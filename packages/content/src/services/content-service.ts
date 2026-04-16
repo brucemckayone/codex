@@ -773,6 +773,7 @@ export class ContentService extends BaseService {
     contentType?: string;
     search?: string;
     sort: string;
+    creatorId?: string;
   }): Promise<PaginatedListResponse<ContentWithRelations>> {
     try {
       const { limit, offset } = withPagination({
@@ -798,6 +799,11 @@ export class ContentService extends BaseService {
       // Optional content type filter
       if (params.contentType) {
         whereConditions.push(eq(content.contentType, params.contentType));
+      }
+
+      // Optional creator filter — scopes to a single creator's content within the org
+      if (params.creatorId) {
+        whereConditions.push(eq(content.creatorId, params.creatorId));
       }
 
       // Optional search on title/description

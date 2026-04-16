@@ -15,7 +15,7 @@
   import * as m from '$paraglide/messages';
   import { ContentDetailView } from '$lib/components/content';
   import { ContentCard } from '$lib/components/ui/ContentCard';
-  import { contentCollection, hydrateIfNeeded } from '$lib/collections';
+  import { hydrateIfNeeded } from '$lib/collections';
   import { formatPrice } from '$lib/utils/format';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import type { PageData } from './$types';
@@ -33,11 +33,11 @@
     }
   });
 
-  // Use cached content from collection if available (e.g., from browse/explore)
-  // Falls back to SSR data (always present, awaited in server load)
-  const content = $derived(
-    contentCollection?.state.get(data.content.id) ?? data.content
-  );
+  // Always use server load data — it's fetched by slug for this specific page.
+  // Previously used contentCollection?.state.get(data.content.id) as an optimistic
+  // lookup, but TanStack DB's internal state.get() returns wrong items after
+  // collection hydration from explore, causing stale content on client-side navigation.
+  const content = $derived(data.content);
 
   let purchasing = $state(false);
 
@@ -54,21 +54,45 @@
     subscriptionCoversContent: false,
   });
 
+  // Guard against stale promise resolution when navigating between content items.
+  // Without this, content A's subscriptionContext can resolve after navigating to B
+  // and overwrite B's subscription state with A's data.
+  let resolvedSubPromise: Promise<unknown> | null = null;
+
   $effect(() => {
     if (!enableSubscriptions) {
-      subCtx = {
-        requiresSubscription: false,
-        hasSubscription: false,
-        subscriptionCoversContent: false,
-      };
+      untrack(() => {
+        subCtx = {
+          requiresSubscription: false,
+          hasSubscription: false,
+          subscriptionCoversContent: false,
+        };
+        resolvedSubPromise = null;
+      });
       return;
     }
-    data.subscriptionContext?.then((ctx) => {
-      subCtx = {
-        requiresSubscription: ctx.requiresSubscription,
-        hasSubscription: ctx.hasSubscription,
-        subscriptionCoversContent: ctx.subscriptionCoversContent,
-      };
+    const promise = data.subscriptionContext;
+    untrack(() => {
+      if (promise && promise !== resolvedSubPromise) {
+        resolvedSubPromise = promise;
+        promise.then((ctx) => {
+          if (resolvedSubPromise === promise) {
+            subCtx = {
+              requiresSubscription: ctx.requiresSubscription,
+              hasSubscription: ctx.hasSubscription,
+              subscriptionCoversContent: ctx.subscriptionCoversContent,
+            };
+          }
+        });
+      } else if (!promise) {
+        subCtx = {
+          requiresSubscription:
+            data.content.accessType === 'subscribers' || !!data.content.minimumTierId,
+          hasSubscription: false,
+          subscriptionCoversContent: false,
+        };
+        resolvedSubPromise = null;
+      }
     });
   });
 
@@ -83,6 +107,7 @@
       durationSeconds: number;
       completed: boolean;
     } | null,
+    // svelte-ignore state_referenced_locally
     loading: !!data.accessAndProgress,
   });
 
@@ -139,10 +164,11 @@
 </script>
 
 <!--
-  Single ContentDetailView instance — props update reactively when
-  the streaming promise resolves. This avoids destroying/recreating
-  the component tree (and remounting AudioPlayer/HLS/waveform).
+  Key by content ID to force full re-mount when navigating between content items.
+  Without this, SvelteKit reuses the same component instance for different [contentSlug]
+  params, and internal $state/$effect from the previous item can persist.
 -->
+{#key data.content.id}
 <ContentDetailView
   content={content}
   contentBodyHtml={data.contentBodyHtml}
@@ -233,6 +259,7 @@
     {/if}
   {/if}
 {/await}
+{/key}
 
 <style>
   /* ── Skeleton Loading States ── */

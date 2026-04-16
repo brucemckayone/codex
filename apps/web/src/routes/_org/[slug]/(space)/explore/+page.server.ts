@@ -8,6 +8,7 @@
 import type { KVNamespace } from '@cloudflare/workers-types';
 import { CacheType, VersionedCache } from '@codex/cache';
 import { getPublicContent } from '$lib/remote/content.remote';
+import { getPublicCreators } from '$lib/remote/org.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
@@ -33,13 +34,15 @@ async function fetchAuthContent(
   sort: string,
   q: string | undefined,
   contentType: string | undefined,
-  page: number
+  page: number,
+  creatorId: string | undefined
 ) {
   const params = new URLSearchParams();
   params.set('organizationId', orgId);
   params.set('status', 'published');
   if (q) params.set('search', q);
   if (contentType) params.set('contentType', contentType);
+  if (creatorId) params.set('creatorId', creatorId);
   params.set('sortBy', AUTH_SORT_MAP[sort].sortBy);
   params.set('sortOrder', AUTH_SORT_MAP[sort].sortOrder);
   params.set('page', String(page));
@@ -63,6 +66,54 @@ export const load: PageServerLoad = async ({
   const sortParam = url.searchParams.get('sort');
   const pageParam = url.searchParams.get('page');
   const category = url.searchParams.get('category') ?? undefined;
+  const creatorUsername = url.searchParams.get('creator') ?? undefined;
+
+  // Resolve creator username → userId + profile for the banner.
+  // We reuse getPublicCreators (KV-cached upstream, returns up to 100 members) rather
+  // than adding a username-specific endpoint. Typical orgs have <20 creators, so the
+  // cost of the broader fetch is negligible and it keeps the backend surface small.
+  let creator: {
+    id: string;
+    name: string;
+    username: string | null;
+    avatarUrl: string | null;
+    bio: string | null;
+    socialLinks: {
+      website?: string;
+      twitter?: string;
+      youtube?: string;
+      instagram?: string;
+    } | null;
+    role: string;
+    contentCount: number;
+  } | null = null;
+  if (creatorUsername) {
+    try {
+      const creators = await getPublicCreators({
+        slug: org.slug,
+        limit: 100,
+      });
+      const match = creators?.items?.find(
+        (c) => c.username === creatorUsername
+      );
+      if (match) {
+        creator = {
+          id: match.id,
+          name: match.name,
+          username: match.username,
+          avatarUrl: match.avatarUrl,
+          bio: match.bio,
+          socialLinks: match.socialLinks,
+          role: match.role,
+          contentCount: match.contentCount,
+        };
+      }
+    } catch {
+      // Degrade gracefully — unknown creator just means we don't render the banner
+      // and don't filter the content (defensive: avoids an empty-grid dead-end).
+      creator = null;
+    }
+  }
 
   const contentType = VALID_TYPES.includes(
     typeParam as (typeof VALID_TYPES)[number]
@@ -90,9 +141,10 @@ export const load: PageServerLoad = async ({
     setHeaders(CACHE_HEADERS.PRIVATE);
     const api = createServerApi(platform, cookies);
 
-    // Cache sort-based browse queries (no search) — popularity shifts slowly (3min TTL).
-    // Search queries bypass cache: too dynamic, key space explodes.
-    const shouldCache = !q && platform?.env?.CACHE_KV;
+    // Cache sort-based browse queries (no search, no creator filter) — popularity
+    // shifts slowly (3min TTL). Search + creator-filtered queries bypass cache: they
+    // have too many variants, so caching would just pollute KV.
+    const shouldCache = !q && !creator && platform?.env?.CACHE_KV;
     if (shouldCache) {
       const cacheId = `${org.id}:${sort}:${contentType ?? 'all'}:${page}`;
       const cache = new VersionedCache({
@@ -101,7 +153,16 @@ export const load: PageServerLoad = async ({
       contentResult = await cache.get(
         cacheId,
         CacheType.ORG_CONTENT_SORTED,
-        () => fetchAuthContent(api, org.id, sort, q, contentType, page),
+        () =>
+          fetchAuthContent(
+            api,
+            org.id,
+            sort,
+            q,
+            contentType,
+            page,
+            creator?.id
+          ),
         { ttl: 180 }
       );
     } else {
@@ -111,7 +172,8 @@ export const load: PageServerLoad = async ({
         sort,
         q,
         contentType,
-        page
+        page,
+        creator?.id
       );
     }
   } else {
@@ -123,6 +185,7 @@ export const load: PageServerLoad = async ({
       sort: sort as 'newest' | 'oldest' | 'title',
       page,
       limit: PAGE_LIMIT,
+      creatorId: creator?.id,
     });
   }
 
@@ -131,11 +194,13 @@ export const load: PageServerLoad = async ({
       items: contentResult?.items ?? [],
       total: contentResult?.pagination?.total ?? 0,
     },
+    creator,
     filters: {
       q: q ?? '',
       type: contentType ?? '',
       sort,
       category: category ?? '',
+      creator: creator?.username ?? '',
       page,
     },
     limit: PAGE_LIMIT,

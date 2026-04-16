@@ -223,6 +223,18 @@
           const { createTunnelRenderer } = await import('./renderers/tunnel-renderer');
           return createTunnelRenderer();
         }
+        case 'plasma': {
+          const { createPlasmaRenderer } = await import('./renderers/plasma-renderer');
+          return createPlasmaRenderer();
+        }
+        case 'flow': {
+          const { createFlowRenderer } = await import('./renderers/flow-renderer');
+          return createFlowRenderer();
+        }
+        case 'spore': {
+          const { createSporeRenderer } = await import('./renderers/spore-renderer');
+          return createSporeRenderer();
+        }
         default:
           return null;
       }

@@ -65,8 +65,7 @@
     </span>
   </div>
 
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <div class="tags-container" role="list" aria-label={m.content_form_tags()} onclick={() => inputRef?.focus()}>
+  <div class="tags-container" role="list" aria-label={m.content_form_tags()}>
     {#each tags as tag, i}
       <span class="tag-pill" role="listitem">
         {tag}

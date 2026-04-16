@@ -27,14 +27,23 @@ export function getThumbnailUrl(baseUrl: string, size: ThumbnailSize): string {
 }
 
 /**
+ * Check whether a thumbnail URL has webp size variants (sm/md/lg.webp).
+ * Only URLs ending with a recognised size filename are safe for srcset generation.
+ */
+const HAS_SIZE_VARIANTS = /\/(sm|md|lg)\.webp$/;
+
+/**
  * Generate srcset string from a thumbnail URL.
  * Produces sm, md, lg variants by replacing the filename.
+ * Returns empty string for URLs that don't follow the {dir}/{size}.webp convention
+ * (e.g. legacy seed thumbnails like thumb.jpg) to avoid 404s.
  *
  * @example
  * getThumbnailSrcset('http://localhost:4100/abc/media-thumbnails/xyz/md.webp')
  * // => '.../sm.webp 200w, .../md.webp 400w, .../lg.webp 800w'
  */
 export function getThumbnailSrcset(baseUrl: string): string {
+  if (!HAS_SIZE_VARIANTS.test(baseUrl)) return '';
   return (Object.entries(THUMBNAIL_WIDTHS) as [ThumbnailSize, number][])
     .map(([size, width]) => `${getThumbnailUrl(baseUrl, size)} ${width}w`)
     .join(', ');

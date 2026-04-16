@@ -113,7 +113,8 @@
   <div class="studio-content">
     <!-- Overlay for mobile (outside aside so sidebar paints on top) -->
     {#if mobileMenuOpen}
-      <div class="sidebar-overlay" onclick={closeMenu}></div>
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="sidebar-overlay" role="presentation" onclick={closeMenu}></div>
     {/if}
 
     <!-- Sidebar -->

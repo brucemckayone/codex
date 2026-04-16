@@ -10,10 +10,10 @@
     tags: ['autodocs'],
   });
 
-  // Create stores for dialog state (each story gets its own)
   const defaultOpen = writable(false);
   const confirmOpen = writable(false);
   const formOpen = writable(false);
+  const largeOpen = writable(false);
   const interactiveOpen = writable(false);
 </script>
 
@@ -25,7 +25,9 @@
         <Dialog.Title>Dialog Title</Dialog.Title>
         <Dialog.Description>This is a description of the dialog content.</Dialog.Description>
       </Dialog.Header>
-      <p style="color: var(--color-text);">Your dialog content goes here. This is a basic modal dialog with a title, description, and close button.</p>
+      <Dialog.Body>
+        <p style="color: var(--color-text); margin: 0;">Your dialog content goes here. This is a basic modal dialog with a branded accent bar, proper section separation, and smooth entry animations.</p>
+      </Dialog.Body>
       <Dialog.Footer>
         <Button variant="secondary" onclick={() => $defaultOpen = false}>Cancel</Button>
         <Button variant="primary" onclick={() => $defaultOpen = false}>Confirm</Button>
@@ -34,10 +36,10 @@
   </Dialog.Root>
 </Story>
 
-<Story name="Confirmation Dialog">
+<Story name="Confirmation (Small)">
   <Button variant="destructive" onclick={() => $confirmOpen = true}>Delete Item</Button>
   <Dialog.Root bind:open={$confirmOpen}>
-    <Dialog.Content>
+    <Dialog.Content size="sm">
       <Dialog.Header>
         <Dialog.Title>Are you sure?</Dialog.Title>
         <Dialog.Description>This action cannot be undone. This will permanently delete the item.</Dialog.Description>
@@ -58,19 +60,37 @@
         <Dialog.Title>Edit Profile</Dialog.Title>
         <Dialog.Description>Make changes to your profile here.</Dialog.Description>
       </Dialog.Header>
-      <div style="display: flex; flex-direction: column; gap: 1rem;">
-        <div style="display: flex; flex-direction: column; gap: 0.25rem;">
-          <label style="font-size: 0.875rem; font-weight: 500; color: var(--color-text);">Name</label>
-          <input style="padding: 0.5rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface);" value="John Doe" />
+      <Dialog.Body>
+        <div style="display: flex; flex-direction: column; gap: var(--space-1);">
+          <label style="font-size: var(--text-sm); font-weight: var(--font-medium); color: var(--color-text);">Name</label>
+          <input style="padding: var(--space-2) var(--space-3); border: var(--border-width) var(--border-style) var(--color-border); border-radius: var(--radius-input); background: var(--color-background); color: var(--color-text); font-size: var(--text-sm);" value="John Doe" />
         </div>
-        <div style="display: flex; flex-direction: column; gap: 0.25rem;">
-          <label style="font-size: 0.875rem; font-weight: 500; color: var(--color-text);">Email</label>
-          <input type="email" style="padding: 0.5rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface);" value="john@example.com" />
+        <div style="display: flex; flex-direction: column; gap: var(--space-1);">
+          <label style="font-size: var(--text-sm); font-weight: var(--font-medium); color: var(--color-text);">Email</label>
+          <input type="email" style="padding: var(--space-2) var(--space-3); border: var(--border-width) var(--border-style) var(--color-border); border-radius: var(--radius-input); background: var(--color-background); color: var(--color-text); font-size: var(--text-sm);" value="john@example.com" />
         </div>
-      </div>
+      </Dialog.Body>
       <Dialog.Footer>
         <Button variant="secondary" onclick={() => $formOpen = false}>Cancel</Button>
         <Button variant="primary" onclick={() => $formOpen = false}>Save Changes</Button>
+      </Dialog.Footer>
+    </Dialog.Content>
+  </Dialog.Root>
+</Story>
+
+<Story name="Large Dialog">
+  <Button onclick={() => $largeOpen = true}>Open Large</Button>
+  <Dialog.Root bind:open={$largeOpen}>
+    <Dialog.Content size="lg">
+      <Dialog.Header>
+        <Dialog.Title>Large Dialog</Dialog.Title>
+        <Dialog.Description>This uses the large size variant for wider content.</Dialog.Description>
+      </Dialog.Header>
+      <Dialog.Body>
+        <p style="color: var(--color-text); margin: 0;">The large dialog variant (56rem max-width) is suitable for content that needs more horizontal space, such as data tables, media previews, or side-by-side comparisons.</p>
+      </Dialog.Body>
+      <Dialog.Footer>
+        <Button variant="secondary" onclick={() => $largeOpen = false}>Close</Button>
       </Dialog.Footer>
     </Dialog.Content>
   </Dialog.Root>
@@ -81,21 +101,17 @@
   play={async ({ canvasElement }) => {
     const canvas = within(canvasElement);
 
-    // Find and click the trigger button
     const trigger = canvas.getByRole('button', { name: /open dialog/i });
     await expect(trigger).toBeInTheDocument();
     await userEvent.click(trigger);
 
-    // Dialog renders in a portal, so search the whole document
     const body = within(document.body);
     const dialog = await body.findByRole('dialog');
     await expect(dialog).toBeVisible();
 
-    // Verify dialog title is present
     const title = within(dialog).getByText('Dialog Title');
     await expect(title).toBeVisible();
 
-    // Click cancel to close the dialog
     const cancelButton = within(dialog).getByRole('button', { name: /cancel/i });
     await userEvent.click(cancelButton);
   }}
@@ -107,7 +123,9 @@
         <Dialog.Title>Dialog Title</Dialog.Title>
         <Dialog.Description>This is a description of the dialog content.</Dialog.Description>
       </Dialog.Header>
-      <p style="color: var(--color-text);">Test the dialog interactions.</p>
+      <Dialog.Body>
+        <p style="color: var(--color-text); margin: 0;">Test the dialog interactions.</p>
+      </Dialog.Body>
       <Dialog.Footer>
         <Button variant="secondary" onclick={() => $interactiveOpen = false}>Cancel</Button>
         <Button variant="primary" onclick={() => $interactiveOpen = false}>Confirm</Button>

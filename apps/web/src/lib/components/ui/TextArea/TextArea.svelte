@@ -33,7 +33,7 @@
     ...restProps
   }: Props = $props();
 
-  const errorId = id ? `${id}-error` : 'textarea-error';
+  const errorId = $derived(id ? `${id}-error` : 'textarea-error');
 
   let textarea: HTMLTextAreaElement;
   // Internal state prevents resize loop when autoResize updates textarea height

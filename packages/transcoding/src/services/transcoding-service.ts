@@ -193,7 +193,22 @@ export class TranscodingService extends BaseService {
       },
     };
 
-    // Step 3: Call RunPod /run API (async)
+    // Step 3: Set status to 'transcoding' BEFORE calling RunPod
+    // This must happen before the API call because in local dev the
+    // container runs synchronously — the completion webhook arrives
+    // before the fetch returns. The webhook handler requires
+    // status='transcoding' to update the media, so we must set it first.
+    // If the RunPod call fails, we revert to 'uploaded'.
+    await this.db
+      .update(mediaItems)
+      .set({
+        status: MEDIA_STATUS.TRANSCODING,
+        transcodingPriority: priority ?? media.transcodingPriority,
+        updatedAt: new Date(),
+      })
+      .where(eq(mediaItems.id, mediaId));
+
+    // Step 4: Call RunPod /run API (async in cloud, sync in local dev)
     let runpodJobId: string;
 
     try {
@@ -223,6 +238,20 @@ export class TranscodingService extends BaseService {
       const result = (await response.json()) as RunPodJobResponse;
       runpodJobId = result.id;
     } catch (error) {
+      // Revert status on failure — media should remain uploadable
+      await this.db
+        .update(mediaItems)
+        .set({
+          status: MEDIA_STATUS.UPLOADED,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(mediaItems.id, mediaId),
+            eq(mediaItems.status, MEDIA_STATUS.TRANSCODING)
+          )
+        );
+
       if (error instanceof RunPodApiError) {
         throw error;
       }
@@ -232,16 +261,21 @@ export class TranscodingService extends BaseService {
       });
     }
 
-    // Step 4: Update media status to 'transcoding'
+    // Step 5: Store the RunPod job ID for webhook matching
+    // In local dev the webhook may have already completed by this point
+    // (status already 'ready'), so we use an atomic WHERE guard.
     await this.db
       .update(mediaItems)
       .set({
-        status: MEDIA_STATUS.TRANSCODING,
         runpodJobId,
-        transcodingPriority: priority ?? media.transcodingPriority,
         updatedAt: new Date(),
       })
-      .where(eq(mediaItems.id, mediaId));
+      .where(
+        and(
+          eq(mediaItems.id, mediaId),
+          eq(mediaItems.status, MEDIA_STATUS.TRANSCODING)
+        )
+      );
 
     this.obs.info('Transcoding job started', {
       mediaId,

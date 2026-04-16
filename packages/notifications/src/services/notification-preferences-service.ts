@@ -199,7 +199,7 @@ export class NotificationPreferencesService extends BaseService {
     const newPreferences: NewNotificationPreference = {
       userId,
       emailMarketing: input.emailMarketing ?? true,
-      emailTransactional: input.emailTransactional ?? true,
+      emailTransactional: true,
       emailDigest: input.emailDigest ?? true,
     };
 

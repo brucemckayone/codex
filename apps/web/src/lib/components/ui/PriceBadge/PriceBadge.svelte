@@ -1,22 +1,27 @@
 <!--
   @component PriceBadge
 
-  Displays a price/access badge with visual variants:
-  - "Free" (success) when amount is 0
-  - Formatted price (neutral) when amount > 0
-  - "Purchased" (info + check icon) when purchased is true
-  - "Included" (brand + check icon) when included is true (subscription covers this content)
-  - "Subscription" (purple) for subscriber-gated content
-  - "Followers" (info) for followers-only content
-  - "Team" (secondary) for team-only content (replaces "Members")
+  Displays a price/access badge with dark glass overlay for guaranteed contrast
+  on any thumbnail. Semantic left-accent stripe indicates access type at a glance.
 
-  Priority: purchased > included > accessType > price
+  Variants:
+  - "Free" (green accent) when amount is 0
+  - Formatted price (no accent) when amount > 0
+  - "Purchased" (blue accent + check) when purchased is true
+  - "Included" (green accent + check) when included OR follower viewing followers-only
+  - Tier name or "Subscription" (brand accent) for subscriber-gated content
+  - "Followers" (blue accent) for followers-only content (non-follower viewer)
+  - "Team" (muted accent) for team-only content
+
+  Priority: purchased > included > followers+isFollower > accessType > price
 
   @prop {number | null} amount - Price in minor units (pence). 0 = free, null = hidden.
   @prop {string} currency - ISO 4217 currency code. Defaults to 'GBP'.
   @prop {boolean} purchased - Whether the user has purchased this content.
   @prop {boolean} included - Whether the user's subscription covers this content.
-  @prop {'free' | 'paid' | 'subscribers' | 'members'} [accessType] - Content access type override.
+  @prop {'free' | 'paid' | 'followers' | 'subscribers' | 'team' | null} [accessType] - Content access type.
+  @prop {boolean} [isFollower] - Whether the user follows this org (contextualizes followers badge).
+  @prop {string | null} [tierName] - Resolved tier name for subscriber-gated content.
 -->
 <script lang="ts">
   import type { HTMLAttributes } from 'svelte/elements';
@@ -30,6 +35,8 @@
     purchased?: boolean;
     included?: boolean;
     accessType?: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | null;
+    isFollower?: boolean;
+    tierName?: string | null;
   }
 
   const {
@@ -38,6 +45,8 @@
     purchased = false,
     included = false,
     accessType = null,
+    isFollower = false,
+    tierName = null,
     class: className,
     ...restProps
   }: Props = $props();
@@ -45,6 +54,8 @@
   const variant = $derived.by(() => {
     if (purchased) return 'purchased';
     if (included) return 'included';
+    // Follower viewing followers-only content → show as included (they have access)
+    if (accessType === 'followers' && isFollower) return 'included';
     if (accessType === 'subscribers') return 'subscribers';
     if (accessType === 'followers') return 'followers';
     if (accessType === 'team') return 'team';
@@ -55,9 +66,12 @@
   const label = $derived.by(() => {
     if (purchased) return m.content_price_purchased();
     if (included) return m.content_price_included();
+    // Follower viewing followers-only → "Included"
+    if (accessType === 'followers' && isFollower) return m.content_price_included();
     if (accessType === 'subscribers') {
-      // Show price if also purchasable, otherwise show "Subscription"
+      // Show price if dual-gated (purchasable + subscriber), otherwise tier name or generic
       if (amount && amount > 0) return formatPrice(amount);
+      if (tierName) return tierName;
       return m.content_price_subscribers();
     }
     if (accessType === 'followers') return m.content_price_followers();
@@ -67,12 +81,13 @@
     return '';
   });
 
+  const showCheck = $derived(variant === 'purchased' || variant === 'included');
   const show = $derived(amount != null || purchased || included || accessType != null);
 </script>
 
 {#if show}
   <span class="price-badge {className ?? ''}" data-variant={variant} {...restProps}>
-    {#if purchased || included}
+    {#if showCheck}
       <CheckIcon size={12} />
     {/if}
     {label}
@@ -84,55 +99,13 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-    padding: var(--space-1) var(--space-2);
+    padding: var(--space-0-5) var(--space-2);
     font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    border-radius: var(--radius-sm);
-    line-height: var(--leading-none);
+    font-weight: var(--font-medium);
+    border-radius: var(--radius-full);
+    line-height: var(--leading-tight);
     white-space: nowrap;
-    backdrop-filter: blur(var(--blur-sm));
-    -webkit-backdrop-filter: blur(var(--blur-sm));
-  }
-
-  .price-badge[data-variant='free'] {
-    background: var(--color-success-50);
-    color: var(--color-success-700);
-    border: var(--border-width) var(--border-style) var(--color-success-200);
-  }
-
-  .price-badge[data-variant='purchased'] {
-    background: var(--color-info-50);
-    color: var(--color-info-700);
-    border: var(--border-width) var(--border-style) var(--color-info-200);
-  }
-
-  .price-badge[data-variant='paid'] {
-    background: var(--color-surface-secondary);
-    color: var(--color-text);
-    border: var(--border-width) var(--border-style) var(--color-border);
-  }
-
-  .price-badge[data-variant='included'] {
-    background: var(--color-primary-50);
-    color: var(--color-primary-700);
-    border: var(--border-width) var(--border-style) var(--color-primary-200);
-  }
-
-  .price-badge[data-variant='subscribers'] {
-    background: var(--color-primary-50);
-    color: var(--color-primary-700);
-    border: var(--border-width) var(--border-style) var(--color-primary-200);
-  }
-
-  .price-badge[data-variant='followers'] {
-    background: var(--color-info-50);
-    color: var(--color-info-700);
-    border: var(--border-width) var(--border-style) var(--color-info-200);
-  }
-
-  .price-badge[data-variant='team'] {
-    background: var(--color-surface-secondary);
-    color: var(--color-text-secondary);
-    border: var(--border-width) var(--border-style) var(--color-border);
+    background: var(--color-neutral-900);
+    color: var(--color-neutral-50);
   }
 </style>

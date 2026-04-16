@@ -187,6 +187,21 @@ const updateBrandingCommandSchema = z.object({
   bodyWeight: nullableString,
   // Dark mode overrides
   darkModeOverrides: nullableString, // JSON string of Partial<ThemeColors>
+  // Hero layout
+  heroLayout: z
+    .enum([
+      'default',
+      'centered',
+      'logo-hero',
+      'minimal',
+      'split',
+      'magazine',
+      'asymmetric',
+      'portrait',
+      'gallery',
+      'stacked',
+    ])
+    .optional(),
 });
 
 /**
@@ -215,6 +230,7 @@ export const updateBrandingCommand = command(
     headingWeight,
     bodyWeight,
     darkModeOverrides,
+    heroLayout,
   }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
@@ -236,6 +252,7 @@ export const updateBrandingCommand = command(
       headingWeight,
       bodyWeight,
       darkModeOverrides,
+      heroLayout,
     });
 
     await invalidateCache(platform, orgId);
@@ -385,3 +402,46 @@ export const deleteIntroVideo = command(z.string().uuid(), async (orgId) => {
 
   return result;
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pricing FAQ
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get pricing FAQ items for an organization.
+ * Returns parsed PricingFaqItem[] or null if none configured.
+ */
+export const getPricingFaq = query(z.string().uuid(), async (orgId) => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+
+  const settings = await api.org.getSettings(orgId);
+  const raw = settings?.branding?.pricingFaq;
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw) as import('@codex/validation').PricingFaqItem[];
+  } catch {
+    return null;
+  }
+});
+
+/**
+ * Update pricing FAQ items for an organization.
+ * Pass null to clear the FAQ (pricing page will show defaults).
+ */
+export const updatePricingFaq = command(
+  z.object({
+    orgId: z.string().uuid(),
+    pricingFaq: z.union([z.literal(null), z.string().min(1)]),
+  }),
+  async ({ orgId, pricingFaq }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    const result = await api.org.updateBranding(orgId, { pricingFaq });
+    await invalidateCache(platform, orgId);
+
+    return result;
+  }
+);

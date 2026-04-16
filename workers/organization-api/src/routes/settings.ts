@@ -109,6 +109,8 @@ export async function updateBrandCache(
         textScale: settings.branding?.textScale ?? null,
         headingWeight: settings.branding?.headingWeight ?? null,
         bodyWeight: settings.branding?.bodyWeight ?? null,
+        heroLayout: settings.branding?.heroLayout ?? 'default',
+        pricingFaq: settings.branding?.pricingFaq ?? null,
       };
     } else {
       // Fallback: Settings not created yet, fetch org directly
@@ -148,6 +150,8 @@ export async function updateBrandCache(
         textScale: null,
         headingWeight: null,
         bodyWeight: null,
+        heroLayout: 'default',
+        pricingFaq: null,
       };
     }
 

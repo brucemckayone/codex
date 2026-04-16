@@ -21,7 +21,7 @@
     }
   });
 
-  let searchValue = $state(data.search);
+  let searchValue = $derived(data.search);
 
   function handleSearch(event: Event) {
     event.preventDefault();

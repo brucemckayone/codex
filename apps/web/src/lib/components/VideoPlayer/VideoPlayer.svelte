@@ -58,8 +58,18 @@
     isMuted || volumeLevel === 0 ? 'off' : volumeLevel < 0.5 ? 'low' : 'high'
   );
 
+  let isFullscreen = $state(false);
+
   function toggleCinemaMode() {
     oncinemachange?.(!cinemaMode);
+  }
+
+  function handleFullscreenChange() {
+    isFullscreen = !!document.fullscreenElement;
+    // Exit cinema mode when entering fullscreen — they're mutually exclusive
+    if (isFullscreen && cinemaMode) {
+      oncinemachange?.(false);
+    }
   }
 
   function handlePlay() {
@@ -258,6 +268,8 @@
   class="video-player-wrapper"
   class:video-player-wrapper--controls-visible={controlsVisible}
   class:video-player-wrapper--cinema={cinemaMode}
+  role="region"
+  aria-label="Video player"
   onmouseenter={handleMouseEnter}
   onmouseleave={handleMouseLeave}
   onmousemove={handleMouseMove}
@@ -341,6 +353,7 @@
               onclick={toggleCinemaMode}
               aria-label={cinemaMode ? 'Exit cinema mode' : 'Cinema mode'}
               aria-pressed={cinemaMode}
+              title={cinemaMode ? 'Exit cinema mode' : 'Cinema mode'}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 {#if cinemaMode}

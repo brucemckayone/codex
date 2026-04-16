@@ -4,7 +4,8 @@
   import type { LevelId } from '$lib/brand-editor';
 
   const CUSTOMIZE_CATEGORIES: LevelId[] = ['typography', 'shape'];
-  const ADVANCED_CATEGORIES: LevelId[] = ['shadows', 'logo', 'intro-video', 'hero-effects'];
+  const HERO_CATEGORIES: LevelId[] = ['header-layout', 'hero-effects', 'intro-video'];
+  const ADVANCED_CATEGORIES: LevelId[] = ['shadows', 'logo'];
 
   let showPalettes = $state(false);
 
@@ -63,6 +64,28 @@
         {/each}
       </div>
     {/if}
+  </section>
+
+  <!-- Hero -->
+  <section class="home__section">
+    <span class="home__section-label">Hero</span>
+    <div class="home__categories">
+      {#each HERO_CATEGORIES as catId}
+        {@const cat = LEVELS[catId]}
+        <button class="home__category" onclick={() => brandEditor.navigateTo(catId)}>
+          <div class="home__category-left">
+            <span class="home__category-icon">{cat.icon}</span>
+            <div class="home__category-text">
+              <span class="home__category-name">{cat.label}</span>
+              {#if cat.description}
+                <span class="home__category-desc">{cat.description}</span>
+              {/if}
+            </div>
+          </div>
+          <span class="home__chevron" aria-hidden="true">›</span>
+        </button>
+      {/each}
+    </div>
   </section>
 
   <!-- Customize -->

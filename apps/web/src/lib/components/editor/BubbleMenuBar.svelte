@@ -18,6 +18,7 @@
 
   let showLinkInput = $state(false);
   let linkUrl = $state('');
+  // svelte-ignore non_reactive_update
   let linkInput: HTMLInputElement;
 
   function toggleLink() {

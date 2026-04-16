@@ -73,11 +73,13 @@
     </Dialog.Header>
 
     <form {onsubmit} class="dialog-form">
-      {#if error}
-        <Alert variant="error">{error}</Alert>
-      {/if}
+      <div class="dialog-form-body">
+        {#if error}
+          <Alert variant="error">{error}</Alert>
+        {/if}
 
-      {@render children()}
+        {@render children()}
+      </div>
 
       <Dialog.Footer>
         <Button
@@ -109,6 +111,16 @@
   .dialog-form {
     display: flex;
     flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .dialog-form-body {
+    display: flex;
+    flex-direction: column;
     gap: var(--space-4);
+    padding: var(--space-4) var(--space-6);
+    overflow-y: auto;
+    flex: 1;
   }
 </style>

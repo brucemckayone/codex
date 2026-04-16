@@ -21,16 +21,22 @@
 
   // Derive active tab from pathname
   const activeTab = $derived(
-    page.url.pathname.endsWith('/branding') ? 'branding' : 'general'
+    page.url.pathname.endsWith('/branding')
+      ? 'branding'
+      : page.url.pathname.endsWith('/pricing-faq')
+        ? 'pricing-faq'
+        : 'general'
   );
 
   // Derive loading tab from pending navigation
   const loadingTab = $derived(
     navigating?.to?.url.pathname?.endsWith('/branding')
       ? 'branding'
-      : navigating?.to?.url.pathname?.endsWith('/settings')
-        ? 'general'
-        : null
+      : navigating?.to?.url.pathname?.endsWith('/pricing-faq')
+        ? 'pricing-faq'
+        : navigating?.to?.url.pathname?.endsWith('/settings')
+          ? 'general'
+          : null
   );
 
   // Map nav items to tab config with i18n labels
@@ -44,6 +50,11 @@
       value: 'branding',
       href: '/studio/settings/branding',
       label: m.settings_branding(),
+    },
+    {
+      value: 'pricing-faq',
+      href: '/studio/settings/pricing-faq',
+      label: 'Pricing FAQ',
     },
   ]);
 </script>

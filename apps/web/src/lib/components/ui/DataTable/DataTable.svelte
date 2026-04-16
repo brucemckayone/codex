@@ -117,12 +117,12 @@
               class:data-table__th--sortable={col.sortable}
               style:width={col.width}
               style:text-align={col.align ?? 'left'}
+              aria-sort={col.sortable && onSort ? (sortKey === col.key ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none') : undefined}
             >
               {#if col.sortable && onSort}
                 <button
                   class="data-table__sort-btn"
                   onclick={() => handleSort(col.key)}
-                  aria-sort={sortKey === col.key ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
                 >
                   {col.label}
                   {#if sortKey === col.key}

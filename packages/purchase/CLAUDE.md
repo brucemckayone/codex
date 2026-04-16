@@ -1,68 +1,105 @@
 # @codex/purchase
 
-Stripe integration, checkout sessions, webhook handling, and purchase verification.
+Stripe Checkout integration, purchase lifecycle, webhook processing, and revenue split calculation.
 
-## API
+## Key Exports
 
-### `PurchaseService`
-| Method | Purpose | Notes |
+```typescript
+import { PurchaseService, calculateRevenueSplit, createStripeClient, verifyWebhookSignature } from '@codex/purchase';
+import { AlreadyPurchasedError, ContentNotPurchasableError, PaymentProcessingError } from '@codex/purchase';
+```
+
+## `PurchaseService`
+
+### Constructor
+
+```typescript
+const service = new PurchaseService(
+  { db, environment },
+  stripe // Stripe instance from createStripeClient(secretKey)
+);
+```
+
+### Methods
+
+| Method | Signature | Notes |
 |---|---|---|
-| `createCheckoutSession(input, userId)` | Create Stripe Checkout session | Validates content exists, published, priced |
-| `completePurchase(intentId, metadata)` | Process successful payment | Idempotent. Creates purchase + access grant |
-| `verifyPurchase(contentId, userId)` | Check if user owns content | Used by access service |
-| `getPurchaseHistory(userId, options)` | List user's purchases | Paginated, scoped to user |
+| `createCheckoutSession` | `(input: CreateCheckoutInput, customerId: string)` | Validates content is published, priced, and org-scoped. Checks for existing purchase. Returns `{ sessionUrl, sessionId }`. |
+| `completePurchase` | `(stripePaymentIntentId: string, metadata: CompletePurchaseMetadata)` | Transaction. **Idempotent** — returns existing if already processed. Calculates revenue split + creates purchase + grants `contentAccess`. |
+| `verifyPurchase` | `(contentId: string, customerId: string)` | Returns `true` if user has a completed purchase. Used by access service. |
+| `getPurchaseHistory` | `(customerId: string, input: PurchaseQueryInput)` | Paginated. Scoped to customerId. |
+| `getPurchase` | `(purchaseId: string, customerId: string)` | Get single purchase. Scoped to customerId. |
+| `verifyCheckoutSession` | `(sessionId: string, customerId: string)` | Verify Stripe session status. |
+| `processRefund` | `(purchaseId: string, customerId: string, reason?: string)` | Transaction. Issues Stripe refund + marks purchase refunded. |
+| `createPortalSession` | `(customerId: string, returnUrl: string)` | Stripe billing portal session for subscription management. |
 
-### Utilities
+## Utility Functions
+
 | Export | Purpose |
 |---|---|
 | `createStripeClient(secretKey)` | Creates pinned Stripe SDK client |
-| `verifyWebhookSignature(payload, sig, secret)` | HMAC verification of Stripe webhooks |
-| `calculateRevenueSplit(amountCents)` | Returns `{ platform, org, creator }` split |
+| `verifyWebhookSignature(payload, sig, secret)` | HMAC verification for Stripe webhooks |
+| `calculateRevenueSplit(amountCents, platformFeeBps, orgFeeBps)` | Returns `{ platformFeeCents, organizationFeeCents, creatorPayoutCents }` |
+| `DEFAULT_PLATFORM_FEE_PERCENTAGE` | `1000` (10% in basis points) |
+| `DEFAULT_ORG_FEE_PERCENTAGE` | `0` (0%) |
 
 ## Revenue Split
 
-| Recipient | Percentage | Notes |
+| Recipient | Default | Notes |
 |---|---|---|
-| Platform | 10% | `PLATFORM_FEE_BPS = 1000` from `@codex/constants` |
-| Organization | 0% | Currently zero — reserved for future |
+| Platform | 10% | `DEFAULT_PLATFORM_FEE_PERCENTAGE = 1000` bps |
+| Organization | 0% | Reserved for future use |
 | Creator | 90% | Remainder after platform fee |
 
-**Currency**: GBP (£) — all amounts in pence (cents equivalent).
+**Currency: GBP (£), amounts in pence.**
 
-## Key Patterns
+## Purchase Flow
 
-### Idempotency
-`completePurchase()` uses `stripePaymentIntentId` as a unique constraint on the `purchases` table. If the webhook fires twice, the second call is a no-op (detects existing record).
-
-### Purchase Flow
 ```
-User clicks Buy → createCheckoutSession → Stripe Checkout page
-  → User pays → Stripe webhook → completePurchase
-    → Insert purchase record (idempotent)
-    → Grant contentAccess record
-    → Bump user library version in cache
+User clicks Buy
+  → createCheckoutSession() → Stripe Checkout redirect
+    → User pays → Stripe fires webhook
+      → completePurchase(stripePaymentIntentId, metadata)
+        → Idempotency check (return existing if found)
+        → Calculate revenue split
+        → INSERT purchase record
+        → INSERT contentAccess record
+        → COMMIT (atomic)
 ```
 
-### Validation Before Checkout
-- Content MUST exist and be published
-- Content MUST have price > 0 (free content doesn't go through checkout)
-- Organization MUST exist
-- User MUST be authenticated
+## Idempotency
 
-## Strict Rules
+`completePurchase()` uses `stripePaymentIntentId` as the unique key. If the Stripe webhook fires twice, the second call returns the existing purchase record without creating a duplicate.
 
-- **MUST** verify Stripe webhook signatures with `verifyWebhookSignature()` — NEVER trust unverified webhooks
-- **MUST** use idempotent purchase creation (unique `stripePaymentIntentId`) — webhooks may fire multiple times
-- **MUST** use `db.transaction()` for `completePurchase` — purchase record + access grant must be atomic
+## Phase 1 Constraint
+
+Content MUST belong to an organization (`organizationId != null`) to be purchasable. Personal content (no org) cannot go through checkout.
+
+## Custom Errors
+
+| Error | HTTP | When |
+|---|---|---|
+| `ContentNotPurchasableError` | 422 | Content is free, not published, deleted, or has no org |
+| `AlreadyPurchasedError` | 409 | Customer already purchased this content |
+| `PaymentProcessingError` | 500 | Stripe session creation or charge failed |
+| `PurchaseNotFoundError` | 404 | Purchase doesn't exist or not owned by customer |
+
+## Rules
+
+- **MUST** verify Stripe webhook signatures with `verifyWebhookSignature()` in webhook handler — NEVER trust unverified payloads
+- **MUST** use `db.transaction()` in `completePurchase()` — purchase + access grant must be atomic
+- **MUST** use idempotent purchase creation — webhooks fire multiple times
 - **MUST** validate content is published and priced before creating checkout session
 - **NEVER** expose Stripe secret keys in responses or logs
-- **NEVER** hardcode currency or fee percentages — use `@codex/constants`
+- Revenue split percentages come from `DEFAULT_*` constants — never hardcode
 
 ## Integration
 
-- **Depends on**: `@codex/database`, `@codex/service-errors`, `@codex/validation`, Stripe SDK
-- **Used by**: ecom-api worker, `@codex/access` (purchase verification)
+- **Depends on**: `@codex/database`, `@codex/service-errors`, `@codex/validation`, Stripe SDK, `@codex/constants`
+- **Used by**: ecom-api worker (checkout/webhooks), `@codex/access` (purchase verification)
 
 ## Reference Files
 
-- `packages/purchase/src/services/purchase-service.ts` — PurchaseService
+- `packages/purchase/src/services/purchase-service.ts`
+- `packages/purchase/src/services/revenue-calculator.ts`
+- `packages/purchase/src/stripe-client.ts`

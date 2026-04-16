@@ -5,7 +5,7 @@
  * Call initProgressSync(userId) once in the root layout.
  *
  * Sync triggers:
- * - Every 30 seconds while page is visible
+ * - Every 2 minutes while page is visible
  * - When page becomes visible (tab switch)
  * - Before page unload
  */
@@ -16,12 +16,15 @@ import { getUnsyncedProgress, syncProgressToServer } from './progress';
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let initializedForUser: string | null = null;
 
+/** Server sync runs every 2 minutes — local saves remain frequent (30s in VideoPlayer) */
+const SYNC_INTERVAL_MS = 120_000;
+
 /**
  * Start the sync interval
  */
 function startSync(): void {
   if (syncInterval) return;
-  syncInterval = setInterval(syncProgressToServer, 30000);
+  syncInterval = setInterval(syncProgressToServer, SYNC_INTERVAL_MS);
 }
 
 /**
@@ -115,11 +118,9 @@ export function initProgressSync(userId: string): void {
   // Listen for page unload
   window.addEventListener('beforeunload', handleBeforeUnload);
 
-  // Start syncing
+  // Start syncing — progress will sync on first interval tick (2 min),
+  // visibility change, or beforeunload. No immediate sync needed on init.
   startSync();
-
-  // Initial sync
-  syncProgressToServer();
 }
 
 /**

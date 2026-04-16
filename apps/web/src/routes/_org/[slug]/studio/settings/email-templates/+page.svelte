@@ -9,7 +9,8 @@
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { Card, PageHeader } from '$lib/components/ui';
+	import { Card as CardNs, PageHeader } from '$lib/components/ui';
+	const Card = CardNs.Root;
 
 	let { data } = $props();
 

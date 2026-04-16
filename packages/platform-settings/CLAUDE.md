@@ -1,57 +1,78 @@
 # @codex/platform-settings
 
-Organization settings management via Facade pattern. Manages branding, contact info, and feature toggles.
+Organization settings facade — branding (logo, colors, density), contact info, and feature toggles. All settings are org-scoped. Upsert pattern: creates on first write, updates on subsequent writes.
 
-## API
+## Key Exports
 
-### `PlatformSettingsFacade`
-Unified access to all settings through a single facade:
+- **`PlatformSettingsFacade`** — Primary facade (use this)
+- **`BrandingSettingsService`** — Direct branding access (advanced use)
+- **`ContactSettingsService`** — Direct contact access (advanced use)
+- **`FeatureSettingsService`** — Direct features access (advanced use)
+- **`FileTooLargeError`**, **`InvalidFileTypeError`**, **`SettingsUpsertError`** — Error classes
+
+## PlatformSettingsFacade
+
+**Constructor**:
+```ts
+new PlatformSettingsFacade({
+  db: dbHttp | dbWs,
+  environment: string,
+  organizationId: string,    // required — all settings are org-scoped
+  r2?: R2Service,            // optional — required for logo uploads
+  r2PublicUrlBase?: string,  // optional — required for logo URL construction
+})
+```
+
+In `procedure()` handlers, access via `ctx.services.settings` — `organizationId` is injected from org context automatically.
 
 | Method | Purpose | Notes |
 |---|---|---|
-| `getAllSettings(orgId)` | Parallel fetch of all settings | Returns branding + contact + features |
-| `getBranding(orgId)` / `updateBranding(orgId, input)` | Logo URL, primary color, density | |
-| `getContact(orgId)` / `updateContact(orgId, input)` | Email, name, timezone | |
-| `getFeatures(orgId)` / `updateFeatures(orgId, input)` | Feature toggles (signups, purchases) | |
-| `uploadLogo(orgId, file)` | Upload org logo to R2 | Returns URL |
+| `getAllSettings()` | Parallel fetch of all three categories | Returns `AllSettingsResponse` |
+| `getBranding()` | Logo URL, primary color hex, density scale | Returns `BrandingSettingsResponse` |
+| `updateBranding(input: UpdateBrandingInput)` | Update branding fields | Upserts |
+| `getContact()` | Platform name, support email, timezone | Returns `ContactSettingsResponse` |
+| `updateContact(input: UpdateContactInput)` | Update contact fields | Upserts |
+| `getFeatures()` | `signupsEnabled`, `purchasesEnabled` | Returns `FeatureSettingsResponse` |
+| `updateFeatures(input: UpdateFeaturesInput)` | Toggle features | Upserts |
+| `uploadLogo(orgId, file)` | Validate + upload logo to R2 | Returns updated branding URL |
 
-## Sub-Services
+## Sub-Service Responsibilities
 
-| Service | Scope | Storage |
+| Service | Storage | Scope |
 |---|---|---|
-| **BrandingService** | Logo, primary color, density scale | `branding_settings` table + R2 for logos |
-| **ContactService** | Platform name, email, timezone | `contact_settings` table |
-| **FeatureService** | Signup enabled, purchases enabled | `feature_settings` table |
+| `BrandingSettingsService` | `branding_settings` table + R2 for logos | Per org |
+| `ContactSettingsService` | `contact_settings` table | Per org |
+| `FeatureSettingsService` | `feature_settings` table | Per org |
 
-## Storage Patterns
+Logo R2 key: `logos/{orgId}/logo.{ext}` — 1-year immutable cache for raster, 1-hour for SVG.
 
-- **Tables**: `platformSettings`, `branding_settings`, `contact_settings`, `feature_settings`
-- **Pattern**: Upsert (INSERT ON CONFLICT UPDATE) — settings are always 1:1 per org
-- **Logo storage**: R2 key `logos/{orgId}/logo.{ext}`, cache 1 year (immutable)
+## How Settings Flow Through the Platform
 
-## How Settings Are Used
-
-1. **Organization-api** reads/writes settings via this facade
-2. **Identity-api** reads branding for injection into org layouts
-3. **Web app** applies branding as CSS custom properties in org layout:
+1. **Organization-api** reads/writes settings via `ctx.services.settings` (the facade)
+2. **Identity-api** reads branding for injection into org layout server loads
+3. **Web app** injects branding as CSS custom properties on the org layout:
    ```css
-   --org-brand-primary: var(--brand-primary-color);
-   --org-brand-density: var(--brand-density-scale);
+   --brand-primary-color: #hex;
+   --brand-density-scale: 1.0;
    ```
-4. **Notifications** injects `logoUrl` and `primaryColor` into email templates
+4. **Notifications** injects `logoUrl` and `primaryColor` into email templates via `brandTokenResolver` in the service registry
 
 ## Strict Rules
 
-- **MUST** scope all settings operations by `organizationId` — settings are always org-scoped
-- **MUST** use upsert pattern for all updates — creates if not exists, updates if exists
-- **MUST** validate all setting values with Zod schemas before persisting
+- **MUST** scope all settings by `organizationId` — always passed in constructor
+- **MUST** use upsert pattern — settings are 1:1 per org, never insert duplicates
+- **MUST** validate setting values with Zod before persisting (input types from `@codex/validation`)
+- **MUST** provide `r2` and `r2PublicUrlBase` for logo upload operations — facade will throw if missing
 - **NEVER** hardcode branding values — always read from settings
 
 ## Integration
 
-- **Depends on**: `@codex/database`, `@codex/cloudflare-clients` (R2 for logos)
-- **Used by**: identity-api worker, organization-api worker, `@codex/notifications` (branding injection)
+- **Depends on**: `@codex/database`, `@codex/cloudflare-clients` (R2), `@codex/service-errors`, `@codex/shared-types`, `@codex/validation`
+- **Used by**: identity-api worker, organization-api worker, `@codex/notifications` (brand token resolver), service-registry in `@codex/worker-utils`
 
 ## Reference Files
 
-- `packages/platform-settings/src/` — facade and sub-services
+- `packages/platform-settings/src/services/platform-settings-service.ts` — PlatformSettingsFacade
+- `packages/platform-settings/src/services/branding-settings-service.ts`
+- `packages/platform-settings/src/services/contact-settings-service.ts`
+- `packages/platform-settings/src/services/feature-settings-service.ts`

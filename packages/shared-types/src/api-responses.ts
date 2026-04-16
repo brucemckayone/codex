@@ -207,6 +207,10 @@ export interface BrandingSettingsResponse {
   textScale: string | null;
   headingWeight: string | null;
   bodyWeight: string | null;
+  // Hero layout
+  heroLayout: string;
+  // Pricing FAQ (JSON string: PricingFaqItem[])
+  pricingFaq: string | null;
 }
 
 /**
@@ -274,4 +278,5 @@ export interface PublicBrandingResponse {
   radiusValue: number;
   densityValue: number;
   introVideoUrl: string | null;
+  heroLayout: string;
 }

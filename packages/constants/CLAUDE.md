@@ -1,94 +1,163 @@
 # @codex/constants
 
-Shared constants and utilities. Zero-dependency — safe to import everywhere.
+Shared constants and utilities. Zero dependencies — safe to import anywhere.
 
-## Service Ports (Source of Truth)
+## Service Ports & URLs
 
-**MUST** use `getServiceUrl(service, env)` to resolve URLs. NEVER hardcode ports.
+**MUST** use `getServiceUrl(service, env)` — NEVER hardcode ports or URLs.
 
-| Service | Port | Worker |
+```ts
+import { getServiceUrl } from '@codex/constants';
+
+const authUrl = getServiceUrl('auth', env);       // → https://auth.revelations.studio (prod)
+const contentUrl = getServiceUrl('content', env); // → http://localhost:4001 (dev)
+```
+
+**`ServiceName`** values: `'auth' | 'content' | 'access' | 'org' | 'ecom' | 'admin' | 'identity' | 'notifications' | 'media'`
+
+`getServiceUrl` resolves via env vars first (`AUTH_WORKER_URL`, `API_URL`, `ORG_API_URL`, etc.), then falls back to defaults. Validates all URLs through `validateServiceUrl()` (SSRF protection).
+
+| Service | Port | Env var override |
 |---|---|---|
-| `AUTH` | 42069 | auth |
-| `CONTENT` | 4001 | content-api |
-| `ACCESS` | 4001 | content-api (shared) |
-| `ORGANIZATION` | 42071 | organization-api |
-| `ECOMMERCE` | 42072 | ecom-api |
-| `ADMIN` | 42073 | admin-api |
-| `IDENTITY` | 42074 | identity-api |
-| `NOTIFICATIONS` | 42075 | notifications-api |
-| `MEDIA` | 4002 | media-api |
-| `MAILHOG` | 8025 | dev email UI |
+| `auth` | 42069 | `AUTH_WORKER_URL` |
+| `content` / `access` | 4001 | `API_URL` |
+| `org` | 42071 | `ORG_API_URL` |
+| `ecom` | 42072 | `ECOM_API_URL` |
+| `admin` | 42073 | `ADMIN_API_URL` |
+| `identity` | 42074 | `IDENTITY_API_URL` |
+| `notifications` | 42075 | `NOTIFICATIONS_API_URL` |
+| `media` | 4002 | `MEDIA_API_URL` |
 
-## Key Exports
+`SERVICE_PORTS` is also exported (object of port numbers) — use for reference but not for building URLs.
 
-### URLs & Services
-| Export | Purpose |
-|---|---|
-| `SERVICE_PORTS` | Port constants for all workers |
-| `getServiceUrl(service, env)` | Resolves full URL (dev vs prod). Includes SSRF protection |
-| `validateServiceUrl(url, requireHttps)` | Blocks dangerous protocols, private IPs, cloud metadata |
-| `DOMAINS` | `{ PROD, STAGING, DEV, LOCAL }` |
-| `RESERVED_SUBDOMAINS` | Array of reserved subdomain names |
-| `RESERVED_SUBDOMAINS_SET` | Set for O(1) lookups |
+## Environment
 
-### Commerce
-| Export | Value | Notes |
-|---|---|---|
-| `PLATFORM_FEE_BPS` | 1000 (10%) | Platform take on purchases |
-| `MIN_PURCHASE_AMOUNT_CENTS` | — | Minimum purchase in pence (GBP) |
+```ts
+isDev(env)           // true in development/test; accepts Env object or boolean
+ENV_NAMES            // { PRODUCTION, STAGING, DEVELOPMENT, TEST }
+validateServiceUrl(url, requireHttps?) // SSRF protection — throws on private IPs in prod
+```
 
-### Environment
-| Export | Purpose |
-|---|---|
-| `isDev(env)` | Returns true in development/test mode |
-| `ENV_NAMES` | `{ PRODUCTION, STAGING, DEVELOPMENT, TEST }` |
-| `INFRA_KEYS` | Environment variable key names for R2, Stripe, Database |
+**SSRF protection**: blocks `javascript:`, `data:`, `file:` protocols; cloud metadata (`169.254.169.254`, `metadata.google.internal`); private IPs (10.x, 172.16-31.x, 192.168.x, 127.x) when `requireHttps=true`.
 
-### Limits
-| Export | Purpose |
-|---|---|
-| `MAX_FILE_SIZE_BYTES` | Upload size limit |
-| `MAX_PAGINATION_LIMIT` | Max items per page |
+## Cookies
 
-### MIME Types
-| Export | Purpose |
-|---|---|
-| `VIDEO` | Supported video MIME types |
-| `IMAGE` | Supported image MIME types |
-| `STREAMING` | HLS streaming MIME types |
+```ts
+getCookieConfig(env?, host?, options?)
+// Returns: { path, httpOnly, secure, sameSite, domain?, maxAge? }
+// secure=true always in prod; false only for localhost/lvh.me/nip.io in dev
+// domain=.revelations.studio in prod (or COOKIE_DOMAIN env var)
+// domain=.lvh.me in dev when host contains lvh.me
 
-### Cookies
-| Export | Purpose |
-|---|---|
-| `getCookieConfig(env)` | Returns secure cookie config (HttpOnly, Secure, SameSite, domain) |
-| `COOKIES.SESSION_NAME` | Session cookie name |
+COOKIES.SESSION_NAME  // 'codex-session'
+COOKIES.SESSION_MAX_AGE  // 604800s (7 days)
+COOKIES.TOKEN_MAX_AGE    // 300s (5 minutes)
+```
 
-## SSRF Protection
+## Commerce
 
-`getServiceUrl()` validates all URLs via `validateServiceUrl()`:
-- Only allows `http://` and `https://` protocols
-- Blocks `javascript:`, `data:`, `file:`, `ftp:` protocols
-- Blocks cloud metadata services (`169.254.169.254`, `metadata.google.internal`)
-- Blocks private IP ranges in production (`10.x`, `172.16.x`, `192.168.x`, `127.x`)
-- Allows localhost only in dev mode
+```ts
+FEES.PLATFORM_PERCENT    // 1000 (10.00% in basis points)
+FEES.SUBSCRIPTION_ORG_PERCENT  // 1500 (15.00%)
+CURRENCY                 // { GBP: 'gbp', USD: 'usd', EUR: 'eur' }
+STRIPE_EVENTS            // checkout.session.completed, customer.subscription.*, etc.
+PURCHASE_STATUS          // { PENDING, COMPLETED, FAILED, REFUNDED }
+SUBSCRIPTION_STATUS      // { ACTIVE, PAST_DUE, CANCELLING, CANCELLED, INCOMPLETE }
+BILLING_INTERVAL         // { MONTH, YEAR }
+CONNECT_ACCOUNT_STATUS   // { ONBOARDING, ACTIVE, RESTRICTED, DISABLED }
+```
+
+**Default currency is GBP (£)**, not USD.
+
+## Limits & File Sizes
+
+```ts
+PAGINATION           // { DEFAULT: 20, MAX: 100 }
+FILE_SIZES           // { LOGO_MAX_BYTES: 5MB, IMAGE_MAX_BYTES: 5MB, MEDIA_MAX_BYTES: 5GB, MEDIA_MIN_BYTES: 1KB }
+R2_DEFAULTS          // { MAX_RETRIES: 3, BASE_DELAY_MS: 100, MAX_EXPIRY_SECONDS: 604800 }
+STREAMING            // { DEFAULT_EXPIRY_SECONDS: 3600 }
+CACHE_TTL            // { BRAND_CACHE_SECONDS: 604800, ORG_PUBLIC_INFO_SECONDS: 1800 }
+VIDEO_PROGRESS       // { COMPLETION_THRESHOLD: 0.95 }
+```
+
+## Rate Limit Presets
+
+Used by `@codex/security`'s `RATE_LIMIT_PRESETS`:
+
+```ts
+RATE_LIMIT_PRESETS   // { AUTH, STRICT, STREAMING, API, WEBHOOK, WEB }
+// AUTH: 5/15min, STRICT: 20/min, STREAMING: 60/min, API: 100/min, WEB: 300/min, WEBHOOK: 1000/min
+```
+
+## MIME Types & Headers
+
+```ts
+MIME_TYPES           // { APPLICATION: { JSON }, IMAGE: { ... }, VIDEO: { ... }, ... }
+HEADERS              // { CONTENT_TYPE, WORKER_SIGNATURE, WORKER_TIMESTAMP, ... }
+SUPPORTED_IMAGE_MIME_TYPES  // Set of allowed image MIME types
+SUPPORTED_MEDIA_MIME_TYPES  // Set of allowed video/audio MIME types
+MIME_TO_EXTENSION    // Map from MIME type to file extension
+```
+
+## Content & Database Constants
+
+```ts
+CONTENT_STATUS       // { DRAFT, PUBLISHED, ARCHIVED }
+MEDIA_STATUS         // { PENDING, PROCESSING, READY, FAILED }
+CONTENT_TYPES        // { VIDEO, AUDIO, WRITTEN }
+MEDIA_TYPES          // { VIDEO, AUDIO }
+VISIBILITY           // { PUBLIC, MEMBERS, PURCHASERS, PRIVATE }
+ACCESS_TYPES         // { FREE, PAID, MEMBERS_ONLY, ... }
+CONTENT_ACCESS_TYPE  // content access type constants
+
+ORGANIZATION_ROLES   // { OWNER, ADMIN, CREATOR, SUBSCRIBER, MEMBER }
+ORGANIZATION_STATUS  // org status constants
+DB_METHODS           // { LOCAL_PROXY, NEON_BRANCH, PRODUCTION }
+POSTGRES_ERROR_CODES // { UNIQUE_VIOLATION: '23505', FOREIGN_KEY_VIOLATION: '23503', NOT_NULL_VIOLATION: '23502' }
+```
+
+## URLs & Subdomains
+
+```ts
+DOMAINS              // { PROD: 'revelations.studio', STAGING: '...', DEV: 'lvh.me', LOCAL: 'localhost' }
+RESERVED_SUBDOMAINS  // Array of reserved org slug names (cdn, api, auth, www, admin, etc.)
+RESERVED_SUBDOMAINS_SET  // Set<string> for O(1) lookups
+```
+
+**MUST** check `RESERVED_SUBDOMAINS_SET` when validating org slugs (built into `createOrganizationSchema` in `@codex/validation`).
+
+## Security & Observability Constants
+
+```ts
+AUTH_ROLES           // { ADMIN, CREATOR, USER }
+CSP_DIRECTIVES       // CSP directive constants for security headers
+SENSITIVE_KEYS       // Array of field names to redact in logs
+SENSITIVE_PATTERNS   // Regex patterns for detecting sensitive data
+LOG_LEVELS           // { DEBUG, INFO, WARN, ERROR }
+```
+
+## Infrastructure Keys
+
+```ts
+INFRA_KEYS.R2        // { ACCOUNT_ID, ACCESS_KEY_ID, SECRET_ACCESS_KEY, BUCKET_MEDIA }
+INFRA_KEYS.STRIPE    // { SECRET_KEY, WEBHOOK_SECRET }
+INFRA_KEYS.DATABASE  // { URL, URL_LOCAL_PROXY }
+```
 
 ## Strict Rules
 
-- **MUST** use `getServiceUrl(service, env)` for ALL worker URL resolution — NEVER hardcode URLs or ports
-- **MUST** use `SERVICE_PORTS` as single source of truth — NEVER duplicate port numbers
-- **MUST** check `RESERVED_SUBDOMAINS_SET` when validating org slugs
-- **MUST** use `getCookieConfig(env)` for cookie configuration — ensures correct domain/security settings
-- **NEVER** hardcode port numbers, domains, or URLs in worker code
-- **NEVER** import this package with side effects — it's pure constants/functions
-
-## Integration
-
-- **Depends on**: Nothing (zero dependencies)
-- **Used by**: Every package and worker in the monorepo
+- **MUST** use `getServiceUrl(service, env)` — NEVER hardcode URLs or port numbers
+- **MUST** use `RESERVED_SUBDOMAINS_SET` for org slug validation
+- **MUST** use `getCookieConfig(env)` for cookie configuration
+- **NEVER** add side effects to this package — it must be pure constants/functions
 
 ## Reference Files
 
-- `packages/constants/src/urls.ts` — ports, domains, reserved subdomains, `getServiceUrl()`
-- `packages/constants/src/env.ts` — `isDev()`, `validateServiceUrl()`, `INFRA_KEYS`
-- `packages/constants/src/cookies.ts` — `getCookieConfig()`, cookie names
-- `packages/constants/src/mime.ts` — MIME type constants
+- `packages/constants/src/urls.ts` — `SERVICE_PORTS`, `DOMAINS`, `RESERVED_SUBDOMAINS`
+- `packages/constants/src/env.ts` — `getServiceUrl`, `isDev`, `validateServiceUrl`, `INFRA_KEYS`
+- `packages/constants/src/cookies.ts` — `getCookieConfig`, `COOKIES`
+- `packages/constants/src/limits.ts` — `PAGINATION`, `FILE_SIZES`, `RATE_LIMIT_PRESETS`, `CACHE_TTL`
+- `packages/constants/src/commerce.ts` — `FEES`, `CURRENCY`, `STRIPE_EVENTS`, `PURCHASE_STATUS`
+- `packages/constants/src/content.ts` — `CONTENT_STATUS`, `MEDIA_STATUS`, `CONTENT_TYPES`, `VISIBILITY`
+- `packages/constants/src/mime.ts` — `MIME_TYPES`, `HEADERS`, `SUPPORTED_*_MIME_TYPES`
+- `packages/constants/src/database.ts` — `POSTGRES_ERROR_CODES`, `ORGANIZATION_ROLES`, `DB_METHODS`

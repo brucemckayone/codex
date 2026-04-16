@@ -86,6 +86,12 @@ export const brandingSettings = pgTable(
     headingWeight: varchar('heading_weight', { length: 10 }),
     bodyWeight: varchar('body_weight', { length: 10 }),
 
+    // Hero layout variant (brand editor "Header Layout" section)
+    heroLayout: varchar('hero_layout', { length: 20 }).default('default'),
+
+    // Pricing FAQ (JSON string: PricingFaqItem[])
+    pricingFaq: text('pricing_faq'),
+
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),

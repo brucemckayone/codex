@@ -14,6 +14,7 @@
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
+  import { CreatorExploreBanner } from '$lib/components/ui/CreatorCard';
   import { Pagination } from '$lib/components/ui/Pagination';
   import Select from '$lib/components/ui/Select/Select.svelte';
   import { contentCollection, hydrateCollection, hydrateIfNeeded, useLiveQuery } from '$lib/collections';
@@ -54,6 +55,7 @@
   // Plain variable (not $state) — only used for reference comparison inside the effect,
   // never in the template. Using $state() would wrap the array in a Proxy, making
   // reference equality checks always fail (raw !== proxy → infinite loop).
+  // svelte-ignore state_referenced_locally
   let prevServerItems = data.content?.items;
   $effect(() => {
     const currentItems = data.content?.items;
@@ -151,11 +153,19 @@
       });
     }
 
+    if (data.creator) {
+      chips.push({
+        key: 'creator',
+        label: `Creator: ${data.creator.name}`,
+        onRemove: () => updateFilter('creator', null),
+      });
+    }
+
     return chips;
   });
 
   const hasActiveFilters = $derived(
-    !!filters.q || !!localType || !!localCategory || (filters.sort !== 'newest')
+    !!filters.q || !!localType || !!localCategory || (filters.sort !== 'newest') || !!data.creator
   );
 
   let searchInput = $state('');
@@ -192,6 +202,7 @@
     url.searchParams.delete('type');
     url.searchParams.delete('sort');
     url.searchParams.delete('category');
+    url.searchParams.delete('creator');
     url.searchParams.delete('page');
     goto(url.toString(), { replaceState: true });
   }
@@ -224,6 +235,24 @@
 </svelte:head>
 
 <div class="explore">
+  <!--
+    Creator feature banner — rendered only when the page is filtered by
+    creator (?creator=<username>). Acts as a profile spread for that
+    contributor, with the filtered content grid below it serving as
+    their catalogue. Avoids a separate /creators/[username] route.
+  -->
+  {#if data.creator}
+    <CreatorExploreBanner
+      name={data.creator.name}
+      avatarUrl={data.creator.avatarUrl}
+      bio={data.creator.bio}
+      role={data.creator.role}
+      contentCount={data.creator.contentCount}
+      socialLinks={data.creator.socialLinks}
+      onClear={() => updateFilter('creator', null)}
+    />
+  {/if}
+
   <!-- Header -->
   <header class="explore__header">
     <h1 class="explore__title">{m.explore_title()}</h1>

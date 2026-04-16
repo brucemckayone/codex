@@ -99,12 +99,7 @@
     { value: 'Pacific/Auckland', label: 'Pacific/Auckland' },
   ];
 
-  let timezoneValue = $state(contact.timezone ?? 'UTC');
-
-  // Sync timezone when contact data changes
-  $effect(() => {
-    timezoneValue = contact.timezone ?? 'UTC';
-  });
+  let timezoneValue = $derived(contact.timezone ?? 'UTC');
 </script>
 
 <svelte:head>

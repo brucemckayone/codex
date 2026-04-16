@@ -1,7 +1,9 @@
 /**
  * Org Pricing page - server load
  *
- * Loads subscription tiers for the org + user's current subscription (if auth'd).
+ * Loads subscription tiers, user's current subscription, content preview
+ * thumbnails, and org stats. FAQ comes from parent layout branding data.
+ *
  * Public page — cache is DYNAMIC_PUBLIC for unauthenticated users.
  */
 import { createServerApi } from '$lib/server/api';
@@ -23,17 +25,21 @@ export const load: PageServerLoad = async ({
 
   const api = createServerApi(platform, cookies);
 
-  // Load tiers (public) and current subscription (if auth'd) in parallel
-  const [tiers, currentSubscription] = await Promise.all([
-    api.tiers.list(org.id).catch(() => []),
-    locals.user
+  return {
+    // Existing
+    tiers: api.tiers.list(org.id).catch(() => []),
+    currentSubscription: locals.user
       ? api.subscription.getCurrent(org.id).catch(() => null)
       : Promise.resolve(null),
-  ]);
-
-  return {
-    tiers,
-    currentSubscription,
     isAuthenticated: !!locals.user,
+
+    // Content thumbnails for preview section (streamed)
+    contentPreview: api.content
+      .getPublicContent(new URLSearchParams({ orgId: org.id, limit: '6' }))
+      .then((result) => result?.items ?? [])
+      .catch(() => []),
+
+    // Org stats for content preview overlay
+    stats: api.org.getPublicStats(org.slug).catch(() => null),
   };
 };

@@ -59,6 +59,7 @@
   const priceVal = $derived(form.fields.price?.value() ?? '0.00');
 
   // Tags state (managed locally, serialized to hidden input)
+  // svelte-ignore state_referenced_locally — form field: user edits must survive until submit
   let tags = $state<string[]>(content?.tags ?? []);
 
   function handleTagsChange(newTags: string[]) {
@@ -153,6 +154,7 @@
   let showDangerZone = $state(false);
 
   // Minimum tier selector
+  // svelte-ignore state_referenced_locally — form field: user edits must survive until submit
   let selectedMinimumTierId = $state<string>(content?.minimumTierId ?? '');
   const tierSelectOptions = $derived([
     { value: '', label: 'Select a tier' },

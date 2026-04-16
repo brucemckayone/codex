@@ -425,11 +425,8 @@ export type CreateContentInput = z.infer<typeof createContentSchema>;
 /**
  * Update Content Input
  * All fields optional (partial update)
- * Note: Cannot change mediaItemId after creation
  */
-export const updateContentSchema = baseContentSchema
-  .partial()
-  .omit({ mediaItemId: true }); // Cannot change media reference
+export const updateContentSchema = baseContentSchema.partial();
 
 export type UpdateContentInput = z.infer<typeof updateContentSchema>;
 
@@ -515,6 +512,7 @@ export const publicContentQuerySchema = paginationSchema
     contentType: contentTypeEnum.optional(),
     search: z.string().max(255).optional(),
     sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
+    creatorId: uuidSchema.optional(),
   })
   .refine((data) => data.orgId || data.slug, {
     message: 'Either orgId or slug must be provided',

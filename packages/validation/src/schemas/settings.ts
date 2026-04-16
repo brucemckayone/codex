@@ -60,6 +60,42 @@ export const MAX_LOGO_FILE_SIZE_BYTES = FILE_SIZES.LOGO_MAX_BYTES;
 export const logoMimeTypeSchema = z.enum(ALLOWED_LOGO_MIME_TYPES);
 
 // ============================================================================
+// Pricing FAQ Schemas
+// ============================================================================
+
+/**
+ * Single pricing FAQ item
+ */
+export const pricingFaqItemSchema = z.object({
+  id: z.string().uuid('FAQ item must have a valid UUID'),
+  question: z
+    .string()
+    .trim()
+    .min(1, 'Question is required')
+    .max(200, 'Question must be 200 characters or less'),
+  answer: z
+    .string()
+    .trim()
+    .min(1, 'Answer is required')
+    .max(2000, 'Answer must be 2000 characters or less')
+    .refine((str) => !/<[^>]*>/g.test(str), 'Answer cannot contain HTML tags'),
+  order: z.number().int().min(0, 'Order must be non-negative'),
+});
+
+/**
+ * Array of FAQ items (max 20 per org, unique order values)
+ */
+export const pricingFaqSchema = z
+  .array(pricingFaqItemSchema)
+  .max(20, 'Maximum 20 FAQ items allowed')
+  .refine((items) => {
+    const orders = items.map((i) => i.order);
+    return new Set(orders).size === orders.length;
+  }, 'Each FAQ item must have a unique order value');
+
+export type PricingFaqItem = z.infer<typeof pricingFaqItemSchema>;
+
+// ============================================================================
 // Domain Schemas
 // ============================================================================
 
@@ -85,6 +121,21 @@ export const updateBrandingSchema = z.object({
   textScale: z.string().max(10).nullable().optional(),
   headingWeight: z.string().max(10).nullable().optional(),
   bodyWeight: z.string().max(10).nullable().optional(),
+  heroLayout: z
+    .enum([
+      'default',
+      'centered',
+      'logo-hero',
+      'minimal',
+      'split',
+      'magazine',
+      'asymmetric',
+      'portrait',
+      'gallery',
+      'stacked',
+    ])
+    .optional(),
+  pricingFaq: z.union([z.literal(null), z.string().min(1)]).optional(),
 });
 
 export type UpdateBrandingInput = z.infer<typeof updateBrandingSchema>;
@@ -153,6 +204,8 @@ export const brandingSettingsSchema: z.ZodType<BrandingSettingsResponse> = z
     textScale: z.string().nullable(),
     headingWeight: z.string().nullable(),
     bodyWeight: z.string().nullable(),
+    heroLayout: z.string(),
+    pricingFaq: z.string().nullable(),
   })
   .pipe(
     z.object({
@@ -175,6 +228,8 @@ export const brandingSettingsSchema: z.ZodType<BrandingSettingsResponse> = z
       textScale: z.string().nullable(),
       headingWeight: z.string().nullable(),
       bodyWeight: z.string().nullable(),
+      heroLayout: z.string(),
+      pricingFaq: z.string().nullable(),
     })
   );
 
@@ -238,7 +293,9 @@ export const DEFAULT_BRANDING: BrandingSettingsResponse = {
   textScale: null,
   headingWeight: null,
   bodyWeight: null,
+  heroLayout: 'default',
   densityValue: 1,
+  pricingFaq: null,
 };
 
 /**

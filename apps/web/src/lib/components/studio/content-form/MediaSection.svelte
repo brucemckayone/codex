@@ -36,7 +36,7 @@
 
   const { form, mediaItems, orgSlug }: Props = $props();
 
-  let selectedMediaId = $state<string | null>(form.fields.mediaItemId?.value() ?? null);
+  let selectedMediaId = $derived<string | null>(form.fields.mediaItemId?.value() ?? null);
 
   const selectedMedia = $derived(
     selectedMediaId ? mediaItems.find((m) => m.id === selectedMediaId) : null

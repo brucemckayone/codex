@@ -14,16 +14,18 @@ import {
   getWaveformImageKey,
   getWaveformKey,
 } from '../../../transcoding/src/paths';
-import { MEDIA, ORGS, THUMBNAIL_SEEDS, USERS } from './constants';
+import { CONTENT, MEDIA, ORGS, THUMBNAIL_SEEDS, USERS } from './constants';
 import {
   fetchPortraitImage,
   fetchRealImage,
+  fetchUrlImage,
   generateAudioMasterPlaylist,
   generateAvatarSvg,
   generateLogoSvg,
   generateMasterPlaylist,
   generateVariantPlaylist,
   generateWaveformJson,
+  OFFERING_IMAGE_URLS,
   PLACEHOLDER_JPEG,
   VIDEO_VARIANTS,
 } from './placeholders';
@@ -120,6 +122,7 @@ async function collectMediaFiles(): Promise<R2File[]> {
     { media: MEDIA.introTs, creatorId: USERS.creator.id },
     { media: MEDIA.advancedSvelte, creatorId: USERS.creator.id },
     { media: MEDIA.honoApis, creatorId: USERS.admin.id },
+    { media: MEDIA.cacaoCeremony, creatorId: USERS.luzura.id },
   ];
 
   for (const { media, creatorId } of readyVideos) {
@@ -239,6 +242,70 @@ async function collectMediaFiles(): Promise<R2File[]> {
     });
   }
 
+  // Audio: Sound Bowls (Of Blood & Bones)
+  const soundBowlsCreatorId = USERS.luzura.id;
+  const soundBowls = MEDIA.soundBowls;
+  const soundBowlsSeed = THUMBNAIL_SEEDS[soundBowls.id] ?? soundBowls.id;
+
+  files.push({
+    bucket: MEDIA_BUCKET_NAME,
+    key: getOriginalKey(soundBowlsCreatorId, soundBowls.id, 'audio.mp3'),
+    data: PLACEHOLDER_JPEG,
+    contentType: 'audio/mpeg',
+  });
+
+  files.push({
+    bucket: MEDIA_BUCKET_NAME,
+    key: getHlsMasterKey(soundBowlsCreatorId, soundBowls.id),
+    data: Buffer.from(generateAudioMasterPlaylist(), 'utf-8'),
+    contentType: 'application/vnd.apple.mpegurl',
+  });
+
+  files.push({
+    bucket: MEDIA_BUCKET_NAME,
+    key: getHlsVariantKey(soundBowlsCreatorId, soundBowls.id, 'audio'),
+    data: Buffer.from(
+      generateVariantPlaylist(soundBowls.durationSeconds),
+      'utf-8'
+    ),
+    contentType: 'application/vnd.apple.mpegurl',
+  });
+
+  files.push({
+    bucket: MEDIA_BUCKET_NAME,
+    key: getWaveformKey(soundBowlsCreatorId, soundBowls.id),
+    data: Buffer.from(generateWaveformJson(200), 'utf-8'),
+    contentType: 'application/json',
+  });
+
+  files.push({
+    bucket: MEDIA_BUCKET_NAME,
+    key: getWaveformImageKey(soundBowlsCreatorId, soundBowls.id),
+    data: await fetchRealImage(soundBowlsSeed, 800, 200),
+    contentType: 'image/jpeg',
+  });
+
+  // Sound bowls thumbnail variants
+  files.push({
+    bucket: MEDIA_BUCKET_NAME,
+    key: getThumbnailKey(soundBowlsCreatorId, soundBowls.id),
+    data: await fetchRealImage(soundBowlsSeed, 800, 450),
+    contentType: 'image/jpeg',
+  });
+
+  for (const size of ['sm', 'md', 'lg'] as const) {
+    files.push({
+      bucket: ASSETS_BUCKET_NAME,
+      key: getMediaThumbnailKey(soundBowlsCreatorId, soundBowls.id, size),
+      data: await fetchRealImage(
+        soundBowlsSeed,
+        sizes[size][0],
+        sizes[size][1]
+      ),
+      contentType: 'image/jpeg',
+    });
+  }
+
   return files;
 }
 
@@ -289,13 +356,69 @@ async function collectAssetFiles(): Promise<R2File[]> {
 
   for (const org of Object.values(ORGS)) {
     const logoSizes = { sm: 64, md: 128, lg: 256 } as const;
-    for (const size of ['sm', 'md', 'lg'] as const) {
+
+    if (org.id === ORGS.bones.id) {
+      // Fetch the real PNG logo for Of Blood & Bones
+      try {
+        const logoData = await fetchUrlImage(
+          'https://ofbloodandbones.com/wp-content/uploads/2024/07/OF-BLOOD-AND-BONES-BUSINESS-CARDS.png',
+          'bones-logo.png'
+        );
+        for (const size of ['sm', 'md', 'lg'] as const) {
+          files.push({
+            bucket: ASSETS_BUCKET_NAME,
+            key: getOrgLogoKey(org.id, size),
+            data: logoData,
+            contentType: 'image/png',
+          });
+        }
+      } catch {
+        // Fallback to generated SVG if fetch fails
+        for (const size of ['sm', 'md', 'lg'] as const) {
+          files.push({
+            bucket: ASSETS_BUCKET_NAME,
+            key: getOrgLogoKey(org.id, size),
+            data: generateLogoSvg(org.name, org.primaryColor, logoSizes[size]),
+            contentType: 'image/svg+xml',
+          });
+        }
+      }
+    } else {
+      for (const size of ['sm', 'md', 'lg'] as const) {
+        files.push({
+          bucket: ASSETS_BUCKET_NAME,
+          key: getOrgLogoKey(org.id, size),
+          data: generateLogoSvg(org.name, org.primaryColor, logoSizes[size]),
+          contentType: 'image/svg+xml',
+        });
+      }
+    }
+  }
+
+  // Fetch offering images for Of Blood & Bones content thumbnails
+  console.log(
+    '  Fetching Of Blood & Bones offering images (cached after first run)...'
+  );
+  const bonesContent = Object.values(CONTENT).filter(
+    (c) => c.orgId === ORGS.bones.id
+  );
+  for (const item of bonesContent) {
+    const url = OFFERING_IMAGE_URLS[item.slug];
+    if (!url) continue;
+    try {
+      const ext = url.endsWith('.png') ? 'png' : 'jpg';
+      const contentType = ext === 'png' ? 'image/png' : 'image/jpeg';
+      const imageData = await fetchUrlImage(url, `bones-${item.slug}.${ext}`);
+      // Store offering thumbnail under a consistent key for dev-cdn
+      const thumbKey = `${item.creatorId}/thumbnails/offering-${item.slug}/thumb.jpg`;
       files.push({
         bucket: ASSETS_BUCKET_NAME,
-        key: getOrgLogoKey(org.id, size),
-        data: generateLogoSvg(org.name, org.primaryColor, logoSizes[size]),
-        contentType: 'image/svg+xml',
+        key: thumbKey,
+        data: imageData,
+        contentType,
       });
+    } catch {
+      // Skip if fetch fails — content card will show without thumbnail
     }
   }
 

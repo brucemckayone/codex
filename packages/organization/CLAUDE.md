@@ -1,63 +1,91 @@
 # @codex/organization
 
-Organization CRUD, slug management, and membership.
+Organization CRUD, membership management, follower relationships, and public profile queries.
 
-## API
+## Key Exports
 
-### `OrganizationService`
-| Method | Purpose | Notes |
+```typescript
+import { OrganizationService } from '@codex/organization';
+import { OrganizationNotFoundError, ConflictError, LastOwnerError, MemberNotFoundError } from '@codex/organization';
+```
+
+## `OrganizationService`
+
+### Constructor
+
+```typescript
+const service = new OrganizationService({ db, environment });
+```
+
+### Core CRUD
+
+| Method | Signature | Notes |
 |---|---|---|
-| `create(input, creatorId)` | Create org | Validates slug against reserved subdomains |
-| `get(id, creatorId)` | Get by ID | Scoped by creatorId |
-| `getBySlug(slug)` | Get by slug | Used for subdomain resolution |
-| `update(id, input, creatorId)` | Partial update | Validates slug if changed |
-| `delete(id, creatorId)` | Soft delete | Sets `deletedAt` |
-| `list(creatorId, filters)` | Paginated list | Creator's orgs only |
-| `isSlugAvailable(slug)` | Check uniqueness | Also checks reserved subdomains |
+| `create` | `(input: CreateOrganizationInput, userId: string)` | Transaction. Auto-creates `owner` membership for `userId`. Throws `ConflictError` on slug collision. |
+| `get` | `(id: string)` | Returns `Organization \| null`. Not scoped by user — caller must check ownership. |
+| `getBySlug` | `(slug: string)` | Used for subdomain resolution. Normalizes to lowercase. |
+| `update` | `(id: string, input: UpdateOrganizationInput)` | Transaction. Throws `ConflictError` on slug collision. Caller must verify ownership. |
+| `delete` | `(id: string)` | Soft delete via `deletedAt`. Caller must verify ownership. |
+| `list` | `(filters: OrganizationFilters, pagination?)` | Paginated. Supports search (name/description) + sort. NOT scoped by user — caller applies membership filter. |
+| `isSlugAvailable` | `(slug: string)` | Checks `RESERVED_SUBDOMAINS_SET` + DB uniqueness. |
 
-## Slug Validation
+### Membership Management
 
-Org slugs become subdomains (e.g., `my-org.lvh.me` in dev, `my-org.revelations.studio` in prod).
-
-**Rules**:
-- Lowercase alphanumeric + hyphens only
-- Cannot start/end with hyphen
-- Checked against `RESERVED_SUBDOMAINS_SET` from `@codex/constants` (includes `api`, `cdn`, `admin`, `www`, `platform`, `creators`, etc.)
-- Must be unique across all orgs (checked at service level + DB unique constraint)
-- Validation schema: `organizationSlugSchema` in `@codex/validation`
-
-## Membership
-
-Organizations have members via `organizationMemberships` table:
-- Each membership links a user to an org with a role
-- Roles determine access to studio, settings, billing, etc.
-- The org creator is automatically the first member
-
-## Data Model
-
-| Field | Type | Notes |
+| Method | Signature | Notes |
 |---|---|---|
-| `id` | UUID | Primary key |
-| `name` | string | Display name |
-| `slug` | string | Unique, used as subdomain |
-| `creatorId` | UUID | FK to users, owner |
-| `description` | string? | Optional |
-| `deletedAt` | timestamp? | Soft delete |
+| `listMembers` | `(organizationId: string, query)` | Paginated. Filters: role, status. Returns name/email/avatarUrl/role/status/joinedAt. |
+| `getMyMembership` | `(organizationId: string, userId: string)` | Returns `{ role, joinedAt }` or nulls if not a member. Never throws. |
+| `getUserOrganizations` | `(userId: string)` | All orgs where user has active membership, sorted by name. |
+| `inviteMember` | `(organizationId: string, input: { email, role }, invitedBy: string)` | Transaction. Looks up user by email. Throws `ConflictError` if already a member. |
+| `updateMemberRole` | `(organizationId: string, userId: string, role: string)` | Transaction. Cannot demote last owner (`LastOwnerError`). |
+| `removeMember` | `(organizationId: string, userId: string)` | Sets status: `inactive`. Cannot remove last owner. |
 
-## Strict Rules
+### Public Profile Queries
 
-- **MUST** scope all queries with `scopedNotDeleted(organizations, creatorId)` or equivalent
+| Method | Signature | Notes |
+|---|---|---|
+| `getPublicMembers` | `(slug: string, query?)` | Public-safe: name/avatarUrl/role/joinedAt only. No emails. |
+| `getPublicCreators` | `(slug: string, pagination?)` | Active creators (owner/admin/creator roles) with content counts, recent content (up to 4), and other org memberships. |
+| `getPublicStats` | `(slug: string)` | Aggregate stats: content counts by type, total duration, creator count, total views, categories. |
+
+### Follower Operations
+
+| Method | Signature | Notes |
+|---|---|---|
+| `followOrganization` | `(orgId: string, userId: string)` | Idempotent — `onConflictDoNothing`. |
+| `unfollowOrganization` | `(orgId: string, userId: string)` | Idempotent — silently no-ops if not following. |
+| `isFollowing` | `(orgId: string, userId: string)` | Returns boolean. |
+| `getFollowerCount` | `(orgId: string)` | Returns count. Public. |
+
+## Slug Rules
+
+- Org slugs become subdomains (e.g., `my-org.revelations.studio`)
+- Checked against `RESERVED_SUBDOMAINS_SET` from `@codex/constants` (includes `api`, `cdn`, `admin`, `www`, `platform`, etc.)
+- DB unique constraint is the safety net; service validates first
+
+## Custom Errors
+
+| Error | When |
+|---|---|
+| `OrganizationNotFoundError` | Org doesn't exist or soft-deleted |
+| `ConflictError` | Slug already taken |
+| `LastOwnerError` | Demoting/removing last org owner |
+| `MemberNotFoundError` | Target user not in org |
+
+## Rules
+
 - **MUST** validate slugs against `RESERVED_SUBDOMAINS_SET` before creating/updating
 - **MUST** soft delete only — NEVER hard-delete organizations
-- **MUST** check slug uniqueness at both service level AND rely on DB unique constraint as safety net
-- **NEVER** allow reserved subdomains as org slugs — they conflict with platform infrastructure
+- **NEVER** allow reserved subdomains as org slugs
+- `get()` and `update()` are NOT user-scoped — route handlers must enforce ownership via `getMyMembership()`
+- `getPublicCreators()` returns `avatarUrl ?? image` (handles both R2 and legacy image URLs)
 
 ## Integration
 
-- **Depends on**: `@codex/database`, `@codex/service-errors`, `@codex/validation`
+- **Depends on**: `@codex/database`, `@codex/service-errors`, `@codex/validation`, `@codex/constants`, `@codex/shared-types`
 - **Used by**: organization-api worker
 
 ## Reference Files
 
-- `packages/organization/src/services/organization-service.ts` — OrganizationService
+- `packages/organization/src/services/organization-service.ts`
 - `packages/organization/src/services/__tests__/organization-service.test.ts` — reference tests

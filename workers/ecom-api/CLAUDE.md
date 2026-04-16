@@ -1,146 +1,148 @@
 # Ecom-API Worker (port 42072)
 
-Stripe e-commerce integration: checkout sessions, payment/subscription/connect webhooks, purchase management, and subscription lifecycle.
+Stripe e-commerce integration: checkout sessions, payment/subscription/connect webhooks, purchase management, subscription lifecycle, and Stripe Connect onboarding.
 
 ## Route Groups
 
-### 1. Checkout (`/checkout`)
-| Method | Path | Policy | Input | Status | Response |
-|---|---|---|---|---|---|
-| POST | `/checkout/create` | `auth: 'required'` | body: `createCheckoutSchema` | 201 | `{ data: { checkoutUrl, sessionId } }` |
-| GET | `/checkout/verify/:sessionId` | `auth: 'required'` | params: sessionId | 200 | `{ data: { sessionStatus, purchase?, content? } }` |
+### Checkout (`/checkout`)
 
-### 2. Purchases (`/purchases`)
-| Method | Path | Policy | Input | Status | Response |
+| Method | Path | Policy | Rate Limit | Status | Response |
 |---|---|---|---|---|---|
-| GET | `/purchases` | `auth: 'required'` | query: pagination + status filter | 200 | `{ items, pagination }` |
-| GET | `/purchases/:id` | `auth: 'required'` | params: id | 200 | `{ data: Purchase }` |
+| POST | `/checkout/create` | `auth: 'required'` | `strict` | 200 | `{ data: { sessionUrl, sessionId } }` |
+| POST | `/checkout/portal-session` | `auth: 'required'` | `strict` | 200 | `{ data: { url } }` |
+| GET | `/checkout/verify` | `auth: 'required'` | `api` | 200 | `{ data: { sessionStatus, purchase?, content? } }` |
 
-### 3. Subscriptions (`/subscriptions`)
-| Method | Path | Policy | Input | Status | Response |
+### Purchases (`/purchases`)
+
+| Method | Path | Policy | Status | Response |
+|---|---|---|---|---|
+| GET | `/purchases` | `auth: 'required'` | 200 | `{ items, pagination }` |
+| GET | `/purchases/:id` | `auth: 'required'` | 200 | `{ data: Purchase }` |
+
+### Subscriptions (`/subscriptions`)
+
+| Method | Path | Policy | Rate Limit | Status | Response |
 |---|---|---|---|---|---|
-| POST | `/subscriptions/checkout` | `auth: 'required'` | body: `createSubscriptionCheckoutSchema` | 201 | `{ data: { checkoutUrl, sessionId } }` |
-| GET | `/subscriptions/current` | `auth: 'required'` | query: organizationId | 200 | `{ data: Subscription }` |
+| POST | `/subscriptions/checkout` | `auth: 'required'` | `strict` | 201 | `{ data: { checkoutUrl, sessionId } }` |
+| GET | `/subscriptions/current` | `auth: 'required'` | — | 200 | `{ data: Subscription }` |
 | GET | `/subscriptions/mine` | `auth: 'required'` | — | 200 | `{ items }` |
-| POST | `/subscriptions/change-tier` | `auth: 'required'` | body: `changeTierSchema` | 200 | `{ data }` |
-| POST | `/subscriptions/cancel` | `auth: 'required'` | body: `cancelSubscriptionSchema` | 200 | `{ data }` |
-| POST | `/subscriptions/reactivate` | `auth: 'required'` | body: `reactivateSubscriptionSchema` | 200 | `{ data }` |
-| GET | `/subscriptions/subscribers` | `auth: 'required'` | query: pagination + tierId + status | 200 | `{ items, pagination }` |
-| GET | `/subscriptions/stats` | `auth: 'required'` | query: organizationId | 200 | `{ data: Stats }` |
-| GET | `/subscriptions/tiers` | none (public) | query: organizationId | 200 | `{ items }` |
-| POST | `/subscriptions/tiers` | `auth: 'required'` | body: `createTierSchema` | 201 | `{ data: Tier }` |
-| PATCH | `/subscriptions/tiers/:id` | `auth: 'required'` | body: `updateTierSchema` | 200 | `{ data: Tier }` |
-| DELETE | `/subscriptions/tiers/:id` | `auth: 'required'` | params: id | 204 | — |
-| POST | `/subscriptions/tiers/reorder` | `auth: 'required'` | body: `reorderTiersSchema` | 200 | `{ data }` |
+| POST | `/subscriptions/change-tier` | `auth: 'required'` | `strict` | 200 | `{ data: Subscription }` |
+| POST | `/subscriptions/cancel` | `auth: 'required'` | — | 200 | `{ data: Subscription }` |
+| POST | `/subscriptions/reactivate` | `auth: 'required'` | — | 200 | `{ data: Subscription }` |
+| GET | `/subscriptions/stats` | `auth: 'required'`, `requireOrgManagement` | — | 200 | `{ data: Stats }` |
+| GET | `/subscriptions/subscribers` | `auth: 'required'`, `requireOrgManagement` | — | 200 | `{ items, pagination }` |
 
-### 4. Connect (`/connect`)
-| Method | Path | Policy | Input | Status | Response |
+### Connect (`/connect`)
+
+| Method | Path | Policy | Rate Limit | Status | Response |
 |---|---|---|---|---|---|
-| POST | `/connect/onboard` | `auth: 'required'` | body: `connectOnboardSchema` | 201 | `{ data: { url } }` |
-| GET | `/connect/status` | `auth: 'required'` | query: organizationId | 200 | `{ data: ConnectStatus }` |
-| POST | `/connect/dashboard` | `auth: 'required'` | body: `connectDashboardSchema` | 200 | `{ data: { url } }` |
+| POST | `/connect/onboard` | `auth: 'required'`, `requireOrgManagement` | `strict` | 201 | `{ data: { url } }` |
+| GET | `/connect/status` | `auth: 'required'`, `requireOrgManagement` | — | 200 | `{ data: ConnectStatus }` |
+| POST | `/connect/sync` | `auth: 'required'`, `requireOrgManagement` | `strict` | 200 | `{ data: ConnectStatus }` |
+| POST | `/connect/dashboard` | `auth: 'required'`, `requireOrgManagement` | — | 200 | `{ data: { url } }` |
 
-## Webhook Endpoints (7)
+## Webhook Endpoints
 
-All webhooks use `verifyStripeSignature()` middleware (HMAC-SHA256), NOT `procedure()`.
+All webhooks bypass `procedure()`. Flow: `verifyStripeSignature()` (HMAC) → `createWebhookHandler()` → handler. Rate limit: `webhook` preset (1000/min).
 
-| Path | Secret Env Var | Handler | Events Handled |
+| Path | Env Var for Secret | Handler | Events |
 |---|---|---|---|
-| `/webhooks/stripe/booking` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `handleCheckoutCompleted` | `checkout.session.completed` (mode=payment) |
+| `/webhooks/stripe/booking` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `handleCheckoutCompleted` | `checkout.session.completed` (payment mode) |
 | `/webhooks/stripe/payment` | `STRIPE_WEBHOOK_SECRET_PAYMENT` | `handlePaymentWebhook` | `payment_intent.*`, `charge.*` (incl. refunds) |
-| `/webhooks/stripe/subscription` | `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` | `handleSubscriptionWebhook` | `checkout.session.completed` (mode=subscription), `customer.subscription.*`, `invoice.*` |
+| `/webhooks/stripe/subscription` | `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` | `handleSubscriptionWebhook` | `checkout.session.completed` (subscription mode), `customer.subscription.*`, `invoice.*` |
 | `/webhooks/stripe/connect` | `STRIPE_WEBHOOK_SECRET_CONNECT` | `handleConnectWebhook` | `account.*`, `capability.*`, `person.*` |
 | `/webhooks/stripe/customer` | `STRIPE_WEBHOOK_SECRET_CUSTOMER` | (logging stub) | `customer.*` |
 | `/webhooks/stripe/dispute` | `STRIPE_WEBHOOK_SECRET_DISPUTE` | (logging stub) | `charge.dispute.*`, `radar.early_fraud_warning.*` |
-| `/webhooks/stripe/dev` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `routeDevWebhook` | All events (dev-only, 404 in production) |
+| `/webhooks/stripe/dev` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `routeDevWebhook` | All events — routes to correct handler. Returns 404 in production. |
 
-## Handler Architecture
+Dev usage: `stripe listen --forward-to http://localhost:42072/webhooks/stripe/dev` — set all `STRIPE_WEBHOOK_SECRET_*` to the same CLI-generated value.
+
+## Webhook Handler Architecture
 
 ```
-Request → verifyStripeSignature (HMAC) → createWebhookHandler (wraps handler)
+verifyStripeSignature (HMAC) → createWebhookHandler (wraps handler, logs, returns { received: true })
   → handler(event, stripe, context)
     → createPerRequestDbClient (WebSocket for transactions)
-    → Service method (business logic)
-    → Fire-and-forget: cache invalidation + email dispatch (via waitUntil)
+    → service method (business logic)
+    → waitUntil: cache invalidation + email dispatch (fire-and-forget)
     → cleanup() DB connection
 ```
 
-Handlers are **thin orchestrators**: extract Stripe event data, call service methods, fire-and-forget cache invalidation and email dispatch. Business logic lives in `@codex/purchase`, `@codex/subscription`.
+Handlers are thin orchestrators. Business logic lives in `@codex/purchase` and `@codex/subscription`.
 
 ## Services Used
 
-| Service | Package | Used For |
+| Service | Package | Purpose |
 |---|---|---|
-| `PurchaseService` | `@codex/purchase` | Checkout sessions, purchase completion, refunds, verification, portal |
-| `SubscriptionService` | `@codex/subscription` | Subscription CRUD, webhook handlers, tier changes, stats |
-| `TierService` | `@codex/subscription` | Tier CRUD, Stripe Product/Price sync, reordering |
-
-## Config Variables
-
-| Variable | Required | Purpose |
-|---|---|---|
-| `STRIPE_SECRET_KEY` | Yes | Stripe API key |
-| `DATABASE_URL` | Yes | Neon PostgreSQL connection |
-| `STRIPE_WEBHOOK_SECRET_BOOKING` | Yes | Booking webhook signing secret |
-| `STRIPE_WEBHOOK_SECRET_PAYMENT` | Yes | Payment webhook signing secret |
-| `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` | Yes | Subscription webhook signing secret |
-| `STRIPE_WEBHOOK_SECRET_CONNECT` | Yes | Connect webhook signing secret |
-| `STRIPE_WEBHOOK_SECRET_CUSTOMER` | No | Customer webhook signing secret (stub) |
-| `STRIPE_WEBHOOK_SECRET_DISPUTE` | No | Dispute webhook signing secret (stub) |
-| `RATE_LIMIT_KV` | Yes | KV namespace for rate limiting |
-| `CACHE_KV` | No | KV namespace for cache invalidation |
-| `ENVIRONMENT` | No | `production` / `development` / `test` |
-| `WEB_APP_URL` | No | Web app URL for email links |
-
-## Strict Rules
-
-- **MUST** keep handlers thin — business logic belongs in service packages, not route handlers
-- **MUST** verify Stripe webhook signatures with `verifyStripeSignature()` — NEVER process unverified webhooks
-- **MUST** return `{ received: true }` to Stripe webhooks — prevents Stripe retries
-- **MUST** use idempotent operations — webhooks may fire multiple times (unique constraints protect against duplicates)
-- **MUST** use `createPerRequestDbClient` + `waitUntil(cleanup())` in webhook handlers for DB lifecycle
-- **MUST** fire-and-forget cache invalidation and email dispatch via `waitUntil` — never block webhook response
-- **NEVER** expose Stripe secret keys in responses or logs
-- **NEVER** skip content validation before checkout creation
-- **NEVER** put DB queries or email composition in webhook handlers — delegate to services
+| `PurchaseService` (`purchase`) | `@codex/purchase` | Checkout sessions, purchase completion, refunds, portal, verification |
+| `SubscriptionService` (`subscription`) | `@codex/subscription` | Subscription CRUD, webhook handlers, tier changes, stats |
+| `TierService` (`tier`) | `@codex/subscription` | Tier CRUD, Stripe Product/Price sync |
+| `ConnectService` (`connect`) | `@codex/subscription` | Connect account creation, status, dashboard links |
 
 ## Key Flows
 
 ### Purchase Flow
 ```
-POST /checkout/create → validate content (published, priced) → Stripe Checkout Session
-  → User pays → Stripe webhook /booking → completePurchase (idempotent)
-    → Insert purchase + contentAccess (transaction) → Bump library cache
+POST /checkout/create → validate content → Stripe Checkout Session
+  → User pays → /webhooks/stripe/booking → completePurchase (idempotent)
+    → INSERT purchase + contentAccess (transaction) → bump library cache
 ```
 
 ### Subscription Flow
 ```
-POST /subscriptions/checkout → validate tier + Connect account → Stripe Checkout Session
-  → User subscribes → Stripe webhook /subscription (checkout.session.completed mode=subscription)
-    → handleSubscriptionCreated → Insert subscription + membership (transaction) → Email + cache
-  → Renewal → invoice.payment_succeeded → Update period + revenue transfers
-  → Cancel → customer.subscription.updated (cancel_at_period_end) → status=cancelling
-  → Period end → customer.subscription.deleted → status=cancelled → Deactivate subscriber membership
+POST /subscriptions/checkout → validate tier + Connect account → Stripe Session
+  → /webhooks/stripe/subscription (checkout.session.completed, subscription mode)
+    → handleSubscriptionCreated → INSERT subscription + membership → email + cache
+  → Renewal: invoice.payment_succeeded → update period + revenue
+  → Cancel: customer.subscription.updated (cancel_at_period_end) → status=cancelling
+  → Period end: customer.subscription.deleted → deactivate membership
 ```
 
 ### Refund Flow
 ```
-Stripe Dashboard refund → Stripe webhook /payment (charge.refunded)
-  → handlePaymentWebhook → processRefund (idempotent)
-    → Update purchase status=refunded + soft-delete contentAccess (transaction)
+Stripe Dashboard refund → /webhooks/stripe/payment (charge.refunded)
+  → processRefund (idempotent) → purchase.status=refunded + soft-delete contentAccess
 ```
+
+## Config Variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `DATABASE_URL` | Yes | Neon PostgreSQL |
+| `STRIPE_SECRET_KEY` | Yes | Stripe API key |
+| `STRIPE_WEBHOOK_SECRET_BOOKING` | Yes | Booking webhook secret |
+| `STRIPE_WEBHOOK_SECRET_PAYMENT` | Yes | Payment webhook secret |
+| `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` | Yes | Subscription webhook secret |
+| `STRIPE_WEBHOOK_SECRET_CONNECT` | Yes | Connect webhook secret |
+| `STRIPE_WEBHOOK_SECRET_CUSTOMER` | No | Customer webhook secret (stub only) |
+| `STRIPE_WEBHOOK_SECRET_DISPUTE` | No | Dispute webhook secret (stub only) |
+| `RATE_LIMIT_KV` | Yes | Rate limiting |
+| `AUTH_SESSION_KV` | Yes | Session validation (for `procedure()` routes) |
+| `CACHE_KV` | No | Cache invalidation after purchase/subscription |
+| `ENVIRONMENT` | No | `production` enables production guards (dev webhook 404) |
+| `WEB_APP_URL` | No | App URL for email links |
+
+## Strict Rules
+
+- **MUST** verify Stripe webhooks with `verifyStripeSignature()` — NEVER process unverified webhooks
+- **MUST** return `{ received: true }` to all Stripe webhooks — prevents retries
+- **MUST** use idempotent operations — webhooks fire multiple times
+- **MUST** use `createPerRequestDbClient` + `waitUntil(cleanup())` in webhook handlers
+- **MUST** fire-and-forget cache invalidation and emails via `waitUntil` — never block webhook response
+- **NEVER** expose Stripe secret keys in responses or logs
+- **NEVER** put DB queries or email composition in webhook handlers — delegate to services
 
 ## Reference Files
 
-- `workers/ecom-api/src/index.ts` — Worker setup, route registration, webhook endpoints
-- `workers/ecom-api/src/routes/checkout.ts` — Checkout routes
-- `workers/ecom-api/src/routes/purchases.ts` — Purchase query routes
-- `workers/ecom-api/src/routes/subscriptions.ts` — Subscription management routes
+- `workers/ecom-api/src/index.ts` — worker setup, route + webhook registration
+- `workers/ecom-api/src/routes/checkout.ts` — create, portal-session, verify
+- `workers/ecom-api/src/routes/purchases.ts` — purchase list + get
+- `workers/ecom-api/src/routes/subscriptions.ts` — subscription management
 - `workers/ecom-api/src/routes/connect.ts` — Stripe Connect routes
-- `workers/ecom-api/src/handlers/checkout.ts` — Checkout webhook handler
-- `workers/ecom-api/src/handlers/payment-webhook.ts` — Payment/refund webhook handler
-- `workers/ecom-api/src/handlers/subscription-webhook.ts` — Subscription webhook handler
-- `workers/ecom-api/src/handlers/connect-webhook.ts` — Connect webhook handler
+- `workers/ecom-api/src/handlers/checkout.ts` — booking webhook handler
+- `workers/ecom-api/src/handlers/payment-webhook.ts` — payment/refund handler
+- `workers/ecom-api/src/handlers/subscription-webhook.ts` — subscription lifecycle handler
+- `workers/ecom-api/src/handlers/connect-webhook.ts` — Connect account handler
 - `workers/ecom-api/src/middleware/verify-signature.ts` — Stripe HMAC verification
-- `workers/ecom-api/src/utils/dev-webhook-router.ts` — Dev-only event routing
-- `workers/ecom-api/src/utils/webhook-handler.ts` — Webhook handler factory
+- `workers/ecom-api/src/utils/dev-webhook-router.ts` — dev event routing
+- `workers/ecom-api/src/utils/webhook-handler.ts` — webhook handler factory

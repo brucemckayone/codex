@@ -22,15 +22,18 @@ export const load: PageServerLoad = async ({
   // which is already in URL params. This overlaps with the layout's org fetch.
   const statsPromise = getPublicStats(routeParams.slug);
 
+  // Landing page shows a horizontal carousel of creators directly under the hero.
+  // Limit 12 gives the carousel enough content to scroll through on orgs with a deep team,
+  // while still being a single cheap query (typical orgs have <10 creators).
   const creatorsPromise = getPublicCreators({
     slug: routeParams.slug,
-    limit: 3,
+    limit: 12,
   });
 
   // Now wait for layout (needed for orgId → content fetch)
   const { org } = await parent();
 
-  // Cache headers — layout still streams subscriptionContext (user-specific)
+  // Cache headers — layout streams tiers (public), subscription is client-side
   setHeaders(
     locals.user ? CACHE_HEADERS.PRIVATE : CACHE_HEADERS.DYNAMIC_PUBLIC
   );

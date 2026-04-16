@@ -8,6 +8,7 @@
  * - GET /api/content/public/discover - Browse all published content platform-wide (discover page)
  */
 
+import { CacheType, VersionedCache } from '@codex/cache';
 import type { ContentWithRelations } from '@codex/content';
 import {
   discoverContentQuerySchema,
@@ -65,11 +66,33 @@ app.get(
     policy: { auth: 'none', rateLimit: 'api' },
     input: { query: publicContentQuerySchema },
     handler: async (ctx) => {
-      const result = await ctx.services.content.listPublic(ctx.input.query);
-      return new PaginatedResult(
-        resolveR2Urls(result.items, ctx.env.R2_PUBLIC_URL_BASE),
-        result.pagination
-      );
+      const { orgId, sort, limit, page, contentType, search } = ctx.input.query;
+
+      const fetchContent = async () => {
+        const result = await ctx.services.content.listPublic(ctx.input.query);
+        return new PaginatedResult(
+          resolveR2Urls(result.items, ctx.env.R2_PUBLIC_URL_BASE),
+          result.pagination
+        );
+      };
+
+      // KV cache-aside for org-scoped browse queries only.
+      // Skip for search (too many variants), slug (exact lookups for content detail —
+      // the cache key doesn't include slug, so different slugs would return the same cached item),
+      // and creatorId (per-creator filter is lower-volume; skipping avoids cache-key explosion).
+      const { slug, creatorId } = ctx.input.query;
+      if (orgId && !search && !slug && !creatorId && ctx.env.CACHE_KV) {
+        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        const cacheSubKey = `${orgId}:${sort ?? 'newest'}:${limit ?? 20}:${page ?? 1}:${contentType ?? 'all'}`;
+        return cache.get(
+          cacheSubKey,
+          CacheType.COLLECTION_ORG_CONTENT(orgId),
+          fetchContent,
+          { ttl: 300 }
+        );
+      }
+
+      return fetchContent();
     },
   })
 );

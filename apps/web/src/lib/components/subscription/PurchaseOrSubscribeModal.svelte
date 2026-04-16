@@ -65,7 +65,7 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={handleOpenChange}>
-  <Dialog.Content>
+  <Dialog.Content size="sm">
     <Dialog.Header>
       <Dialog.Title>
         {#if reason === 'higher_tier_required'}
@@ -81,7 +81,7 @@
       {/if}
     </Dialog.Header>
 
-    <div class="modal-body">
+    <Dialog.Body>
       <!-- Billing toggle -->
       <div class="billing-toggle" role="radiogroup" aria-label="Billing period">
         <button
@@ -137,18 +137,11 @@
           </div>
         {/each}
       </div>
-    </div>
+    </Dialog.Body>
   </Dialog.Content>
 </Dialog.Root>
 
 <style>
-  .modal-body {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-    padding: 0 var(--space-4) var(--space-4);
-  }
-
   /* Billing toggle */
   .billing-toggle {
     display: inline-flex;

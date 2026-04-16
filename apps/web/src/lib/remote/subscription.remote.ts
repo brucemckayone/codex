@@ -207,6 +207,7 @@ const createTierCommandSchema = z.object({
   description: z.string().max(500).optional(),
   priceMonthly: z.number().int().min(100),
   priceAnnual: z.number().int().min(100),
+  isRecommended: z.boolean().optional(),
 });
 
 /**
@@ -228,6 +229,7 @@ const updateTierCommandSchema = z.object({
   description: z.string().max(500).optional(),
   priceMonthly: z.number().int().min(100).optional(),
   priceAnnual: z.number().int().min(100).optional(),
+  isRecommended: z.boolean().optional(),
 });
 
 /**

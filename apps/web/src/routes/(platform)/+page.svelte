@@ -160,10 +160,6 @@
     color: var(--color-interactive);
   }
 
-  .feature-icon svg {
-    width: 100%;
-    height: 100%;
-  }
 
   .feature h3 {
     font-family: var(--font-heading);

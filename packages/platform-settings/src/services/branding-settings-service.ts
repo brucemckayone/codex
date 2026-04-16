@@ -13,11 +13,13 @@ import {
   ForbiddenError,
   InternalServiceError,
   NotFoundError,
+  ValidationError,
 } from '@codex/service-errors';
 import type { BrandingSettingsResponse } from '@codex/shared-types';
 import {
   ALLOWED_LOGO_MIME_TYPES,
   DEFAULT_BRANDING,
+  pricingFaqSchema,
   type UpdateBrandingInput,
 } from '@codex/validation';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -83,6 +85,8 @@ export class BrandingSettingsService extends BaseService {
         textScale: schema.brandingSettings.textScale,
         headingWeight: schema.brandingSettings.headingWeight,
         bodyWeight: schema.brandingSettings.bodyWeight,
+        heroLayout: schema.brandingSettings.heroLayout,
+        pricingFaq: schema.brandingSettings.pricingFaq,
       })
       .from(schema.brandingSettings)
       .where(eq(schema.brandingSettings.organizationId, this.organizationId))
@@ -120,6 +124,8 @@ export class BrandingSettingsService extends BaseService {
     textScale: string | null;
     headingWeight: string | null;
     bodyWeight: string | null;
+    heroLayout: string | null;
+    pricingFaq: string | null;
   }): BrandingSettingsResponse {
     return {
       logoUrl: row.logoUrl,
@@ -141,6 +147,8 @@ export class BrandingSettingsService extends BaseService {
       textScale: row.textScale,
       headingWeight: row.headingWeight,
       bodyWeight: row.bodyWeight,
+      heroLayout: row.heroLayout ?? 'default',
+      pricingFaq: row.pricingFaq,
     };
   }
 
@@ -171,7 +179,22 @@ export class BrandingSettingsService extends BaseService {
       textScale: 'textScale',
       headingWeight: 'headingWeight',
       bodyWeight: 'bodyWeight',
+      heroLayout: 'heroLayout',
+      pricingFaq: 'pricingFaq',
     };
+
+    // Server-side JSON validation for pricingFaq (defense-in-depth)
+    if (input.pricingFaq !== undefined && input.pricingFaq !== null) {
+      try {
+        const parsed = JSON.parse(input.pricingFaq);
+        pricingFaqSchema.parse(parsed);
+      } catch {
+        throw new ValidationError(
+          'pricingFaq must be valid JSON matching the FAQ schema'
+        );
+      }
+    }
+
     for (const [dbField, inputField] of Object.entries(fieldMap)) {
       if (input[inputField] !== undefined) {
         const val = input[inputField];

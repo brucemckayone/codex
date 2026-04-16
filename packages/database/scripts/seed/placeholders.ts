@@ -56,6 +56,8 @@ const PORTRAIT_URLS: Record<string, string> = {
   priyapatel: 'https://randomuser.me/api/portraits/women/55.jpg',
   lucaswalker: 'https://randomuser.me/api/portraits/men/41.jpg',
   emmawilson: 'https://randomuser.me/api/portraits/women/17.jpg',
+  luzura:
+    'https://ofbloodandbones.com/wp-content/uploads/2025/11/829ee3b0-426f-4e74-95e6-08575250d17c-768x1024.jpg',
 };
 
 /**
@@ -82,6 +84,32 @@ export async function fetchPortraitImage(
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch portrait: ${url} (${response.status})`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  fs.mkdirSync(CACHE_DIR, { recursive: true });
+  fs.writeFileSync(cachePath, buffer);
+  return buffer;
+}
+
+/**
+ * Fetch an image from an arbitrary URL with local file caching.
+ * Used for external brand assets (logos, offering images).
+ * Cached in .cache/seed-images/ to avoid re-downloading.
+ */
+export async function fetchUrlImage(
+  url: string,
+  cacheKey: string
+): Promise<Buffer> {
+  const cachePath = path.join(CACHE_DIR, cacheKey);
+
+  if (fs.existsSync(cachePath)) {
+    return fs.readFileSync(cachePath);
+  }
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${url} (${response.status})`);
   }
   const buffer = Buffer.from(await response.arrayBuffer());
 
@@ -503,4 +531,99 @@ export const ARTICLE_BODY_JSON: Record<string, unknown> = {
       ],
     },
   ],
+};
+
+/**
+ * TipTap JSON document for offering-style content (Of Blood & Bones).
+ * Spiritual/descriptive tone instead of the tech tutorial format.
+ */
+export const OFFERING_BODY_JSON: Record<string, unknown> = {
+  type: 'doc',
+  content: [
+    {
+      type: 'heading',
+      attrs: { level: 1 },
+      content: [{ type: 'text', text: 'About This Offering' }],
+    },
+    {
+      type: 'paragraph',
+      content: [
+        {
+          type: 'text',
+          text: 'This is a sacred practice rooted in ancestral wisdom and somatic healing. Each session is tailored to your unique path, honouring the intelligence of your body and the whispers of your lineage.',
+        },
+      ],
+    },
+    {
+      type: 'heading',
+      attrs: { level: 2 },
+      content: [{ type: 'text', text: 'What to Expect' }],
+    },
+    {
+      type: 'paragraph',
+      content: [
+        {
+          type: 'text',
+          text: 'Sessions blend somatic practices, ceremonial elements, and intuitive guidance. You will be held in a container of safety and presence throughout.',
+        },
+      ],
+    },
+    {
+      type: 'blockquote',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              marks: [{ type: 'italic' }],
+              text: 'The body remembers what the mind forgets. Through these practices, we listen.',
+            },
+          ],
+        },
+      ],
+    },
+    {
+      type: 'heading',
+      attrs: { level: 2 },
+      content: [{ type: 'text', text: 'Booking & Availability' }],
+    },
+    {
+      type: 'paragraph',
+      content: [
+        {
+          type: 'text',
+          text: 'Sessions are available online and in-person at our private studio on the shorelines of Stonehaven, Scotland. Please get in touch to discuss your needs and book a consultation.',
+        },
+      ],
+    },
+  ],
+};
+
+/**
+ * Offering image URLs from ofbloodandbones.com, keyed by content slug.
+ * Used to seed R2 thumbnails for the Of Blood & Bones studio content.
+ */
+export const OFFERING_IMAGE_URLS: Record<string, string> = {
+  'skin-talismans':
+    'https://ofbloodandbones.com/wp-content/uploads/2024/09/ginkgotattoo-scaled.jpg',
+  'tooth-talismans':
+    'https://ofbloodandbones.com/wp-content/uploads/2024/09/02a360c5-4cfa-4dbb-9965-a9a9acd1738f-scaled.jpg',
+  'soul-path-mentorship':
+    'https://ofbloodandbones.com/wp-content/uploads/2024/07/9a7261fa-c5eb-4462-88bc-0403898abe46.jpg',
+  'limpia-energy-cleansing':
+    'https://ofbloodandbones.com/wp-content/uploads/2024/09/IMG_5554-2.jpg',
+  'ceremonial-cacao':
+    'https://ofbloodandbones.com/wp-content/uploads/2024/07/Sacbe-product-and-branding-shoot-0083-scaled.jpg',
+  'sacred-calendar':
+    'https://ofbloodandbones.com/wp-content/uploads/2024/07/IMG_6042.jpg',
+  'closing-the-bones':
+    'https://ofbloodandbones.com/wp-content/uploads/2024/07/Untitled-design-22.png',
+  held: 'https://ofbloodandbones.com/wp-content/uploads/2024/07/H-.-E-.-L-.-D-819x1024.png',
+  'neuro-somatic-intelligence':
+    'https://ofbloodandbones.com/wp-content/uploads/2024/07/undone.png',
+  'sound-therapy':
+    'https://ofbloodandbones.com/wp-content/uploads/2024/09/tibetan-singing-bowls-in-close-up-photography-5602465-scaled.jpg',
+  'eco-somatic-experiencing':
+    'https://ofbloodandbones.com/wp-content/uploads/2024/07/IMG_3078.jpg',
 };

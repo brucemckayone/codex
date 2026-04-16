@@ -1,7 +1,10 @@
 # Web App (SvelteKit)
 
 Frontend SvelteKit application for the Codex platform.
-**Stack**: Svelte 5, SvelteKit, TanStack DB, Vite, Cloudflare Pages.
+
+**Stack:** Svelte 5.55, SvelteKit 2.55, TanStack DB 0.5 + svelte-db 0.1, Melt UI 0.86, Paraglide i18n, Vite 6, Cloudflare Pages adapter.
+
+---
 
 ## Strict Rules
 
@@ -10,165 +13,146 @@ Frontend SvelteKit application for the Codex platform.
 - **MUST** use `$app/state` (`page`, `navigating`) — NEVER `$app/stores` (`$page`, `$navigating`)
 - **MUST** use `$state()` for reactive primitives, `$derived()` for computed, `$effect()` for side effects
 - **MUST** use `Snippet` type for content slots and `{@render children()}` to invoke them
-- **MUST** extend HTML element types in Props (`HTMLButtonAttributes`, `HTMLInputAttributes`) when wrapping native elements
+- **MUST** extend HTML element types in Props (`HTMLButtonAttributes`, etc.) when wrapping native elements
 
 ### Data & Caching
 - **MUST** guard all collections with `browser` check — they are `undefined` on server
-- **MUST** use `useLiveQuery()` with `ssrData` option for SSR safety — NEVER call `useLiveQuery` without it
+- **MUST** use `useLiveQuery()` (from `$lib/collections`) with `ssrData` option for SSR safety
 - **MUST** hydrate collections in `onMount()` — NEVER before first client render
-- **MUST** call `depends('cache:versions')` in layout server loads that participate in staleness
-- **MUST** call `initProgressSync()` ONLY in `(platform)/+layout.svelte` — NEVER in nested layouts
-- **NEVER** destructure `useLiveQuery` result directly — it loses reactivity. Use `query.data`, or `$derived(query)`
-- **NEVER** call collection methods outside `onMount` or `$effect`
+- **MUST** call `depends('cache:versions')` in platform layout server load; `depends('cache:org-versions')` in org layout server load
+- **MUST** call `initProgressSync()` ONLY once per layout tree — called in both `(platform)/+layout.svelte` and `_org/[slug]/+layout.svelte`
+- **NEVER** destructure `useLiveQuery` result directly — loses reactivity. Use `query.data` or `const { data } = $derived(query)`
 
 ### Routing
-- **MUST** keep paths root-relative on org subdomains — slug is in hostname, not URL path
-- **MUST** use `buildContentUrl(page.url, content)` for all content page links — handles cross-org subdomain routing and slug/ID fallback (`$lib/utils/subdomain.ts`)
-- **MUST** use `buildOrgUrl()` for cross-org navigation to non-content pages — different org = different origin
+- **MUST** use root-relative paths on org subdomains — slug is in hostname, not URL path
+- **MUST** use `buildContentUrl(page.url, content)` for content links — handles cross-org subdomain routing
+- **MUST** use `buildOrgUrl()` for cross-org navigation — different org = different origin
 - **NEVER** include route group names (`(platform)`, `(space)`, `(auth)`) in hrefs or `goto()`
 
 ### Styling
-- **MUST** use design tokens for ALL CSS values — NEVER hardcode px, hex colors, or raw values
-- **MUST** use spacing scale (`--space-1` through `--space-24`) — NEVER hardcode padding/margin
+- **MUST** use design tokens for ALL CSS — NEVER hardcode px, hex, or raw values
+- **MUST** use spacing scale (`--space-1` through `--space-24`)
 
 ### API & Auth
-- **MUST** use `createServerApi(platform, cookies)` for all backend calls — NEVER call `fetch()` directly
-- **MUST** check `locals.user` in `+page.server.ts` for auth gates — NEVER trust client-side auth
+- **MUST** use `createServerApi(platform, cookies)` for all backend calls in server-side code
+- **MUST** check `locals.user` in `+page.server.ts` for auth gates
 - **MUST** use `getCookieConfig()` when deleting cookies — cross-subdomain cookies need matching `domain`
 - **MUST** prefix sensitive form fields with `_` (e.g., `_password`) to prevent repopulation on error
 
-### Currency
-- Default currency is **GBP (£)**, not USD ($)
-
 ---
 
-## Subdomain Routing
+## Routing Structure
 
-The platform uses subdomain-based routing via `src/hooks.ts` `reroute()`:
+Subdomain routing via `src/hooks.server.ts`:
 
-| Subdomain | Internal Route | Example |
+| Host | Internal Route | Notes |
 |---|---|---|
-| `lvh.me:3000` (none) | `(platform)/*` | Homepage, discover, library, account |
-| `creators.lvh.me:3000` | `_creators/*` | Creator profiles, content catalogs |
-| `{slug}.lvh.me:3000` | `_org/[slug]/*` | Org landing, explore, studio, settings |
+| `lvh.me:3000` | `(platform)/*` | Homepage, discover, library, account |
+| `{slug}.lvh.me:3000` | `_org/[slug]/*` | Org space, studio, settings |
+| `creators.lvh.me:3000` | `_creators/[username]/*` | Creator profiles |
 
-> **Dev note:** Local dev uses `lvh.me` (a wildcard DNS resolving to 127.0.0.1) instead of `localhost` because browsers reject `Domain=.localhost` cookies per RFC 6761, breaking cross-subdomain auth.
+> **Dev note:** Use `lvh.me` (resolves to 127.0.0.1) not `localhost` — browsers reject `Domain=.localhost` cookies per RFC 6761.
+
+### Route tree
+
+```
+src/routes/
+├── +layout.svelte             Root — SkipLink, NavigationProgress, Toaster, view transitions,
+│                              cross-subdomain auth sync (visibilitychange → invalidate('app:auth'))
+├── +layout.server.ts          depends('app:auth'), returns { user }
+│
+├── (platform)/                Platform routes (no subdomain)
+│   ├── +layout.svelte         SidebarRail, PageContainer, Footer, version staleness $effect,
+│   │                          visibilitychange → invalidate('cache:versions'), initProgressSync
+│   ├── +layout.server.ts      depends('cache:versions'), reads library version from KV
+│   ├── +page                  Platform homepage
+│   ├── discover/              Browse content across all orgs
+│   ├── library/               User's purchased/free content
+│   ├── account/               Profile, notifications, purchases
+│   ├── pricing/
+│   ├── about/
+│   └── become-creator/
+│
+├── _org/[slug]/               Org subdomain routes
+│   ├── +layout.svelte         Org branding injection, BrandEditorPanel,
+│   │                          ShaderHero fullpage canvas, SidebarRail/MobileNav,
+│   │                          version staleness $effect, initProgressSync
+│   ├── +layout.server.ts      depends('cache:org-versions'), public org info, streams
+│   │                          versions/subscriptionContext/isFollowing
+│   ├── (space)/               Public org pages
+│   │   ├── +page              Org landing
+│   │   ├── explore/           Content catalogue
+│   │   ├── content/[slug]/    Content detail + player
+│   │   ├── creators/          Creator list
+│   │   ├── library/           User's org library
+│   │   ├── pricing/
+│   │   └── checkout/success/
+│   └── studio/                Creator studio (ssr=false — client SPA)
+│       ├── +layout.ts         export const ssr = false
+│       ├── +layout.server.ts  Auth guard, role guard (creator/admin/owner), membership
+│       ├── +page              Dashboard
+│       ├── content/           Content list + new + edit/[id]
+│       ├── media/             Media library
+│       ├── analytics/
+│       ├── customers/
+│       ├── team/
+│       ├── billing/
+│       ├── monetisation/
+│       └── settings/          General, Branding, Email Templates
+│
+├── (auth)/                    Auth pages — centered card layout
+│   ├── login/, register/, forgot-password/, reset-password/, verify-email/
+│
+├── _creators/[username]/      Creator subdomain
+│
+├── api/                       SvelteKit API routes
+│   ├── health/
+│   ├── progress-beacon/       sendBeacon endpoint for tab-close progress flush
+│   └── search/
+│
+└── logout/, unsubscribe/[token]/
+```
 
 ### CRITICAL: No Slug in URL Paths
 
-On org subdomains, the org slug is in the **hostname**, NOT the URL path. All `href`, `goto()`, `baseUrl` in `_org/` routes must use root-relative paths:
+On org subdomains, the slug is in the **hostname**. All paths must be root-relative:
 
 ```svelte
-<!-- CORRECT: paths are root-relative on org subdomains -->
-<!-- e.g. on bruce-studio.lvh.me:3000 -->
+<!-- CORRECT — on bruce-studio.lvh.me:3000 -->
 <a href="/">Home</a>
 <a href="/explore">Explore</a>
-<a href="/studio">Studio</a>
 <a href="/studio/content">Content</a>
-<a href="/content/{item.slug}">View Content</a>
 goto('/studio/analytics?dateFrom=...')
 
-<!-- WRONG: slug is already in the hostname, don't repeat it -->
-<a href="/{orgSlug}">Home</a>
-<a href="/{orgSlug}/explore">Explore</a>
+<!-- WRONG — slug is already in hostname -->
 <a href="/{orgSlug}/studio">Studio</a>
 ```
 
-The `reroute()` hook maps these root-relative paths to the correct internal routes:
-- `bruce-studio.lvh.me:3000/explore` → `_org/bruce-studio/explore` → matches `(space)/explore/+page.svelte`
-- `bruce-studio.lvh.me:3000/studio` → `_org/bruce-studio/studio` → matches `studio/+page.svelte`
+Rerouting: `bruce-studio.lvh.me:3000/explore` → `_org/bruce-studio/(space)/explore/+page.svelte`
 
-**Exception:** Cross-org navigation (e.g., StudioSwitcher) needs full subdomain URLs since it navigates to a different origin.
+**Exception:** StudioSwitcher and other cross-org navigation uses `buildOrgUrl()` since it targets a different origin.
 
-**Content page links:** Always use `buildContentUrl(page.url, content)` from `$lib/utils/subdomain.ts` — it handles cross-org subdomain routing automatically:
+**Content links:** Always `buildContentUrl(page.url, content)` from `$lib/utils/subdomain.ts`.
 
-```svelte
-import { page } from '$app/state';
-import { buildContentUrl } from '$lib/utils/subdomain';
+---
 
-<!-- Automatically handles same-org (root-relative) vs cross-org (full URL) -->
-<a href={buildContentUrl(page.url, item)}>View</a>
-<a href={buildContentUrl(page.url, item.content)}>View</a>
-<a href={buildContentUrl(page.url, { slug: contentSlug, id: content.id })}>View</a>
-```
+## State Management
 
-The function accepts `{ slug?: string | null; id: string; organizationSlug?: string | null }` — uses slug when available, falls back to ID. On the content's own org subdomain it returns root-relative `/content/{slug}`, otherwise builds a full cross-origin URL via `buildOrgUrl()`.
+### Collections
 
-**Route groups like `(space)` are filesystem-only** — never include them in rerouted paths or `href` values.
+Three collections in `src/lib/collections/`:
 
-### Public Endpoints for Cross-Subdomain Data
+| Collection | Storage | Key | Use case |
+|---|---|---|---|
+| `libraryCollection` | `localStorage` (`codex-library`) | `content.id` | User's purchased/free content — survives refresh |
+| `progressCollection` | `localStorage` (`codex-playback-progress`) | `contentId` | Playback position — survives tab close |
+| `contentCollection` | QueryClient (session) | `['content']` | Browsable catalogue — server-authoritative |
 
-For data needed by the org layout (which runs on the org subdomain), use public (no-auth) API endpoints. While `lvh.me` enables cross-subdomain cookie sharing in dev, public endpoints remain useful for unauthenticated visitors:
-
-- `GET /api/organizations/public/:slug/info` — org identity + branding (used by org layout)
-- `GET /api/organizations/public/:slug/creators` — public creator list
-- `GET /api/content/public?orgId=...` — published content (no auth)
-
-The org layout (`_org/[slug]/+layout.server.ts`) calls `api.org.getPublicInfo(slug)` directly via `createServerApi` — not through a remote function — to avoid `query()` error propagation issues.
-
-## Key Patterns
+All three are `undefined` on the server. Always guard with `browser` or use `useLiveQuery` with `ssrData`.
 
 ### SSR-Safe Live Queries
 
-**Problem:** TanStack DB's `useLiveQuery` requires collections to exist, but our collections are `undefined` on the server (by design, to prevent cross-request data leaks in SSR/Cloudflare Workers).
-
-**Solution:** Use the SSR-safe `useLiveQuery` wrapper from `$lib/collections`.
-
 ```svelte
-<!-- +page.svelte -->
-<script lang="ts">
-  import { onMount } from 'svelte';
-  import {
-    hydrateIfNeeded,
-    libraryCollection,
-    useLiveQuery,  // SSR-safe wrapper
-  } from '$lib/collections';
-
-  let { data } = $props();  // From +page.server.ts
-
-  // Hydrate collection with server data on mount
-  onMount(() => {
-    if (data.library?.items) {
-      hydrateIfNeeded('library', data.library.items);
-    }
-  });
-
-  // Live query - works on both server and client
-  const libraryQuery = useLiveQuery(
-    (q) => q.from({ item: libraryCollection })
-            .orderBy(({ item }) => item.progress?.updatedAt ?? '', 'desc'),
-    undefined,  // deps (optional)
-    { ssrData: data.library?.items }  // SSR fallback data
-  );
-</script>
-```
-
-**Flow:**
-1. **Server (SSR)**: `useLiveQuery` returns static `ssrData` - no reactivity, no errors
-2. **Client (onMount)**: `hydrateIfNeeded()` populates the local collection (localStorage for library, QueryClient for content)
-3. **Client (after mount)**: `useLiveQuery` uses cached data - no refetch, stays reactive
-
-**Files:**
-- `$lib/collections/use-live-query-ssr.ts` - SSR-safe wrapper
-- `$lib/collections/query-client.ts` - QueryClient (undefined on server)
-- `$lib/collections/library.ts` - Example collection (undefined on server)
-
-**If you need the unsafe version** (runs on server, will error): `useLiveQueryUnsafe`
-
-### Page Data Loading Pattern
-
-```typescript
-// +page.server.ts - Server-side data fetch
-import type { PageServerLoad } from './$types';
-
-export const load: PageServerLoad = async ({ locals }) => {
-  const library = await getUserLibrary(locals.session);
-  return { library };
-};
-```
-
-```svelte
-<!-- +page.svelte - SSR-safe reactive data -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import { hydrateIfNeeded, libraryCollection, useLiveQuery } from '$lib/collections';
@@ -176,64 +160,136 @@ export const load: PageServerLoad = async ({ locals }) => {
   let { data } = $props();
 
   onMount(() => {
-    if (data.library?.items) {
-      hydrateIfNeeded('library', data.library.items);
-    }
+    if (data.library?.items) hydrateIfNeeded('library', data.library.items);
   });
 
   const libraryQuery = useLiveQuery(
-    (q) => q.from({ item: libraryCollection }),
+    (q) => q.from({ item: libraryCollection }).orderBy(({ item }) => item.progress?.updatedAt, 'desc'),
     undefined,
     { ssrData: data.library?.items }
   );
+  // Access: libraryQuery.data, libraryQuery.isLoading
+  // Or: const { data: items } = $derived(libraryQuery);
 </script>
 ```
 
-### API Client (`createServerApi`)
+**Flow:** SSR returns `ssrData` statically → `onMount` calls `hydrateIfNeeded()` → live query switches to collection reactivity.
 
-All backend calls go through `$lib/server/api.ts`:
+**`hydrateIfNeeded` is a no-op on return visits** for localStorage collections — localStorage already has data, so `isCollectionHydrated` returns true. Server data only enters via `invalidateCollection`.
 
-```typescript
-import { createServerApi } from '$lib/server/api';
+### Adding a New localStorage Collection
 
-// In +page.server.ts or remote functions
-const api = createServerApi(platform, cookies);
-const content = await api.content.get(id);
-const library = await api.access.listLibrary(params);
+1. Create collection with `localStorageCollectionOptions({ storageKey: 'codex-{name}', getKey })` and a `browser` guard (see `library.ts`)
+2. Add `loadFromServer()` reconciliation — upsert fresh items, delete removed keys
+3. In `hydration.ts`: add a branch for the new collection key in `hydrateCollection`, `isCollectionHydrated`, and `invalidateCollection`
+4. To wire cross-device staleness: read its version key in the appropriate layout server load and add a `staleKeys.some(...)` branch in the `$effect`
+
+### Progress Sync
+
+`initProgressSync(userId)` is called in both `(platform)/+layout.svelte` and `_org/[slug]/+layout.svelte` (when `data.user?.id` exists). It manages:
+- 2-minute periodic flush to server
+- Sync on tab visibility change
+- `beforeunload` sendBeacon to `/api/progress-beacon`
+
+`forceSync()` is called in `beforeNavigate` to flush progress before server loads run.
+
+---
+
+## Version-Based Cache Invalidation
+
+### Platform layout pattern
+
+```
+Server KV ──versions──> +layout.server.ts ──data.versions──> $effect
+                         depends('cache:versions')             |
+                                                    getStaleKeys() → invalidateCollection()
+                                                               |
+                                                    updateStoredVersions()
+                                                               |
+         visibilitychange → invalidate('cache:versions') ──> re-run load
 ```
 
-**Key behaviors:**
-- Resolves worker URLs via `getServiceUrl()` from `@codex/constants`
-- Forwards session cookie in both `CODEX_SESSION` and `better-auth.session_token` headers
-- **Envelope unwrapping**: `{ data: T }` → unwrapped to `T`, `{ items, pagination }` → returned as-is, 204 → `null`
-- 10-second fetch timeout prevents hangs on cold workers
-- **NEVER** encode cookies — JWT tokens use URL-safe base64, encoding corrupts them
+**Platform layout** tracks `user:{id}:library`. **Org layout** tracks `org:{id}:config` and `org:{id}:content`. Both layouts call `initProgressSync` independently since each is a separate route tree.
 
-### Remote Functions
+The org layout uses `invalidate('cache:org-versions')` (separate from platform's `'cache:versions'`) and has a 60-second cooldown to prevent hammering.
 
-Three types of remote functions in `$lib/remote/*.remote.ts`:
+### Version Keys
 
-**`query()` — cached reads:**
+| Key | Who bumps it | Client action on stale |
+|---|---|---|
+| `collection:user:{id}:library` | ecom-api (purchase) | `invalidateCollection('library')` |
+| `org:{id}:config` | identity-api (branding save) | `invalidateCollection('content')` |
+| `collection:org:{id}:content` | content-api (publish/unpublish) | `invalidateCollection('content')` |
+
+### HTTP Cache Headers
+
+From `$lib/server/cache.ts`:
+
 ```typescript
+import { CACHE_HEADERS } from '$lib/server/cache';
+setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);   // Public catalogue pages: 5 min
+setHeaders(CACHE_HEADERS.STATIC_PUBLIC);    // Static pages: 1 hour
+setHeaders(CACHE_HEADERS.PRIVATE);          // Auth pages: no-cache (default for studio)
+```
+
+---
+
+## API Client
+
+### `createServerApi(platform, cookies)` — `$lib/server/api.ts`
+
+All backend calls go through this in `+page.server.ts` and remote functions.
+
+```typescript
+const api = createServerApi(platform, cookies);
+const content = await api.content.list(params);
+const org = await api.org.getPublicInfo(slug);
+```
+
+**Key behaviours:**
+- Resolves worker URLs via `getServiceUrl()` from `@codex/constants`
+- Forwards session cookie as both `CODEX_SESSION` and `better-auth.session_token`
+- **NEVER** encode cookie values — JWT tokens use URL-safe base64; encoding corrupts them
+- Unwraps procedure envelopes: `{ data: T }` → `T`, `{ items, pagination }` → as-is, 204 → `null`
+- 10-second fetch timeout with `AbortController`
+- Throws `ApiError` (from `$lib/server/errors.ts`) on non-2xx
+
+### API namespaces
+
+| Namespace | Worker | Key methods |
+|---|---|---|
+| `api.auth` | auth | `getSession()` |
+| `api.account` | identity | `getProfile()`, `updateProfile()`, `uploadAvatar()` |
+| `api.content` | content | `list()`, `get()`, `create()`, `update()`, `publish()`, `getPublicContent()`, `getDiscoverContent()` |
+| `api.access` | content/access | `getStreamingUrl()`, `getUserLibrary()`, `saveProgress()` |
+| `api.org` | org | `getPublicInfo()`, `getPublicCreators()`, `getMyMembership()`, `getMembers()`, `follow()` |
+| `api.checkout` | ecom | `create()`, `verify()`, `createPortalSession()` |
+| `api.subscription` | ecom | `getCurrent()`, `checkout()`, `cancel()`, `getSubscribers()` |
+| `api.tiers` | org | `list()`, `create()`, `update()`, `reorder()` |
+| `api.connect` | ecom | `onboard()`, `getStatus()`, `getDashboardLink()` |
+| `api.analytics` | admin | `getDashboardStats()`, `getRevenue()`, `getTopContent()` |
+| `api.admin` | admin | `getCustomers()`, `getActivity()`, `getCustomerDetail()`, `grantContentAccess()` |
+| `api.media` | content/media | `list()`, `create()`, `upload()`, `uploadComplete()`, `transcodingStatus()` |
+
+### Remote Functions — `$lib/remote/*.remote.ts`
+
+Three types, all import from `$app/server` and use `getRequestEvent()`:
+
+```typescript
+// query() — cached reads, can be awaited in templates or used in collections
 export const getContent = query(z.string().uuid(), async (id) => {
   const { platform, cookies } = getRequestEvent();
-  const api = createServerApi(platform, cookies);
-  return api.content.get(id);
+  return createServerApi(platform, cookies).content.get(id);
 });
-// Usage: {#await getContent(id)} ... {:then content} ... {/await}
-```
 
-**`command()` — mutations without forms:**
-```typescript
+// command() — mutations without a form
 export const deleteContent = command(z.string().uuid(), async (id) => {
   const { platform, cookies } = getRequestEvent();
   return createServerApi(platform, cookies).content.delete(id);
 });
-```
 
-**`form()` — progressive enhancement:**
-```typescript
-export const createContentForm = form(createContentFormSchema, async (input) => {
+// form() — progressive enhancement (works without JS)
+export const createContentForm = form(schema, async (input) => {
   const { platform, cookies } = getRequestEvent();
   try {
     const result = await createServerApi(platform, cookies).content.create(input);
@@ -242,498 +298,174 @@ export const createContentForm = form(createContentFormSchema, async (input) => 
     return { success: false as const, error: error.message };
   }
 });
-// Usage: <form {...createContentForm}> ... </form>
 ```
 
-**Security note:** Prefix sensitive fields with `_` (e.g., `_password`) — they are NOT repopulated on validation failure.
+Available remote modules: `account`, `admin`, `auth`, `avatar-delete`, `avatar-upload`, `billing`, `branding`, `checkout`, `content`, `library`, `media`, `org`, `settings`, `subscription`.
 
-### Collection Mutations
+---
 
-Optimistic updates with automatic rollback on error:
+## Org Branding
 
-```svelte
-<script>
-  import { updateProgress } from '$lib/collections';
-
-  function handleTimeUpdate(e) {
-    updateProgress(
-      contentId,
-      e.target.currentTime,
-      e.target.duration
-    );
-  }
-</script>
-```
-
-## Data Loading Strategy
-
-When implementing a new page or feature, pick the right data loading approach based on the data's characteristics. **Do not mix strategies unnecessarily** — use the simplest one that fits.
-
-### Decision Tree
+Org branding is applied in `_org/[slug]/+layout.svelte` as inline CSS custom properties on `.org-layout`:
 
 ```
-Is this data user-specific and only needed for one page?
-  YES → Server Load only (+page.server.ts)
-        Examples: account profile, notification preferences, purchase history
-
-Does the data need client-side reactivity (filtering, sorting, live updates)?
-  YES → Is it user-owned and should survive refresh?
-          YES → localStorage Collection (localStorageCollectionOptions)
-                Examples: library, playback progress
-          NO  → QueryClient Collection (queryCollectionOptions)
-                Examples: content catalogue
-
-Does the component need to write data back?
-  Is it a form (progressive enhancement needed)?
-    YES → Remote Function form() — works without JS, enhances with it
-          Examples: profile update, notification prefs, Stripe portal
-  Is it a fire-and-forget mutation?
-    YES → Remote Function command()
-          Examples: save playback progress
-  Is it a cached read callable from components?
-    YES → Remote Function query()
-          Examples: listContent, getUserLibrary, getProfile
+--brand-color          primary hex
+--brand-secondary      secondary hex
+--brand-accent         accent hex
+--brand-bg             background hex
+--brand-density        numeric (default 1)
+--brand-radius         rem value (e.g. 0.5rem)
+--brand-font-body      Google Font name + fallback
+--brand-font-heading   Google Font name + fallback
+--brand-shadow-scale   fine-tune shadow multiplier
+--brand-text-scale     fine-tune text size multiplier
+...etc
 ```
 
-### Strategy Matrix
+The `[data-org-brand]` attribute gates the CSS selectors in `org-brand.css` that activate these overrides. A full OKLCH-derived colour palette is computed from `--brand-color` via relative colour syntax in the CSS file.
 
-| Strategy | When to use | SSR | Offline | Reactive |
-|---|---|---|---|---|
-| **Server Load** (`+page.server.ts`) | Page-scoped data, auth guards, one-off fetches | Yes | No | No (static) |
-| **Remote `query()`** | Reusable cached reads, callable from components or collections | Yes | No | Via collection |
-| **Remote `query.batch()`** | List pages where each item needs extra data (N+1 prevention) | Yes | No | No |
-| **Remote `form()`** | User input → server mutation with progressive enhancement | Yes | No | `.pending`/`.result` |
-| **Remote `command()`** | Programmatic mutations (no form UI) | No | No | No |
-| **localStorage Collection** | User-owned data, must survive refresh, offline value | Client | Yes | Yes |
-| **QueryClient Collection** | Server-authoritative browsing data, session-scoped | Client | No | Yes |
+Hero visibility toggles (stats, pills, description, logo, title) are stored as `tokenOverrides` JSON in branding settings and applied as `data-hero-hide-*` attributes. All hero visibility CSS keys live under `tokenOverrides`.
 
-### Typical Page Patterns
+**Token overrides** (shader preset, custom CSS vars, hero toggles) are stored as JSON string in `branding_settings.tokenOverrides`, parsed and injected via `injectTokenOverrides(el, overrides)` from `$lib/brand-editor/css-injection.ts`.
 
-**Simple settings page** (account profile, notifications):
-```
-+page.server.ts  →  loads data via createServerApi()
-+page.svelte     →  $props().data, form() for mutations
-```
-No collections needed. Server load provides data, remote `form()` handles saves.
+### Brand Editor
 
-**Browsable catalogue** (org content listing, discover page):
-```
-+page.server.ts     →  SSR fetch for first paint + SEO
-+page.svelte        →  useLiveQuery(contentCollection, { ssrData })
-                        onMount → hydrateIfNeeded('content', data.items)
-content.remote.ts   →  query() feeds the collection's queryFn
-```
+A floating panel activated by `?brandEditor` URL param. State is managed in `$lib/brand-editor/brand-editor-store.svelte.ts` using module-level Svelte 5 runes (`$state`, `$derived`). Live CSS injection runs via `$effect` — no React-style state lifting needed.
 
-**User library with offline progress**:
-```
-+layout.server.ts   →  version check (KV), depends('cache:versions')
-+layout.svelte      →  $effect(versions) staleness → invalidateCollection
-+page.svelte        →  useLiveQuery(libraryCollection, { ssrData })
-progress-sync.ts    →  30s interval + visibility + sendBeacon
-```
+`brandEditor.open(orgId, savedState)` / `brandEditor.close()` / `brandEditor.getSavePayload()` / `brandEditor.markSaved()`
 
-### Rules
+The panel is rendered OUTSIDE `.org-layout` so it uses system tokens unaffected by org branding.
 
-1. **Server loads for auth gates and page data** — every `+page.server.ts` should check `locals.user` and redirect if needed
-2. **Remote functions for all backend calls** — never call `fetch()` directly from components; always go through `$lib/remote/*.remote.ts` which uses `createServerApi()`
-3. **Collections only when reactivity is needed** — don't create a collection just to display a list; use server load data directly
-4. **One collection per domain concept** — don't create per-page collections; extend existing ones with filters via `useLiveQuery`
-5. **localStorage collections need a reconciliation function** — `loadFromServer()` that upserts fresh items and removes stale ones (see `library.ts`)
-6. **Version manifest for cross-device sync** — if data can change on another device, wire a version key through `+layout.server.ts` → `$effect` → `invalidateCollection`
+---
 
-## Caching & Version Invalidation
-
-Four cache layers exist in the platform: **HTTP headers** (CDN/browser), **server KV** (`@codex/cache`), **client collections** (TanStack DB), and **client manifest** (localStorage versions). Frontend devs primarily work with HTTP headers and client-side invalidation. For server KV internals and TTL guidelines, see `docs/caching-strategy.md` and `packages/cache/CLAUDE.md`.
-
-### HTTP Cache Headers
-
-Use presets from `$lib/server/cache.ts` in `+page.server.ts` load functions:
-
-| Preset | Value | Use when |
-|---|---|---|
-| `CACHE_HEADERS.STATIC_PUBLIC` | `public, max-age=3600, s-maxage=3600` | Public static pages (landing, marketing, about) |
-| `CACHE_HEADERS.DYNAMIC_PUBLIC` | `public, max-age=300, s-maxage=300` | Public catalogue/browse pages (discover, org explore) |
-| `CACHE_HEADERS.PRIVATE` | `private, no-cache` | Any authenticated/user-specific page |
-
-```typescript
-import { CACHE_HEADERS } from '$lib/server/cache';
-
-export const load: PageServerLoad = async ({ setHeaders }) => {
-  setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
-  // ...
-};
-```
-
-**Rule:** Default to `PRIVATE` for any page behind auth. Only use `STATIC_PUBLIC` or `DYNAMIC_PUBLIC` for unauthenticated public pages.
-
-### Version Invalidation Lifecycle
-
-1. Server `+layout.server.ts` reads versions from KV via `cache.getVersion()`, returns `{ versions }`. Must call `depends('cache:versions')`.
-2. Client `$effect` calls `getStaleKeys(data.versions)` — diffs server versions against localStorage manifest.
-3. Stale keys trigger `invalidateCollection()` for the affected collection.
-4. `updateStoredVersions()` persists the new versions to localStorage.
-5. Tab return (`visibilitychange`) fires `invalidate('cache:versions')` — re-runs server load — cycle repeats.
-6. Backend workers bump versions via `cache.invalidate(id)` after DB writes.
-
-```
-Server KV ──versions──> +layout.server.ts ──data.versions──> $effect
-                                                               |
-                                          getStaleKeys() <─────┘
-                                               |
-                                     invalidateCollection()
-                                               |
-                                     updateStoredVersions()
-                                               |
-              visibilitychange ──invalidate('cache:versions')──> re-run server load
-```
-
-### Version Keys Reference
-
-| Version key | Client manifest? | Bumped by | Client action on stale |
-|---|---|---|---|
-| `user:{userId}` | Yes | identity-api (profile/prefs update) | `invalidateCollection('library')` |
-| `user:{userId}:library` | Yes | ecom-api (purchase completion) | `invalidateCollection('library')` |
-| `content:published` | No (server KV only) | content-api (publish/unpublish) | SSR re-renders automatically |
-| `org:{orgId}:content` | No (server KV only) | content-api (org content change) | SSR re-renders automatically |
-
-**Rule:** Content catalogue versions are server-authoritative — don't add them to the client manifest.
-
-### Server-Authoritative vs Cacheable
-
-**Never cache client-side** (always fetch fresh from server):
-- Auth/session state
-- Access control decisions
-- Purchase verification
-- Prices and billing data
-- Content legal status (takedowns, restrictions)
-
-**Safe to cache client-side** (staleness for minutes is acceptable):
-- User library (owned content list)
-- Playback progress
-- Content catalogue for browsing (title, description, thumbnails)
-
-### Checklist: Wiring Version Invalidation
-
-1. Choose or create a version key in `CacheType` (`packages/cache/src/cache-keys.ts`)
-2. Bump the version in the backend worker after the DB write: `await cache.invalidate(id)`
-3. Read the version in `+layout.server.ts` with `cache.getVersion()`, ensure `depends('cache:versions')` is called
-4. Add a staleness branch in the layout `$effect`: `if (staleKeys.some(k => k.includes(':your-key'))) void invalidateCollection('your-collection')`
-5. Implement `invalidateCollection()` handler in `hydration.ts` if needed for the new collection
-6. Test: mutate data → return to tab → verify collection refreshes
-
-### TTL Awareness
-
-Server KV cache has TTLs (user: 5-15 min, org: 10-30 min, content: 5-10 min, access: 1-5 min). The `visibilitychange` pattern bypasses stale cache by re-reading version keys directly. See `packages/cache/CLAUDE.md` for full TTL guidelines.
-
-## Architecture
-
-### State Management Layers
-
-| Layer | Purpose | SSR Safe |
-|-------|---------|----------|
-| `+page.server.ts` | Server data fetch | Yes |
-| `useLiveQuery()` | Client reactivity | Yes (with ssrData) |
-| `hydrateIfNeeded()` | Populate cache | Client only |
-| Collection methods | Optimistic mutations | Client only |
-
-### Collection Types
-
-Two backing strategies for TanStack DB collections:
-
-| Collection | Storage | Use when |
-|---|---|---|
-| `libraryCollection` | `localStorageCollectionOptions` | User-owned, must survive refresh, offline value |
-| `progressCollection` | `localStorageCollectionOptions` | User-owned, must survive tab close |
-| `contentCollection` | `queryCollectionOptions` | Server-authoritative, SSR is the primary source |
-
-**Decision rule:** If staleness for a few minutes is acceptable and data belongs to the user → localStorage. If the server is always authoritative → QueryClient.
-
-**Adding a new localStorage-backed collection:**
-1. Create collection with `localStorageCollectionOptions({ storageKey: 'codex-{name}', getKey })` and a `browser` guard (see `library.ts`)
-2. Add `loadFromServer()` reconciliation function — upsert fresh items, delete removed keys
-3. In `hydration.ts`, add a branch for the new collection key in `hydrateCollection`, `isCollectionHydrated`, and `invalidateCollection`
-4. To wire cross-device staleness: read its version key in `+layout.server.ts` and add a `staleKeys.some(k => k.includes('...'))` branch in the `$effect`
-
-### Platform Layout Pattern
-
-`(platform)/+layout.svelte` owns three cross-cutting concerns. **Do not duplicate these in child layouts.**
-
-```typescript
-// 1. Reactive staleness — re-runs whenever data.versions changes (after invalidate re-runs server load)
-$effect(() => {
-  const staleKeys = getStaleKeys(data.versions ?? {});
-  if (staleKeys.some((k) => k.includes(':library'))) void invalidateCollection('library');
-  updateStoredVersions(data.versions ?? {});
-});
-
-onMount(() => {
-  // 2. Tab return → re-run server load → fresh versions → $effect fires again
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') void invalidate('cache:versions');
-  });
-
-  // 3. Progress sync — 30s flush + tab visibility + beforeunload beacon
-  if (data.user?.id) initProgressSync(data.user.id);
-  return () => cleanupProgressSync();
-});
-```
-
-`+layout.server.ts` **must** have `depends('cache:versions')` for the `invalidate` call to trigger a re-run.
-
-**Extending the staleness check for a new collection:**
-1. Bump its version key in the relevant worker on mutation
-2. Read that version in `+layout.server.ts`: `versions[CacheType.X(id)] = await cache.getVersion(...)`
-3. Add detection branch to the `$effect`: `if (staleKeys.some(k => k.includes(':your-key'))) void invalidateCollection('your-collection')`
-
-### Important Files
-
-| Path | Purpose |
-|------|---------|
-| `$lib/collections/index.ts` | Barrel export for all collections |
-| `$lib/collections/query-client.ts` | QueryClient (undefined on server) |
-| `$lib/collections/use-live-query-ssr.ts` | SSR-safe useLiveQuery wrapper |
-| `$lib/collections/hydration.ts` | SSR hydration utilities |
-| `$lib/collections/library.ts` | localStorage-backed library collection; undefined on server |
-| `$lib/client/version-manifest.ts` | Client version manifest — `getStaleKeys`, `updateStoredVersions` |
-| `$lib/collections/progress-sync.ts` | Progress sync manager — 30s flush, beforeunload beacon |
-| `$lib/collections/content.ts` | Content collection example |
-| `$lib/remote/*.remote.ts` | Remote function wrappers |
-| `$lib/server/api.ts` | Authenticated fetch wrapper |
-| `$lib/server/cache.ts` | HTTP cache header presets (`CACHE_HEADERS`) |
-
-## Development
-
-- **Dev server**: `pnpm dev` (runs on port 3000)
-- **Typecheck**: `pnpm typecheck`
-- **E2E tests**: `pnpm test:e2e`
-- **Unit tests**: `pnpm test`
-
-## Styling Rules
-
-**Never hardcode CSS values.** Always use design tokens from `$lib/styles/tokens/`:
-
-```css
-/* CORRECT — uses tokens */
-border: var(--border-width) var(--border-style) var(--color-error-200);
-background-color: var(--color-error-50);
-padding: var(--space-3);
-border-radius: var(--radius-md);
-
-/* WRONG — hardcoded values */
-border: 1px solid #fecaca;
-background-color: #fef2f2;
-padding: 12px;
-border-radius: 8px;
-```
-
-Available border tokens: `--border-width` (1px), `--border-width-thick` (2px), `--border-style` (solid), `--border-default` (shorthand with `--color-border`).
-
-Error/success alert pattern:
-```css
-.auth-error {
-  padding: var(--space-3);
-  background-color: var(--color-error-50);
-  border: var(--border-width) var(--border-style) var(--color-error-200);
-  border-radius: var(--radius-md);
-  color: var(--color-error-700);
-  font-size: var(--text-sm);
-}
-```
-
-## Svelte 5 Standards
-
-**Always use `$app/state` (runes), not `$app/stores` (legacy):**
-
-```svelte
-<!-- CORRECT — Svelte 5 runes -->
-<script>
-  import { page } from '$app/state';
-  import { goto, invalidate } from '$app/navigation';
-
-  // Access directly — no $ prefix
-  const url = page.url;
-  const params = page.params;
-</script>
-
-<!-- WRONG — Svelte 4 stores -->
-<script>
-  import { page } from '$app/stores';
-  // $page.url — requires $ prefix, legacy pattern
-</script>
-```
-
-**Always verify with MCPs:** Use the Svelte MCP (`mcp__svelte__get-documentation`) and Context7 MCP to check correct Svelte 5 / SvelteKit / Melt UI / TanStack DB usage. Don't guess — look it up.
-
-## Key Gotchas
-
-1. **Collections are undefined on server** - Always use `useLiveQuery` with `ssrData` option
-2. **Don't destructure `useLiveQuery` results directly** - Svelte 5 reactivity requires using `$derived`:
-   ```svelte
-   <!-- Correct -->
-   const query = useLiveQuery(...);
-   // Access: query.data, query.isLoading
-
-   <!-- Also correct -->
-   const query = useLiveQuery(...);
-   const { data, isLoading } = $derived(query);
-
-   <!-- Wrong - loses reactivity -->
-   const { data, isLoading } = useLiveQuery(...);
-   ```
-
-3. **QueryClient is per-browser-instance** - Not shared across requests (SSR safety)
-4. **`hydrateIfNeeded` is a no-op on return visits for localStorage collections** — localStorage survives refresh, so `isCollectionHydrated` returns true before SSR data is inserted. Server data only enters the collection via `invalidateCollection`. This is intentional.
-5. **`initProgressSync` lives only in `(platform)/+layout.svelte`** — do not call it again in nested layouts or pages.
-
-## Layout Hierarchy & Responsibilities
-
-The layout chain determines what each page inherits. **Never duplicate parent responsibilities in child layouts.**
+## Layout Hierarchy
 
 ```
 +layout.svelte (root)
-├── SkipLink, NavigationProgress, Toaster, view transitions
-├── Passes data.user to all children
+└── (platform)/+layout.svelte      ★ SidebarRail, PageContainer, Footer
+│   └── depends('cache:versions')   version staleness + initProgressSync
 │
-├── (platform)/+layout.svelte ★ CRITICAL ORCHESTRATOR
-│   ├── PlatformHeader (sticky, UserMenu, MobileNav)
-│   ├── PageContainer + Footer
-│   ├── Version staleness $effect (getStaleKeys → invalidateCollection)
-│   ├── visibilitychange → invalidate('cache:versions')
-│   ├── initProgressSync(userId) — ONLY called here
-│   └── Server load: depends('cache:versions'), reads KV library version
-│
-├── _org/[slug]/+layout.svelte
-│   ├── Resolves org from subdomain slug (two-tier: public then auth endpoint)
-│   ├── Applies org branding as CSS custom properties
-│   ├── OrgHeader + org footer
-│   ├── id="main-content" on <main> (skip link target)
-│   └── Server load: org version keys, depends('cache:versions')
-│       │
-│       └── studio/+layout.svelte
-│           ├── Auth guard (redirect to /login)
-│           ├── Role guard (member → redirect to /?error=access_denied)
-│           ├── StudioSidebar (role-based links) + StudioSwitcher
-│           └── Server load: getMyMembership, getMyOrganizations
-│               │
-│               └── settings/+layout.svelte
-│                   └── SETTINGS_NAV tabs (General, Branding)
-│
-├── (auth)/+layout.svelte
-│   └── Centered card layout for login/register/forgot-pw/reset-pw/verify-email
-│
-└── _creators/+layout.svelte
-    └── Creator subdomain layout (needs work — currently minimal)
+└── _org/[slug]/+layout.svelte      ★ Org branding, ShaderHero, BrandEditorPanel
+    └── depends('cache:org-versions') version staleness + initProgressSync
+    │
+    └── studio/+layout.svelte        ssr=false, auth+role guard
+        └── depends('cache:studio')
+
+└── (auth)/+layout.svelte            Centered card layout
+└── _creators/+layout.svelte         Creator subdomain
+```
+
+**Never duplicate parent responsibilities** in child layouts:
+- `initProgressSync` is called in BOTH platform and org layouts (they are separate route trees with independent lifecycles)
+- `depends('cache:versions')` lives in platform layout; `depends('cache:org-versions')` in org layout
+- Studio layout calls `depends('cache:studio')` to prevent re-running on every sub-page navigation
+
+---
+
+## Data Loading Strategy
+
+| Strategy | When to use | SSR | Reactive |
+|---|---|---|---|
+| `+page.server.ts` load | Page-scoped data, auth guards | Yes | No |
+| Remote `query()` | Reusable cached reads callable from components | Yes | Via collection |
+| Remote `form()` | User input with progressive enhancement | Yes | `.pending`/`.result` |
+| Remote `command()` | Programmatic mutations | No | No |
+| localStorage collection | User-owned, must survive refresh | Client | Yes |
+| QueryClient collection | Server-authoritative browsing | Client | Yes |
+
+**Shell + Stream pattern** — await critical data, stream secondary:
+
+```typescript
+// +page.server.ts
+export const load: PageServerLoad = async ({ parent }) => {
+  const { org } = await parent();
+  const content = await getPublicContent({ orgId: org.id, limit: 6 });  // Await: critical for SEO
+  return {
+    newReleases: content?.items ?? [],
+    creators: getCreators({ slug: org.slug })                            // Stream: skeleton → data
+      .then(r => ({ items: r?.items ?? [], total: r?.pagination?.total ?? 0 }))
+      .catch(() => ({ items: [], total: 0 })),                           // MUST .catch() on every promise
+  };
+};
+```
+
+```svelte
+{#await data.creators}
+  <CreatorsSkeleton />
+{:then creators}
+  <CreatorsSection items={creators.items} />
+{/await}
 ```
 
 **Rules:**
-- `initProgressSync` lives ONLY in `(platform)/+layout.svelte`
-- Version staleness check: platform layout does library, org layout does org-specific keys
-- `depends('cache:versions')` MUST be in server loads that participate in staleness
-- Each layout's `<main>` needs `id="main-content"` for the skip link
+- `.catch()` on every returned promise — unhandled rejections crash the server
+- Await data needed for SEO (`<svelte:head>`) and page structure
+- Streaming only works in `+page.server.ts`, NOT universal `+page.ts`
 
-## Cookie Management
+---
 
-**CRITICAL:** Cross-subdomain cookies require `domain` when deleting. Always use `getCookieConfig()` for both setting AND deleting cookies:
+## Component Library
 
-```typescript
-// CORRECT — matches the domain used when setting the cookie
-import { COOKIES, getCookieConfig } from '@codex/constants';
-const host = request.headers.get('host') ?? undefined;
-const cookieConfig = getCookieConfig(platform?.env, host);
-cookies.delete(COOKIES.SESSION_NAME, {
-  path: cookieConfig.path,
-  domain: cookieConfig.domain,
-});
+**Location:** `src/lib/components/`
 
-// WRONG — won't delete cross-subdomain cookies (domain mismatch)
-cookies.delete(COOKIES.SESSION_NAME, { path: '/' });
+| Directory | Purpose |
+|---|---|
+| `ui/` | Shared primitives — Button, Card, Badge, Dialog, Input, Select, Toast, Tabs, etc. |
+| `layout/` | SidebarRail, Header, MobileNav (MobileBottomNav, MobileBottomSheet), StudioSidebar |
+| `brand-editor/` | Floating brand editor panel + level components |
+| `content/` | ContentCard, content viewers |
+| `VideoPlayer/` | HLS video player with cinema mode |
+| `AudioPlayer/` | Audio player + ImmersiveShaderPlayer |
+| `editor/` | Rich text editor (Tiptap) |
+| `search/` | CommandPaletteSearch |
+| `seo/` | SEO meta helpers |
+| `studio/` | Studio-specific components |
+| `ui/ShaderHero/` | WebGL shader background (GLSL presets, audio-reactive) |
+
+Components use Melt UI headless primitives. Always check `$lib/components/ui/index.ts` barrel for available exports before creating a new primitive.
+
+---
+
+## Design Tokens
+
+**Location:** `src/lib/styles/tokens/`
+
+| File | Token prefix | Examples |
+|---|---|---|
+| `colors.css` | `--color-*` | `--color-primary-500`, `--color-text`, `--color-surface-secondary` |
+| `spacing.css` | `--space-*` | `--space-1` (4px) … `--space-24` |
+| `typography.css` | `--font-*`, `--text-*` | `--font-sans`, `--text-sm`, `--font-medium` |
+| `borders.css` | `--border-*`, `--radius-*` | `--border-width`, `--border-default`, `--radius-md` |
+| `shadows.css` | `--shadow-*` | `--shadow-sm`, `--shadow-md` |
+| `motion.css` | `--transition-*` | `--transition-colors`, `--transition-shadow` |
+| `z-index.css` | `--z-*` | `--z-sticky`, `--z-modal` |
+| `layout.css` | `--container-*`, breakpoint media | `--container-max`, `@media (--below-md)` |
+| `materials.css` | `--blur-*` | `--blur-2xl` |
+
+**Never hardcode CSS values.** Example:
+```css
+/* CORRECT */
+border: var(--border-width) var(--border-style) var(--color-error-200);
+padding: var(--space-3);
+border-radius: var(--radius-md);
+
+/* WRONG */
+border: 1px solid #fecaca;
+padding: 12px;
 ```
 
-The session cookie is set with `domain: .lvh.me` (dev) or `.revelations.studio` (prod). Deleting without the domain creates a new cookie on the bare hostname instead of removing the original.
+---
 
-## Component Patterns
+## Auth on the Frontend
 
-### Props Pattern (Svelte 5)
+`hooks.server.ts` runs three hooks in sequence:
+1. `sessionHook` — validates `codex-session` cookie against auth worker, sets `locals.user`, `locals.session`, `locals.userId`
+2. `securityHook` — applies security headers (`X-Frame-Options`, `X-Content-Type-Options`, etc.)
+3. `cdnRewriteHook` — dev-only: rewrites `localhost:4100` CDN URLs to `nip.io` for LAN mobile access
 
-```svelte
-<script lang="ts">
-  import type { Snippet } from 'svelte';
-  import type { HTMLButtonAttributes } from 'svelte/elements';
+Session validation fails gracefully — auth worker unavailable = treat as unauthenticated.
 
-  interface Props extends HTMLButtonAttributes {
-    variant?: 'primary' | 'secondary' | 'ghost' | 'destructive';
-    size?: 'sm' | 'md' | 'lg';
-    loading?: boolean;
-    children: Snippet;
-  }
-
-  const {
-    variant = 'primary',
-    size = 'md',
-    loading = false,
-    children,
-    class: className,
-    ...restProps
-  }: Props = $props();
-</script>
-
-<button class="button {className ?? ''}" data-variant={variant} data-size={size} {...restProps}>
-  {@render children()}
-</button>
-```
-
-**Key rules:**
-- Always define `Props` interface extending the HTML element type
-- Use `$props()` for destructuring — required for reactivity
-- Use `class: className` to accept class prop
-- Spread `...restProps` to pass through HTML attributes
-- Use `$bindable()` for two-way binding (e.g., input value)
-- Use `Snippet<[T]>` for typed content slots
-
-### Reactive State
-
-```svelte
-<script>
-  let count = $state(0);                    // Reactive primitive
-  const doubled = $derived(count * 2);      // Computed value
-  $effect(() => { console.log(count); });   // Side effect
-</script>
-```
-
-## Error Handling
-
-### ErrorBoundary Component
-
-```svelte
-<ErrorBoundary fallback={snippet}>
-  <ChildComponent />
-</ErrorBoundary>
-```
-
-Uses `<svelte:boundary onerror={handler}>` internally. Logs errors with context.
-
-### +error.svelte Pages
-
-Each route group has its own `+error.svelte`:
-- `(platform)/account/+error.svelte` — account-specific errors
-- `_org/[slug]/+error.svelte` — org-level errors
-- `_org/[slug]/studio/+error.svelte` — studio-specific errors
-- `+error.svelte` (root) — catch-all
-
-## Auth on Frontend
-
-### Session Validation (every request)
-
-`hooks.server.ts` validates the session cookie on every request:
-```typescript
-// Extracts codex-session cookie
-// Calls auth worker GET /api/auth/session
-// Sets event.locals.user and event.locals.session
-// Fails gracefully — treats auth worker unavailable as unauthenticated
-```
-
-### Protected Routes
-
+**Protecting a route:**
 ```typescript
 // +page.server.ts
 export const load: PageServerLoad = async ({ locals }) => {
@@ -742,47 +474,67 @@ export const load: PageServerLoad = async ({ locals }) => {
 };
 ```
 
-### Role Guards (Studio)
-
+**Cookie deletion** — always use `getCookieConfig()`:
 ```typescript
-// studio/+layout.server.ts
-export const load: LayoutServerLoad = async ({ locals, params }) => {
-  if (!locals.user) throw redirect(303, '/login');
-  const membership = await api.org.getMyMembership(params.slug);
-  if (!membership) throw redirect(303, '/?error=access_denied');
-  return { membership };
-};
+import { getCookieConfig } from '@codex/constants';
+const cookieConfig = getCookieConfig(platform?.env, request.headers.get('host') ?? undefined);
+cookies.delete(COOKIES.SESSION_NAME, { path: cookieConfig.path, domain: cookieConfig.domain });
 ```
 
-## Design Token Categories
+**Cross-subdomain auth sync:** Root layout detects `codex-session` cookie appearance/disappearance on tab return (login/logout on another subdomain) and calls `invalidate('app:auth')`.
 
-NEVER hardcode CSS values. Use tokens from `$lib/styles/tokens/`:
+---
 
-| Category | Examples | Token Pattern |
-|---|---|---|
-| **Colors** | Primary, error, success, text, surface | `--color-primary-500`, `--color-error-50`, `--color-text` |
-| **Spacing** | Padding, margin, gap | `--space-1` (4px) through `--space-24` |
-| **Typography** | Font family, size, weight | `--font-sans`, `--text-sm`, `--font-medium` |
-| **Borders** | Width, style, radius | `--border-width`, `--radius-md`, `--border-default` |
-| **Shadows** | Box shadows | `--shadow-sm`, `--shadow-md` |
-| **Transitions** | Animation timing | `--transition-colors`, `--transition-shadow` |
-| **Z-index** | Stacking | `--z-sticky`, `--z-modal` |
-| **Layout** | Container widths, breakpoints | `--layout-max-width`, `--breakpoint-md` |
+## Error Handling
 
-### Org Branding
+- Each route group has its own `+error.svelte`: `(platform)/account/`, `_org/[slug]/`, `_org/[slug]/studio/`, and root
+- `ErrorBoundary.svelte` uses `<svelte:boundary onerror>` for component-level boundaries
+- `$lib/server/errors.ts` exports `ApiError` — thrown by `createServerApi` on non-2xx responses
 
-Org branding is injected as CSS custom properties in `_org/[slug]/+layout.svelte`:
-```css
---org-brand-primary: var(--brand-primary-color);
---org-brand-density: var(--brand-density-scale, 1);
+---
+
+## i18n
+
+Paraglide (`@inlang/paraglide-sveltekit`). Messages imported as:
+```typescript
+import * as m from '$paraglide/messages';
+// Usage: m.footer_powered_by({ platform: m.footer_powered_by_platform() })
 ```
 
-Density scaling affects all spacing tokens via `--space-unit: calc(0.25rem * var(--brand-density-scale, 1))`.
+---
 
-## Related
+## Important Files
 
-- [TanStack DB Docs](https://tanstack.com/db/latest)
-- [SvelteKit Docs](https://kit.svelte.dev)
+| Path | Purpose |
+|---|---|
+| `src/hooks.server.ts` | Session validation, security headers, CDN rewrite |
+| `src/lib/server/api.ts` | `createServerApi` — all backend calls |
+| `src/lib/server/cache.ts` | `CACHE_HEADERS` presets + `invalidateCache()` |
+| `src/lib/server/errors.ts` | `ApiError` class |
+| `src/lib/collections/index.ts` | Barrel — collections, hydration, live query |
+| `src/lib/collections/hydration.ts` | `hydrateIfNeeded`, `invalidateCollection`, `isCollectionHydrated` |
+| `src/lib/collections/library.ts` | localStorage library collection |
+| `src/lib/collections/progress.ts` | localStorage progress collection |
+| `src/lib/collections/progress-sync.ts` | `initProgressSync`, `forceSync`, `cleanupProgressSync` |
+| `src/lib/collections/use-live-query-ssr.ts` | SSR-safe `useLiveQuery` wrapper |
+| `src/lib/client/version-manifest.ts` | `getStaleKeys`, `updateStoredVersions`, `clearClientState` |
+| `src/lib/brand-editor/` | Brand editor store, CSS injection, palette generator, presets |
+| `src/lib/utils/subdomain.ts` | `buildContentUrl`, `buildOrgUrl` |
+| `src/lib/remote/*.remote.ts` | Remote function wrappers |
+
+---
+
+## Development
+
+- **Dev server:** `pnpm dev` from monorepo root (port 3000, `lvh.me`)
+- **Typecheck:** `pnpm typecheck`
+- **Unit tests:** `pnpm test`
+- **E2E tests:** `pnpm test:e2e`
+- **Local dev uses `lvh.me`** — wildcard DNS to 127.0.0.1 for cross-subdomain cookie support
+- **Local CDN:** dev-cdn worker on port 4100 (Miniflare R2) — never use external placeholder images
+
+## Related Docs
+
 - Caching architecture: `docs/caching-strategy.md`
-- Server cache package: `packages/cache/CLAUDE.md`
-- Main platform docs: `/CLAUDE.md`
+- Cache package: `packages/cache/CLAUDE.md`
+- Root platform docs: `CLAUDE.md`

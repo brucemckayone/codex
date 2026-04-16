@@ -1,294 +1,107 @@
 # @codex/service-errors
 
-Standard error handling, BaseService foundation, and HTTP response mapping.
+Standard error classes, `BaseService` foundation, and HTTP response mapping for all Codex services.
 
 ## Error Classes
-All extend `ServiceError` with `statusCode`, `code`, `message`, and optional `context`.
 
-**Authentication & Authorization**
-- `UnauthorizedError` (401): Not authenticated or invalid session.
-- `ForbiddenError` (403): Lacks permission for action.
+All extend abstract `ServiceError` with `statusCode`, `code`, `message`, and optional `context`.
 
-**Client Errors**
-- `ValidationError` (400): Input validation failed.
-- `NotFoundError` (404): Resource doesn't exist.
-- `ConflictError` (409): Operation conflicts with existing state (e.g., duplicate slug).
-- `BusinessLogicError` (422): Violates business rules (e.g., purchase before content published).
+| Class | Status | Code | When to Use |
+|---|---|---|---|
+| `UnauthorizedError` | 401 | `UNAUTHORIZED` | Not authenticated or invalid session |
+| `ForbiddenError` | 403 | `FORBIDDEN` | Authenticated but lacks permission |
+| `ValidationError` | 400 | `VALIDATION_ERROR` | Input validation failed (prefer Zod schemas instead) |
+| `NotFoundError` | 404 | `NOT_FOUND` | Resource doesn't exist |
+| `ConflictError` | 409 | `CONFLICT` | Duplicate (e.g., slug already taken) |
+| `BusinessLogicError` | 422 | `BUSINESS_LOGIC_ERROR` | Violates business rules (e.g., buy unpublished content) |
+| `InternalServiceError` | 500 | `INTERNAL_ERROR` | Unexpected errors — never expose internal details |
 
-**Server Errors**
-- `InternalServiceError` (500): Unexpected errors (wrapped, never exposes internal details).
-
-## BaseService
-Abstract class providing foundation for all domain services.
-
-**Properties**
-- `protected db`: Database client (HTTP or WebSocket).
-- `protected environment`: Runtime environment string.
-- `protected obs`: Scoped `ObservabilityClient` (auto-created with service name).
-
-**Constructor**
 ```ts
-constructor(config: ServiceConfig) // config: { db, environment }
+// Correct usage — include correlation IDs, no PII
+throw new NotFoundError('Content not found', { contentId: id });
+throw new ForbiddenError('Access denied', { userId, contentId });
+throw new ConflictError('Slug already exists', { slug });
+throw new BusinessLogicError('Cannot purchase unpublished content', { contentId });
 ```
 
-**Methods**
-- `protected handleError(error, context?)`: Wraps unknown errors, re-throws ServiceError unchanged.
+## BaseService
 
-**Usage**
+Abstract class — all domain services MUST extend it.
+
 ```ts
+import { BaseService, type ServiceConfig } from '@codex/service-errors';
+
 export class ContentService extends BaseService {
   constructor(config: ServiceConfig) {
-    super(config); // Initializes db, environment, obs
+    super(config); // provides this.db, this.environment, this.obs
   }
 
   async getContent(id: string, creatorId: string) {
-    // ALWAYS scope queries — see @codex/database CLAUDE.md
-    const content = await this.db.query.content.findFirst({
+    const item = await this.db.query.content.findFirst({
       where: and(eq(schema.content.id, id), scopedNotDeleted(schema.content, creatorId))
     });
-    if (!content) {
-      throw new NotFoundError('Content not found', { contentId: id });
-    }
-    return content;
+    if (!item) throw new NotFoundError('Content not found', { contentId: id });
+    return item;
   }
+}
+
+// Instantiate via service registry (ctx.services.*), not directly in routes
+const service = new ContentService({ db: createDbClient(env), environment: env.ENVIRONMENT });
+```
+
+**`ServiceConfig`**: `{ db: Database | DatabaseWs, environment: string }`
+
+**Protected properties**: `this.db`, `this.environment`, `this.obs` (auto-created `ObservabilityClient` scoped to class name)
+
+**`protected handleError(error, context?: string): never`** — re-throws `ServiceError` unchanged, wraps unknown errors as `InternalServiceError`. Takes optional string context (not an object).
+
+```ts
+try {
+  await externalApi.call();
+} catch (err) {
+  this.handleError(err, 'external-api-call'); // wraps as InternalServiceError
 }
 ```
 
 ## Error Mapping
-### `mapErrorToResponse(error, options?)`
-Converts any error to standardized HTTP response.
 
-**Handles**
-- `ServiceError`: Uses `statusCode` and `code` from error.
-- `ZodError`: Maps to 422 with field-level validation details.
-- Unknown errors: Logs (if enabled), returns 500 with generic message.
+**`mapErrorToResponse(error, options?)`** — converts any error to a standardized HTTP response.
 
-**Options**
-- `includeStack?: boolean`: Include stack trace in dev (default: false).
-- `logError?: boolean`: Log unknown errors (default: true).
-- `obs?: ObservabilityClient`: Use for structured logging instead of console.
+- `ServiceError` → uses its `statusCode` and `code`
+- `ZodError` → 422 with field-level details
+- Unknown → 500 with generic message (never exposes internals)
 
-**Returns**
-```ts
-{
-  statusCode: ErrorStatusCode,
-  response: {
-    error: {
-      code: string,
-      message: string,
-      details?: unknown
-    }
-  }
-}
-```
+Options: `{ includeStack?: boolean, logError?: boolean, obs?: ObservabilityClient }`
 
-**Worker Usage**
-```ts
-app.post('/content', async (c) => {
-  try {
-    const result = await contentService.createContent(input);
-    return c.json(result);
-  } catch (err) {
-    const { statusCode, response } = mapErrorToResponse(err, { obs });
-    return c.json(response, statusCode);
-  }
-});
-```
+Returns: `{ statusCode: number, response: { error: { code, message, details? } } }`
+
+In practice, `procedure()` from `@codex/worker-utils` calls this automatically — you don't call it manually in route handlers unless you bypass `procedure()`.
 
 ## Helper Functions
-- `wrapError(error, context?)`: Wraps unknown errors as `InternalServiceError`. Detects DB unique constraint violations (returns `ConflictError`).
-- `isServiceError(error)`: Type guard for ServiceError instances.
-- `isKnownError(error)`: Type guard for ServiceError or ZodError.
 
-## Error Response Format
-All errors return consistent JSON structure:
+| Export | Purpose |
+|---|---|
+| `wrapError(error, context?)` | Wraps unknown errors as `InternalServiceError`; detects DB unique constraint → `ConflictError` |
+| `isServiceError(error)` | Type guard: `error instanceof ServiceError` |
+| `isKnownError(error)` | Type guard: `ServiceError` or `ZodError` |
+
+## Error Response Wire Format
+
 ```json
-{
-  "error": {
-    "code": "NOT_FOUND",
-    "message": "Content not found",
-    "details": { "contentId": "123" }
-  }
-}
-```
-
-## Patterns
-**Service Layer**: Throw typed errors with context.
-```ts
-if (!hasAccess) {
-  throw new ForbiddenError('Access denied', { userId, contentId });
-}
-```
-
-**Worker Layer**: Map to HTTP responses.
-```ts
-catch (err) {
-  const { statusCode, response } = mapErrorToResponse(err, { obs });
-  return c.json(response, statusCode);
-}
-```
-
-**Transactions**: Errors automatically rollback.
-```ts
-return this.db.transaction(async (tx) => {
-  const item = await tx.insert(...).returning();
-  if (conflict) throw new ConflictError('Duplicate');
-  return item;
-}); // Auto-rollback on error
-```
-
-## Error Handling Patterns
-
-### In Services (Business Logic)
-**Always throw typed errors** for expected failure cases:
-```ts
-// NOT FOUND: Resource doesn't exist
-if (!content) throw new NotFoundError('Content not found', { contentId });
-
-// FORBIDDEN: User lacks permission
-if (content.creatorId !== userId) {
-  throw new ForbiddenError('Access denied', { userId, contentId });
-}
-
-// CONFLICT: Duplicate resource
-if (existingSlug) throw new ConflictError('Slug already exists', { slug });
-
-// BUSINESS LOGIC: Rule violation
-if (content.status !== 'published') {
-  throw new BusinessLogicError('Cannot purchase unpublished content', { contentId });
-}
-
-// VALIDATION: Invalid input (prefer Zod schema validation instead)
-if (!input.title?.trim()) {
-  throw new ValidationError('Title required', { field: 'title' });
-}
-```
-
-**Never catch and swallow errors** in services. Let them propagate to worker layer.
-
-**Use `handleError()` for unknown errors** (database exceptions, third-party API failures):
-```ts
-try {
-  await externalAPI.call();
-} catch (err) {
-  this.handleError(err, 'external-api-call'); // Wraps as InternalServiceError
-}
+{ "error": { "code": "NOT_FOUND", "message": "Content not found", "details": { "contentId": "uuid" } } }
 ```
 
 ## Strict Rules
 
-- **MUST** throw typed `ServiceError` subclasses — NEVER throw raw strings or generic `Error`
-- **MUST** extend `BaseService` for all service classes — provides `db`, `environment`, `obs`
-- **MUST** include correlation IDs in error context (`contentId`, `userId`, `organizationId`)
-- **MUST** use `handleError()` for wrapping unknown/external errors
-- **MUST** let errors propagate to `procedure()` — it calls `mapErrorToResponse()` automatically
-- **NEVER** catch and swallow errors in services — let them propagate
+- **MUST** extend `BaseService` for all service classes
+- **MUST** throw typed `ServiceError` subclasses — NEVER `throw new Error(...)` or `throw 'string'`
+- **MUST** use `handleError()` when catching unknown/external errors (wraps safely)
+- **MUST** include correlation IDs in context (`contentId`, `userId`, `organizationId`) — NEVER PII
+- **NEVER** catch and swallow errors in services — let them propagate to `procedure()`
 - **NEVER** catch inside `db.transaction()` unless you want partial commit
-- **NEVER** include PII in error context (passwords, emails, tokens)
-- **NEVER** expose internal details in error messages (DB URLs, SQL, stack traces)
-
-## Integration
-
-- **Depends on**: `@codex/database`, `@codex/observability`
-- **Used by**: All service packages, `@codex/worker-utils` (`mapErrorToResponse`)
 
 ## Reference Files
 
-- `packages/service-errors/src/base-errors.ts` — `ServiceError` and all error subclasses
-- `packages/service-errors/src/error-mapper.ts` — `mapErrorToResponse`
-- `packages/service-errors/src/base-service.ts` — `BaseService` abstract class
-- `packages/service-errors/src/helpers.ts` — `wrapError`, `isServiceError`, `isKnownError`
-
-### In Workers (HTTP Layer)
-**Let `procedure()` handle errors automatically**. If using `procedure()` from `@codex/worker-utils`, errors are auto-mapped:
-```ts
-app.post('/content', procedure({
-  handler: async ({ c, input, obs }) => {
-    // Service throws NotFoundError, ForbiddenError, etc.
-    return await contentService.createContent(input);
-    // procedure() automatically calls mapErrorToResponse
-  }
-}));
-```
-
-**Manual error handling** (for non-procedure routes):
-```ts
-app.post('/content', async (c) => {
-  try {
-    const result = await contentService.createContent(input);
-    return c.json(result);
-  } catch (err) {
-    const { statusCode, response } = mapErrorToResponse(err, { obs });
-    return c.json(response, statusCode);
-  }
-});
-```
-
-### Error Context Rules
-**Always include correlation IDs**:
-```ts
-throw new NotFoundError('Content not found', {
-  contentId,        // Resource ID
-  userId,           // Actor ID
-  organizationId    // Scope ID
-});
-```
-
-**Never include sensitive data**:
-```ts
-// ❌ DON'T: Expose credentials or PII
-throw new UnauthorizedError('Invalid password', { password, email });
-
-// ✅ DO: Use generic context
-throw new UnauthorizedError('Invalid credentials', { userId });
-```
-
-**Keep messages user-facing**:
-```ts
-// ❌ DON'T: Internal implementation details
-throw new InternalServiceError('Failed to connect to db.neon.tech:5432');
-
-// ✅ DO: Generic message (details in logs via obs.trackError)
-throw new InternalServiceError('Database unavailable');
-```
-
-### Error Response Format (Client Receives)
-All errors follow this structure:
-```json
-{
-  "error": {
-    "code": "NOT_FOUND",
-    "message": "Content not found",
-    "details": {
-      "contentId": "uuid-123"
-    }
-  }
-}
-```
-
-**Status codes map directly to error classes**:
-- `400` → `ValidationError`
-- `401` → `UnauthorizedError`
-- `403` → `ForbiddenError`
-- `404` → `NotFoundError`
-- `409` → `ConflictError`
-- `422` → `BusinessLogicError` (or ZodError)
-- `500` → `InternalServiceError`
-
-### Transaction Error Handling
-Errors thrown inside `db.transaction()` automatically rollback:
-```ts
-return this.db.transaction(async (tx) => {
-  const content = await tx.insert(schema.content).values(data).returning();
-
-  // If this throws, INSERT is rolled back
-  if (conflictCheck) throw new ConflictError('Duplicate');
-
-  // Multi-step: both succeed or both rollback
-  await tx.insert(schema.media).values(mediaData);
-
-  return content;
-});
-```
-
-**Never catch errors inside transactions** unless you want to commit partial work.
+- `packages/service-errors/src/base-errors.ts` — `ServiceError` and all subclasses, `wrapError`, `isServiceError`
+- `packages/service-errors/src/base-service.ts` — `BaseService`, `ServiceConfig`
+- `packages/service-errors/src/error-mapper.ts` — `mapErrorToResponse`, `isKnownError`

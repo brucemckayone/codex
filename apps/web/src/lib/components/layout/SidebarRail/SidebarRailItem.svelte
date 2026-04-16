@@ -43,7 +43,7 @@
 		aria-label={label}
 		style:--item-index={index}
 	>
-		<svelte:component this={IconComponent} size={22} />
+		<IconComponent size={22} />
 		<span class="rail-item__label">{label}</span>
 	</a>
 {:else}
@@ -55,7 +55,7 @@
 		aria-label={label}
 		use:melt={$trigger}
 	>
-		<svelte:component this={IconComponent} size={22} />
+		<IconComponent size={22} />
 	</a>
 	{#if $open}
 		<div use:melt={$content} class="rail-item__tooltip">

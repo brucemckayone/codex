@@ -76,19 +76,19 @@ export function updateLocalProgress(
 ): void {
   if (!progressCollection) return;
   const now = new Date().toISOString();
-  const completed =
-    durationSeconds > 0 && positionSeconds / durationSeconds >= VIDEO_PROGRESS.COMPLETION_THRESHOLD;
-  const percentComplete =
-    durationSeconds > 0
-      ? Math.round((positionSeconds / durationSeconds) * 100)
-      : 0;
+  // Round to integers — the server schema requires whole numbers,
+  // and video.currentTime / video.duration return floats.
+  const pos = Math.round(positionSeconds);
+  const dur = Math.round(durationSeconds);
+  const completed = dur > 0 && pos / dur >= VIDEO_PROGRESS.COMPLETION_THRESHOLD;
+  const percentComplete = dur > 0 ? Math.round((pos / dur) * 100) : 0;
 
   const existing = progressCollection.state.get(contentId);
 
   if (existing) {
     progressCollection.update(contentId, (draft) => {
-      draft.positionSeconds = positionSeconds;
-      draft.durationSeconds = durationSeconds;
+      draft.positionSeconds = pos;
+      draft.durationSeconds = dur;
       draft.completed = completed;
       draft.percentComplete = percentComplete;
       draft.updatedAt = now;
@@ -97,8 +97,8 @@ export function updateLocalProgress(
   } else {
     progressCollection.insert({
       contentId,
-      positionSeconds,
-      durationSeconds,
+      positionSeconds: pos,
+      durationSeconds: dur,
       completed,
       percentComplete,
       updatedAt: now,

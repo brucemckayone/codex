@@ -114,6 +114,7 @@
 		bind:this={sheetEl}
 		class="sheet"
 		role="dialog"
+		tabindex="-1"
 		aria-label="More options"
 		transition:fly={{ y: 400, duration: 300, easing: cubicOut }}
 		ontouchstart={handleTouchStart}

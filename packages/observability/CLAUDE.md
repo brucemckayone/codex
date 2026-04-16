@@ -1,164 +1,128 @@
 # @codex/observability
 
-Structured logging & metrics for Cloudflare Workers. PII redaction, request tracking, error correlation.
+Structured logging for Cloudflare Workers. PII redaction, request tracking, performance timing.
 
-## API
+## `ObservabilityClient`
 
-### `ObservabilityClient`
-Constructor: `new ObservabilityClient(serviceName, environment?, redactionOptions?)`
-
-**Logging Methods**
-- `info(message, metadata?)`: Info-level log.
-- `warn(message, metadata?)`: Warning-level log.
-- `error(message, metadata?)`: Error-level log.
-- `debug(message, metadata?)`: Debug-level (dev only).
-- `log(event: LogEvent)`: Generic event log (all levels route here).
-
-**Tracking Methods**
-- `trackRequest(metrics: RequestMetrics)`: Log HTTP request (url, method, duration, status, userAgent).
-- `trackError(error: Error, context?: ErrorContext)`: Log error with stack/context.
-- `setRequestId(id: string)`: Set correlation ID for log grouping.
-
-### Helpers
-- `createRequestTimer(obs, request)`: Returns timer with `.end(status)` method for request tracking.
-- `trackRequestError(obs, error, request)`: Convenience wrapper for error tracking.
-
-### Redaction
-- `redactSensitiveData(data, options?)`: Sync PII redaction (passwords, tokens, emails, etc.).
-- `redactSensitiveDataAsync(data, options?)`: Async variant.
-- `REDACTION_PRESETS`: Predefined field patterns (credentials, contact, financial).
-
-## Config
-**Environment Modes**
-- `development`: Mask PII (keep 4 chars), debug logs enabled, console output.
-- `production`: Hash PII, debug logs disabled, structured JSON to stdout.
-
-**Redaction Options**
-- `mode`: `'mask'` (asterisks) or `'hash'` (SHA-256).
-- `redactEmails`: Boolean (default: true in prod).
-- `keepChars`: Number of chars to keep when masking (default: 4 in dev).
-
-## Usage
 ```ts
-// Service initialization
-const obs = new ObservabilityClient('content-api', 'production');
+const obs = new ObservabilityClient(serviceName, environment?, redactionOptions?);
+// environment defaults to 'development'
+// redactionOptions defaults based on environment
+```
 
-// Request timing (Hono middleware)
+Services extending `BaseService` get `this.obs` automatically (scoped to class name) — no manual instantiation needed in services.
+
+### Logging Methods
+
+```ts
+obs.info('Content published', { contentId, creatorId });   // business events
+obs.warn('Cache miss, falling back to DB', { key });        // recoverable issues
+obs.error('Stripe webhook failed', { eventId });            // failures
+obs.debug('Query executed', { table, duration });           // dev only (no-op in prod)
+```
+
+### Tracking Methods
+
+```ts
+obs.trackRequest({ url, method, duration, status, userAgent? });
+obs.trackError(error, { url, method, userId, contentId });  // logs at 'error' level with stack
+obs.setRequestId(id);  // set correlation ID — all subsequent logs include it
+```
+
+### Performance Methods
+
+```ts
+// perf() — warn if over threshold, debug otherwise
+obs.perf('session-validation', durationMs, { threshold: 2000, metadata: { userId } });
+
+// startTimer() — convenience wrapper
+const timer = obs.startTimer('org-layout', { threshold: 3000 });
+const org = await api.getOrg(slug);
+const ms = timer.end({ slug }); // logs via perf(), returns ms
+```
+
+### Generic Event
+
+```ts
+obs.log({ level: 'info', message: 'Event', timestamp: new Date(), metadata?: {} });
+```
+
+## Request Timing (Hono Middleware)
+
+```ts
+import { createRequestTimer } from '@codex/observability';
+
 app.use('*', async (c, next) => {
+  const requestId = c.req.header('cf-ray') ?? crypto.randomUUID();
+  obs.setRequestId(requestId);
   const timer = createRequestTimer(obs, c.req);
   await next();
   timer.end(c.res.status);
 });
-
-// Error tracking
-try {
-  await service.createContent(input);
-} catch (error) {
-  obs.trackError(error, {
-    url: c.req.url,
-    method: c.req.method,
-    userId: session.userId
-  });
-  throw error;
-}
-
-// Manual logging
-obs.info('Content published', { contentId: '123', creatorId: 'abc' });
-obs.debug('Cache hit', { key: 'org:slug' }); // Dev only
 ```
 
-## Integration with BaseService
-Services extending `BaseService` automatically get an `obs` instance (scoped to service name).
-
-```ts
-export class ContentService extends BaseService {
-  async createContent(input: ContentInput) {
-    this.obs.info('Creating content', { creatorId: input.creatorId });
-    // ...
-  }
-}
-```
+`trackRequestError(obs, error, request)` is a convenience wrapper for error handling in `app.onError`.
 
 ## Output Format
-All logs output as JSON to console (Cloudflare captures via `wrangler tail`):
+
+- **Development**: colorized human-readable lines to console (with ANSI colors, inline fields)
+- **Production/test**: structured JSON to console (captured by `wrangler tail` / log aggregators)
+
 ```json
 {
   "level": "info",
   "message": "Content published",
   "timestamp": "2026-02-14T12:00:00.000Z",
-  "service": "content-api",
+  "service": "ContentService",
   "environment": "production",
-  "requestId": "req-123",
-  "metadata": { "contentId": "123" }
+  "requestId": "abc123",
+  "metadata": { "contentId": "uuid" }
 }
 ```
 
-## Logging Patterns
+## PII Redaction
 
-### When to Log
-**Request Tracking**
-- Use `createRequestTimer()` in Hono middleware for automatic HTTP request logging.
-- Tracks: URL, method, duration, status, user-agent.
+Automatic on all logs — metadata is passed through `redactSensitiveData()` before output.
 
-**Error Logging**
-- Use `trackError(error, context)` for all caught errors before re-throwing.
-- Always include context: `{ url, method, userId, contentId }` etc.
-- Never use `trackError()` for expected business logic errors (use `info()` or `warn()` instead).
-
-**Business Events**
-- Use `info()` for significant business events: content published, purchase completed, user registered.
-- Use `warn()` for recoverable issues: retry succeeded, fallback used, deprecated API called.
-- Use `debug()` for development troubleshooting: cache hits, query timing, state transitions.
-
-**Avoid Logging**
-- Don't log every database query (too noisy, use debug only if investigating).
-- Don't log successful validation (only log failures).
-- Don't duplicate error logs (worker already logs via `mapErrorToResponse`).
-
-### PII Safety Rules
-**Always Redact**
-- Passwords, tokens, API keys, session IDs: Auto-redacted by `redactSensitiveData()`.
-- Email addresses: Redacted in production (configurable via `redactEmails`).
-- Credit card numbers, SSNs: Auto-detected and redacted.
-
-**Safe to Log**
-- User/content/organization IDs (UUIDs, not emails).
-- Request metadata: method, URL path (not query params with tokens).
-- Status codes, timing metrics, feature flags.
-
-**Context Guidelines**
-- Include IDs for correlation: `{ userId, contentId, orgId }`.
-- Avoid including full request/response bodies (use sample or summary instead).
-- When in doubt, redact. PII exposure is worse than missing context.
-
-### Request Correlation
-Set request ID early in middleware for log grouping:
 ```ts
-app.use('*', async (c, next) => {
-  const requestId = c.req.header('cf-ray') || crypto.randomUUID();
-  obs.setRequestId(requestId);
-  await next();
-});
+import { redactSensitiveData, redactSensitiveDataAsync, REDACTION_PRESETS } from '@codex/observability';
+
+// Standalone use (when not using ObservabilityClient)
+const safe = redactSensitiveData({ password: 'secret', email: 'user@example.com' });
+// → { password: '***REDACTED***', email: 'u***@***.***' } (dev masking)
 ```
 
-All subsequent logs in the request lifecycle will include this `requestId` for tracing.
+**Redaction config**:
+- Dev: `mode: 'mask'` (asterisks, keep 4 chars), emails masked
+- Prod: `mode: 'hash'` (SHA-256), emails redacted
+
+`REDACTION_PRESETS` — predefined field patterns (credentials, contact, financial).
+
+**Safe to log**: IDs (UUIDs), request metadata (method, URL path), status codes, timing
+**Never log**: passwords, tokens, API keys, session IDs, full emails, payment data, full request/response bodies
+
+## When to Use Which Method
+
+| Situation | Method |
+|---|---|
+| HTTP request start/end | `createRequestTimer()` |
+| Caught error (before re-throw) | `trackError(error, context)` |
+| Business event (purchase, publish) | `info()` |
+| Recoverable issue (retry, fallback) | `warn()` |
+| Failure (external API down) | `error()` |
+| Dev debugging (cache hit, query timing) | `debug()` (no-op in prod) |
+| Performance measurement | `perf()` / `startTimer()` |
+
+**Don't use `trackError()`** for expected business logic errors (not-found, forbidden) — those are normal flow, use `info()` or `warn()`.
 
 ## Strict Rules
 
 - **MUST** use `ObservabilityClient` for ALL logging — NEVER use `console.log` directly
-- **MUST** use `redactSensitiveData()` before logging any user-provided data
-- **MUST** include `requestId` for log correlation — set early in middleware
-- **MUST** use `trackError()` for all caught errors before re-throwing
-- **MUST** use `info()` for business events, `warn()` for recoverable issues, `error()` for failures
-- **NEVER** log passwords, session tokens, API keys, or full email addresses
-- **NEVER** log full request/response bodies — use summaries or sampling
-- **NEVER** use `trackError()` for expected business logic errors (use `warn()` instead)
-
-## Integration
-
-- **Depends on**: Nothing (standalone)
-- **Used by**: `@codex/service-errors` (BaseService auto-creates obs), all workers (request tracking)
+- **MUST** call `obs.setRequestId()` early in middleware for log correlation
+- **NEVER** log PII — the client auto-redacts metadata but don't log raw request bodies
+- **NEVER** duplicate error logging — `mapErrorToResponse()` already logs via `obs` if provided
 
 ## Reference Files
 
-- `packages/observability/src/index.ts` — ObservabilityClient, redaction, helpers
+- `packages/observability/src/index.ts` — `ObservabilityClient`, `createRequestTimer`, `trackRequestError`, redaction exports
+- `packages/observability/src/redact.ts` — `redactSensitiveData`, `REDACTION_PRESETS`

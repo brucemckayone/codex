@@ -11,8 +11,8 @@
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
-  import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
-  import { Badge } from '$lib/components/ui/Badge';
+  import { CreatorCarouselCard, SkeletonCreatorCard } from '$lib/components/ui/CreatorCard';
+  import Carousel from '$lib/components/carousel/Carousel.svelte';
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
   import { buildContentUrl } from '$lib/utils/subdomain';
@@ -302,6 +302,66 @@
     </section>
   {/if}
 
+  <!--
+    Creators — editorial "Contributors" masthead.
+    Pulled above New Releases so creator discovery is the first content
+    block users see after the hero. Streamed (skeleton first) so it
+    doesn't delay hero paint. Each card links to /explore?creator=<username>,
+    which filters the explore page to that creator's catalogue and
+    renders a feature-banner at the top (see CreatorExploreBanner).
+
+    Treatment: magazine masthead — small-caps eyebrow, display-type
+    section title, thin hairline, carousel of photo-dominant cards.
+  -->
+  <section class="section section--contributors">
+    <header class="contributors__head">
+      <p class="contributors__eyebrow">
+        <span class="contributors__eyebrow-mark" aria-hidden="true">N°</span>
+        The Contributors
+      </p>
+      <hr class="contributors__rule" aria-hidden="true" />
+      <div class="contributors__title-row">
+        <h2 class="contributors__title">{m.org_creators_preview_title()}</h2>
+        {#await data.creators then creators}
+          {#if (creators?.total ?? 0) > (creators?.items?.length ?? 0)}
+            <a href="/creators" class="contributors__view-all">
+              View all {creators?.total ?? 0}
+              <span aria-hidden="true">→</span>
+            </a>
+          {/if}
+        {/await}
+      </div>
+    </header>
+
+    {#await data.creators}
+      <div class="contributors__skeleton-row">
+        {#each Array(4) as _}
+          <SkeletonCreatorCard />
+        {/each}
+      </div>
+    {:then creators}
+      {#if creators?.items?.length > 0}
+        <Carousel
+          items={creators.items}
+          itemMinWidth="calc(var(--space-24) * 3)"
+          gap="var(--space-6)"
+          ariaLabel={m.org_creators_preview_title()}
+        >
+          {#snippet renderItem(creator: typeof creators.items[number], index: number)}
+            <CreatorCarouselCard
+              name={creator.name}
+              username={creator.username}
+              avatarUrl={creator.avatarUrl}
+              bio={creator.bio}
+              role={creator.role}
+              position={index + 1}
+            />
+          {/snippet}
+        </Carousel>
+      {/if}
+    {/await}
+  </section>
+
   <!-- New Releases -->
   <section class="section">
     <div class="section__header">
@@ -347,51 +407,6 @@
     {/if}
   </section>
 
-  <!-- Creator Preview -->
-  {#await data.creators}
-    <section class="section">
-      <div class="section__header">
-        <div class="skeleton" style="width: 200px; height: var(--text-2xl);"></div>
-      </div>
-      <div class="creators-grid">
-        {#each Array(3) as _}
-          <div class="creator-card skeleton-card">
-            <div class="skeleton skeleton-circle"></div>
-            <div class="skeleton" style="width: 120px; height: var(--text-base);"></div>
-            <div class="skeleton" style="width: 80px; height: var(--text-sm);"></div>
-          </div>
-        {/each}
-      </div>
-    </section>
-  {:then creators}
-    {#if creators?.items?.length > 0}
-      <section class="section">
-        <div class="section__header">
-          <h2 class="section__title">{m.org_creators_preview_title()}</h2>
-          {#if (creators?.total ?? 0) > 3}
-            <a href="/creators" class="section__view-all">
-              {m.org_creators_preview_view_all()} &rarr;
-            </a>
-          {/if}
-        </div>
-        <div class="creators-grid">
-          {#each creators.items as creator (creator.name)}
-            <div class="creator-card">
-              <Avatar class="creator-card__avatar">
-                <AvatarImage src={creator.avatarUrl ? getThumbnailUrl(creator.avatarUrl, 'sm') : undefined} alt={creator.name} />
-                <AvatarFallback>{creator.name.charAt(0).toUpperCase()}</AvatarFallback>
-              </Avatar>
-              <span class="creator-card__name">{creator.name}</span>
-              <Badge variant="neutral">{creator.role}</Badge>
-              <span class="creator-card__count">
-                {m.org_creators_content_count({ count: String(creator.contentCount) })}
-              </span>
-            </div>
-          {/each}
-        </div>
-      </section>
-    {/if}
-  {/await}
   </div>
 </div>
 
@@ -723,15 +738,15 @@
     /* Blur the fixed shader behind for frosted-glass effect */
     backdrop-filter: blur(var(--blur-2xl));
     -webkit-backdrop-filter: blur(var(--blur-2xl));
-    /* Gradient: transparent at top (blurred shader shows through),
-       gradually becomes opaque for readable content below */
+    /* Gradient: lightly tinted at top, becomes opaque to match
+       content-page blur density further down */
     background: linear-gradient(
       to bottom,
-      color-mix(in srgb, var(--color-brand-primary) 12%, transparent) 0%,
-      color-mix(in srgb, var(--color-brand-primary) 8%, color-mix(in srgb, var(--color-background) 10%, transparent)) 300px,
-      color-mix(in srgb, var(--color-background) 20%, transparent) 600px,
-      color-mix(in srgb, var(--color-background) 35%, transparent) 900px,
-      color-mix(in srgb, var(--color-background) 50%, transparent) 1200px
+      color-mix(in srgb, var(--color-brand-primary) 20%, color-mix(in srgb, var(--color-background) 40%, transparent)) 0%,
+      color-mix(in srgb, var(--color-background) 55%, transparent) 300px,
+      color-mix(in srgb, var(--color-background) 70%, transparent) 600px,
+      color-mix(in srgb, var(--color-background) 80%, transparent) 900px,
+      color-mix(in srgb, var(--color-background) 88%, transparent) 1200px
     );
     /* Mask fades entire element in over the overlap zone */
     mask-image: linear-gradient(to bottom, transparent 0%, black 250px);
@@ -784,47 +799,107 @@
     font-size: var(--text-lg);
   }
 
-  .creators-grid {
+  /* ══════════════════════════════════════════
+     CONTRIBUTORS — editorial masthead header
+     Magazine-style section intro: small-caps eyebrow
+     with N° glyph, thin hairline, display-type title
+     flush left, optional "view all" link flush right.
+     ══════════════════════════════════════════ */
+  .section--contributors {
     display: flex;
-    justify-content: center;
-    gap: var(--space-8);
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  .contributors__head {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .contributors__eyebrow {
+    margin: 0;
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    font-family: var(--font-body);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wider);
+    color: var(--color-text-tertiary);
+  }
+
+  .contributors__eyebrow-mark {
+    font-family: var(--font-heading);
+    font-weight: var(--font-normal);
+    text-transform: none;
+    letter-spacing: var(--tracking-normal);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    padding: 0 var(--space-1);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-xs);
+  }
+
+  .contributors__rule {
+    width: var(--space-10);
+    height: 0;
+    margin: 0;
+    border: none;
+    border-top: var(--border-width-thick) var(--border-style) var(--color-text-primary);
+    opacity: var(--opacity-80);
+  }
+
+  .contributors__title-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-4);
     flex-wrap: wrap;
   }
 
-  .creator-card {
-    display: flex;
-    flex-direction: column;
+  .contributors__title {
+    margin: 0;
+    font-family: var(--font-heading);
+    /* Fluid display ramp anchored to typography tokens. Fluid middle
+       is a raw vw rate — no --fluid token exists in the system yet. */
+    font-size: clamp(var(--text-2xl), var(--_fluid-contrib-title, 3.5vw), var(--text-4xl));
+    font-weight: var(--font-bold);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-tighter);
+    color: var(--color-text-primary);
+    /* Cap line length at a comfortable editorial measure (32 characters) */
+    max-width: 32ch;
+  }
+
+  .contributors__view-all {
+    display: inline-flex;
     align-items: center;
     gap: var(--space-2);
-    padding: var(--space-6);
-    background: var(--color-surface);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-lg);
-    min-width: 180px;
-    max-width: 240px;
-    text-align: center;
-    transition: var(--transition-shadow);
-  }
-
-  .creator-card:hover {
-    box-shadow: var(--shadow-md);
-  }
-
-  :global(.creator-card__avatar) {
-    width: var(--space-12);
-    height: var(--space-12);
-    font-size: var(--text-lg);
-  }
-
-  .creator-card__name {
-    font-size: var(--text-base);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-  }
-
-  .creator-card__count {
+    font-family: var(--font-body);
     font-size: var(--text-sm);
-    color: var(--color-text-tertiary);
+    font-weight: var(--font-medium);
+    color: var(--color-text-secondary);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color var(--duration-fast) var(--ease-default);
+  }
+
+  .contributors__view-all:hover {
+    color: var(--color-text-primary);
+  }
+
+  /* Skeleton row fills the horizontal rhythm while creators stream in.
+     overflow:hidden prevents skeleton cards bleeding past the section. */
+  .contributors__skeleton-row {
+    display: flex;
+    gap: var(--space-5);
+    overflow: hidden;
+  }
+
+  .contributors__skeleton-row :global(> *) {
+    flex: 0 0 calc(var(--space-24) * 3);
   }
 
   /* ══════════════════════════════════════════
@@ -884,37 +959,8 @@
     }
   }
 
-  /* ── Skeletons ── */
-  .skeleton {
-    background: linear-gradient(
-      90deg,
-      var(--color-surface-secondary) 25%,
-      var(--color-surface-tertiary) 50%,
-      var(--color-surface-secondary) 75%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-    border-radius: var(--radius-md);
-  }
-
-  .skeleton-circle {
-    width: var(--space-12);
-    height: var(--space-12);
-    border-radius: var(--radius-full);
-  }
-
-  .skeleton-card {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-6);
-  }
-
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
+  /* Skeleton shimmer is provided by the SkeletonCreatorCard primitive,
+     so no page-level skeleton CSS is needed here. */
 
   /* ══════════════════════════════════════════
      HERO LAYOUT VARIANTS
@@ -1023,17 +1069,197 @@
     justify-content: center;
   }
 
+  /* ── Split ── restrained luxury: content left half, canvas right half.
+     padding-right reserves the right portion for the shader to breathe —
+     no markup changes, no centring overrides. The title block keeps its
+     container-centred alignment; its text simply wraps at 50%. */
+  :global([data-hero-layout="split"]) .hero__title,
+  :global([data-hero-layout="split"]) .hero__content {
+    padding-right: 50%;
+  }
+
+  /* ── Magazine ── stats lifted to top-right as a vertical masthead.
+     Title stays bottom-left classic. Description picks up small-caps
+     treatment for a print-editorial feel.
+
+     Making `.hero__content` static lets the stats' absolute positioning
+     escape to `.hero` (the hero viewport) rather than anchoring to the
+     bottom-aligned content column. */
+  :global([data-hero-layout="magazine"]) .hero__content {
+    position: static;
+  }
+
+  :global([data-hero-layout="magazine"]) .hero__stats {
+    position: absolute;
+    top: var(--space-10);
+    right: var(--space-8);
+    flex-direction: column;
+    align-items: flex-end;
+    text-align: right;
+    gap: var(--space-5);
+    border-top: none;
+    border-right: var(--border-width) solid
+      color-mix(in srgb, var(--brand-hero-border-tint, white) 30%, transparent);
+    padding-top: 0;
+    padding-right: var(--space-5);
+    margin-top: 0;
+    z-index: 3;
+  }
+
+  :global([data-hero-layout="magazine"]) .hero__stat-number {
+    font-size: clamp(1.5rem, 2.5vw, 2.25rem);
+  }
+
+  :global([data-hero-layout="magazine"]) .hero__description {
+    font-variant-caps: all-small-caps;
+    letter-spacing: var(--tracking-wider);
+    font-size: var(--text-base);
+  }
+
+  /* ── Asymmetric ── title top-right, content bottom-left.
+     space-between on the hero flex-column handles the vertical split;
+     text-align right on the title pushes its text to the right within
+     its centred container block. */
+  :global([data-hero-layout="asymmetric"]) .hero {
+    justify-content: space-between;
+  }
+
+  :global([data-hero-layout="asymmetric"]) .hero__title {
+    text-align: right;
+    margin-top: var(--space-10);
+  }
+
+  /* ── Portrait ── everything right-aligned in a narrow right column.
+     Mirror of default with text-align: right. Narrow via padding-left. */
+  :global([data-hero-layout="portrait"]) .hero__title {
+    text-align: right;
+    padding-left: 55%;
+  }
+
+  :global([data-hero-layout="portrait"]) .hero__content {
+    align-items: flex-end;
+    text-align: right;
+    padding-left: 55%;
+  }
+
+  :global([data-hero-layout="portrait"]) .hero__description {
+    margin-left: auto;
+  }
+
+  :global([data-hero-layout="portrait"]) .hero__pills,
+  :global([data-hero-layout="portrait"]) .hero__actions,
+  :global([data-hero-layout="portrait"]) .hero__stats {
+    justify-content: flex-end;
+  }
+
+  /* ── Gallery ── museum/cinema: huge title centred at top, content
+     flows horizontally as a single strip at the bottom (row-wrap). */
+  :global([data-hero-layout="gallery"]) .hero {
+    justify-content: space-between;
+  }
+
+  :global([data-hero-layout="gallery"]) .hero__title {
+    text-align: center;
+    font-size: clamp(4rem, 10vw, 9rem);
+    margin-top: var(--space-12);
+  }
+
+  :global([data-hero-layout="gallery"]) .hero__content {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--space-8);
+  }
+
+  :global([data-hero-layout="gallery"]) .hero__description {
+    max-width: 30ch;
+    margin: 0;
+  }
+
+  :global([data-hero-layout="gallery"]) .hero__stats {
+    border-top: none;
+    padding-top: 0;
+    margin-top: 0;
+    gap: var(--space-6);
+  }
+
+  :global([data-hero-layout="gallery"]) .hero__stat-number {
+    font-size: clamp(1.5rem, 2.5vw, 2.25rem);
+  }
+
+  /* ── Stacked ── Swiss typographic: one word per line.
+     `word-spacing: 100vw` is the classic CSS-only trick to force each
+     word onto its own line without touching markup. */
+  :global([data-hero-layout="stacked"]) .hero__title {
+    word-spacing: 100vw;
+    line-height: 0.9;
+    font-size: clamp(3rem, 7vw, 6.5rem);
+  }
+
   /* ── Layout mobile overrides ── */
   @media (--below-md) {
     :global([data-hero-layout="centered"]) .hero__actions,
     :global([data-hero-layout="logo-hero"]) .hero__actions,
-    :global([data-hero-layout="minimal"]) .hero__actions {
+    :global([data-hero-layout="minimal"]) .hero__actions,
+    :global([data-hero-layout="split"]) .hero__actions,
+    :global([data-hero-layout="magazine"]) .hero__actions,
+    :global([data-hero-layout="asymmetric"]) .hero__actions,
+    :global([data-hero-layout="portrait"]) .hero__actions,
+    :global([data-hero-layout="gallery"]) .hero__actions,
+    :global([data-hero-layout="stacked"]) .hero__actions {
       flex-direction: column;
       width: 100%;
     }
 
     :global([data-hero-layout="logo-hero"]) .hero__logo {
       --_logo-base: var(--space-32);
+    }
+
+    /* Collapse asymmetric splits on mobile — not enough horizontal room
+       for the padding-reserved empty halves to feel intentional. */
+    :global([data-hero-layout="split"]) .hero__title,
+    :global([data-hero-layout="split"]) .hero__content,
+    :global([data-hero-layout="portrait"]) .hero__title,
+    :global([data-hero-layout="portrait"]) .hero__content {
+      padding-right: var(--space-5);
+      padding-left: var(--space-5);
+    }
+
+    :global([data-hero-layout="portrait"]) .hero__title,
+    :global([data-hero-layout="portrait"]) .hero__content {
+      text-align: left;
+      align-items: flex-start;
+    }
+
+    :global([data-hero-layout="portrait"]) .hero__pills,
+    :global([data-hero-layout="portrait"]) .hero__actions,
+    :global([data-hero-layout="portrait"]) .hero__stats {
+      justify-content: flex-start;
+    }
+
+    /* Magazine stats: re-flow inline at the bottom on mobile */
+    :global([data-hero-layout="magazine"]) .hero__stats {
+      position: static;
+      flex-direction: row;
+      align-items: flex-start;
+      text-align: left;
+      border-right: none;
+      border-top: var(--border-width) solid
+        color-mix(in srgb, var(--brand-hero-border-tint, white) 25%, transparent);
+      padding-top: var(--space-6);
+      padding-right: 0;
+      margin-top: var(--space-2);
+    }
+
+    /* Gallery: drop the horizontal content strip back to column flow */
+    :global([data-hero-layout="gallery"]) .hero__content {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    :global([data-hero-layout="asymmetric"]) .hero__title {
+      text-align: left;
     }
   }
 

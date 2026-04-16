@@ -14,7 +14,12 @@ const now = new Date();
 
 export async function seedMedia(db: typeof DbClient) {
   // Ready video items — all R2 keys from path SSOT
-  const readyVideos = [MEDIA.introTs, MEDIA.advancedSvelte, MEDIA.honoApis];
+  const readyVideos = [
+    MEDIA.introTs,
+    MEDIA.advancedSvelte,
+    MEDIA.honoApis,
+    MEDIA.cacaoCeremony,
+  ];
 
   await db.insert(schema.mediaItems).values([
     // Ready videos
@@ -68,6 +73,44 @@ export async function seedMedia(db: typeof DbClient) {
       waveformImageKey: getWaveformImageKey(
         MEDIA.podcast.creatorId,
         MEDIA.podcast.id
+      ),
+      transcodingAttempts: 1,
+      transcodingPriority: 2,
+      uploadedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    },
+
+    // Ready audio (sound bowls — Of Blood & Bones)
+    {
+      id: MEDIA.soundBowls.id,
+      creatorId: MEDIA.soundBowls.creatorId,
+      title: MEDIA.soundBowls.title,
+      mediaType: MEDIA.soundBowls.mediaType,
+      status: MEDIA.soundBowls.status,
+      r2Key: getOriginalKey(
+        MEDIA.soundBowls.creatorId,
+        MEDIA.soundBowls.id,
+        'audio.mp3'
+      ),
+      fileSizeBytes: MEDIA.soundBowls.fileSizeBytes,
+      mimeType: MEDIA.soundBowls.mimeType,
+      durationSeconds: MEDIA.soundBowls.durationSeconds,
+      hlsMasterPlaylistKey: getHlsMasterKey(
+        MEDIA.soundBowls.creatorId,
+        MEDIA.soundBowls.id
+      ),
+      hlsPreviewKey: getHlsPreviewKey(
+        MEDIA.soundBowls.creatorId,
+        MEDIA.soundBowls.id
+      ),
+      waveformKey: getWaveformKey(
+        MEDIA.soundBowls.creatorId,
+        MEDIA.soundBowls.id
+      ),
+      waveformImageKey: getWaveformImageKey(
+        MEDIA.soundBowls.creatorId,
+        MEDIA.soundBowls.id
       ),
       transcodingAttempts: 1,
       transcodingPriority: 2,

@@ -39,13 +39,19 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Content>
-		<Dialog.Title>{title}</Dialog.Title>
-		{#if description}
-			<Dialog.Description>{description}</Dialog.Description>
-		{/if}
+	<Dialog.Content size="sm">
+		<Dialog.Header>
+			<Dialog.Title>{title}</Dialog.Title>
+			{#if description}
+				<Dialog.Description>{description}</Dialog.Description>
+			{/if}
+		</Dialog.Header>
 
-		{@render children?.()}
+		{#if children}
+			<Dialog.Body>
+				{@render children()}
+			</Dialog.Body>
+		{/if}
 
 		<Dialog.Footer>
 			<Button variant="secondary" onclick={handleCancel}>{cancelText}</Button>

@@ -20,8 +20,9 @@
 
 <style>
   .dialog-description {
-    font-size: var(--text-base);
+    font-size: var(--text-sm);
     color: var(--color-text-secondary);
+    line-height: var(--leading-normal, 1.5);
     margin: 0;
   }
 </style>

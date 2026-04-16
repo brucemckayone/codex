@@ -42,6 +42,30 @@
   gap: var(--space-3);
 }
 
+/* ── Featured Grid ──
+   First item spans 2 cols (sm) or 2×2 (lg) when there are enough items.
+   Uses :has() to guard against awkward layouts with <4 items. */
+
+@media (--breakpoint-sm) {
+  .content-grid--featured:has(> :nth-child(4)) > :first-child {
+    grid-column: span 2;
+  }
+}
+
+@media (--breakpoint-lg) {
+  .content-grid--featured:has(> :nth-child(4)) > :first-child {
+    grid-column: span 2;
+    grid-row: span 2;
+  }
+}
+
+/* ── Container Queries ──
+   Each grid child becomes an inline-size container so ContentCard
+   can adapt to its cell size via @container queries. */
+.content-grid > * {
+  container-type: inline-size;
+}
+
 /* ── Form Field Inputs ──
    Shared styling for text inputs, textareas, and labels used across forms. */
 .field-input {

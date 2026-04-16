@@ -47,6 +47,9 @@
     { id: 'julia', label: 'Julia', description: 'Animated fractal set' },
     { id: 'vapor', label: 'Vapor', description: 'Volumetric aurora clouds' },
     { id: 'tunnel', label: 'Tunnel', description: 'Apollonian fractal tunnel' },
+    { id: 'plasma', label: 'Plasma', description: 'Iridescent fluid streams' },
+    { id: 'flow', label: 'Flow', description: 'Curl-noise paint streaks' },
+    { id: 'spore', label: 'Spore', description: 'Agent-based slime network' },
   ];
 
   // ── Default values ─────────────────────────────────────────────────────
@@ -289,6 +292,24 @@
     'shader-tunnel-radius': '2.0',
     'shader-tunnel-brightness': '1.00',
     'shader-tunnel-twist': '0.07',
+    // Plasma
+    'shader-plasma-speed': '0.80',
+    'shader-plasma-bands': '25.0',
+    'shader-plasma-pressure': '0.90',
+    'shader-plasma-turn': '0.11',
+    'shader-plasma-diffusion': '1.20',
+    // Flow
+    'shader-flow-curl': '0.60',
+    'shader-flow-advection': '6.0',
+    'shader-flow-smoothing': '0.80',
+    'shader-flow-contrast': '12.0',
+    'shader-flow-field-speed': '1.00',
+    // Spore
+    'shader-spore-sensor-angle': '12.5',
+    'shader-spore-sensor-offset': '3.0',
+    'shader-spore-step-size': '6.0',
+    'shader-spore-rotation': '22.5',
+    'shader-spore-decay': '0.998',
   };
 
   /** All shader-* token override keys. */
@@ -583,6 +604,27 @@
   const tunnelRadius = $derived(readNum('shader-tunnel-radius'));
   const tunnelBrightness = $derived(readNum('shader-tunnel-brightness'));
   const tunnelTwist = $derived(readNum('shader-tunnel-twist'));
+
+  // Plasma
+  const plasmaSpeed = $derived(readNum('shader-plasma-speed'));
+  const plasmaBands = $derived(readNum('shader-plasma-bands'));
+  const plasmaPressure = $derived(readNum('shader-plasma-pressure'));
+  const plasmaTurn = $derived(readNum('shader-plasma-turn'));
+  const plasmaDiffusion = $derived(readNum('shader-plasma-diffusion'));
+
+  // Flow
+  const flowCurl = $derived(readNum('shader-flow-curl'));
+  const flowAdvection = $derived(readNum('shader-flow-advection'));
+  const flowSmoothing = $derived(readNum('shader-flow-smoothing'));
+  const flowContrast = $derived(readNum('shader-flow-contrast'));
+  const flowFieldSpeed = $derived(readNum('shader-flow-field-speed'));
+
+  // Spore
+  const sporeSensorAngle = $derived(readNum('shader-spore-sensor-angle'));
+  const sporeSensorOffset = $derived(readNum('shader-spore-sensor-offset'));
+  const sporeStepSize = $derived(readNum('shader-spore-step-size'));
+  const sporeRotation = $derived(readNum('shader-spore-rotation'));
+  const sporeDecay = $derived(readNum('shader-spore-decay'));
 
   // ── Update helpers ─────────────────────────────────────────────────────
   function updateOverride(key: string, value: string) {
@@ -899,6 +941,7 @@
             class:hero-fx__toggle--on={invert}
             onclick={() => updateOverride('shader-invert', invert ? '0' : '1')}
             role="switch"
+            aria-label="Toggle invert colors"
             aria-checked={invert}
           >
             <span class="hero-fx__toggle-thumb"></span>
@@ -1558,6 +1601,33 @@
         <BrandSliderField id="shader-tunnel-radius" label="Tunnel Width" value={tunnelRadius.toFixed(1)} min={1.0} max={3.0} step={0.5} current={tunnelRadius} minLabel="Narrow" maxLabel="Wide" oninput={handleSliderInput('shader-tunnel-radius')} />
         <BrandSliderField id="shader-tunnel-brightness" label="Brightness" value={tunnelBrightness.toFixed(2)} min={0.50} max={2.00} step={0.10} current={tunnelBrightness} minLabel="Dim" maxLabel="Bright" oninput={handleSliderInput('shader-tunnel-brightness')} />
         <BrandSliderField id="shader-tunnel-twist" label="Path Curvature" value={tunnelTwist.toFixed(2)} min={0.03} max={0.10} step={0.01} current={tunnelTwist} minLabel="Gentle" maxLabel="Winding" oninput={handleSliderInput('shader-tunnel-twist')} />
+      </section>
+    {:else if activePreset === 'plasma'}
+      <section class="hero-fx__section">
+        <span class="hero-fx__section-label">Plasma</span>
+        <BrandSliderField id="shader-plasma-speed" label="Flow Speed" value={plasmaSpeed.toFixed(2)} min={0.20} max={2.00} step={0.10} current={plasmaSpeed} minLabel="Slow" maxLabel="Fast" oninput={handleSliderInput('shader-plasma-speed')} />
+        <BrandSliderField id="shader-plasma-bands" label="Color Bands" value={plasmaBands.toFixed(1)} min={5.0} max={40.0} step={1.0} current={plasmaBands} minLabel="Few" maxLabel="Many" oninput={handleSliderInput('shader-plasma-bands')} />
+        <BrandSliderField id="shader-plasma-pressure" label="Pressure" value={plasmaPressure.toFixed(2)} min={0.20} max={2.00} step={0.10} current={plasmaPressure} minLabel="Soft" maxLabel="Strong" oninput={handleSliderInput('shader-plasma-pressure')} />
+        <BrandSliderField id="shader-plasma-turn" label="Slime Turn" value={plasmaTurn.toFixed(2)} min={0.02} max={0.25} step={0.01} current={plasmaTurn} minLabel="Gentle" maxLabel="Sharp" oninput={handleSliderInput('shader-plasma-turn')} />
+        <BrandSliderField id="shader-plasma-diffusion" label="Diffusion" value={plasmaDiffusion.toFixed(2)} min={0.50} max={2.00} step={0.10} current={plasmaDiffusion} minLabel="Tight" maxLabel="Spread" oninput={handleSliderInput('shader-plasma-diffusion')} />
+      </section>
+    {:else if activePreset === 'spore'}
+      <section class="hero-fx__section">
+        <span class="hero-fx__section-label">Spore</span>
+        <BrandSliderField id="shader-spore-sensor-angle" label="Sensor Angle" value={sporeSensorAngle.toFixed(1)} min={5.0} max={45.0} step={0.5} current={sporeSensorAngle} minLabel="Narrow" maxLabel="Wide" oninput={handleSliderInput('shader-spore-sensor-angle')} />
+        <BrandSliderField id="shader-spore-sensor-offset" label="Sensor Reach" value={sporeSensorOffset.toFixed(1)} min={1.0} max={8.0} step={0.5} current={sporeSensorOffset} minLabel="Close" maxLabel="Far" oninput={handleSliderInput('shader-spore-sensor-offset')} />
+        <BrandSliderField id="shader-spore-step-size" label="Step Size" value={sporeStepSize.toFixed(1)} min={2.0} max={12.0} step={0.5} current={sporeStepSize} minLabel="Slow" maxLabel="Fast" oninput={handleSliderInput('shader-spore-step-size')} />
+        <BrandSliderField id="shader-spore-rotation" label="Turn Amount" value={sporeRotation.toFixed(1)} min={5.0} max={45.0} step={0.5} current={sporeRotation} minLabel="Gentle" maxLabel="Sharp" oninput={handleSliderInput('shader-spore-rotation')} />
+        <BrandSliderField id="shader-spore-decay" label="Trail Decay" value={sporeDecay.toFixed(3)} min={0.990} max={0.999} step={0.001} current={sporeDecay} minLabel="Fast" maxLabel="Slow" oninput={handleSliderInput('shader-spore-decay')} />
+      </section>
+    {:else if activePreset === 'flow'}
+      <section class="hero-fx__section">
+        <span class="hero-fx__section-label">Flow</span>
+        <BrandSliderField id="shader-flow-curl" label="Curl Strength" value={flowCurl.toFixed(2)} min={0.10} max={1.50} step={0.05} current={flowCurl} minLabel="Gentle" maxLabel="Tight" oninput={handleSliderInput('shader-flow-curl')} />
+        <BrandSliderField id="shader-flow-advection" label="Advection" value={flowAdvection.toFixed(1)} min={1.0} max={12.0} step={0.5} current={flowAdvection} minLabel="Short" maxLabel="Long" oninput={handleSliderInput('shader-flow-advection')} />
+        <BrandSliderField id="shader-flow-smoothing" label="Smoothing" value={flowSmoothing.toFixed(2)} min={0.30} max={0.95} step={0.05} current={flowSmoothing} minLabel="Crisp" maxLabel="Smooth" oninput={handleSliderInput('shader-flow-smoothing')} />
+        <BrandSliderField id="shader-flow-contrast" label="Contrast" value={flowContrast.toFixed(1)} min={4.0} max={20.0} step={1.0} current={flowContrast} minLabel="Soft" maxLabel="Punchy" oninput={handleSliderInput('shader-flow-contrast')} />
+        <BrandSliderField id="shader-flow-field-speed" label="Field Speed" value={flowFieldSpeed.toFixed(2)} min={0.20} max={2.00} step={0.10} current={flowFieldSpeed} minLabel="Slow" maxLabel="Fast" oninput={handleSliderInput('shader-flow-field-speed')} />
       </section>
     {/if}
   {/if}

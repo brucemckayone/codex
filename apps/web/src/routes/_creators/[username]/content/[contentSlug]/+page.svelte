@@ -14,7 +14,7 @@
   import * as m from '$paraglide/messages';
   import { ContentDetailView } from '$lib/components/content';
   import { ContentCard } from '$lib/components/ui/ContentCard';
-  import { contentCollection, hydrateIfNeeded } from '$lib/collections';
+  import { hydrateIfNeeded } from '$lib/collections';
   import { formatPrice } from '$lib/utils/format';
   import type { PageData } from './$types';
 
@@ -31,11 +31,9 @@
     }
   });
 
-  // Use cached content from collection if available (e.g., from browse/explore)
-  // Falls back to SSR data (always present, awaited in server load)
-  const content = $derived(
-    contentCollection?.state.get(data.content.id) ?? data.content
-  );
+  // Always use server load data — it's fetched by slug for this specific page.
+  // Collection state.get() returns wrong items after hydration from explore/browse.
+  const content = $derived(data.content);
 
   let purchasing = $state(false);
 
@@ -69,6 +67,7 @@
       durationSeconds: number;
       completed: boolean;
     } | null,
+    // svelte-ignore state_referenced_locally
     loading: !!data.accessAndProgress,
   });
 
@@ -124,8 +123,9 @@
 <!--
   Single ContentDetailView instance — props update reactively when
   the streaming promise resolves. This avoids destroying/recreating
-  the component tree (and remounting AudioPlayer/HLS/waveform).
+  Key by content ID to force full re-mount when navigating between content items.
 -->
+{#key data.content.id}
 <ContentDetailView
   content={content}
   contentBodyHtml={data.contentBodyHtml}
@@ -224,6 +224,7 @@
     {/if}
   {/if}
 {/await}
+{/key}
 
 <style>
   /* ── Skeleton Loading States ── */

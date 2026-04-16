@@ -378,10 +378,6 @@
     outline-offset: 2px;
   }
 
-  .upload-icon {
-    color: var(--color-text-secondary);
-  }
-
   .drop-text {
     font-size: var(--text-sm);
     color: var(--color-text-secondary);

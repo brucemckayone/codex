@@ -36,10 +36,15 @@
     initialSearch = '',
   }: Props = $props();
 
+  // svelte-ignore state_referenced_locally — user-controlled filter state, props sync via URL navigation
   let contentType = $state(initialContentType);
+  // svelte-ignore state_referenced_locally
   let progressStatus = $state(initialProgressStatus);
+  // svelte-ignore state_referenced_locally
   let accessType = $state(initialAccessType);
+  // svelte-ignore state_referenced_locally
   let searchInput = $state(initialSearch);
+  // svelte-ignore state_referenced_locally
   let searchDebounced = $state(initialSearch);
 
   const contentTypeOptions = [

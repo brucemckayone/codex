@@ -14,7 +14,20 @@ import {
   requireAuth,
   securityHeaders,
 } from '@codex/security';
-import type { HonoEnv } from '@codex/shared-types';
+import type { Bindings, HonoEnv } from '@codex/shared-types';
+
+/** Keys in Bindings whose values are KVNamespace */
+type KVBindingKey = {
+  [K in keyof Bindings]: NonNullable<Bindings[K]> extends KVNamespace
+    ? K
+    : never;
+}[keyof Bindings];
+
+/** Keys in Bindings whose values are R2Bucket */
+type R2BindingKey = {
+  [K in keyof Bindings]: NonNullable<Bindings[K]> extends R2Bucket ? K : never;
+}[keyof Bindings];
+
 import type { Context, MiddlewareHandler, Next } from 'hono';
 import { cors } from 'hono/cors';
 
@@ -293,7 +306,7 @@ export function createHealthCheckHandler(
  * ])
  * ```
  */
-export function createKvCheck(bindingNames: string[]): (
+export function createKvCheck(bindingNames: KVBindingKey[]): (
   c: Context<HonoEnv>
 ) => Promise<{
   status: 'ok' | 'error';
@@ -304,7 +317,7 @@ export function createKvCheck(bindingNames: string[]): (
     const obs = c.get('obs');
     const bindings = bindingNames.map((name) => ({
       name,
-      kv: (c.env as Record<string, KVNamespace | undefined>)[name],
+      kv: c.env[name] as KVNamespace | undefined,
     }));
 
     const results = await Promise.all(
@@ -362,7 +375,7 @@ export function createKvCheck(bindingNames: string[]): (
  * createR2Check(['MEDIA_BUCKET'])
  * ```
  */
-export function createR2Check(bindingNames: string[]): (
+export function createR2Check(bindingNames: R2BindingKey[]): (
   c: Context<HonoEnv>
 ) => Promise<{
   status: 'ok' | 'error';
@@ -373,7 +386,7 @@ export function createR2Check(bindingNames: string[]): (
     const obs = c.get('obs');
     const bindings = bindingNames.map((name) => ({
       name,
-      bucket: (c.env as Record<string, R2Bucket | undefined>)[name],
+      bucket: c.env[name] as R2Bucket | undefined,
     }));
 
     const results = await Promise.all(

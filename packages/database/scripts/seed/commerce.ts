@@ -341,6 +341,18 @@ export async function seedCommerce(db: typeof DbClient) {
       'c5_ts_deep',
       daysAgo(80)
     ),
+    // viewer: 1 purchase from Of Blood & Bones (Ceremonial Cacao £19.99)
+    makePurchase(
+      PURCHASES.viewerCacao.id,
+      USERS.viewer.id,
+      CONTENT.ceremonialCacao.id,
+      ORGS.bones.id,
+      1999,
+      Math.round(1999 * 0.1),
+      1999 - Math.round(1999 * 0.1),
+      'viewer_cacao',
+      daysAgo(1)
+    ),
   ]);
 
   // Content access records
@@ -472,6 +484,16 @@ export async function seedCommerce(db: typeof DbClient) {
       createdAt: now,
       updatedAt: now,
     },
+    // Of Blood & Bones: viewer purchased Ceremonial Cacao
+    {
+      id: CONTENT_ACCESS.viewerCacao.id,
+      userId: USERS.viewer.id,
+      contentId: CONTENT.ceremonialCacao.id,
+      organizationId: ORGS.bones.id,
+      accessType: 'purchased',
+      createdAt: now,
+      updatedAt: now,
+    },
   ]);
 
   // ── Subscription Tiers ────────────────────────────────────────────
@@ -487,6 +509,7 @@ export async function seedCommerce(db: typeof DbClient) {
       priceMonthly: TIERS.alphaStandard.priceMonthly,
       priceAnnual: TIERS.alphaStandard.priceAnnual,
       isActive: true,
+      isRecommended: false,
       createdAt: now,
       updatedAt: now,
     },
@@ -499,6 +522,7 @@ export async function seedCommerce(db: typeof DbClient) {
       priceMonthly: TIERS.alphaPro.priceMonthly,
       priceAnnual: TIERS.alphaPro.priceAnnual,
       isActive: true,
+      isRecommended: true,
       createdAt: now,
       updatedAt: now,
     },
@@ -511,6 +535,20 @@ export async function seedCommerce(db: typeof DbClient) {
       priceMonthly: TIERS.betaStandard.priceMonthly,
       priceAnnual: TIERS.betaStandard.priceAnnual,
       isActive: true,
+      isRecommended: false,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: TIERS.bonesSoulPath.id,
+      organizationId: ORGS.bones.id,
+      name: TIERS.bonesSoulPath.name,
+      description: TIERS.bonesSoulPath.description,
+      sortOrder: TIERS.bonesSoulPath.sortOrder,
+      priceMonthly: TIERS.bonesSoulPath.priceMonthly,
+      priceAnnual: TIERS.bonesSoulPath.priceAnnual,
+      isActive: true,
+      isRecommended: true,
       createdAt: now,
       updatedAt: now,
     },
@@ -533,6 +571,7 @@ export async function seedCommerce(db: typeof DbClient) {
       { ...TIERS.alphaStandard, organizationId: ORGS.alpha.id },
       { ...TIERS.alphaPro, organizationId: ORGS.alpha.id },
       { ...TIERS.betaStandard, organizationId: ORGS.beta.id },
+      { ...TIERS.bonesSoulPath, organizationId: ORGS.bones.id },
     ];
 
     for (const tier of seedTiers) {
@@ -599,6 +638,16 @@ export async function seedCommerce(db: typeof DbClient) {
     .update(schema.content)
     .set({ minimumTierId: TIERS.alphaStandard.id })
     .where(eq(schema.content.id, CONTENT.membersOnly.id));
+
+  // Of Blood & Bones: Soul Path tier → subscriber-only content
+  await db
+    .update(schema.content)
+    .set({ minimumTierId: TIERS.bonesSoulPath.id })
+    .where(eq(schema.content.id, CONTENT.soulPath.id));
+  await db
+    .update(schema.content)
+    .set({ minimumTierId: TIERS.bonesSoulPath.id })
+    .where(eq(schema.content.id, CONTENT.sacredCalendar.id));
 
   // ── Subscriptions ──────────────────────────────────────────────────
   // viewer@test.com subscribes to Alpha Standard tier.
@@ -706,11 +755,11 @@ export async function seedCommerce(db: typeof DbClient) {
       `  ${statusIcon} Connect account ${accountId} — charges: ${chargesEnabled}, payouts: ${payoutsEnabled}`
     );
     console.log(
-      `  Seeded platform fee, 13 purchases, 14 content access, 3 tiers, 1 subscription`
+      `  Seeded platform fee, 14 purchases, 15 content access, 4 tiers, 1 subscription`
     );
   } else {
     console.log(
-      '  Seeded platform fee, 13 purchases, 14 content access, 3 tiers, 1 subscription (skipped Stripe — no STRIPE_SECRET_KEY)'
+      '  Seeded platform fee, 14 purchases, 15 content access, 4 tiers, 1 subscription (skipped Stripe — no STRIPE_SECRET_KEY)'
     );
   }
 }

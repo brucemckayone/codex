@@ -9,12 +9,12 @@
 
 	// Use server-loaded preferences (no client-side fetch needed)
 	let { data } = $props();
-	const preferences = data.preferences;
+	const preferences = $derived(data.preferences);
 
-	// Local state for Switch bindings and conditional hidden input rendering
-	let marketingChecked = $state(preferences?.emailMarketing ?? true);
-	let transactionalChecked = $state(preferences?.emailTransactional ?? true);
-	let digestChecked = $state(preferences?.emailDigest ?? true);
+	// Writable derived: re-syncs from server data, locally mutable by user interaction
+	let marketingChecked = $derived(preferences?.emailMarketing ?? true);
+	let transactionalChecked = $derived(preferences?.emailTransactional ?? true);
+	let digestChecked = $derived(preferences?.emailDigest ?? true);
 
 	let showSuccess = $state(false);
 	let successTimeout: ReturnType<typeof setTimeout> | null = null;

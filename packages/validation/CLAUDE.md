@@ -1,222 +1,167 @@
 # @codex/validation
 
-Zod schemas for input validation. Single source of truth for all API inputs.
+Zod schemas for all API inputs. Single source of truth — define schemas here, never in route handlers.
 
-## Usage Patterns
-
-### Basic Pattern: Validate User Input
+## Usage with `procedure()`
 
 ```ts
-import { createContentSchema, uuidSchema } from '@codex/validation';
+import { createContentSchema, createIdParamsSchema } from '@codex/validation';
 
-// In procedure()
-app.post('/api/content',
+app.post('/content',
   procedure({
     policy: { auth: 'required' },
     input: { body: createContentSchema },
     handler: async (ctx) => {
-      // ctx.input.body is typed and validated
+      // ctx.input.body is fully typed and validated
       return await ctx.services.content.create(ctx.input.body, ctx.user.id);
     },
   })
 );
 
-// Direct validation (rare)
-const id = uuidSchema.parse(req.param('id')); // throws if invalid
-```
-
-### Defensive Validation in Services
-
-```ts
-import { z, uuidSchema } from '@codex/validation';
-
-class ContentService {
-  async getById(id: string, userId: string) {
-    // Defensive validation (belt & suspenders)
-    const validId = uuidSchema.parse(id);
-    const validUserId = uuidSchema.parse(userId);
-
-    return await db.query.content.findFirst({
-      where: (content, { eq }) => eq(content.id, validId),
-    });
-  }
-}
-```
-
-## Common Schemas
-
-### Content & Media
-- `createContentSchema` - Create content (title, slug, mediaItemId, visibility, price)
-- `updateContentSchema` - Update content (partial fields)
-- `contentQuerySchema` - List/filter content (pagination, creatorId, status)
-- `createMediaItemSchema` - Register media upload
-- `mediaQuerySchema` - List media items
-
-### Organizations
-- `createOrganizationSchema` - Create org (name, slug, description, logoUrl, websiteUrl)
-- `updateOrganizationSchema` - Update org (all fields optional)
-- `inviteMemberSchema` - Invite org member (email, role)
-- `updateMemberRoleSchema` - Update member role
-- `listMembersQuerySchema` - List org members (pagination, role filter)
-
-### Access & Playback
-- `getStreamingUrlSchema` - Request streaming URL (contentId)
-- `savePlaybackProgressSchema` - Save playback position (contentId, position)
-
-### Purchases
-- `createCheckoutSchema` - Stripe checkout session (contentId, successUrl, cancelUrl)
-- `purchaseQuerySchema` - List purchases (userId, contentId, status)
-
-### Common Utilities
-- `paginationSchema` - `{ page: number, limit: number }` (max 100/page)
-- `uuidSchema` - UUID v4 validation
-- `userIdSchema` - BetterAuth user ID (alphanumeric, 1-64 chars)
-- `slugSchema` - Lowercase alphanumeric + hyphens
-- `urlSchema` - HTTP/HTTPS only (XSS prevention)
-- `emailSchema` - Email validation
-
-## Primitives (Building Blocks)
-
-### Identifiers
-- `uuidSchema` - UUID v4 (e.g., content IDs, media IDs)
-- `userIdSchema` - BetterAuth user ID (alphanumeric string)
-- `createSlugSchema(maxLength)` - Slug factory (default 500 chars)
-- `createIdParamsSchema()` - `{ id: uuidSchema }` for route params
-- `createSlugParamsSchema()` - `{ slug: slugSchema }` for route params
-
-### URLs & Strings
-- `urlSchema` - HTTP/HTTPS URLs only (blocks `javascript:`, `data:`)
-- `emailSchema` - Email validation
-- `createSanitizedStringSchema(min, max, fieldName)` - Trim + length limits
-- `createOptionalTextSchema(max, fieldName)` - Nullable text with max length
-
-### Numbers
-- `priceCentsSchema` - Integer cents (0-10,000,000), nullable (null = free)
-- `positiveIntSchema` - Positive integers (e.g., page numbers)
-- `nonNegativeIntSchema` - Non-negative integers (e.g., counts)
-
-### Dates & Colors
-- `isoDateSchema` - ISO 8601 date strings coerced to Date objects
-- `hexColorSchema` - `#RRGGBB` format (uppercase normalized)
-- `timezoneSchema` - IANA timezone (e.g., `America/New_York`)
-
-## Special Cases
-
-### SVG Sanitization
-
-**Use Case**: Sanitize user-uploaded SVG files to prevent XSS.
-
-```ts
-import { sanitizeSvgContent } from '@codex/validation';
-
-const safeSvg = await sanitizeSvgContent(userUploadedSvg);
-// Removes <script>, onclick handlers, dangerous URIs
-```
-
-**What's Blocked**:
-- `<script>`, `<iframe>`, `<object>`, `<embed>`, `<foreignObject>`
-- Event handlers (`onerror`, `onload`, `onclick`, etc.)
-- `javascript:`, `data:` URIs
-
-**What's Allowed**:
-- Safe SVG elements (`<svg>`, `<path>`, `<circle>`, `<rect>`, `<g>`, `<defs>`)
-- Gradients, filters, common attributes
-
-**Note**: Returns empty string if sanitization fails (indicates malicious file).
-
-### MIME Type Extraction
-
-**Use Case**: Extract clean MIME type from Content-Type header.
-
-```ts
-import { extractMimeType } from '@codex/validation';
-
-const mimeType = extractMimeType('image/jpeg; charset=utf-8');
-// Returns: 'image/jpeg'
-```
-
-### Organization Slug Validation
-
-**Use Case**: Ensure org slug doesn't conflict with platform subdomains.
-
-```ts
-import { createOrganizationSchema } from '@codex/validation';
-
-// Organization slug is validated within createOrganizationSchema
-createOrganizationSchema.parse({
-  name: 'My Org',
-  slug: 'platform', // throws (reserved subdomain)
-});
-
-createOrganizationSchema.parse({
-  name: 'My Org',
-  slug: 'my-org',   // valid
-});
-```
-
-**Reserved Subdomains**: `platform`, `api`, `www`, `admin`, `docs`, `blog`, `status`, `cdn` (see `@codex/constants/RESERVED_SUBDOMAINS_SET`)
-
-**Implementation**: The slug validation is built into `createOrganizationSchema` using `organizationSlugSchema` (internal to content-schemas.ts)
-
-## Strict Rules
-
-- **MUST** validate ALL user input (body, query, params) with Zod schemas via `procedure({ input })` — no unvalidated input reaches handlers
-- **MUST** use existing primitive schemas (`uuidSchema`, `slugSchema`, `urlSchema`, `emailSchema`) — NEVER write ad-hoc regex validation
-- **MUST** use `sanitizeSvgContent()` for ALL SVG uploads — SVGs without sanitization are XSS vectors
-- **MUST** use `urlSchema` for ALL user-provided URLs — blocks `javascript:`, `data:` protocols
-- **MUST** match Zod schema constraints to database column constraints (string lengths, enum values)
-- **MUST** validate org slugs against `RESERVED_SUBDOMAINS_SET` from `@codex/constants` (built into `createOrganizationSchema`)
-- **NEVER** write ad-hoc validation in route handlers — define schemas in this package
-- **NEVER** trust user input without validation, even in internal/admin endpoints
-
-## Integration
-
-- **Depends on**: Zod, `@codex/constants` (reserved subdomains)
-- **Used by**: `@codex/worker-utils` (procedure input validation), all service packages (defensive validation)
-
-## Standards
-
-### Validation Best Practices
-1. **Use Zod schemas** for all user input (body, query, params)
-2. **Match database constraints** (string lengths, enum values)
-3. **Sanitize strings** (trim whitespace, normalize case)
-4. **Prevent XSS** (block `javascript:`, `data:` URIs in URLs)
-5. **Clear error messages** (user-friendly, non-leaking)
-
-### Error Handling
-- Invalid input throws `ZodError` with field-level details
-- Procedure automatically catches and returns 400 Bad Request
-- Service errors (business logic) throw typed errors (404, 403, etc.)
-
-### Integration with `procedure()`
-```ts
-// Input validation happens before handler execution
-app.post('/api/content/:id/publish',
+app.get('/content/:id',
   procedure({
     policy: { auth: 'required' },
     input: { params: createIdParamsSchema() },
     handler: async (ctx) => {
-      // ctx.input.params.id is guaranteed to be valid UUID
-      return await ctx.services.content.publish(
-        ctx.input.params.id,
-        ctx.user.id
-      );
+      // ctx.input.params.id is guaranteed UUID
     },
   })
 );
 ```
 
-### Type Inference
-```ts
-import { z } from '@codex/validation';
+## Schema Domains
 
-const schema = createContentSchema;
-type ContentInput = z.infer<typeof schema>;
-// Type-safe input across workers and services
+### Content & Media (`content/content-schemas.ts`)
+- `createContentSchema` — create content (title, slug, type, visibility, price, etc.)
+- `updateContentSchema` — partial update
+- `publishContentSchema` — publish with optional publishedAt date
+- `contentQuerySchema` — paginated list (status, type, creatorId, visibility filters)
+- `publicContentQuerySchema` — public-facing list (published only)
+- `discoverContentQuerySchema` — discover/browse with category filter
+- `uploadRequestSchema` — presigned upload request (filename, mimeType, fileSize)
+- `createMediaItemSchema` — register media upload
+- `updateMediaItemSchema` — update media metadata
+- `mediaQuerySchema` — paginated media list
+- `checkContentSlugSchema` — slug availability check
+- `organizationQuerySchema` — org-scoped content query
+- Enums: `contentTypeEnum`, `visibilityEnum`, `contentStatusEnum`, `contentAccessTypeEnum`, `mediaTypeEnum`, `mediaStatusEnum`
+
+### Organization Members (`schemas/organization.ts`)
+- `inviteMemberSchema` — invite by email + role
+- `updateMemberRoleSchema` — change member role
+- `listMembersQuerySchema` — paginated members list with role filter
+- `publicMembersQuerySchema` — public members query
+
+### Access & Playback (`schemas/access.ts`)
+- `getStreamingUrlSchema` — request signed streaming URL (`contentId`)
+- `savePlaybackProgressSchema` — save position (`contentId`, `positionSeconds`, `durationSeconds`, `completed`)
+- `getPlaybackProgressSchema` — get progress for content
+- `listUserLibrarySchema` — paginated library with filters
+
+### Purchases (`schemas/purchase.ts`)
+- `createCheckoutSchema` — Stripe checkout (`contentId`, `successUrl`, `cancelUrl`)
+- `purchaseQuerySchema` — list purchases (userId, contentId, status)
+- `getPurchaseSchema` — get single purchase
+- `createPortalSessionSchema` — Stripe billing portal
+- `verifyCheckoutSessionSchema` — verify session after redirect
+- `checkoutSessionMetadataSchema` — internal Stripe metadata shape
+- `purchaseStatusEnum` — purchase statuses
+
+### Settings (`schemas/settings.ts`)
+- `updateBrandingSchema` — org branding (colors, fonts, radius, density, logo, intro video, hero layout)
+- `updateContactSchema` — contact settings (name, email, timezone, social URLs)
+- `updateFeaturesSchema` — feature flags (signups, purchases, subscriptions)
+- `brandingSettingsSchema`, `contactSettingsSchema`, `featureSettingsSchema` — full settings shapes
+- `allSettingsSchema` — combined settings
+- `DEFAULT_BRANDING`, `DEFAULT_CONTACT`, `DEFAULT_FEATURES` — default values
+- `pricingFaqItemSchema`, `pricingFaqSchema` — FAQ array
+- `logoMimeTypeSchema`, `ALLOWED_LOGO_MIME_TYPES`, `MAX_LOGO_FILE_SIZE_BYTES`
+
+### Subscriptions (`schemas/subscription.ts`)
+- Subscription-related schemas (plans, membership)
+
+### Transcoding (`schemas/transcoding.ts`)
+- `runpodWebhookSchema`, `runpodWebhookUnionSchema` — RunPod webhook payloads
+- `runpodWebhookOutputSchema` — transcoding output (HLS variants, thumbnails)
+- `retryTranscodingSchema`, `getTranscodingStatusSchema`
+- Enums: `runpodJobStatusEnum`, `transcodingStepEnum`, `hlsVariantSchema`, `thumbnailSizeSchema`, `mezzanineStatusEnum`
+- Types: `RunPodWebhookPayload`, `RunPodWebhookOutput`, `TranscodingStep`
+
+### File Upload (`schemas/file-upload.ts`)
+- File upload validation schemas
+
+### Notifications (`schemas/notifications.ts`)
+- Email/notification schemas
+
+### Auth (`auth.ts`)
+- Auth-related schemas (registration, login, etc.)
+
+### Identity (`identity/user-schema.ts`)
+- User profile schemas
+
+### Admin (`admin/admin-schemas.ts`)
+- Admin-only operation schemas
+
+### Pagination (`shared/pagination-schema.ts`)
+- `paginationSchema` — `{ page: number (≥1), limit: number (1–100) }`
+- `PaginationInput` — inferred type
+
+## Primitives (`primitives.ts`)
+
+| Export | Purpose |
+|---|---|
+| `uuidSchema` | UUID v4 validation |
+| `userIdSchema` | BetterAuth user ID (alphanumeric, 1–64 chars) |
+| `createSlugSchema(maxLength?)` | Slug factory (lowercase alphanumeric + hyphens) |
+| `createIdParamsSchema()` | `{ id: uuidSchema }` for route params |
+| `createSlugParamsSchema(maxLength?)` | `{ slug: slugSchema }` for route params |
+| `urlSchema` | HTTP/HTTPS only — blocks `javascript:`, `data:` |
+| `optionalUrlSchema(message?)` | Optional URL — coerces empty string to undefined |
+| `emailSchema` | Email validation |
+| `createSanitizedStringSchema(min, max, field)` | Trimmed string with length limits |
+| `createOptionalTextSchema(max, field)` | Nullable optional text |
+| `priceCentsSchema` | Integer pence, 0–10,000,000, nullable (null = free) |
+| `positiveIntSchema` | Positive integers |
+| `nonNegativeIntSchema` | Non-negative integers |
+| `isoDateSchema` | ISO 8601 → coerced `Date` |
+| `hexColorSchema` | `#RRGGBB` normalized to uppercase |
+| `timezoneSchema` | IANA timezone string |
+| `radiusValueSchema` | Border radius: 0–2 rem |
+| `densityValueSchema` | Spacing multiplier: 0.75–1.25 |
+| `fontNameSchema` | Font family name (alphanumeric + spaces, max 50) |
+| `sanitizeSvgContent(content)` | Async DOMPurify SVG sanitization |
+| `extractMimeType(contentType)` | Strips parameters from Content-Type header |
+
+`z` is also re-exported: `import { z } from '@codex/validation'`
+
+## SVG Sanitization
+
+```ts
+import { sanitizeSvgContent } from '@codex/validation';
+
+const safeSvg = await sanitizeSvgContent(userUploadedSvg);
+// Throws if sanitization results in empty content (malicious file)
+// Blocks: <script>, <iframe>, <object>, <embed>, <foreignObject>, <image>
+// Blocks: onerror, onload, onclick handlers; javascript:/data: URIs
 ```
 
-## Reference
-- **Source**: `/packages/validation/src/`
-- **Primitives**: `/packages/validation/src/primitives.ts`
-- **Schemas**: `/packages/validation/src/schemas/` and `/packages/validation/src/content/`
-- **Tests**: `/packages/validation/src/__tests__/`
+**MUST use for all SVG uploads** — unsanitized SVGs are XSS vectors.
+
+## Currency Note
+
+`priceCentsSchema` stores values in **pence (GBP)**, not cents. Max 10,000,000p = £100,000.
+
+## Strict Rules
+
+- **MUST** validate all user input (body, query, params) via `procedure({ input })` — no unvalidated input reaches handlers
+- **MUST** use existing primitives (`uuidSchema`, `urlSchema`, `emailSchema`) — NEVER write ad-hoc regex
+- **MUST** use `sanitizeSvgContent()` for ALL SVG uploads
+- **MUST** use `urlSchema` for ALL user-provided URLs — blocks dangerous protocols
+- **NEVER** define ad-hoc schemas in route handlers — add them to this package
+
+## Reference Files
+
+- `packages/validation/src/primitives.ts` — building-block schemas
+- `packages/validation/src/content/content-schemas.ts` — content/media schemas
+- `packages/validation/src/schemas/` — domain schemas
+- `packages/validation/src/shared/pagination-schema.ts` — pagination

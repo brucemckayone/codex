@@ -19,5 +19,7 @@
     flex-direction: column;
     gap: var(--space-1);
     text-align: left;
+    padding: var(--space-6) var(--space-6) var(--space-4);
+    border-bottom: var(--border-width) var(--border-style) var(--color-border-subtle);
   }
 </style>

@@ -21,9 +21,12 @@
 <style>
   .dialog-title {
     font-family: var(--font-heading);
-    font-size: var(--text-2xl);
+    font-size: var(--text-xl);
     font-weight: var(--font-bold);
     color: var(--color-text);
+    line-height: var(--leading-tight, 1.25);
+    letter-spacing: var(--tracking-tight, -0.01em);
     margin: 0;
+    padding-right: var(--space-8);
   }
 </style>

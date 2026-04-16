@@ -22,7 +22,9 @@
   // Link popover state
   let showLinkPopover = $state(false);
   let linkUrl = $state('');
+  // svelte-ignore non_reactive_update
   let linkInput: HTMLInputElement;
+  // svelte-ignore non_reactive_update
   let linkBtnElement: HTMLButtonElement;
 
   function openLinkPopover() {

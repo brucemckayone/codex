@@ -18,6 +18,11 @@
     display: flex;
     flex-direction: column-reverse;
     gap: var(--space-2);
+    padding: var(--space-4) var(--space-6) var(--space-6);
+    border-top: var(--border-width) var(--border-style) var(--color-border-subtle);
+    background: var(--color-surface-secondary);
+    border-radius: 0 0 var(--radius-modal) var(--radius-modal);
+    margin-top: auto;
   }
 
   @media (--breakpoint-sm) {

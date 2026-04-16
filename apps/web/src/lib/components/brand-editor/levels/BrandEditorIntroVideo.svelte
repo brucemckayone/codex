@@ -30,6 +30,7 @@
   let introVideoUrl = $state<string | null>(null);
   let error = $state<string | null>(null);
   let mediaItemId = $state<string | null>(null);
+  // svelte-ignore non_reactive_update
   let fileInput: HTMLInputElement;
   let deleting = $state(false);
 

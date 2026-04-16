@@ -78,6 +78,14 @@ export const LEVELS: Record<LevelId, LevelMeta> = {
     icon: '▶',
     description: 'Upload hero video',
   },
+  'header-layout': {
+    id: 'header-layout',
+    depth: 1,
+    label: 'Header Layout',
+    parent: 'home',
+    icon: '⊞',
+    description: 'Hero section arrangement',
+  },
   'fine-tune-colors': {
     id: 'fine-tune-colors',
     depth: 2,
@@ -94,6 +102,7 @@ export const LEVELS: Record<LevelId, LevelMeta> = {
 
 /** Level 1 categories shown on the home screen (in display order). */
 export const HOME_CATEGORIES: LevelId[] = [
+  'header-layout',
   'colors',
   'typography',
   'shape',

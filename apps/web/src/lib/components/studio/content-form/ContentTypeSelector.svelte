@@ -59,12 +59,13 @@
     <legend class="type-legend">{m.studio_content_form_content_type_label()}</legend>
     <div class="type-cards">
       {#each types as type}
+        {@const Icon = type.icon}
         <label class="type-card" data-selected={selectedType === type.value || undefined}>
           <input
             {...form.fields.contentType.as('radio', type.value)}
             class="sr-only"
           />
-          <svelte:component this={type.icon} size={24} />
+          <Icon size={24} />
           <span class="type-card-label">{type.label()}</span>
           <span class="type-card-desc">{type.description}</span>
         </label>

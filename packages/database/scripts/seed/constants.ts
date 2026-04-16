@@ -100,6 +100,13 @@ export const USERS = {
     role: 'customer',
     username: 'emmawilson',
   },
+  luzura: {
+    id: seedTextId('seed-user-luzura'),
+    name: 'Luzura Peralta',
+    email: 'luzura@test.com',
+    role: 'creator',
+    username: 'luzura',
+  },
 } as const;
 
 /**
@@ -126,6 +133,7 @@ export const ACCOUNTS = {
   customer3: { id: seedTextId('seed-account-customer3') },
   customer4: { id: seedTextId('seed-account-customer4') },
   customer5: { id: seedTextId('seed-account-customer5') },
+  luzura: { id: seedTextId('seed-account-luzura') },
 } as const;
 
 // ── Sessions ─────────────────────────────────────────────────
@@ -170,6 +178,10 @@ export const SESSIONS = {
     id: seedTextId('seed-session-customer5'),
     token: seedTextId('seed-token-customer5'),
   },
+  luzura: {
+    id: seedTextId('seed-session-luzura'),
+    token: seedTextId('seed-token-luzura'),
+  },
 } as const;
 
 // ── Organizations ────────────────────────────────────────────
@@ -187,6 +199,14 @@ export const ORGS = {
     slug: 'studio-beta',
     description: 'API development and backend engineering tutorials',
     primaryColor: '#2563EB',
+  },
+  bones: {
+    id: seedUuid('seed-org-bones'),
+    name: 'Of Blood & Bones',
+    slug: 'of-blood-and-bones',
+    description:
+      'Ancestral healing, somatic practices, and sacred bodywork on the shorelines of Stonehaven, Scotland',
+    primaryColor: '#A62B0C',
   },
 } as const;
 
@@ -216,6 +236,12 @@ export const MEMBERSHIPS = {
   },
   customer5AlphaMember: {
     id: seedUuid('seed-membership-customer5-alpha-member'),
+  },
+  luzuraBonesOwner: {
+    id: seedUuid('seed-membership-luzura-bones-owner'),
+  },
+  viewerBonesMember: {
+    id: seedUuid('seed-membership-viewer-bones-member'),
   },
 } as const;
 
@@ -281,6 +307,29 @@ export const MEDIA = {
     status: 'failed' as const,
     creatorId: USERS.creator.id,
   },
+  // ── Of Blood & Bones media ──
+  cacaoCeremony: {
+    id: seedUuid('seed-media-cacao-ceremony'),
+    title: 'Ceremonial Cacao Journey',
+    mediaType: 'video' as const,
+    status: 'ready' as const,
+    creatorId: USERS.luzura.id,
+    durationSeconds: 1200, // 20 min
+    width: 1920,
+    height: 1080,
+    fileSizeBytes: '62914560', // ~60MB
+    mimeType: 'video/mp4',
+  },
+  soundBowls: {
+    id: seedUuid('seed-media-sound-bowls'),
+    title: 'Sound Therapy: Singing Bowls',
+    mediaType: 'audio' as const,
+    status: 'ready' as const,
+    creatorId: USERS.luzura.id,
+    durationSeconds: 2100, // 35 min
+    fileSizeBytes: '33600000', // ~33MB
+    mimeType: 'audio/mpeg',
+  },
 } as const;
 
 // ── Subscription Tiers (defined before CONTENT because content references tier IDs) ──
@@ -310,6 +359,15 @@ export const TIERS = {
     sortOrder: 1,
     priceMonthly: 699, // £6.99/mo
     priceAnnual: 6699, // £66.99/yr (~20% discount)
+  },
+  bonesSoulPath: {
+    id: seedUuid('seed-tier-bones-soul-path'),
+    name: 'Soul Path',
+    description:
+      'Monthly access to mentorship recordings, guided practices, and the sacred calendar.',
+    sortOrder: 1,
+    priceMonthly: 1500, // £15.00/mo
+    priceAnnual: 14400, // £144.00/yr (~20% discount)
   },
 } as const;
 
@@ -497,6 +555,158 @@ export const CONTENT = {
     viewCount: 15,
     purchaseCount: 0,
   },
+  // ── Of Blood & Bones offerings ──
+  skinTalismans: {
+    id: seedUuid('seed-content-skin-talismans'),
+    title: 'Skin Talismans',
+    slug: 'skin-talismans',
+    contentType: 'written' as const,
+    priceCents: null,
+    status: 'published' as const,
+    orgId: ORGS.bones.id,
+    mediaId: null,
+    creatorId: USERS.luzura.id,
+    viewCount: 1240,
+    purchaseCount: 0,
+  },
+  toothTalismans: {
+    id: seedUuid('seed-content-tooth-talismans'),
+    title: 'Tooth Talismans',
+    slug: 'tooth-talismans',
+    contentType: 'written' as const,
+    accessType: 'paid' as const,
+    priceCents: 4999,
+    status: 'published' as const,
+    orgId: ORGS.bones.id,
+    mediaId: null,
+    creatorId: USERS.luzura.id,
+    viewCount: 890,
+    purchaseCount: 34,
+  },
+  soulPath: {
+    id: seedUuid('seed-content-soul-path'),
+    title: 'Soul Path Mentorship',
+    slug: 'soul-path-mentorship',
+    contentType: 'written' as const,
+    accessType: 'subscribers' as const,
+    priceCents: null,
+    minimumTierId: TIERS.bonesSoulPath.id,
+    status: 'published' as const,
+    orgId: ORGS.bones.id,
+    mediaId: null,
+    creatorId: USERS.luzura.id,
+    viewCount: 320,
+    purchaseCount: 0,
+  },
+  limpia: {
+    id: seedUuid('seed-content-limpia'),
+    title: 'Limpia: Energy Cleansing',
+    slug: 'limpia-energy-cleansing',
+    contentType: 'written' as const,
+    priceCents: null,
+    status: 'published' as const,
+    orgId: ORGS.bones.id,
+    mediaId: null,
+    creatorId: USERS.luzura.id,
+    viewCount: 670,
+    purchaseCount: 0,
+  },
+  ceremonialCacao: {
+    id: seedUuid('seed-content-ceremonial-cacao'),
+    title: 'Ceremonial Cacao',
+    slug: 'ceremonial-cacao',
+    contentType: 'video' as const,
+    accessType: 'paid' as const,
+    priceCents: 1999,
+    status: 'published' as const,
+    orgId: ORGS.bones.id,
+    mediaId: MEDIA.cacaoCeremony.id,
+    creatorId: USERS.luzura.id,
+    viewCount: 1560,
+    purchaseCount: 87,
+  },
+  sacredCalendar: {
+    id: seedUuid('seed-content-sacred-calendar'),
+    title: 'Sacred Calendar',
+    slug: 'sacred-calendar',
+    contentType: 'written' as const,
+    accessType: 'subscribers' as const,
+    priceCents: null,
+    minimumTierId: TIERS.bonesSoulPath.id,
+    status: 'published' as const,
+    orgId: ORGS.bones.id,
+    mediaId: null,
+    creatorId: USERS.luzura.id,
+    viewCount: 245,
+    purchaseCount: 0,
+  },
+  closingTheBones: {
+    id: seedUuid('seed-content-closing-the-bones'),
+    title: 'Closing the Bones',
+    slug: 'closing-the-bones',
+    contentType: 'written' as const,
+    priceCents: null,
+    status: 'published' as const,
+    orgId: ORGS.bones.id,
+    mediaId: null,
+    creatorId: USERS.luzura.id,
+    viewCount: 980,
+    purchaseCount: 0,
+  },
+  held: {
+    id: seedUuid('seed-content-held'),
+    title: 'H.E.L.D',
+    slug: 'held',
+    contentType: 'written' as const,
+    accessType: 'paid' as const,
+    priceCents: 2999,
+    status: 'published' as const,
+    orgId: ORGS.bones.id,
+    mediaId: null,
+    creatorId: USERS.luzura.id,
+    viewCount: 410,
+    purchaseCount: 22,
+  },
+  neuroSomatic: {
+    id: seedUuid('seed-content-neuro-somatic'),
+    title: 'Neuro Somatic Intelligence',
+    slug: 'neuro-somatic-intelligence',
+    contentType: 'written' as const,
+    priceCents: null,
+    status: 'published' as const,
+    orgId: ORGS.bones.id,
+    mediaId: null,
+    creatorId: USERS.luzura.id,
+    viewCount: 530,
+    purchaseCount: 0,
+  },
+  soundTherapy: {
+    id: seedUuid('seed-content-sound-therapy'),
+    title: 'Sound Therapy',
+    slug: 'sound-therapy',
+    contentType: 'audio' as const,
+    priceCents: null,
+    status: 'published' as const,
+    orgId: ORGS.bones.id,
+    mediaId: MEDIA.soundBowls.id,
+    creatorId: USERS.luzura.id,
+    viewCount: 780,
+    purchaseCount: 0,
+  },
+  ecoSomatic: {
+    id: seedUuid('seed-content-eco-somatic'),
+    title: 'Eco Somatic Experiencing',
+    slug: 'eco-somatic-experiencing',
+    contentType: 'written' as const,
+    accessType: 'followers' as const,
+    priceCents: null,
+    status: 'published' as const,
+    orgId: ORGS.bones.id,
+    mediaId: null,
+    creatorId: USERS.luzura.id,
+    viewCount: 350,
+    purchaseCount: 0,
+  },
 } as const;
 
 // ── Thumbnail Image Seeds (picsum.photos) ───────────────────
@@ -507,6 +717,8 @@ export const THUMBNAIL_SEEDS: Record<string, string> = {
   [MEDIA.advancedSvelte.id]: 'svelte-advanced',
   [MEDIA.honoApis.id]: 'api-building',
   [MEDIA.podcast.id]: 'podcast-tech',
+  [MEDIA.cacaoCeremony.id]: 'cacao-ceremony',
+  [MEDIA.soundBowls.id]: 'sound-bowls',
 };
 
 // ── Purchases ────────────────────────────────────────────────
@@ -525,6 +737,7 @@ export const PURCHASES = {
   c4TsDeep: { id: seedUuid('seed-purchase-c4-ts-deep') },
   c4Css: { id: seedUuid('seed-purchase-c4-css') },
   c5TsDeep: { id: seedUuid('seed-purchase-c5-ts-deep') },
+  viewerCacao: { id: seedUuid('seed-purchase-viewer-cacao') },
 } as const;
 
 // ── Content Access ───────────────────────────────────────────
@@ -544,6 +757,7 @@ export const CONTENT_ACCESS = {
   c4TsDeep: { id: seedUuid('seed-access-c4-ts-deep') },
   c4Css: { id: seedUuid('seed-access-c4-css') },
   c5TsDeep: { id: seedUuid('seed-access-c5-ts-deep') },
+  viewerCacao: { id: seedUuid('seed-access-viewer-cacao') },
 } as const;
 
 // ── Playback ─────────────────────────────────────────────────
@@ -553,6 +767,7 @@ export const PLAYBACK = {
   viewerPodcast: { id: seedUuid('seed-playback-viewer-podcast') },
   adminHono: { id: seedUuid('seed-playback-admin-hono') },
   adminSvelte: { id: seedUuid('seed-playback-admin-svelte') },
+  viewerCacao: { id: seedUuid('seed-playback-viewer-cacao') },
 } as const;
 
 // ── Subscriptions ───────────────────────────────────────────
@@ -587,5 +802,10 @@ export const SETTINGS = {
     platformName: 'Studio Beta',
     supportEmail: 'support@studiobeta.test',
     contactUrl: 'https://studiobeta.test/contact',
+  },
+  bones: {
+    platformName: 'Of Blood & Bones',
+    supportEmail: 'hello@ofbloodandbones.com',
+    contactUrl: 'https://ofbloodandbones.com/contact',
   },
 } as const;

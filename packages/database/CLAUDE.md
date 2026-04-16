@@ -6,108 +6,115 @@ Drizzle ORM + Neon PostgreSQL access layer.
 
 | Client | Transport | Use Case | Transactions |
 |---|---|---|---|
-| **`dbHttp`** | HTTP (stateless) | Production workers, simple queries | No |
-| **`dbWs`** | WebSocket (stateful) | Tests, dev, multi-step mutations | Yes |
+| **`dbHttp`** | HTTP (stateless) | Module-level singleton for simple queries | No |
+| **`dbWs`** | WebSocket (stateful) | Module-level singleton for transactions (tests/dev) | Yes |
+| **`createDbClient(env)`** | HTTP | Per-request HTTP client (inject env at runtime) | No |
+| **`createPerRequestDbClient(env)`** | WebSocket | Per-request WS client with `cleanup()` — required in Workers | Yes |
 
-**Factories:**
-- `createDbClient(env)` → HTTP client for production
-- `createPerRequestDbClient(env)` → WebSocket client with cleanup (for transactions)
+**In Cloudflare Workers**: always use `createDbClient(env)` for HTTP or `createPerRequestDbClient(env)` for transactions — the module-level singletons don't have access to runtime env bindings.
+
+```ts
+// Simple query in a Worker
+const db = createDbClient(c.env);
+const items = await db.query.content.findMany({ where: scopedNotDeleted(schema.content, userId) });
+
+// Transaction in a Worker
+const { db, cleanup } = createPerRequestDbClient(c.env);
+await db.transaction(async (tx) => {
+  const [item] = await tx.insert(schema.content).values(data).returning();
+  await tx.insert(schema.mediaItems).values({ contentId: item.id });
+});
+ctx.waitUntil(cleanup()); // MUST close pool — use waitUntil so it runs after response
+```
 
 ## Schema (Key Tables)
 
 | Domain | Tables |
 |---|---|
-| **Identity** | `users`, `sessions`, `accounts`, `verificationTokens` |
+| **Auth** | `sessions`, `accounts`, `verificationTokens` |
+| **Users** | `users` |
 | **Organization** | `organizations`, `organizationMemberships` |
 | **Content** | `content`, `mediaItems` |
-| **Ecommerce** | `purchases`, `contentAccess` (entitlements), `platformFeeConfig` |
-| **Tracking** | `videoPlayback`, `emailAuditLogs` |
+| **Ecommerce** | `purchases`, `contentAccess`, `platformFeeConfig` |
+| **Playback** | `videoPlayback` |
+| **Notifications** | `emailAuditLogs` |
+| **Settings** | `platformSettings` (branding, features, contact) |
+| **Storage** | orphaned entity/image tracking |
+| **Subscriptions** | `subscriptions`, `subscriptionPlans` |
+| **Followers** | `followers` |
+
+Import: `import * as schema from '@codex/database'` (re-exported as namespace).
 
 ## Query Helpers
 
-| Helper | Purpose | Usage |
+Import from `@codex/database` (re-exported from `utils`):
+
+| Helper | Signature | Purpose |
 |---|---|---|
-| `whereNotDeleted(table)` | Soft delete filter | `where: whereNotDeleted(content)` |
-| `withCreatorScope(table, creatorId)` | Creator ownership filter | `where: withCreatorScope(content, userId)` |
-| `scopedNotDeleted(table, creatorId)` | Combined scope + soft delete (most common) | `where: scopedNotDeleted(content, userId)` |
-| `withPagination({ page, limit })` | Page → offset conversion | Returns `{ limit, offset }` |
+| `whereNotDeleted(table)` | `(T) → SQL` | Soft delete filter: `isNull(table.deletedAt)` |
+| `withCreatorScope(table, creatorId)` | `(T, string) → SQL` | Creator ownership: `eq(table.creatorId, id)` |
+| `withOrgScope(table, orgId)` | `(T, string) → SQL` | Org isolation: `eq(table.organizationId, id)` |
+| `scopedNotDeleted(table, creatorId)` | `(T, string) → SQL` | `whereNotDeleted` + `withCreatorScope` combined |
+| `orgScopedNotDeleted(table, orgId)` | `(T, string) → SQL` | `whereNotDeleted` + `withOrgScope` combined |
+| `withPagination({ page, limit })` | `({page,limit}) → {limit,offset}` | Page → offset conversion (1-indexed pages) |
+| `isUniqueViolation(error)` | `(unknown) → boolean` | Detects Postgres 23505 (also unwraps Drizzle cause) |
+| `isForeignKeyViolation(error)` | `(unknown) → boolean` | Detects Postgres 23503 |
+| `isNotNullViolation(error)` | `(unknown) → boolean` | Detects Postgres 23502 |
+| `getConstraintName(error)` | `(unknown) → string\|null` | Extracts constraint name from Postgres error |
 
-**Error Detection:**
-- `isUniqueViolation(error)` → detects duplicate key errors (use for slug conflicts, etc.)
-- `isForeignKeyViolation(error)` → detects FK constraint failures
-
-## Usage
+Drizzle operators (`and`, `eq`, `or`, `desc`, `asc`, `count`, `sql`, etc.) are also re-exported directly from `@codex/database`.
 
 ```ts
-// Production (HTTP, no transactions)
-const db = createDbClient(env);
-const items = await db.query.content.findMany({
-  where: scopedNotDeleted(content, creatorId),
+// Most common pattern: fetch one item scoped to creator
+const item = await db.query.content.findFirst({
+  where: and(
+    eq(schema.content.id, id),
+    scopedNotDeleted(schema.content, creatorId)
+  )
 });
+if (!item) throw new NotFoundError('Content not found', { contentId: id });
 
-// Transactions (WebSocket only)
-const db = createPerRequestDbClient(env);
-await db.transaction(async (tx) => {
-  const [item] = await tx.insert(content).values(data).returning();
-  await tx.insert(mediaItems).values({ contentId: item.id, ... });
-  // If any throw, both operations rollback
+// Org-scoped public query
+const items = await db.query.content.findMany({
+  where: orgScopedNotDeleted(schema.content, orgId),
+  ...withPagination({ page, limit }),
+  orderBy: [desc(schema.content.publishedAt)]
 });
 ```
 
 ## Strict Rules
 
 ### Security Scoping (MANDATORY)
-
-- **MUST** scope EVERY query with `scopedNotDeleted(table, creatorId)` or `withCreatorScope()` — unscoped queries are a data exposure vulnerability
-- **NEVER** query by ID alone without a scoping filter
-
-```ts
-// WRONG — data exposure vulnerability
-const item = await db.query.content.findFirst({
-  where: eq(content.id, id)
-});
-
-// CORRECT — always scope
-const item = await db.query.content.findFirst({
-  where: and(
-    eq(content.id, id),
-    scopedNotDeleted(content, creatorId)
-  )
-});
-```
+- **MUST** scope EVERY query with `scopedNotDeleted` or `orgScopedNotDeleted` — querying by ID alone is a data exposure vulnerability
+- **NEVER** use bare `eq(table.id, id)` without a creator/org scope filter
 
 ### Soft Deletes
-
-- **MUST** use `whereNotDeleted(table)` in all queries (or `scopedNotDeleted` which includes it)
-- **MUST** delete by setting `deletedAt: new Date()` — NEVER hard-delete rows
-- **NEVER** use `db.delete()` — use `db.update().set({ deletedAt: new Date() })`
+- **MUST** delete by setting `deletedAt: new Date()` via `db.update().set({ deletedAt: new Date() })`
+- **NEVER** use `db.delete()` — hard deletes break audit trails
 
 ### Transactions
-
-- **MUST** use `db.transaction()` for multi-step mutations (create + update, state transitions)
-- **MUST** use `dbWs` (WebSocket client) for transactions — `dbHttp` does NOT support them
+- **MUST** use `createPerRequestDbClient(env)` (not `dbWs`) in Cloudflare Workers for transactions
+- **MUST** call `cleanup()` after every `createPerRequestDbClient` usage — use `ctx.waitUntil(cleanup())`
 - **MUST** let errors propagate inside transactions for auto-rollback — NEVER catch inside unless you want partial commit
-- **DO NOT** use transactions for single-row inserts/updates or read-only queries
+- `dbWs` (module-level) is for tests only
 
-### Assertions
+## Type Exports
 
-- **MUST** use `invariant()` for precondition checks and state validation in services
-- Example: `invariant(media.status === 'ready', 'Media must be ready to publish')`
+```ts
+import type { Database, DatabaseWs } from '@codex/database';
+// Database = HTTP client type (for service constructors)
+// DatabaseWs = WS client type
+```
 
 ## Migrations
 
 - Generate: `pnpm db:generate`
 - Apply: `pnpm db:migrate`
-- Migration files: `packages/database/src/migrations/`
-- Journal: `packages/database/src/migrations/meta/_journal.json`
-
-## Integration
-
-- **Depends on**: Drizzle ORM, Neon serverless driver
-- **Used by**: All service packages (`@codex/content`, `@codex/organization`, `@codex/purchase`, etc.)
+- Files: `packages/database/src/migrations/`
 
 ## Reference Files
 
 - `packages/database/src/schema/` — all table definitions
-- `packages/database/src/utils/query-helpers.ts` — `scopedNotDeleted`, `whereNotDeleted`, `withPagination`
-- `packages/database/src/index.ts` — client factories
+- `packages/database/src/utils/query-helpers.ts` — `scopedNotDeleted`, `withPagination`, etc.
+- `packages/database/src/utils/db-errors.ts` — `isUniqueViolation`, `isForeignKeyViolation`
+- `packages/database/src/client.ts` — client factories and exports

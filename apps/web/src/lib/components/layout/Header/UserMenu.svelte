@@ -117,11 +117,6 @@
     }
   }
 
-  .chevron {
-    color: var(--color-text-muted);
-    flex-shrink: 0;
-  }
-
   .user-info {
     padding: var(--space-2) var(--space-3);
     display: flex;

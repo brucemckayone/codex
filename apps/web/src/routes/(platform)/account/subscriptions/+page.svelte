@@ -219,7 +219,7 @@
 
 <!-- Cancel Subscription Dialog -->
 <Dialog.Root bind:open={cancelDialogOpen}>
-  <Dialog.Content>
+  <Dialog.Content size="sm">
     <Dialog.Header>
       <Dialog.Title>{m.subscription_cancel()}</Dialog.Title>
       {#if cancellingSubscription}
@@ -229,7 +229,7 @@
       {/if}
     </Dialog.Header>
 
-    <div class="cancel-form">
+    <Dialog.Body>
       <div class="form-field">
         <Label for="cancel-reason">{m.subscription_cancel_reason()}</Label>
         <TextArea
@@ -243,7 +243,7 @@
       {#if cancelError}
         <Alert variant="error">{cancelError}</Alert>
       {/if}
-    </div>
+    </Dialog.Body>
 
     <Dialog.Footer>
       <Button variant="ghost" onclick={() => { cancelDialogOpen = false; }}>
@@ -357,12 +357,6 @@
     margin: 0;
   }
 
-  .cancel-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    padding: 0 var(--space-4);
-  }
 
   .form-field {
     display: flex;

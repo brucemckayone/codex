@@ -127,7 +127,7 @@
   const avgSpend = $derived(rawItems.length ? Math.round(pageRevenue / rawItems.length) : 0);
 
   // ── FilterBar config ───────────────────────────────────────────────
-  const filterConfigs = [
+  const filterConfigs = $derived([
     { type: 'search' as const, key: 'search', placeholder: m.studio_customers_search_placeholder(), mode: 'submit' as const },
     {
       type: 'select' as const, key: 'joined', label: m.studio_customers_filter_joined(),
@@ -155,7 +155,7 @@
       placeholder: m.studio_customers_filter_content_all(),
       options: contentOptions,
     },
-  ];
+  ]);
 
   const filterValues = $derived({
     search: page.url.searchParams.get('search') ?? '',
@@ -437,13 +437,6 @@
     .stats-bar {
       grid-template-columns: 1fr;
     }
-  }
-
-  /* ── Filtered notice ──────────────────────────────────────────────── */
-  .filtered-notice {
-    margin: 0;
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
   }
 
   /* ── Pagination + page size ───────────────────────────────────────── */

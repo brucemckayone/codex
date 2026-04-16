@@ -26,6 +26,7 @@
   import Label from '$lib/components/ui/Label/Label.svelte';
   import { TrashIcon, EditIcon, PlusIcon, CheckCircleIcon } from '$lib/components/ui/Icon';
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
+  import { toast } from '$lib/components/ui/Toast/toast-store';
   import { onMount } from 'svelte';
   import {
     listTiers,
@@ -250,6 +251,27 @@
     }
   }
 
+
+  // ─── Recommended Toggle ─────────────────────────────────────────────────
+
+  async function handleToggleRecommended(tier: SubscriptionTier) {
+    try {
+      await updateTier({
+        orgId,
+        tierId: tier.id,
+        isRecommended: !tier.isRecommended,
+      });
+      await invalidateAll();
+      toast.success(
+        tier.isRecommended
+          ? 'Removed recommended status'
+          : `${tier.name} set as recommended`
+      );
+    } catch {
+      toast.error('Failed to update tier');
+    }
+  }
+
   // ─── Connect ────────────────────────────────────────────────────────────
 
   async function handleConnectOnboard() {
@@ -440,11 +462,22 @@
               <div class="tier-info">
                 <div class="tier-rank">{i + 1}</div>
                 <div class="tier-details">
-                  <span class="tier-name">{tier.name}</span>
+                  <div class="tier-name-row">
+                    <span class="tier-name">{tier.name}</span>
+                    {#if tier.isRecommended}
+                      <Badge variant="success">Recommended</Badge>
+                    {/if}
+                  </div>
                   {#if tier.description}
                     <span class="tier-description">{tier.description}</span>
                   {/if}
                 </div>
+              </div>
+              <div class="tier-recommended">
+                <Switch
+                  checked={tier.isRecommended}
+                  onclick={() => handleToggleRecommended(tier)}
+                />
               </div>
               <div class="tier-prices">
                 <span class="tier-price">
@@ -500,58 +533,60 @@
     </Dialog.Header>
 
     <form class="tier-form" onsubmit={(e) => { e.preventDefault(); handleTierSubmit(); }}>
-      <div class="form-field">
-        <Label for="tier-name">{m.monetisation_tier_name()}</Label>
-        <Input
-          id="tier-name"
-          bind:value={tierName}
-          placeholder="e.g. Basic, Pro, Premium"
-          required
-          maxlength={100}
-        />
-      </div>
-
-      <div class="form-field">
-        <Label for="tier-description">{m.monetisation_tier_description()}</Label>
-        <TextArea
-          id="tier-description"
-          bind:value={tierDescription}
-          placeholder="What subscribers get at this tier"
-          rows={3}
-          maxlength={500}
-        />
-      </div>
-
-      <div class="form-row">
+      <Dialog.Body>
         <div class="form-field">
-          <Label for="tier-price-monthly">{m.monetisation_tier_price_monthly()}</Label>
+          <Label for="tier-name">{m.monetisation_tier_name()}</Label>
           <Input
-            id="tier-price-monthly"
-            type="number"
-            bind:value={tierPriceMonthly}
-            min={100}
-            step={1}
+            id="tier-name"
+            bind:value={tierName}
+            placeholder="e.g. Basic, Pro, Premium"
             required
+            maxlength={100}
           />
-          <span class="form-hint">{formatPrice(tierPriceMonthly)}</span>
         </div>
-        <div class="form-field">
-          <Label for="tier-price-annual">{m.monetisation_tier_price_annual()}</Label>
-          <Input
-            id="tier-price-annual"
-            type="number"
-            bind:value={tierPriceAnnual}
-            min={100}
-            step={1}
-            required
-          />
-          <span class="form-hint">{formatPrice(tierPriceAnnual)}</span>
-        </div>
-      </div>
 
-      {#if tierFormError}
-        <Alert variant="error">{tierFormError}</Alert>
-      {/if}
+        <div class="form-field">
+          <Label for="tier-description">{m.monetisation_tier_description()}</Label>
+          <TextArea
+            id="tier-description"
+            bind:value={tierDescription}
+            placeholder="What subscribers get at this tier"
+            rows={3}
+            maxlength={500}
+          />
+        </div>
+
+        <div class="form-row">
+          <div class="form-field">
+            <Label for="tier-price-monthly">{m.monetisation_tier_price_monthly()}</Label>
+            <Input
+              id="tier-price-monthly"
+              type="number"
+              bind:value={tierPriceMonthly}
+              min={100}
+              step={1}
+              required
+            />
+            <span class="form-hint">{formatPrice(tierPriceMonthly)}</span>
+          </div>
+          <div class="form-field">
+            <Label for="tier-price-annual">{m.monetisation_tier_price_annual()}</Label>
+            <Input
+              id="tier-price-annual"
+              type="number"
+              bind:value={tierPriceAnnual}
+              min={100}
+              step={1}
+              required
+            />
+            <span class="form-hint">{formatPrice(tierPriceAnnual)}</span>
+          </div>
+        </div>
+
+        {#if tierFormError}
+          <Alert variant="error">{tierFormError}</Alert>
+        {/if}
+      </Dialog.Body>
 
       <Dialog.Footer>
         <Button variant="ghost" type="button" onclick={() => { tierDialogOpen = false; }}>
@@ -567,14 +602,16 @@
 
 <!-- Delete Tier Dialog -->
 <Dialog.Root bind:open={deleteDialogOpen}>
-  <Dialog.Content>
+  <Dialog.Content size="sm">
     <Dialog.Header>
       <Dialog.Title>{m.monetisation_tiers_delete()}</Dialog.Title>
     </Dialog.Header>
-    <p class="delete-confirm">{m.monetisation_tiers_delete_confirm()}</p>
-    {#if deleteError}
-      <Alert variant="error">{deleteError}</Alert>
-    {/if}
+    <Dialog.Body>
+      <p class="delete-confirm">{m.monetisation_tiers_delete_confirm()}</p>
+      {#if deleteError}
+        <Alert variant="error">{deleteError}</Alert>
+      {/if}
+    </Dialog.Body>
     <Dialog.Footer>
       <Button variant="ghost" onclick={() => { deleteDialogOpen = false; deletingTier = null; }} disabled={deleteLoading}>
         {m.monetisation_cancel()}
@@ -753,6 +790,18 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .tier-name-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .tier-recommended {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
   }
 
   .tier-prices {

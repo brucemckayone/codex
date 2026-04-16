@@ -24,7 +24,7 @@
 		}
 	}
 
-	const categoryLabel = data.category === 'marketing' ? 'marketing emails' : 'weekly digest emails';
+	const categoryLabel = $derived(data.category === 'marketing' ? 'marketing emails' : 'weekly digest emails');
 </script>
 
 <svelte:head>

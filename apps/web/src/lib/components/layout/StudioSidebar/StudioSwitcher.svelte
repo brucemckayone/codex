@@ -161,21 +161,11 @@
     font-weight: var(--font-medium);
   }
 
-  .switcher-chevron {
-    color: var(--color-text-muted);
-    flex-shrink: 0;
-  }
-
   .item-content {
     display: flex;
     align-items: center;
     gap: var(--space-2);
     flex: 1;
-  }
-
-  .check {
-    color: var(--color-interactive);
-    flex-shrink: 0;
   }
 
   .org-icon {

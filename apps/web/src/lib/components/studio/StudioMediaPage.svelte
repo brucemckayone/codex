@@ -200,12 +200,14 @@
 
 <!-- Delete Confirmation Dialog -->
 <Dialog.Root bind:open={showDeleteConfirm} onOpenChange={handleDeleteDialogChange}>
-  <Dialog.Content>
+  <Dialog.Content size="sm">
     <Dialog.Header>
       <Dialog.Title>{m.media_delete_title()}</Dialog.Title>
     </Dialog.Header>
-    <p class="delete-description">{m.media_delete_confirm()}</p>
-    <div class="dialog-actions">
+    <Dialog.Body>
+      <p class="delete-description">{m.media_delete_confirm()}</p>
+    </Dialog.Body>
+    <Dialog.Footer>
       <Button
         variant="secondary"
         onclick={() => handleDeleteDialogChange(false)}
@@ -216,7 +218,7 @@
       <Button variant="destructive" onclick={confirmDelete} disabled={isDeleting} loading={isDeleting}>
         {isDeleting ? m.common_loading() : m.media_delete_button()}
       </Button>
-    </div>
+    </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>
 
@@ -307,9 +309,4 @@
     line-height: var(--leading-relaxed);
   }
 
-  .dialog-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--space-2);
-  }
 </style>

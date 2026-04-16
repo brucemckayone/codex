@@ -1,3 +1,4 @@
+import { VIDEO_PROGRESS } from '@codex/constants';
 import type { RequestEvent } from '@sveltejs/kit';
 import { json } from '@sveltejs/kit';
 import { z } from 'zod';
@@ -34,7 +35,8 @@ export const POST = async ({ request, platform, cookies }: RequestEvent) => {
     entries.map((entry) => {
       const completed =
         entry.durationSeconds > 0 &&
-        entry.positionSeconds / entry.durationSeconds > 0.9;
+        entry.positionSeconds / entry.durationSeconds >=
+          VIDEO_PROGRESS.COMPLETION_THRESHOLD;
 
       return api.access.saveProgress(entry.contentId, {
         positionSeconds: entry.positionSeconds,

@@ -156,6 +156,7 @@ const publicContentQueryParamsSchema = z.object({
   contentType: z.enum(['video', 'audio', 'written']).optional(),
   search: z.string().max(255).optional(),
   sort: z.enum(['newest', 'oldest', 'title']).default('newest').optional(),
+  creatorId: z.string().uuid().optional(),
 });
 
 /**
@@ -184,6 +185,7 @@ export const getPublicContent = query(
     if (params.contentType) searchParams.set('contentType', params.contentType);
     if (params.search) searchParams.set('search', params.search);
     if (params.sort) searchParams.set('sort', params.sort);
+    if (params.creatorId) searchParams.set('creatorId', params.creatorId);
 
     return api.content.getPublicContent(searchParams);
   }
@@ -464,6 +466,77 @@ export const createContentForm = form(
     }
   }
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Content Thumbnail Upload (file upload via form)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const uploadThumbnailSchema = z.object({
+  contentId: z.string().uuid(),
+  thumbnail: z
+    .instanceof(File)
+    .refine(
+      (file) => ['image/png', 'image/jpeg', 'image/webp'].includes(file.type),
+      'Thumbnail must be PNG, JPEG, or WebP'
+    )
+    .refine(
+      (file) => file.size <= 10 * 1024 * 1024,
+      'File must be less than 10MB'
+    ),
+});
+
+/**
+ * Upload content thumbnail
+ *
+ * Uses form() for native FormData submission (File objects cannot be
+ * serialized by command()/devalue).
+ *
+ * Usage:
+ * ```svelte
+ * <form {...uploadThumbnailForm} enctype="multipart/form-data">
+ *   <input type="hidden" name="contentId" value={contentId} />
+ *   <input type="file" name="thumbnail" accept="image/png,image/jpeg,image/webp" />
+ *   <button>Upload</button>
+ * </form>
+ * ```
+ */
+export const uploadThumbnailForm = form(
+  uploadThumbnailSchema,
+  async ({ contentId, thumbnail }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    try {
+      const result = await api.content.uploadThumbnail(contentId, thumbnail);
+      return {
+        success: true as const,
+        thumbnailUrl: result.thumbnailUrl,
+      };
+    } catch (error) {
+      return {
+        success: false as const,
+        error:
+          error instanceof Error ? error.message : 'Failed to upload thumbnail',
+      };
+    }
+  }
+);
+
+/**
+ * Delete content thumbnail
+ */
+export const deleteThumbnailCommand = command(
+  z.string().uuid(),
+  async (contentId) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.content.deleteThumbnail(contentId);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Content Update Form (progressive enhancement)
+// ─────────────────────────────────────────────────────────────────────────────
 
 const updateContentFormSchema = z.object({
   contentId: z.string().uuid(),

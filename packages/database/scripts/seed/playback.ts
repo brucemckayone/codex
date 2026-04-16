@@ -56,7 +56,18 @@ export async function seedPlayback(db: typeof DbClient) {
       createdAt: now,
       updatedAt: now,
     },
+    // Of Blood & Bones: viewer watching Ceremonial Cacao (40%)
+    {
+      id: PLAYBACK.viewerCacao.id,
+      userId: USERS.viewer.id,
+      contentId: CONTENT.ceremonialCacao.id,
+      positionSeconds: Math.round(MEDIA.cacaoCeremony.durationSeconds * 0.4),
+      durationSeconds: MEDIA.cacaoCeremony.durationSeconds,
+      completed: false,
+      createdAt: now,
+      updatedAt: now,
+    },
   ]);
 
-  console.log('  Seeded 5 playback progress records');
+  console.log('  Seeded 6 playback progress records');
 }

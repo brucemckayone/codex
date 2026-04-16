@@ -46,20 +46,24 @@
     if (navigation.from?.url.pathname === navigation.to.url.pathname) return;
 
     return new Promise((resolve) => {
-      const transition = document.startViewTransition(async () => {
-        resolve();
-        await navigation.complete;
-      });
+      try {
+        const transition = document.startViewTransition(async () => {
+          resolve();
+          await navigation.complete;
+        });
 
-      // Safety valve: skip the visual transition if DOM update takes too long.
-      // With experimental.async, Svelte's tick() races rAF against setTimeout,
-      // but slow server loads (cold workers in dev) can still hit edge cases.
-      // skipTransition() completes the transition instantly (no animation),
-      // ensuring the DOM always updates without waiting for Chrome's 4s timeout.
-      const safety = setTimeout(() => transition.skipTransition(), 1200);
-      transition.finished
-        .finally(() => clearTimeout(safety))
-        .catch(() => {});
+        // Safety valve: skip the visual transition if DOM update takes too long.
+        // skipTransition() completes the transition instantly (no animation),
+        // ensuring the DOM always updates without waiting for Chrome's 4s timeout.
+        const safety = setTimeout(() => transition.skipTransition(), 800);
+        transition.finished
+          .finally(() => clearTimeout(safety))
+          .catch(() => {});
+      } catch {
+        // startViewTransition throws DOMException if a transition is already active.
+        // Resolve immediately so SvelteKit proceeds with navigation.
+        resolve();
+      }
     });
   });
 

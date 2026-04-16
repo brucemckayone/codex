@@ -112,27 +112,24 @@ export function drawQuad(gl: WebGL2RenderingContext): void {
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
-/** Create a single RGBA16F FBO at the given resolution. */
-export function createFBO(
+/**
+ * Create an FBO with a specific internal format.
+ * Generalizes createFBO for use cases beyond RGBA16F (e.g., R8 for SDFs).
+ */
+export function createFBOWithFormat(
   gl: WebGL2RenderingContext,
   w: number,
-  h: number
+  h: number,
+  internalFormat: number,
+  format: number,
+  type: number,
+  filter: number = gl.LINEAR
 ): FBO {
   const tex = gl.createTexture()!;
   gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texImage2D(
-    gl.TEXTURE_2D,
-    0,
-    gl.RGBA16F,
-    w,
-    h,
-    0,
-    gl.RGBA,
-    gl.HALF_FLOAT,
-    null
-  );
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, w, h, 0, format, type, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
@@ -148,6 +145,15 @@ export function createFBO(
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
   return { fbo, tex, w, h };
+}
+
+/** Create a single RGBA16F FBO at the given resolution. */
+export function createFBO(
+  gl: WebGL2RenderingContext,
+  w: number,
+  h: number
+): FBO {
+  return createFBOWithFormat(gl, w, h, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT);
 }
 
 /** Create a ping-pong double FBO for feedback simulations. */

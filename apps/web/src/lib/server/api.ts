@@ -172,11 +172,26 @@ export function createServerApi(
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
     const timer = logger.startTimer(`api:${worker}${path}`);
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-      headers,
-    }).finally(() => clearTimeout(timeoutId));
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers,
+      });
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        timer.end({ method: options?.method ?? 'GET', status: 408 });
+        throw new ApiError(
+          408,
+          `Request to ${worker}${path} timed out`,
+          'REQUEST_TIMEOUT'
+        );
+      }
+      throw err;
+    }
+    clearTimeout(timeoutId);
     timer.end({ method: options?.method ?? 'GET', status: response.status });
 
     if (!response.ok) {
@@ -249,11 +264,26 @@ export function createServerApi(
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
       const timer = logger.startTimer(`api.fetch:${worker}${path}`);
-      const response = await fetch(url, {
-        ...options,
-        signal: controller.signal,
-        headers,
-      }).finally(() => clearTimeout(timeoutId));
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          ...options,
+          signal: controller.signal,
+          headers,
+        });
+      } catch (err) {
+        clearTimeout(timeoutId);
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          timer.end({ method: options?.method ?? 'GET', status: 408 });
+          throw new ApiError(
+            408,
+            `Request to ${worker}${path} timed out`,
+            'REQUEST_TIMEOUT'
+          );
+        }
+        throw err;
+      }
+      clearTimeout(timeoutId);
       timer.end({ method: options?.method ?? 'GET', status: response.status });
 
       if (!response.ok) {
@@ -502,6 +532,51 @@ export function createServerApi(
        */
       delete: (id: string) =>
         request<void>('content', `/api/content/${id}`, {
+          method: 'DELETE',
+        }),
+
+      /**
+       * Upload content thumbnail (multipart - uses raw fetch for FormData, then unwraps procedure envelope)
+       */
+      uploadThumbnail: (
+        id: string,
+        file: File
+      ): Promise<{ thumbnailUrl: string; size: number; mimeType: string }> => {
+        const url = `${serverApiUrl(platform, 'content')}/api/content/${id}/thumbnail`;
+        const formData = new FormData();
+        formData.append('thumbnail', file);
+
+        return fetch(url, {
+          method: 'POST',
+          headers: sessionCookie
+            ? { Cookie: `${COOKIES.SESSION_NAME}=${sessionCookie}` }
+            : {},
+          body: formData,
+        }).then(async (res) => {
+          if (!res.ok)
+            throw new ApiError(res.status, 'Thumbnail upload failed');
+          const json = await res.json();
+          const record = json as Record<string, unknown>;
+          if ('data' in record && record.data != null) {
+            return record.data as {
+              thumbnailUrl: string;
+              size: number;
+              mimeType: string;
+            };
+          }
+          return json as {
+            thumbnailUrl: string;
+            size: number;
+            mimeType: string;
+          };
+        });
+      },
+
+      /**
+       * Delete content thumbnail
+       */
+      deleteThumbnail: (id: string) =>
+        request<void>('content', `/api/content/${id}/thumbnail`, {
           method: 'DELETE',
         }),
 
@@ -804,6 +879,7 @@ export function createServerApi(
       getPublicCreators: (slug: string, params?: URLSearchParams) =>
         request<
           PaginatedListResponse<{
+            id: string;
             name: string;
             username: string | null;
             avatarUrl: string | null;

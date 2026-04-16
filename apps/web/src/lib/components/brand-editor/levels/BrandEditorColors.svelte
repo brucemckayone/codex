@@ -31,24 +31,26 @@
   {#each SECTIONS as section}
     {@const currentValue = getColor(section.field) ?? section.fallback}
     <section class="colors-level__section">
-      <button
-        class="colors-level__header"
-        class:colors-level__header--expanded={expanded === section.id}
-        onclick={() => toggle(section.id)}
-      >
-        <span class="colors-level__swatch" style:background={currentValue}></span>
-        <span class="colors-level__label">{section.label}</span>
-        <span class="colors-level__hex">{currentValue}</span>
+      <div class="colors-level__header-row">
+        <button
+          class="colors-level__header"
+          class:colors-level__header--expanded={expanded === section.id}
+          onclick={() => toggle(section.id)}
+        >
+          <span class="colors-level__swatch" style:background={currentValue}></span>
+          <span class="colors-level__label">{section.label}</span>
+          <span class="colors-level__hex">{currentValue}</span>
+          <span class="colors-level__chevron">{expanded === section.id ? '−' : '+'}</span>
+        </button>
         {#if section.clearable && brandEditor.pending?.backgroundColor}
           <button
             class="colors-level__clear"
-            onclick={(e) => { e.stopPropagation(); brandEditor.updateField('backgroundColor', null); }}
+            onclick={() => brandEditor.updateField('backgroundColor', null)}
           >
             clear
           </button>
         {/if}
-        <span class="colors-level__chevron">{expanded === section.id ? '−' : '+'}</span>
-      </button>
+      </div>
 
       {#if expanded === section.id}
         <div class="colors-level__picker">
@@ -83,7 +85,14 @@
     overflow: hidden;
   }
 
+  .colors-level__header-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
   .colors-level__header {
+    flex: 1;
     display: flex;
     align-items: center;
     gap: var(--space-2);
@@ -135,13 +144,16 @@
   }
 
   .colors-level__clear {
+    position: absolute;
+    right: var(--space-8);
     font-size: var(--text-xs);
     color: var(--color-text-muted);
     background: none;
     border: none;
     cursor: pointer;
     text-decoration: underline;
-    padding: 0;
+    padding: var(--space-1) var(--space-2);
+    z-index: 1;
   }
 
   .colors-level__clear:hover {

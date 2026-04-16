@@ -10,6 +10,7 @@
  * - Playback progress for each item
  */
 
+import { VIDEO_PROGRESS } from '@codex/constants';
 import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
@@ -158,7 +159,7 @@ const saveProgressSchema = z.object({
 /**
  * Save playback progress (command for mutations)
  *
- * Automatically calculates completion status (>90% = completed).
+ * Automatically calculates completion status using VIDEO_PROGRESS.COMPLETION_THRESHOLD.
  *
  * Usage:
  * ```svelte
@@ -183,10 +184,10 @@ export const savePlaybackProgress = command(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
-    // Calculate completion status (90% threshold)
     const completed =
       data.durationSeconds > 0 &&
-      data.positionSeconds / data.durationSeconds > 0.9;
+      data.positionSeconds / data.durationSeconds >=
+        VIDEO_PROGRESS.COMPLETION_THRESHOLD;
 
     return api.access.saveProgress(data.contentId, {
       positionSeconds: data.positionSeconds,

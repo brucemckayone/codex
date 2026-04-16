@@ -10,7 +10,7 @@
   @prop {MediaItemOption[]} [mediaItems] - Available media items for picker
 -->
 <script lang="ts">
-  import { onDestroy, tick } from 'svelte';
+  import { onDestroy, tick, untrack } from 'svelte';
   import { beforeNavigate } from '$app/navigation';
   import { ArrowLeftIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
@@ -71,10 +71,10 @@
 
   // Local status tracking — content prop may be derived (immutable),
   // so we track status separately for optimistic publish/unpublish updates.
-  let contentStatus = $state(content?.status ?? 'draft');
+  let contentStatus = $derived(content?.status ?? 'draft');
 
   // Shader preset for immersive audio mode
-  let shaderPreset: string | null = $state(content?.shaderPreset ?? null);
+  let shaderPreset: string | null = $derived(content?.shaderPreset ?? null);
 
   const contentTypeVal = $derived(form.fields.contentType.value() ?? content?.contentType ?? 'video');
   const formPending = $derived(form.pending > 0);
@@ -83,27 +83,36 @@
     if (successTimeout) clearTimeout(successTimeout);
   });
 
-  // ── Populate form fields for edit mode ─────────────────────────────────
+  // ── Populate form fields for edit mode (one-time initialization) ────────
+  // untrack prevents re-running when content updates after save,
+  // which would reset user edits (e.g. newly selected mediaItemId)
+  let formInitialized = false;
   $effect(() => {
+    if (formInitialized) return;
     if (isEdit && content) {
-      updateContentForm.fields.set({
-        contentId: content.id,
-        organizationId: organizationId ?? '',
-        title: content.title ?? '',
-        slug: content.slug ?? '',
-        description: content.description ?? '',
-        contentType: content.contentType ?? 'video',
-        mediaItemId: content.mediaItemId ?? '',
-        contentBody: content.contentBody ?? '',
-        accessType: content.accessType ?? 'free',
-        visibility: content.visibility ?? 'public',
-        price: content.priceCents ? (content.priceCents / 100).toFixed(2) : '0.00',
-        category: content.category ?? '',
-        tags: JSON.stringify(content.tags ?? []),
-        thumbnailUrl: content.thumbnailUrl ?? '',
-        shaderPreset: content.shaderPreset ?? '',
+      formInitialized = true;
+      untrack(() => {
+        updateContentForm.fields.set({
+          contentId: content!.id,
+          organizationId: organizationId ?? '',
+          title: content!.title ?? '',
+          slug: content!.slug ?? '',
+          description: content!.description ?? '',
+          contentType: content!.contentType ?? 'video',
+          mediaItemId: content!.mediaItemId ?? '',
+          contentBody: content!.contentBodyJson
+            ? JSON.stringify(content!.contentBodyJson)
+            : content!.contentBody ?? '',
+          accessType: content!.accessType ?? 'free',
+          visibility: content!.visibility ?? 'public',
+          price: content!.priceCents ? (content!.priceCents / 100).toFixed(2) : '0.00',
+          category: content!.category ?? '',
+          tags: JSON.stringify(content!.tags ?? []),
+          thumbnailUrl: content!.thumbnailUrl ?? '',
+          shaderPreset: content!.shaderPreset ?? '',
+        });
       });
-    } else {
+    } else if (!isEdit) {
       createContentForm.fields.set({
         organizationId: organizationId ?? '',
         title: '',
@@ -273,9 +282,9 @@
       <!-- Details (Title, Slug, Description) -->
       <ContentDetails {form} {orgSlug} {creatorUsername} {organizationId} contentId={content?.id} />
 
-      <!-- Media Section (video/audio only) -->
+      <!-- Media Section (video/audio only) — filtered to matching type -->
       {#if contentTypeVal === 'video' || contentTypeVal === 'audio'}
-        <MediaSection {form} {mediaItems} {orgSlug} />
+        <MediaSection {form} mediaItems={mediaItems.filter(m => m.mediaType === contentTypeVal)} {orgSlug} />
       {/if}
 
       <!-- Shader Preset (audio only) -->
@@ -295,7 +304,7 @@
       <WrittenContentEditor {form} optional={contentTypeVal !== 'written'} />
 
       <!-- Thumbnail -->
-      <ThumbnailUpload {form} {mediaThumbnailUrl} />
+      <ThumbnailUpload {form} {mediaThumbnailUrl} contentId={content?.id ?? null} />
     </div>
 
     <!-- ═══ SIDEBAR ═══ -->

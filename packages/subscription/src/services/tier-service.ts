@@ -54,6 +54,34 @@ export class TierService extends BaseService {
   }
 
   /**
+   * Ensure only one tier per org is recommended.
+   * Clears isRecommended on all other active tiers for the org.
+   * Called INSIDE a transaction with the insert/update to prevent race conditions.
+   */
+  private async ensureSingleRecommended(
+    tx: Parameters<
+      Parameters<typeof import('@codex/database')['dbWs']['transaction']>[0]
+    >[0],
+    orgId: string,
+    excludeTierId?: string
+  ): Promise<void> {
+    const conditions = [
+      eq(subscriptionTiers.organizationId, orgId),
+      eq(subscriptionTiers.isRecommended, true),
+      isNull(subscriptionTiers.deletedAt),
+    ];
+
+    if (excludeTierId) {
+      conditions.push(sql`${subscriptionTiers.id} != ${excludeTierId}`);
+    }
+
+    await tx
+      .update(subscriptionTiers)
+      .set({ isRecommended: false, updatedAt: new Date() })
+      .where(and(...conditions));
+  }
+
+  /**
    * Create a subscription tier with Stripe Product + Prices.
    * Validates the org has an active Connect account before proceeding.
    *
@@ -122,24 +150,40 @@ export class TierService extends BaseService {
 
       // Insert tier record — if this fails, clean up Stripe resources
       let tier: SubscriptionTier | undefined;
-      try {
-        const [inserted] = await this.db
-          .insert(subscriptionTiers)
-          .values({
-            organizationId: orgId,
-            name: input.name,
-            description: input.description ?? null,
-            sortOrder: nextSortOrder,
-            priceMonthly: input.priceMonthly,
-            priceAnnual: input.priceAnnual,
-            stripeProductId: product.id,
-            stripePriceMonthlyId: monthlyPrice.id,
-            stripePriceAnnualId: annualPrice.id,
-            isActive: true,
-          })
-          .returning();
+      const tierValues = {
+        organizationId: orgId,
+        name: input.name,
+        description: input.description ?? null,
+        sortOrder: nextSortOrder,
+        priceMonthly: input.priceMonthly,
+        priceAnnual: input.priceAnnual,
+        stripeProductId: product.id,
+        stripePriceMonthlyId: monthlyPrice.id,
+        stripePriceAnnualId: annualPrice.id,
+        isActive: true,
+        isRecommended: input.isRecommended ?? false,
+      };
 
-        tier = inserted;
+      try {
+        if (input.isRecommended) {
+          // Atomically clear other recommended flags + insert new tier
+          await (this.db as typeof import('@codex/database').dbWs).transaction(
+            async (tx) => {
+              await this.ensureSingleRecommended(tx, orgId);
+              const [inserted] = await tx
+                .insert(subscriptionTiers)
+                .values(tierValues)
+                .returning();
+              tier = inserted;
+            }
+          );
+        } else {
+          const [inserted] = await this.db
+            .insert(subscriptionTiers)
+            .values(tierValues)
+            .returning();
+          tier = inserted;
+        }
       } catch (dbError) {
         // DB insert failed — archive Stripe Product to prevent orphaned resources.
         // Archiving a product deactivates it and all its prices.
@@ -289,34 +333,52 @@ export class TierService extends BaseService {
 
       // Update DB record — if this fails, roll back Stripe price changes
       let updated: SubscriptionTier | undefined;
-      try {
-        const [result] = await this.db
-          .update(subscriptionTiers)
-          .set({
-            ...(input.name !== undefined && { name: input.name }),
-            ...(input.description !== undefined && {
-              description: input.description ?? null,
-            }),
-            ...(input.priceMonthly !== undefined && {
-              priceMonthly: input.priceMonthly,
-            }),
-            ...(input.priceAnnual !== undefined && {
-              priceAnnual: input.priceAnnual,
-            }),
-            stripePriceMonthlyId: newMonthlyPriceId,
-            stripePriceAnnualId: newAnnualPriceId,
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(subscriptionTiers.id, tierId),
-              eq(subscriptionTiers.organizationId, orgId),
-              isNull(subscriptionTiers.deletedAt)
-            )
-          )
-          .returning();
+      const updateSet = {
+        ...(input.name !== undefined && { name: input.name }),
+        ...(input.description !== undefined && {
+          description: input.description ?? null,
+        }),
+        ...(input.priceMonthly !== undefined && {
+          priceMonthly: input.priceMonthly,
+        }),
+        ...(input.priceAnnual !== undefined && {
+          priceAnnual: input.priceAnnual,
+        }),
+        ...(input.isRecommended !== undefined && {
+          isRecommended: input.isRecommended,
+        }),
+        stripePriceMonthlyId: newMonthlyPriceId,
+        stripePriceAnnualId: newAnnualPriceId,
+        updatedAt: new Date(),
+      };
+      const updateWhere = and(
+        eq(subscriptionTiers.id, tierId),
+        eq(subscriptionTiers.organizationId, orgId),
+        isNull(subscriptionTiers.deletedAt)
+      );
 
-        updated = result;
+      try {
+        if (input.isRecommended === true) {
+          // Atomically clear other recommended flags + update this tier
+          await (this.db as typeof import('@codex/database').dbWs).transaction(
+            async (tx) => {
+              await this.ensureSingleRecommended(tx, orgId, tierId);
+              const [result] = await tx
+                .update(subscriptionTiers)
+                .set(updateSet)
+                .where(updateWhere)
+                .returning();
+              updated = result;
+            }
+          );
+        } else {
+          const [result] = await this.db
+            .update(subscriptionTiers)
+            .set(updateSet)
+            .where(updateWhere)
+            .returning();
+          updated = result;
+        }
       } catch (dbError) {
         // DB update failed — roll back Stripe price changes to prevent divergence
         this.obs.warn(
@@ -380,10 +442,10 @@ export class TierService extends BaseService {
         throw new TierHasSubscribersError(tierId, subCount.count);
       }
 
-      // Soft delete
+      // Soft delete — also clear isRecommended to avoid stale flags
       await this.db
         .update(subscriptionTiers)
-        .set({ deletedAt: new Date(), isActive: false })
+        .set({ deletedAt: new Date(), isActive: false, isRecommended: false })
         .where(eq(subscriptionTiers.id, tierId));
 
       // Archive Stripe Product

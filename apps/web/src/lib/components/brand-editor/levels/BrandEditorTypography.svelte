@@ -1,58 +1,40 @@
 <script lang="ts">
   import { brandEditor } from '$lib/brand-editor';
-  import { Select } from '$lib/components/ui';
-
-  const FONT_OPTIONS = [
-    { value: '', label: 'Default (Inter)' },
-    { value: 'Inter', label: 'Inter' },
-    { value: 'Roboto', label: 'Roboto' },
-    { value: 'Open Sans', label: 'Open Sans' },
-    { value: 'Lato', label: 'Lato' },
-    { value: 'Poppins', label: 'Poppins' },
-    { value: 'Montserrat', label: 'Montserrat' },
-    { value: 'Playfair Display', label: 'Playfair Display' },
-    { value: 'Merriweather', label: 'Merriweather' },
-    { value: 'DM Sans', label: 'DM Sans' },
-    { value: 'Source Sans 3', label: 'Source Sans 3' },
-    { value: 'Nunito', label: 'Nunito' },
-    { value: 'Raleway', label: 'Raleway' },
-  ];
+  import FontPicker from '../FontPicker.svelte';
 
   const bodyFont = $derived(brandEditor.pending?.fontBody ?? '');
   const headingFont = $derived(brandEditor.pending?.fontHeading ?? '');
 
-  function updateBody(val: string | undefined) {
+  function updateBody(val: string) {
     brandEditor.updateField('fontBody', val || null);
   }
 
-  function updateHeading(val: string | undefined) {
+  function updateHeading(val: string) {
     brandEditor.updateField('fontHeading', val || null);
   }
 </script>
 
 <div class="typography-level">
   <section class="typography-level__section">
-    <Select
+    <FontPicker
+      mode="body"
       label="Body Font"
-      options={FONT_OPTIONS}
       value={bodyFont}
       onValueChange={updateBody}
-      placeholder="Select font..."
     />
-    <p class="typography-level__preview" style="font-family: {bodyFont || 'var(--font-sans)'}">
+    <p class="typography-level__preview" style="font-family: {bodyFont ? `'${bodyFont}'` : 'var(--font-sans)'}">
       The quick brown fox jumps over the lazy dog.
     </p>
   </section>
 
   <section class="typography-level__section">
-    <Select
+    <FontPicker
+      mode="heading"
       label="Heading Font"
-      options={FONT_OPTIONS}
       value={headingFont}
       onValueChange={updateHeading}
-      placeholder="Select font..."
     />
-    <p class="typography-level__preview typography-level__preview--heading" style="font-family: {headingFont || 'var(--font-heading)'}">
+    <p class="typography-level__preview typography-level__preview--heading" style="font-family: {headingFont ? `'${headingFont}'` : 'var(--font-heading)'}">
       Heading Sample
     </p>
   </section>

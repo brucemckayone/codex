@@ -45,6 +45,7 @@ export const subscriptionTiers = pgTable(
     stripePriceAnnualId: varchar('stripe_price_annual_id', { length: 255 }),
 
     isActive: boolean('is_active').notNull().default(true),
+    isRecommended: boolean('is_recommended').notNull().default(false),
 
     // Timestamps
     createdAt: timestamp('created_at', { withTimezone: true })

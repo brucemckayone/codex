@@ -394,6 +394,7 @@ export class OrganizationService extends BaseService {
     pagination?: { page: number; limit: number }
   ): Promise<
     PaginatedListResponse<{
+      id: string;
       name: string;
       username: string | null;
       avatarUrl: string | null;
@@ -600,6 +601,7 @@ export class OrganizationService extends BaseService {
 
       return {
         items: members.map((m) => ({
+          id: m.userId,
           name: m.name,
           username: m.username ?? null,
           avatarUrl: m.avatarUrl ?? m.image ?? null,

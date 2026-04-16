@@ -125,6 +125,9 @@ async function seedData() {
   console.log('    Viewer:       viewer@test.com      (member/subscriber)');
   console.log('    Admin:        admin@test.com       (owner of Studio Beta)');
   console.log(
+    '    Luzura:       luzura@test.com      (owner of Of Blood & Bones)'
+  );
+  console.log(
     '    New Creator:  newcreator@test.com  (approved creator, no org yet)'
   );
   console.log(
@@ -140,6 +143,9 @@ async function seedData() {
   console.log('  Orgs:');
   console.log('    studio-alpha.lvh.me:3000  (rose accent #E11D48)');
   console.log('    studio-beta.lvh.me:3000   (blue accent #2563EB)');
+  console.log(
+    '    of-blood-and-bones.lvh.me:3000  (burnt red #A62B0C, parchment bg)'
+  );
 }
 
 seedData()

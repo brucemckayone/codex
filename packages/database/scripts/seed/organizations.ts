@@ -24,6 +24,14 @@ export async function seedOrganizations(db: typeof DbClient) {
       createdAt: now,
       updatedAt: now,
     },
+    {
+      id: ORGS.bones.id,
+      name: ORGS.bones.name,
+      slug: ORGS.bones.slug,
+      description: ORGS.bones.description,
+      createdAt: now,
+      updatedAt: now,
+    },
   ]);
 
   // Organization memberships
@@ -128,6 +136,25 @@ export async function seedOrganizations(db: typeof DbClient) {
       createdAt: now,
       updatedAt: now,
     },
+    // Of Blood & Bones memberships
+    {
+      id: MEMBERSHIPS.luzuraBonesOwner.id,
+      organizationId: ORGS.bones.id,
+      userId: USERS.luzura.id,
+      role: 'owner',
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: MEMBERSHIPS.viewerBonesMember.id,
+      organizationId: ORGS.bones.id,
+      userId: USERS.viewer.id,
+      role: 'member',
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    },
   ]);
 
   // Organization followers (audience relationships — separate from team memberships)
@@ -152,12 +179,24 @@ export async function seedOrganizations(db: typeof DbClient) {
       userId: USERS.customer2.id,
       createdAt: now,
     },
+    // Of Blood & Bones followers
+    {
+      organizationId: ORGS.bones.id,
+      userId: USERS.viewer.id,
+      createdAt: now,
+    },
+    {
+      organizationId: ORGS.bones.id,
+      userId: USERS.customer3.id,
+      createdAt: now,
+    },
   ]);
 
   // Platform settings hub (required FK target for spoke tables)
   await db.insert(schema.platformSettings).values([
     { organizationId: ORGS.alpha.id, createdAt: now, updatedAt: now },
     { organizationId: ORGS.beta.id, createdAt: now, updatedAt: now },
+    { organizationId: ORGS.bones.id, createdAt: now, updatedAt: now },
   ]);
 
   // Branding settings (with logo URLs pointing to seeded R2 files)
@@ -166,6 +205,29 @@ export async function seedOrganizations(db: typeof DbClient) {
       organizationId: ORGS.alpha.id,
       primaryColorHex: ORGS.alpha.primaryColor,
       logoUrl: `http://localhost:4100/${getOrgLogoKey(ORGS.alpha.id, 'md')}`,
+      pricingFaq: JSON.stringify([
+        {
+          id: 'seed-faq-cancel',
+          question: 'Can I cancel my subscription at any time?',
+          answer:
+            'Absolutely! You can cancel your subscription from your account settings at any point. Your access continues until the end of your current billing period — no surprise charges.',
+          order: 0,
+        },
+        {
+          id: 'seed-faq-difference',
+          question: 'What is the difference between Standard and Pro?',
+          answer:
+            'Standard gives you access to all tutorials and workshops. Pro unlocks everything including deep-dives, masterclasses, and early access to new content.',
+          order: 1,
+        },
+        {
+          id: 'seed-faq-team',
+          question: 'Do you offer team or group pricing?',
+          answer:
+            'Not yet, but we are working on team plans for 2026. In the meantime, each team member can subscribe individually.',
+          order: 2,
+        },
+      ]),
       createdAt: now,
       updatedAt: now,
     },
@@ -173,6 +235,26 @@ export async function seedOrganizations(db: typeof DbClient) {
       organizationId: ORGS.beta.id,
       primaryColorHex: ORGS.beta.primaryColor,
       logoUrl: `http://localhost:4100/${getOrgLogoKey(ORGS.beta.id, 'md')}`,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      organizationId: ORGS.bones.id,
+      primaryColorHex: ORGS.bones.primaryColor,
+      backgroundColorHex: '#F3F0E7',
+      textColorHex: '#A62B0C',
+      fontHeading: 'Cardo',
+      fontBody: null,
+      radiusValue: '0.33',
+      densityValue: '1',
+      headingWeight: '400',
+      bodyWeight: '400',
+      shadowScale: '0.5',
+      logoUrl: `http://localhost:4100/${getOrgLogoKey(ORGS.bones.id, 'md')}`,
+      tokenOverrides: JSON.stringify({
+        'heading-weight': '400',
+        'body-weight': '400',
+      }),
       createdAt: now,
       updatedAt: now,
     },
@@ -198,6 +280,16 @@ export async function seedOrganizations(db: typeof DbClient) {
       createdAt: now,
       updatedAt: now,
     },
+    {
+      organizationId: ORGS.bones.id,
+      platformName: SETTINGS.bones.platformName,
+      supportEmail: SETTINGS.bones.supportEmail,
+      contactUrl: SETTINGS.bones.contactUrl,
+      timezone: 'Europe/London',
+      instagramUrl: 'https://instagram.com/of.blood.and.bones',
+      createdAt: now,
+      updatedAt: now,
+    },
   ]);
 
   // Feature settings
@@ -214,6 +306,14 @@ export async function seedOrganizations(db: typeof DbClient) {
       organizationId: ORGS.beta.id,
       enableSignups: true,
       enablePurchases: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      organizationId: ORGS.bones.id,
+      enableSignups: true,
+      enablePurchases: true,
+      enableSubscriptions: true,
       createdAt: now,
       updatedAt: now,
     },

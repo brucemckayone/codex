@@ -41,8 +41,11 @@
     formFieldAttrs,
   }: Props = $props();
 
+  // svelte-ignore non_reactive_update
   let editorElement: HTMLDivElement;
+  // svelte-ignore non_reactive_update
   let hiddenTextarea: HTMLTextAreaElement;
+  // svelte-ignore non_reactive_update
   let bubbleMenuElement: HTMLDivElement;
 
   // The editor instance itself (set once on mount, never reassigned)

@@ -782,18 +782,18 @@ function parseCssColor(str: string): [number, number, number] | null {
   return null;
 }
 
-/** Read a --brand-shader-* CSS property from the org layout element. */
-function readBrandVar(el: Element, key: string): string | null {
-  const val = getComputedStyle(el).getPropertyValue(`--brand-${key}`).trim();
+/** Read a --brand-shader-* CSS property from a cached CSSStyleDeclaration. */
+function readBrandVar(style: CSSStyleDeclaration, key: string): string | null {
+  const val = style.getPropertyValue(`--brand-${key}`).trim();
   return val || null;
 }
 
 /** Read a --color-brand-* CSS property for brand palette colors. */
 function readColorVar(
-  el: Element,
+  style: CSSStyleDeclaration,
   key: string
 ): [number, number, number] | null {
-  const val = getComputedStyle(el).getPropertyValue(`--color-${key}`).trim();
+  const val = style.getPropertyValue(`--color-${key}`).trim();
   if (!val) return null;
   return parseCssColor(val);
 }
@@ -814,36 +814,45 @@ export function getShaderConfig(
   presetOverride?: ShaderPresetId
 ): ShaderConfig {
   const el = orgLayoutEl ?? document.querySelector('.org-layout');
+  // Cache getComputedStyle once — avoids forced reflow on each property read
+  const style = el ? getComputedStyle(el) : null;
 
   const preset =
     presetOverride ??
-    ((el ? readBrandVar(el, 'shader-preset') : null) as ShaderPresetId | null);
+    ((style
+      ? readBrandVar(style, 'shader-preset')
+      : null) as ShaderPresetId | null);
   const resolvedPreset = preset ?? DEFAULTS.preset;
 
   // Read brand colors from the org's CSS custom properties
-  const primary = (el ? readColorVar(el, 'brand-primary') : null) ?? [
+  const primary = (style ? readColorVar(style, 'brand-primary') : null) ?? [
     0.486, 0.227, 0.929,
   ];
-  const secondary = (el ? readColorVar(el, 'brand-secondary') : null) ?? [
+  const secondary = (style ? readColorVar(style, 'brand-secondary') : null) ?? [
     0.925, 0.282, 0.6,
   ];
-  const accent = (el ? readColorVar(el, 'brand-accent') : null) ?? [
+  const accent = (style ? readColorVar(style, 'brand-accent') : null) ?? [
     0.961, 0.62, 0.043,
   ];
-  const bg = (el ? readColorVar(el, 'brand-bg') : null) ?? [0.059, 0.09, 0.165];
+  const bg = (style ? readColorVar(style, 'brand-bg') : null) ?? [
+    0.059, 0.09, 0.165,
+  ];
 
   // Read logo URL for SDF-based shader integration
-  const logoUrl = el ? readBrandVar(el, 'shader-logo-url') : null;
+  const logoUrl = style ? readBrandVar(style, 'shader-logo-url') : null;
 
   const base: ShaderConfigBase = {
     preset: resolvedPreset,
     intensity: num(
-      el ? readBrandVar(el, 'shader-intensity') : null,
+      style ? readBrandVar(style, 'shader-intensity') : null,
       DEFAULTS.intensity
     ),
-    grain: num(el ? readBrandVar(el, 'shader-grain') : null, DEFAULTS.grain),
+    grain: num(
+      style ? readBrandVar(style, 'shader-grain') : null,
+      DEFAULTS.grain
+    ),
     vignette: num(
-      el ? readBrandVar(el, 'shader-vignette') : null,
+      style ? readBrandVar(style, 'shader-vignette') : null,
       DEFAULTS.vignette
     ),
     logoUrl: logoUrl ?? undefined,
@@ -856,7 +865,7 @@ export function getShaderConfig(
   };
 
   const rv = (key: string, def: number) =>
-    num(el ? readBrandVar(el, key) : null, def);
+    num(style ? readBrandVar(style, key) : null, def);
 
   switch (resolvedPreset) {
     case 'suture':
@@ -880,7 +889,7 @@ export function getShaderConfig(
         aberration: rv('shader-aberration', DEFAULTS.aberration),
       };
     case 'warp': {
-      const invertRaw = el ? readBrandVar(el, 'shader-invert') : null;
+      const invertRaw = style ? readBrandVar(style, 'shader-invert') : null;
       return {
         ...base,
         preset: 'warp',
@@ -905,7 +914,9 @@ export function getShaderConfig(
         refraction: rv('shader-refraction', DEFAULTS.refraction),
       };
     case 'pulse': {
-      const pulseColorRaw = el ? readBrandVar(el, 'shader-pulse-color') : null;
+      const pulseColorRaw = style
+        ? readBrandVar(style, 'shader-pulse-color')
+        : null;
       return {
         ...base,
         preset: 'pulse',

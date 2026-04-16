@@ -34,6 +34,8 @@ const BIOS: Record<string, string> = {
     'Indie game developer and pixel art hobbyist. Currently building a retro-inspired platformer in my spare time.',
   [USERS.customer5.id]:
     'Content strategist helping brands find their authentic voice. Believes every story deserves to be told well.',
+  [USERS.luzura.id]:
+    'Multi-disciplinary artist of Celtic-Ta\u00edno descent. Somatic movement artist, neurosomatic coach, traditional Mayan medicine practitioner, and contemporary dancer based in Stonehaven, Scotland.',
 };
 
 const SOCIAL_LINKS: Record<
@@ -60,6 +62,10 @@ const SOCIAL_LINKS: Record<
   [USERS.customer1.id]: {
     website: 'https://mariasantos.design',
     instagram: 'https://instagram.com/mariasantos',
+  },
+  [USERS.luzura.id]: {
+    website: 'https://ofbloodandbones.com',
+    instagram: 'https://instagram.com/of.blood.and.bones',
   },
 };
 
