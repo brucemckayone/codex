@@ -57,7 +57,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 8 | **Full micro-polish review** — focus rings, motion reduce paths, dark mode, backdrop-filter fallback, skeleton match | ✅ done | Commit on 2026-04-17 |
 | 9 | **Copy tightening (defaults)** — FAQ defaults rewritten for objection-handling, FAQ lede reframed from "fine print" to "before you subscribe" | ✅ done | Commit on 2026-04-17 |
 | 10 | **Checkout error treatment** — editorial alert with icon, title+message hierarchy, dismiss button, transition | ✅ done | Commit on 2026-04-17 |
-| 11+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 11 | **Preview fallback variants** — sparse-content orgs (0/1/2/3 thumbs) get dedicated spread layouts instead of section-disappearing hard gate | ✅ done | Commit on 2026-04-17 |
+| 12+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -261,3 +262,15 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Visual verify attempted**: Dev server was running on `:3000` but workers weren't (`:4001`, `:42069`, etc all closed). Navigation to `studio-alpha.lvh.me:3000/pricing` and `of-blood-and-bones.lvh.me:3000/pricing` returned the 404 "Organization not found" page — expected behavior when the org worker is unreachable. Seeded org slugs confirmed as `studio-alpha`, `studio-beta`, `of-blood-and-bones` (from `packages/database/scripts/seed/constants.ts`). **Next fire** should boot `pnpm dev` fully from the monorepo root to bring up all workers, then verify.
 
   - **Next pass prerequisite**: Full `pnpm dev` boot from monorepo root + visual walkthrough. Start with `of-blood-and-bones.lvh.me:3000/pricing` (terracotta brand — exercises the OKLCH color-mix paths nicely). Check: hero stagger, tier card ribbon/glow, preview spread, FAQ accordion, trust strip, sticky CTA on scroll past tier cards, error state if possible to trigger. Also check dark mode (toggle via `html.dark` or `?theme=dark`).
+
+- **2026-04-17 Pass 11 (Preview fallback variants)**: Replaced the hard gate `if (withThumbs.length >= 3)` with count-adaptive spread layouts. Sparse-content orgs now get a properly-shaped preview section instead of the section disappearing entirely.
+  - **Gate change**: condition flipped from `withThumbs.length >= 3` to `items.length > 0`. Any published content — even if none have thumbnails — renders the section with masthead + stats footer.
+  - **Spread variants** via `--solo` / `--pair` / `--trio` / `--magazine` modifier classes. Variant chosen inline via `{@const spreadVariant = tiles.length === 1 ? 'solo' : ...}`.
+  - **Solo (1 tile)**: mobile = full-width 16:9 hero. md+ = full-width 16:7 cinematic hero, single column, zero gap.
+  - **Pair (2 tiles)**: mobile = 2-col 4:3 grid (inherits default). md+ = 2-col 16:7 aspect with `--space-1` gap.
+  - **Trio (3 tiles)**: mobile = 1 full-width 16:9 hero (tile 0 spans full row) + 2 supporting 4:3 tiles below. md+ = 1.8fr/1fr 2-row grid, aspect 5:3, hero spans both rows — echoes the magazine shape at reduced density.
+  - **Magazine (4+ tiles)**: unchanged — now explicitly scoped to `.preview__spread--magazine` instead of bare `.preview__spread`.
+  - **Zero-tile fallback**: if `tiles.length === 0`, the `<div class="preview__spread">` is skipped entirely (wrapped in `{#if tiles.length > 0}`). The section still renders masthead + stats + CTA — the value prop still sells, just without a blur wall that reveals nothing.
+  - **Layout principle**: every variant preserves the hero-anchor feel (always a dominant hero tile, supporting tiles balanced around it). Mobile always has a clear "main" tile. No variant wastes space with half-empty grid cells.
+
+  - **Next pass prerequisite**: Visual verify the four variants at mobile + md+ widths once `pnpm dev` is fully booted. Specifically: does solo's 16:7 aspect feel too cinematic on desktop (may need to cap at 16:8 for a less-wide feel)? Does trio's mobile hero + supports ordering read naturally? Are the gaps consistent across variants? Also check: what happens when `items.length > 0` but all thumbnails fail to load (broken URLs)? Current code only filters out null `thumbnailUrl` — broken images would show alt text or a broken-image icon.

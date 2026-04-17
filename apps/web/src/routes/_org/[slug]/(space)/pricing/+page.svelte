@@ -465,8 +465,9 @@
     <!-- ═══ CONTENT PREVIEW ═══ -->
     {#await data.contentPreview then items}
       {@const withThumbs = items?.filter((i) => i.thumbnailUrl) ?? []}
-      {#if withThumbs.length >= 3}
+      {#if (items?.length ?? 0) > 0}
         {@const tiles = withThumbs.slice(0, 4)}
+        {@const spreadVariant = tiles.length === 1 ? 'solo' : tiles.length === 2 ? 'pair' : tiles.length === 3 ? 'trio' : 'magazine'}
         <section class="preview reveal" data-reveal>
           <header class="preview__lede">
             <p class="preview__eyebrow">Inside the library</p>
@@ -477,16 +478,18 @@
             </p>
           </header>
 
-          <div class="preview__spread">
-            {#each tiles as item, i (item.id)}
-              {@const typeLabel = item.contentType === 'audio' ? 'Audio' : item.contentType === 'written' ? 'Article' : 'Video'}
-              <div class="preview__tile preview__tile--{i}">
-                <img src={item.thumbnailUrl} alt="" loading="lazy" />
-                <div class="preview__tile-shade" aria-hidden="true"></div>
-                <span class="preview__badge">{typeLabel}</span>
-              </div>
-            {/each}
-          </div>
+          {#if tiles.length > 0}
+            <div class="preview__spread preview__spread--{spreadVariant}">
+              {#each tiles as item, i (item.id)}
+                {@const typeLabel = item.contentType === 'audio' ? 'Audio' : item.contentType === 'written' ? 'Article' : 'Video'}
+                <div class="preview__tile preview__tile--{i}">
+                  <img src={item.thumbnailUrl} alt="" loading="lazy" />
+                  <div class="preview__tile-shade" aria-hidden="true"></div>
+                  <span class="preview__badge">{typeLabel}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
 
           {#await data.stats then stats}
             <footer class="preview__footer">
@@ -1382,7 +1385,9 @@
     text-wrap: pretty;
   }
 
-  /* Magazine spread — 1 hero tile + 3 supporting on md+, 2×2 on mobile */
+  /* Magazine spread — base + count-adaptive variants (solo/pair/trio/magazine).
+     Default is the 4-tile magazine layout; narrower variants keep the editorial
+     feel at sparse-content orgs without looking underfilled. */
   .preview__spread {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1392,17 +1397,61 @@
     box-shadow: var(--shadow-md);
   }
 
+  /* Solo (1 tile): single cinematic hero */
+  .preview__spread--solo {
+    grid-template-columns: 1fr;
+  }
+  .preview__spread--solo .preview__tile--0 {
+    aspect-ratio: 16 / 9;
+  }
+
+  /* Trio (3 tiles): mobile = 1 wide hero + 2 side-by-side below */
+  .preview__spread--trio .preview__tile--0 {
+    grid-column: 1 / -1;
+    aspect-ratio: 16 / 9;
+  }
+
+  /* md+: full magazine layouts */
   @media (--breakpoint-md) {
-    .preview__spread {
+    .preview__spread--magazine {
       grid-template-columns: 1.8fr 1fr;
       grid-template-rows: repeat(3, 1fr);
       aspect-ratio: 5 / 2.4;
       gap: var(--space-1);
     }
-    .preview__tile--0 { grid-column: 1; grid-row: 1 / 4; }
-    .preview__tile--1 { grid-column: 2; grid-row: 1; }
-    .preview__tile--2 { grid-column: 2; grid-row: 2; }
-    .preview__tile--3 { grid-column: 2; grid-row: 3; }
+    .preview__spread--magazine .preview__tile--0 { grid-column: 1; grid-row: 1 / 4; }
+    .preview__spread--magazine .preview__tile--1 { grid-column: 2; grid-row: 1; }
+    .preview__spread--magazine .preview__tile--2 { grid-column: 2; grid-row: 2; }
+    .preview__spread--magazine .preview__tile--3 { grid-column: 2; grid-row: 3; }
+
+    .preview__spread--solo {
+      grid-template-columns: 1fr;
+      aspect-ratio: 16 / 7;
+      gap: 0;
+    }
+    .preview__spread--solo .preview__tile--0 {
+      aspect-ratio: auto;
+    }
+
+    .preview__spread--pair {
+      grid-template-columns: 1fr 1fr;
+      aspect-ratio: 16 / 7;
+      gap: var(--space-1);
+    }
+
+    .preview__spread--trio {
+      grid-template-columns: 1.8fr 1fr;
+      grid-template-rows: repeat(2, 1fr);
+      aspect-ratio: 5 / 3;
+      gap: var(--space-1);
+    }
+    .preview__spread--trio .preview__tile--0 {
+      grid-column: 1;
+      grid-row: 1 / 3;
+      aspect-ratio: auto;
+    }
+    .preview__spread--trio .preview__tile--1 { grid-column: 2; grid-row: 1; }
+    .preview__spread--trio .preview__tile--2 { grid-column: 2; grid-row: 2; }
   }
 
   .preview__tile {
