@@ -65,7 +65,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 16 | **Billing toggle ARIA radiogroup** — added roving tabindex + arrow-key navigation for proper WAI-ARIA radiogroup semantics | ✅ done | Commit on 2026-04-17 |
 | 17 | **Ribbon shine micro-interaction** — one-shot diagonal overlay sweep on the recommended ribbon after page load, draws eye to the recommended tier | ✅ done | Commit on 2026-04-17 |
 | 18 | **Savings pill as lure** — flipped visibility so pill shows on Annual button when Monthly is active (incentive), hides when Annual taken; copy now computed from max tier savings | ✅ done | Commit on 2026-04-17 |
-| 19+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 19 | **Lighthouse a11y 100** — ran snapshot audit, found insufficient contrast on inactive toggle text, bumped color token to restore WCAG AA | ✅ done | Commit on 2026-04-17 |
+| 20+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -353,3 +354,13 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Verified in-browser**: reload → Monthly active + `Save 20%` pill visible on Annual button. Click Annual → Annual active + pill unmounted + card prices switch to yearly totals + helper lines show monthly-equivalents. Full conversion chain: lure → commit → reassurance.
 
   - **Next pass prerequisite**: Consider: when pill is on Monthly-visible state, should there be a micro-animation to draw further attention (gentle pulse every few seconds)? Probably not — would be annoying. But worth noting as a future experiment if CTAs aren't converting. Alternative: add a subtle "shimmer" on the pill that matches the ribbon shine but slower, fires once on initial load only. Also: when switching back from Annual to Monthly, the pill re-appears via the render condition — maybe add a slight fade-in to avoid abrupt appearance.
+
+- **2026-04-17 Pass 19 (Lighthouse a11y 100)**: Ran Chrome DevTools Lighthouse snapshot audit against the live page (of-blood-and-bones.lvh.me:3000/pricing, dark mode, desktop). Initial scores: Accessibility 96, Best Practices 100, SEO 100. One failing audit: `color-contrast`.
+  - **Failing item**: inactive `.toggle-option` button — foreground `#717171` on background `#1e0605` = contrast ratio 3.97, below WCAG AA's 4.5 threshold for normal-weight 15px body text.
+  - **Root cause**: `--color-text-muted` derives via `oklch(from brand-bg-dark clamp(0.3, abs(0.5 - l) + 0.3, 0.55) 0 0)`. On this org's very-dark brand bg, the clamp produces a mid-gray at ~45% luminance — fine on pure black, insufficient contrast on near-black-but-slightly-lit surfaces like `#1e0605`.
+  - **Fix**: moved inactive `.toggle-option` color from `--color-text-muted` → `--color-text-secondary`, and hover from `--color-text-secondary` → `--color-text`. New hierarchy: resting secondary (`#d4d4d4`, ~11:1 on dark bg — AAA), hover full text (`#fafafa`), active full text on brand-tinted pill. Two distinct visible text weights (resting vs active/hover) + the BG pill difference = clear affordance.
+  - **Kept token-driven**: didn't hardcode a color. The fix uses the higher-contrast semantic token that the design system already provides — works across all themes (light, dark, brand-branded) without bespoke rules.
+  - **Verified post-fix**: re-ran Lighthouse audit. Accessibility: **100**. Best Practices: **100**. SEO: **100**. 34 passed, 0 failed.
+  - **Scope note**: a broader fix would address `--color-text-muted` derivation in `org-brand.css` so it never drops below AA — but that's a system-level change affecting every page. The pricing-page-local fix is the right scope for this pass.
+
+  - **Next pass prerequisite**: the same `--color-text-muted` issue could appear on other elements throughout the app (e.g., card helpers, trust labels, faq subtitles). A follow-up org-wide pass could audit all `--color-text-muted` usages against the dark-mode org backgrounds and fix the systemic issue. Within this file: spot-check that `.card__price-helper`, `.trust__label`, `.sticky-bar__helper`, `.preview__stat-label`, and `.preview__categories li` — all using muted — still render with sufficient contrast against their containers (they should since they sit on the same dark surface and may not have the contrast issue depending on exact computed color mix).

@@ -875,7 +875,7 @@
     padding: var(--space-2) var(--space-6);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     border: none;
     background: none;
     border-radius: var(--radius-full);
@@ -887,7 +887,7 @@
   }
 
   .toggle-option:hover:not(.active) {
-    color: var(--color-text-secondary);
+    color: var(--color-text);
   }
 
   .toggle-option:focus-visible {
