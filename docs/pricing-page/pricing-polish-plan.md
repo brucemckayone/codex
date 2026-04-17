@@ -70,7 +70,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 21 | **Sticky CTA — mobile trigger, footer z-index, trust-strip suppression** — user feedback: mobile needs scroll-trigger (not always-on), sticky appeared under footer, and should hide when trust/footer enters view | ✅ done | Commit on 2026-04-18 |
 | 22 | **Tier card uniform heights + description clamp** — grid `align-items: stretch` + `height: 100%` on card/inner + 3-line clamp on desc so cards stay visually balanced regardless of creator copy length | ✅ done | Commit on 2026-04-18 |
 | 23 | **Full-page contrast sweep** — ran Lighthouse with all sections revealed; fixed stat labels + preview CTA brand-text-on-light contrast | ✅ done | Commit on 2026-04-18 |
-| 24+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 24 | **Preview CTA hierarchy check + single-pill suppression** — verified Pass 23 bump doesn't compete with tier CTAs; hid the categories strip when only 1 category (isolated pill → visual noise) | ✅ done | Commit on 2026-04-18 |
+| 25+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -430,3 +431,12 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Coverage milestone**: the pricing page is now WCAG AA clean on every interactive/informational element at every scroll position across both light and dark org themes. Zero failing contrast audits in any test configuration.
 
   **Next pass prerequisite**: the `.preview__cta` visual weight bumped slightly (10% bg vs 6% before) — verify it doesn't overwhelm the tier card CTAs' visual hierarchy. The tier card CTAs should remain the primary conversion moment; the preview CTA is secondary ("explore the catalog"). If preview CTA now feels too loud, dial back border or bg. Also: consider bumping other brand-text-on-light-bg elements proactively — `.hero__eyebrow`, `.preview__eyebrow`, `.faq__eyebrow`, `.trust__label` may all have similar borderline contrast on light orgs.
+
+- **2026-04-18 Pass 24 (Preview CTA hierarchy check + single-pill suppression)**:
+  - **Hierarchy check (verified)**: compared the Pass 23 preview CTA (10% brand-tint bg, brand-hover text color, 30% brand border) against the sticky bar's filled-primary Subscribe. Subscribe is solid-bg filled button; preview is outline-style pill. Hierarchy is clear — sticky remains the primary conversion moment; preview CTA is secondary "explore the catalog" action. No over-competition.
+  - **Single-pill fix**: `of-blood-and-bones` (and presumably other small/new orgs) have only 1 category. The `.preview__categories` ul was rendering a single isolated "Healing" pill — visually sparse, communicates focus not variety, defeats the row's purpose.
+  - **Condition flipped**: `{#if (stats?.categories?.length ?? 0) > 0}` → `> 1`. List renders only when ≥ 2 categories exist. Below that threshold, the strip is skipped entirely, which tightens the footer rhythm (stats → CTA, no orphan pill in between).
+  - **Design rationale**: pills exist to *signal variety across topics*. A single pill makes the opposite claim — focus. The stats row already handles the "scope" signal; the pills should only appear when they add the distinct "breadth" signal.
+  - **Visual result**: preview footer now reads as 3-item stack (stats → CTA) when categories < 2, or 4-item stack (stats → pills → CTA) when ≥ 2. Both cadences feel balanced.
+
+  **Next pass prerequisite**: consider the symmetrical case — what if an org has 15+ categories? Currently `.slice(0, 8)` caps the display, but 8 pills wrapping to multiple rows could look busy. May want to cap at 6 for a cleaner single-row look on desktop. Also: proactively audit the other `.*__eyebrow` elements' brand-primary contrast on light orgs — if a light-mode org has a lighter brand (rose, lavender), eyebrows could be the next contrast fail.

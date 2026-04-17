@@ -576,7 +576,7 @@
                 {/if}
               </div>
 
-              {#if (stats?.categories?.length ?? 0) > 0}
+              {#if (stats?.categories?.length ?? 0) > 1}
                 <ul class="preview__categories" aria-label="Topics">
                   {#each stats.categories.slice(0, 8) as cat}
                     <li>{cat}</li>
