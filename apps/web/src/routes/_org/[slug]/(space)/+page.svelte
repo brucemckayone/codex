@@ -34,8 +34,8 @@
   onMount(() => {
     // Hydrate TanStack DB cache with whatever content we already rendered
     // server-side so client navigations feel instant.
-    if (data.newReleases?.length) {
-      hydrateIfNeeded('content', data.newReleases);
+    if (data.allContent?.length) {
+      hydrateIfNeeded('content', data.allContent);
     }
 
     // Track desktop breakpoint for inline vs modal video
@@ -53,18 +53,9 @@
   const orgName = $derived(data.org?.name ?? 'Organization');
   const orgDescription = $derived(data.org?.description ?? '');
   const logoUrl = $derived(data.org?.logoUrl ?? '');
-  const newReleases = $derived(data.newReleases ?? []);
   const stats = $derived(data.stats);
   const user = $derived(data.user);
   const introVideoUrl = $derived(data.org?.introVideoUrl ?? null);
-
-  // Stable mapping of logical section ids → numeric tint slots. Two slots
-  // alternate so consecutive sections feel distinct without needing one
-  // colour per section. Kept as a plain function so the template stays
-  // declarative — no map-state in the script.
-  function tintFor(sectionId: string): '1' | '2' {
-    return sectionId === 'featured' ? '1' : '2';
-  }
 
   // Continue watching — live query over localStorage-backed libraryCollection.
   // On return visits: instant from localStorage. On first visit: empty until staleness detection loads data.
@@ -320,128 +311,158 @@
   {/if}
 
   <!--
-    Main feed — a single edge-to-edge content grid that interleaves section
-    ledes, full-width featured tiles, and normal-sized content tiles. No
-    outer gutters on tiles; inner thumbnail padding creates the visual
-    rhythm. Contiguous tiles with the same data-section-tint share a
-    background wash that defines the section zone.
+    Per-domain feed — a stack of sections (Featured, Videos, Audio, …) each
+    composed server-side in feed-types.ts. The renderer dispatches on item
+    count: 1–2 items → stacked feature spreads; 3+ items → horizontal
+    carousel with a ~2×-wide hero first tile.
   -->
-  {#if data.feedItems.length > 0}
-    <section class="feed-wrap">
-      <div class="content-grid">
-        {#each data.feedItems as item, i (item.kind + '-' + i)}
-          {#if item.kind === 'lede'}
-            <header
-              class="tile tile--full tile--lede"
-              data-section-tint={tintFor(item.sectionId)}
-            >
-              <p class="lede__eyebrow">{item.eyebrow}</p>
-              <hr class="lede__rule" aria-hidden="true" />
-              <div class="lede__title-row">
-                <h2 class="lede__title">{item.title}</h2>
-                {#if item.viewAllHref}
-                  <a href={item.viewAllHref} class="lede__view-all">
-                    {item.viewAllLabel ?? m.org_view_all_content()}
-                    <span aria-hidden="true">→</span>
-                  </a>
-                {/if}
-              </div>
-            </header>
-          {:else if item.kind === 'content' && item.span === 'full'}
-            {@const c = item.content}
-            {@const thumb = c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null}
-            {@const href = buildContentUrl(page.url, c)}
-            {@const duration = c.mediaItem?.durationSeconds ?? null}
-            {@const titleId = `feature-title-${c.id}`}
-            {@const typeLabel = c.contentType === 'audio' ? 'Audio' : c.contentType === 'written' ? 'Article' : 'Video'}
-            {@const ctaLabel = c.contentType === 'audio' ? 'Listen now' : c.contentType === 'written' ? 'Read now' : 'Watch now'}
-            <article
-              class="tile tile--full feature-spread"
-              data-section-tint={tintFor(item.sectionId)}
-              aria-labelledby={titleId}
-            >
-              <a class="feature-spread__link" {href}>
-                <figure class="feature-spread__frame">
-                  {#if thumb}
-                    <img
-                      src={thumb}
-                      srcset={getThumbnailSrcset(thumb)}
-                      sizes={DEFAULT_SIZES}
-                      alt=""
-                      class="feature-spread__img"
-                      loading="lazy"
-                    />
-                  {:else}
-                    <div class="feature-spread__fallback" aria-hidden="true"></div>
-                  {/if}
-                  <span class="feature-spread__type-badge">{typeLabel}</span>
-                </figure>
-                <div class="feature-spread__body">
-                  {#if c.category}
-                    <p class="feature-spread__eyebrow">{c.category}</p>
-                  {/if}
-                  <h3 class="feature-spread__title" id={titleId}>{c.title}</h3>
-                  {#if c.description}
-                    <p class="feature-spread__description">{extractPlainText(c.description)}</p>
-                  {/if}
-                  <hr class="feature-spread__rule" aria-hidden="true" />
-                  <div class="feature-spread__byline">
-                    {#if c.creator?.name}
-                      <Avatar class="feature-spread__avatar">
-                        <AvatarImage src={undefined} alt={c.creator.name} />
-                        <AvatarFallback>{c.creator.name.charAt(0).toUpperCase()}</AvatarFallback>
-                      </Avatar>
-                      <span class="feature-spread__creator">{c.creator.name}</span>
-                    {/if}
-                    {#if duration}
-                      <span class="feature-spread__meta-sep" aria-hidden="true">·</span>
-                      <span>{formatDurationHuman(duration)}</span>
-                    {/if}
-                    {#if c.priceCents != null && c.priceCents > 0}
-                      <span class="feature-spread__meta-sep" aria-hidden="true">·</span>
-                      <span>£{(c.priceCents / 100).toFixed(2)}</span>
-                    {:else if c.accessType === 'free'}
-                      <span class="feature-spread__meta-sep" aria-hidden="true">·</span>
-                      <span>Free</span>
-                    {/if}
-                  </div>
-                  <span class="feature-spread__cta">
-                    {ctaLabel}
-                    <span class="feature-spread__cta-arrow" aria-hidden="true">→</span>
-                  </span>
-                </div>
-              </a>
-            </article>
-          {:else if item.kind === 'content'}
-            <div
-              class="tile"
-              data-section-tint={tintFor(item.sectionId)}
-            >
-              <ContentCard
-                variant="grid"
-                id={item.content.id}
-                title={item.content.title}
-                thumbnail={item.content.mediaItem?.thumbnailUrl ?? item.content.thumbnailUrl ?? null}
-                description={item.content.description}
-                contentType={item.content.contentType === 'written' ? 'article' : item.content.contentType}
-                duration={item.content.mediaItem?.durationSeconds ?? null}
-                creator={item.content.creator ? {
-                  username: item.content.creator.name ?? undefined,
-                  displayName: item.content.creator.name ?? undefined,
-                } : undefined}
-                href={buildContentUrl(page.url, item.content)}
-                price={item.content.priceCents != null ? {
-                  amount: item.content.priceCents,
-                  currency: 'GBP',
-                } : null}
-                contentAccessType={item.content.accessType}
-                included={access.isIncluded(item.content)}
-                isFollower={access.isFollowing}
-                tierName={access.getTierName(item.content)}
-                category={item.content.category ?? null}
-              />
-            </div>
+
+  <!-- Snippet: full-width feature spread (1–2-item sections + carousel hero) -->
+  {#snippet spread(c)}
+    {@const thumb = c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null}
+    {@const href = buildContentUrl(page.url, c)}
+    {@const duration = c.mediaItem?.durationSeconds ?? null}
+    {@const titleId = `feature-title-${c.id}`}
+    {@const typeLabel = c.contentType === 'audio' ? 'Audio' : c.contentType === 'written' ? 'Article' : 'Video'}
+    {@const ctaLabel = c.contentType === 'audio' ? 'Listen now' : c.contentType === 'written' ? 'Read now' : 'Watch now'}
+    <article class="feature-spread" aria-labelledby={titleId}>
+      <a class="feature-spread__link" {href}>
+        <figure class="feature-spread__frame">
+          {#if thumb}
+            <img
+              src={thumb}
+              srcset={getThumbnailSrcset(thumb)}
+              sizes={DEFAULT_SIZES}
+              alt=""
+              class="feature-spread__img"
+              loading="lazy"
+            />
+          {:else}
+            <div class="feature-spread__fallback" aria-hidden="true"></div>
           {/if}
+          <span class="feature-spread__type-badge">{typeLabel}</span>
+        </figure>
+        <div class="feature-spread__body">
+          {#if c.category}
+            <p class="feature-spread__eyebrow">{c.category}</p>
+          {/if}
+          <h3 class="feature-spread__title" id={titleId}>{c.title}</h3>
+          {#if c.description}
+            <p class="feature-spread__description">{extractPlainText(c.description)}</p>
+          {/if}
+          <hr class="feature-spread__rule" aria-hidden="true" />
+          <div class="feature-spread__byline">
+            {#if c.creator?.name}
+              <Avatar class="feature-spread__avatar">
+                <AvatarImage src={undefined} alt={c.creator.name} />
+                <AvatarFallback>{c.creator.name.charAt(0).toUpperCase()}</AvatarFallback>
+              </Avatar>
+              <span class="feature-spread__creator">{c.creator.name}</span>
+            {/if}
+            {#if duration}
+              <span class="feature-spread__meta-sep" aria-hidden="true">·</span>
+              <span>{formatDurationHuman(duration)}</span>
+            {/if}
+            {#if c.priceCents != null && c.priceCents > 0}
+              <span class="feature-spread__meta-sep" aria-hidden="true">·</span>
+              <span>£{(c.priceCents / 100).toFixed(2)}</span>
+            {:else if c.accessType === 'free'}
+              <span class="feature-spread__meta-sep" aria-hidden="true">·</span>
+              <span>Free</span>
+            {/if}
+          </div>
+          <span class="feature-spread__cta">
+            {ctaLabel}
+            <span class="feature-spread__cta-arrow" aria-hidden="true">→</span>
+          </span>
+        </div>
+      </a>
+    </article>
+  {/snippet}
+
+  <!-- Snippet: compact ContentCard for grid + non-hero carousel tiles -->
+  {#snippet gridCard(c, variant)}
+    <ContentCard
+      {variant}
+      id={c.id}
+      title={c.title}
+      thumbnail={c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null}
+      description={c.description}
+      contentType={c.contentType === 'written' ? 'article' : c.contentType}
+      duration={c.mediaItem?.durationSeconds ?? null}
+      creator={c.creator ? {
+        username: c.creator.name ?? undefined,
+        displayName: c.creator.name ?? undefined,
+      } : undefined}
+      href={buildContentUrl(page.url, c)}
+      price={c.priceCents != null ? {
+        amount: c.priceCents,
+        currency: 'GBP',
+      } : null}
+      contentAccessType={c.accessType}
+      included={access.isIncluded(c)}
+      isFollower={access.isFollowing}
+      tierName={access.getTierName(c)}
+      category={c.category ?? null}
+    />
+  {/snippet}
+
+  {#each data.sections as section (section.id)}
+    <section class="feed-section">
+      <header class="lede">
+        <p class="lede__eyebrow">{section.eyebrow}</p>
+        <hr class="lede__rule" aria-hidden="true" />
+        <div class="lede__title-row">
+          <h2 class="lede__title">{section.title}</h2>
+          {#if section.viewAllHref}
+            <a href={section.viewAllHref} class="lede__view-all">
+              {section.viewAllLabel ?? m.org_view_all_content()}
+              <span aria-hidden="true">→</span>
+            </a>
+          {/if}
+        </div>
+      </header>
+
+      {#if section.items.length <= 2}
+        <div class="feed-section__spreads">
+          {#each section.items as item (item.id)}
+            {@render spread(item)}
+          {/each}
+        </div>
+      {:else}
+        <Carousel
+          items={section.items}
+          firstItemHero
+          itemMinWidth="16rem"
+          gap="var(--space-4)"
+          ariaLabel={section.title}
+        >
+          {#snippet renderItem(c, i)}
+            {@render gridCard(c, i === 0 ? 'featured' : 'grid')}
+          {/snippet}
+        </Carousel>
+      {/if}
+    </section>
+  {/each}
+
+  <!-- Bottom catalogue — flat grid of every published item. Carries the
+       page forward from curated carousels → exhaustive browse. -->
+  {#if data.allContent.length > 0}
+    <section class="feed-section feed-section--catalogue">
+      <header class="lede">
+        <p class="lede__eyebrow">The Catalogue</p>
+        <hr class="lede__rule" aria-hidden="true" />
+        <div class="lede__title-row">
+          <h2 class="lede__title">All content</h2>
+          <a href="/explore" class="lede__view-all">
+            {m.org_view_all_content()}
+            <span aria-hidden="true">→</span>
+          </a>
+        </div>
+      </header>
+      <div class="content-grid">
+        {#each data.allContent as item (item.id)}
+          {@render gridCard(item, 'grid')}
         {/each}
       </div>
     </section>
@@ -867,27 +888,39 @@
   }
 
   /* ══════════════════════════════════════════
-     FEED — single edge-to-edge grid
-     Cards touch; inner thumbnail padding provides
-     the visual rhythm. Full-width tiles (featured
-     content, section ledes) span all columns via
-     grid-column: 1 / -1. Tinted background strips
-     visually group consecutive tiles that share a
-     data-section-tint attribute.
+     FEED — per-domain section bands
+     Each .feed-section renders lede + (spread(s) | carousel) stack.
+     Format chosen by item count at render time. Page-background
+     carries through; rhythm comes from vertical spacing and the
+     lede rule.
      ══════════════════════════════════════════ */
-  .feed-wrap {
+  .feed-section {
     width: 100%;
     max-width: var(--container-xl);
     margin: 0 auto;
-    padding: var(--space-8) 0;
+    padding: var(--space-10) var(--space-6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
   }
 
+  .feed-section--catalogue {
+    /* The catalogue deserves more vertical air — it's the "continuing on"
+       exhaustive browse band at the bottom of the page. */
+    padding-block: var(--space-12);
+  }
+
+  .feed-section__spreads {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+  }
+
+  /* Catalogue grid — flat tiled layout for the bottom "All content" band.
+     Same 3-column-at-xl rhythm as the carousel items above it, so the
+     visual tile size carries through. */
   .content-grid {
     display: grid;
-    /* 22rem minimum gives 3 columns at --container-xl width, so each
-       thumbnail has editorial presence rather than five crowded tiles
-       in a row. Auto-fill still lets the grid reflow gracefully at
-       container-query sizes between the defined breakpoints. */
     grid-template-columns: repeat(
       auto-fill,
       minmax(min(100%, 22rem), 1fr)
@@ -896,33 +929,22 @@
     align-items: stretch;
   }
 
-  .tile {
-    min-width: 0;
-    /* No tile padding — cards truly touch edge-to-edge. The inner
-       thumbnail padding on ContentCard (var(--space-2)) is what creates
-       the visual rhythm between adjacent tiles. */
-    padding: 0;
-    transition: background var(--duration-normal) var(--ease-out);
-  }
-
-  /* Flatten the inner ContentCard when it lives in the feed grid — the
-     tile is already doing the visual containment via background tint and
-     the inner thumbnail border-radius, so a per-card border and shadow
-     would double up along touching edges. Hover still raises the card
-     for interactivity feedback. */
-  .tile :global(.cc) {
+  /* Flatten the ContentCard frame inside both the catalogue grid and
+     the carousel tracks — adjacent cards visually merge via their
+     inner thumbnail padding rather than doubled borders. Hover still
+     lifts the card for interactivity feedback. */
+  .content-grid :global(.cc),
+  .feed-section :global(.carousel__item .cc) {
     border-color: transparent;
     background: transparent;
   }
 
-  .tile :global(.cc:hover),
-  .tile :global(.cc:focus-within:has(:focus-visible)) {
+  .content-grid :global(.cc:hover),
+  .content-grid :global(.cc:focus-within:has(:focus-visible)),
+  .feed-section :global(.carousel__item .cc:hover),
+  .feed-section :global(.carousel__item .cc:focus-within:has(:focus-visible)) {
     border-color: color-mix(in srgb, var(--color-border) 50%, transparent);
     background: color-mix(in srgb, var(--color-surface-card) 70%, transparent);
-  }
-
-  .tile--full {
-    grid-column: 1 / -1;
   }
 
   /* ══════════════════════════════════════════
@@ -1166,27 +1188,7 @@
     }
   }
 
-  /* ── Lede tile — section header rendered as a full-width grid cell ── */
-  .tile--lede {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    padding: var(--space-12) var(--space-6) var(--space-6);
-  }
-
-  .tile--lede:first-child {
-    /* First lede in the feed doesn't need top padding — the content-area
-       gradient already provides vertical air above it. */
-    padding-top: var(--space-8);
-  }
-
-  /* Feed is fully transparent — section rhythm comes from the lede
-     headers (eyebrow + rule + title) and vertical spacing alone,
-     letting the page's ambient background carry through. The
-     data-section-tint attribute is kept in markup as a hook for
-     future per-section treatments, but doesn't paint anything now. */
-
-  /* Tablet — drop to 2 chunky columns before mobile takes over */
+  /* Tablet — 2 chunky columns for the catalogue grid */
   @media (--below-lg) {
     .content-grid {
       grid-template-columns: repeat(
@@ -1196,14 +1198,14 @@
     }
   }
 
-  /* Mobile — 2-column grid. Full-width tiles still span both. */
+  /* Mobile — stricter 2-column grid */
   @media (--below-md) {
     .content-grid {
       grid-template-columns: repeat(2, 1fr);
     }
 
-    .tile--lede {
-      padding: var(--space-8) var(--space-4) var(--space-4);
+    .feed-section {
+      padding: var(--space-8) var(--space-4);
     }
   }
 

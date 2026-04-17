@@ -33,6 +33,12 @@
     showArrows?: boolean;
     scrollAmount?: 'page' | number;
     ariaLabel?: string;
+    /**
+     * When true, the first carousel item is rendered at ~2× the regular
+     * item width. Used on the org landing feed where each per-domain
+     * section leads with a "hero" tile (Netflix-style row anchor).
+     */
+    firstItemHero?: boolean;
   }
 
   const {
@@ -46,6 +52,7 @@
     showArrows = true,
     scrollAmount = 'page',
     ariaLabel,
+    firstItemHero = false,
     class: className,
     ...restProps
   }: Props = $props();
@@ -110,6 +117,7 @@
     <div class="carousel__wrapper">
       <div
         class="carousel__track"
+        class:carousel__track--first-hero={firstItemHero}
         bind:this={trackEl}
         onscroll={updateArrowVisibility}
         onfocusin={handleFocusIn}
@@ -216,6 +224,18 @@
     min-width: var(--carousel-item-min-width, 280px);
     max-width: 400px;
     scroll-snap-align: start;
+  }
+
+  /* Hero variant — first tile in the carousel is ~2× width. Used by the
+     org landing feed's per-domain sections where each section leads with
+     a larger "anchor" tile. The cap accounts for very wide min-widths
+     which would otherwise produce a hero tile that dwarfs the viewport. */
+  .carousel__track--first-hero > .carousel__item:first-child {
+    min-width: min(
+      calc(var(--carousel-item-min-width, 280px) * 2),
+      40rem
+    );
+    max-width: 40rem;
   }
 
   /* Navigation arrows */
