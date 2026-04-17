@@ -69,7 +69,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 20 | **Light-mode contrast sweep** — ran Lighthouse on studio-alpha (rose/white), found price interval + helper text failing in light mode, bumped muted→secondary; verified dark mode didn't regress | ✅ done | Commit on 2026-04-17 |
 | 21 | **Sticky CTA — mobile trigger, footer z-index, trust-strip suppression** — user feedback: mobile needs scroll-trigger (not always-on), sticky appeared under footer, and should hide when trust/footer enters view | ✅ done | Commit on 2026-04-18 |
 | 22 | **Tier card uniform heights + description clamp** — grid `align-items: stretch` + `height: 100%` on card/inner + 3-line clamp on desc so cards stay visually balanced regardless of creator copy length | ✅ done | Commit on 2026-04-18 |
-| 23+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 23 | **Full-page contrast sweep** — ran Lighthouse with all sections revealed; fixed stat labels + preview CTA brand-text-on-light contrast | ✅ done | Commit on 2026-04-18 |
+| 24+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -417,3 +418,15 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Verified in-browser**: all three cards now 487px tall. Subscribe CTAs align as a clean trio with featured one emphasized via its -16px lift.
 
   **Next pass prerequisite**: consider adding a subtle `reserved-space` hint when a tier has no description at all — an empty `.card__desc` would waste ~60px but keep icon hierarchy identical. Probably not worth it since most tiers have descriptions. Also: at mobile widths where cards stack, stretch vs start is moot.
+
+- **2026-04-18 Pass 23 (Full-page contrast sweep)**: Earlier Lighthouse passes were at scroll 0, so below-fold sections weren't audited. Ran a fresh snapshot after scrolling through all revealed sections — found TWO new light-mode fails in the preview section:
+  - **`.preview__stat-label`** ("TITLES", "CREATOR", "HOURS"): `#a3a3a3` on `#fafafa` = 2.41:1. Same systemic `--color-text-muted` issue.
+  - **`.preview__cta` text** (brand-colored "Browse the catalogue"): `#e11d48` on `#fdf1f4` = 4.26:1. Rose brand on a very lightly brand-tinted surface — bg tint was too subtle, contrast fell just under WCAG AA 4.5.
+  - **Fix 1**: `.preview__stat-label` color `--color-text-muted` → `--color-text-secondary`. Matches the Pass 20 pattern.
+  - **Fix 2**: `.preview__cta` — text changed from `--color-brand-primary` → `--color-brand-primary-hover` (semantically "slightly darker variant", -0.08L OKLCH). Bumped bg tint from 6% → 10% brand-in-surface mix for stronger pill presence. Bumped border from 25% → 30% brand for the same reason. Inline CSS comment documents the -0.08L semantic.
+  - **Post-fix verification — both orgs, all sections revealed**:
+    - studio-alpha (light, rose brand, 2 tiers in duo): Accessibility **100**, Best Practices 100, SEO 100. 34 passed, 0 failed.
+    - of-blood-and-bones (dark, terracotta brand, 3 tiers): Accessibility **100**, Best Practices 100, SEO 100. 34 passed, 0 failed.
+  - **Coverage milestone**: the pricing page is now WCAG AA clean on every interactive/informational element at every scroll position across both light and dark org themes. Zero failing contrast audits in any test configuration.
+
+  **Next pass prerequisite**: the `.preview__cta` visual weight bumped slightly (10% bg vs 6% before) — verify it doesn't overwhelm the tier card CTAs' visual hierarchy. The tier card CTAs should remain the primary conversion moment; the preview CTA is secondary ("explore the catalog"). If preview CTA now feels too loud, dial back border or bg. Also: consider bumping other brand-text-on-light-bg elements proactively — `.hero__eyebrow`, `.preview__eyebrow`, `.faq__eyebrow`, `.trust__label` may all have similar borderline contrast on light orgs.

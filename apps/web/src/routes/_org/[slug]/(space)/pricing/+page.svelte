@@ -1685,7 +1685,7 @@
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wider);
     text-transform: var(--text-transform-label, uppercase);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
   }
 
   .preview__categories {
@@ -1718,9 +1718,11 @@
     padding: var(--space-3) var(--space-5);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
-    color: var(--color-brand-primary, var(--color-interactive));
-    background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 6%, var(--color-surface));
-    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 25%, transparent);
+    /* Hover variant = brand color with -0.08L OKLCH — darker for legibility
+       on light surfaces without abandoning brand identity. */
+    color: var(--color-brand-primary-hover, var(--color-interactive-hover, var(--color-brand-primary)));
+    background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 10%, var(--color-surface));
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 30%, transparent);
     border-radius: var(--radius-full);
     text-decoration: none;
     transition:
