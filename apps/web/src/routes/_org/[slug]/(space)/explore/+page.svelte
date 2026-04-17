@@ -418,7 +418,7 @@
         <ContentCard
           id={item.id}
           title={item.title}
-          thumbnail={item.mediaItem?.thumbnailKey ?? item.thumbnailUrl ?? null}
+          thumbnail={item.mediaItem?.thumbnailUrl ?? item.thumbnailUrl ?? null}
           description={item.description}
           contentType={(item.contentType === 'written' ? 'article' : item.contentType) as 'video' | 'audio' | 'article'}
           duration={item.mediaItem?.durationSeconds ?? null}
