@@ -7,6 +7,7 @@
   import Button from '$lib/components/ui/Button/Button.svelte';
   import { Badge, EmptyState } from '$lib/components/ui';
   import {
+    AlertTriangleIcon,
     CheckIcon,
     CheckCircleIcon,
     LockIcon,
@@ -312,8 +313,27 @@
 
     <!-- ═══ TIER CARDS ═══ -->
     {#if checkoutError}
-      <div class="checkout-error" role="alert">
-        <p>{checkoutError}</p>
+      <div
+        class="checkout-error"
+        role="alert"
+        aria-live="polite"
+        transition:fly={{ y: -12, duration: 220, easing: cubicOut }}
+      >
+        <span class="checkout-error__icon" aria-hidden="true">
+          <AlertTriangleIcon size={18} />
+        </span>
+        <div class="checkout-error__body">
+          <p class="checkout-error__title">Something went wrong</p>
+          <p class="checkout-error__message">{checkoutError}</p>
+        </div>
+        <button
+          class="checkout-error__dismiss"
+          type="button"
+          onclick={() => { checkoutError = ''; }}
+          aria-label="Dismiss error"
+        >
+          <XIcon size={14} />
+        </button>
       </div>
     {/if}
 
@@ -1976,20 +1996,101 @@
     }
   }
 
-  /* ── ERROR ────────────────────────────────────────────────────────── */
+  /* ══════════════════════════════════════════════════════════════════
+     CHECKOUT ERROR — editorial alert, not a flat banner
+     ══════════════════════════════════════════════════════════════════ */
 
   .checkout-error {
     width: 100%;
-    padding: var(--space-3) var(--space-4);
-    background-color: var(--color-error-50);
-    border: var(--border-width) var(--border-style) var(--color-error-200);
+    max-width: 44rem;
+    margin: 0 auto;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-4) var(--space-4) var(--space-3);
+    background: color-mix(in srgb, var(--color-error-50) 92%, var(--color-surface));
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-error-200) 85%, transparent);
+    border-left: var(--border-width-thick) var(--border-style) var(--color-error-600);
     border-radius: var(--radius-md);
-    color: var(--color-error-700);
-    font-size: var(--text-sm);
-    text-align: center;
+    box-shadow:
+      var(--shadow-sm),
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 20%, transparent);
   }
 
-  .checkout-error p { margin: 0; }
+  .checkout-error__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-8);
+    height: var(--space-8);
+    flex-shrink: 0;
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--color-error-100) 80%, transparent);
+    color: var(--color-error-600);
+    margin-top: calc(-1 * var(--space-0-5));
+  }
+
+  .checkout-error__body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+  }
+
+  .checkout-error__title {
+    margin: 0;
+    font-family: var(--font-heading);
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--color-error-700);
+    letter-spacing: var(--tracking-tight);
+    line-height: var(--leading-tight);
+  }
+
+  .checkout-error__message {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--color-error-700);
+    line-height: var(--leading-snug);
+    text-wrap: pretty;
+    opacity: 0.9;
+  }
+
+  .checkout-error__dismiss {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-7);
+    height: var(--space-7);
+    flex-shrink: 0;
+    border: none;
+    background: none;
+    color: var(--color-error-600);
+    cursor: pointer;
+    border-radius: var(--radius-full);
+    transition:
+      color var(--duration-normal) var(--ease-default),
+      background-color var(--duration-normal) var(--ease-default),
+      transform var(--duration-normal) var(--ease-default);
+  }
+
+  .checkout-error__dismiss:hover {
+    color: var(--color-error-700);
+    background: color-mix(in srgb, var(--color-error-100) 90%, transparent);
+    transform: rotate(90deg);
+  }
+
+  .checkout-error__dismiss:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus-ring-error);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .checkout-error__dismiss:hover {
+      transform: none;
+    }
+  }
 
   /* ── SKELETON ─────────────────────────────────────────────────────── */
 

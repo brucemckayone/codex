@@ -56,7 +56,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 7 | **Between-section rhythm** — breath, scroll reveals for each section, tighter vertical cadence | ✅ done | Commit on 2026-04-17 |
 | 8 | **Full micro-polish review** — focus rings, motion reduce paths, dark mode, backdrop-filter fallback, skeleton match | ✅ done | Commit on 2026-04-17 |
 | 9 | **Copy tightening (defaults)** — FAQ defaults rewritten for objection-handling, FAQ lede reframed from "fine print" to "before you subscribe" | ✅ done | Commit on 2026-04-17 |
-| 10+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 10 | **Checkout error treatment** — editorial alert with icon, title+message hierarchy, dismiss button, transition | ✅ done | Commit on 2026-04-17 |
+| 11+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -245,3 +246,18 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Override mechanism preserved**: orgs that customize their FAQ via the Studio editor see their own content — these defaults only appear for unconfigured orgs, which are also the orgs least likely to have their own conversion copy. Biggest leverage ships here.
 
   - **Next pass prerequisite**: Visual verify end-to-end (boot `pnpm dev`, scroll through on both desktop + mobile emulation, confirm reveal timings, check dark mode). This is the biggest outstanding debt — 9 passes of code polish without a single browser check. Also consider: preview section's `if withThumbs.length >= 3` hard-gate (section disappears entirely below 3 items) may be too strict; a 1-2-item fallback could still convert.
+
+- **2026-04-17 Pass 10 (Checkout error treatment)**: Upgraded the flat red banner into a proper editorial alert.
+  - **Structure**: single `<p>` wrapped in `<div>` → icon + body (title + message) + dismiss button. Template now renders `<AlertTriangleIcon>` in a tinted circle, a semibold "Something went wrong" title in the heading font, the actual error message beneath, and a rotating `XIcon` dismiss that clears `checkoutError`.
+  - **Layout**: left-aligned flex row with `--space-3` gap; `max-width: 44rem` + `margin: 0 auto` so it doesn't sprawl on wide viewports. Matches the page's other max-widths (faq 48rem, preview footer 44rem).
+  - **Visual hierarchy**: left-edge accent (`--border-width-thick` in `--color-error-600`) — standard design-system device for "read this" (used by Material, Ant, IBM Carbon). Surface softened via `color-mix(--color-error-50, 92%, --color-surface)` so it blends rather than screams. Shadow + inner highlight for a little lift.
+  - **Icon treatment**: `--space-8` rounded squircle in `color-mix(--color-error-100, 80%, transparent)` with `--color-error-600` icon. Same squircle pattern as tier card feature icons and trust strip icons — consistent language across every icon-in-context on the page.
+  - **Typography**: title uses `--font-heading`, `--text-sm`, semibold, tracking-tight. Message uses body font, same size, 0.9 opacity for subtle demotion.
+  - **Dismiss button**: `--space-7` circle, rotates 90° on hover (motion guard for reduced-motion), uses `--shadow-focus-ring-error` for accessible focus styling (error-colored focus ring — semantic match to the surrounding context).
+  - **Entrance**: `transition:fly={{ y: -12, duration: 220, easing: cubicOut }}` — drops down from the top briefly. Matches the sticky CTA's fly pattern but shorter + smaller y delta since error appears closer to where the user is looking.
+  - **A11y**: `role="alert"` + `aria-live="polite"` (announces without interrupting), `aria-label="Dismiss error"` on the close button.
+  - **State**: new inline `onclick={() => { checkoutError = ''; }}` gives users control — previously errors stayed until next attempt.
+
+  - **Visual verify attempted**: Dev server was running on `:3000` but workers weren't (`:4001`, `:42069`, etc all closed). Navigation to `studio-alpha.lvh.me:3000/pricing` and `of-blood-and-bones.lvh.me:3000/pricing` returned the 404 "Organization not found" page — expected behavior when the org worker is unreachable. Seeded org slugs confirmed as `studio-alpha`, `studio-beta`, `of-blood-and-bones` (from `packages/database/scripts/seed/constants.ts`). **Next fire** should boot `pnpm dev` fully from the monorepo root to bring up all workers, then verify.
+
+  - **Next pass prerequisite**: Full `pnpm dev` boot from monorepo root + visual walkthrough. Start with `of-blood-and-bones.lvh.me:3000/pricing` (terracotta brand — exercises the OKLCH color-mix paths nicely). Check: hero stagger, tier card ribbon/glow, preview spread, FAQ accordion, trust strip, sticky CTA on scroll past tier cards, error state if possible to trigger. Also check dark mode (toggle via `html.dark` or `?theme=dark`).
