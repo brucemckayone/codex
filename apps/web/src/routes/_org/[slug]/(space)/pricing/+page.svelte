@@ -85,31 +85,31 @@
   // ── FAQ ────────────────────────────────────────────────────────────
   const DEFAULT_FAQ: PricingFaqItem[] = [
     {
-      id: 'default-cancel',
-      question: 'Can I cancel my subscription at any time?',
+      id: 'default-access',
+      question: 'When does my access start?',
       answer:
-        'Yes, you can cancel your subscription at any time from your account settings. Your access will continue until the end of your current billing period.',
+        'Immediately. The moment your payment confirms, every title included in your tier unlocks — no waiting period, no activation email to hunt down.',
       order: 0,
     },
     {
-      id: 'default-payment',
-      question: 'What payment methods do you accept?',
+      id: 'default-cancel',
+      question: 'Can I cancel anytime?',
       answer:
-        'We accept all major credit and debit cards including Visa, Mastercard, and American Express. All payments are processed securely through Stripe.',
+        'Yes. Cancel from your account in a couple of clicks and you keep access through the end of the billing period you have already paid for.',
       order: 1,
     },
     {
-      id: 'default-access',
-      question: 'Do I get instant access after subscribing?',
+      id: 'default-change-plan',
+      question: 'Can I switch plans later?',
       answer:
-        'Yes, you get immediate access to all content included in your subscription tier as soon as your payment is confirmed.',
+        'Anytime. Upgrades and downgrades take effect at the start of your next billing period so you never lose paid time, and the price difference is handled automatically.',
       order: 2,
     },
     {
-      id: 'default-change-plan',
-      question: 'Can I change my plan later?',
+      id: 'default-payment',
+      question: 'Is my payment secure?',
       answer:
-        'Absolutely. You can upgrade or downgrade your subscription tier at any time. Changes take effect at the start of your next billing period.',
+        'Every transaction is processed by Stripe, the same payment infrastructure used by Amazon, Shopify, and most of the internet. The creators never see your card details.',
       order: 3,
     },
   ];
@@ -512,11 +512,11 @@
     <!-- ═══ FAQ ═══ -->
     <section class="faq reveal" data-reveal>
       <header class="faq__lede">
-        <p class="faq__eyebrow">The fine print</p>
+        <p class="faq__eyebrow">Before you subscribe</p>
         <span class="faq__rule" aria-hidden="true"></span>
         <h2 class="faq__title">Questions, answered.</h2>
         <p class="faq__subtitle">
-          The short version — plus room for anything the creators want you to know.
+          The questions we hear most — answered straight.
         </p>
       </header>
 

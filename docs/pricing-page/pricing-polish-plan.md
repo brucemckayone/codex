@@ -55,7 +55,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 6 | **Sticky CTA** — premium chip, tier-color glow, polished transitions, mobile-edge safe | ✅ done | Commit on 2026-04-17 |
 | 7 | **Between-section rhythm** — breath, scroll reveals for each section, tighter vertical cadence | ✅ done | Commit on 2026-04-17 |
 | 8 | **Full micro-polish review** — focus rings, motion reduce paths, dark mode, backdrop-filter fallback, skeleton match | ✅ done | Commit on 2026-04-17 |
-| 9+ | **Continuous refinement** — each re-fire picks the weakest remaining section | ⬜ pending | |
+| 9 | **Copy tightening (defaults)** — FAQ defaults rewritten for objection-handling, FAQ lede reframed from "fine print" to "before you subscribe" | ✅ done | Commit on 2026-04-17 |
+| 10+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -231,3 +232,16 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Focus-visible audit**: all interactive elements covered — `.toggle-option`, `.accordion-trigger`, `.preview__cta`, `.sticky-bar__dismiss` have `:focus-visible { box-shadow: var(--shadow-focus-ring); }`. Buttons use the shared component's own handling. No gaps.
 
   - **Next pass prerequisite**: Visual smoke test of the loading state — refresh the page with network throttling to confirm the 3-shell skeleton (with featured middle) matches the final card count + featured position most of the time. Verify in Firefox (older version without backdrop-filter support) that the fallback solid surfaces look acceptable. Also scan for any lingering visual regressions on ultrawide (2560px+) viewports — the `--container-max: 72rem` cap should prevent sprawl.
+
+- **2026-04-17 Pass 9 (Copy tightening — defaults)**: Rewrote the hard-coded `DEFAULT_FAQ` array and the FAQ lede for conversion-focused voice.
+  - **FAQ eyebrow**: "The fine print" → "Before you subscribe". Removed the negative legal-gotcha connotation and reframed as pre-purchase reassurance. Pairs with the existing title ("Questions, answered.") to form a narrative: *Before you subscribe → Questions, answered.*
+  - **FAQ subtitle**: "The short version — plus room for anything the creators want you to know." → "The questions we hear most — answered straight." Cleaner, more declarative; "answered straight" sets voice expectation.
+  - **DEFAULT_FAQ reordering + rewrite** — ordered by conversion priority (lead with value, then friction, end with trust):
+    1. *When does my access start?* — lead with the delivered value. "Immediately. The moment your payment confirms, every title included in your tier unlocks — no waiting period, no activation email to hunt down." (vs "Do I get instant access after subscribing?" + generic "yes" answer)
+    2. *Can I cancel anytime?* — commitment reassurance. Specific: "Cancel from your account in a couple of clicks and you keep access through the end of the billing period you have already paid for."
+    3. *Can I switch plans later?* — flexibility reassurance. Adds "the price difference is handled automatically" to address a common unknown.
+    4. *Is my payment secure?* — trust finale. Rewrote from "what payment methods" (trust question masquerading as payment-options question) to the underlying concern. Answer: "Every transaction is processed by Stripe, the same payment infrastructure used by Amazon, Shopify, and most of the internet. The creators never see your card details." — social proof via brand anchoring + concrete privacy promise.
+  - **Why this order matters**: opens with "you get everything immediately" (the benefit), moves through "you can leave / you can change" (removing friction), lands on "your payment is safe" (final trust lock). Reads like a short sales argument top-to-bottom, not an alphabetized FAQ.
+  - **Override mechanism preserved**: orgs that customize their FAQ via the Studio editor see their own content — these defaults only appear for unconfigured orgs, which are also the orgs least likely to have their own conversion copy. Biggest leverage ships here.
+
+  - **Next pass prerequisite**: Visual verify end-to-end (boot `pnpm dev`, scroll through on both desktop + mobile emulation, confirm reveal timings, check dark mode). This is the biggest outstanding debt — 9 passes of code polish without a single browser check. Also consider: preview section's `if withThumbs.length >= 3` hard-gate (section disappears entirely below 3 items) may be too strict; a 1-2-item fallback could still convert.
