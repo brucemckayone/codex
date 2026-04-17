@@ -967,7 +967,15 @@
     gap: var(--space-6);
     width: 100%;
     padding: 0;
-    align-items: start;
+    /* stretch → all cards share the tallest card's height, CTAs align */
+    align-items: stretch;
+  }
+
+  /* Card inner fills its grid cell so stretch takes effect through the
+     visible surface. */
+  .card,
+  .card__inner {
+    height: 100%;
   }
 
   @media (--breakpoint-sm) {
@@ -1241,6 +1249,13 @@
     line-height: var(--leading-snug);
     margin: 0;
     text-wrap: pretty;
+    /* Cap at 3 lines so cards stay visually balanced regardless of
+       creator copy length. Tier descriptions should be concise by design. */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   /* ── PRICING (editorial stack) ────────────────────────────────── */

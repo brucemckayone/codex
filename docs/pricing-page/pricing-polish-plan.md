@@ -68,7 +68,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 19 | **Lighthouse a11y 100** — ran snapshot audit, found insufficient contrast on inactive toggle text, bumped color token to restore WCAG AA | ✅ done | Commit on 2026-04-17 |
 | 20 | **Light-mode contrast sweep** — ran Lighthouse on studio-alpha (rose/white), found price interval + helper text failing in light mode, bumped muted→secondary; verified dark mode didn't regress | ✅ done | Commit on 2026-04-17 |
 | 21 | **Sticky CTA — mobile trigger, footer z-index, trust-strip suppression** — user feedback: mobile needs scroll-trigger (not always-on), sticky appeared under footer, and should hide when trust/footer enters view | ✅ done | Commit on 2026-04-18 |
-| 22+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 22 | **Tier card uniform heights + description clamp** — grid `align-items: stretch` + `height: 100%` on card/inner + 3-line clamp on desc so cards stay visually balanced regardless of creator copy length | ✅ done | Commit on 2026-04-18 |
+| 23+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -408,3 +409,11 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - Race note: between tier-out and trust-in observer firings, there's a single-frame window where sticky could flash visible. In practice, Chrome batches IO callbacks same-frame so this is invisible to users.
 
   **Next pass prerequisite**: consider a slight `transition: opacity` on the sticky-bar's fly enter so the end-of-page hide doesn't feel abrupt. Also: on VERY tall viewports where trust might be in view simultaneously with tier cards' bottom still visible, the sticky might never show — but that's an extreme edge case and the fallback (no sticky) is fine.
+
+- **2026-04-18 Pass 22 (Tier card uniform heights + description clamp)**: Probed the rendered cards at 1440×900 and found inconsistent heights (Soul Path: 487px, kljhh: 475.5px, ooiojgoi: 467.5px — ~20px variance) driven entirely by description line count.
+  - **Fix 1 — line-clamp on description**: added `display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden` to `.card__desc`. Caps creator descriptions at 3 lines with ellipsis truncation. Concise copy is better anyway.
+  - **Fix 2 — grid stretch + full-height cards**: changed `.tier-stage { align-items: start }` → `align-items: stretch`, added `.card, .card__inner { height: 100% }`. Grid row height determined by tallest card; all cards fill to match. Combined with existing `.card__action { margin-top: auto }`, CTAs now pin to card bottoms.
+  - **Featured lift preserved**: `.card--featured { margin-top: calc(-1 * var(--space-4)) }` desktop rule still works — featured card top at y=439 vs 455 for siblings (-16px lift), bottom ends 16px earlier. Visual hierarchy intact.
+  - **Verified in-browser**: all three cards now 487px tall. Subscribe CTAs align as a clean trio with featured one emphasized via its -16px lift.
+
+  **Next pass prerequisite**: consider adding a subtle `reserved-space` hint when a tier has no description at all — an empty `.card__desc` would waste ~60px but keep icon hierarchy identical. Probably not worth it since most tiers have descriptions. Also: at mobile widths where cards stack, stretch vs start is moot.
