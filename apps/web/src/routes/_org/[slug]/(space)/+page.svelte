@@ -827,10 +827,10 @@
 
   .tile {
     min-width: 0;
-    /* Tile padding is intentionally small — the ContentCard itself carries
-       inner padding (var(--space-2)), which already creates the illusion
-       of a gap between thumbnails when cards touch. */
-    padding: var(--space-1);
+    /* No tile padding — cards truly touch edge-to-edge. The inner
+       thumbnail padding on ContentCard (var(--space-2)) is what creates
+       the visual rhythm between adjacent tiles. */
+    padding: 0;
     transition: background var(--duration-normal) var(--ease-out);
   }
 
@@ -896,8 +896,13 @@
   .content-grid > [data-section-tint='2'] {
     /* Tint 2 is the default "content band" — a soft neutral wash that
        distinguishes the feed from the page background without fighting
-       tint 1 or the cards themselves. */
-    background: var(--color-surface-secondary);
+       tint 1 or the cards themselves. A hair of brand warmth is mixed
+       in so the band inherits per-org personality. */
+    background: color-mix(
+      in oklch,
+      var(--color-brand-primary, var(--color-primary-500)) 3%,
+      var(--color-surface-secondary)
+    );
   }
 
   /* Tablet — give cards a bit more room before they become too narrow */
