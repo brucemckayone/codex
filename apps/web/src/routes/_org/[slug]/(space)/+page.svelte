@@ -12,6 +12,7 @@
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { CreatorCarouselCard, SkeletonCreatorCard } from '$lib/components/ui/CreatorCard';
+  import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
   import Carousel from '$lib/components/carousel/Carousel.svelte';
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
@@ -352,6 +353,8 @@
             {@const href = buildContentUrl(page.url, c)}
             {@const duration = c.mediaItem?.durationSeconds ?? null}
             {@const titleId = `feature-title-${c.id}`}
+            {@const typeLabel = c.contentType === 'audio' ? 'Audio' : c.contentType === 'written' ? 'Article' : 'Video'}
+            {@const ctaLabel = c.contentType === 'audio' ? 'Listen now' : c.contentType === 'written' ? 'Read now' : 'Watch now'}
             <article
               class="tile tile--full feature-spread"
               data-section-tint={tintFor(item.sectionId)}
@@ -371,6 +374,7 @@
                   {:else}
                     <div class="feature-spread__fallback" aria-hidden="true"></div>
                   {/if}
+                  <span class="feature-spread__type-badge">{typeLabel}</span>
                 </figure>
                 <div class="feature-spread__body">
                   {#if c.category}
@@ -381,9 +385,13 @@
                     <p class="feature-spread__description">{extractPlainText(c.description)}</p>
                   {/if}
                   <hr class="feature-spread__rule" aria-hidden="true" />
-                  <div class="feature-spread__meta">
+                  <div class="feature-spread__byline">
                     {#if c.creator?.name}
-                      <span>{c.creator.name}</span>
+                      <Avatar class="feature-spread__avatar">
+                        <AvatarImage src={undefined} alt={c.creator.name} />
+                        <AvatarFallback>{c.creator.name.charAt(0).toUpperCase()}</AvatarFallback>
+                      </Avatar>
+                      <span class="feature-spread__creator">{c.creator.name}</span>
                     {/if}
                     {#if duration}
                       <span class="feature-spread__meta-sep" aria-hidden="true">·</span>
@@ -398,7 +406,7 @@
                     {/if}
                   </div>
                   <span class="feature-spread__cta">
-                    {c.contentType === 'audio' ? 'Listen now' : c.contentType === 'written' ? 'Read now' : 'Watch now'}
+                    {ctaLabel}
                     <span class="feature-spread__cta-arrow" aria-hidden="true">→</span>
                   </span>
                 </div>
@@ -932,7 +940,10 @@
     display: grid;
     grid-template-columns: 2fr 3fr;
     gap: var(--space-10);
-    align-items: center;
+    /* Anchor both columns to the top. Sparse text no longer leaves empty
+       space equally above AND below — any extra vertical space falls
+       beneath the CTA where it reads as intentional breathing room. */
+    align-items: start;
     text-decoration: none;
     color: inherit;
     outline: none;
@@ -944,17 +955,40 @@
     border-radius: var(--radius-sm);
   }
 
-  /* Image frame — 4:5 portrait crop gives editorial gravity. The 16:9
-     source is cropped via object-fit: cover; center-cropping is
-     acceptable since the user chose this thumbnail as the feature. */
+  /* Image frame — native 16:9 ratio preserves the source thumbnail
+     without cropping and keeps image height balanced against the
+     text column, which on sparse content would otherwise leave a
+     cavern of whitespace on the right. */
   .feature-spread__frame {
     position: relative;
     margin: 0;
-    aspect-ratio: 4 / 5;
+    aspect-ratio: 16 / 9;
     overflow: hidden;
     border-radius: var(--radius-md);
     background: var(--color-surface-tertiary);
     isolation: isolate;
+  }
+
+  /* Content-type pill — floats top-left corner of the image. Translucent
+     glass treatment so it doesn't compete with the thumbnail's hero
+     composition. */
+  .feature-spread__type-badge {
+    position: absolute;
+    top: var(--space-3);
+    left: var(--space-3);
+    z-index: 2;
+    padding: var(--space-1) var(--space-3);
+    font-family: var(--font-body);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wider);
+    color: var(--color-neutral-50);
+    background: color-mix(in srgb, var(--color-neutral-900) 60%, transparent);
+    backdrop-filter: blur(var(--blur-sm));
+    -webkit-backdrop-filter: blur(var(--blur-sm));
+    border-radius: var(--radius-xs);
+    line-height: var(--leading-tight);
   }
 
   .feature-spread__img {
@@ -1010,12 +1044,16 @@
   .feature-spread__title {
     margin: 0;
     font-family: var(--font-heading);
-    /* Fluid display ramp anchored to typography tokens */
-    font-size: clamp(var(--text-3xl), 3.5vw, var(--text-5xl));
+    /* Fluid display ramp — larger min/max so the title carries visual
+       weight even when the content happens to be short. An 80px max
+       anchors the spread as the page's dominant feature. */
+    font-size: clamp(var(--text-4xl), 5.5vw, 5rem);
     font-weight: var(--font-bold);
-    line-height: var(--leading-tight);
-    letter-spacing: var(--tracking-tighter);
+    line-height: 1.05;
+    letter-spacing: -0.025em;
     color: var(--color-text-primary);
+    /* Max-width gives good line breaks even on very long titles */
+    max-width: 20ch;
   }
 
   .feature-spread__description {
@@ -1040,7 +1078,10 @@
     opacity: var(--opacity-60);
   }
 
-  .feature-spread__meta {
+  /* Byline row — avatar + creator, then dot-separated meta. Familiar
+     newspaper/NYT rhythm where the photo gives the creator visual
+     identity beyond just their name as text. */
+  .feature-spread__byline {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -1049,19 +1090,44 @@
     color: var(--color-text-secondary);
   }
 
+  :global(.feature-spread__avatar) {
+    height: var(--space-8);
+    width: var(--space-8);
+    font-size: var(--text-sm);
+    /* Pull the avatar slightly left so the creator name sits flush with
+       the rule above — matches the editorial vertical rhythm. */
+    margin-right: var(--space-1);
+  }
+
+  .feature-spread__creator {
+    font-weight: var(--font-semibold);
+    color: var(--color-text-primary);
+  }
+
   .feature-spread__meta-sep {
     opacity: var(--opacity-50);
   }
 
+  /* Solid primary CTA — anchors the spread's visual weight so sparse
+     content still feels intentional. Sized and styled like the hero's
+     primary button for consistency across the landing surface. */
   .feature-spread__cta {
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
-    margin-top: var(--space-1);
+    align-self: flex-start;
+    margin-top: var(--space-3);
+    padding: var(--space-3) var(--space-7);
     font-size: var(--text-base);
     font-weight: var(--font-semibold);
-    color: var(--color-text-primary);
-    transition: color var(--duration-fast) var(--ease-default);
+    color: var(--color-text-inverse, white);
+    background: var(--color-brand-primary, var(--color-primary-500));
+    border-radius: var(--radius-base);
+    box-shadow: var(--shadow-md);
+    transition:
+      transform var(--duration-fast) var(--ease-default),
+      box-shadow var(--duration-normal) var(--ease-default),
+      background-color var(--duration-fast) var(--ease-default);
   }
 
   .feature-spread__cta-arrow {
@@ -1070,7 +1136,13 @@
   }
 
   .feature-spread__link:hover .feature-spread__cta {
-    color: var(--color-interactive, var(--color-text-primary));
+    transform: translateY(calc(-1 * var(--space-0-5)));
+    box-shadow: var(--shadow-lg);
+    background: color-mix(
+      in oklch,
+      var(--color-brand-primary, var(--color-primary-500)) 90%,
+      black
+    );
   }
 
   .feature-spread__link:hover .feature-spread__cta-arrow {
@@ -1088,10 +1160,10 @@
       gap: var(--space-6);
     }
 
-    .feature-spread__frame {
-      /* Return to content-native ratio on mobile so thumbnails don't
-         crop awkwardly when stacked full-width. */
-      aspect-ratio: 16 / 9;
+    .feature-spread__title {
+      /* Dial back the huge desktop title so it doesn't dominate the
+         single-column mobile stack. */
+      font-size: clamp(var(--text-3xl), 7vw, var(--text-5xl));
     }
   }
 
