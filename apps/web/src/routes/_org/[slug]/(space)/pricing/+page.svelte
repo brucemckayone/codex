@@ -83,6 +83,12 @@
     return sorted[Math.floor(sorted.length / 2)] ?? sorted[0];
   });
 
+  // Max annual savings across all tiers — used as the hero lure.
+  const maxAnnualSavings = $derived.by(() => {
+    if (tiers.length === 0) return 0;
+    return Math.max(0, ...tiers.map((t) => savingsPercent(t)));
+  });
+
   // ── FAQ ────────────────────────────────────────────────────────────
   const DEFAULT_FAQ: PricingFaqItem[] = [
     {
@@ -336,8 +342,8 @@
             tabindex={billingInterval === 'year' ? 0 : -1}
           >
             {m.pricing_annual()}
-            {#if billingInterval === 'year'}
-              <span class="savings-pill">Save 20%</span>
+            {#if billingInterval === 'month' && maxAnnualSavings > 0}
+              <span class="savings-pill">Save {maxAnnualSavings}%</span>
             {/if}
           </button>
         </div>

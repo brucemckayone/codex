@@ -64,7 +64,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 15 | **Keyboard focus ring a11y fix** — switched toggle + preview CTA from box-shadow to outline so active/hover state styles don't override focus-visible | ✅ done | Commit on 2026-04-17 |
 | 16 | **Billing toggle ARIA radiogroup** — added roving tabindex + arrow-key navigation for proper WAI-ARIA radiogroup semantics | ✅ done | Commit on 2026-04-17 |
 | 17 | **Ribbon shine micro-interaction** — one-shot diagonal overlay sweep on the recommended ribbon after page load, draws eye to the recommended tier | ✅ done | Commit on 2026-04-17 |
-| 18+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 18 | **Savings pill as lure** — flipped visibility so pill shows on Annual button when Monthly is active (incentive), hides when Annual taken; copy now computed from max tier savings | ✅ done | Commit on 2026-04-17 |
+| 19+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -343,3 +344,12 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Ribbon now has `overflow: hidden`**: required for the pseudo to be clipped to the pill silhouette. Pre-existed in the ribbon styling? No — I added it. Edge case: if ribbon text ever wraps (unlikely — `white-space: nowrap` is set), overflow hidden would truncate. But with nowrap + short "Most Popular" copy, safe.
 
   - **Next pass prerequisite**: Accordion arrow-key nav audit (Melt UI should provide Home/End/Arrow), then full-page Lighthouse/axe-core scan to catch any contrast issues on the brand-tinted pills/labels. Also consider: at the moment the ribbon shine fires, is the card already "settled"? If not, the shine may feel premature. Timing may need adjustment based on observed feel (currently open-loop — user-subjective judgment).
+
+- **2026-04-17 Pass 18 (Savings pill repurposed as lure)**: Corrected a conversion-logic inversion on the billing toggle's "Save 20%" pill.
+  - **Inverted problem**: the pill used to show only when `billingInterval === 'year'` — i.e. as a confirmation AFTER the user had already selected Annual. Pointless in that direction: the user already got the deal, why tell them "Save 20%"? The pill should be an INCENTIVE, visible when they're on Monthly so they see "Save 20%" on the Annual button and feel the pull.
+  - **Flipped condition**: `{#if billingInterval === 'month' && maxAnnualSavings > 0}`. Pill now appears inside the Annual button when user is on Monthly. Clicking the Annual button (or the pill inside it — bubbling) commits. When Annual active, pill unmounts — no redundant badge on the already-selected option.
+  - **Computed copy**: hardcoded `Save 20%` replaced with `Save {maxAnnualSavings}%`. New `$derived` computes `Math.max(0, ...tiers.map(savingsPercent))` across all tiers — so if a creator's tiers save 12/17/20%, the pill advertises the max (20) honestly. Falls back gracefully: if no tiers or all zero savings, pill doesn't render (guard: `> 0`).
+  - **Entrance animation still works**: the `savingsBounce` keyframe fires when the element renders. On initial Monthly load, the pill bounces in 1.5× the normal duration with `--ease-bounce` — draws attention right as the hero stagger completes.
+  - **Verified in-browser**: reload → Monthly active + `Save 20%` pill visible on Annual button. Click Annual → Annual active + pill unmounted + card prices switch to yearly totals + helper lines show monthly-equivalents. Full conversion chain: lure → commit → reassurance.
+
+  - **Next pass prerequisite**: Consider: when pill is on Monthly-visible state, should there be a micro-animation to draw further attention (gentle pulse every few seconds)? Probably not — would be annoying. But worth noting as a future experiment if CTAs aren't converting. Alternative: add a subtle "shimmer" on the pill that matches the ribbon shine but slower, fires once on initial load only. Also: when switching back from Annual to Monthly, the pill re-appears via the render condition — maybe add a slight fade-in to avoid abrupt appearance.
