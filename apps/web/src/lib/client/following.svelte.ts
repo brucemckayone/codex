@@ -38,6 +38,14 @@ export const followingStore = {
   /** Read follow state — reactive when used in $derived */
   get: (orgId: string): boolean => data[orgId] ?? false,
 
+  /**
+   * True when a value for this org has been hydrated from server or
+   * explicitly set by the user. Lets callers skip redundant server
+   * fetches when the localStorage-backed store already has the answer.
+   * Distinct from `get(orgId) === false`, which is the hydrated value.
+   */
+  has: (orgId: string): boolean => data[orgId] !== undefined,
+
   /** Set follow state (optimistic update + persist) */
   set: (orgId: string, following: boolean) => {
     data[orgId] = following;

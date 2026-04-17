@@ -221,10 +221,13 @@
       }
     }, VERSION_POLL_INTERVAL_MS);
 
-    // Fetch following status client-side and hydrate the store.
-    // On return visits, localStorage has the value (instant); hydrate() is a no-op.
-    // On first visit, background fetch populates the store reactively.
-    if (data.user) {
+    // Fetch following status client-side and hydrate the store — but
+    // only when we don't already have a value cached in localStorage.
+    // This saves a network request on every return visit. Cross-device
+    // "followed on another device" drift is accepted as a trade-off;
+    // the store is optimistically-updated on every click so discrepancy
+    // only persists until the next click or manual unfollow/follow.
+    if (data.user && !followingStore.has(data.org.id)) {
       getFollowingStatus(data.org.id)
         .then((following) => { followingStore.hydrate(data.org.id, following); })
         .catch(() => { /* Graceful — store keeps localStorage value or defaults to false */ });
