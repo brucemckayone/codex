@@ -61,7 +61,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 12 | **Visual verification + bug fixes** — live screenshot session found `//mo` double-slash on tier cards + section rules too faint on dark mode; both fixed | ✅ done | Commit on 2026-04-17 |
 | 13 | **Mobile + light mode verify + tick() fix** — found preview reveal not firing post-stream; fixed with `tick()` before observer re-sweep | ✅ done | Commit on 2026-04-17 |
 | 14 | **Sticky CTA annual helper** — adds "£X.XX/mo · billed annually" helper line on the sticky when Annual is active, matching tier card pattern | ✅ done | Commit on 2026-04-17 |
-| 15+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 15 | **Keyboard focus ring a11y fix** — switched toggle + preview CTA from box-shadow to outline so active/hover state styles don't override focus-visible | ✅ done | Commit on 2026-04-17 |
+| 16+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -306,3 +307,13 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Conversion logic**: now when a user is deep in Annual, the sticky gives them the full context — yearly commitment, monthly-equivalent, billing cadence — without them having to scroll back to the cards. The decision moment stays anchored.
 
   - **Next pass prerequisite**: Keyboard-only navigation audit. Tab through the page and verify focus rings render at every stop: toggle buttons → tier card CTAs → preview "Browse the catalogue" link → accordion triggers → sticky Subscribe → sticky dismiss → trust icons (no focus needed, non-interactive). Also: check that Escape key doesn't break anything unexpectedly (the accordion uses Melt UI which should handle Escape natively). Consider: should the savings pill "Save 20%" be a focusable button that clicks Annual? Currently it's decorative text inside the Annual toggle button.
+
+- **2026-04-17 Pass 15 (Keyboard focus ring a11y fix)**: Keyboard audit surfaced a silent focus ring failure on toggle buttons + preview CTA.
+  - **Bug**: Two elements had `:focus-visible { outline: none; box-shadow: var(--shadow-focus-ring); }` — but the corresponding `:active` / `:hover` rules also set `box-shadow` with the same `(0,0,2,0)` CSS specificity. Source order determined the winner, and in both cases the state rule came after focus-visible, silently overriding the focus ring with the active/hover shadow. Result: focused-but-active Monthly toggle had NO visible focus ring. Same for `.preview__cta:hover` when also focused.
+  - **Diagnosis**: in-browser script dispatched `el.focus({ focusVisible: true })`, then checked `getComputedStyle().boxShadow`. Toggle's focus-visible rule was matched (`matches(':focus-visible') === true`) but the rendered shadow was the `.active` state's shadow, not the focus ring. Confirmed the source-order cascade issue by grep: `.toggle-option:focus-visible` at line 862, `.toggle-option.active` at line 867.
+  - **Fix**: swapped from `outline: none; box-shadow: var(--shadow-focus-ring)` to `outline: var(--border-width-thick) solid var(--color-focus); outline-offset: var(--space-0-5)`. Outline is independent of box-shadow, so active/hover state styles never conflict. Applied to both `.toggle-option:focus-visible` and `.preview__cta:focus-visible`.
+  - **Verified**: re-ran the focus probe after reload. All three focusable elements (Monthly, Annual, Browse the catalogue) render `outline: 2px solid var(--color-focus)` with `outline-offset: 2px`. 
+  - **Not affected**: `.accordion-trigger:focus-visible`, `.sticky-bar__dismiss:focus-visible`, `.checkout-error__dismiss:focus-visible` all use the box-shadow pattern but their corresponding hover states don't set box-shadow — so no conflict. Left as-is.
+  - **Side note**: `--color-focus` resolves to `#EF4444`-ish on this dev setup (may be a seed-data quirk where the test orgs share a similar primary). Regardless, the ring renders visibly against any surface.
+
+  - **Next pass prerequisite**: Deeper a11y audit — check accordion keyboard behavior (Arrow up/down to navigate between triggers, Home/End to jump to first/last, Enter/Space to toggle). Melt UI should provide this natively. Also: axe-core scan or Lighthouse accessibility audit to catch anything I missed (missing aria labels, color contrast on brand-tinted text, etc). Consider: is the billing toggle `role="radiogroup"` + `role="radio"` semantics correct? Radio groups usually have Arrow Left/Right key navigation — does that work with Melt's toggle or is the toggle custom?

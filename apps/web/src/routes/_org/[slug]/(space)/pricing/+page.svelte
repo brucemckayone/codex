@@ -860,8 +860,8 @@
   }
 
   .toggle-option:focus-visible {
-    outline: none;
-    box-shadow: var(--shadow-focus-ring);
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
   }
 
   .toggle-option.active {
@@ -1642,8 +1642,8 @@
   }
 
   .preview__cta:focus-visible {
-    outline: none;
-    box-shadow: var(--shadow-focus-ring);
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
   }
 
   .preview__cta-arrow {
