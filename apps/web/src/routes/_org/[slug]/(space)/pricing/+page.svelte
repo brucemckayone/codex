@@ -118,7 +118,6 @@
 
   // ── Sticky CTA ────────────────────────────────────────────────────
   let tierCardsRef = $state<HTMLElement | null>(null);
-  let previewRef = $state<HTMLElement | null>(null);
   let showStickyCta = $state(false);
   let dismissedStickyCta = $state(false);
   let isMobile = $state(false);
@@ -221,30 +220,39 @@
       });
     });
 
-    let previewObserver: IntersectionObserver | undefined;
-    const unwatchPreview = $effect.root(() => {
-      $effect(() => {
-        if (previewRef && !previewObserver) {
-          previewObserver = new IntersectionObserver(
-            ([entry]) => {
-              if (entry.isIntersecting) {
-                entry.target.classList.add('preview-visible');
-                previewObserver?.disconnect();
-              }
-            },
-            { threshold: 0.2 }
-          );
-          previewObserver.observe(previewRef);
+    // Generic scroll-reveal for below-fold sections (preview, faq, trust).
+    // Sections that haven't entered the viewport stay at reduced opacity;
+    // adding `.reveal--visible` triggers the CSS transition.
+    const revealObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('reveal--visible');
+            revealObserver.unobserve(entry.target);
+          }
         }
-      });
-    });
+      },
+      { threshold: 0.12, rootMargin: '0px 0px -8% 0px' }
+    );
+
+    const observeReveals = () => {
+      const revealEls = document.querySelectorAll<HTMLElement>(
+        '[data-reveal]:not(.reveal--visible)'
+      );
+      revealEls.forEach((el) => revealObserver.observe(el));
+    };
+
+    // Initial sweep picks up static sections (faq, trust).
+    observeReveals();
+    // Re-sweep after streamed sections land in the DOM (preview).
+    Promise.resolve(data.contentPreview).finally(observeReveals);
+    Promise.resolve(data.stats).finally(observeReveals);
 
     return () => {
       mq.removeEventListener('change', handleMq);
       observer?.disconnect();
-      previewObserver?.disconnect();
+      revealObserver.disconnect();
       unwatch();
-      unwatchPreview();
     };
   });
 </script>
@@ -428,7 +436,7 @@
       {@const withThumbs = items?.filter((i) => i.thumbnailUrl) ?? []}
       {#if withThumbs.length >= 3}
         {@const tiles = withThumbs.slice(0, 4)}
-        <section class="preview" bind:this={previewRef}>
+        <section class="preview reveal" data-reveal>
           <header class="preview__lede">
             <p class="preview__eyebrow">Inside the library</p>
             <span class="preview__rule" aria-hidden="true"></span>
@@ -491,7 +499,7 @@
     {/await}
 
     <!-- ═══ FAQ ═══ -->
-    <section class="faq">
+    <section class="faq reveal" data-reveal>
       <header class="faq__lede">
         <p class="faq__eyebrow">The fine print</p>
         <span class="faq__rule" aria-hidden="true"></span>
@@ -514,7 +522,7 @@
     </section>
 
     <!-- ═══ TRUST ═══ -->
-    <footer class="trust">
+    <footer class="trust reveal" data-reveal>
       <span class="trust__rule" aria-hidden="true"></span>
       <div class="trust__signals">
         <span class="trust__signal">
@@ -1234,6 +1242,52 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════
+     SCROLL REVEAL — shared by below-fold sections (preview, faq, trust)
+     Toggled via [data-reveal] + .reveal--visible (added by JS observer).
+     ══════════════════════════════════════════════════════════════════ */
+
+  .reveal {
+    opacity: 0;
+    transform: translateY(var(--space-5));
+    transition:
+      opacity var(--duration-slower) var(--ease-smooth),
+      transform var(--duration-slower) var(--ease-smooth);
+  }
+
+  :global(.reveal.reveal--visible) {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* Child-rule scale-expand — echoes the hero's heroRuleExpand,
+     delayed slightly so the section lifts first, then the rule draws. */
+  .reveal .preview__rule,
+  .reveal .faq__rule,
+  .reveal .trust__rule {
+    transform: scaleX(0.3);
+    transform-origin: center;
+    transition: transform var(--duration-slower) var(--ease-smooth) 150ms;
+  }
+
+  :global(.reveal.reveal--visible) .preview__rule,
+  :global(.reveal.reveal--visible) .faq__rule,
+  :global(.reveal.reveal--visible) .trust__rule {
+    transform: scaleX(1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reveal {
+      opacity: 1;
+      transform: none;
+    }
+    .reveal .preview__rule,
+    .reveal .faq__rule,
+    .reveal .trust__rule {
+      transform: none;
+    }
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
      CONTENT PREVIEW — editorial magazine spread
      ══════════════════════════════════════════════════════════════════ */
 
@@ -1242,23 +1296,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-10);
-    opacity: 0;
-    transform: translateY(var(--space-4));
-    transition:
-      opacity calc(var(--duration-slower) * 1.2) var(--ease-smooth),
-      transform calc(var(--duration-slower) * 1.2) var(--ease-smooth);
-  }
-
-  :global(.preview.preview-visible) {
-    opacity: 1;
-    transform: translateY(0);
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .preview {
-      opacity: 1;
-      transform: none;
-    }
   }
 
   /* Masthead */

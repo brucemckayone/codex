@@ -53,7 +53,7 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 4 | **FAQ** — lede-style masthead, column-balanced two-up layout on wide screens, refined accordion chrome | ✅ done | Commit on 2026-04-17. Stayed single-column (editorial > two-up) |
 | 5 | **Trust Strip** — editorial hairline above, brand microaccent, better iconography, refined hierarchy | ✅ done | Commit on 2026-04-17 |
 | 6 | **Sticky CTA** — premium chip, tier-color glow, polished transitions, mobile-edge safe | ✅ done | Commit on 2026-04-17 |
-| 7 | **Between-section rhythm** — breath, scroll reveals for each section, tighter vertical cadence | ⬜ pending | |
+| 7 | **Between-section rhythm** — breath, scroll reveals for each section, tighter vertical cadence | ✅ done | Commit on 2026-04-17 |
 | 8 | **Full micro-polish review** — focus rings, motion reduce paths, dark mode, backdrop-filter fallback, skeleton match | ⬜ pending | |
 | 9+ | **Continuous refinement** — each re-fire picks the weakest remaining section | ⬜ pending | |
 
@@ -208,3 +208,14 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Inner padding asymmetry**: `space-2 space-2 space-2 space-5` — left breathing room for the eyebrow-stacked info, tighter right padding so the Button sits nicely toward the edge.
 
   - **Next pass prerequisite**: Visual check on desktop scroll-trigger — bar should appear centered, not hug left edge. Confirm the brand glow isn't overpowering on high-saturation brands (terracotta at #C24129 can look intense; if so, dial back the 18% mix). Mobile: verify full-bleed works on iOS notch devices (safe-area-inset-bottom kicks in).
+
+- **2026-04-17 Pass 7 (Between-section rhythm)**: Unified scroll-reveal system across below-fold sections.
+  - **Removed**: bespoke `.preview` opacity/transform/transition CSS, the preview-specific IntersectionObserver, the `previewRef` state, the `unwatchPreview` $effect.root wrapper, the `preview-visible` global selector.
+  - **Added**: shared `.reveal` base class (opacity: 0, translateY(`--space-5`), `--duration-slower` + `--ease-smooth`) and `:global(.reveal.reveal--visible)` trigger. Applied via `class="... reveal"` + `data-reveal` attribute to `.preview`, `.faq`, `.trust`. Generic observer in onMount queries `[data-reveal]:not(.reveal--visible)`, with initial sweep for static sections + post-stream re-sweep via `Promise.resolve(data.contentPreview/data.stats).finally(observeReveals)` to catch streamed-in sections.
+  - **Child-rule motion**: `.preview__rule`, `.faq__rule`, `.trust__rule` now start at `scaleX(0.3)` and expand to `scaleX(1)` with a 150ms delay after their parent section reveals. Echoes the hero's `heroRuleExpand` keyframe — the section *lifts* first, then the rule *draws itself*. Consistent motion language top to bottom.
+  - **Observer threshold**: 0.12 with `rootMargin: '0px 0px -8% 0px'` — section reveals when its top reaches 8% from the bottom of the viewport, which feels natural (triggers just before the section is fully in view, not after).
+  - **Performance**: `observer.unobserve(entry.target)` on reveal prevents duplicate work; `observer.observe()` is idempotent so post-stream re-sweeps are safe even for already-observed elements.
+  - **Reduced motion**: single guard under the reveal block resets opacity + transform to base values; rule scaleX resets to 1.
+  - **Mount-time robustness**: since `.preview` is inside `{#await data.contentPreview}`, it may not exist at onMount. Promise-based re-sweep handles this without needing MutationObserver or retry polling. The observer's `threshold: 0.12` means even if a slow stream lands when the user has already scrolled past, the element reveals immediately on next scroll frame.
+
+  - **Next pass prerequisite**: Visual smoke test — scroll from top to bottom. Expected: hero staggers on load, tier cards stagger via existing `cardReveal`, preview + faq + trust each lift-and-fade as they enter the viewport, their rules expand after. Check that refresh-while-scrolled-down doesn't leave sections stuck at opacity: 0 (the `finally(observeReveals)` should catch this). If reduced-motion is on, everything should appear statically.
