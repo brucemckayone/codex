@@ -817,9 +817,13 @@
 
   .content-grid {
     display: grid;
+    /* 22rem minimum gives 3 columns at --container-xl width, so each
+       thumbnail has editorial presence rather than five crowded tiles
+       in a row. Auto-fill still lets the grid reflow gracefully at
+       container-query sizes between the defined breakpoints. */
     grid-template-columns: repeat(
       auto-fill,
-      minmax(min(100%, 16rem), 1fr)
+      minmax(min(100%, 22rem), 1fr)
     );
     gap: 0;
     align-items: stretch;
@@ -905,12 +909,12 @@
     );
   }
 
-  /* Tablet — give cards a bit more room before they become too narrow */
+  /* Tablet — drop to 2 chunky columns before mobile takes over */
   @media (--below-lg) {
     .content-grid {
       grid-template-columns: repeat(
         auto-fill,
-        minmax(min(100%, 14rem), 1fr)
+        minmax(min(100%, 18rem), 1fr)
       );
     }
   }
