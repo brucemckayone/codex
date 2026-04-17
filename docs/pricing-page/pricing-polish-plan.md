@@ -1,0 +1,146 @@
+# Pricing Page Polish Loop
+
+**Status**: Living document. Updated every 20 minutes by the `/loop` cron.
+**Started**: 2026-04-17
+**Owner**: Claude (autonomous)
+**Mandate**: The functional v1.1 spec (Codex-mlwp) is shipped. The page works but it reads as *centered SaaS*, not *editorial premium*. Polish it one section at a time until it feels as considered as the org landing page.
+
+---
+
+## North Star
+
+The org landing page (`apps/web/src/routes/_org/[slug]/(space)/+page.svelte`) is the benchmark. The design language to bring across:
+
+| Landing device | How to bring it to pricing |
+|---|---|
+| `.lede` eyebrow + hairline + display title | Use the same masthead treatment on every section header |
+| `clamp()` display typography, dramatic scale | Hero heading should match the landing's gravity |
+| Editorial asymmetry (bottom-left hero, magazine spreads) | Hero can stay centered but the tier row + FAQ should break the strict symmetry |
+| Generous `--space-12`/`--space-16` section rhythm | Replace the current `--space-12` gap with something more editorial |
+| `--container-max` 80rem breathing room | Current pricing is locked to 960px — too narrow for 3 cards |
+| Brand-gradient atmospherics (ShaderHero canvas) | Bring a brand gradient mesh + noise into the hero backdrop |
+| Content-density-adaptive layouts | Tier count (1/2/3/4+) should drive the card grid shape, not flex-wrap |
+| `color-mix(in oklch, var(--color-brand-primary) N%, ...)` | Every surface, border, and tint should reach for brand color through `color-mix` |
+
+---
+
+## What's wrong with v1 (honest audit)
+
+The code mirrors the v1.1 spec, but visually:
+
+1. **Container is 960px** — three tier cards wrap awkwardly on laptop widths. Landing uses 80rem everywhere; pricing should too.
+2. **Hero feels centered-SaaS** — fine structurally, but no atmosphere, no editorial eyebrow rule, typography caps out at `--text-4xl` while landing's hero is `clamp(3.5rem, 8vw, 8rem)`.
+3. **Tier cards are identical** — recommended gets a glow ring but no dramatic *difference* in shape, elevation, or pacing. The magazine-spread idea the landing uses for single items isn't applied.
+4. **No brand color elsewhere** — cards are neutral glass with faint brand border. The brand is barely present between the hero gradient and the CTA button.
+5. **Feature checklist is generic** — three static strings (`all tier content / cancel anytime / instant access`) with identical check icons. Reads as template, not content.
+6. **Content preview is a 6-up blur grid** — fine concept, but the overlay is centered glass with a small "browse the library" link. No editorial power.
+7. **FAQ is a naked accordion card** — no masthead treatment, no visual interest, no section-level identity.
+8. **Trust strip is flat** — three icon+label pairs, no hierarchy, no brand.
+9. **Sticky CTA is functional but plain** — doesn't feel like a premium product chip.
+10. **Section gaps use `--space-12`** — same as card internal padding, so nothing *sings* spatially.
+
+---
+
+## Polish Pass Schedule
+
+Each cron fire (every 20 min) does **one pass** fully. After every pass: commit, push, update this doc.
+
+| # | Section | Status | Notes |
+|---|---|---|---|
+| 1 | **Hero** — container widening, editorial lede masthead, display typography, brand gradient mesh backdrop, polished billing toggle | ✅ done | Commit on 2026-04-17 |
+| 2 | **Tier Cards** — differentiated recommended treatment, editorial price display, meaningful feature list, brand-accent glow, card-count-adaptive grid | ⬜ pending | |
+| 3 | **Content Preview** — move from "blur wall" to "editorial magazine spread" with mixed thumbnail tiles, real creator glimpses, branded stat | ⬜ pending | |
+| 4 | **FAQ** — lede-style masthead, column-balanced two-up layout on wide screens, refined accordion chrome | ⬜ pending | |
+| 5 | **Trust Strip** — editorial hairline above, brand microaccent, better iconography, refined hierarchy | ⬜ pending | |
+| 6 | **Sticky CTA** — premium chip, tier-color glow, polished transitions, mobile-edge safe | ⬜ pending | |
+| 7 | **Between-section rhythm** — breath, scroll reveals for each section, tighter vertical cadence | ⬜ pending | |
+| 8 | **Full micro-polish review** — focus rings, motion reduce paths, dark mode, backdrop-filter fallback, skeleton match | ⬜ pending | |
+| 9+ | **Continuous refinement** — each re-fire picks the weakest remaining section | ⬜ pending | |
+
+---
+
+## Inventory — Tokens I'm designing with
+
+### Color
+- **Brand palette**: `--color-brand-primary` (derived from `--brand-color`), plus `-hover`, `-active`, `-subtle` OKLCH variants
+- **Interactive**: `--color-interactive` (same brand root)
+- **Accent**: `--color-brand-accent` (from `--brand-accent`)
+- **Surface**: `--color-surface`, `-secondary`, `-tertiary`, `-card`, `-elevated`
+- **Text**: `--color-text`, `-secondary`, `-muted`, `-tertiary`, `-disabled`, `-on-brand`
+- **Border**: `--color-border`, `-strong`, `-subtle`, `-hover`
+- **Semantic**: `--color-success-600/50`, `--color-error-*`, `--color-warning-*`
+- **Glass**: `--material-glass`, `--material-glass-border`, `--color-glass-tint`, `--color-glass-tint-dark`
+- **Color-mix**: always reach for `color-mix(in oklch, var(--color-brand-primary) N%, transparent)` — gives brand depth without flat fills
+
+### Typography
+- **Fonts**: `--font-heading` (org-branded display), `--font-sans` (org-branded body), `--font-mono`
+- **Scale**: `--text-xs` through `--text-4xl` — all `clamp()`-fluid and brand-scalable via `--text-scale`
+- **Weights**: `--font-normal|medium|semibold|bold` — all brand-overridable
+- **Line-height**: `--leading-none|tight|snug|normal|relaxed`
+- **Tracking**: `--tracking-tighter|tight|normal|wide|wider`
+- **Transform**: `--text-transform-label` (brand-configurable — may be `none` for lowercase brands)
+
+### Space / Layout
+- **Spacing**: `--space-0-5` through `--space-24` — multiplied by brand density scale
+- **Radius**: `--radius-xs/sm/md/lg/xl/full` — all driven by `--brand-radius`
+- **Container**: `--container-max` (80rem)
+- **Breakpoints**: `--breakpoint-sm/md/lg/xl/2xl` via `@media (--breakpoint-md)`
+- **Below-BP**: `@media (--below-md)` for mobile-only
+
+### Depth / Material
+- **Shadows**: `--shadow-xs/sm/md/lg/xl/inner` — brand-scalable via `--brand-shadow-scale`
+- **Blur**: `--blur-sm/md/lg/xl/2xl`
+- **Card interaction**: `--card-hover-scale`, `--card-image-hover-scale` — brand-tunable
+
+### Motion
+- **Duration**: `--duration-fast/normal/slow/slower`
+- **Easing**: `--ease-default/in/out/bounce/smooth/spring`
+- **Transitions**: `--transition-colors|transform|opacity|shadow`
+
+### Borders
+- **Widths**: `--border-width` (1px), `--border-width-thick` (2px)
+- **Compound**: `--border-default`, `--border-focus`
+
+---
+
+## Pass 1 — Hero (2026-04-17 ~17:00 local)
+
+### Goal
+Turn the hero from "centered pricing title" into an editorial masthead that establishes the *membership* idea with the same gravity as the landing hero establishes the org.
+
+### Concrete changes
+1. **Container widening**: `.pricing-page { max-width: 960px }` → `max-width: 72rem` (1152px). Gives three tier cards room to live side-by-side at laptop widths without the current awkward wrap.
+2. **Hero padding rhythm**: `var(--space-16) var(--space-4) var(--space-10)` → `var(--space-20) var(--space-8) var(--space-14)` — more dramatic top silence, roomier side padding, pushes the billing toggle into its own breathable zone.
+3. **Hero lede masthead**: Replace plain eyebrow with a `.lede`-style treatment — `.lede__eyebrow` in small-caps brand-primary, hairline `<hr class="lede__rule">` beneath, then display title. Matches landing's editorial voice.
+4. **Display typography**:
+   - Heading: `font-size: clamp(2.75rem, 5vw + 1rem, 4.75rem)`, `line-height: var(--leading-none)`, `letter-spacing: var(--tracking-tighter)`
+   - Subtitle: `--text-lg` → `--text-xl`, `max-width: 44ch`
+5. **Brand gradient mesh backdrop**: New `::before` layer — two offset radial gradients in `color-mix(oklch, var(--color-brand-primary) 14%, transparent)` and `color-mix(oklch, var(--color-brand-primary) 7%, transparent)` at different positions, plus a subtle top-to-bottom wash to the surface color. Composites behind the hero to give atmospheric brand presence without imagery.
+6. **Soft grain overlay**: Subtle SVG noise data-URI at `opacity: 0.04` layered over the gradient for editorial texture (matches the mood of the landing's shader without the heft).
+7. **Billing toggle upgrade**:
+   - Active pill background uses `color-mix(in oklch, var(--color-brand-primary) 12%, var(--color-surface))` — brand tint, not pure surface
+   - Inactive options get `color: var(--color-text-tertiary)` for a softer starting state
+   - Inner highlight via `inset 0 1px 0` white glass-tint stays
+   - Savings pill: `--ease-bounce` stays, but scaled duration `var(--duration-slower)` and a slight upward translate in the bounce for Disney-principled overshoot
+8. **Entrance stagger**: Keep the existing stagger (eyebrow → heading → subtitle → toggle) but bump delays to `0 / 100 / 200 / 320ms` so the reveal feels paced rather than rushed.
+
+### Success criteria
+- Hero feels as "premium / editorial" as the landing hero does when you arrive — specifically: there's atmosphere behind the text, the eyebrow+rule+title reads as a considered masthead not a form label, and the display title doesn't feel like a form heading.
+- Billing toggle reads as part of the brand, not like a stock segmented control.
+- Works at org-brand extremes: low-density (0.8x), high-density (1.2x), bold heading weight (900), pill-shaped radius (1rem).
+
+### Out of scope for this pass
+- Shader hero (landing has one; pricing doesn't need that weight).
+- Changing the copy (i18n keys stay).
+- Tier card changes (Pass 2).
+- Touching `+page.server.ts` (backend untouched).
+
+### Changes summary
+- `apps/web/src/routes/_org/[slug]/(space)/pricing/+page.svelte` — template + styles for hero only.
+
+---
+
+## Log
+
+- **2026-04-17 Pass 1 (Hero)**: Widened container to 72rem. Replaced centered SaaS hero with editorial lede: small-caps brand eyebrow → gradient-hairline rule → display title (`clamp(2.5rem, 4vw + 1rem, 4.5rem)`, tracking-tighter, leading-none, text-wrap balance) → muted subtitle. Added brand gradient mesh backdrop (three offset radial gradients in brand-primary OKLCH mixes + surface wash) with inlined fractalNoise SVG grain at 4% opacity / overlay blend for editorial texture. Upgraded billing toggle: brand-tinted active gradient instead of flat surface, focus-visible ring, softer border via `color-mix(border, 60%, transparent)`, deeper inner highlights. Savings pill now uses `success-700` on `success-50` with a border and a 3-stop bounce keyframe. Staggered entrance timing recalibrated (40/140/200/320/440ms) for a paced reveal rather than a rush.
+  - **Next pass prerequisite**: Boot `pnpm dev` (from monorepo root — NEVER `cd` into workers) and visit `http://bruce-studio.lvh.me:3000/pricing` to visually verify before Pass 2. Expected wins: atmospheric brand wash behind the masthead, confident display typography, brand-colored billing toggle. Look for regressions: backdrop clipping at edges, noise banding in dark mode, mobile hero padding feeling cramped.

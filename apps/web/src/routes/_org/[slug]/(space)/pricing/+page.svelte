@@ -255,16 +255,20 @@
     />
   {:else}
     <!-- ═══ HERO ═══ -->
-    <section class="pricing-hero" style="--stagger: 0">
-      <div class="hero-eyebrow">Membership</div>
-      <h1 class="hero-heading" style="--stagger: 0">
-        {m.subscription_pricing_title()}
-      </h1>
-      <p class="hero-subtitle" style="--stagger: 1">
-        {m.subscription_pricing_subtitle()}
-      </p>
+    <section class="pricing-hero">
+      <div class="pricing-hero__backdrop" aria-hidden="true"></div>
+      <header class="pricing-hero__lede">
+        <p class="pricing-hero__eyebrow">Membership</p>
+        <span class="pricing-hero__rule" aria-hidden="true"></span>
+        <h1 class="pricing-hero__title">
+          {m.subscription_pricing_title()}
+        </h1>
+        <p class="pricing-hero__subtitle">
+          {m.subscription_pricing_subtitle()}
+        </p>
+      </header>
 
-      <div class="billing-toggle-wrapper" style="--stagger: 2">
+      <div class="billing-toggle-wrapper">
         <div class="billing-toggle" role="radiogroup" aria-label="Billing period">
           <button
             class="toggle-option"
@@ -497,114 +501,211 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--space-12);
-    padding: 0 var(--space-4) var(--space-12);
-    max-width: 960px;
+    gap: var(--space-16);
+    padding: 0 var(--space-6) var(--space-20);
+    max-width: 72rem;
     margin: 0 auto;
   }
 
-  @media (max-width: 47.9375rem) {
+  @media (--below-md) {
     .pricing-page {
-      padding-bottom: calc(var(--space-20) + env(safe-area-inset-bottom, 0px));
+      gap: var(--space-12);
+      padding: 0 var(--space-4) calc(var(--space-20) + env(safe-area-inset-bottom, 0px));
     }
   }
 
-  /* ── HERO ────────────────────────────────────────────────────────── */
+  /* ══════════════════════════════════════════════════════════════════
+     HERO — editorial masthead over brand gradient mesh
+     ══════════════════════════════════════════════════════════════════ */
 
   .pricing-hero {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-16) var(--space-4) var(--space-10);
+    gap: var(--space-8);
+    padding: var(--space-20) var(--space-8) var(--space-14);
     text-align: center;
+    width: 100%;
+    isolation: isolate;
+  }
+
+  @media (--below-md) {
+    .pricing-hero {
+      padding: var(--space-14) var(--space-2) var(--space-10);
+      gap: var(--space-6);
+    }
+  }
+
+  /* Brand gradient mesh + surface wash — fills the whole hero band,
+     extends slightly beyond so the glow isn't clipped at the edges. */
+  .pricing-hero__backdrop {
+    position: absolute;
+    inset: calc(-1 * var(--space-4)) calc(-1 * var(--space-8)) 0;
+    z-index: -1;
+    pointer-events: none;
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+    background:
+      radial-gradient(
+        ellipse 60% 70% at 18% 12%,
+        color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 18%, transparent),
+        transparent 62%
+      ),
+      radial-gradient(
+        ellipse 50% 60% at 82% 88%,
+        color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 11%, transparent),
+        transparent 65%
+      ),
+      radial-gradient(
+        ellipse 80% 60% at 50% 0%,
+        color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 7%, transparent),
+        transparent 70%
+      ),
+      linear-gradient(
+        180deg,
+        color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 4%, var(--color-surface)) 0%,
+        var(--color-surface) 100%
+      );
+  }
+
+  /* Editorial grain — adds a fine texture on top of the gradient.
+     Inlined fractalNoise SVG keeps this zero-network-cost. */
+  .pricing-hero__backdrop::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='5'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.04;
+    mix-blend-mode: overlay;
+    pointer-events: none;
+  }
+
+  .pricing-hero__lede {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-4);
+    max-width: 44rem;
     width: 100%;
   }
 
-  .hero-eyebrow {
+  .pricing-hero__eyebrow {
+    font-family: var(--font-sans);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
-    letter-spacing: 0.12em;
+    letter-spacing: var(--tracking-wider);
     text-transform: var(--text-transform-label, uppercase);
     color: var(--color-brand-primary, var(--color-interactive));
+    margin: 0;
     opacity: 0;
     transform: translateY(var(--space-2));
   }
 
-  .hero-heading {
+  .pricing-hero__rule {
+    display: block;
+    width: var(--space-16);
+    height: var(--border-width);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 55%, transparent),
+      transparent
+    );
+    opacity: 0;
+    transform: scaleX(0.4);
+    transform-origin: center;
+  }
+
+  .pricing-hero__title {
     font-family: var(--font-heading);
-    font-size: var(--text-4xl);
+    font-size: clamp(2.5rem, 4vw + 1rem, 4.5rem);
     font-weight: var(--font-bold);
+    line-height: var(--leading-none);
+    letter-spacing: var(--tracking-tighter);
     color: var(--color-text);
     margin: 0;
-    line-height: var(--leading-tight);
-    letter-spacing: var(--tracking-tight);
+    max-width: 18ch;
+    text-wrap: balance;
     opacity: 0;
     transform: translateY(var(--space-3));
   }
 
-  .hero-subtitle {
-    font-size: var(--text-lg);
+  .pricing-hero__subtitle {
+    font-size: var(--text-xl);
+    line-height: var(--leading-snug);
     color: var(--color-text-secondary);
     margin: 0;
-    max-width: 480px;
-    line-height: var(--leading-relaxed);
+    max-width: 46ch;
+    text-wrap: pretty;
     opacity: 0;
     transform: translateY(var(--space-3));
   }
 
   .billing-toggle-wrapper {
-    margin-top: var(--space-4);
+    display: inline-flex;
     opacity: 0;
     transform: translateY(var(--space-3));
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    .hero-eyebrow,
-    .hero-heading,
-    .hero-subtitle,
+    .pricing-hero__eyebrow,
+    .pricing-hero__title,
+    .pricing-hero__subtitle,
     .billing-toggle-wrapper {
-      animation: revealUp var(--duration-slower) var(--ease-smooth) forwards;
+      animation: heroRise var(--duration-slower) var(--ease-smooth) forwards;
     }
-    .hero-eyebrow   { animation-delay: 0ms; }
-    .hero-heading    { animation-delay: 80ms; }
-    .hero-subtitle   { animation-delay: 160ms; }
-    .billing-toggle-wrapper { animation-delay: 240ms; }
+    .pricing-hero__rule {
+      animation: heroRuleExpand var(--duration-slower) var(--ease-smooth) forwards;
+    }
+    .pricing-hero__eyebrow        { animation-delay: 40ms; }
+    .pricing-hero__rule           { animation-delay: 140ms; }
+    .pricing-hero__title          { animation-delay: 200ms; }
+    .pricing-hero__subtitle       { animation-delay: 320ms; }
+    .billing-toggle-wrapper       { animation-delay: 440ms; }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .hero-eyebrow,
-    .hero-heading,
-    .hero-subtitle,
+    .pricing-hero__eyebrow,
+    .pricing-hero__rule,
+    .pricing-hero__title,
+    .pricing-hero__subtitle,
     .billing-toggle-wrapper {
       opacity: 1;
       transform: none;
     }
   }
 
-  @keyframes revealUp {
+  @keyframes heroRise {
     from { opacity: 0; transform: translateY(var(--space-3)); }
     to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes heroRuleExpand {
+    from { opacity: 0; transform: scaleX(0.4); }
+    to   { opacity: 1; transform: scaleX(1); }
   }
 
   /* ── BILLING TOGGLE ──────────────────────────────────────────────── */
 
   .billing-toggle {
+    position: relative;
     display: inline-flex;
-    padding: var(--space-0-5);
-    background: var(--material-glass);
+    padding: var(--space-1);
+    background: color-mix(in srgb, var(--color-surface) 70%, transparent);
     backdrop-filter: blur(var(--blur-lg));
     -webkit-backdrop-filter: blur(var(--blur-lg));
-    border: 1px solid var(--material-glass-border);
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 60%, transparent);
     border-radius: var(--radius-full);
     box-shadow:
       var(--shadow-sm),
-      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 8%, transparent);
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 14%, transparent),
+      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark, black) 3%, transparent);
   }
 
   .toggle-option {
     position: relative;
-    padding: var(--space-2) var(--space-5);
+    padding: var(--space-2) var(--space-6);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
     color: var(--color-text-muted);
@@ -612,42 +713,60 @@
     background: none;
     border-radius: var(--radius-full);
     cursor: pointer;
-    transition: color var(--duration-normal), background-color var(--duration-normal), box-shadow var(--duration-normal);
-  }
-
-  .toggle-option.active {
-    background-color: var(--color-surface);
-    color: var(--color-text);
-    box-shadow:
-      var(--shadow-sm),
-      0 0 0 1px color-mix(in srgb, var(--color-border) 50%, transparent);
+    transition:
+      color var(--duration-normal) var(--ease-default),
+      background-color var(--duration-normal) var(--ease-default),
+      box-shadow var(--duration-normal) var(--ease-default);
   }
 
   .toggle-option:hover:not(.active) {
     color: var(--color-text-secondary);
   }
 
+  .toggle-option:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus-ring);
+  }
+
+  .toggle-option.active {
+    color: var(--color-text);
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 8%, var(--color-surface)),
+      var(--color-surface)
+    );
+    box-shadow:
+      var(--shadow-sm),
+      0 0 0 1px color-mix(in srgb, var(--color-border) 60%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 22%, transparent);
+  }
+
   .savings-pill {
-    display: inline-block;
-    margin-left: var(--space-1);
+    display: inline-flex;
+    align-items: center;
+    margin-left: var(--space-2);
     padding: var(--space-0-5) var(--space-2);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
-    color: var(--color-success-600);
-    background-color: var(--color-success-50);
+    letter-spacing: var(--tracking-wide);
+    color: var(--color-success-700);
+    background: color-mix(in srgb, var(--color-success-50) 85%, transparent);
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-success-200) 80%, transparent);
     border-radius: var(--radius-full);
     vertical-align: middle;
   }
 
   @media (prefers-reduced-motion: no-preference) {
     .savings-pill {
-      animation: popIn calc(var(--duration-slow) * 1.17) var(--ease-bounce) forwards;
+      animation: savingsBounce var(--duration-slower) var(--ease-bounce) forwards;
+      transform-origin: center;
     }
   }
 
-  @keyframes popIn {
-    from { opacity: 0; transform: scale(0.6); }
-    to   { opacity: 1; transform: scale(1); }
+  @keyframes savingsBounce {
+    0%   { opacity: 0; transform: scale(0.5) translateY(var(--space-1)); }
+    60%  { opacity: 1; transform: scale(1.06) translateY(0); }
+    100% { opacity: 1; transform: scale(1) translateY(0); }
   }
 
   /* ── TIER STAGE (card grid) ──────────────────────────────────────── */
