@@ -66,7 +66,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 17 | **Ribbon shine micro-interaction** — one-shot diagonal overlay sweep on the recommended ribbon after page load, draws eye to the recommended tier | ✅ done | Commit on 2026-04-17 |
 | 18 | **Savings pill as lure** — flipped visibility so pill shows on Annual button when Monthly is active (incentive), hides when Annual taken; copy now computed from max tier savings | ✅ done | Commit on 2026-04-17 |
 | 19 | **Lighthouse a11y 100** — ran snapshot audit, found insufficient contrast on inactive toggle text, bumped color token to restore WCAG AA | ✅ done | Commit on 2026-04-17 |
-| 20+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 20 | **Light-mode contrast sweep** — ran Lighthouse on studio-alpha (rose/white), found price interval + helper text failing in light mode, bumped muted→secondary; verified dark mode didn't regress | ✅ done | Commit on 2026-04-17 |
+| 21+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -364,3 +365,16 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Scope note**: a broader fix would address `--color-text-muted` derivation in `org-brand.css` so it never drops below AA — but that's a system-level change affecting every page. The pricing-page-local fix is the right scope for this pass.
 
   - **Next pass prerequisite**: the same `--color-text-muted` issue could appear on other elements throughout the app (e.g., card helpers, trust labels, faq subtitles). A follow-up org-wide pass could audit all `--color-text-muted` usages against the dark-mode org backgrounds and fix the systemic issue. Within this file: spot-check that `.card__price-helper`, `.trust__label`, `.sticky-bar__helper`, `.preview__stat-label`, and `.preview__categories li` — all using muted — still render with sufficient contrast against their containers (they should since they sit on the same dark surface and may not have the contrast issue depending on exact computed color mix).
+
+- **2026-04-17 Pass 20 (Light-mode contrast sweep)**: Pass 19 got the dark-mode org to Lighthouse 100, but ran the audit on studio-alpha (rose brand on near-white surface) and found TWO new failing items in light mode:
+  - `.card__price-interval` (the `/mo` or `/yr` next to price) — `#a3a3a3` on `#fefefe` = 2.5:1, fails WCAG AA.
+  - `.card__price-helper` (the "£X.XX/mo · billed annually" line) — same colors, 2.5:1.
+  - **Fix**: both bumped from `--color-text-muted` → `--color-text-secondary`. Same pattern as Pass 19's toggle fix: the semantic tokens are contrast-safe; `--color-text-muted` on light-mode white surfaces is fundamentally insufficient for body text.
+  - **Cross-mode verification**:
+    - studio-alpha (light, rose brand): Accessibility **100**, Best Practices 100, SEO 100.
+    - of-blood-and-bones (dark, terracotta brand): Accessibility **100**, Best Practices 100, SEO 100.
+    - Both modes: 34 passed, 0 failed on Lighthouse.
+  - **Why this is more nuanced than the toggle fix**: the tier card text sits on the card's inner glass surface (mostly white in light mode). Lighthouse was right — `a3a3a3 on fefefe` is genuinely too faint for 15px body. In dark mode the same elements don't fail because their computed muted color is lighter against their dark surface (OKLCH derivation flips).
+  - **Pattern becoming clear**: `--color-text-muted` is best reserved for DECORATIVE text (dots, separators, visual rhythm) — not INFORMATIONAL text (prices, helpers, CTAs' supporting copy). For informational muted-feel text, `--color-text-secondary` is the right semantic token. This is an implicit contract that should probably be documented in the design system, but for this page the fix is applied.
+
+  - **Next pass prerequisite**: the remaining `--color-text-muted` usages — `.preview__stat-label`, `.trust__label`, `.sticky-bar__helper`, `.sticky-bar__price small`, `.sticky-bar__sep`, `.sticky-bar__dismiss` — should all be re-audited for light-mode contrast. Most of these sit on glass or brand-tinted surfaces which may have different contrast profiles. A `snapshot` Lighthouse at full-page scroll (forcing all `.reveal--visible` sections into view) would catch any remaining issues. Also consider: should the design system's `--color-text-muted` derivation be tightened in `org-brand.css` so this class of issue can't happen? That's an app-wide change outside this polish loop.

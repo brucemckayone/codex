@@ -1255,7 +1255,7 @@
   .card__price-interval {
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     letter-spacing: var(--tracking-tight);
   }
 
@@ -1278,7 +1278,7 @@
     display: inline-block;
     margin-top: var(--space-1);
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     letter-spacing: var(--tracking-tight);
   }
 
