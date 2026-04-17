@@ -124,18 +124,24 @@
   let faqItems = $state<PricingFaqItem[]>(DEFAULT_FAQ);
 
   // ── Sticky CTA ────────────────────────────────────────────────────
+  // Two-observer pattern: tier cards leaving → sticky allowed;
+  // trust strip entering → sticky suppressed (so it doesn't cover the footer).
+  // Identical logic on desktop and mobile — no more always-visible mobile shortcut.
   let tierCardsRef = $state<HTMLElement | null>(null);
-  let showStickyCta = $state(false);
+  let trustStripRef = $state<HTMLElement | null>(null);
+  let tierCardsOutOfView = $state(false);
+  let trustStripInView = $state(false);
   let dismissedStickyCta = $state(false);
   let isMobile = $state(false);
 
-  const showMobileStickyCta = $derived(
-    isMobile && tiers.length > 0 && !pricingLoading && !currentTierId
+  const stickyVisible = $derived(
+    tierCardsOutOfView &&
+      !trustStripInView &&
+      !dismissedStickyCta &&
+      tiers.length > 0 &&
+      !pricingLoading &&
+      !currentTierId
   );
-  const showDesktopStickyCta = $derived(
-    !isMobile && showStickyCta && !dismissedStickyCta
-  );
-  const stickyVisible = $derived(showMobileStickyCta || showDesktopStickyCta);
 
   // ── Helpers ────────────────────────────────────────────────────────
   function savingsPercent(tier: SubscriptionTier): number {
@@ -221,26 +227,42 @@
     };
     mq.addEventListener('change', handleMq);
 
-    let observer: IntersectionObserver | undefined;
-    const setupObserver = () => {
-      if (tierCardsRef) {
-        observer = new IntersectionObserver(
+    // Observer 1: tier cards leaving viewport → sticky allowed.
+    let tierObserver: IntersectionObserver | undefined;
+    // Observer 2: trust strip entering viewport → sticky suppressed so it
+    // doesn't cover the page footer.
+    let trustObserver: IntersectionObserver | undefined;
+
+    const setupTierObserver = () => {
+      if (tierCardsRef && !tierObserver) {
+        tierObserver = new IntersectionObserver(
           ([entry]) => {
-            if (!isMobile) {
-              showStickyCta = !entry.isIntersecting && !dismissedStickyCta;
-            }
+            tierCardsOutOfView = !entry.isIntersecting;
           },
           { threshold: 0 }
         );
-        observer.observe(tierCardsRef);
+        tierObserver.observe(tierCardsRef);
+      }
+    };
+
+    const setupTrustObserver = () => {
+      if (trustStripRef && !trustObserver) {
+        trustObserver = new IntersectionObserver(
+          ([entry]) => {
+            trustStripInView = entry.isIntersecting;
+          },
+          { threshold: 0.3 }
+        );
+        trustObserver.observe(trustStripRef);
       }
     };
 
     const unwatch = $effect.root(() => {
       $effect(() => {
-        if (!pricingLoading && tierCardsRef) {
-          setupObserver();
-        }
+        if (!pricingLoading && tierCardsRef) setupTierObserver();
+      });
+      $effect(() => {
+        if (trustStripRef) setupTrustObserver();
       });
     });
 
@@ -282,7 +304,8 @@
 
     return () => {
       mq.removeEventListener('change', handleMq);
-      observer?.disconnect();
+      tierObserver?.disconnect();
+      trustObserver?.disconnect();
       revealObserver.disconnect();
       unwatch();
     };
@@ -595,7 +618,7 @@
     </section>
 
     <!-- ═══ TRUST ═══ -->
-    <footer class="trust reveal" data-reveal>
+    <footer class="trust reveal" data-reveal bind:this={trustStripRef}>
       <span class="trust__rule" aria-hidden="true"></span>
       <div class="trust__signals">
         <span class="trust__signal">
@@ -1971,12 +1994,17 @@
     bottom: 0;
     left: 0;
     right: 0;
-    z-index: var(--z-sticky, 40);
+    /* --z-fixed (1030) so the sticky layer beats the org-footer's backdrop-filter
+       compositing layer, which would otherwise paint above it in Chrome despite
+       our z-index being higher than the footer's (auto → 0) — a known
+       backdrop-filter stacking quirk. */
+    z-index: var(--z-fixed, 1030);
     pointer-events: none;
     display: flex;
     justify-content: center;
     padding: var(--space-3) var(--space-4);
     padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+    isolation: isolate;
   }
 
   .sticky-bar__inner {

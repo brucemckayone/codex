@@ -67,7 +67,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 18 | **Savings pill as lure** — flipped visibility so pill shows on Annual button when Monthly is active (incentive), hides when Annual taken; copy now computed from max tier savings | ✅ done | Commit on 2026-04-17 |
 | 19 | **Lighthouse a11y 100** — ran snapshot audit, found insufficient contrast on inactive toggle text, bumped color token to restore WCAG AA | ✅ done | Commit on 2026-04-17 |
 | 20 | **Light-mode contrast sweep** — ran Lighthouse on studio-alpha (rose/white), found price interval + helper text failing in light mode, bumped muted→secondary; verified dark mode didn't regress | ✅ done | Commit on 2026-04-17 |
-| 21+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 21 | **Sticky CTA — mobile trigger, footer z-index, trust-strip suppression** — user feedback: mobile needs scroll-trigger (not always-on), sticky appeared under footer, and should hide when trust/footer enters view | ✅ done | Commit on 2026-04-18 |
+| 22+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -378,3 +379,32 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Pattern becoming clear**: `--color-text-muted` is best reserved for DECORATIVE text (dots, separators, visual rhythm) — not INFORMATIONAL text (prices, helpers, CTAs' supporting copy). For informational muted-feel text, `--color-text-secondary` is the right semantic token. This is an implicit contract that should probably be documented in the design system, but for this page the fix is applied.
 
   - **Next pass prerequisite**: the remaining `--color-text-muted` usages — `.preview__stat-label`, `.trust__label`, `.sticky-bar__helper`, `.sticky-bar__price small`, `.sticky-bar__sep`, `.sticky-bar__dismiss` — should all be re-audited for light-mode contrast. Most of these sit on glass or brand-tinted surfaces which may have different contrast profiles. A `snapshot` Lighthouse at full-page scroll (forcing all `.reveal--visible` sections into view) would catch any remaining issues. Also consider: should the design system's `--color-text-muted` derivation be tightened in `org-brand.css` so this class of issue can't happen? That's an app-wide change outside this polish loop.
+
+- **2026-04-18 Pass 21 (Sticky CTA — user-reported trio of fixes)**: User feedback identified three distinct issues on the sticky CTA:
+  1. **Mobile had no scroll trigger** — was always-visible via a separate `showMobileStickyCta` derived state. User wanted unified scroll-triggered behavior across both modes.
+  2. **Sticky rendered UNDER the site footer** on desktop despite having `z-index: var(--z-sticky, 40)` = 1020 vs footer's implicit auto/0. Chrome backdrop-filter stacking quirk — the footer's `backdrop-filter: blur(8px)` creates a compositing layer that paints above lower-priority z-index'd layers regardless of numeric z.
+  3. **Sticky needed to hide** when reaching the page footer / trust strip so it doesn't cover them.
+
+  **Fix 1 — unified scroll trigger**:
+  - Retired `showMobileStickyCta`/`showDesktopStickyCta`/`stickyVisible` triad and the `showStickyCta` imperatively-set boolean.
+  - New state: `tierCardsOutOfView` + `trustStripInView` (both observer-driven).
+  - Derived: `stickyVisible = tierCardsOutOfView && !trustStripInView && !dismissedStickyCta && tiers.length > 0 && !pricingLoading && !currentTierId`.
+  - Removed the `if (!isMobile)` guard inside the tier observer callback — same logic fires everywhere.
+  - Dismiss button still hidden on mobile via the existing `{#if !isMobile}` (preserves tap area; scroll-back naturally hides the bar).
+
+  **Fix 2 — z-index stacking**:
+  - Bumped `.sticky-bar` z-index from `var(--z-sticky, 40)` (1020) → `var(--z-fixed, 1030)`. The `--z-fixed` level is designed for things-that-must-cover-page-chrome.
+  - Added `isolation: isolate` as a belt-and-braces stacking-context anchor.
+  - Inline comment in CSS documents the backdrop-filter quirk for future devs.
+
+  **Fix 3 — hide on end-of-page**:
+  - New `trustStripRef` bound to the trust footer via `bind:this`.
+  - Second IntersectionObserver (`trustObserver`, threshold: 0.3) sets `trustStripInView = true` when the trust strip enters viewport.
+  - Sticky hides as soon as trust strip appears — meaning the sticky is NEVER visible when the site footer is in view, which sidesteps the z-index quirk entirely AND respects visual hierarchy (user is at the natural end of the page, doesn't need the persistent shortcut).
+
+  **Verified in-browser**:
+  - Desktop 1440×900: scroll 0 = no sticky (tier cards visible); scroll 1500 = sticky with z-index 1030; bottom = no sticky (trust in view).
+  - Mobile 500×844: scroll 0 = no sticky; scroll 2000 = sticky visible (tier cards above); trust-in-view = no sticky. Full trio of states, mobile + desktop identical.
+  - Race note: between tier-out and trust-in observer firings, there's a single-frame window where sticky could flash visible. In practice, Chrome batches IO callbacks same-frame so this is invisible to users.
+
+  **Next pass prerequisite**: consider a slight `transition: opacity` on the sticky-bar's fly enter so the end-of-page hide doesn't feel abrupt. Also: on VERY tall viewports where trust might be in view simultaneously with tier cards' bottom still visible, the sticky might never show — but that's an extreme edge case and the fallback (no sticky) is fine.
