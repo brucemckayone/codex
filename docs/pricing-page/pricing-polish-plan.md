@@ -48,7 +48,7 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | # | Section | Status | Notes |
 |---|---|---|---|
 | 1 | **Hero** — container widening, editorial lede masthead, display typography, brand gradient mesh backdrop, polished billing toggle | ✅ done | Commit on 2026-04-17 |
-| 2 | **Tier Cards** — differentiated recommended treatment, editorial price display, meaningful feature list, brand-accent glow, card-count-adaptive grid | ⬜ pending | |
+| 2 | **Tier Cards** — differentiated recommended treatment, editorial price display, meaningful feature list, brand-accent glow, card-count-adaptive grid | ✅ done | Commit on 2026-04-17 |
 | 3 | **Content Preview** — move from "blur wall" to "editorial magazine spread" with mixed thumbnail tiles, real creator glimpses, branded stat | ⬜ pending | |
 | 4 | **FAQ** — lede-style masthead, column-balanced two-up layout on wide screens, refined accordion chrome | ⬜ pending | |
 | 5 | **Trust Strip** — editorial hairline above, brand microaccent, better iconography, refined hierarchy | ⬜ pending | |
@@ -143,4 +143,15 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
 ## Log
 
 - **2026-04-17 Pass 1 (Hero)**: Widened container to 72rem. Replaced centered SaaS hero with editorial lede: small-caps brand eyebrow → gradient-hairline rule → display title (`clamp(2.5rem, 4vw + 1rem, 4.5rem)`, tracking-tighter, leading-none, text-wrap balance) → muted subtitle. Added brand gradient mesh backdrop (three offset radial gradients in brand-primary OKLCH mixes + surface wash) with inlined fractalNoise SVG grain at 4% opacity / overlay blend for editorial texture. Upgraded billing toggle: brand-tinted active gradient instead of flat surface, focus-visible ring, softer border via `color-mix(border, 60%, transparent)`, deeper inner highlights. Savings pill now uses `success-700` on `success-50` with a border and a 3-stop bounce keyframe. Staggered entrance timing recalibrated (40/140/200/320/440ms) for a paced reveal rather than a rush.
-  - **Next pass prerequisite**: Boot `pnpm dev` (from monorepo root — NEVER `cd` into workers) and visit `http://bruce-studio.lvh.me:3000/pricing` to visually verify before Pass 2. Expected wins: atmospheric brand wash behind the masthead, confident display typography, brand-colored billing toggle. Look for regressions: backdrop clipping at edges, noise banding in dark mode, mobile hero padding feeling cramped.
+
+- **2026-04-17 Pass 2 (Tier Cards)**: Full card rethink.
+  - **Grid**: `flex-wrap: center` → CSS Grid with `repeat(auto-fit, minmax(min(100%, 18rem), 1fr))`. Clean 1/2/3/4+ column layouts; `--single` caps at 28rem centered, `--duo` caps at 52rem centered.
+  - **Recommended differentiation**: floating ribbon (`.card__ribbon`) overhanging the card's top edge in a brand-gradient pill with shadow + brand glow. Featured card surface now carries a subtle `linear-gradient(brand-primary 6% → 1% → 3%)` wash over surface. Extra top padding (`--space-10`) accommodates the overhang. On desktop side-by-side layouts, featured gets a `margin-top: -space-4` lift so it physically sits above siblings. Featured box-shadow upgraded to include a brand-colored bloom (`0 space-6 space-12 … brand 22%`).
+  - **Editorial price stack**: amount + interval + savings pill on one baseline row, monthly-equivalent helper line beneath on annual (`£X.XX/mo · billed annually`) or up-sell on monthly (`Save X% when billed annually`). Savings pill uses `−X%` glyph for discount-tag readability. Featured card's price amount renders in `--color-brand-primary` for visual anchor. Amount bumped to display-scale `clamp(2.25rem, 2vw + 1.5rem, 3rem)` in heading font.
+  - **Features**: hairlined list — each item gets `padding: --space-3 0` with a bottom border between rows. Check icons now sit in a brand-tinted rounded squircle (`--space-6` circle, 12% brand on regular, 20% on featured). Text line-height tightened to snug, all copy punched up: "Cancel anytime" → "Cancel anytime, no questions asked"; "Instant access" → "Instant access on payment".
+  - **Tier name typography**: `--text-xl` → `--text-2xl`, `--leading-tight`, `--tracking-tight`.
+  - **CTA hierarchy**: `variant={isRecommended ? 'primary' : 'secondary'}` — only the recommended tier's CTA is filled primary, others are secondary. Creates one clear conversion focus per row.
+  - **Current-plan label**: retained inline pill treatment; ribbon is recommendation-only.
+  - **Glow**: conic gradient pulse tightened (70%/22%/70% stops, scale 1→1.005 micro-breathing, `--ease-smooth` instead of raw ease-in-out, 3.2s cycle).
+
+  - **Next pass prerequisite**: Visual verification in-browser — boot `pnpm dev` from monorepo root and visit a 3-tier org's pricing page. Verify ribbon positioning at various widths, brand tint readability at low-saturation brands, feature icon circles scale properly with brand density. Watch for: ribbon collision with inner content at narrow widths, the featured card's `margin-top: -space-4` misbehaving in 1-tier and single-column mobile layouts (should collapse to 0 via `:not(.tier-stage--single)` but worth confirming).

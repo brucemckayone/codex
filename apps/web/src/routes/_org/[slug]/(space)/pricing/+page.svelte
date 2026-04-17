@@ -334,15 +334,13 @@
             class:card--current={isCurrentPlan}
             style="--card-index: {i}"
           >
-            <!-- Glow layer for recommended -->
+            <!-- Glow layer + floating ribbon for recommended -->
             {#if isRecommended && !isCurrentPlan}
               <div class="card__glow" aria-hidden="true"></div>
+              <span class="card__ribbon">Most Popular</span>
             {/if}
 
             <div class="card__inner">
-              {#if isRecommended && !isCurrentPlan}
-                <span class="card__label card__label--popular">Most Popular</span>
-              {/if}
               {#if isCurrentPlan}
                 <span class="card__label card__label--current">{m.pricing_current_plan()}</span>
               {/if}
@@ -355,30 +353,44 @@
               </header>
 
               <div class="card__pricing">
-                <span class="card__amount">{formatPrice(tierPrice(tier))}</span>
-                <span class="card__interval">
-                  /{billingInterval === 'month' ? m.pricing_per_month() : m.pricing_per_year()}
-                </span>
-              </div>
-
-              {#if billingInterval === 'year' && savings > 0}
-                <div class="card__savings">
-                  {m.pricing_save_percent({ percent: savings.toString() })}
+                <div class="card__price-row">
+                  <span class="card__price-amount">{formatPrice(tierPrice(tier))}</span>
+                  <span class="card__price-interval">
+                    /{billingInterval === 'month' ? m.pricing_per_month() : m.pricing_per_year()}
+                  </span>
+                  {#if billingInterval === 'year' && savings > 0}
+                    <span class="card__price-save">−{savings}%</span>
+                  {/if}
                 </div>
-              {/if}
+                {#if billingInterval === 'year' && tier.priceAnnual > 0}
+                  <span class="card__price-helper">
+                    £{(tier.priceAnnual / 1200).toFixed(2)}/mo · billed annually
+                  </span>
+                {:else if billingInterval === 'month' && savings > 0}
+                  <span class="card__price-helper">
+                    Save {savings}% when billed annually
+                  </span>
+                {/if}
+              </div>
 
               <ul class="card__features">
                 <li>
-                  <CheckIcon size={14} />
-                  {m.pricing_all_tier_content({ tierName: tier.name })}
+                  <span class="card__feature-icon" aria-hidden="true">
+                    <CheckIcon size={16} />
+                  </span>
+                  <span>{m.pricing_all_tier_content({ tierName: tier.name })}</span>
                 </li>
                 <li>
-                  <CheckIcon size={14} />
-                  Cancel anytime
+                  <span class="card__feature-icon" aria-hidden="true">
+                    <CheckIcon size={16} />
+                  </span>
+                  <span>Cancel anytime, no questions asked</span>
                 </li>
                 <li>
-                  <CheckIcon size={14} />
-                  Instant access
+                  <span class="card__feature-icon" aria-hidden="true">
+                    <CheckIcon size={16} />
+                  </span>
+                  <span>Instant access on payment</span>
                 </li>
               </ul>
 
@@ -389,6 +401,7 @@
                   </Button>
                 {:else}
                   <Button
+                    variant={isRecommended ? 'primary' : 'secondary'}
                     onclick={() => handleSubscribe(tier)}
                     loading={checkoutLoading === tier.id}
                     class="tier-cta"
@@ -772,28 +785,73 @@
   /* ── TIER STAGE (card grid) ──────────────────────────────────────── */
 
   .tier-stage {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--space-6);
     width: 100%;
-    padding: 0 var(--space-2);
+    padding: 0;
+    align-items: start;
   }
 
+  @media (--breakpoint-sm) {
+    .tier-stage {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (--breakpoint-lg) {
+    .tier-stage {
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+      gap: var(--space-5);
+    }
+  }
+
+  /* 1-tier: centered, narrow */
   .tier-stage--single {
-    max-width: 400px;
+    grid-template-columns: minmax(0, 28rem);
+    justify-content: center;
+    max-width: 28rem;
+    margin: 0 auto;
+  }
+  @media (--breakpoint-sm) {
+    .tier-stage--single {
+      grid-template-columns: minmax(0, 28rem);
+    }
+  }
+
+  /* 2-tier: side-by-side, constrained total width */
+  .tier-stage--duo {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 52rem;
+    margin: 0 auto;
+  }
+  @media (--breakpoint-sm) {
+    .tier-stage--duo {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (--breakpoint-lg) {
+    .tier-stage--duo {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
 
   /* ── CARD ─────────────────────────────────────────────────────────── */
 
   .card {
     position: relative;
-    flex: 1 1 320px;
-    max-width: 420px;
-    min-width: 280px;
+    width: 100%;
+    min-width: 0;
     border-radius: var(--radius-lg);
     opacity: 0;
     transform: translateY(var(--space-6));
+  }
+
+  /* Featured card overhangs siblings on side-by-side layouts */
+  @media (--breakpoint-sm) {
+    .tier-stage:not(.tier-stage--single) .card--featured {
+      margin-top: calc(-1 * var(--space-4));
+    }
   }
 
   @media (prefers-reduced-motion: no-preference) {
@@ -843,26 +901,47 @@
       inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark, black) 4%, transparent);
   }
 
-  /* ── FEATURED CARD (recommended glow) ──────────────────────────── */
+  /* ── FEATURED CARD (recommended glow + brand tint) ─────────────── */
 
   .card--featured .card__inner {
-    border-color: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 40%, transparent);
+    padding-top: var(--space-10);
+    background:
+      linear-gradient(
+        180deg,
+        color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 6%, var(--color-surface)) 0%,
+        color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 1%, var(--color-surface)) 55%,
+        color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 3%, var(--color-surface)) 100%
+      );
+    border-color: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 45%, transparent);
+    box-shadow:
+      var(--shadow-xl),
+      0 var(--space-6) var(--space-12) calc(-1 * var(--space-4)) color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 22%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 14%, transparent),
+      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark, black) 3%, transparent);
+  }
+
+  .card--featured:hover .card__inner {
+    box-shadow:
+      var(--shadow-xl),
+      0 var(--space-8) var(--space-16) calc(-1 * var(--space-4)) color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 32%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 18%, transparent),
+      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark, black) 3%, transparent);
   }
 
   .card__glow {
     position: absolute;
-    inset: -2px;
-    border-radius: calc(var(--radius-lg) + 2px);
+    inset: calc(-1 * var(--border-width-thick));
+    border-radius: calc(var(--radius-lg) + var(--border-width-thick));
     background: conic-gradient(
       from 180deg,
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 60%, transparent),
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 20%, transparent),
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 60%, transparent)
+      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 70%, transparent),
+      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 22%, transparent),
+      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 70%, transparent)
     );
-    opacity: var(--opacity-70);
+    opacity: 0.55;
     filter: blur(var(--blur-sm));
     z-index: 0;
-    animation: glowPulse 3s ease-in-out infinite alternate;
+    animation: glowPulse 3.2s var(--ease-smooth) infinite alternate;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -870,21 +949,43 @@
   }
 
   @keyframes glowPulse {
-    from { opacity: 0.5; }
-    to   { opacity: 0.8; }
+    from { opacity: 0.4; transform: scale(1); }
+    to   { opacity: 0.75; transform: scale(1.005); }
   }
 
   .card--featured:hover .card__glow {
-    opacity: 1;
+    opacity: 0.9;
     filter: blur(var(--blur-md));
   }
 
-  /* Featured card is slightly scaled up in multi-card layouts */
-  .tier-stage--duo .card--featured {
-    flex: 1 1 340px;
-  }
-  .tier-stage--duo .card--featured .card__inner {
-    padding: var(--space-10) var(--space-8);
+  /* ── FLOATING RIBBON (recommended) ─────────────────────────────── */
+
+  .card__ribbon {
+    position: absolute;
+    top: calc(-1 * var(--space-3));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    padding: var(--space-1-5, calc(var(--space-1) * 1.5)) var(--space-4);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    letter-spacing: var(--tracking-wider);
+    text-transform: var(--text-transform-label, uppercase);
+    color: var(--color-text-on-brand, white);
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 92%, white),
+      var(--color-brand-primary, var(--color-interactive))
+    );
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 60%, transparent);
+    border-radius: var(--radius-full);
+    box-shadow:
+      var(--shadow-md),
+      0 var(--space-1) var(--space-4) color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 25%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 25%, transparent);
+    white-space: nowrap;
   }
 
   /* ── CURRENT PLAN ──────────────────────────────────────────────── */
@@ -894,7 +995,7 @@
     border-width: var(--border-width-thick);
   }
 
-  /* ── CARD LABEL (badge) ────────────────────────────────────────── */
+  /* ── CARD LABEL (inline pill — current plan only) ──────────────── */
 
   .card__label {
     display: inline-flex;
@@ -907,16 +1008,10 @@
     border-radius: var(--radius-full);
   }
 
-  .card__label--popular {
-    color: var(--color-brand-primary, var(--color-interactive));
-    background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 12%, var(--color-surface));
-    border: 1px solid color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 25%, transparent);
-  }
-
   .card__label--current {
     color: var(--color-interactive);
     background: color-mix(in srgb, var(--color-interactive) 10%, var(--color-surface));
-    border: 1px solid color-mix(in srgb, var(--color-interactive) 20%, transparent);
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-interactive) 20%, transparent);
   }
 
   /* ── CARD CONTENT ──────────────────────────────────────────────── */
@@ -929,74 +1024,130 @@
 
   .card__name {
     font-family: var(--font-heading);
-    font-size: var(--text-xl);
+    font-size: var(--text-2xl);
     font-weight: var(--font-bold);
     color: var(--color-text);
     margin: 0;
-    letter-spacing: var(--tracking-normal);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-tight);
   }
 
   .card__desc {
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
-    line-height: var(--leading-relaxed);
+    line-height: var(--leading-snug);
     margin: 0;
+    text-wrap: pretty;
   }
+
+  /* ── PRICING (editorial stack) ────────────────────────────────── */
 
   .card__pricing {
     display: flex;
-    align-items: baseline;
+    flex-direction: column;
     gap: var(--space-1);
-    padding: var(--space-2) 0;
+    padding: var(--space-1) 0;
   }
 
-  .card__amount {
-    font-size: var(--text-4xl);
+  .card__price-row {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    row-gap: var(--space-1);
+  }
+
+  .card__price-amount {
+    font-family: var(--font-heading);
+    font-size: clamp(2.25rem, 2vw + 1.5rem, 3rem);
     font-weight: var(--font-bold);
     color: var(--color-text);
     font-variant-numeric: tabular-nums;
-    line-height: 1;
+    line-height: var(--leading-none);
     letter-spacing: var(--tracking-tighter);
   }
 
-  .card__interval {
-    font-size: var(--text-sm);
-    color: var(--color-text-muted);
+  /* Featured tier: price amount in brand color for visual anchor */
+  .card--featured .card__price-amount {
+    color: var(--color-brand-primary, var(--color-interactive));
   }
 
-  .card__savings {
+  .card__price-interval {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text-muted);
+    letter-spacing: var(--tracking-tight);
+  }
+
+  .card__price-save {
+    margin-left: auto;
     display: inline-flex;
-    align-self: flex-start;
+    align-items: center;
     padding: var(--space-0-5) var(--space-2);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
-    color: var(--color-success-600);
-    background-color: var(--color-success-50);
+    letter-spacing: var(--tracking-wide);
+    color: var(--color-success-700);
+    background: color-mix(in srgb, var(--color-success-50) 85%, transparent);
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-success-200) 80%, transparent);
     border-radius: var(--radius-full);
+    font-variant-numeric: tabular-nums;
   }
+
+  .card__price-helper {
+    display: inline-block;
+    margin-top: var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    letter-spacing: var(--tracking-tight);
+  }
+
+  /* ── FEATURES (hairlined list) ────────────────────────────────── */
 
   .card__features {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
     list-style: none;
-    padding: var(--space-4) 0;
+    padding: var(--space-2) 0 0;
     margin: 0;
-    border-top: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+    border-top: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 50%, transparent);
     flex: 1;
   }
 
   .card__features li {
     display: flex;
-    align-items: center;
-    gap: var(--space-2);
+    align-items: flex-start;
+    gap: var(--space-3);
+    padding: var(--space-3) 0;
     font-size: var(--text-sm);
+    line-height: var(--leading-snug);
     color: var(--color-text-secondary);
+    border-bottom: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 35%, transparent);
+  }
+
+  .card__features li:last-child {
+    border-bottom: none;
+  }
+
+  .card__feature-icon {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-6);
+    height: var(--space-6);
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 12%, transparent);
+    color: var(--color-brand-primary, var(--color-interactive));
+    margin-top: calc(-1 * var(--space-0-5));
+  }
+
+  .card--featured .card__feature-icon {
+    background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 20%, transparent);
   }
 
   .card__features li :global(svg) {
     flex-shrink: 0;
-    color: var(--color-brand-primary, var(--color-interactive));
   }
 
   .card__action {
