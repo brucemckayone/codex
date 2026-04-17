@@ -66,6 +66,9 @@
 
 <svelte:head>
   <title>{m.checkout_success_title()} | {titleSuffix}</title>
+  <!-- Session-keyed thank-you page — never index. Each visit uses a
+       unique session_id param so appearing in SERPs would be noise. -->
+  <meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 
 <div class="checkout-success">

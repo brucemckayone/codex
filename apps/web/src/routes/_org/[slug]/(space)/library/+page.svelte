@@ -211,6 +211,10 @@
 
 <svelte:head>
   <title>My {orgName} Library</title>
+  <!-- Private authenticated page — never index user's personal library
+       state. Follow is fine so the crawler keeps navigating outbound
+       links without storing this URL in the search index. -->
+  <meta name="robots" content="noindex, follow" />
 </svelte:head>
 
 <LibraryPageView

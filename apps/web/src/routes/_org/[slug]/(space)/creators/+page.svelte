@@ -13,6 +13,7 @@
   import { Pagination } from '$lib/components/ui/Pagination';
   import { UsersIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
+  import { StructuredData } from '$lib/components/seo';
   import type { PageData } from './$types';
 
   const { data }: { data: PageData } = $props();
@@ -49,15 +50,61 @@
     url.searchParams.delete('page');
     return `${url.pathname}${url.search}`;
   });
+
+  // ── SEO ──────────────────────────────────────────────────────────
+  // Canonical includes ?page= (each paginated page is a distinct
+  // discoverable URL). Self-referencing pagination is safe per
+  // current Google guidance; the prior rel=next/prev hint is ignored.
+  const canonicalUrl = $derived(`${page.url.origin}${page.url.pathname}${page.url.search}`);
+
+  // CollectionPage with an ItemList of Person entities — helps Google
+  // surface the directory in people-search contexts and associate
+  // individual creators with the org.
+  const collectionSchema = $derived<Record<string, unknown>>({
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    name: `${m.org_creators_title()} | ${orgName}`,
+    description: m.org_creators_subtitle(),
+    url: canonicalUrl,
+    isPartOf: {
+      '@type': 'WebSite',
+      name: orgName,
+      url: page.url.origin,
+    },
+    mainEntity: {
+      '@type': 'ItemList',
+      numberOfItems: total,
+      itemListElement: items.map((c, i) => ({
+        '@type': 'ListItem',
+        position: (currentPage - 1) * limit + i + 1,
+        item: {
+          '@type': 'Person',
+          name: c.name,
+          ...(c.avatarUrl && { image: c.avatarUrl }),
+          ...(c.bio && { description: c.bio }),
+          ...(c.username && {
+            url: `${page.url.origin}/explore?creator=${encodeURIComponent(c.username)}`,
+          }),
+        },
+      })),
+    },
+  });
 </script>
 
 <svelte:head>
   <title>{m.org_creators_title()} | {orgName}</title>
+  <link rel="canonical" href={canonicalUrl} />
   <meta name="description" content="{m.org_creators_subtitle()}" />
   <meta property="og:title" content="{m.org_creators_title()} | {orgName}" />
   <meta property="og:description" content={m.org_creators_subtitle()} />
   <meta property="og:type" content="website" />
+  <meta property="og:url" content={canonicalUrl} />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="{m.org_creators_title()} | {orgName}" />
+  <meta name="twitter:description" content={m.org_creators_subtitle()} />
 </svelte:head>
+
+<StructuredData data={collectionSchema} />
 
 <div class="creators">
   <!-- Header -->
