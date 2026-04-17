@@ -50,7 +50,7 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 1 | **Hero** — container widening, editorial lede masthead, display typography, brand gradient mesh backdrop, polished billing toggle | ✅ done | Commit on 2026-04-17 |
 | 2 | **Tier Cards** — differentiated recommended treatment, editorial price display, meaningful feature list, brand-accent glow, card-count-adaptive grid | ✅ done | Commit on 2026-04-17 |
 | 3 | **Content Preview** — move from "blur wall" to "editorial magazine spread" with mixed thumbnail tiles, real creator glimpses, branded stat | ✅ done | Commit on 2026-04-17 |
-| 4 | **FAQ** — lede-style masthead, column-balanced two-up layout on wide screens, refined accordion chrome | ⬜ pending | |
+| 4 | **FAQ** — lede-style masthead, column-balanced two-up layout on wide screens, refined accordion chrome | ✅ done | Commit on 2026-04-17. Stayed single-column (editorial > two-up) |
 | 5 | **Trust Strip** — editorial hairline above, brand microaccent, better iconography, refined hierarchy | ⬜ pending | |
 | 6 | **Sticky CTA** — premium chip, tier-color glow, polished transitions, mobile-edge safe | ⬜ pending | |
 | 7 | **Between-section rhythm** — breath, scroll reveals for each section, tighter vertical cadence | ⬜ pending | |
@@ -168,3 +168,19 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Backward compat**: observer still adds `preview-visible` to the bound element — only the base class name changed (`.content-preview` → `.preview`). `:global(.preview.preview-visible)` handles the reveal.
 
   - **Next pass prerequisite**: Visually verify the spread at various tile counts (we slice to 4 but source may have 3-6). Confirm content-type badges remain legible on busy thumbnails. Check that the `aspect-ratio: 5/2.4` spread doesn't get too short on ultrawide displays (may want to cap `max-height` on very wide viewports in a later pass). Also check that mobile 2×2 doesn't feel cramped at tiny widths — consider 1-column fallback below 320px.
+
+- **2026-04-17 Pass 4 (FAQ)**: Editorial single-column FAQ with brand-indicator accordion.
+  - **Decision**: Rejected two-column layout (prereq suggested it). Two-up FAQ grids feel SaaS-template-y; single-column with strong typography is more magazine / NYT-premium. Width capped at 48rem for comfortable reading.
+  - **Structure**: `.faq-section` → `.faq`, `.faq-container` (glass card) → `.faq__list` (hairline-only). Retired `.section-heading`. Added `.faq__lede` matching Pass 1/2/3 masthead pattern (eyebrow → gradient rule → display title → subtitle).
+  - **Copy shift**: eyebrow "The fine print" instead of "Frequently Asked Questions" form-label; title "Questions, answered." instead of plain "FAQ"; subtitle acknowledges creator customization ("plus room for anything the creators want you to know").
+  - **Accordion chrome** (via `.faq__list :global(.accordion-*)` overrides, per Svelte parent-child scoping rules):
+    - Trigger: heading font, `--text-base`, semibold, tracking-tight, `--space-5` vertical padding, generous left padding for the brand indicator.
+    - Hover: brand-color text + 4% brand-tinted background wash.
+    - Open: trigger text colored brand-primary.
+    - Focus-visible: brand focus ring (via `--shadow-focus-ring`).
+    - Chevron: brand-primary color, `--space-4` size, `--ease-spring` rotation (was `--ease-default`).
+    - Left-edge brand indicator: `::before` pseudo renders a 2px pill on the trigger's left edge. Height transitions from 0 → 45% on hover, → 70% on open. Pseudo stays outside `:global()` per Svelte's selector parser (`:global(.accordion-trigger)::before` not `:global(.accordion-trigger::before)`).
+    - Content: relaxed line-height, pretty text-wrap, 44rem content max-width, consistent left indentation matching trigger.
+  - **Item separators**: hairlines (`color-mix(border, 50%, transparent)`) top of list + between items, none on last — replaces the old glass-card visual container.
+
+  - **Next pass prerequisite**: Verify indicator-pseudo animation works (should fill from center-out). Test keyboard navigation — focus ring should be clearly visible on each trigger. Confirm chevron spring rotation feels alive without being distracting. Consider: on smallest viewports, does the `--space-6` left padding on trigger look excessive?

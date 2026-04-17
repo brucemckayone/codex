@@ -491,9 +491,17 @@
     {/await}
 
     <!-- ═══ FAQ ═══ -->
-    <section class="faq-section">
-      <h2 class="section-heading">Frequently Asked Questions</h2>
-      <div class="faq-container">
+    <section class="faq">
+      <header class="faq__lede">
+        <p class="faq__eyebrow">The fine print</p>
+        <span class="faq__rule" aria-hidden="true"></span>
+        <h2 class="faq__title">Questions, answered.</h2>
+        <p class="faq__subtitle">
+          The short version — plus room for anything the creators want you to know.
+        </p>
+      </header>
+
+      <div class="faq__list">
         <Accordion.Root>
           {#each faqItems as item (item.id)}
             <Accordion.Item value={item.id}>
@@ -1507,33 +1515,169 @@
     transform: translateX(var(--space-1));
   }
 
-  /* ── FAQ ──────────────────────────────────────────────────────────── */
+  /* ══════════════════════════════════════════════════════════════════
+     FAQ — editorial single column with brand-indicator accordion
+     ══════════════════════════════════════════════════════════════════ */
 
-  .faq-section {
+  .faq {
     width: 100%;
-    max-width: 640px;
+    max-width: 48rem;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
   }
 
-  .section-heading {
-    font-family: var(--font-heading);
-    font-size: var(--text-xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text);
+  .faq__lede {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-3);
     text-align: center;
-    margin: 0 0 var(--space-6);
-    letter-spacing: var(--tracking-normal);
+    max-width: 44rem;
+    margin: 0 auto;
   }
 
-  .faq-container {
-    background: color-mix(in srgb, var(--color-surface) 60%, transparent);
-    backdrop-filter: blur(var(--blur-md));
-    -webkit-backdrop-filter: blur(var(--blur-md));
-    border: 1px solid color-mix(in srgb, var(--color-border) 40%, transparent);
-    border-radius: var(--radius-lg);
-    padding: var(--space-2);
-    box-shadow:
-      var(--shadow-sm),
-      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 6%, transparent);
+  .faq__eyebrow {
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    letter-spacing: var(--tracking-wider);
+    text-transform: var(--text-transform-label, uppercase);
+    color: var(--color-brand-primary, var(--color-interactive));
+    margin: 0;
+  }
+
+  .faq__rule {
+    display: block;
+    width: var(--space-16);
+    height: var(--border-width);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 55%, transparent),
+      transparent
+    );
+  }
+
+  .faq__title {
+    font-family: var(--font-heading);
+    font-size: clamp(1.75rem, 2.5vw + 1rem, 2.75rem);
+    font-weight: var(--font-bold);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-tighter);
+    color: var(--color-text);
+    margin: 0;
+    max-width: 20ch;
+    text-wrap: balance;
+  }
+
+  .faq__subtitle {
+    font-size: var(--text-base);
+    line-height: var(--leading-snug);
+    color: var(--color-text-secondary);
+    margin: 0;
+    max-width: 48ch;
+    text-wrap: pretty;
+  }
+
+  .faq__list {
+    width: 100%;
+    border-top: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 50%, transparent);
+  }
+
+  /* ── Accordion overrides ─────────────────────────────────────────
+     Targets the inner components (scoped to their own files).
+     Svelte hashes `.faq__list`; inner descendants must be :global(). */
+
+  .faq__list :global(.accordion-item) {
+    border-bottom: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 50%, transparent);
+  }
+
+  .faq__list :global(.accordion-item:last-child) {
+    border-bottom: none;
+  }
+
+  .faq__list :global(.accordion-header) {
+    position: relative;
+  }
+
+  .faq__list :global(.accordion-trigger) {
+    position: relative;
+    padding: var(--space-5) var(--space-4) var(--space-5) var(--space-6);
+    font-family: var(--font-heading);
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    letter-spacing: var(--tracking-tight);
+    line-height: var(--leading-snug);
+    color: var(--color-text);
+    background: none;
+    border: none;
+    border-radius: var(--radius-sm);
+    transition:
+      color var(--duration-normal) var(--ease-default),
+      background-color var(--duration-normal) var(--ease-default);
+  }
+
+  .faq__list :global(.accordion-trigger:hover) {
+    color: var(--color-brand-primary, var(--color-interactive));
+    text-decoration: none;
+    background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 4%, transparent);
+  }
+
+  .faq__list :global(.accordion-trigger:focus-visible) {
+    outline: none;
+    box-shadow: var(--shadow-focus-ring);
+  }
+
+  .faq__list :global(.accordion-trigger[aria-expanded="true"]) {
+    color: var(--color-brand-primary, var(--color-interactive));
+  }
+
+  /* Left-edge brand indicator — fills in on hover, stays lit when open.
+     Pseudo-element stays outside :global() per Svelte's selector parser. */
+  .faq__list :global(.accordion-trigger)::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: var(--space-2);
+    width: var(--border-width-thick);
+    height: 0;
+    background: var(--color-brand-primary, var(--color-interactive));
+    border-radius: var(--radius-full);
+    transform: translateY(-50%);
+    transition: height var(--duration-normal) var(--ease-smooth);
+  }
+
+  .faq__list :global(.accordion-trigger):hover::before {
+    height: 45%;
+  }
+
+  .faq__list :global(.accordion-trigger[aria-expanded="true"])::before {
+    height: 70%;
+  }
+
+  .faq__list :global(.accordion-chevron) {
+    color: var(--color-brand-primary, var(--color-interactive));
+    opacity: 1;
+    height: var(--space-4);
+    width: var(--space-4);
+    transition: transform var(--duration-normal) var(--ease-spring);
+  }
+
+  .faq__list :global(.accordion-content) {
+    font-size: var(--text-sm);
+    line-height: var(--leading-relaxed);
+    color: var(--color-text-secondary);
+  }
+
+  .faq__list :global(.accordion-content-inner) {
+    padding: var(--space-1) var(--space-4) var(--space-5) var(--space-6);
+    max-width: 44rem;
+  }
+
+  .faq__list :global(.accordion-content-inner p) {
+    margin: 0;
+    text-wrap: pretty;
   }
 
   /* ── TRUST BAR ───────────────────────────────────────────────────── */
