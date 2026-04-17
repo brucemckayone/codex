@@ -51,7 +51,7 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 2 | **Tier Cards** — differentiated recommended treatment, editorial price display, meaningful feature list, brand-accent glow, card-count-adaptive grid | ✅ done | Commit on 2026-04-17 |
 | 3 | **Content Preview** — move from "blur wall" to "editorial magazine spread" with mixed thumbnail tiles, real creator glimpses, branded stat | ✅ done | Commit on 2026-04-17 |
 | 4 | **FAQ** — lede-style masthead, column-balanced two-up layout on wide screens, refined accordion chrome | ✅ done | Commit on 2026-04-17. Stayed single-column (editorial > two-up) |
-| 5 | **Trust Strip** — editorial hairline above, brand microaccent, better iconography, refined hierarchy | ⬜ pending | |
+| 5 | **Trust Strip** — editorial hairline above, brand microaccent, better iconography, refined hierarchy | ✅ done | Commit on 2026-04-17 |
 | 6 | **Sticky CTA** — premium chip, tier-color glow, polished transitions, mobile-edge safe | ⬜ pending | |
 | 7 | **Between-section rhythm** — breath, scroll reveals for each section, tighter vertical cadence | ⬜ pending | |
 | 8 | **Full micro-polish review** — focus rings, motion reduce paths, dark mode, backdrop-filter fallback, skeleton match | ⬜ pending | |
@@ -184,3 +184,14 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Item separators**: hairlines (`color-mix(border, 50%, transparent)`) top of list + between items, none on last — replaces the old glass-card visual container.
 
   - **Next pass prerequisite**: Verify indicator-pseudo animation works (should fill from center-out). Test keyboard navigation — focus ring should be clearly visible on each trigger. Confirm chevron spring rotation feels alive without being distracting. Consider: on smallest viewports, does the `--space-6` left padding on trigger look excessive?
+
+- **2026-04-17 Pass 5 (Trust Strip)**: Flat icon+divider row → editorial coda.
+  - **Structure**: `.trust-bar` → `.trust` (column flex with `.trust__rule` + `.trust__signals`). Each signal gets wrapped icon + label: `.trust__signal > .trust__icon + .trust__label`. Dividers changed from vertical 1px bars to brand-colored dots (`.trust__dot`).
+  - **Brand rhyme**: `.trust__rule` reuses the same `--space-16` wide gradient-hairline pattern as `.pricing-hero__rule`, `.preview__rule`, `.faq__rule`. Creates a visual refrain — every section opens (or in this case closes) with the same brand mark.
+  - **Icons**: each SVG now lives inside a `--space-5` brand-tinted circle (`color-mix(brand, 10%, transparent)` background, brand-color on the icon). Matches the tier card feature icon treatment at slightly smaller scale.
+  - **Dots**: tiny `--space-1` circles in `color-mix(brand, 45%, transparent)` replace the neutral 1px vertical dividers. Editorial, brand-present, not form-template-y.
+  - **Typography**: label bumped `--text-xs` → `--text-sm`, `--font-normal` → `--font-medium`, added `--tracking-tight`. Color stays muted — icons carry the brand signal, text stays quiet.
+  - **Mobile wrap**: below sm, signals stack vertically and dots hide — tinted icon circles alone carry the grouping. Cleaner than hard line-break + wrapped dots.
+  - **Removed**: the faint 60% opacity on plain icons (no longer needed — icon is a proper tinted shape now).
+
+  - **Next pass prerequisite**: Check that at tight viewport widths (600-768px), the dots don't get crowded; confirm the rule doesn't feel redundant next to the FAQ list's bottom border (there's no bottom border on FAQ list — each accordion item has its own). Also sanity-check that the `--space-5` icon circle + `--text-sm` label combo maintains vertical rhythm across brand density scales (0.8x / 1.0x / 1.2x).

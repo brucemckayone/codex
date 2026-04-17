@@ -514,21 +514,24 @@
     </section>
 
     <!-- ═══ TRUST ═══ -->
-    <footer class="trust-bar">
-      <span class="trust-signal">
-        <CheckCircleIcon size={14} />
-        <span>Cancel anytime</span>
-      </span>
-      <span class="trust-divider" aria-hidden="true"></span>
-      <span class="trust-signal">
-        <LockIcon size={14} />
-        <span>Secure checkout</span>
-      </span>
-      <span class="trust-divider" aria-hidden="true"></span>
-      <span class="trust-signal">
-        <CheckIcon size={14} />
-        <span>Instant access</span>
-      </span>
+    <footer class="trust">
+      <span class="trust__rule" aria-hidden="true"></span>
+      <div class="trust__signals">
+        <span class="trust__signal">
+          <span class="trust__icon" aria-hidden="true"><CheckCircleIcon size={14} /></span>
+          <span class="trust__label">Cancel anytime</span>
+        </span>
+        <span class="trust__dot" aria-hidden="true"></span>
+        <span class="trust__signal">
+          <span class="trust__icon" aria-hidden="true"><LockIcon size={14} /></span>
+          <span class="trust__label">Secure checkout</span>
+        </span>
+        <span class="trust__dot" aria-hidden="true"></span>
+        <span class="trust__signal">
+          <span class="trust__icon" aria-hidden="true"><CheckIcon size={14} /></span>
+          <span class="trust__label">Instant access</span>
+        </span>
+      </div>
     </footer>
   {/if}
 </div>
@@ -1680,44 +1683,87 @@
     text-wrap: pretty;
   }
 
-  /* ── TRUST BAR ───────────────────────────────────────────────────── */
+  /* ══════════════════════════════════════════════════════════════════
+     TRUST STRIP — editorial coda
+     Short brand rule on top, tinted icon circles, brand-colored dots
+     between signals. Rhymes with the section mastheads above.
+     ══════════════════════════════════════════════════════════════════ */
 
-  .trust-bar {
+  .trust {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-6);
+  }
+
+  .trust__rule {
+    display: block;
+    width: var(--space-16);
+    height: var(--border-width);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 55%, transparent),
+      transparent
+    );
+  }
+
+  .trust__signals {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: var(--space-4);
-    padding: var(--space-4) var(--space-4);
-    width: 100%;
-    max-width: 640px;
+    flex-wrap: wrap;
+    gap: var(--space-3) var(--space-5);
+    padding: 0 var(--space-4);
+    max-width: 42rem;
   }
 
-  .trust-signal {
-    display: flex;
+  .trust__signal {
+    display: inline-flex;
     align-items: center;
     gap: var(--space-2);
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
     white-space: nowrap;
   }
 
-  .trust-signal :global(svg) {
+  .trust__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-5);
+    height: var(--space-5);
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 10%, transparent);
+    color: var(--color-brand-primary, var(--color-interactive));
     flex-shrink: 0;
-    opacity: 0.6;
   }
 
-  .trust-divider {
-    width: 1px;
-    height: var(--space-4);
-    background-color: var(--color-border);
+  .trust__icon :global(svg) {
     flex-shrink: 0;
   }
 
-  @media (max-width: 47.9375rem) {
-    .trust-bar {
-      flex-wrap: wrap;
+  .trust__label {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text-secondary);
+    letter-spacing: var(--tracking-tight);
+  }
+
+  .trust__dot {
+    display: inline-block;
+    width: var(--space-1);
+    height: var(--space-1);
+    border-radius: var(--radius-full);
+    background: color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 45%, transparent);
+    flex-shrink: 0;
+  }
+
+  @media (--below-sm) {
+    .trust__signals {
+      flex-direction: column;
+      gap: var(--space-3);
     }
-    .trust-divider {
+    .trust__dot {
       display: none;
     }
   }
