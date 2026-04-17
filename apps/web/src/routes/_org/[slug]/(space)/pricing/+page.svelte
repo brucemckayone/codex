@@ -402,7 +402,7 @@
                 <div class="card__price-row">
                   <span class="card__price-amount">{formatPrice(tierPrice(tier))}</span>
                   <span class="card__price-interval">
-                    /{billingInterval === 'month' ? m.pricing_per_month() : m.pricing_per_year()}
+                    {billingInterval === 'month' ? m.pricing_per_month() : m.pricing_per_year()}
                   </span>
                   {#if billingInterval === 'year' && savings > 0}
                     <span class="card__price-save">−{savings}%</span>
@@ -732,7 +732,7 @@
     background: linear-gradient(
       90deg,
       transparent,
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 55%, transparent),
+      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 72%, transparent),
       transparent
     );
     opacity: 0;
@@ -1359,7 +1359,7 @@
     background: linear-gradient(
       90deg,
       transparent,
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 55%, transparent),
+      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 72%, transparent),
       transparent
     );
   }
@@ -1681,7 +1681,7 @@
     background: linear-gradient(
       90deg,
       transparent,
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 55%, transparent),
+      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 72%, transparent),
       transparent
     );
   }
@@ -1828,7 +1828,7 @@
     background: linear-gradient(
       90deg,
       transparent,
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 55%, transparent),
+      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 72%, transparent),
       transparent
     );
   }
