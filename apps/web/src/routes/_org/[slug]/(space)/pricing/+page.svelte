@@ -149,6 +149,23 @@
     return hours % 1 === 0 ? `${Math.round(hours)}` : `${hours.toFixed(1)}`;
   }
 
+  // ── Billing toggle radiogroup keyboard handling ──────────────────
+  // ARIA radiogroup pattern: arrow keys navigate + select the adjacent radio.
+  // Roving tabindex is set inline on each button so Tab only lands once on
+  // the group (on the currently-checked radio).
+  function handleBillingKey(e: KeyboardEvent) {
+    const next = ['ArrowRight', 'ArrowDown'].includes(e.key);
+    const prev = ['ArrowLeft', 'ArrowUp'].includes(e.key);
+    if (!next && !prev) return;
+    e.preventDefault();
+    billingInterval = billingInterval === 'month' ? 'year' : 'month';
+    // Shift focus to the newly-checked option on the next microtask after
+    // Svelte updates aria-checked + tabindex.
+    const targetIdx = billingInterval === 'month' ? 0 : 1;
+    const buttons = (e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('button');
+    queueMicrotask(() => buttons[targetIdx]?.focus());
+  }
+
   async function handleSubscribe(tier: SubscriptionTier) {
     if (!data.isAuthenticated) {
       const returnPath = `${page.url.pathname}?tierId=${encodeURIComponent(tier.id)}&billingInterval=${encodeURIComponent(billingInterval)}`;
@@ -293,13 +310,20 @@
       </header>
 
       <div class="billing-toggle-wrapper">
-        <div class="billing-toggle" role="radiogroup" aria-label="Billing period">
+        <div
+          class="billing-toggle"
+          role="radiogroup"
+          aria-label="Billing period"
+          onkeydown={handleBillingKey}
+          tabindex={-1}
+        >
           <button
             class="toggle-option"
             class:active={billingInterval === 'month'}
             onclick={() => { billingInterval = 'month'; }}
             role="radio"
             aria-checked={billingInterval === 'month'}
+            tabindex={billingInterval === 'month' ? 0 : -1}
           >
             {m.pricing_monthly()}
           </button>
@@ -309,6 +333,7 @@
             onclick={() => { billingInterval = 'year'; }}
             role="radio"
             aria-checked={billingInterval === 'year'}
+            tabindex={billingInterval === 'year' ? 0 : -1}
           >
             {m.pricing_annual()}
             {#if billingInterval === 'year'}

@@ -62,7 +62,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 13 | **Mobile + light mode verify + tick() fix** — found preview reveal not firing post-stream; fixed with `tick()` before observer re-sweep | ✅ done | Commit on 2026-04-17 |
 | 14 | **Sticky CTA annual helper** — adds "£X.XX/mo · billed annually" helper line on the sticky when Annual is active, matching tier card pattern | ✅ done | Commit on 2026-04-17 |
 | 15 | **Keyboard focus ring a11y fix** — switched toggle + preview CTA from box-shadow to outline so active/hover state styles don't override focus-visible | ✅ done | Commit on 2026-04-17 |
-| 16+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 16 | **Billing toggle ARIA radiogroup** — added roving tabindex + arrow-key navigation for proper WAI-ARIA radiogroup semantics | ✅ done | Commit on 2026-04-17 |
+| 17+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -317,3 +318,17 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Side note**: `--color-focus` resolves to `#EF4444`-ish on this dev setup (may be a seed-data quirk where the test orgs share a similar primary). Regardless, the ring renders visibly against any surface.
 
   - **Next pass prerequisite**: Deeper a11y audit — check accordion keyboard behavior (Arrow up/down to navigate between triggers, Home/End to jump to first/last, Enter/Space to toggle). Melt UI should provide this natively. Also: axe-core scan or Lighthouse accessibility audit to catch anything I missed (missing aria labels, color contrast on brand-tinted text, etc). Consider: is the billing toggle `role="radiogroup"` + `role="radio"` semantics correct? Radio groups usually have Arrow Left/Right key navigation — does that work with Melt's toggle or is the toggle custom?
+
+- **2026-04-17 Pass 16 (Billing toggle ARIA radiogroup semantics)**: Completed the WAI-ARIA radiogroup pattern on the billing toggle.
+  - **Pre-existing gap**: markup had `role="radiogroup"` + `role="radio"` + `aria-checked` but lacked (a) roving tabindex (Tab landed on BOTH buttons, not the canonical "one stop per group"), and (b) arrow-key navigation (Arrow Left/Right/Up/Down should move between radios + toggle the selection). Without these, screen reader users would announce the toggle as a radiogroup but keyboard behavior didn't match the role's implied contract.
+  - **Implementation**:
+    - **Roving tabindex**: `tabindex={billingInterval === 'month' ? 0 : -1}` on Monthly, inverse on Annual. Tab now enters the group exactly once — lands on the currently-checked radio, skips the unchecked one.
+    - **Arrow-key handler**: new `handleBillingKey(e: KeyboardEvent)` function wired via `onkeydown` on the radiogroup wrapper. Arrow Right/Down → switch to Annual; Arrow Left/Up → switch to Monthly. Swaps `billingInterval` state, then `queueMicrotask(() => target.focus())` to shift keyboard focus to the newly-checked option after Svelte updates the DOM.
+    - **`tabindex={-1}` on the group wrapper**: required by Svelte's a11y linter when an element has `role="radiogroup"` — ensures the group can receive programmatic focus if ever needed but isn't in the tab sequence (the radios handle that via their roving tabindex).
+  - **Verified in-browser**:
+    - Initial: Monthly `tabindex=0 aria-checked=true`, Annual `tabindex=-1 aria-checked=false`.
+    - After ArrowRight dispatch: Monthly `tabindex=-1 aria-checked=false`, Annual `tabindex=0 aria-checked=true`, `document.activeElement` = Annual. 
+    - After ArrowLeft dispatch: fully reverts, focus back on Monthly.
+  - **Screen reader impact**: NVDA/VoiceOver/JAWS will now announce "billing period, radio group, monthly, 1 of 2, selected" when entering the group via Tab, and arrow keys will announce the transitions. Prior implementation announced the role but behaved like two independent buttons.
+
+  - **Next pass prerequisite**: Accordion keyboard behavior audit — test Arrow Up/Down (Melt UI should provide this natively for `<Accordion.Root>`), Home/End, Enter/Space. Lighthouse or axe-core full-page a11y scan. Also check the tier card CTAs — the Button component's built-in focus styling should suffice, but verify there's no regression after the recent focus-visible refactor.
