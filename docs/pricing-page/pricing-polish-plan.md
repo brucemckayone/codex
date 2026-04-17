@@ -63,7 +63,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 14 | **Sticky CTA annual helper** — adds "£X.XX/mo · billed annually" helper line on the sticky when Annual is active, matching tier card pattern | ✅ done | Commit on 2026-04-17 |
 | 15 | **Keyboard focus ring a11y fix** — switched toggle + preview CTA from box-shadow to outline so active/hover state styles don't override focus-visible | ✅ done | Commit on 2026-04-17 |
 | 16 | **Billing toggle ARIA radiogroup** — added roving tabindex + arrow-key navigation for proper WAI-ARIA radiogroup semantics | ✅ done | Commit on 2026-04-17 |
-| 17+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 17 | **Ribbon shine micro-interaction** — one-shot diagonal overlay sweep on the recommended ribbon after page load, draws eye to the recommended tier | ✅ done | Commit on 2026-04-17 |
+| 18+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -332,3 +333,13 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Screen reader impact**: NVDA/VoiceOver/JAWS will now announce "billing period, radio group, monthly, 1 of 2, selected" when entering the group via Tab, and arrow keys will announce the transitions. Prior implementation announced the role but behaved like two independent buttons.
 
   - **Next pass prerequisite**: Accordion keyboard behavior audit — test Arrow Up/Down (Melt UI should provide this natively for `<Accordion.Root>`), Home/End, Enter/Space. Lighthouse or axe-core full-page a11y scan. Also check the tier card CTAs — the Button component's built-in focus styling should suffice, but verify there's no regression after the recent focus-visible refactor.
+
+- **2026-04-17 Pass 17 (Ribbon shine micro-interaction)**: Added a one-shot diagonal shine sweep on the "Most Popular" ribbon to draw the eye to the recommended tier after page load.
+  - **Why**: after 16 passes the page renders well, but entrance animations on all three tier cards use the same `cardReveal` keyframe with just a per-card delay. No visual cue distinguishes the recommended tier's *arrival*. The ribbon is the hierarchy anchor — a one-shot shine there, fired 1.2s after page load (after all card stagger completes), gives a final flourish without turning the page into a nightclub.
+  - **Implementation**: `::after` pseudo on `.card__ribbon` with a 120° white gradient (transparent 25% → `color-mix(white, 38%, transparent)` 50% → transparent 75%) and `mix-blend-mode: overlay`. Translates from `translateX(-160%)` to `160%` over 2.2s with `--ease-smooth`. Runs once. `border-radius: inherit` keeps the sweep clipped to the pill shape, plus `overflow: hidden` on the ribbon.
+  - **Blend mode choice**: `overlay` lightens light pixels, darkens dark ones — so the white shine reads correctly whether the brand is red, blue, or lavender. On a white ribbon (if ever) it'd be more muted; on a saturated brand pill it's a subtle highlight sweep without ever blowing out.
+  - **Reduced motion**: wrapped in `@media (prefers-reduced-motion: no-preference)` — users with reduced-motion preference never see the pseudo-element at all.
+  - **Timing choice**: 1.2s delay is after `cardReveal`'s max stagger (`120ms * 3 = 360ms` + 550ms duration ≈ 900ms, plus a ~300ms breather). The shine therefore lands AFTER the cards have finished arriving — a sequential choreography: cards arrive, then the eye is directed to the recommended one.
+  - **Ribbon now has `overflow: hidden`**: required for the pseudo to be clipped to the pill silhouette. Pre-existed in the ribbon styling? No — I added it. Edge case: if ribbon text ever wraps (unlikely — `white-space: nowrap` is set), overflow hidden would truncate. But with nowrap + short "Most Popular" copy, safe.
+
+  - **Next pass prerequisite**: Accordion arrow-key nav audit (Melt UI should provide Home/End/Arrow), then full-page Lighthouse/axe-core scan to catch any contrast issues on the brand-tinted pills/labels. Also consider: at the moment the ribbon shine fires, is the card already "settled"? If not, the shine may feel premature. Timing may need adjustment based on observed feel (currently open-loop — user-subjective judgment).

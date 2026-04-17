@@ -1134,6 +1134,32 @@
       0 var(--space-1) var(--space-4) color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 25%, transparent),
       inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 25%, transparent);
     white-space: nowrap;
+    overflow: hidden;
+  }
+
+  /* One-shot diagonal shine after entrance — draws the eye to the
+     recommended tier once, then stays quiet. Disabled under reduced motion. */
+  @media (prefers-reduced-motion: no-preference) {
+    .card__ribbon::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(
+        120deg,
+        transparent 25%,
+        color-mix(in srgb, white 38%, transparent) 50%,
+        transparent 75%
+      );
+      mix-blend-mode: overlay;
+      transform: translateX(-160%);
+      animation: ribbonShine 2.2s var(--ease-smooth) 1.2s 1 forwards;
+      pointer-events: none;
+      border-radius: inherit;
+    }
+  }
+
+  @keyframes ribbonShine {
+    to { transform: translateX(160%); }
   }
 
   /* ── CURRENT PLAN ──────────────────────────────────────────────── */
