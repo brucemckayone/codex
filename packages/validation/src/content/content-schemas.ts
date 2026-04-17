@@ -312,6 +312,10 @@ const baseContentSchema = z.object({
     .record(z.string(), z.union([z.number(), z.boolean()]))
     .optional()
     .nullable(),
+
+  // Creator-flagged "feature on homepage" — promotes to full-width editorial
+  // card on the org landing feed. Defaults to false at DB level.
+  featured: z.boolean().optional(),
 });
 
 /**
@@ -513,6 +517,15 @@ export const publicContentQuerySchema = paginationSchema
     search: z.string().max(255).optional(),
     sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
     creatorId: uuidSchema.optional(),
+    // Creator-flagged featured filter — true returns only featured items,
+    // false excludes them. Undefined (default) returns all published items.
+    // Accepts boolean or stringified boolean (URL query strings).
+    featured: z
+      .union([
+        z.boolean(),
+        z.enum(['true', 'false']).transform((v) => v === 'true'),
+      ])
+      .optional(),
   })
   .refine((data) => data.orgId || data.slug, {
     message: 'Either orgId or slug must be provided',

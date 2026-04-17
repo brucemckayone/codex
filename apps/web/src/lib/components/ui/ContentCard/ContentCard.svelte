@@ -196,13 +196,6 @@
         </span>
       {/if}
 
-      <!-- Category — small-caps editorial tag, translucent rather than
-           a loud SaaS pill. Only shown when the content actually has a
-           category set; otherwise the corner stays clean. -->
-      {#if category && variant !== 'compact' && variant !== 'resume'}
-        <span class="cc__category-tag">{category}</span>
-      {/if}
-
       <!-- Price badge (top-right) -->
       {#if showPriceBadge}
         <PriceBadge
@@ -238,6 +231,9 @@
 
     <!-- Body -->
     <div class="cc__body">
+      {#if category && variant !== 'compact' && variant !== 'resume'}
+        <p class="cc__eyebrow">{category}</p>
+      {/if}
       <h3 class="cc__title" id={titleId}>
         <a href={href}>{title}</a>
       </h3>
@@ -420,27 +416,19 @@
   }
 
   /*
-    Category — small-caps editorial tag in the top-left corner.
-    Translucent glass treatment (dark scrim + blur) rather than a
-    solid brand pill so the photograph stays dominant and the page
-    reads as an editorial spread, not a SaaS dashboard.
+    Category eyebrow — small-caps editorial label above the title.
+    Replaces the previous glass-scrim overlay on the thumbnail, which
+    fought the image. An eyebrow reads as editorial hierarchy (think
+    magazine department label) and leaves the photograph clean.
   */
-  .cc__category-tag {
-    position: absolute;
-    top: var(--space-2);
-    left: var(--space-2);
-    z-index: 1;
-    padding: var(--space-0-5) var(--space-2);
+  .cc__eyebrow {
+    margin: 0;
     font-family: var(--font-body);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
-    color: var(--color-neutral-50);
-    background: color-mix(in srgb, var(--color-neutral-900) 55%, transparent);
-    backdrop-filter: blur(var(--blur-sm));
-    -webkit-backdrop-filter: blur(var(--blur-sm));
-    border-radius: var(--radius-xs);
+    color: var(--color-text-tertiary);
     line-height: var(--leading-tight);
   }
 

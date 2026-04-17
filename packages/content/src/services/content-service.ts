@@ -774,6 +774,7 @@ export class ContentService extends BaseService {
     search?: string;
     sort: string;
     creatorId?: string;
+    featured?: boolean;
   }): Promise<PaginatedListResponse<ContentWithRelations>> {
     try {
       const { limit, offset } = withPagination({
@@ -804,6 +805,12 @@ export class ContentService extends BaseService {
       // Optional creator filter — scopes to a single creator's content within the org
       if (params.creatorId) {
         whereConditions.push(eq(content.creatorId, params.creatorId));
+      }
+
+      // Optional featured filter — true = only featured, false = exclude featured.
+      // Undefined returns everything (backward-compatible).
+      if (params.featured !== undefined) {
+        whereConditions.push(eq(content.featured, params.featured));
       }
 
       // Optional search on title/description

@@ -16,6 +16,7 @@
 <script lang="ts">
   import { CheckIcon, CircleIcon } from '$lib/components/ui/Icon';
   import { Badge, Button, Select } from '$lib/components/ui';
+  import Switch from '$lib/components/ui/Switch/Switch.svelte';
   import * as m from '$paraglide/messages';
   import TagsInput from './TagsInput.svelte';
   import type { ContentWithRelations, SubscriptionTier } from '$lib/types';
@@ -65,6 +66,11 @@
   function handleTagsChange(newTags: string[]) {
     tags = newTags;
   }
+
+  // Featured flag — locally managed, serialized to hidden input. Promotes the
+  // content to a full-width editorial card on the org homepage feed.
+  // svelte-ignore state_referenced_locally — user edits must survive until submit
+  let featured = $state<boolean>(content?.featured ?? false);
 
   // Access type options
   type AccessTypeOption = { value: string; label: string; description: string };
@@ -186,6 +192,7 @@
   <input type="hidden" name="accessType" value={accessTypeVal} />
   <input type="hidden" name="visibility" value={derivedVisibility} />
   <input type="hidden" name="minimumTierId" value={selectedMinimumTierId || ''} />
+  <input type="hidden" name="featured" value={featured ? 'true' : ''} />
   {#if !showPriceField}
     <input type="hidden" name="price" value={priceVal} />
   {/if}
@@ -357,6 +364,22 @@
   <!-- Tags -->
   <div class="sidebar-section">
     <TagsInput {tags} onchange={handleTagsChange} />
+  </div>
+
+  <!-- Homepage feature flag — promotes content to a full-width editorial card -->
+  <div class="sidebar-section">
+    <div class="feature-row">
+      <div class="feature-label">
+        <h4 class="sidebar-heading">Feature on homepage</h4>
+        <p class="feature-desc">
+          Promote this content to a full-width editorial card on the org landing page.
+        </p>
+      </div>
+      <Switch
+        bind:checked={featured}
+        aria-label="Feature on homepage"
+      />
+    </div>
   </div>
 
   <!-- Danger Zone (edit only) -->
@@ -564,6 +587,28 @@
 
   .price-input {
     border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  }
+
+  /* Homepage feature flag row */
+  .feature-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+
+  .feature-label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+  }
+
+  .feature-desc {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    line-height: var(--leading-relaxed);
   }
 
   /* Danger zone */

@@ -29,6 +29,8 @@
   let isDesktop = $state(false);
 
   onMount(() => {
+    // Hydrate TanStack DB cache with whatever content we already rendered
+    // server-side so client navigations feel instant.
     if (data.newReleases?.length) {
       hydrateIfNeeded('content', data.newReleases);
     }
@@ -52,6 +54,14 @@
   const stats = $derived(data.stats);
   const user = $derived(data.user);
   const introVideoUrl = $derived(data.org?.introVideoUrl ?? null);
+
+  // Stable mapping of logical section ids → numeric tint slots. Two slots
+  // alternate so consecutive sections feel distinct without needing one
+  // colour per section. Kept as a plain function so the template stays
+  // declarative — no map-state in the script.
+  function tintFor(sectionId: string): '1' | '2' {
+    return sectionId === 'featured' ? '1' : '2';
+  }
 
   // Continue watching — live query over localStorage-backed libraryCollection.
   // On return visits: instant from localStorage. On first visit: empty until staleness detection loads data.
@@ -307,15 +317,78 @@
   {/if}
 
   <!--
-    Creators — editorial "Contributors" masthead.
-    Pulled above New Releases so creator discovery is the first content
-    block users see after the hero. Streamed (skeleton first) so it
-    doesn't delay hero paint. Each card links to /explore?creator=<username>,
-    which filters the explore page to that creator's catalogue and
-    renders a feature-banner at the top (see CreatorExploreBanner).
+    Main feed — a single edge-to-edge content grid that interleaves section
+    ledes, full-width featured tiles, and normal-sized content tiles. No
+    outer gutters on tiles; inner thumbnail padding creates the visual
+    rhythm. Contiguous tiles with the same data-section-tint share a
+    background wash that defines the section zone.
+  -->
+  {#if data.feedItems.length > 0}
+    <section class="feed-wrap">
+      <div class="content-grid">
+        {#each data.feedItems as item, i (item.kind + '-' + i)}
+          {#if item.kind === 'lede'}
+            <header
+              class="tile tile--full tile--lede"
+              data-section-tint={tintFor(item.sectionId)}
+            >
+              <p class="lede__eyebrow">{item.eyebrow}</p>
+              <hr class="lede__rule" aria-hidden="true" />
+              <div class="lede__title-row">
+                <h2 class="lede__title">{item.title}</h2>
+                {#if item.viewAllHref}
+                  <a href={item.viewAllHref} class="lede__view-all">
+                    {item.viewAllLabel ?? m.org_view_all_content()}
+                    <span aria-hidden="true">→</span>
+                  </a>
+                {/if}
+              </div>
+            </header>
+          {:else if item.kind === 'content'}
+            <div
+              class="tile"
+              class:tile--full={item.span === 'full'}
+              data-section-tint={tintFor(item.sectionId)}
+            >
+              <ContentCard
+                variant={item.span === 'full' ? 'featured' : 'grid'}
+                id={item.content.id}
+                title={item.content.title}
+                thumbnail={item.content.mediaItem?.thumbnailUrl ?? item.content.thumbnailUrl ?? null}
+                description={item.content.description}
+                contentType={item.content.contentType === 'written' ? 'article' : item.content.contentType}
+                duration={item.content.mediaItem?.durationSeconds ?? null}
+                creator={item.content.creator ? {
+                  username: item.content.creator.name ?? undefined,
+                  displayName: item.content.creator.name ?? undefined,
+                } : undefined}
+                href={buildContentUrl(page.url, item.content)}
+                price={item.content.priceCents != null ? {
+                  amount: item.content.priceCents,
+                  currency: 'GBP',
+                } : null}
+                contentAccessType={item.content.accessType}
+                included={access.isIncluded(item.content)}
+                isFollower={access.isFollowing}
+                tierName={access.getTierName(item.content)}
+                category={item.content.category ?? null}
+              />
+            </div>
+          {/if}
+        {/each}
+      </div>
+    </section>
+  {:else}
+    <div class="empty-state">
+      <p>{m.org_no_content_yet()}</p>
+    </div>
+  {/if}
 
-    Treatment: magazine masthead — small-caps eyebrow, display-type
-    section title, thin hairline, carousel of photo-dominant cards.
+  <!--
+    Contributors masthead — kept as a dedicated section below the main
+    feed so creator discovery remains a first-class surface. Treatment:
+    magazine masthead (small-caps eyebrow, display title, hairline,
+    horizontal carousel). Streamed so it doesn't delay first paint.
   -->
   <section class="section section--stacked">
     <header class="lede">
@@ -360,55 +433,6 @@
         </Carousel>
       {/if}
     {/await}
-  </section>
-
-  <!-- New Releases — editorial lede, same treatment as The Contributors -->
-  <section class="section section--stacked">
-    <header class="lede">
-      <p class="lede__eyebrow">Just Published</p>
-      <hr class="lede__rule" aria-hidden="true" />
-      <div class="lede__title-row">
-        <h2 class="lede__title">{m.org_new_releases_title()}</h2>
-        {#if newReleases.length > 0}
-          <a href="/explore" class="lede__view-all">
-            {m.org_view_all_content()} <span aria-hidden="true">→</span>
-          </a>
-        {/if}
-      </div>
-    </header>
-    {#if newReleases.length > 0}
-      <div class="content-grid content-grid--featured">
-        {#each newReleases as item, i (item.id)}
-          <ContentCard
-            variant={i === 0 ? 'featured' : 'grid'}
-            id={item.id}
-            title={item.title}
-            thumbnail={item.mediaItem?.thumbnailUrl ?? item.thumbnailUrl ?? null}
-            description={item.description}
-            contentType={item.contentType === 'written' ? 'article' : item.contentType}
-            duration={item.mediaItem?.durationSeconds ?? null}
-            creator={item.creator ? {
-              username: item.creator.name ?? undefined,
-              displayName: item.creator.name ?? undefined,
-            } : undefined}
-            href={buildContentUrl(page.url, item)}
-            price={item.priceCents != null ? {
-              amount: item.priceCents,
-              currency: 'GBP',
-            } : null}
-            contentAccessType={item.accessType}
-            included={access.isIncluded(item)}
-            isFollower={access.isFollowing}
-            tierName={access.getTierName(item)}
-            category={item.category ?? null}
-          />
-        {/each}
-      </div>
-    {:else}
-      <div class="empty-state">
-        <p>{m.org_no_content_yet()}</p>
-      </div>
-    {/if}
   </section>
 
   </div>
@@ -775,6 +799,135 @@
     gap: var(--space-8);
   }
 
+  /* ══════════════════════════════════════════
+     FEED — single edge-to-edge grid
+     Cards touch; inner thumbnail padding provides
+     the visual rhythm. Full-width tiles (featured
+     content, section ledes) span all columns via
+     grid-column: 1 / -1. Tinted background strips
+     visually group consecutive tiles that share a
+     data-section-tint attribute.
+     ══════════════════════════════════════════ */
+  .feed-wrap {
+    width: 100%;
+    max-width: var(--container-xl);
+    margin: 0 auto;
+    padding: var(--space-8) 0;
+  }
+
+  .content-grid {
+    display: grid;
+    grid-template-columns: repeat(
+      auto-fill,
+      minmax(min(100%, 16rem), 1fr)
+    );
+    gap: 0;
+    align-items: stretch;
+  }
+
+  .tile {
+    min-width: 0;
+    /* Tile padding is intentionally small — the ContentCard itself carries
+       inner padding (var(--space-2)), which already creates the illusion
+       of a gap between thumbnails when cards touch. */
+    padding: var(--space-1);
+    transition: background var(--duration-normal) var(--ease-out);
+  }
+
+  /* Flatten the inner ContentCard when it lives in the feed grid — the
+     tile is already doing the visual containment via background tint and
+     the inner thumbnail border-radius, so a per-card border and shadow
+     would double up along touching edges. Hover still raises the card
+     for interactivity feedback. */
+  .tile :global(.cc) {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .tile :global(.cc:hover),
+  .tile :global(.cc:focus-within:has(:focus-visible)) {
+    border-color: color-mix(in srgb, var(--color-border) 50%, transparent);
+    background: color-mix(in srgb, var(--color-surface-card) 70%, transparent);
+  }
+
+  .tile--full {
+    grid-column: 1 / -1;
+  }
+
+  /* When a featured ContentCard lives in a full-width tile, the body
+     overlay would otherwise stretch across the whole width and look like
+     a banner strip. Cap it to an editorial measure anchored to the
+     bottom-left so the image stays dominant and the text stays readable. */
+  .tile--full :global(.cc[data-variant='featured']) {
+    min-height: calc(var(--space-24) * 4);
+  }
+
+  .tile--full :global(.cc[data-variant='featured']) :global(.cc__body) {
+    max-width: min(40rem, 60%);
+    justify-self: start;
+  }
+
+  /* ── Lede tile — section header rendered as a full-width grid cell ── */
+  .tile--lede {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-12) var(--space-6) var(--space-6);
+  }
+
+  .tile--lede:first-child {
+    /* First lede in the feed doesn't need top padding — the content-area
+       gradient already provides vertical air above it. */
+    padding-top: var(--space-8);
+  }
+
+  /* ── Background tint zones ──
+     color-mix uses the current brand primary so tints inherit per-org
+     branding automatically. The wash lives on individual tiles rather
+     than a wrapper so it flows naturally with auto-fill grid tracks. */
+  .content-grid > [data-section-tint='1'] {
+    background: color-mix(
+      in oklch,
+      var(--color-brand-primary, var(--color-primary-500)) 12%,
+      transparent
+    );
+  }
+
+  .content-grid > [data-section-tint='2'] {
+    /* Tint 2 is the default "content band" — a soft neutral wash that
+       distinguishes the feed from the page background without fighting
+       tint 1 or the cards themselves. */
+    background: var(--color-surface-secondary);
+  }
+
+  /* Tablet — give cards a bit more room before they become too narrow */
+  @media (--below-lg) {
+    .content-grid {
+      grid-template-columns: repeat(
+        auto-fill,
+        minmax(min(100%, 14rem), 1fr)
+      );
+    }
+  }
+
+  /* Mobile — 2-column grid. Full-width tiles still span both. */
+  @media (--below-md) {
+    .content-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+
+    .tile--lede {
+      padding: var(--space-8) var(--space-4) var(--space-4);
+    }
+  }
+
+  @media (--below-sm) {
+    .content-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+
   /*
     .lede — shared editorial section-header used by every content block on
     the landing page. Structure (top to bottom):
@@ -1094,16 +1247,19 @@
   }
 
   /* ── Asymmetric ── title top-right, content bottom-left.
-     space-between on the hero flex-column handles the vertical split;
-     text-align right on the title pushes its text to the right within
-     its centred container block. */
-  :global([data-hero-layout="asymmetric"]) .hero {
-    justify-content: space-between;
-  }
 
+     Title is absolutely positioned at the top so toggling it off never
+     affects content's flex-end position. A previous version used
+     `justify-content: space-between` on `.hero`, which reflowed the
+     sole remaining flex item (content) to the top when the title was
+     hidden — the exact "things jump to the top" bug. */
   :global([data-hero-layout="asymmetric"]) .hero__title {
+    position: absolute;
+    top: var(--space-10);
+    left: 0;
+    right: 0;
     text-align: right;
-    margin-top: var(--space-10);
+    margin-top: 0;
   }
 
   /* ── Portrait ── everything right-aligned in a narrow right column.
@@ -1130,15 +1286,18 @@
   }
 
   /* ── Gallery ── museum/cinema: huge title centred at top, content
-     flows horizontally as a single strip at the bottom (row-wrap). */
-  :global([data-hero-layout="gallery"]) .hero {
-    justify-content: space-between;
-  }
+     flows horizontally as a single strip at the bottom (row-wrap).
 
+     Same fix as asymmetric — title absolutely positioned at the top
+     so hiding it never shifts the content strip upward. */
   :global([data-hero-layout="gallery"]) .hero__title {
+    position: absolute;
+    top: var(--space-12);
+    left: 0;
+    right: 0;
     text-align: center;
     font-size: clamp(4rem, 10vw, 9rem);
-    margin-top: var(--space-12);
+    margin-top: 0;
   }
 
   :global([data-hero-layout="gallery"]) .hero__content {
@@ -1172,6 +1331,66 @@
     word-spacing: 100vw;
     line-height: 0.9;
     font-size: clamp(3rem, 7vw, 6.5rem);
+  }
+
+  /* ══════════════════════════════════════════
+     HERO ENTRANCE ANIMATIONS
+     Staggered choreography on initial mount.
+
+     Title uses `clip-path` (not opacity/transform) so it never creates
+     a stacking context — preserving `mix-blend-mode: difference`
+     against the shader canvas throughout the reveal.
+
+     Content children use opacity + translateY (they have no blend-mode
+     dependency). Reduced-motion is handled globally by motion.css — it
+     collapses every duration to 0.01ms, so these animations vanish
+     automatically for users who have the preference set.
+     ══════════════════════════════════════════ */
+  @keyframes hero-title-reveal {
+    from { clip-path: inset(0 0 100% 0); }
+    to { clip-path: inset(0 0 0 0); }
+  }
+
+  @keyframes hero-rise {
+    from {
+      opacity: 0;
+      transform: translateY(var(--space-4));
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .hero__title {
+    animation: hero-title-reveal var(--duration-slower) var(--ease-smooth) backwards;
+  }
+
+  .hero__logo-wrap,
+  .hero__description,
+  .hero__pills,
+  .hero__actions,
+  .hero__stats {
+    animation: hero-rise var(--duration-slower) var(--ease-smooth) backwards;
+  }
+
+  .hero__logo-wrap { animation-delay: 150ms; }
+  .hero__description { animation-delay: 250ms; }
+  .hero__pills { animation-delay: 350ms; }
+  .hero__actions { animation-delay: 450ms; }
+  .hero__stats { animation-delay: 550ms; }
+
+  /* When the hero switches to video-playing mode we want the existing
+     fade-out transition to own the animation — not the entrance keyframes.
+     Setting `animation: none` on the playing state cedes control to the
+     transition property already defined on .hero__title / .hero__content. */
+  .hero--video-playing .hero__title,
+  .hero--video-playing .hero__logo-wrap,
+  .hero--video-playing .hero__description,
+  .hero--video-playing .hero__pills,
+  .hero--video-playing .hero__actions,
+  .hero--video-playing .hero__stats {
+    animation: none;
   }
 
   /* ── Layout mobile overrides ── */

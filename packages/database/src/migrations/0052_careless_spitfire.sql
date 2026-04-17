@@ -1,0 +1,2 @@
+ALTER TABLE "content" ADD COLUMN "featured" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE INDEX "idx_content_org_featured" ON "content" USING btree ("organization_id","published_at") WHERE "content"."featured" = true AND "content"."status" = 'published' AND "content"."deleted_at" IS NULL;

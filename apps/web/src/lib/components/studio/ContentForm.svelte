@@ -110,6 +110,7 @@
           tags: JSON.stringify(content!.tags ?? []),
           thumbnailUrl: content!.thumbnailUrl ?? '',
           shaderPreset: content!.shaderPreset ?? '',
+          featured: content!.featured ? 'true' : '',
         });
       });
     } else if (!isEdit) {
@@ -128,6 +129,7 @@
         tags: '[]',
         thumbnailUrl: '',
         shaderPreset: '',
+        featured: '',
       });
     }
   });

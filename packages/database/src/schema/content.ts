@@ -1,6 +1,7 @@
 import { relations, sql } from 'drizzle-orm';
 import {
   bigint,
+  boolean,
   check,
   index,
   integer,
@@ -312,6 +313,11 @@ export const content = pgTable(
     // 'draft' | 'published' | 'archived'
     publishedAt: timestamp('published_at', { withTimezone: true }),
 
+    // Creator-flagged feature — promotes the item to a full-width editorial
+    // card on the org homepage feed. Orthogonal to status: only published
+    // items actually surface; the flag just marks intent.
+    featured: boolean('featured').default(false).notNull(),
+
     // Metadata
     viewCount: integer('view_count').default(0).notNull(),
     purchaseCount: integer('purchase_count').default(0).notNull(),
@@ -344,6 +350,13 @@ export const content = pgTable(
     index('idx_content_creator_org_published')
       .on(table.creatorId, table.organizationId, table.status)
       .where(sql`${table.deletedAt} IS NULL`),
+
+    // Partial index for org homepage "featured" lookup — tiny (1–3 rows/org)
+    index('idx_content_org_featured')
+      .on(table.organizationId, table.publishedAt)
+      .where(
+        sql`${table.featured} = true AND ${table.status} = 'published' AND ${table.deletedAt} IS NULL`
+      ),
 
     // Partial unique indexes for slug uniqueness (exclude soft-deleted rows)
     // Unique slug per organization (for organization content)

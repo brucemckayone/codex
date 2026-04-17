@@ -157,6 +157,7 @@ const publicContentQueryParamsSchema = z.object({
   search: z.string().max(255).optional(),
   sort: z.enum(['newest', 'oldest', 'title']).default('newest').optional(),
   creatorId: z.string().uuid().optional(),
+  featured: z.boolean().optional(),
 });
 
 /**
@@ -186,6 +187,8 @@ export const getPublicContent = query(
     if (params.search) searchParams.set('search', params.search);
     if (params.sort) searchParams.set('sort', params.sort);
     if (params.creatorId) searchParams.set('creatorId', params.creatorId);
+    if (params.featured !== undefined)
+      searchParams.set('featured', String(params.featured));
 
     return api.content.getPublicContent(searchParams);
   }
@@ -252,6 +255,7 @@ const createContentCommandSchema = z.object({
   tags: z.array(z.string()).optional(),
   thumbnailUrl: z.string().url().optional().nullable(),
   minimumTierId: z.string().uuid().optional().nullable(),
+  featured: z.boolean().optional(),
 });
 
 /**
@@ -295,6 +299,7 @@ const updateContentCommandSchema = z.object({
     category: z.string().optional().nullable(),
     tags: z.array(z.string()).optional(),
     thumbnailUrl: z.string().url().optional().nullable(),
+    featured: z.boolean().optional(),
   }),
 });
 
@@ -378,6 +383,16 @@ const optionalUuid = z
   .transform((v) => (v === '' ? null : v))
   .pipe(z.string().uuid().nullable());
 
+/**
+ * Helper: form checkbox/switch → boolean. HTML checkboxes only submit a value
+ * when checked, so "on"/"true" → true; missing/empty → false.
+ */
+const formBoolean = z
+  .string()
+  .optional()
+  .default('')
+  .transform((v) => v === 'true' || v === 'on');
+
 const createContentFormSchema = z.object({
   organizationId: optionalUuid,
   title: z.string().min(1, 'Title is required'),
@@ -409,6 +424,7 @@ const createContentFormSchema = z.object({
   thumbnailUrl: optionalString,
   minimumTierId: optionalUuid,
   shaderPreset: optionalString,
+  featured: formBoolean,
 });
 
 /**
@@ -434,6 +450,7 @@ export const createContentForm = form(
     thumbnailUrl,
     minimumTierId,
     shaderPreset,
+    featured,
   }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
@@ -454,6 +471,7 @@ export const createContentForm = form(
         thumbnailUrl,
         minimumTierId,
         shaderPreset,
+        featured,
       });
 
       return { success: true as const, contentId: result.id };
@@ -570,6 +588,7 @@ const updateContentFormSchema = z.object({
   thumbnailUrl: optionalString,
   minimumTierId: optionalUuid,
   shaderPreset: optionalString,
+  featured: formBoolean,
 });
 
 /**
@@ -595,6 +614,7 @@ export const updateContentForm = form(
     thumbnailUrl,
     minimumTierId,
     shaderPreset,
+    featured,
   }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
@@ -615,6 +635,7 @@ export const updateContentForm = form(
         thumbnailUrl,
         minimumTierId,
         shaderPreset,
+        featured,
       });
 
       return { success: true as const, data: result };
