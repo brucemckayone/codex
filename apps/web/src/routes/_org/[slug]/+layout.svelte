@@ -14,32 +14,15 @@
   import type { Snippet } from 'svelte';
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
-  import { beforeNavigate, goto, invalidate } from '$app/navigation';
+  import { beforeNavigate, invalidate } from '$app/navigation';
   import { page } from '$app/state';
   import type { LayoutData } from './$types';
   import { SidebarRail } from '$lib/components/layout/SidebarRail';
   import { MobileBottomNav, MobileBottomSheet } from '$lib/components/layout/MobileNav';
   import CommandPaletteSearch from '$lib/components/search/CommandPaletteSearch.svelte';
-  import BrandEditorPanel from '$lib/components/brand-editor/BrandEditorPanel.svelte';
-  import BrandEditorHeader from '$lib/components/brand-editor/BrandEditorHeader.svelte';
-  import BrandEditorFooter from '$lib/components/brand-editor/BrandEditorFooter.svelte';
-  import BrandEditorHome from '$lib/components/brand-editor/levels/BrandEditorHome.svelte';
-  import BrandEditorColors from '$lib/components/brand-editor/levels/BrandEditorColors.svelte';
-  import BrandEditorTypography from '$lib/components/brand-editor/levels/BrandEditorTypography.svelte';
-  import BrandEditorShape from '$lib/components/brand-editor/levels/BrandEditorShape.svelte';
-  import BrandEditorShadows from '$lib/components/brand-editor/levels/BrandEditorShadows.svelte';
-  import BrandEditorLogo from '$lib/components/brand-editor/levels/BrandEditorLogo.svelte';
-  import BrandEditorFineTuneColors from '$lib/components/brand-editor/levels/BrandEditorFineTuneColors.svelte';
-  import BrandEditorFineTuneTypography from '$lib/components/brand-editor/levels/BrandEditorFineTuneTypography.svelte';
-  import BrandEditorPresets from '$lib/components/brand-editor/levels/BrandEditorPresets.svelte';
-  import BrandEditorHeroEffects from '$lib/components/brand-editor/levels/BrandEditorHeroEffects.svelte';
-  import BrandEditorIntroVideo from '$lib/components/brand-editor/levels/BrandEditorIntroVideo.svelte';
-  import BrandEditorHeaderLayout from '$lib/components/brand-editor/levels/BrandEditorHeaderLayout.svelte';
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
   import { brandEditor, injectTokenOverrides, clearTokenOverrides } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
-  import { updateBrandingCommand } from '$lib/remote/branding.remote';
-  import { toast } from '$lib/components/ui/Toast/toast-store';
   import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection, loadSubscriptionFromServer } from '$lib/collections';
   import { initProgressSync, cleanupProgressSync, forceSync } from '$lib/collections/progress-sync';
@@ -311,18 +294,6 @@
     }
   });
 
-  // Strip URL param when editor closes
-  function handleEditorClose() {
-    if (brandEditor.isDirty) {
-      if (!confirm('You have unsaved brand changes. Discard?')) return;
-      brandEditor.discard();
-    }
-    brandEditor.close();
-    const url = new URL(page.url);
-    url.searchParams.delete('brandEditor');
-    goto(url.pathname + url.search, { replaceState: true });
-  }
-
   // beforeunload when dirty
   $effect(() => {
     if (!browser) return;
@@ -337,46 +308,23 @@
     }
   });
 
-  // Save handler
-  let saving = $state(false);
+  // Dynamically load the brand editor module only when the editor is
+  // activated (URL param or store state). Keeps ~23 components and the
+  // branding remote off the critical path for normal org visitors.
+  type BrandEditorMountComponent =
+    typeof import('$lib/components/brand-editor/BrandEditorMount.svelte').default;
+  let BrandEditorMount = $state<BrandEditorMountComponent | null>(null);
+  const shouldLoadBrandEditor = $derived(
+    browser && (showBrandEditor || !brandEditor.isClosed)
+  );
 
-  async function handleSave() {
-    const payload = brandEditor.getSavePayload();
-    if (!payload || !brandEditor.orgId) return;
-
-    saving = true;
-    try {
-      const overrides = payload.tokenOverrides ?? {};
-      const hasOverrides = Object.keys(overrides).length > 0;
-
-      await updateBrandingCommand({
-        orgId: brandEditor.orgId,
-        primaryColorHex: payload.primaryColor,
-        secondaryColorHex: payload.secondaryColor ?? '',
-        accentColorHex: payload.accentColor ?? '',
-        backgroundColorHex: payload.backgroundColor ?? '',
-        fontBody: payload.fontBody ?? '',
-        fontHeading: payload.fontHeading ?? '',
-        radiusValue: payload.radius,
-        densityValue: payload.density,
-        tokenOverrides: hasOverrides ? JSON.stringify(overrides) : '',
-        textColorHex: overrides['text'] ?? '',
-        shadowScale: overrides['shadow-scale'] ?? '',
-        shadowColor: overrides['shadow-color'] ?? '',
-        textScale: overrides['text-scale'] ?? '',
-        headingWeight: overrides['heading-weight'] ?? '',
-        bodyWeight: overrides['body-weight'] ?? '',
-        darkModeOverrides: payload.darkOverrides ? JSON.stringify(payload.darkOverrides) : '',
-        heroLayout: payload.heroLayout,
-      });
-      brandEditor.markSaved();
-      toast.success('Brand settings saved');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save brand settings');
-    } finally {
-      saving = false;
+  $effect(() => {
+    if (shouldLoadBrandEditor && !BrandEditorMount) {
+      void import('$lib/components/brand-editor/BrandEditorMount.svelte').then(
+        (mod) => { BrandEditorMount = mod.default; }
+      );
     }
-  }
+  });
 
   // SvelteKit navigation guard — flush progress + brand editor dirty check
   beforeNavigate(({ cancel }) => {
@@ -467,42 +415,10 @@
   {/if}
 </div>
 
-<!-- Brand Editor Panel — rendered OUTSIDE .org-layout so it uses system tokens -->
-<BrandEditorPanel onsave={handleSave} {saving}>
-  {#snippet header()}
-    <BrandEditorHeader onclose={handleEditorClose} />
-  {/snippet}
-
-  {#if brandEditor.level === 'home'}
-    <BrandEditorHome />
-  {:else if brandEditor.level === 'colors'}
-    <BrandEditorColors />
-  {:else if brandEditor.level === 'typography'}
-    <BrandEditorTypography />
-  {:else if brandEditor.level === 'shape'}
-    <BrandEditorShape />
-  {:else if brandEditor.level === 'shadows'}
-    <BrandEditorShadows />
-  {:else if brandEditor.level === 'logo'}
-    <BrandEditorLogo />
-  {:else if brandEditor.level === 'presets'}
-    <BrandEditorPresets />
-  {:else if brandEditor.level === 'hero-effects'}
-    <BrandEditorHeroEffects />
-  {:else if brandEditor.level === 'intro-video'}
-    <BrandEditorIntroVideo />
-  {:else if brandEditor.level === 'header-layout'}
-    <BrandEditorHeaderLayout />
-  {:else if brandEditor.level === 'fine-tune-colors'}
-    <BrandEditorFineTuneColors />
-  {:else if brandEditor.level === 'fine-tune-typography'}
-    <BrandEditorFineTuneTypography />
-  {/if}
-
-  {#snippet footer()}
-    <BrandEditorFooter onsave={handleSave} {saving} />
-  {/snippet}
-</BrandEditorPanel>
+<!-- Brand Editor — dynamically imported, rendered OUTSIDE .org-layout so it uses system tokens -->
+{#if BrandEditorMount}
+  <BrandEditorMount />
+{/if}
 
 <style>
   .org-layout {

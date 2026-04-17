@@ -333,7 +333,6 @@
       }
 
       const elapsed = (performance.now() - startTime) / 1000;
-      resize();
       renderer.render(gl!, elapsed, mouse, config, canvasEl!.width, canvasEl!.height);
     }
 
@@ -384,7 +383,12 @@
     document.addEventListener('visibilitychange', onVisibilityChange);
 
     // ── Resize listener ────────────────────────────────────────
-    window.addEventListener('resize', resize);
+    // ResizeObserver on the container catches CSS size changes
+    // (window resize, sidebar collapse, view-transition size changes,
+    // rotation) without the 60/sec getBoundingClientRect cost of
+    // per-frame polling. Fires once on observe() for initial sizing.
+    const resizeObserver = new ResizeObserver(() => resize());
+    if (containerEl) resizeObserver.observe(containerEl);
 
     // ── Start ──────────────────────────────────────────────────
     const initialConfig = getShaderConfig();
@@ -398,7 +402,7 @@
       if (renderer) renderer.destroy(gl!);
       document.removeEventListener('visibilitychange', onVisibilityChange);
       motionQuery.removeEventListener('change', onMotionChange);
-      window.removeEventListener('resize', resize);
+      resizeObserver.disconnect();
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('click', onClick);
       window.removeEventListener('touchstart', onTouchStart);

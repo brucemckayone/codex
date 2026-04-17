@@ -24,12 +24,32 @@
   import { followingStore } from '$lib/client/following.svelte';
   import { followOrganization, unfollowOrganization } from '$lib/remote/org.remote';
   import { useAccessContext } from '$lib/utils/access-context.svelte';
+  import { StructuredData } from '$lib/components/seo';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
 
   let videoActive = $state(false);
   let isDesktop = $state(false);
+
+  // Category-bar sticky detection — IntersectionObserver watches a
+  // 1px sentinel placed above the bar. When the sentinel scrolls out
+  // of the viewport the bar has reached top: 0 and we toggle the
+  // stuck class so the frosted backdrop fades in.
+  let categoryBarStuck = $state(false);
+  let categorySentinelEl: HTMLDivElement | undefined = $state();
+
+  $effect(() => {
+    if (!categorySentinelEl) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        categoryBarStuck = !entry.isIntersecting;
+      },
+      { threshold: 0 }
+    );
+    observer.observe(categorySentinelEl);
+    return () => observer.disconnect();
+  });
 
   onMount(() => {
     // Hydrate TanStack DB cache with whatever content we already rendered
@@ -56,6 +76,22 @@
   const stats = $derived(data.stats);
   const user = $derived(data.user);
   const introVideoUrl = $derived(data.org?.introVideoUrl ?? null);
+
+  // Canonical URL is the org's own subdomain origin. Prevents SEO
+  // duplicate-content issues if the platform ever links to the same org
+  // via a different path shape.
+  const canonicalUrl = $derived(`${page.url.origin}${page.url.pathname}`);
+
+  // Organization schema for rich search results — helps Google show the
+  // org name, logo, and description in SERP knowledge panels.
+  const orgSchema = $derived<Record<string, unknown>>({
+    '@context': 'https://schema.org',
+    '@type': 'Organization',
+    name: orgName,
+    url: page.url.origin,
+    ...(orgDescription && { description: orgDescription }),
+    ...(logoUrl && { logo: logoUrl, image: logoUrl }),
+  });
 
   // Continue watching — live query over localStorage-backed libraryCollection.
   // On return visits: instant from localStorage. On first visit: empty until staleness detection loads data.
@@ -134,14 +170,20 @@
 
 <svelte:head>
   <title>{orgName} | Revelations</title>
+  <link rel="canonical" href={canonicalUrl} />
   <meta property="og:title" content={orgName} />
   {#if orgDescription}
     <meta property="og:description" content={orgDescription} />
     <meta name="description" content={orgDescription} />
   {/if}
   <meta property="og:type" content="website" />
+  <meta property="og:url" content={canonicalUrl} />
   {#if logoUrl}
     <meta property="og:image" content={logoUrl} />
+    <!-- LCP: the hero logo is the above-the-fold image. Preload signals
+         to the browser to fetch it alongside the critical chain, not
+         after the main stylesheet resolves. fetchpriority reinforces. -->
+    <link rel="preload" as="image" href={logoUrl} fetchpriority="high" />
   {/if}
   <meta name="twitter:card" content={logoUrl ? 'summary_large_image' : 'summary'} />
   <meta name="twitter:title" content={orgName} />
@@ -149,6 +191,8 @@
     <meta name="twitter:description" content={orgDescription} />
   {/if}
 </svelte:head>
+
+<StructuredData data={orgSchema} />
 
 <div class="org-landing">
   <!-- Hero: full viewport, content anchored bottom-left, editorial -->
@@ -185,7 +229,14 @@
       <!-- Logo badge -->
       {#if logoUrl}
         <div class="hero__logo-wrap">
-          <img src={logoUrl} alt="{orgName} logo" class="hero__logo" loading="eager" />
+          <img
+            src={logoUrl}
+            alt="{orgName} logo"
+            class="hero__logo"
+            loading="eager"
+            fetchpriority="high"
+            decoding="async"
+          />
         </div>
       {/if}
 
@@ -311,10 +362,44 @@
   {/if}
 
   <!--
-    Per-domain feed — a stack of sections (Featured, Videos, Audio, …) each
-    composed server-side in feed-types.ts. The renderer dispatches on item
-    count: 1–2 items → stacked feature spreads; 3+ items → horizontal
-    carousel with a ~2×-wide hero first tile.
+    Category pills — a sticky quick-nav bar at the top of the feed.
+    Sticks to viewport top when scrolled past, so category navigation
+    is always reachable. Full-bleed bar with a frosted backdrop so
+    feed content reads cleanly underneath while it's stuck. Uses the
+    `stats.categories` list already fetched for the hero pills.
+  -->
+  {#if (stats?.categories?.length ?? 0) > 0}
+    <!-- 1px sentinel sits above the sticky bar; when it scrolls out of
+         the viewport we know the bar has reached top: 0. -->
+    <div class="category-bar__sentinel" bind:this={categorySentinelEl} aria-hidden="true"></div>
+    <nav
+      class="category-bar"
+      class:category-bar--stuck={categoryBarStuck}
+      aria-label="Browse by category"
+    >
+      <div class="category-bar__inner">
+        <div class="category-pills__row" role="list">
+          <a href="/explore" class="category-pills__pill category-pills__pill--all">All</a>
+          {#each stats?.categories ?? [] as category}
+            <a
+              role="listitem"
+              href="/explore?category={encodeURIComponent(category)}"
+              class="category-pills__pill"
+            >
+              {category.charAt(0).toUpperCase() + category.slice(1)}
+            </a>
+          {/each}
+        </div>
+      </div>
+    </nav>
+  {/if}
+
+  <!--
+    Per-domain feed — a stack of sections (Featured → category rows →
+    Videos → Audio → Articles → Free samples) composed server-side in
+    feed-types.ts. Renderer dispatches by count: Featured-1 → magazine
+    spread anchor; exactly 2 items → fill-row grid (no wasted space);
+    1 or 3+ items → horizontal carousel.
   -->
 
   <!-- Snippet: full-width feature spread (1–2-item sections + carousel hero) -->
@@ -410,7 +495,6 @@
   {#each data.sections as section (section.id)}
     <section class="feed-section">
       <header class="lede">
-        <p class="lede__eyebrow">{section.eyebrow}</p>
         <hr class="lede__rule" aria-hidden="true" />
         <div class="lede__title-row">
           <h2 class="lede__title">{section.title}</h2>
@@ -423,22 +507,28 @@
         </div>
       </header>
 
-      {#if section.items.length <= 2}
-        <div class="feed-section__spreads">
+      {#if section.id === 'featured' && section.items.length === 1}
+        <!-- Editorial anchor — reserved for the single-item Featured
+             case, where the creator has flagged one piece as hero. -->
+        {@render spread(section.items[0])}
+      {:else if section.items.length === 2}
+        <!-- Exactly 2 items — use a fill-row grid so the tiles span
+             the available width at 50/50 instead of sitting in a
+             carousel's left corner with wasted space to the right. -->
+        <div class="feed-pair">
           {#each section.items as item (item.id)}
-            {@render spread(item)}
+            {@render gridCard(item, 'grid')}
           {/each}
         </div>
       {:else}
         <Carousel
           items={section.items}
-          firstItemHero
           itemMinWidth="16rem"
           gap="var(--space-4)"
           ariaLabel={section.title}
         >
-          {#snippet renderItem(c, i)}
-            {@render gridCard(c, i === 0 ? 'featured' : 'grid')}
+          {#snippet renderItem(c)}
+            {@render gridCard(c, 'grid')}
           {/snippet}
         </Carousel>
       {/if}
@@ -898,22 +988,20 @@
     width: 100%;
     max-width: var(--container-xl);
     margin: 0 auto;
-    padding: var(--space-10) var(--space-6);
+    /* Block padding drives the gap between adjacent sections — tight
+       enough that the page reads as one continuous feed, loose enough
+       that each lede has room to breathe. */
+    padding: var(--space-6) var(--space-6);
     display: flex;
     flex-direction: column;
-    gap: var(--space-6);
+    gap: var(--space-5);
   }
 
   .feed-section--catalogue {
-    /* The catalogue deserves more vertical air — it's the "continuing on"
-       exhaustive browse band at the bottom of the page. */
-    padding-block: var(--space-12);
-  }
-
-  .feed-section__spreads {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-8);
+    /* The catalogue earns a little more vertical air — it's the
+       "continuing on" exhaustive browse band at the bottom of the
+       page and benefits from separation from the carousel stack above. */
+    padding-block: var(--space-10);
   }
 
   /* Catalogue grid — flat tiled layout for the bottom "All content" band.
@@ -934,17 +1022,152 @@
      inner thumbnail padding rather than doubled borders. Hover still
      lifts the card for interactivity feedback. */
   .content-grid :global(.cc),
-  .feed-section :global(.carousel__item .cc) {
+  .feed-section :global(.carousel__item .cc),
+  .feed-pair :global(.cc) {
     border-color: transparent;
     background: transparent;
   }
 
+
   .content-grid :global(.cc:hover),
   .content-grid :global(.cc:focus-within:has(:focus-visible)),
   .feed-section :global(.carousel__item .cc:hover),
-  .feed-section :global(.carousel__item .cc:focus-within:has(:focus-visible)) {
+  .feed-section :global(.carousel__item .cc:focus-within:has(:focus-visible)),
+  .feed-pair :global(.cc:hover),
+  .feed-pair :global(.cc:focus-within:has(:focus-visible)) {
     border-color: color-mix(in srgb, var(--color-border) 50%, transparent);
     background: color-mix(in srgb, var(--color-surface-card) 70%, transparent);
+  }
+
+  /* ══════════════════════════════════════════
+     FEED PAIR — exactly-2-items section layout
+     Two tiles side-by-side filling the row at 50/50 on desktop so
+     the section doesn't leave a "carousel's worth" of empty space
+     to the right of a short item list.
+     ══════════════════════════════════════════ */
+  .feed-pair {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-4);
+    align-items: stretch;
+  }
+
+  @media (--below-sm) {
+    .feed-pair {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  /* ══════════════════════════════════════════
+     CATEGORY BAR — sticky quick-nav at top of feed
+     Full-bleed bar that sticks to viewport top when scrolled past.
+     Pills jump straight into /explore?category=X.
+
+     The frosted backdrop + bottom border only appear when the bar is
+     "stuck" (detected via IntersectionObserver on the sentinel above).
+     Before sticking, the bar has no chrome so it blends into the
+     hero/content-area gradient underneath.
+     ══════════════════════════════════════════ */
+  .category-bar__sentinel {
+    /* 1px tall marker that sits just above the sticky bar. When it
+       scrolls out of view, the observer flips categoryBarStuck. */
+    height: 1px;
+    width: 100%;
+    pointer-events: none;
+  }
+
+  .category-bar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+
+  /* Gradient overlay lives on a pseudo-element so it can fade in via
+     opacity when the bar sticks — transitioning from "no background"
+     to "linear-gradient" directly on the bar wouldn't animate (gradient
+     is background-image, not background-color). Pseudo sits behind the
+     pills in document order so no z-index wrangling needed. */
+  .category-bar::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--color-background) 92%, transparent) 0%,
+      color-mix(in srgb, var(--color-background) 55%, transparent) 55%,
+      transparent 100%
+    );
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-normal) var(--ease-default);
+  }
+
+  .category-bar--stuck::before {
+    opacity: 1;
+  }
+
+  .category-bar__inner {
+    position: relative;
+    z-index: 1;
+    max-width: var(--container-xl);
+    margin: 0 auto;
+    padding: var(--space-3) var(--space-6);
+  }
+
+  .category-pills__row {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: var(--space-2);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .category-pills__row::-webkit-scrollbar {
+    display: none;
+  }
+
+  .category-pills__pill {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-3);
+    border: var(--border-width) var(--border-style)
+      color-mix(in srgb, var(--color-border) 55%, transparent);
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--color-surface-card) 35%, transparent);
+    font-family: var(--font-body);
+    font-size: var(--text-base);
+    font-weight: var(--font-medium);
+    color: var(--color-text-primary);
+    text-decoration: none;
+    white-space: nowrap;
+    transition:
+      background-color var(--duration-fast) var(--ease-default),
+      border-color var(--duration-fast) var(--ease-default),
+      color var(--duration-fast) var(--ease-default);
+  }
+
+  .category-pills__pill:hover {
+    background: var(--color-surface-card);
+    border-color: var(--color-text-primary);
+  }
+
+  .category-pills__pill:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+  }
+
+  /* "All" pill sits first as the neutral/default state. Keeps the
+     same chrome as category pills — being first in the row is enough
+     visual prominence without a brand tint that could read as an
+     "active" state (which we don't track on the landing page). */
+
+  @media (--below-md) {
+    .category-bar__inner {
+      padding: var(--space-3) var(--space-4);
+    }
   }
 
   /* ══════════════════════════════════════════
@@ -1205,13 +1428,24 @@
     }
 
     .feed-section {
-      padding: var(--space-8) var(--space-4);
+      padding: var(--space-5) var(--space-4);
     }
   }
 
   @media (--below-sm) {
     .content-grid {
       grid-template-columns: 1fr;
+    }
+  }
+
+  /* Mobile: feed carousels use a deliberate 80/20 split so the next
+     tile is always peeking at the trailing edge — makes the row's
+     scrollability unmistakable on a phone viewport. Scoped to feed
+     sections so other carousels (Contributors) keep their sizing. */
+  @media (--below-md) {
+    .feed-section :global(.carousel__item) {
+      min-width: 80%;
+      max-width: 80%;
     }
   }
 
