@@ -603,6 +603,11 @@
             {formatPrice(tierPrice(recommendedTier))}<small>/{billingInterval === 'month' ? 'mo' : 'yr'}</small>
           </span>
         </span>
+        {#if billingInterval === 'year' && recommendedTier.priceAnnual > 0}
+          <span class="sticky-bar__helper">
+            £{(recommendedTier.priceAnnual / 1200).toFixed(2)}/mo · billed annually
+          </span>
+        {/if}
       </div>
       <Button onclick={() => handleSubscribe(recommendedTier)}>
         {m.pricing_subscribe()}
@@ -2016,6 +2021,15 @@
     font-weight: var(--font-medium);
     color: var(--color-text-muted);
     margin-left: var(--space-0-5);
+  }
+
+  .sticky-bar__helper {
+    margin-top: var(--space-0-5);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-text-muted);
+    letter-spacing: var(--tracking-tight);
+    line-height: var(--leading-tight);
   }
 
   .sticky-bar__dismiss {

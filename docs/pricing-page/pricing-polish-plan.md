@@ -60,7 +60,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 11 | **Preview fallback variants** — sparse-content orgs (0/1/2/3 thumbs) get dedicated spread layouts instead of section-disappearing hard gate | ✅ done | Commit on 2026-04-17 |
 | 12 | **Visual verification + bug fixes** — live screenshot session found `//mo` double-slash on tier cards + section rules too faint on dark mode; both fixed | ✅ done | Commit on 2026-04-17 |
 | 13 | **Mobile + light mode verify + tick() fix** — found preview reveal not firing post-stream; fixed with `tick()` before observer re-sweep | ✅ done | Commit on 2026-04-17 |
-| 14+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 14 | **Sticky CTA annual helper** — adds "£X.XX/mo · billed annually" helper line on the sticky when Annual is active, matching tier card pattern | ✅ done | Commit on 2026-04-17 |
+| 15+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -296,3 +297,12 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Screenshots**: `.claude/pricing-annual.png`, `.claude/pricing-mobile-fixed.png`, `.claude/pricing-studio-alpha.png`.
 
   - **Next pass prerequisite**: Test narrow viewport sticky CTA — on mobile, sticky is full-bleed always-visible; check that it doesn't cover tier card Subscribe buttons when cards are in view (might need bottom padding on `.pricing-page` that accounts for sticky height). Also test keyboard-only navigation across the whole page (tab through eyebrow → toggle → cards → accordion → trust → sticky dismiss → CTA). Consider: should the sticky price also show a monthly-equivalent helper line when Annual is active? Currently shows `£49.90/yr` only, which is less mentally-anchorable than the tier cards' full price + helper stack.
+
+- **2026-04-17 Pass 14 (Sticky CTA annual helper)**: Added the monthly-equivalent helper line to the sticky CTA when Annual is active.
+  - **Problem**: on Annual, sticky showed just `£49.90/yr` — no mental anchor to the more familiar monthly unit. Tier cards show the full stack (yearly price + monthly-equivalent helper + "billed annually"). Sticky should match for consistency.
+  - **Template**: added conditional `<span class="sticky-bar__helper">` after `.sticky-bar__headline` — renders when `billingInterval === 'year' && recommendedTier.priceAnnual > 0`. Content: `£{(priceAnnual / 1200).toFixed(2)}/mo · billed annually`.
+  - **Style**: `--text-xs`, `--font-medium`, `--color-text-muted`, `--tracking-tight`, `--leading-tight`, `margin-top: --space-0-5`. Same visual weight as the tier card helper; sits right below the `name · price` headline row.
+  - **Verified**: toggled between Monthly and Annual in-browser. Monthly shows the standard `name · £X/mo` headline, no helper. Annual shows `name · £X/yr` headline + helper line underneath.
+  - **Conversion logic**: now when a user is deep in Annual, the sticky gives them the full context — yearly commitment, monthly-equivalent, billing cadence — without them having to scroll back to the cards. The decision moment stays anchored.
+
+  - **Next pass prerequisite**: Keyboard-only navigation audit. Tab through the page and verify focus rings render at every stop: toggle buttons → tier card CTAs → preview "Browse the catalogue" link → accordion triggers → sticky Subscribe → sticky dismiss → trust icons (no focus needed, non-interactive). Also: check that Escape key doesn't break anything unexpectedly (the accordion uses Melt UI which should handle Escape natively). Consider: should the savings pill "Save 20%" be a focusable button that clicks Annual? Currently it's decorative text inside the Annual toggle button.
