@@ -52,7 +52,7 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 3 | **Content Preview** — move from "blur wall" to "editorial magazine spread" with mixed thumbnail tiles, real creator glimpses, branded stat | ✅ done | Commit on 2026-04-17 |
 | 4 | **FAQ** — lede-style masthead, column-balanced two-up layout on wide screens, refined accordion chrome | ✅ done | Commit on 2026-04-17. Stayed single-column (editorial > two-up) |
 | 5 | **Trust Strip** — editorial hairline above, brand microaccent, better iconography, refined hierarchy | ✅ done | Commit on 2026-04-17 |
-| 6 | **Sticky CTA** — premium chip, tier-color glow, polished transitions, mobile-edge safe | ⬜ pending | |
+| 6 | **Sticky CTA** — premium chip, tier-color glow, polished transitions, mobile-edge safe | ✅ done | Commit on 2026-04-17 |
 | 7 | **Between-section rhythm** — breath, scroll reveals for each section, tighter vertical cadence | ⬜ pending | |
 | 8 | **Full micro-polish review** — focus rings, motion reduce paths, dark mode, backdrop-filter fallback, skeleton match | ⬜ pending | |
 | 9+ | **Continuous refinement** — each re-fire picks the weakest remaining section | ⬜ pending | |
@@ -195,3 +195,16 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Removed**: the faint 60% opacity on plain icons (no longer needed — icon is a proper tinted shape now).
 
   - **Next pass prerequisite**: Check that at tight viewport widths (600-768px), the dots don't get crowded; confirm the rule doesn't feel redundant next to the FAQ list's bottom border (there's no bottom border on FAQ list — each accordion item has its own). Also sanity-check that the `--space-5` icon circle + `--text-sm` label combo maintains vertical rhythm across brand density scales (0.8x / 1.0x / 1.2x).
+
+- **2026-04-17 Pass 6 (Sticky CTA)**: Full-bleed bar → floating premium pill (desktop) + full-bleed (mobile).
+  - **Responsive split**: outer `.sticky-bar` is a `pointer-events: none` wrapper; `.sticky-bar__inner` is the actual pill. Desktop inner has `max-width: 44rem`, `border-radius: full`, `pointer-events: auto`. Mobile gets `.sticky-bar--mobile` class → inner resets to full-bleed, radius 0, no side/bottom borders — same chip chrome but edge-to-edge for thumb reach.
+  - **Brand glow shadow**: inner now has a 3-layer shadow — `--shadow-xl` base + brand-colored bloom (`0 space-4 space-12 color-mix(brand, 18%, transparent)`) + inner glass highlight. The bloom ties the sticky visually to the recommended tier card's bloom (same token values).
+  - **Editorial headline**: added `.sticky-bar__eyebrow` "Most Popular" in small-caps brand-primary above a `.sticky-bar__headline` row of `tier name · price`. Two-line info left, CTA + dismiss right. Echoes the ribbon on the recommended card — same "Most Popular" label, same brand voice.
+  - **Typography**: tier name now uses `--font-heading` + `--text-base` semibold (was `--text-sm` medium sans). Price matches — heading font, bold, `tracking-tight`. Small interval (`/mo` `/yr`) stays sans + muted for scale contrast.
+  - **Text truncation**: long tier names get ellipsis with `max-width: 16ch`, preventing layout explosion.
+  - **Dismiss polish**: transition includes `transform rotate(90deg)` on hover for a playful reveal cue (disabled under `prefers-reduced-motion: reduce`). Hover background now a neutral-on-text mix instead of raw surface-secondary. Focus-visible ring via `--shadow-focus-ring`.
+  - **Entrance**: `fly { y: 80, duration: 350 }` up from `y: 60, duration: 300` — slightly more dramatic lift, same cubicOut easing.
+  - **Separator glyph**: `·` between name and price (not a layout gap) — reads as a single phrase rather than disjoint cells.
+  - **Inner padding asymmetry**: `space-2 space-2 space-2 space-5` — left breathing room for the eyebrow-stacked info, tighter right padding so the Button sits nicely toward the edge.
+
+  - **Next pass prerequisite**: Visual check on desktop scroll-trigger — bar should appear centered, not hug left edge. Confirm the brand glow isn't overpowering on high-saturation brands (terracotta at #C24129 can look intense; if so, dial back the 18% mix). Mobile: verify full-bleed works on iOS notch devices (safe-area-inset-bottom kicks in).

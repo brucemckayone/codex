@@ -540,12 +540,19 @@
 {#if stickyVisible && recommendedTier}
   <div
     class="sticky-bar"
-    transition:fly={{ y: 60, duration: 300, easing: cubicOut }}
+    class:sticky-bar--mobile={isMobile}
+    transition:fly={{ y: 80, duration: 350, easing: cubicOut }}
   >
     <div class="sticky-bar__inner">
       <div class="sticky-bar__info">
-        <span class="sticky-bar__name">{recommendedTier.name}</span>
-        <span class="sticky-bar__price">{formatPrice(tierPrice(recommendedTier))}<small>/{billingInterval === 'month' ? 'mo' : 'yr'}</small></span>
+        <span class="sticky-bar__eyebrow">Most Popular</span>
+        <span class="sticky-bar__headline">
+          <span class="sticky-bar__name">{recommendedTier.name}</span>
+          <span class="sticky-bar__sep" aria-hidden="true">·</span>
+          <span class="sticky-bar__price">
+            {formatPrice(tierPrice(recommendedTier))}<small>/{billingInterval === 'month' ? 'mo' : 'yr'}</small>
+          </span>
+        </span>
       </div>
       <Button onclick={() => handleSubscribe(recommendedTier)}>
         {m.pricing_subscribe()}
@@ -1768,7 +1775,9 @@
     }
   }
 
-  /* ── STICKY BAR ──────────────────────────────────────────────────── */
+  /* ══════════════════════════════════════════════════════════════════
+     STICKY BAR — floating pill (desktop) / full-bleed bar (mobile)
+     ══════════════════════════════════════════════════════════════════ */
 
   .sticky-bar {
     position: fixed;
@@ -1776,47 +1785,112 @@
     left: 0;
     right: 0;
     z-index: var(--z-sticky, 40);
-    background: color-mix(in srgb, var(--color-surface) 92%, transparent);
-    backdrop-filter: blur(var(--blur-xl));
-    -webkit-backdrop-filter: blur(var(--blur-xl));
-    border-top: 1px solid color-mix(in srgb, var(--color-border) 40%, transparent);
-    box-shadow: 0 calc(-1 * var(--space-2)) var(--space-6) color-mix(in srgb, var(--color-glass-tint-dark, black) 6%, transparent);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    pointer-events: none;
+    display: flex;
+    justify-content: center;
+    padding: var(--space-3) var(--space-4);
+    padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
   }
 
   .sticky-bar__inner {
+    pointer-events: auto;
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: var(--space-4);
+    gap: var(--space-3);
+    width: 100%;
+    max-width: 44rem;
+    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-5);
+    background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+    backdrop-filter: blur(var(--blur-xl));
+    -webkit-backdrop-filter: blur(var(--blur-xl));
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 60%, transparent);
+    border-radius: var(--radius-full);
+    box-shadow:
+      var(--shadow-xl),
+      0 var(--space-4) var(--space-12) calc(-1 * var(--space-2)) color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 18%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 16%, transparent),
+      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark, black) 2%, transparent);
+  }
+
+  /* Mobile: full-bleed bar, not floating pill (maximize thumb reach) */
+  .sticky-bar--mobile {
+    padding: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .sticky-bar--mobile .sticky-bar__inner {
+    max-width: 100%;
     padding: var(--space-3) var(--space-4);
-    max-width: 960px;
-    margin: 0 auto;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    box-shadow:
+      0 calc(-1 * var(--space-2)) var(--space-6) color-mix(in srgb, var(--color-glass-tint-dark, black) 6%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 12%, transparent);
   }
 
   .sticky-bar__info {
     display: flex;
+    flex-direction: column;
+    gap: 0;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .sticky-bar__eyebrow {
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    letter-spacing: var(--tracking-wider);
+    text-transform: var(--text-transform-label, uppercase);
+    color: var(--color-brand-primary, var(--color-interactive));
+    line-height: var(--leading-tight);
+  }
+
+  .sticky-bar__headline {
+    display: inline-flex;
     align-items: baseline;
     gap: var(--space-2);
+    margin-top: var(--space-0-5);
+    flex-wrap: wrap;
+    min-width: 0;
   }
 
   .sticky-bar__name {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
+    font-family: var(--font-heading);
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
     color: var(--color-text);
+    letter-spacing: var(--tracking-tight);
+    line-height: var(--leading-none);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 16ch;
+  }
+
+  .sticky-bar__sep {
+    color: var(--color-text-muted);
+    opacity: 0.5;
+    line-height: var(--leading-none);
   }
 
   .sticky-bar__price {
-    font-size: var(--text-lg);
+    font-family: var(--font-heading);
+    font-size: var(--text-base);
     font-weight: var(--font-bold);
     color: var(--color-text);
     font-variant-numeric: tabular-nums;
+    letter-spacing: var(--tracking-tight);
+    line-height: var(--leading-none);
   }
 
   .sticky-bar__price small {
+    font-family: var(--font-sans);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
     color: var(--color-text-muted);
+    margin-left: var(--space-0-5);
   }
 
   .sticky-bar__dismiss {
@@ -1830,12 +1904,28 @@
     color: var(--color-text-muted);
     cursor: pointer;
     border-radius: var(--radius-full);
-    transition: color var(--duration-fast), background-color var(--duration-fast);
+    flex-shrink: 0;
+    transition:
+      color var(--duration-normal) var(--ease-default),
+      background-color var(--duration-normal) var(--ease-default),
+      transform var(--duration-normal) var(--ease-default);
   }
 
   .sticky-bar__dismiss:hover {
     color: var(--color-text);
-    background-color: var(--color-surface-secondary);
+    background-color: color-mix(in srgb, var(--color-text) 6%, transparent);
+    transform: rotate(90deg);
+  }
+
+  .sticky-bar__dismiss:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus-ring);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sticky-bar__dismiss:hover {
+      transform: none;
+    }
   }
 
   /* ── ERROR ────────────────────────────────────────────────────────── */
