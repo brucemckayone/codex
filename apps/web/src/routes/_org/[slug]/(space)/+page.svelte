@@ -1044,16 +1044,15 @@
   .feature-spread__title {
     margin: 0;
     font-family: var(--font-heading);
-    /* Fluid display ramp — larger min/max so the title carries visual
-       weight even when the content happens to be short. An 80px max
-       anchors the spread as the page's dominant feature. */
-    font-size: clamp(var(--text-4xl), 5.5vw, 5rem);
+    /* Goldilocks ramp — 80px was shouting, 48px was timid. Landing at
+       ~64px max gives the title confident display presence without
+       turning single-word titles into wall art. */
+    font-size: clamp(var(--text-4xl), 4.5vw, 4rem);
     font-weight: var(--font-bold);
-    line-height: 1.05;
-    letter-spacing: -0.025em;
+    line-height: 1.1;
+    letter-spacing: var(--tracking-tighter);
     color: var(--color-text-primary);
-    /* Max-width gives good line breaks even on very long titles */
-    max-width: 20ch;
+    max-width: 22ch;
   }
 
   .feature-spread__description {
@@ -1181,29 +1180,11 @@
     padding-top: var(--space-8);
   }
 
-  /* ── Background tint zones ──
-     color-mix uses the current brand primary so tints inherit per-org
-     branding automatically. The wash lives on individual tiles rather
-     than a wrapper so it flows naturally with auto-fill grid tracks. */
-  .content-grid > [data-section-tint='1'] {
-    background: color-mix(
-      in oklch,
-      var(--color-brand-primary, var(--color-primary-500)) 12%,
-      transparent
-    );
-  }
-
-  .content-grid > [data-section-tint='2'] {
-    /* Tint 2 is the default "content band" — a soft neutral wash that
-       distinguishes the feed from the page background without fighting
-       tint 1 or the cards themselves. A hair of brand warmth is mixed
-       in so the band inherits per-org personality. */
-    background: color-mix(
-      in oklch,
-      var(--color-brand-primary, var(--color-primary-500)) 3%,
-      var(--color-surface-secondary)
-    );
-  }
+  /* Feed is fully transparent — section rhythm comes from the lede
+     headers (eyebrow + rule + title) and vertical spacing alone,
+     letting the page's ambient background carry through. The
+     data-section-tint attribute is kept in markup as a hook for
+     future per-section treatments, but doesn't paint anything now. */
 
   /* Tablet — drop to 2 chunky columns before mobile takes over */
   @media (--below-lg) {
