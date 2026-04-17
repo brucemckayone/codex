@@ -81,10 +81,7 @@
 
   <!-- Content column -->
   <div class="feature__content">
-    <p class="feature__eyebrow">
-      <span class="feature__eyebrow-mark" aria-hidden="true">N°</span>
-      Featured contributor
-    </p>
+    <p class="feature__eyebrow">Featured contributor</p>
 
     <h2 id="creator-feature-name" class="feature__name">{name}</h2>
 
@@ -232,19 +229,6 @@
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
     color: var(--color-text-tertiary);
-  }
-
-  .feature__eyebrow-mark {
-    font-family: var(--font-heading);
-    font-weight: var(--font-normal);
-    text-transform: none;
-    letter-spacing: var(--tracking-normal);
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    /* Subtle hairline box around the N° so it reads as a chapter mark */
-    padding: 0 var(--space-1);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-xs);
   }
 
   .feature__name {

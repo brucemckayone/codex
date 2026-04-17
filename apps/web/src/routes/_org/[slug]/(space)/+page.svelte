@@ -274,12 +274,16 @@
   <!-- Continue Watching — client-side from localStorage libraryCollection -->
   {#if continueWatching.length > 0}
     <section class="section">
-      <div class="section__header">
-        <h2 class="section__title">{m.org_continue_watching_title()}</h2>
-        <a href="/library" class="section__view-all">
-          {m.org_continue_watching_view_library()} &rarr;
-        </a>
-      </div>
+      <header class="lede">
+        <p class="lede__eyebrow">Your library</p>
+        <hr class="lede__rule" aria-hidden="true" />
+        <div class="lede__title-row">
+          <h2 class="lede__title">{m.org_continue_watching_title()}</h2>
+          <a href="/library" class="lede__view-all">
+            {m.org_continue_watching_view_library()} <span aria-hidden="true">→</span>
+          </a>
+        </div>
+      </header>
       <div class="content-grid">
         {#each continueWatching as item (item.content.id)}
           <ContentCard
@@ -313,18 +317,15 @@
     Treatment: magazine masthead — small-caps eyebrow, display-type
     section title, thin hairline, carousel of photo-dominant cards.
   -->
-  <section class="section section--contributors">
-    <header class="contributors__head">
-      <p class="contributors__eyebrow">
-        <span class="contributors__eyebrow-mark" aria-hidden="true">N°</span>
-        The Contributors
-      </p>
-      <hr class="contributors__rule" aria-hidden="true" />
-      <div class="contributors__title-row">
-        <h2 class="contributors__title">{m.org_creators_preview_title()}</h2>
+  <section class="section section--stacked">
+    <header class="lede">
+      <p class="lede__eyebrow">The Contributors</p>
+      <hr class="lede__rule" aria-hidden="true" />
+      <div class="lede__title-row">
+        <h2 class="lede__title">{m.org_creators_preview_title()}</h2>
         {#await data.creators then creators}
           {#if (creators?.total ?? 0) > (creators?.items?.length ?? 0)}
-            <a href="/creators" class="contributors__view-all">
+            <a href="/creators" class="lede__view-all">
               View all {creators?.total ?? 0}
               <span aria-hidden="true">→</span>
             </a>
@@ -334,7 +335,7 @@
     </header>
 
     {#await data.creators}
-      <div class="contributors__skeleton-row">
+      <div class="creators-skeleton">
         {#each Array(4) as _}
           <SkeletonCreatorCard />
         {/each}
@@ -347,14 +348,13 @@
           gap="var(--space-6)"
           ariaLabel={m.org_creators_preview_title()}
         >
-          {#snippet renderItem(creator: typeof creators.items[number], index: number)}
+          {#snippet renderItem(creator: typeof creators.items[number])}
             <CreatorCarouselCard
               name={creator.name}
               username={creator.username}
               avatarUrl={creator.avatarUrl}
               bio={creator.bio}
               role={creator.role}
-              position={index + 1}
             />
           {/snippet}
         </Carousel>
@@ -362,16 +362,20 @@
     {/await}
   </section>
 
-  <!-- New Releases -->
-  <section class="section">
-    <div class="section__header">
-      <h2 class="section__title">{m.org_new_releases_title()}</h2>
-      {#if newReleases.length > 0}
-        <a href="/explore" class="section__view-all">
-          {m.org_view_all_content()} &rarr;
-        </a>
-      {/if}
-    </div>
+  <!-- New Releases — editorial lede, same treatment as The Contributors -->
+  <section class="section section--stacked">
+    <header class="lede">
+      <p class="lede__eyebrow">Just Published</p>
+      <hr class="lede__rule" aria-hidden="true" />
+      <div class="lede__title-row">
+        <h2 class="lede__title">{m.org_new_releases_title()}</h2>
+        {#if newReleases.length > 0}
+          <a href="/explore" class="lede__view-all">
+            {m.org_view_all_content()} <span aria-hidden="true">→</span>
+          </a>
+        {/if}
+      </div>
+    </header>
     {#if newReleases.length > 0}
       <div class="content-grid content-grid--featured">
         {#each newReleases as item, i (item.id)}
@@ -753,39 +757,103 @@
     -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 250px);
   }
 
+  /*
+    Generic page section shell — centered, gutter padding, capped at the
+    project's --container-xl. Stacked sections use flex to space the header
+    from the content grid below it.
+  */
   .section {
     padding: var(--space-12) var(--space-6);
-    max-width: 1200px;
+    max-width: var(--container-xl);
     width: 100%;
     margin: 0 auto;
   }
 
-  .section__header {
+  .section--stacked {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+  }
+
+  /*
+    .lede — shared editorial section-header used by every content block on
+    the landing page. Structure (top to bottom):
+      eyebrow   → small-caps contextual label
+      rule      → short heavy hairline (decorative chapter mark)
+      title-row → display-type section title + optional flush-right view-all
+    Kept as a single component so every section on the page has the same
+    editorial rhythm.
+  */
+  .lede {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .lede__eyebrow {
+    margin: 0;
+    font-family: var(--font-body);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wider);
+    color: var(--color-text-tertiary);
+  }
+
+  .lede__rule {
+    width: var(--space-10);
+    height: 0;
+    margin: 0;
+    border: none;
+    border-top: var(--border-width-thick) var(--border-style) var(--color-text-primary);
+    opacity: var(--opacity-80);
+  }
+
+  .lede__title-row {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: var(--space-4);
-    margin-bottom: var(--space-8);
+    flex-wrap: wrap;
   }
 
-  .section__title {
+  .lede__title {
     margin: 0;
-    font-size: var(--text-2xl);
+    font-family: var(--font-heading);
+    /* Fluid display ramp anchored to typography tokens */
+    font-size: clamp(var(--text-2xl), var(--_fluid-lede, 3.5vw), var(--text-4xl));
     font-weight: var(--font-bold);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-tighter);
     color: var(--color-text-primary);
+    /* Cap line length at a comfortable editorial measure */
+    max-width: 32ch;
   }
 
-  .section__view-all {
+  .lede__view-all {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-family: var(--font-body);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    color: var(--color-text-secondary);
     text-decoration: none;
     white-space: nowrap;
     transition: color var(--duration-fast) var(--ease-default);
   }
 
-  .section__view-all:hover {
-    color: var(--color-interactive-hover);
+  .lede__view-all:hover {
+    color: var(--color-text-primary);
+  }
+
+  .lede__view-all > span {
+    display: inline-block;
+    transition: transform var(--duration-normal) var(--ease-out);
+  }
+
+  .lede__view-all:hover > span {
+    transform: translateX(var(--space-1));
   }
 
   .empty-state {
@@ -799,106 +867,15 @@
     font-size: var(--text-lg);
   }
 
-  /* ══════════════════════════════════════════
-     CONTRIBUTORS — editorial masthead header
-     Magazine-style section intro: small-caps eyebrow
-     with N° glyph, thin hairline, display-type title
-     flush left, optional "view all" link flush right.
-     ══════════════════════════════════════════ */
-  .section--contributors {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-6);
-  }
-
-  .contributors__head {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  .contributors__eyebrow {
-    margin: 0;
-    display: inline-flex;
-    align-items: baseline;
-    gap: var(--space-2);
-    font-family: var(--font-body);
-    font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-wider);
-    color: var(--color-text-tertiary);
-  }
-
-  .contributors__eyebrow-mark {
-    font-family: var(--font-heading);
-    font-weight: var(--font-normal);
-    text-transform: none;
-    letter-spacing: var(--tracking-normal);
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    padding: 0 var(--space-1);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-xs);
-  }
-
-  .contributors__rule {
-    width: var(--space-10);
-    height: 0;
-    margin: 0;
-    border: none;
-    border-top: var(--border-width-thick) var(--border-style) var(--color-text-primary);
-    opacity: var(--opacity-80);
-  }
-
-  .contributors__title-row {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: var(--space-4);
-    flex-wrap: wrap;
-  }
-
-  .contributors__title {
-    margin: 0;
-    font-family: var(--font-heading);
-    /* Fluid display ramp anchored to typography tokens. Fluid middle
-       is a raw vw rate — no --fluid token exists in the system yet. */
-    font-size: clamp(var(--text-2xl), var(--_fluid-contrib-title, 3.5vw), var(--text-4xl));
-    font-weight: var(--font-bold);
-    line-height: var(--leading-tight);
-    letter-spacing: var(--tracking-tighter);
-    color: var(--color-text-primary);
-    /* Cap line length at a comfortable editorial measure (32 characters) */
-    max-width: 32ch;
-  }
-
-  .contributors__view-all {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    font-family: var(--font-body);
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--color-text-secondary);
-    text-decoration: none;
-    white-space: nowrap;
-    transition: color var(--duration-fast) var(--ease-default);
-  }
-
-  .contributors__view-all:hover {
-    color: var(--color-text-primary);
-  }
-
-  /* Skeleton row fills the horizontal rhythm while creators stream in.
-     overflow:hidden prevents skeleton cards bleeding past the section. */
-  .contributors__skeleton-row {
+  /* Skeleton row used while the streamed creators promise resolves.
+     overflow:hidden prevents skeletons bleeding past the section edge. */
+  .creators-skeleton {
     display: flex;
     gap: var(--space-5);
     overflow: hidden;
   }
 
-  .contributors__skeleton-row :global(> *) {
+  .creators-skeleton :global(> *) {
     flex: 0 0 calc(var(--space-24) * 3);
   }
 

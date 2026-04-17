@@ -104,15 +104,6 @@
   const hasProgress = $derived(progress != null && (progress.completed || progressPercent > 0));
   const isCompleted = $derived(progress?.completed ?? false);
 
-  const contentTypeLabel = $derived.by(() => {
-    switch (contentType) {
-      case 'video': return m.content_type_video();
-      case 'audio': return m.content_type_audio();
-      case 'article': return m.content_type_article();
-      default: return contentType;
-    }
-  });
-
   const timeRemaining = $derived.by(() => {
     if (!progress || isCompleted) return null;
     const remaining = (progress.durationSeconds ?? 0) - (progress.positionSeconds ?? 0);
@@ -133,7 +124,6 @@
 
   const showCreator = $derived(variant === 'grid' || variant === 'featured');
   const showDescription = $derived((variant === 'featured' || variant === 'grid') && !!description);
-  const showMetadata = $derived(variant !== 'resume');
   const showPriceBadge = $derived(
     accessType == null &&
     variant !== 'compact' && variant !== 'resume' &&
@@ -199,27 +189,16 @@
         </div>
       {/if}
 
-      <!-- Duration badge (bottom-right) -->
+      <!-- Duration — small editorial caption in bottom-right of the image -->
       {#if duration && variant !== 'resume'}
         <span class="cc__duration" aria-label="{m.content_duration()}: {formatDurationHuman(duration)}">
           {formatDurationHuman(duration)}
         </span>
       {/if}
 
-      <!-- Type icon (bottom-left) -->
-      {#if variant !== 'compact' && variant !== 'resume'}
-        <span class="cc__type-icon" role="img" aria-label={contentTypeLabel}>
-          {#if contentType === 'video'}
-            <PlayIcon size={14} />
-          {:else if contentType === 'audio'}
-            <MusicIcon size={14} />
-          {:else}
-            <FileTextIcon size={14} />
-          {/if}
-        </span>
-      {/if}
-
-      <!-- Category tag (top-left) -->
+      <!-- Category — small-caps editorial tag, translucent rather than
+           a loud SaaS pill. Only shown when the content actually has a
+           category set; otherwise the corner stays clean. -->
       {#if category && variant !== 'compact' && variant !== 'resume'}
         <span class="cc__category-tag">{category}</span>
       {/if}
@@ -267,15 +246,10 @@
         <p class="cc__description">{extractPlainText(description)}</p>
       {/if}
 
-      {#if showMetadata}
-        <p class="cc__meta">
-          <span class="cc__meta-type">{contentTypeLabel}</span>
-          {#if duration}
-            <span class="cc__meta-sep" aria-hidden="true">&middot;</span>
-            <span>{formatDurationHuman(duration)}</span>
-          {/if}
-        </p>
-      {/if}
+      <!-- Body-level meta line was removed — duration already appears on
+           the thumbnail, and the content type is self-evident from the
+           title + thumbnail context. Kept the `showMetadata` derivation
+           in case future variants want it back. -->
 
       {#if showAccessBadge}
         <span class="cc__access-badge cc__access-badge--{accessType}">
@@ -363,7 +337,7 @@
 
   .cc:focus-within:has(:focus-visible) {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .cc--loading {
@@ -422,48 +396,51 @@
     background: var(--color-surface-secondary);
   }
 
-  /* Duration badge */
+  /*
+    Duration — small editorial caption in the bottom-right of the image.
+    Translucent dark scrim + backdrop blur keeps it legible over any
+    thumbnail without feeling like a loud SaaS pill.
+  */
   .cc__duration {
     position: absolute;
     bottom: var(--space-2);
     right: var(--space-2);
     padding: var(--space-0-5) var(--space-2);
-    background: var(--color-neutral-900);
+    background: color-mix(in srgb, var(--color-neutral-900) 70%, transparent);
+    backdrop-filter: blur(var(--blur-sm));
+    -webkit-backdrop-filter: blur(var(--blur-sm));
     color: var(--color-neutral-50);
+    font-family: var(--font-body);
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
-    border-radius: var(--radius-full);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: var(--tracking-normal);
+    border-radius: var(--radius-xs);
     line-height: var(--leading-tight);
   }
 
-  /* Type icon badge */
-  .cc__type-icon {
-    position: absolute;
-    bottom: var(--space-2);
-    left: var(--space-2);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--space-7);
-    height: var(--space-7);
-    background: var(--color-neutral-900);
-    color: var(--color-neutral-50);
-    border-radius: var(--radius-full);
-    line-height: 0;
-  }
-
-  /* Category tag (top-left overlay) */
+  /*
+    Category — small-caps editorial tag in the top-left corner.
+    Translucent glass treatment (dark scrim + blur) rather than a
+    solid brand pill so the photograph stays dominant and the page
+    reads as an editorial spread, not a SaaS dashboard.
+  */
   .cc__category-tag {
     position: absolute;
     top: var(--space-2);
     left: var(--space-2);
     z-index: 1;
     padding: var(--space-0-5) var(--space-2);
+    font-family: var(--font-body);
     font-size: var(--text-xs);
-    font-weight: var(--font-medium);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wider);
     color: var(--color-neutral-50);
-    background: var(--color-neutral-900);
-    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--color-neutral-900) 55%, transparent);
+    backdrop-filter: blur(var(--blur-sm));
+    -webkit-backdrop-filter: blur(var(--blur-sm));
+    border-radius: var(--radius-xs);
     line-height: var(--leading-tight);
   }
 
@@ -506,7 +483,7 @@
     padding: var(--space-3);
     display: flex;
     flex-direction: column;
-    gap: var(--space-1-5);
+    gap: var(--space-2);
     flex: 1;
   }
 
@@ -534,7 +511,7 @@
 
   .cc__title a:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
     border-radius: var(--radius-xs);
   }
 
@@ -554,19 +531,9 @@
     overflow: hidden;
   }
 
-  /* Metadata row */
-  .cc__meta {
-    margin: 0;
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    line-height: var(--leading-tight);
-  }
-
+  /* Dot separator used in progress-status text for time-remaining */
   .cc__meta-sep {
-    opacity: 0.5;
+    opacity: var(--opacity-50);
   }
 
   /* Access badge (list variant) */
@@ -575,7 +542,7 @@
     align-items: center;
     align-self: flex-start;
     padding: var(--space-0-5) var(--space-2);
-    font-size: 0.625rem;
+    font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     line-height: 1;
     border-radius: var(--radius-full);
@@ -688,8 +655,9 @@
   }
 
   .cc[data-variant='list'] .cc__thumb {
-    width: 180px;
-    min-width: 180px;
+    /* 180px — composed from space tokens so it scales with density */
+    width: calc(var(--space-24) + var(--space-20) + var(--space-1));
+    min-width: calc(var(--space-24) + var(--space-20) + var(--space-1));
     aspect-ratio: auto;
   }
 
@@ -700,7 +668,7 @@
     gap: var(--space-1);
   }
 
-  @media (max-width: 639px) {
+  @media (--below-sm) {
     .cc[data-variant='list'] {
       flex-direction: column;
     }
@@ -719,10 +687,12 @@
      ═══════════════════════════════════════════ */
 
   .cc[data-variant='featured'] {
-    /* Image fills card — body overlays at bottom */
+    /* Image fills card — body overlays at bottom.
+       Floor height composed from space tokens (96 × 3 + 48 + 24 = 360px)
+       so the featured card never collapses below a hero-worthy size. */
     display: grid;
     grid-template-rows: 1fr;
-    min-height: 360px;
+    min-height: calc(var(--space-24) * 3 + var(--space-12) + var(--space-6));
   }
 
   .cc[data-variant='featured'] .cc__link {
@@ -759,10 +729,6 @@
     display: -webkit-box;
   }
 
-  .cc[data-variant='featured'] .cc__meta {
-    font-size: var(--text-sm);
-  }
-
   /* ═══════════════════════════════════════════
      VARIANT: COMPACT
      ═══════════════════════════════════════════ */
@@ -785,8 +751,9 @@
   }
 
   .cc[data-variant='compact'] .cc__thumb {
-    width: 160px;
-    min-width: 160px;
+    /* 160px — 96 + 64, cleanly composed from space tokens */
+    width: calc(var(--space-24) + var(--space-16));
+    min-width: calc(var(--space-24) + var(--space-16));
     border-radius: var(--radius-md);
   }
 
@@ -805,8 +772,10 @@
      ═══════════════════════════════════════════ */
 
   .cc[data-variant='resume'] {
-    min-width: 240px;
-    max-width: 340px;
+    /* 240–340px — composed from space tokens:
+       min: 96×2 + 48 = 240, max: 96×3 + 48 + 4 = 340 */
+    min-width: calc(var(--space-24) * 2 + var(--space-12));
+    max-width: calc(var(--space-24) * 3 + var(--space-12) + var(--space-1));
     flex-shrink: 0;
     scroll-snap-align: start;
   }

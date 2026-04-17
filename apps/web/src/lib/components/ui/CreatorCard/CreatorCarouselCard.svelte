@@ -18,13 +18,10 @@
     avatarUrl: string | null;
     bio: string | null;
     role: string;
-    /** 1-based position in the carousel — displayed as N° 01, 02, 03… */
-    position: number;
   }
 
-  const { name, username, avatarUrl, bio, role, position }: Props = $props();
+  const { name, username, avatarUrl, bio, role }: Props = $props();
 
-  const numeral = $derived(String(position).padStart(2, '0'));
   const initial = $derived(name.charAt(0).toUpperCase());
   const href = $derived(
     username ? `/explore?creator=${encodeURIComponent(username)}` : '/creators'
@@ -49,11 +46,6 @@
         <span class="contrib__fallback-char">{initial}</span>
       </div>
     {/if}
-
-    <span class="contrib__numeral" aria-hidden="true">
-      <span class="contrib__numeral-prefix">N°</span>
-      <span class="contrib__numeral-value">{numeral}</span>
-    </span>
 
     {#if bio}
       <div class="contrib__reveal">
@@ -140,53 +132,6 @@
     font-weight: var(--font-bold);
     color: color-mix(in srgb, var(--color-text-muted) 80%, transparent);
     letter-spacing: var(--tracking-tighter);
-  }
-
-  /* ── Magazine numeral, top-left ──────────────
-     Drawn flush in the corner without a background — just a thin
-     column rule above it — so the photograph keeps its visual
-     dominance. A soft scrim (applied to .contrib__numeral-scrim
-     via ::before) keeps the white text legible over any image. */
-  .contrib__numeral {
-    position: absolute;
-    top: var(--space-4);
-    left: var(--space-4);
-    display: inline-flex;
-    align-items: baseline;
-    gap: var(--space-1);
-    padding: 0;
-    color: white;
-    line-height: 1;
-    font-family: var(--font-heading);
-    /* Subtle drop shadow keeps the numeral readable over light photos
-       without needing a glass background behind it. */
-    text-shadow: 0 var(--space-0-5) var(--space-2)
-      color-mix(in srgb, black 60%, transparent);
-  }
-
-  .contrib__numeral::before {
-    content: '';
-    position: absolute;
-    top: calc(-1 * var(--space-2));
-    left: 0;
-    width: var(--space-5);
-    height: 0;
-    border-top: var(--border-width-thick) var(--border-style) currentColor;
-  }
-
-  .contrib__numeral-prefix {
-    font-size: var(--text-xs);
-    font-weight: var(--font-normal);
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-wider);
-    opacity: var(--opacity-80);
-  }
-
-  .contrib__numeral-value {
-    font-size: var(--text-base);
-    font-weight: var(--font-semibold);
-    letter-spacing: var(--tracking-tight);
-    font-variant-numeric: tabular-nums;
   }
 
   /* ── Hover reveal: bio slides up from bottom ── */
