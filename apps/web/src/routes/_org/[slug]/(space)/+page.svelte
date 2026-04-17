@@ -16,7 +16,9 @@
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
   import { buildContentUrl } from '$lib/utils/subdomain';
-  import { getThumbnailUrl } from '$lib/utils/image';
+  import { getThumbnailUrl, getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
+  import { formatDurationHuman } from '$lib/utils/format';
+  import { extractPlainText } from '@codex/validation';
   import { hydrateIfNeeded, libraryCollection, useLiveQuery, type LibraryItem } from '$lib/collections';
   import { followingStore } from '$lib/client/following.svelte';
   import { followOrganization, unfollowOrganization } from '$lib/remote/org.remote';
@@ -344,14 +346,71 @@
                 {/if}
               </div>
             </header>
+          {:else if item.kind === 'content' && item.span === 'full'}
+            {@const c = item.content}
+            {@const thumb = c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null}
+            {@const href = buildContentUrl(page.url, c)}
+            {@const duration = c.mediaItem?.durationSeconds ?? null}
+            {@const titleId = `feature-title-${c.id}`}
+            <article
+              class="tile tile--full feature-spread"
+              data-section-tint={tintFor(item.sectionId)}
+              aria-labelledby={titleId}
+            >
+              <a class="feature-spread__link" {href}>
+                <figure class="feature-spread__frame">
+                  {#if thumb}
+                    <img
+                      src={thumb}
+                      srcset={getThumbnailSrcset(thumb)}
+                      sizes={DEFAULT_SIZES}
+                      alt=""
+                      class="feature-spread__img"
+                      loading="lazy"
+                    />
+                  {:else}
+                    <div class="feature-spread__fallback" aria-hidden="true"></div>
+                  {/if}
+                </figure>
+                <div class="feature-spread__body">
+                  {#if c.category}
+                    <p class="feature-spread__eyebrow">{c.category}</p>
+                  {/if}
+                  <h3 class="feature-spread__title" id={titleId}>{c.title}</h3>
+                  {#if c.description}
+                    <p class="feature-spread__description">{extractPlainText(c.description)}</p>
+                  {/if}
+                  <hr class="feature-spread__rule" aria-hidden="true" />
+                  <div class="feature-spread__meta">
+                    {#if c.creator?.name}
+                      <span>{c.creator.name}</span>
+                    {/if}
+                    {#if duration}
+                      <span class="feature-spread__meta-sep" aria-hidden="true">·</span>
+                      <span>{formatDurationHuman(duration)}</span>
+                    {/if}
+                    {#if c.priceCents != null && c.priceCents > 0}
+                      <span class="feature-spread__meta-sep" aria-hidden="true">·</span>
+                      <span>£{(c.priceCents / 100).toFixed(2)}</span>
+                    {:else if c.accessType === 'free'}
+                      <span class="feature-spread__meta-sep" aria-hidden="true">·</span>
+                      <span>Free</span>
+                    {/if}
+                  </div>
+                  <span class="feature-spread__cta">
+                    {c.contentType === 'audio' ? 'Listen now' : c.contentType === 'written' ? 'Read now' : 'Watch now'}
+                    <span class="feature-spread__cta-arrow" aria-hidden="true">→</span>
+                  </span>
+                </div>
+              </a>
+            </article>
           {:else if item.kind === 'content'}
             <div
               class="tile"
-              class:tile--full={item.span === 'full'}
               data-section-tint={tintFor(item.sectionId)}
             >
               <ContentCard
-                variant={item.span === 'full' ? 'featured' : 'grid'}
+                variant="grid"
                 id={item.content.id}
                 title={item.content.title}
                 thumbnail={item.content.mediaItem?.thumbnailUrl ?? item.content.thumbnailUrl ?? null}
@@ -858,17 +917,182 @@
     grid-column: 1 / -1;
   }
 
-  /* When a featured ContentCard lives in a full-width tile, the body
-     overlay would otherwise stretch across the whole width and look like
-     a banner strip. Cap it to an editorial measure anchored to the
-     bottom-left so the image stays dominant and the text stays readable. */
-  .tile--full :global(.cc[data-variant='featured']) {
-    min-height: calc(var(--space-24) * 4);
+  /* ══════════════════════════════════════════
+     FEATURE SPREAD
+     Asymmetric 2:3 split (image left, body right) for full-width
+     featured content. Reads as a magazine feature rather than a
+     card — the CreatorExploreBanner sibling for content items.
+     Stacks on mobile.
+     ══════════════════════════════════════════ */
+  .feature-spread {
+    padding: var(--space-8) var(--space-6);
   }
 
-  .tile--full :global(.cc[data-variant='featured']) :global(.cc__body) {
-    max-width: min(40rem, 60%);
-    justify-self: start;
+  .feature-spread__link {
+    display: grid;
+    grid-template-columns: 2fr 3fr;
+    gap: var(--space-10);
+    align-items: center;
+    text-decoration: none;
+    color: inherit;
+    outline: none;
+  }
+
+  .feature-spread__link:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-2);
+    border-radius: var(--radius-sm);
+  }
+
+  /* Image frame — 4:5 portrait crop gives editorial gravity. The 16:9
+     source is cropped via object-fit: cover; center-cropping is
+     acceptable since the user chose this thumbnail as the feature. */
+  .feature-spread__frame {
+    position: relative;
+    margin: 0;
+    aspect-ratio: 4 / 5;
+    overflow: hidden;
+    border-radius: var(--radius-md);
+    background: var(--color-surface-tertiary);
+    isolation: isolate;
+  }
+
+  .feature-spread__img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    /* Slight desaturation by default, recovers on hover — matches the
+       Contributors carousel treatment for visual cohesion. */
+    filter: saturate(0.92) contrast(1.02);
+    transition:
+      transform var(--duration-slower) var(--ease-out),
+      filter var(--duration-normal) var(--ease-default);
+  }
+
+  .feature-spread__link:hover .feature-spread__img,
+  .feature-spread__link:focus-visible .feature-spread__img {
+    transform: scale(1.03);
+    filter: none;
+  }
+
+  .feature-spread__fallback {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+      135deg,
+      color-mix(
+        in oklab,
+        var(--color-brand-primary, var(--color-primary-500)) 30%,
+        var(--color-surface-tertiary)
+      ),
+      var(--color-surface-tertiary)
+    );
+  }
+
+  /* Body column — editorial vertical stack */
+  .feature-spread__body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    min-width: 0;
+  }
+
+  .feature-spread__eyebrow {
+    margin: 0;
+    font-family: var(--font-body);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wider);
+    color: var(--color-text-tertiary);
+  }
+
+  .feature-spread__title {
+    margin: 0;
+    font-family: var(--font-heading);
+    /* Fluid display ramp anchored to typography tokens */
+    font-size: clamp(var(--text-3xl), 3.5vw, var(--text-5xl));
+    font-weight: var(--font-bold);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-tighter);
+    color: var(--color-text-primary);
+  }
+
+  .feature-spread__description {
+    margin: 0;
+    font-size: var(--text-lg);
+    line-height: var(--leading-relaxed);
+    color: var(--color-text-secondary);
+    /* Cap at a comfortable reading measure */
+    max-width: 55ch;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .feature-spread__rule {
+    width: var(--space-10);
+    height: 0;
+    margin: var(--space-2) 0 0;
+    border: none;
+    border-top: var(--border-width-thick) var(--border-style) var(--color-text-primary);
+    opacity: var(--opacity-60);
+  }
+
+  .feature-spread__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  .feature-spread__meta-sep {
+    opacity: var(--opacity-50);
+  }
+
+  .feature-spread__cta {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-1);
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    color: var(--color-text-primary);
+    transition: color var(--duration-fast) var(--ease-default);
+  }
+
+  .feature-spread__cta-arrow {
+    display: inline-block;
+    transition: transform var(--duration-normal) var(--ease-out);
+  }
+
+  .feature-spread__link:hover .feature-spread__cta {
+    color: var(--color-interactive, var(--color-text-primary));
+  }
+
+  .feature-spread__link:hover .feature-spread__cta-arrow {
+    transform: translateX(var(--space-1));
+  }
+
+  /* Tablet + mobile — stack image on top, body below */
+  @media (--below-md) {
+    .feature-spread {
+      padding: var(--space-6) var(--space-4);
+    }
+
+    .feature-spread__link {
+      grid-template-columns: 1fr;
+      gap: var(--space-6);
+    }
+
+    .feature-spread__frame {
+      /* Return to content-native ratio on mobile so thumbnails don't
+         crop awkwardly when stacked full-width. */
+      aspect-ratio: 16 / 9;
+    }
   }
 
   /* ── Lede tile — section header rendered as a full-width grid cell ── */
