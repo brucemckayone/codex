@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import { onMount, untrack } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import * as m from '$paraglide/messages';
@@ -246,8 +246,16 @@
     // Initial sweep picks up static sections (faq, trust).
     observeReveals();
     // Re-sweep after streamed sections land in the DOM (preview).
-    Promise.resolve(data.contentPreview).finally(observeReveals);
-    Promise.resolve(data.stats).finally(observeReveals);
+    // `tick()` waits for Svelte to flush the post-promise DOM update so the
+    // `<section class="preview">` element exists when observeReveals runs.
+    Promise.resolve(data.contentPreview).finally(async () => {
+      await tick();
+      observeReveals();
+    });
+    Promise.resolve(data.stats).finally(async () => {
+      await tick();
+      observeReveals();
+    });
 
     return () => {
       mq.removeEventListener('change', handleMq);
