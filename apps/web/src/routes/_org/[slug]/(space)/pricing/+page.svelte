@@ -142,6 +142,13 @@
     return billingInterval === 'month' ? tier.priceMonthly : tier.priceAnnual;
   }
 
+  function formatHoursShort(totalSeconds: number): string {
+    if (totalSeconds <= 0) return '0';
+    const hours = totalSeconds / 3600;
+    if (hours < 1) return `${Math.round(totalSeconds / 60)}m`;
+    return hours % 1 === 0 ? `${Math.round(hours)}` : `${hours.toFixed(1)}`;
+  }
+
   async function handleSubscribe(tier: SubscriptionTier) {
     if (!data.isAuthenticated) {
       const returnPath = `${page.url.pathname}?tierId=${encodeURIComponent(tier.id)}&billingInterval=${encodeURIComponent(billingInterval)}`;
@@ -420,22 +427,65 @@
     {#await data.contentPreview then items}
       {@const withThumbs = items?.filter((i) => i.thumbnailUrl) ?? []}
       {#if withThumbs.length >= 3}
-        <section class="content-preview" bind:this={previewRef}>
-          <div class="preview-grid">
-            {#each withThumbs.slice(0, 6) as item}
-              <div class="preview-thumb">
+        {@const tiles = withThumbs.slice(0, 4)}
+        <section class="preview" bind:this={previewRef}>
+          <header class="preview__lede">
+            <p class="preview__eyebrow">Inside the library</p>
+            <span class="preview__rule" aria-hidden="true"></span>
+            <h2 class="preview__title">A catalogue you'll never finish.</h2>
+            <p class="preview__subtitle">
+              Video, audio, and writing from every creator — included with every membership.
+            </p>
+          </header>
+
+          <div class="preview__spread">
+            {#each tiles as item, i (item.id)}
+              {@const typeLabel = item.contentType === 'audio' ? 'Audio' : item.contentType === 'written' ? 'Article' : 'Video'}
+              <div class="preview__tile preview__tile--{i}">
                 <img src={item.thumbnailUrl} alt="" loading="lazy" />
+                <div class="preview__tile-shade" aria-hidden="true"></div>
+                <span class="preview__badge">{typeLabel}</span>
               </div>
             {/each}
           </div>
-          <div class="preview-overlay">
-            {#await data.stats then stats}
-              <p class="preview-text">
-                <strong>{stats?.content?.total ?? items.length}</strong> pieces of exclusive content
-              </p>
-            {/await}
-            <a href="/explore" class="preview-cta">Browse the library</a>
-          </div>
+
+          {#await data.stats then stats}
+            <footer class="preview__footer">
+              <div class="preview__stats">
+                {#if stats?.content?.total}
+                  <div class="preview__stat">
+                    <span class="preview__stat-number">{stats.content.total}</span>
+                    <span class="preview__stat-label">{stats.content.total === 1 ? 'Title' : 'Titles'}</span>
+                  </div>
+                {/if}
+                {#if (stats?.creators ?? 0) > 0}
+                  <div class="preview__stat">
+                    <span class="preview__stat-number">{stats.creators}</span>
+                    <span class="preview__stat-label">{stats.creators === 1 ? 'Creator' : 'Creators'}</span>
+                  </div>
+                {/if}
+                {#if (stats?.totalDurationSeconds ?? 0) > 0}
+                  <div class="preview__stat">
+                    <span class="preview__stat-number">{formatHoursShort(stats.totalDurationSeconds)}</span>
+                    <span class="preview__stat-label">Hours</span>
+                  </div>
+                {/if}
+              </div>
+
+              {#if (stats?.categories?.length ?? 0) > 0}
+                <ul class="preview__categories" aria-label="Topics">
+                  {#each stats.categories.slice(0, 8) as cat}
+                    <li>{cat}</li>
+                  {/each}
+                </ul>
+              {/if}
+
+              <a href="/explore" class="preview__cta">
+                <span>Browse the catalogue</span>
+                <span class="preview__cta-arrow" aria-hidden="true">→</span>
+              </a>
+            </footer>
+          {/await}
         </section>
       {/if}
     {/await}
@@ -1165,90 +1215,296 @@
     }
   }
 
-  /* ── CONTENT PREVIEW ─────────────────────────────────────────────── */
+  /* ══════════════════════════════════════════════════════════════════
+     CONTENT PREVIEW — editorial magazine spread
+     ══════════════════════════════════════════════════════════════════ */
 
-  .content-preview {
-    position: relative;
+  .preview {
     width: 100%;
-    border-radius: var(--radius-lg);
-    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-10);
     opacity: 0;
     transform: translateY(var(--space-4));
-    transition: opacity calc(var(--duration-slower) * 1.2), transform calc(var(--duration-slower) * 1.2);
+    transition:
+      opacity calc(var(--duration-slower) * 1.2) var(--ease-smooth),
+      transform calc(var(--duration-slower) * 1.2) var(--ease-smooth);
   }
 
-  :global(.content-preview.preview-visible) {
+  :global(.preview.preview-visible) {
     opacity: 1;
     transform: translateY(0);
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .content-preview {
+    .preview {
       opacity: 1;
       transform: none;
     }
   }
 
-  .preview-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: var(--space-1);
-  }
-
-  @media (max-width: 47.9375rem) {
-    .preview-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-
-  .preview-thumb {
-    aspect-ratio: 16 / 9;
-    overflow: hidden;
-  }
-
-  .preview-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    filter: blur(var(--blur-sm)) saturate(0.8);
-    transform: scale(1.1);
-  }
-
-  .preview-overlay {
-    position: absolute;
-    inset: 0;
+  /* Masthead */
+  .preview__lede {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
     gap: var(--space-3);
-    background: color-mix(in srgb, var(--color-surface) 70%, transparent);
-    backdrop-filter: blur(var(--blur-sm));
-    -webkit-backdrop-filter: blur(var(--blur-sm));
+    text-align: center;
+    max-width: 44rem;
+    margin: 0 auto;
   }
 
-  .preview-text {
-    font-size: var(--text-lg);
-    color: var(--color-text);
+  .preview__eyebrow {
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    letter-spacing: var(--tracking-wider);
+    text-transform: var(--text-transform-label, uppercase);
+    color: var(--color-brand-primary, var(--color-interactive));
     margin: 0;
   }
 
-  .preview-text strong {
-    color: var(--color-brand-primary, var(--color-interactive));
+  .preview__rule {
+    display: block;
+    width: var(--space-16);
+    height: var(--border-width);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 55%, transparent),
+      transparent
+    );
   }
 
-  .preview-cta {
-    font-size: var(--text-sm);
+  .preview__title {
+    font-family: var(--font-heading);
+    font-size: clamp(1.75rem, 2.5vw + 1rem, 2.75rem);
+    font-weight: var(--font-bold);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-tighter);
+    color: var(--color-text);
+    margin: 0;
+    max-width: 20ch;
+    text-wrap: balance;
+  }
+
+  .preview__subtitle {
+    font-size: var(--text-base);
+    line-height: var(--leading-snug);
+    color: var(--color-text-secondary);
+    margin: 0;
+    max-width: 48ch;
+    text-wrap: pretty;
+  }
+
+  /* Magazine spread — 1 hero tile + 3 supporting on md+, 2×2 on mobile */
+  .preview__spread {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-md);
+  }
+
+  @media (--breakpoint-md) {
+    .preview__spread {
+      grid-template-columns: 1.8fr 1fr;
+      grid-template-rows: repeat(3, 1fr);
+      aspect-ratio: 5 / 2.4;
+      gap: var(--space-1);
+    }
+    .preview__tile--0 { grid-column: 1; grid-row: 1 / 4; }
+    .preview__tile--1 { grid-column: 2; grid-row: 1; }
+    .preview__tile--2 { grid-column: 2; grid-row: 2; }
+    .preview__tile--3 { grid-column: 2; grid-row: 3; }
+  }
+
+  .preview__tile {
+    position: relative;
+    overflow: hidden;
+    aspect-ratio: 4 / 3;
+    border-radius: var(--radius-sm);
+  }
+
+  @media (--breakpoint-md) {
+    .preview__tile {
+      aspect-ratio: auto;
+      border-radius: 0;
+    }
+  }
+
+  .preview__tile img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    filter: blur(var(--blur-sm)) saturate(0.85);
+    transform: scale(1.08);
+    transition:
+      filter calc(var(--duration-slower) * 1.2) var(--ease-smooth),
+      transform calc(var(--duration-slower) * 1.2) var(--ease-smooth);
+  }
+
+  /* Hero tile: lighter blur so the composition reads */
+  .preview__tile--0 img {
+    filter: blur(calc(var(--blur-sm) / 2)) saturate(0.92);
+  }
+
+  .preview__tile:hover img {
+    filter: blur(calc(var(--blur-sm) / 2)) saturate(1);
+    transform: scale(1.1);
+  }
+
+  .preview__tile--0:hover img {
+    filter: blur(1px) saturate(1);
+  }
+
+  .preview__tile-shade {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      transparent 42%,
+      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 18%, black) 100%
+    );
+    opacity: 0.55;
+    mix-blend-mode: multiply;
+  }
+
+  .preview__badge {
+    position: absolute;
+    top: var(--space-3);
+    right: var(--space-3);
+    display: inline-flex;
+    align-items: center;
+    padding: var(--space-0-5) var(--space-2);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    letter-spacing: var(--tracking-wider);
+    text-transform: var(--text-transform-label, uppercase);
+    color: white;
+    background: color-mix(in srgb, black 40%, transparent);
+    backdrop-filter: blur(var(--blur-md));
+    -webkit-backdrop-filter: blur(var(--blur-md));
+    border: var(--border-width) var(--border-style) color-mix(in srgb, white 28%, transparent);
+    border-radius: var(--radius-full);
+    z-index: 2;
+  }
+
+  /* Footer: stats → categories → CTA */
+  .preview__footer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-6);
+    padding: 0 var(--space-2);
+  }
+
+  .preview__stats {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: var(--space-8);
+    padding: var(--space-6) 0;
+    width: 100%;
+    max-width: 40rem;
+    border-top: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 50%, transparent);
+    border-bottom: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 50%, transparent);
+  }
+
+  @media (--below-sm) {
+    .preview__stats {
+      gap: var(--space-4);
+    }
+  }
+
+  .preview__stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+    text-align: center;
+  }
+
+  .preview__stat-number {
+    font-family: var(--font-heading);
+    font-size: clamp(1.75rem, 2vw + 1rem, 2.5rem);
+    font-weight: var(--font-bold);
+    color: var(--color-text);
+    line-height: var(--leading-none);
+    letter-spacing: var(--tracking-tighter);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .preview__stat-label {
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    letter-spacing: var(--tracking-wider);
+    text-transform: var(--text-transform-label, uppercase);
+    color: var(--color-text-muted);
+  }
+
+  .preview__categories {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-2);
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-width: 44rem;
+  }
+
+  .preview__categories li {
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-xs);
     font-weight: var(--font-medium);
-    color: var(--color-brand-primary, var(--color-interactive));
-    text-decoration: none;
-    border-bottom: 1px solid currentColor;
-    padding-bottom: var(--space-0-5);
-    transition: opacity var(--duration-normal);
+    color: var(--color-text-secondary);
+    background: color-mix(in srgb, var(--color-surface-secondary) 70%, transparent);
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 40%, transparent);
+    border-radius: var(--radius-full);
+    letter-spacing: var(--tracking-wide);
+    text-transform: capitalize;
   }
 
-  .preview-cta:hover {
-    opacity: var(--opacity-70);
+  .preview__cta {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-5);
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--color-brand-primary, var(--color-interactive));
+    background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 6%, var(--color-surface));
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 25%, transparent);
+    border-radius: var(--radius-full);
+    text-decoration: none;
+    transition:
+      background-color var(--duration-normal) var(--ease-default),
+      border-color var(--duration-normal) var(--ease-default),
+      box-shadow var(--duration-normal) var(--ease-default);
+  }
+
+  .preview__cta:hover {
+    background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 12%, var(--color-surface));
+    border-color: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 45%, transparent);
+    box-shadow:
+      0 var(--space-1) var(--space-4) color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 22%, transparent);
+  }
+
+  .preview__cta:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus-ring);
+  }
+
+  .preview__cta-arrow {
+    display: inline-flex;
+    transition: transform var(--duration-normal) var(--ease-spring);
+  }
+
+  .preview__cta:hover .preview__cta-arrow {
+    transform: translateX(var(--space-1));
   }
 
   /* ── FAQ ──────────────────────────────────────────────────────────── */

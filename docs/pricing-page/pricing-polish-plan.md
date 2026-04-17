@@ -49,7 +49,7 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 |---|---|---|---|
 | 1 | **Hero** — container widening, editorial lede masthead, display typography, brand gradient mesh backdrop, polished billing toggle | ✅ done | Commit on 2026-04-17 |
 | 2 | **Tier Cards** — differentiated recommended treatment, editorial price display, meaningful feature list, brand-accent glow, card-count-adaptive grid | ✅ done | Commit on 2026-04-17 |
-| 3 | **Content Preview** — move from "blur wall" to "editorial magazine spread" with mixed thumbnail tiles, real creator glimpses, branded stat | ⬜ pending | |
+| 3 | **Content Preview** — move from "blur wall" to "editorial magazine spread" with mixed thumbnail tiles, real creator glimpses, branded stat | ✅ done | Commit on 2026-04-17 |
 | 4 | **FAQ** — lede-style masthead, column-balanced two-up layout on wide screens, refined accordion chrome | ⬜ pending | |
 | 5 | **Trust Strip** — editorial hairline above, brand microaccent, better iconography, refined hierarchy | ⬜ pending | |
 | 6 | **Sticky CTA** — premium chip, tier-color glow, polished transitions, mobile-edge safe | ⬜ pending | |
@@ -155,3 +155,16 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Glow**: conic gradient pulse tightened (70%/22%/70% stops, scale 1→1.005 micro-breathing, `--ease-smooth` instead of raw ease-in-out, 3.2s cycle).
 
   - **Next pass prerequisite**: Visual verification in-browser — boot `pnpm dev` from monorepo root and visit a 3-tier org's pricing page. Verify ribbon positioning at various widths, brand tint readability at low-saturation brands, feature icon circles scale properly with brand density. Watch for: ribbon collision with inner content at narrow widths, the featured card's `margin-top: -space-4` misbehaving in 1-tier and single-column mobile layouts (should collapse to 0 via `:not(.tier-stage--single)` but worth confirming).
+
+- **2026-04-17 Pass 3 (Content Preview)**: Full rework of the "blur wall" into an editorial magazine spread.
+  - **Structure**: `.content-preview` → `.preview` with three stacked regions — masthead lede, magazine spread, stat footer.
+  - **Lede masthead**: matches Pass 1/2 editorial voice — `Inside the library` eyebrow → gradient hairline rule → display title ("A catalogue you'll never finish.") → muted subtitle ("Video, audio, and writing from every creator — included with every membership."). `clamp(1.75rem, 2.5vw + 1rem, 2.75rem)` title, text-wrap balance, max-width 20ch/48ch.
+  - **Magazine spread**: CSS Grid with 1 hero tile + 3 supporting tiles on md+ (`grid-template-columns: 1.8fr 1fr`, `grid-template-rows: repeat(3, 1fr)`, `aspect-ratio: 5/2.4`). Mobile: 2×2 grid of 4:3 tiles. Radius-lg corner-rounding on the whole spread, shadow-md lift.
+  - **Layered blur strategy**: hero tile (`--tile--0`) blur at `calc(--blur-sm / 2)` = 2px so the composition reads; supporting tiles at `--blur-sm` = 4px for denser tease. On hover, each tile reveals a sharper version (blur drops by half, saturate to 1). Hero tile drops to 1px blur on hover.
+  - **Tile overlays**: brand-colored multiply gradient from transparent @ 42% to `color-mix(oklch, brand-primary 18%, black)` at bottom — ties tiles together visually while keeping brand presence. Each tile gets a content-type badge (Video/Audio/Article) in a black-glass pill with white-tinted border, top-right.
+  - **Stat footer**: 3 big display-scale stats (Titles / Creators / Hours) in a grid with `grid-auto-flow: column`, separated by top+bottom hairlines. Numbers `clamp(1.75rem, 2vw + 1rem, 2.5rem)` in heading font, tracking-tighter, tabular-nums; labels in small-caps `tracking-wider`. Categories pills strip beneath (if available) using `stats.categories`. CTA pill at the bottom: brand-tinted background (`6% → 12%` on hover), brand-colored border (`25% → 45%` on hover), brand-colored shadow glow, with an animated → arrow that translates on hover via `--ease-spring`.
+  - **Helper**: added local `formatHoursShort()` to script — mirrors landing page's hero-stats hours formatting.
+  - **Motion**: existing scroll-triggered reveal (IntersectionObserver sets `preview-visible`) preserved; transition durations bumped to `--duration-slower * 1.2` with `--ease-smooth`.
+  - **Backward compat**: observer still adds `preview-visible` to the bound element — only the base class name changed (`.content-preview` → `.preview`). `:global(.preview.preview-visible)` handles the reveal.
+
+  - **Next pass prerequisite**: Visually verify the spread at various tile counts (we slice to 4 but source may have 3-6). Confirm content-type badges remain legible on busy thumbnails. Check that the `aspect-ratio: 5/2.4` spread doesn't get too short on ultrawide displays (may want to cap `max-height` on very wide viewports in a later pass). Also check that mobile 2×2 doesn't feel cramped at tiny widths — consider 1-column fallback below 320px.
