@@ -25,6 +25,7 @@
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import VideoPlayer from '$lib/components/VideoPlayer/VideoPlayer.svelte';
   import { AudioPlayer } from '$lib/components/AudioPlayer';
@@ -34,6 +35,7 @@
   import { PriceBadge } from '$lib/components/ui/PriceBadge';
   import { LockIcon, CheckIcon } from '$lib/components/ui/Icon';
   import ProseContent from '$lib/components/editor/ProseContent.svelte';
+  import { StructuredData } from '$lib/components/seo';
   import { extractPlainText } from '@codex/validation';
   import type { ContentWithRelations } from '$lib/types';
 
@@ -164,18 +166,97 @@
       )
       .slice(0, 4)
   );
+
+  // ── SEO ─────────────────────────────────────────────────────────
+  // Canonical URL — stable across query params (streaming URLs,
+  // session IDs etc should not affect the canonical identity).
+  const canonicalUrl = $derived(`${page.url.origin}${page.url.pathname}`);
+
+  // og:type varies by content type: Facebook's spec distinguishes
+  // video.other, music.song, and article. Better signal for social
+  // shares than the generic 'website' default.
+  const ogType = $derived(
+    content.contentType === 'video'
+      ? 'video.other'
+      : content.contentType === 'audio'
+        ? 'music.song'
+        : 'article'
+  );
+
+  // Duration in ISO 8601 format for VideoObject/AudioObject. Schema.org
+  // expects e.g. "PT1H30M45S"; we format from raw seconds. Drop zero
+  // components except when everything is zero (unlikely but safe).
+  const iso8601Duration = $derived.by(() => {
+    if (!duration || duration <= 0) return undefined;
+    const total = Math.floor(duration);
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    const parts =
+      (hours ? `${hours}H` : '') +
+      (minutes ? `${minutes}M` : '') +
+      (seconds || (!hours && !minutes) ? `${seconds}S` : '');
+    return `PT${parts}`;
+  });
+
+  // Content publication date — prefer publishedAt, fall back to createdAt.
+  // Values may arrive as ISO strings (post-JSON-serialization over the
+  // network) or Date objects (in-process). Normalise to an ISO string.
+  const publishedDate = $derived.by<string | undefined>(() => {
+    const c = content as unknown as {
+      publishedAt?: string | Date | null;
+      createdAt?: string | Date | null;
+    };
+    const raw = c.publishedAt ?? c.createdAt;
+    if (!raw) return undefined;
+    if (typeof raw === 'string') return raw;
+    if (raw instanceof Date) return raw.toISOString();
+    return undefined;
+  });
+
+  // Schema.org JSON-LD — picks the right type per content kind for
+  // richer SERP rendering (video thumbnails, article snippets, etc).
+  const contentSchema = $derived.by<Record<string, unknown>>(() => {
+    const base: Record<string, unknown> = {
+      '@context': 'https://schema.org',
+      name: content.title,
+      url: canonicalUrl,
+      ...(description && { description }),
+      ...(thumbnailUrl && { thumbnailUrl, image: thumbnailUrl }),
+      ...(publishedDate && { uploadDate: publishedDate, datePublished: publishedDate }),
+      ...(creatorName && {
+        author: { '@type': 'Person', name: creatorName },
+      }),
+      ...(iso8601Duration && { duration: iso8601Duration }),
+    };
+
+    if (content.contentType === 'video') {
+      return { ...base, '@type': 'VideoObject' };
+    }
+    if (content.contentType === 'audio') {
+      return { ...base, '@type': 'AudioObject' };
+    }
+    // 'written' → Article
+    return { ...base, '@type': 'Article', headline: content.title };
+  });
 </script>
 
 <svelte:head>
   <title>{content.title} | {titleSuffix}</title>
+  <link rel="canonical" href={canonicalUrl} />
   <meta property="og:title" content={content.title} />
   {#if description}
     <meta name="description" content={description} />
     <meta property="og:description" content={description} />
   {/if}
-  <meta property="og:type" content="video.other" />
+  <meta property="og:type" content={ogType} />
+  <meta property="og:url" content={canonicalUrl} />
   {#if thumbnailUrl}
     <meta property="og:image" content={thumbnailUrl} />
+    <!-- LCP: thumbnail is the hero on content pages (video poster,
+         audio cover, or article header image). Preload prioritises
+         it in the critical chain so the above-fold paint is faster. -->
+    <link rel="preload" as="image" href={thumbnailUrl} fetchpriority="high" />
   {/if}
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content={content.title} />
@@ -183,6 +264,8 @@
     <meta name="twitter:description" content={description} />
   {/if}
 </svelte:head>
+
+<StructuredData data={contentSchema} />
 
 <div class="content-detail" data-access={hasAccess ? 'full' : 'preview'}>
   <!-- Video Player / Preview — renders FIRST (hero position) -->

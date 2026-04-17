@@ -26,6 +26,7 @@
   import { BackToTop } from '$lib/components/ui/BackToTop';
   import { useViewMode } from '$lib/utils/view-mode.svelte';
   import { useAccessContext } from '$lib/utils/access-context.svelte';
+  import { StructuredData } from '$lib/components/seo';
   import type { PageData } from './$types';
 
 
@@ -221,18 +222,77 @@
   ] as const;
 
   const { viewMode, handleViewChange } = useViewMode();
+
+  // ── SEO ──────────────────────────────────────────────────────────
+  // Canonical URL strategy: preserve meaningful filter params (type,
+  // category, creator) that represent distinct indexable collections.
+  // Drop transient params (q, sort, page) which would otherwise explode
+  // into thousands of low-value URL variants and dilute crawl budget.
+  const canonicalUrl = $derived.by(() => {
+    const url = new URL(page.url);
+    url.searchParams.delete('q');
+    url.searchParams.delete('sort');
+    url.searchParams.delete('page');
+    return `${url.origin}${url.pathname}${url.search}`;
+  });
+
+  // Robots: noindex search result URLs (?q=…) to avoid crawl traps and
+  // internal search appearing in SERPs. Filter/category/creator URLs
+  // remain indexable since they link the canonical catalogue shape.
+  const noindex = $derived(!!filters.q);
+
+  // Build a human-friendly description that reflects the active filter
+  // state. Generic fallback when browsing the full catalogue.
+  const pageDescription = $derived.by(() => {
+    const parts: string[] = [];
+    if (filters.type) parts.push(filters.type);
+    if (filters.category) parts.push(filters.category);
+    const scope = parts.length > 0 ? parts.join(' + ') : 'all';
+    if (data.creator) {
+      return `Content by ${data.creator.name} on ${orgName}`;
+    }
+    return `Browse ${scope} content from ${orgName}.`;
+  });
+
+  // CollectionPage JSON-LD — tells search engines this page is a
+  // listing of items, helps with sitelinks and rich results.
+  const collectionSchema = $derived<Record<string, unknown>>({
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    name: `${m.explore_title()} | ${orgName}`,
+    description: pageDescription,
+    url: canonicalUrl,
+    isPartOf: {
+      '@type': 'WebSite',
+      name: orgName,
+      url: page.url.origin,
+    },
+    ...(total > 0 && {
+      mainEntity: {
+        '@type': 'ItemList',
+        numberOfItems: total,
+      },
+    }),
+  });
 </script>
 
 <svelte:head>
   <title>{m.explore_title()} | {orgName}</title>
-  <meta name="description" content="Explore content from {orgName}" />
+  <link rel="canonical" href={canonicalUrl} />
+  {#if noindex}
+    <meta name="robots" content="noindex, follow" />
+  {/if}
+  <meta name="description" content={pageDescription} />
   <meta property="og:title" content="{m.explore_title()} | {orgName}" />
-  <meta property="og:description" content="Explore content from {orgName}" />
+  <meta property="og:description" content={pageDescription} />
   <meta property="og:type" content="website" />
+  <meta property="og:url" content={canonicalUrl} />
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content="{m.explore_title()} | {orgName}" />
-  <meta name="twitter:description" content="Explore content from {orgName}" />
+  <meta name="twitter:description" content={pageDescription} />
 </svelte:head>
+
+<StructuredData data={collectionSchema} />
 
 <div class="explore">
   <!--
