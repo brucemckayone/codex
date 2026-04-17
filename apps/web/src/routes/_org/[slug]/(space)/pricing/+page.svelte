@@ -318,14 +318,25 @@
     {/if}
 
     {#if pricingLoading}
-      <div class="tier-stage">
-        {#each Array(2) as _, i}
-          <div class="card-shell" style="--card-index: {i}">
-            <div class="skeleton skeleton--badge"></div>
+      <div class="tier-stage" aria-busy="true" aria-label="Loading subscription plans">
+        {#each Array(3) as _, i}
+          <div
+            class="card-shell"
+            class:card-shell--featured={i === 1}
+            style="--card-index: {i}"
+          >
             <div class="skeleton skeleton--title"></div>
             <div class="skeleton skeleton--desc"></div>
             <div class="skeleton skeleton--price"></div>
-            <div class="skeleton skeleton--feature"></div>
+            <div class="skeleton skeleton--helper"></div>
+            <div class="card-shell__features">
+              {#each Array(3) as _}
+                <div class="card-shell__feature">
+                  <div class="skeleton skeleton--feature-icon"></div>
+                  <div class="skeleton skeleton--feature"></div>
+                </div>
+              {/each}
+            </div>
             <div class="skeleton skeleton--cta"></div>
           </div>
         {/each}
@@ -1983,21 +1994,49 @@
   /* ── SKELETON ─────────────────────────────────────────────────────── */
 
   .card-shell {
-    flex: 1 1 320px;
-    max-width: 420px;
-    min-width: 280px;
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
     padding: var(--space-8) var(--space-6);
-    background: color-mix(in srgb, var(--color-surface) 70%, transparent);
-    backdrop-filter: blur(var(--blur-md));
-    -webkit-backdrop-filter: blur(var(--blur-md));
-    border: 1px solid color-mix(in srgb, var(--color-border) 40%, transparent);
+    background: color-mix(in srgb, var(--color-surface) 85%, transparent);
+    backdrop-filter: blur(var(--blur-xl));
+    -webkit-backdrop-filter: blur(var(--blur-xl));
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 60%, transparent);
     border-radius: var(--radius-lg);
+    box-shadow:
+      var(--shadow-md),
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 10%, transparent);
     opacity: 0;
     animation: cardReveal calc(var(--duration-slower) * 1.1) var(--ease-smooth) forwards;
     animation-delay: calc(120ms * var(--card-index));
+  }
+
+  /* Middle shell hints at the featured tier — matches card--featured tint */
+  .card-shell--featured {
+    padding-top: var(--space-10);
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 6%, var(--color-surface)),
+      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 1%, var(--color-surface))
+    );
+    border-color: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 30%, transparent);
+  }
+
+  .card-shell__features {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-2) 0 0;
+    margin-top: var(--space-2);
+    border-top: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 40%, transparent);
+    flex: 1;
+  }
+
+  .card-shell__feature {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) 0;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -2016,28 +2055,45 @@
     border-radius: var(--radius-sm);
   }
 
-  .skeleton--badge  { width: 30%; height: var(--space-6); border-radius: var(--radius-full); }
-  .skeleton--title  { width: 45%; height: var(--space-6); }
-  .skeleton--desc   { width: 80%; height: var(--space-4); }
-  .skeleton--price  { width: 40%; height: var(--space-10); }
-  .skeleton--feature { width: 65%; height: var(--space-4); }
-  .skeleton--cta    { width: 100%; height: var(--space-12); margin-top: auto; border-radius: var(--radius-md); }
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton { animation: none; }
+  }
+
+  .skeleton--title         { width: 50%; height: var(--space-6); }
+  .skeleton--desc          { width: 80%; height: var(--space-4); }
+  .skeleton--price         { width: 45%; height: var(--space-10); }
+  .skeleton--helper        { width: 60%; height: var(--space-3); }
+  .skeleton--feature       { flex: 1; height: var(--space-3); }
+  .skeleton--feature-icon  {
+    width: var(--space-6);
+    height: var(--space-6);
+    border-radius: var(--radius-full);
+    flex-shrink: 0;
+  }
+  .skeleton--cta           { width: 100%; height: var(--space-12); margin-top: auto; border-radius: var(--radius-md); }
 
   @keyframes shimmer {
     0%   { background-position: 200% 0; }
     100% { background-position: -200% 0; }
   }
 
-  /* ── BACKDROP FALLBACK ───────────────────────────────────────────── */
+  /* ══════════════════════════════════════════════════════════════════
+     BACKDROP-FILTER FALLBACK — for browsers without support
+     ══════════════════════════════════════════════════════════════════ */
 
   @supports not (backdrop-filter: blur(1px)) {
     .card__inner,
-    .faq-container,
-    .billing-toggle {
+    .card-shell,
+    .billing-toggle,
+    .sticky-bar__inner {
       background: var(--color-surface);
     }
-    .sticky-bar {
-      background: var(--color-surface);
+    .card--featured .card__inner,
+    .card-shell--featured {
+      background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 6%, var(--color-surface));
+    }
+    .preview__badge {
+      background: color-mix(in srgb, black 70%, transparent);
     }
   }
 </style>

@@ -54,7 +54,7 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 5 | **Trust Strip** — editorial hairline above, brand microaccent, better iconography, refined hierarchy | ✅ done | Commit on 2026-04-17 |
 | 6 | **Sticky CTA** — premium chip, tier-color glow, polished transitions, mobile-edge safe | ✅ done | Commit on 2026-04-17 |
 | 7 | **Between-section rhythm** — breath, scroll reveals for each section, tighter vertical cadence | ✅ done | Commit on 2026-04-17 |
-| 8 | **Full micro-polish review** — focus rings, motion reduce paths, dark mode, backdrop-filter fallback, skeleton match | ⬜ pending | |
+| 8 | **Full micro-polish review** — focus rings, motion reduce paths, dark mode, backdrop-filter fallback, skeleton match | ✅ done | Commit on 2026-04-17 |
 | 9+ | **Continuous refinement** — each re-fire picks the weakest remaining section | ⬜ pending | |
 
 ---
@@ -219,3 +219,15 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Mount-time robustness**: since `.preview` is inside `{#await data.contentPreview}`, it may not exist at onMount. Promise-based re-sweep handles this without needing MutationObserver or retry polling. The observer's `threshold: 0.12` means even if a slow stream lands when the user has already scrolled past, the element reveals immediately on next scroll frame.
 
   - **Next pass prerequisite**: Visual smoke test — scroll from top to bottom. Expected: hero staggers on load, tier cards stagger via existing `cardReveal`, preview + faq + trust each lift-and-fade as they enter the viewport, their rules expand after. Check that refresh-while-scrolled-down doesn't leave sections stuck at opacity: 0 (the `finally(observeReveals)` should catch this). If reduced-motion is on, everything should appear statically.
+
+- **2026-04-17 Pass 8 (Full micro-polish review)**: Cross-cutting cleanup across the whole page.
+  - **Backdrop fallback**: `@supports not (backdrop-filter: blur(1px))` block rewritten. Removed orphan `.faq-container` reference (class was retired in Pass 4). Added `.card-shell` (skeleton) and `.preview__badge` to the fallback set. Featured card + featured skeleton get brand-tinted fallback backgrounds so recommendation reads even without blur support. Sticky-bar fallback now targets `.sticky-bar__inner` (where the backdrop actually lives), not the outer wrapper.
+  - **Skeleton card shape match**: `.card-shell` now mirrors the Pass 2 tier card structure. Removed Pass-1-era `flex: 1 1 320px; max-width: 420px; min-width: 280px;` (redundant — grid handles sizing). Added new structural placeholders: `.skeleton--helper` (price helper line), `.card-shell__features` (hairlined feature list container), `.card-shell__feature` (row with icon circle + text bar), `.skeleton--feature-icon` (`--space-6` circle matching tier card feature-icon shape). Bumped skeleton count `Array(2)` → `Array(3)` to match the most common 3-tier reality. Removed unused `.skeleton--badge` selector (ribbons don't render on skeletons).
+  - **Featured skeleton**: middle card (`i === 1`) gets `.card-shell--featured` with the same brand-tint gradient + extra top padding as the real featured card — loading state hints at the final recommendation hierarchy.
+  - **Accessibility on loading**: `aria-busy="true"` + `aria-label="Loading subscription plans"` on the skeleton tier-stage; `aria-hidden="true"` on all decorative spans already in place.
+  - **Skeleton shell chrome upgrade**: bumped from `blur(--blur-md)` + `40% border` + `shadow-sm` to match the real card's `blur(--blur-xl)` + `60% border` + `shadow-md` + inner-highlight inset. Shells now share visual language with their eventual content, preventing a layout/material jump on load.
+  - **Skeleton reduced-motion guard**: new `@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }` — was already disabled by the global motion.css override, but an explicit guard documents the intent.
+  - **Orphan CSS audit**: confirmed zero orphan class selectors remain (`section-heading`, `faq-container`, `content-preview`, `preview-grid/thumb/overlay/text`, `trust-bar/signal/divider`, `preview-visible` all gone from both template and CSS).
+  - **Focus-visible audit**: all interactive elements covered — `.toggle-option`, `.accordion-trigger`, `.preview__cta`, `.sticky-bar__dismiss` have `:focus-visible { box-shadow: var(--shadow-focus-ring); }`. Buttons use the shared component's own handling. No gaps.
+
+  - **Next pass prerequisite**: Visual smoke test of the loading state — refresh the page with network throttling to confirm the 3-shell skeleton (with featured middle) matches the final card count + featured position most of the time. Verify in Firefox (older version without backdrop-filter support) that the fallback solid surfaces look acceptable. Also scan for any lingering visual regressions on ultrawide (2560px+) viewports — the `--container-max: 72rem` cap should prevent sprawl.
