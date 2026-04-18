@@ -26,7 +26,7 @@ One section per `/loop` firing. Tick the box and link the report when done.
 - [x] 03. Global utilities — `styles/utilities.css` + unused `theme/utilities.css` → [03-global-utilities.md](03-global-utilities.md)
 - [x] 04. Design tokens — colour system, spacing scale, typography, motion, radius, z-index, materials → [04-design-tokens.md](04-design-tokens.md)
 - [x] 05. Org branding overlay — `org-brand.css` (OKLCH relative colors, hero data-attrs, token overrides) → [05-org-branding-overlay.md](05-org-branding-overlay.md)
-- [ ] 06. Root shell — `+layout.svelte`, SkipLink, NavigationProgress, Toaster
+- [x] 06. Root shell — `+layout.svelte`, SkipLink, NavigationProgress, Toaster → [06-root-shell.md](06-root-shell.md)
 
 ### B — Route sections
 
