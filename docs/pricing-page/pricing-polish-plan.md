@@ -71,7 +71,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 22 | **Tier card uniform heights + description clamp** — grid `align-items: stretch` + `height: 100%` on card/inner + 3-line clamp on desc so cards stay visually balanced regardless of creator copy length | ✅ done | Commit on 2026-04-18 |
 | 23 | **Full-page contrast sweep** — ran Lighthouse with all sections revealed; fixed stat labels + preview CTA brand-text-on-light contrast | ✅ done | Commit on 2026-04-18 |
 | 24 | **Preview CTA hierarchy check + single-pill suppression** — verified Pass 23 bump doesn't compete with tier CTAs; hid the categories strip when only 1 category (isolated pill → visual noise) | ✅ done | Commit on 2026-04-18 |
-| 25+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 25 | **Preview hero tile title** — hero tile now shows one concrete content title as an anchor while supporting tiles stay as teaser blurs | ✅ done | Commit on 2026-04-18 |
+| 26+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -440,3 +441,13 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Visual result**: preview footer now reads as 3-item stack (stats → CTA) when categories < 2, or 4-item stack (stats → pills → CTA) when ≥ 2. Both cadences feel balanced.
 
   **Next pass prerequisite**: consider the symmetrical case — what if an org has 15+ categories? Currently `.slice(0, 8)` caps the display, but 8 pills wrapping to multiple rows could look busy. May want to cap at 6 for a cleaner single-row look on desktop. Also: proactively audit the other `.*__eyebrow` elements' brand-primary contrast on light orgs — if a light-mode org has a lighter brand (rose, lavender), eyebrows could be the next contrast fail.
+
+- **2026-04-18 Pass 25 (Preview hero tile title)**: The preview magazine spread was all-blur with content-type badges — hero tile identical treatment to supports. One concrete detail was missing: naming the hero piece.
+  - **Change**: template now renders `<span class="preview__tile-title">{item.title}</span>` only inside `.preview__tile--0` (the hero). Supporting tiles (1, 2, 3) unchanged — stay as blurred teasers.
+  - **Visual treatment**: bottom-left positioned (`left/right: space-5, bottom: space-4`), `--font-heading`, `--text-lg`, semibold, white with dual text-shadow (`0 1px space-2 black@70% + 0 0 space-1 black@50%`) for legibility over the blurred imagery. Two-line clamp with ellipsis. `max-width: 22ch` prevents sprawl on wide hero tiles.
+  - **Mobile adjustment**: `--text-base` + tighter insets (`--space-3`) at `--below-md` — the hero tile shrinks on mobile, title must shrink with it.
+  - **Why hero-only**: showing titles on every tile would trade "catalog tease" for "catalog list". One named anchor + three anonymous teases maintains the magazine-spread feel while giving users a concrete thing to project onto. A "the hero is X, and there's more like it" read.
+  - **Conversion angle**: the hero's blur still hides the image details, but the title gives users a cognitive handle. Previously: "it's something, blurred". Now: "it's *this specific thing*, plus more." Mental specificity increases purchase intent.
+  - **Verified**: test data "jkhhk" rendered correctly. In real prod this will be the actual content title (seed value was test garbage).
+
+  **Next pass prerequisite**: verify the title treatment across different brand color surfaces — will the white-on-dark text-shadow approach still work on light-mode tiles? (Tiles are multiply-blended so should stay dark-ish regardless, but worth confirming.) Also: consider whether the hero tile should also show the creator's name below the title, or if that's over-specific for a tease.

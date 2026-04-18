@@ -548,6 +548,9 @@
                   <img src={item.thumbnailUrl} alt="" loading="lazy" />
                   <div class="preview__tile-shade" aria-hidden="true"></div>
                   <span class="preview__badge">{typeLabel}</span>
+                  {#if i === 0}
+                    <span class="preview__tile-title">{item.title}</span>
+                  {/if}
                 </div>
               {/each}
             </div>
@@ -1633,6 +1636,42 @@
     border: var(--border-width) var(--border-style) color-mix(in srgb, white 28%, transparent);
     border-radius: var(--radius-full);
     z-index: 2;
+  }
+
+  /* Hero tile title — gives one concrete piece of content a name,
+     while supporting tiles stay as teaser-blurs. Signal over noise. */
+  .preview__tile-title {
+    position: absolute;
+    left: var(--space-5);
+    right: var(--space-5);
+    bottom: var(--space-4);
+    z-index: 2;
+    font-family: var(--font-heading);
+    font-size: var(--text-lg);
+    font-weight: var(--font-semibold);
+    color: white;
+    letter-spacing: var(--tracking-tight);
+    line-height: var(--leading-snug);
+    text-shadow:
+      0 var(--border-width) var(--space-2) color-mix(in srgb, black 70%, transparent),
+      0 0 var(--space-1) color-mix(in srgb, black 50%, transparent);
+    text-wrap: balance;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    pointer-events: none;
+    max-width: 22ch;
+  }
+
+  @media (--below-md) {
+    .preview__tile-title {
+      font-size: var(--text-base);
+      left: var(--space-3);
+      right: var(--space-3);
+      bottom: var(--space-3);
+    }
   }
 
   /* Footer: stats → categories → CTA */
