@@ -2479,4 +2479,30 @@
       background: color-mix(in srgb, black 70%, transparent);
     }
   }
+
+  /* ══════════════════════════════════════════════════════════════════
+     PREFERS-REDUCED-TRANSPARENCY — respect users who disable OS-wide
+     transparency/glassmorphism. Complements the @supports fallback:
+     one is for lack of browser support, this is for users opting out.
+     ══════════════════════════════════════════════════════════════════ */
+
+  @media (prefers-reduced-transparency: reduce) {
+    .card__inner,
+    .card-shell,
+    .billing-toggle,
+    .sticky-bar__inner {
+      background: var(--color-surface);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    .card--featured .card__inner,
+    .card-shell--featured {
+      background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 6%, var(--color-surface));
+    }
+    .preview__badge {
+      background: color-mix(in srgb, black 78%, transparent);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+  }
 </style>

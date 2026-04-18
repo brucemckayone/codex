@@ -77,7 +77,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 28 | **Sticky Subscribe loading state + checkout-error scroll-into-view** — sticky Button was missing `loading` prop; error banner invisible when user clicks sticky from bottom of page | ✅ done | Commit on 2026-04-18 |
 | 29 | **Checkout error retry button** — "Try again" affordance inside the error banner so users don't have to scroll back to the tier cards to retry | ✅ done | Commit on 2026-04-18 |
 | 30 | **Retry button loading feedback** — button stays visible while retry is in flight, with "Retrying…" label, disabled state, and `cursor: progress` | ✅ done | Commit on 2026-04-18 |
-| 31+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 31 | **prefers-reduced-transparency support** — a11y: respect users who disable OS-wide transparency/glassmorphism via solid-surface fallback | ✅ done | Commit on 2026-04-18 |
+| 32+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -504,3 +505,13 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Accessibility**: `disabled` attribute is announced by screen readers as "dimmed" or "unavailable" depending on SR. The label change from "Try again" → "Retrying…" announces as a state update. Full feedback chain regardless of visual modality.
 
   **Next pass prerequisite**: now the retry UX is good for single retries. Consider capping at 3 consecutive failures before showing a "Contact support" link — prevents users stuck in a retry loop if the service is broken. Implementation: track `retryCount` state, reset on success; after 3 fails show different secondary action.
+
+- **2026-04-18 Pass 31 (prefers-reduced-transparency a11y)**: Added explicit `@media (prefers-reduced-transparency: reduce)` support to complement the existing `@supports not (backdrop-filter)` fallback.
+  - **Why both**: `@supports` catches browsers without backdrop-filter support (very old); `@media (prefers-reduced-transparency)` catches USERS who enable OS-level "reduce transparency" setting (iOS, macOS, Windows 11) while using supported browsers. Two different populations, one shared solid-surface substitute.
+  - **Elements covered**: `.card__inner`, `.card-shell`, `.billing-toggle`, `.sticky-bar__inner`, `.preview__badge`, plus their featured variants. Each swaps to `var(--color-surface)` bg + `backdrop-filter: none` + `-webkit-backdrop-filter: none`.
+  - **Featured variants**: `.card--featured` and `.card-shell--featured` swap to `color-mix(brand 6%, surface)` so the recommendation tint is preserved even without blur.
+  - **Badge adjustment**: the preview tile badge gets a slightly darker bg (`black 78%` vs `70%`) to compensate for the lost blur's visual weight against blurred imagery.
+  - **Browser support**: Chrome 115+, Safari 17+. Older browsers ignore the media query and use the regular glass treatment. No regression for majority users.
+  - **Why this matters**: users with visual sensitivities (migraine, vertigo, certain cognitive differences) often disable OS transparency. Respecting their preference without breaking the visual brand for everyone else is basic progressive enhancement.
+
+  **Next pass prerequisite**: manually test on macOS with System Settings → Accessibility → Display → "Reduce transparency" enabled to confirm rendering. Also consider similar treatment for `prefers-reduced-data` (doesn't apply much here since we're not loading heavy assets, but worth checking).
