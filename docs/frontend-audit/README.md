@@ -22,7 +22,7 @@ One section per `/loop` firing. Tick the box and link the report when done.
 ### A — Foundation (cross-cutting)
 
 - [x] 01. CSS Foundation — `styles/`, `theme/`, tokens, themes, utilities, view-transitions → [01-css-foundation.md](01-css-foundation.md)
-- [ ] 02. Base elements — `theme/base.css` (h1-h6, forms, tables, code, lists, focus)
+- [x] 02. Base elements — `theme/base.css` (h1-h6, forms, tables, code, lists, focus) → [02-base-elements.md](02-base-elements.md)
 - [ ] 03. Global utilities — `styles/utilities.css` + unused `theme/utilities.css`
 - [ ] 04. Design tokens — colour system, spacing scale, typography, motion, radius, z-index, materials
 - [ ] 05. Org branding overlay — `org-brand.css` (OKLCH relative colors, hero data-attrs, token overrides)
