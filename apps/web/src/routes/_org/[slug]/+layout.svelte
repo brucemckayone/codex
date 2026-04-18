@@ -24,7 +24,7 @@
   import { brandEditor, injectTokenOverrides, clearTokenOverrides } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
   import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
-  import { invalidateCollection, loadSubscriptionFromServer } from '$lib/collections';
+  import { invalidateCollection, loadSubscriptionFromServer, subscriptionCollection } from '$lib/collections';
   import { initProgressSync, cleanupProgressSync, forceSync } from '$lib/collections/progress-sync';
   import { followingStore } from '$lib/client/following.svelte';
   import { getFollowingStatus } from '$lib/remote/org.remote';
@@ -233,10 +233,13 @@
         .catch(() => { /* Graceful — store keeps localStorage value or defaults to false */ });
     }
 
-    // Hydrate subscription collection from server on first visit.
-    // Populates localStorage with full subscription details so subsequent
-    // navigations get zero-latency reads from the collection.
-    if (data.user) {
+    // Hydrate subscription collection from server only when we don't
+    // have a cached entry for this org. The version-staleness $effect
+    // (watching data.versions above) fires loadSubscriptionFromServer
+    // when the server bumps the subscription version (webhook: purchase,
+    // cancellation, tier change), so we don't need a belt-and-suspenders
+    // fetch on every mount.
+    if (data.user && !subscriptionCollection?.state.has(data.org.id)) {
       void loadSubscriptionFromServer(data.org.id);
     }
 
