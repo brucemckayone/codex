@@ -242,7 +242,7 @@
   .library-card__access-badge {
     display: inline-flex;
     align-items: center;
-    padding: var(--space-half, 2px) var(--space-2);
+    padding: var(--space-0-5) var(--space-2);
     font-size: var(--text-2xs, 0.625rem);
     font-weight: var(--font-semibold);
     line-height: 1;
