@@ -87,7 +87,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 38 | **Retry count cap + escalation helper** — after 3 failed retries, show "refresh or try a different browser" note; counter resets on fresh tier, success, or dismiss | ✅ done | Commit on 2026-04-18 |
 | 39 | **Section labels + tier-specific Subscribe button names** — `aria-label="Subscription plans"` on tier-stage section; Subscribe buttons now say "Subscribe to {tier.name}" for SR users | ✅ done | Commit on 2026-04-18 |
 | 40 | **Explicit aria-labelledby on landmark sections** — hero / preview / faq sections now explicitly named by their headings for SR landmark navigation | ✅ done | Commit on 2026-04-18 |
-| 41+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 41 | **Svelte 5 `style:--prop` directive** — refactored inline `style="--card-index: {i}"` to `style:--card-index={i}` for idiomatic syntax | ✅ done | Commit on 2026-04-18 |
+| 42+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -625,3 +626,12 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Naming convention**: `{section-class}-title` pattern (`pricing-hero-title`, `preview-title`, `faq-title`). Consistent, scoped to the page, unlikely to collide with anything else on the site.
 
   **Next pass prerequisite**: the page is at 40 passes now. Remaining meaningful polish is extremely edge-case. Consider declaring the loop complete at this natural milestone, or continuing with real-device iOS safe-area testing + lavender-brand contrast verification. The page has Lighthouse 100/100/100, comprehensive ARIA semantics, error recovery, mobile + ultra-wide + dark + light mode all verified. Genuinely ship-ready.
+
+- **2026-04-18 Pass 41 (Svelte 5 style directive refactor)**: Converted two inline style uses to Svelte 5's `style:` directive for idiomatic syntax.
+  - **Before**: `style="--card-index: {i}"` on both `.card` and `.card-shell`
+  - **After**: `style:--card-index={i}` — Svelte 5's dedicated directive for setting CSS custom properties
+  - **Why**: Svelte 5 introduced `style:` specifically for binding-style CSS properties. It's the idiomatic pattern — clearer intent, better HMR, and Svelte can optimize the update path. The old `style="{template}"` works but re-parses the entire style string on each render.
+  - **Compiled output identical**: `style="--card-index: 0;"` / `style="--card-index: 1;"` in both cases. No behavioral change. Animations still stagger correctly via `animation-delay: calc(120ms * var(--card-index))`.
+  - **Verified in-browser**: each card's inline style attribute correctly reads `--card-index: 0;` / `--card-index: 1;`. Computed value propagates to the animation.
+
+  **Next pass prerequisite**: spot-audit other Svelte patterns that might benefit from v5 idioms — `class:` directives (already using), `bind:this` (already using correctly), `$state.raw` for non-deeply-reactive state (no current need). The page is Svelte-5-native. Further stylistic cleanup is marginal.

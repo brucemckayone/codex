@@ -451,7 +451,7 @@
           <div
             class="card-shell"
             class:card-shell--featured={i === 1}
-            style="--card-index: {i}"
+            style:--card-index={i}
           >
             <div class="skeleton skeleton--title"></div>
             <div class="skeleton skeleton--desc"></div>
@@ -487,7 +487,7 @@
             class="card"
             class:card--featured={isRecommended && !isCurrentPlan}
             class:card--current={isCurrentPlan}
-            style="--card-index: {i}"
+            style:--card-index={i}
           >
             <!-- Glow layer + floating ribbon for recommended -->
             {#if isRecommended && !isCurrentPlan}
