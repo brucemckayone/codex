@@ -6,8 +6,11 @@
   --space-0: 0;
   --space-0-5: calc(var(--space-unit) * 0.5); /* 2px * density */
   --space-1: var(--space-unit);         /* 4px * density */
+  --space-1-5: calc(var(--space-unit) * 1.5); /* 6px * density */
   --space-2: calc(var(--space-unit) * 2); /* 8px * density */
+  --space-2-5: calc(var(--space-unit) * 2.5); /* 10px * density */
   --space-3: calc(var(--space-unit) * 3); /* 12px * density */
+  --space-3-5: calc(var(--space-unit) * 3.5); /* 14px * density */
   --space-4: calc(var(--space-unit) * 4); /* 16px * density */
   --space-5: calc(var(--space-unit) * 5); /* 20px * density */
   --space-5-5: calc(var(--space-unit) * 5.5); /* 22px * density */
