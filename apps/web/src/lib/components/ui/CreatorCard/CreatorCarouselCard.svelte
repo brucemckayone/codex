@@ -40,6 +40,7 @@
         alt=""
         class="contrib__img"
         loading="lazy"
+        decoding="async"
       />
     {:else}
       <div class="contrib__fallback" aria-hidden="true">

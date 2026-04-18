@@ -165,6 +165,7 @@
           sizes={DEFAULT_SIZES}
           alt={m.content_thumbnail_alt({ title })}
           loading="lazy"
+          decoding="async"
           class="cc__image"
           onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
         />

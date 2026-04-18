@@ -122,6 +122,7 @@
           alt={displayName}
           class="showcase__photo-img"
           loading="lazy"
+          decoding="async"
         />
       {:else}
         <div class="showcase__photo-fallback">
@@ -172,6 +173,7 @@
             alt=""
             class="showcase__thumb"
             loading="lazy"
+            decoding="async"
           />
         {/each}
       </div>
