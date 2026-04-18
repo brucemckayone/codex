@@ -83,7 +83,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 34 | **Preview stats list semantics** — `role="list"` + `role="listitem"` + `aria-label="Library at a glance"` on the stat row | ✅ done | Commit on 2026-04-18 |
 | 35 | **Hero title clamp bumped** — +8px max at desktop (72→80px) after side-by-side comparison with landing's 128px hero | ✅ done | Commit on 2026-04-18 |
 | 36 | **Defensive `type="button"` + ultra-wide verification** — added explicit type to toggle + sticky dismiss buttons; confirmed 2560×1440 layout caps gracefully | ✅ done | Commit on 2026-04-18 |
-| 37+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 37 | **Checkout error ARIA clarify** — removed redundant `aria-live="polite"` (conflicted with role="alert"'s implicit assertive), letting the urgency match the user's active-waiting state | ✅ done | Commit on 2026-04-18 |
+| 38+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -575,3 +576,12 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Compiler behavior**: Svelte doesn't require `type="button"` for form elements (it's a DOM-level contract). No compiler warnings before or after, but the change is semantically correct.
 
   **Next pass prerequisite**: consider whether the page needs a `data-testid` strategy for any critical CTAs (Subscribe buttons) to make e2e testing more robust. Also: the `.pricing-page` has `padding-bottom: var(--space-20)` on desktop — this creates a lot of empty space below the trust strip before the page ends. Could tighten to `--space-12` if visual breathing is still adequate.
+
+- **2026-04-18 Pass 37 (Checkout error ARIA clarification)**: Removed the redundant `aria-live="polite"` on `.checkout-error`. The `role="alert"` already implies `aria-live="assertive"` + `aria-atomic="true"`; my explicit `polite` was overriding the role's implicit assertive, which is backwards for this context.
+  - **Why assertive is correct here**: checkout errors appear in response to a user-initiated action (clicking Subscribe). The user is actively waiting for feedback. Polite defers announcement until the SR is idle, which could be moments later. Assertive interrupts immediately — appropriate when the user's current "activity" is "waiting for the subscribe click to resolve".
+  - **Before**: `role="alert" aria-live="polite"` → polite (aria-live overrides the role's default)
+  - **After**: `role="alert"` → assertive (implicit from role, no override)
+  - **Pattern emerging**: use `aria-live="polite"` only when it's overriding a default-assertive for a reason. For error banners tied to user actions, default-assertive (via `role="alert"`) is appropriate.
+  - **SR impact**: users hear "Alert! Something went wrong. {error message}. Try again button." interrupting any other SR output. Right urgency for the context.
+
+  **Next pass prerequisite**: the page is now at a remarkable polish level — 37 passes deep. Further meaningful improvements are edge-case focused: retry-count cap with contact-support fallback, proactive brand-eyebrow contrast audit on even-lighter brands, real-device iOS safe-area verification. Consider whether to declare the loop complete or continue iteration.

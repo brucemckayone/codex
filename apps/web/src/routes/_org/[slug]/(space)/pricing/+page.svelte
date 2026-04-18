@@ -398,7 +398,6 @@
       <div
         class="checkout-error"
         role="alert"
-        aria-live="polite"
         transition:fly={{ y: -12, duration: 220, easing: cubicOut }}
       >
         <span class="checkout-error__icon" aria-hidden="true">
