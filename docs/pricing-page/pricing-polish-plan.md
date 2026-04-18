@@ -89,7 +89,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 40 | **Explicit aria-labelledby on landmark sections** — hero / preview / faq sections now explicitly named by their headings for SR landmark navigation | ✅ done | Commit on 2026-04-18 |
 | 41 | **Svelte 5 `style:--prop` directive** — refactored inline `style="--card-index: {i}"` to `style:--card-index={i}` for idiomatic syntax | ✅ done | Commit on 2026-04-18 |
 | 42 | **Narrow-viewport verification (500px)** — confirmed no overflow, no clipping, correct sticky behavior on fresh reload at narrowest testable width | ✅ done | Commit on 2026-04-18 |
-| 43+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 43 | **Focus ring consolidation** — switched 3 remaining `box-shadow` focus rings (accordion trigger, sticky dismiss, error dismiss) to the `outline` pattern for full-contrast brand focus indication | ✅ done | Commit on 2026-04-18 |
+| 44+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -651,3 +652,15 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Lighthouse still 100/100/100** at this viewport.
 
   **Next pass prerequisite**: at 42 passes, the work has thoroughly covered intent, visuals, a11y, responsive behavior, edge cases, and failure modes. The page is ship-ready at any quality bar I can define. Remaining candidates would be real-device (not simulated) iOS/Android testing or extremely specific brand-color combinations untested by either seed org.
+
+- **2026-04-18 Pass 43 (Focus ring consolidation)**: In-browser focus probe caught a low-contrast focus ring. `--shadow-focus-ring` resolves via `oklch(from --brand-color calc(l + 0.15) calc(c * 0.5) h)` — for studio-alpha's rose brand this becomes `#FCCAC0` (very pale pink). On a light-mode near-white surface, contrast is ~1.2:1, failing WCAG's 3:1 focus visibility guidance.
+  - **3 elements still using the weak box-shadow focus ring**:
+    - `.faq__list :global(.accordion-trigger:focus-visible)`
+    - `.sticky-bar__dismiss:focus-visible`
+    - `.checkout-error__dismiss:focus-visible`
+  - **Fix**: all three switched from `outline: none; box-shadow: var(--shadow-focus-ring)` to `outline: var(--border-width-thick) solid var(--color-focus); outline-offset: var(--space-0-5)`. The error dismiss uses `--color-error-600` instead of `--color-focus` for semantic color match.
+  - **Contrast improvement**: accordion focus ring now renders as `rgb(225, 29, 72)` (full rose brand) at 2px solid, 2px offset. ~4:1 contrast on white — easily exceeds WCAG 3:1 threshold.
+  - **Pattern unification**: this matches the Pass 15 pattern on toggle/preview-cta. All focus rings now use the outline pattern. `box-shadow` is reserved for hover/active state elevation, `outline` for focus. Independent concerns, independent properties — no cascade conflicts possible.
+  - **Lighthouse result**: 100/100/100, **37 passed** (up from 36). A new a11y audit surfaced via the stronger focus indication — likely `focus-traps` or similar verifying that focusable elements have visible focus indicators.
+
+  **Next pass prerequisite**: `--shadow-focus-ring` token is still used by OTHER components in the design system (this page no longer uses it). Consider proposing a design-system-level refactor: the token should either (a) resolve to a more-contrast-safe value by default, or (b) be deprecated in favor of an outline-based utility. Out of scope for this page's polish loop but worth flagging.

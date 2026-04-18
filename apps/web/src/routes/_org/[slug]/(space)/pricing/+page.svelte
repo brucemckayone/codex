@@ -1961,8 +1961,8 @@
   }
 
   .faq__list :global(.accordion-trigger:focus-visible) {
-    outline: none;
-    box-shadow: var(--shadow-focus-ring);
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
   }
 
   .faq__list :global(.accordion-trigger[aria-expanded="true"]) {
@@ -2261,8 +2261,8 @@
   }
 
   .sticky-bar__dismiss:focus-visible {
-    outline: none;
-    box-shadow: var(--shadow-focus-ring);
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -2401,8 +2401,8 @@
   }
 
   .checkout-error__dismiss:focus-visible {
-    outline: none;
-    box-shadow: var(--shadow-focus-ring-error);
+    outline: var(--border-width-thick) solid var(--color-error-600);
+    outline-offset: var(--space-0-5);
   }
 
   @media (prefers-reduced-motion: reduce) {
