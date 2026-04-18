@@ -2518,6 +2518,46 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════
+     PRINT — strip atmospheric treatments for save-as-PDF. Users who
+     print pricing pages want readable plan info + features, not glass
+     surfaces, gradient meshes, or sticky overlays.
+     ══════════════════════════════════════════════════════════════════ */
+
+  @media print {
+    .pricing-hero__backdrop,
+    .preview__tile-shade,
+    .card__glow,
+    .sticky-bar,
+    .card__ribbon::after {
+      display: none !important;
+    }
+    .pricing-page {
+      max-width: none;
+      padding: 0;
+      gap: var(--space-8);
+    }
+    .pricing-hero {
+      padding: var(--space-6) 0;
+    }
+    .card,
+    .card-shell {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .card__inner,
+    .faq__list :global(.accordion-content) {
+      background: transparent !important;
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      box-shadow: none !important;
+    }
+    /* Open all accordion items so their content prints too */
+    .faq__list :global(.accordion-content) {
+      display: block !important;
+    }
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
      PREFERS-REDUCED-TRANSPARENCY — respect users who disable OS-wide
      transparency/glassmorphism. Complements the @supports fallback:
      one is for lack of browser support, this is for users opting out.

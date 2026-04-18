@@ -90,7 +90,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 41 | **Svelte 5 `style:--prop` directive** — refactored inline `style="--card-index: {i}"` to `style:--card-index={i}` for idiomatic syntax | ✅ done | Commit on 2026-04-18 |
 | 42 | **Narrow-viewport verification (500px)** — confirmed no overflow, no clipping, correct sticky behavior on fresh reload at narrowest testable width | ✅ done | Commit on 2026-04-18 |
 | 43 | **Focus ring consolidation** — switched 3 remaining `box-shadow` focus rings (accordion trigger, sticky dismiss, error dismiss) to the `outline` pattern for full-contrast brand focus indication | ✅ done | Commit on 2026-04-18 |
-| 44+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 44 | **Print stylesheet** — strip atmospheric treatments for save-as-PDF; expand accordion items so all FAQ answers print; break-inside: avoid on cards | ✅ done | Commit on 2026-04-18 |
+| 45+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -664,3 +665,14 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Lighthouse result**: 100/100/100, **37 passed** (up from 36). A new a11y audit surfaced via the stronger focus indication — likely `focus-traps` or similar verifying that focusable elements have visible focus indicators.
 
   **Next pass prerequisite**: `--shadow-focus-ring` token is still used by OTHER components in the design system (this page no longer uses it). Consider proposing a design-system-level refactor: the token should either (a) resolve to a more-contrast-safe value by default, or (b) be deprecated in favor of an outline-based utility. Out of scope for this page's polish loop but worth flagging.
+
+- **2026-04-18 Pass 44 (Print stylesheet)**: Added `@media print` block to strip atmospheric treatments when users print the pricing page or save as PDF.
+  - **Elements hidden on print**: `.pricing-hero__backdrop` (gradient mesh = huge ink waste), `.preview__tile-shade` (multiply overlay), `.card__glow` (conic gradient), `.sticky-bar` (runtime UI, irrelevant on paper), `.card__ribbon::after` (shine animation).
+  - **Page adjustments**: `.pricing-page` drops `max-width` constraint, zeros padding, reduces section gap to `--space-8` for denser print layout.
+  - **Break management**: `break-inside: avoid` + `page-break-inside: avoid` on `.card` and `.card-shell` so tier cards don't split across printed pages mid-content.
+  - **Glass surfaces**: `.card__inner` and `.accordion-content` reset to transparent bg + no backdrop-filter + no shadow. Cleaner print output, no wasted color toner.
+  - **Accordion expansion**: `.faq__list :global(.accordion-content) { display: block !important }` forces all FAQ answers to render on print, even if collapsed in the UI. Users saving a pricing page want to see everything.
+  - **Why this matters**: save-as-PDF for records is a real use case (especially for B2B pricing or compliance documentation). Without print styles, users get a dark-mode screenshot-ish output with sticky overlays obscuring content and glass surfaces rendering as muddy ink. Proper print handling respects users who want a static record.
+  - **Trade-offs**: the `!important` flags on backdrop-filter resets are needed to beat the component-level CSS specificity. Print context justifies the escape hatch.
+
+  **Next pass prerequisite**: manually verify print output (File → Print or Command-P) to confirm the styles render correctly on actual paper/PDF. Also consider printing at various paper sizes (A4, Letter) — `.pricing-page` max-width: none; should let content flow naturally at any paper width.
