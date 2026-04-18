@@ -52,8 +52,8 @@
   }
 
   .editor-footer__dot {
-    width: 6px;
-    height: 6px;
+    width: var(--space-1-5);
+    height: var(--space-1-5);
     border-radius: var(--radius-full);
     background-color: var(--color-brand-accent);
   }

@@ -159,8 +159,8 @@
   }
 
   .brand-bar__dot {
-    width: 8px;
-    height: 8px;
+    width: var(--space-2);
+    height: var(--space-2);
     border-radius: var(--radius-full);
     background-color: var(--color-brand-accent);
   }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { brandEditor } from '$lib/brand-editor';
+  import { hexToHslString } from '$lib/brand-editor/color-utils';
   import ColorInput from '../color-picker/ColorInput.svelte';
   import BrandSliderField from '../BrandSliderField.svelte';
 
@@ -24,23 +25,10 @@
   }
 
   function handleTintChange(hex: string) {
-    // Convert hex to HSL-ish string for --shadow-color
-    // The shadow system uses "H S% L%" format (no commas, no hsl() wrapper)
-    const r = parseInt(hex.slice(1, 3), 16) / 255;
-    const g = parseInt(hex.slice(3, 5), 16) / 255;
-    const b = parseInt(hex.slice(5, 7), 16) / 255;
-    const max = Math.max(r, g, b), min = Math.min(r, g, b);
-    const l = (max + min) / 2;
-    let h = 0, s = 0;
-    if (max !== min) {
-      const d = max - min;
-      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-      if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
-      else if (max === g) h = ((b - r) / d + 2) / 6;
-      else h = ((r - g) / d + 4) / 6;
-    }
-    const hsl = `${Math.round(h * 360)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`;
-    updateOverride('shadow-color', hsl);
+    // The shadow system uses space-delimited "H S% L%" format
+    // (no commas, no hsl() wrapper) so it can be composed into
+    // `hsl(var(--shadow-color) / 0.2)` at the consumer.
+    updateOverride('shadow-color', hexToHslString(hex));
   }
 
   function clearTint() {
@@ -68,7 +56,7 @@
     <div class="shadows-level__label-row">
       <span class="shadows-level__label">Shadow Tint</span>
       {#if tintColor}
-        <button class="shadows-level__clear" onclick={clearTint}>reset</button>
+        <button type="button" class="shadows-level__clear" onclick={clearTint}>reset</button>
       {/if}
     </div>
     <ColorInput
@@ -127,6 +115,12 @@
 
   .shadows-level__clear:hover {
     color: var(--color-interactive);
+  }
+
+  .shadows-level__clear:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
   }
 
   .shadows-level__preview {

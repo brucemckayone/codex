@@ -25,7 +25,10 @@
 </script>
 
 <div class="logo-level">
-  <div class="logo-level__preview" style="background-color: {brandEditor.pending?.backgroundColor ?? 'var(--color-surface)'}">
+  <div
+    class="logo-level__preview"
+    style:background-color={brandEditor.pending?.backgroundColor || 'var(--color-surface)'}
+  >
     {#if logoUrl}
       <img src={logoUrl} alt="Organization logo" class="logo-level__image" />
     {:else}
@@ -84,7 +87,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 120px;
+    min-height: calc(var(--space-24) * 1.25); /* 120px at base density */
     border-radius: var(--radius-lg);
     border: var(--border-width) var(--border-style) var(--color-border-subtle);
     padding: var(--space-6);
@@ -92,7 +95,7 @@
 
   .logo-level__image {
     max-width: 100%;
-    max-height: 80px;
+    max-height: var(--space-20); /* 80px at base density */
     object-fit: contain;
   }
 
