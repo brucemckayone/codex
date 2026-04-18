@@ -84,7 +84,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 35 | **Hero title clamp bumped** — +8px max at desktop (72→80px) after side-by-side comparison with landing's 128px hero | ✅ done | Commit on 2026-04-18 |
 | 36 | **Defensive `type="button"` + ultra-wide verification** — added explicit type to toggle + sticky dismiss buttons; confirmed 2560×1440 layout caps gracefully | ✅ done | Commit on 2026-04-18 |
 | 37 | **Checkout error ARIA clarify** — removed redundant `aria-live="polite"` (conflicted with role="alert"'s implicit assertive), letting the urgency match the user's active-waiting state | ✅ done | Commit on 2026-04-18 |
-| 38+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 38 | **Retry count cap + escalation helper** — after 3 failed retries, show "refresh or try a different browser" note; counter resets on fresh tier, success, or dismiss | ✅ done | Commit on 2026-04-18 |
+| 39+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -585,3 +586,18 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **SR impact**: users hear "Alert! Something went wrong. {error message}. Try again button." interrupting any other SR output. Right urgency for the context.
 
   **Next pass prerequisite**: the page is now at a remarkable polish level — 37 passes deep. Further meaningful improvements are edge-case focused: retry-count cap with contact-support fallback, proactive brand-eyebrow contrast audit on even-lighter brands, real-device iOS safe-area verification. Consider whether to declare the loop complete or continue iteration.
+
+- **2026-04-18 Pass 38 (Retry count cap + escalation helper)**: Implemented the retry-count cap flagged in Pass 30 and referenced in subsequent next-pass notes.
+  - **State**: new `retryCount = $state(0)` tracks consecutive failures.
+  - **Reset triggers**: (1) fresh tier — `if (lastAttemptedTierId !== tier.id) retryCount = 0`; (2) successful attempt — `retryCount = 0` before the redirect; (3) user-initiated dismiss — `onclick={() => { checkoutError = ''; retryCount = 0 }}`. The counter reflects ONLY consecutive failures for the currently-active tier.
+  - **Increment**: `retryCount += 1` inside the catch block before setting `checkoutError`.
+  - **Template**: new `{#if retryCount >= 3}` block renders `<p class="checkout-error__escalation">` with copy: *"If the issue persists, please refresh the page or try a different browser."* Short, actionable, honest — doesn't promise support notification we can't guarantee.
+  - **Style**: `.checkout-error__escalation` — `--text-xs`, `--color-error-700` at 70% opacity, `--leading-snug`, `max-width: 46ch`, `text-wrap: pretty`. Visually demoted compared to the retry button (it's supplementary info, not a primary action).
+  - **Design rationale**: at 3+ failures, the issue is unlikely to be transient (intermittent network blips typically resolve in 1-2 retries). Further retry attempts burn the user's patience. The escalation copy redirects them to browser-level fixes (refresh clears cached state; different browser rules out browser-specific issues) without requiring backend support-email integration.
+  - **UX flow**:
+    1-2 failures: just the retry button.
+    3+ failures: retry button + "refresh or try a different browser" hint.
+    Dismiss/success/fresh-tier: counter resets, escalation disappears on next appearance.
+  - **Why not "Contact support"**: would require plumbing org's supportEmail through to the frontend (currently `data.org` doesn't expose it). Browser-level escalation is backend-free and still actionable. If support email becomes accessible later, this can upgrade to a mailto link.
+
+  **Next pass prerequisite**: consider adding `retryCount` breakpoint-specific copy — at 5+ failures, escalate further to "Please contact the creator directly". But this may be unreachable in practice (users abandon before 5 retries). Keep current simple two-tier escalation for now.

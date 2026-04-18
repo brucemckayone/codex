@@ -35,6 +35,10 @@
   // Remembered tier ID for the error banner's "Try again" action so the
   // user can retry without scrolling back to the cards.
   let lastAttemptedTierId = $state<string | null>(null);
+  // Retry counter — resets on fresh tier or successful attempt. After
+  // 3 consecutive failures we surface a helper message suggesting
+  // escalation paths (refresh, different browser).
+  let retryCount = $state(0);
   const restoredTierId = page.url.searchParams.get('tierId');
 
   // ── Feature Flag ──────────────────────────────────────────────────
@@ -194,6 +198,11 @@
       return;
     }
 
+    // Fresh tier (not a retry of the same one) resets the counter so the
+    // escalation helper doesn't linger if the user picks a different tier.
+    if (lastAttemptedTierId !== tier.id) {
+      retryCount = 0;
+    }
     lastAttemptedTierId = tier.id;
     checkoutLoading = tier.id;
     checkoutError = '';
@@ -203,8 +212,10 @@
         billingInterval,
         organizationId: data.org.id,
       });
+      retryCount = 0;
       window.location.href = result.sessionUrl;
     } catch (err) {
+      retryCount += 1;
       checkoutError =
         err instanceof Error ? err.message : m.subscription_checkout_error();
       checkoutLoading = null;
@@ -416,11 +427,17 @@
               {checkoutLoading !== null ? 'Retrying…' : 'Try again'}
             </button>
           {/if}
+          {#if retryCount >= 3}
+            <p class="checkout-error__escalation">
+              If the issue persists, please refresh the page or try a
+              different browser.
+            </p>
+          {/if}
         </div>
         <button
           class="checkout-error__dismiss"
           type="button"
-          onclick={() => { checkoutError = ''; }}
+          onclick={() => { checkoutError = ''; retryCount = 0; }}
           aria-label="Dismiss error"
         >
           <XIcon size={14} />
@@ -2344,6 +2361,16 @@
   .checkout-error__retry:disabled {
     cursor: progress;
     opacity: var(--opacity-70, 0.7);
+  }
+
+  .checkout-error__escalation {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-xs);
+    color: var(--color-error-700);
+    opacity: var(--opacity-70, 0.7);
+    line-height: var(--leading-snug);
+    text-wrap: pretty;
+    max-width: 46ch;
   }
 
   .checkout-error__dismiss {
