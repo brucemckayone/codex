@@ -586,21 +586,25 @@
 
           {#await data.stats then stats}
             <footer class="preview__footer">
-              <div class="preview__stats">
+              <div
+                class="preview__stats"
+                role="list"
+                aria-label="Library at a glance"
+              >
                 {#if stats?.content?.total}
-                  <div class="preview__stat">
+                  <div class="preview__stat" role="listitem">
                     <span class="preview__stat-number">{stats.content.total}</span>
                     <span class="preview__stat-label">{stats.content.total === 1 ? 'Title' : 'Titles'}</span>
                   </div>
                 {/if}
                 {#if (stats?.creators ?? 0) > 0}
-                  <div class="preview__stat">
+                  <div class="preview__stat" role="listitem">
                     <span class="preview__stat-number">{stats.creators}</span>
                     <span class="preview__stat-label">{stats.creators === 1 ? 'Creator' : 'Creators'}</span>
                   </div>
                 {/if}
                 {#if (stats?.totalDurationSeconds ?? 0) > 0}
-                  <div class="preview__stat">
+                  <div class="preview__stat" role="listitem">
                     <span class="preview__stat-number">{formatHoursShort(stats.totalDurationSeconds)}</span>
                     <span class="preview__stat-label">Hours</span>
                   </div>

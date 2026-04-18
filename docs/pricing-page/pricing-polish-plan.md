@@ -80,7 +80,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 31 | **prefers-reduced-transparency support** — a11y: respect users who disable OS-wide transparency/glassmorphism via solid-surface fallback | ✅ done | Commit on 2026-04-18 |
 | 32 | **Trust strip icon differentiation** — swapped to Clock/Lock/CheckCircle (three distinct shapes) instead of two check-variants + lock | ✅ done | Commit on 2026-04-18 |
 | 33 | **Trust strip list semantics** — `role="list"` + `role="listitem"` + `aria-label` so screen readers announce as a cohesive list of guarantees | ✅ done | Commit on 2026-04-18 |
-| 34+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 34 | **Preview stats list semantics** — `role="list"` + `role="listitem"` + `aria-label="Library at a glance"` on the stat row | ✅ done | Commit on 2026-04-18 |
+| 35+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -536,3 +537,10 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Unchanged for mouse/keyboard users**: roles are SR-only semantics. Visual layout, focus behavior, and click targets are identical.
 
   **Next pass prerequisite**: consider similar semantic upgrades elsewhere — `.card__features` is already `<ul><li>` (correct). `.preview__categories` is `<ul><li>` (correct). `.preview__stats` is three `.preview__stat` divs — could also benefit from list roles for SR clarity. And the billing toggle's inner savings pill — aria-label or sr-only text for "Save 20%" context?
+
+- **2026-04-18 Pass 34 (Preview stats list semantics)**: Applied the same list-semantics pattern to the preview stats row (3 stats: Titles, Creators, Hours). Added `role="list" aria-label="Library at a glance"` to `.preview__stats` and `role="listitem"` to each `.preview__stat`.
+  - **Screen reader impact**: was "8. Titles. 2. Creators. 4.4. Hours." (six disconnected labels). Now: "Library at a glance list, 3 items: 8. Titles. 2. Creators. 4.4. Hours." Structural context + specific anchor phrase ("library at a glance" tells users WHAT these stats describe).
+  - **Savings pill context (considered, skipped)**: the `Save 20%` pill inside the Annual button sits in the button's accessible name. SRs announce the full button: "Annual, Save 20%, radio button, 2 of 2". Context (Annual + savings) is already co-located. No separate aria-label needed.
+  - **Lighthouse**: 100/100/100 maintained, 36 passed (same count — list audit already scored a pass from Pass 33's trust strip).
+
+  **Next pass prerequisite**: final design-language comparison pass against the landing page. Walk through both pages side-by-side and catch any remaining divergence. Candidates: hero typography cadence, section lede consistency, motion timing rhythm.
