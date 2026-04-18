@@ -72,7 +72,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 23 | **Full-page contrast sweep** — ran Lighthouse with all sections revealed; fixed stat labels + preview CTA brand-text-on-light contrast | ✅ done | Commit on 2026-04-18 |
 | 24 | **Preview CTA hierarchy check + single-pill suppression** — verified Pass 23 bump doesn't compete with tier CTAs; hid the categories strip when only 1 category (isolated pill → visual noise) | ✅ done | Commit on 2026-04-18 |
 | 25 | **Preview hero tile title** — hero tile now shows one concrete content title as an anchor while supporting tiles stay as teaser blurs | ✅ done | Commit on 2026-04-18 |
-| 26+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 26 | **Mobile sticky-behind-nav bug** — caught via screenshot: sticky CTA completely obscured by MobileBottomNav on mobile (same z-index, DOM order tied). Fixed with `bottom: --space-16` offset on mobile + page padding-bottom expansion | ✅ done | Commit on 2026-04-18 |
+| 27+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -451,3 +452,13 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Verified**: test data "jkhhk" rendered correctly. In real prod this will be the actual content title (seed value was test garbage).
 
   **Next pass prerequisite**: verify the title treatment across different brand color surfaces — will the white-on-dark text-shadow approach still work on light-mode tiles? (Tiles are multiply-blended so should stay dark-ish regardless, but worth confirming.) Also: consider whether the hero tile should also show the creator's name below the title, or if that's over-specific for a tease.
+
+- **2026-04-18 Pass 26 (Mobile sticky-behind-nav bug)**: Caught via screenshot: on mobile viewport, the sticky CTA was completely obscured by the MobileBottomNav. Both `position: fixed`, both `z-index: 1030`, both anchored at `bottom: 0` — same-z tie broke in favor of whichever painted last (nav, since it's rendered in layout.svelte AFTER the page `<main>` slot).
+  - **Impact**: on every mobile viewport, once tier cards scrolled off-screen, the sticky CTA fly-entered as designed but landed BEHIND the nav — the user saw nothing. A critical conversion regression hidden from code review.
+  - **Fix 1 — sticky offset**: `.sticky-bar--mobile { bottom: var(--space-16) }` (64px) to clear the MobileBottomNav's height. Dropped the `padding-bottom: env(safe-area-inset-bottom)` from mobile since the nav now handles that concern below the sticky.
+  - **Fix 2 — page bottom padding**: `.pricing-page` mobile padding-bottom bumped from `calc(--space-20 + safe-area)` → `calc(--space-24 + --space-16 + safe-area)` = 96 + 64 + safe-area ≈ 160px+. Reserves enough scroll-end space for BOTH fixed bars so the last-section content (trust strip) isn't hidden behind them.
+  - **Desktop unchanged**: `.sticky-bar` base `bottom: 0` still applies on desktop (the mobile variant class overrides it). No regression — verified at 1440×900: sticky at y=818–900 as before.
+  - **Inline comment**: CSS now documents the "nav would cover sticky without this" reason so future devs don't revert the offset as "redundant".
+  - **Why this survived 25 passes**: earlier visual verifications focused on desktop. Mobile was tested but the mobile-nav height wasn't obvious in my code-review-style tests. Only a fresh side-by-side screenshot of the bottom bars at scroll-past-tier-cards caught it. Argument for always testing mobile-with-all-fixed-bars-visible.
+
+  **Next pass prerequisite**: check safe-area-inset-bottom handling on actual iOS notch devices — my `padding-bottom: 0` on mobile sticky could cut off content if there's a notch. MobileBottomNav presumably handles its own safe-area. The sticky sits above the nav at `--space-16`, but the nav's safe-area padding extends below its bottom. No safe-area issue for sticky in principle. But real device testing would confirm.

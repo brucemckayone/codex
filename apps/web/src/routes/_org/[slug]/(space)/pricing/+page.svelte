@@ -703,7 +703,10 @@
   @media (--below-md) {
     .pricing-page {
       gap: var(--space-12);
-      padding: 0 var(--space-4) calc(var(--space-20) + env(safe-area-inset-bottom, 0px));
+      /* Reserve space for the MobileBottomNav (--space-16) + sticky CTA
+         (~--space-16) + breathing room (--space-8) so content above isn't
+         hidden when both fixed bars are visible. */
+      padding: 0 var(--space-4) calc(var(--space-24) + var(--space-16) + env(safe-area-inset-bottom, 0px));
     }
   }
 
@@ -2083,10 +2086,13 @@
       inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark, black) 2%, transparent);
   }
 
-  /* Mobile: full-bleed bar, not floating pill (maximize thumb reach) */
+  /* Mobile: full-bleed bar sitting ABOVE the MobileBottomNav (64px tall).
+     Without this offset the nav covers the sticky — both are position:fixed
+     at z-index: 1030 with same DOM order tie-break won by the nav. */
   .sticky-bar--mobile {
+    bottom: var(--space-16);
     padding: 0;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: 0;
   }
 
   .sticky-bar--mobile .sticky-bar__inner {
