@@ -75,7 +75,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 26 | **Mobile sticky-behind-nav bug** — caught via screenshot: sticky CTA completely obscured by MobileBottomNav on mobile (same z-index, DOM order tied). Fixed with `bottom: --space-16` offset on mobile + page padding-bottom expansion | ✅ done | Commit on 2026-04-18 |
 | 27 | **Preview stats typography + categories cap** — bumped stat-number clamp to 2.75rem max (from 2.5rem), capped categories slice at 6 (was 8) | ✅ done | Commit on 2026-04-18 |
 | 28 | **Sticky Subscribe loading state + checkout-error scroll-into-view** — sticky Button was missing `loading` prop; error banner invisible when user clicks sticky from bottom of page | ✅ done | Commit on 2026-04-18 |
-| 29+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 29 | **Checkout error retry button** — "Try again" affordance inside the error banner so users don't have to scroll back to the tier cards to retry | ✅ done | Commit on 2026-04-18 |
+| 30+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -478,3 +479,19 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Why this matters**: users who click from the sticky are by definition already invested enough to have scrolled past the tier cards. Losing them at the final Subscribe-click-error moment is the highest-cost conversion leak. Loading state acknowledges their click; scroll-to-error ensures they understand what happened.
 
   **Next pass prerequisite**: consider adding a retry affordance on the checkout-error banner itself (a "Try again" button that re-runs `handleSubscribe(recommendedTier)` or the last-attempted tier). Also: the error banner currently dismisses via X, but doesn't auto-dismiss. That's fine — user-controlled dismissal is respectful. But consider if errors persist too long in the UI, maybe a 10s auto-dismiss.
+
+- **2026-04-18 Pass 29 (Checkout error retry button)**: Added the retry affordance flagged in Pass 28's next-pass note.
+  - **State**: new `lastAttemptedTierId = $state<string | null>(null)` remembers which tier failed. Set at the start of `handleSubscribe(tier)`; persists across retries until successful redirect unloads the page.
+  - **Handler**: `handleCheckoutRetry()` finds the tier by ID from the current `tiers` array and calls `handleSubscribe(tier)` again. Safe-guards against the tier having been removed mid-flight.
+  - **Template**: retry button renders inside `.checkout-error__body` beneath the message, gated on `{#if lastAttemptedTierId && !checkoutLoading}` so it hides while a retry is in flight.
+  - **Style**: `.checkout-error__retry` — pill-shaped button in error-palette tokens (error-100 bg 70%, error-200 border, error-700 text). Hover intensifies the bg and border. Focus-visible uses error-600 outline at 2px with --space-0-5 offset. All via semantic tokens, no hardcoded colors.
+  - **UX flow**:
+    1. User clicks Subscribe → `checkoutLoading` + `lastAttemptedTierId` set.
+    2. Request fails → catch sets `checkoutError`, clears `checkoutLoading`.
+    3. Error banner appears + scrolls into view (Pass 28).
+    4. User sees "Try again" button → clicks.
+    5. `handleCheckoutRetry()` calls `handleSubscribe()` again; button hides during loading.
+    6. Success → redirects. Failure → error persists, retry available.
+  - **Single-click recovery**: replaces the previous "scroll back to cards + click Subscribe" two-step recovery path. For users who hit transient errors (network blip, Stripe rate-limit, etc), the retry is right where they're already looking.
+
+  **Next pass prerequisite**: consider capping retries at ~3 before showing a "contact support" option — prevents thrashing on service-wide issues. Also: the retry button's loading state is implicit (Subscribe elsewhere handles spinner), but a user who clicks retry might wonder if anything happened. Could add a quick loading state on the retry button itself.

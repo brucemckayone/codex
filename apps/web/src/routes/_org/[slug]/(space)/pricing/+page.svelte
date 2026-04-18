@@ -31,6 +31,9 @@
   // ── Checkout Flow ─────────────────────────────────────────────────
   let checkoutLoading = $state<string | null>(null);
   let checkoutError = $state('');
+  // Remembered tier ID for the error banner's "Try again" action so the
+  // user can retry without scrolling back to the cards.
+  let lastAttemptedTierId = $state<string | null>(null);
   const restoredTierId = page.url.searchParams.get('tierId');
 
   // ── Feature Flag ──────────────────────────────────────────────────
@@ -161,6 +164,11 @@
     return hours % 1 === 0 ? `${Math.round(hours)}` : `${hours.toFixed(1)}`;
   }
 
+  function handleCheckoutRetry() {
+    const tier = tiers.find((t) => t.id === lastAttemptedTierId);
+    if (tier) handleSubscribe(tier);
+  }
+
   // ── Billing toggle radiogroup keyboard handling ──────────────────
   // ARIA radiogroup pattern: arrow keys navigate + select the adjacent radio.
   // Roving tabindex is set inline on each button so Tab only lands once on
@@ -185,6 +193,7 @@
       return;
     }
 
+    lastAttemptedTierId = tier.id;
     checkoutLoading = tier.id;
     checkoutError = '';
     try {
@@ -395,6 +404,15 @@
         <div class="checkout-error__body">
           <p class="checkout-error__title">Something went wrong</p>
           <p class="checkout-error__message">{checkoutError}</p>
+          {#if lastAttemptedTierId && !checkoutLoading}
+            <button
+              type="button"
+              class="checkout-error__retry"
+              onclick={handleCheckoutRetry}
+            >
+              Try again
+            </button>
+          {/if}
         </div>
         <button
           class="checkout-error__dismiss"
@@ -2284,6 +2302,35 @@
     line-height: var(--leading-snug);
     text-wrap: pretty;
     opacity: 0.9;
+  }
+
+  .checkout-error__retry {
+    align-self: flex-start;
+    margin-top: var(--space-2);
+    padding: var(--space-1-5, calc(var(--space-1) * 1.5)) var(--space-3);
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    letter-spacing: var(--tracking-tight);
+    color: var(--color-error-700);
+    background: color-mix(in srgb, var(--color-error-100) 70%, transparent);
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-error-200) 90%, transparent);
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    transition:
+      background-color var(--duration-normal) var(--ease-default),
+      border-color var(--duration-normal) var(--ease-default),
+      color var(--duration-normal) var(--ease-default);
+  }
+
+  .checkout-error__retry:hover {
+    background: color-mix(in srgb, var(--color-error-100) 95%, transparent);
+    border-color: var(--color-error-600);
+    color: var(--color-error-700);
+  }
+
+  .checkout-error__retry:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-error-600);
+    outline-offset: var(--space-0-5);
   }
 
   .checkout-error__dismiss {
