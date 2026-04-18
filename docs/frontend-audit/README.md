@@ -34,7 +34,7 @@ One section per `/loop` firing. Tick the box and link the report when done.
 - [x] 08. Platform discover — `(platform)/discover/` → [08-platform-discover.md](08-platform-discover.md)
 - [x] 09. Platform library — `(platform)/library/` → [09-platform-library.md](09-platform-library.md)
 - [x] 10. Platform account — `(platform)/account/` → [10-platform-account.md](10-platform-account.md)
-- [ ] 11. Platform pricing — `(platform)/pricing/`
+- [x] 11. Platform pricing — `(platform)/pricing/` → [11-platform-pricing.md](11-platform-pricing.md)
 - [ ] 12. Platform about & become-creator — static marketing
 - [ ] 13. Org landing — `_org/[slug]/(space)/+page.svelte`
 - [ ] 14. Org content detail & player — `_org/[slug]/(space)/content/[slug]/`
