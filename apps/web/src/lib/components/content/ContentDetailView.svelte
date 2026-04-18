@@ -26,9 +26,14 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { page } from '$app/state';
+  import { browser } from '$app/environment';
   import * as m from '$paraglide/messages';
-  import VideoPlayer from '$lib/components/VideoPlayer/VideoPlayer.svelte';
-  import { AudioPlayer } from '$lib/components/AudioPlayer';
+  // PreviewPlayer must stay statically imported: it imports from
+  // $lib/remote/checkout.remote, and SvelteKit's experimental remote
+  // functions plugin can't resolve *.remote.ts through a dynamic
+  // import boundary (Expected to find metadata for remote file).
+  // VideoPlayer and AudioPlayer are heavy but don't touch remote
+  // files, so they're dynamically loaded further down.
   import { PreviewPlayer, deriveAccessState } from '$lib/components/player';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { formatPrice, formatDurationHuman } from '$lib/utils/format';
@@ -167,6 +172,36 @@
       .slice(0, 4)
   );
 
+  // ── Lazy-loaded player components ──────────────────────────────
+  // VideoPlayer (+ media-chrome + HLS) and AudioPlayer are loaded only
+  // when their content type is shown. Written-article content pages
+  // ship neither. Saves significant JS on the critical path for
+  // non-AV content.
+  //
+  // PreviewPlayer is NOT lazy-loaded — it imports from
+  // $lib/remote/checkout.remote, and SvelteKit's experimental remote
+  // functions plugin can't resolve *.remote.ts through a dynamic
+  // import boundary. It stays statically imported above.
+  type VideoPlayerModule = typeof import('$lib/components/VideoPlayer/VideoPlayer.svelte').default;
+  type AudioPlayerModule = typeof import('$lib/components/AudioPlayer').AudioPlayer;
+
+  let VideoPlayer = $state<VideoPlayerModule | null>(null);
+  let AudioPlayer = $state<AudioPlayerModule | null>(null);
+
+  $effect(() => {
+    if (!browser) return;
+    if (content.contentType === 'video' && !VideoPlayer) {
+      void import('$lib/components/VideoPlayer/VideoPlayer.svelte').then(
+        (mod) => { VideoPlayer = mod.default; }
+      );
+    }
+    if (content.contentType === 'audio' && !AudioPlayer) {
+      void import('$lib/components/AudioPlayer').then(
+        (mod) => { AudioPlayer = mod.AudioPlayer; }
+      );
+    }
+  });
+
   // ── SEO ─────────────────────────────────────────────────────────
   // Canonical URL — stable across query params (streaming URLs,
   // session IDs etc should not affect the canonical identity).
@@ -272,14 +307,20 @@
   {#if content.contentType === 'video'}
   <div class="content-detail__player" class:content-detail__player--cinema={cinemaMode} data-content-type="video">
     {#if hasAccess && streamingUrl}
-      <VideoPlayer
-        src={streamingUrl}
-        contentId={content.id}
-        initialProgress={progress?.positionSeconds ?? 0}
-        poster={thumbnailUrl}
-        {cinemaMode}
-        oncinemachange={(v) => (cinemaMode = v)}
-      />
+      {#if VideoPlayer}
+        <VideoPlayer
+          src={streamingUrl}
+          contentId={content.id}
+          initialProgress={progress?.positionSeconds ?? 0}
+          poster={thumbnailUrl}
+          {cinemaMode}
+          oncinemachange={(v) => (cinemaMode = v)}
+        />
+      {:else}
+        <div class="content-detail__player-skeleton">
+          <div class="skeleton skeleton--player"></div>
+        </div>
+      {/if}
     {:else if previewUrl && accessState.status === 'preview'}
       <svelte:boundary>
         <PreviewPlayer
@@ -366,15 +407,21 @@
     {#if content.contentType === 'audio'}
       <div class="content-detail__player content-detail__player--audio" data-content-type="audio">
         {#if hasAccess && streamingUrl}
-          <AudioPlayer
-            src={streamingUrl}
-            contentId={content.id}
-            initialProgress={progress?.positionSeconds ?? 0}
-            waveformUrl={waveformUrl}
-            poster={thumbnailUrl}
-            title={content.title}
-            shaderPreset={content.shaderPreset ?? null}
-          />
+          {#if AudioPlayer}
+            <AudioPlayer
+              src={streamingUrl}
+              contentId={content.id}
+              initialProgress={progress?.positionSeconds ?? 0}
+              waveformUrl={waveformUrl}
+              poster={thumbnailUrl}
+              title={content.title}
+              shaderPreset={content.shaderPreset ?? null}
+            />
+          {:else}
+            <div class="audio-player-skeleton">
+              <div class="skeleton skeleton--audio"></div>
+            </div>
+          {/if}
         {:else if accessLoading}
           <div class="audio-player-skeleton">
             <div class="skeleton skeleton--audio"></div>
