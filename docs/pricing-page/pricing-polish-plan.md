@@ -79,7 +79,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 30 | **Retry button loading feedback** — button stays visible while retry is in flight, with "Retrying…" label, disabled state, and `cursor: progress` | ✅ done | Commit on 2026-04-18 |
 | 31 | **prefers-reduced-transparency support** — a11y: respect users who disable OS-wide transparency/glassmorphism via solid-surface fallback | ✅ done | Commit on 2026-04-18 |
 | 32 | **Trust strip icon differentiation** — swapped to Clock/Lock/CheckCircle (three distinct shapes) instead of two check-variants + lock | ✅ done | Commit on 2026-04-18 |
-| 33+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 33 | **Trust strip list semantics** — `role="list"` + `role="listitem"` + `aria-label` so screen readers announce as a cohesive list of guarantees | ✅ done | Commit on 2026-04-18 |
+| 34+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -527,3 +528,11 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Result**: trust strip now has three visually distinct shapes — circle-with-hands, lock-body-shackle, circle-with-check. Users can parse the row at a glance instead of seeing "two similar things and a lock".
 
   **Next pass prerequisite**: visually confirm on light and dark mode orgs that all three new icons render cleanly inside the `--space-5` tinted circles. ClockIcon may have thinner strokes than the others — if it looks under-weighted at small sizes, bump to size={15} or similar. Also: consider semantic alt for the trust strip — currently icons are `aria-hidden="true"` and labels are text only; fine for most SRs but could add an outer `role="list"` to the `.trust__signals` container.
+
+- **2026-04-18 Pass 33 (Trust strip list semantics)**: Closed the pending a11y improvement from Pass 32. Added `role="list"` + `aria-label="Membership guarantees"` to `.trust__signals` and `role="listitem"` to each `.trust__signal`. The `.trust__dot` separators retain `aria-hidden="true"` so they're ignored by screen readers.
+  - **Screen reader impact**: was "Cancel anytime. Secure checkout. Instant access." (three independent labels). Now: "Membership guarantees list, 3 items: Cancel anytime. Secure checkout. Instant access." Users get explicit structural context — they know these are related, they're a finite list, and they're about membership guarantees.
+  - **Why not `<ul><li>`**: the dot separators are interleaved between signals. Converting to `<ul>` would require either nesting each signal+dot in `<li>` (semantically wrong), or moving dots to `::before`/`::after` pseudo-elements (loses the `aria-hidden` dot's simplicity). ARIA roles on divs/spans give the same SR experience without fighting the layout.
+  - **Lighthouse result**: Accessibility **100**, 36 passed (up from 34), 0 failures. Two new passable audits surfaced: `list` (all list children have correct role) and `listitem` (all listitems inside a valid list parent). A11y baseline strengthens.
+  - **Unchanged for mouse/keyboard users**: roles are SR-only semantics. Visual layout, focus behavior, and click targets are identical.
+
+  **Next pass prerequisite**: consider similar semantic upgrades elsewhere — `.card__features` is already `<ul><li>` (correct). `.preview__categories` is `<ul><li>` (correct). `.preview__stats` is three `.preview__stat` divs — could also benefit from list roles for SR clarity. And the billing toggle's inner savings pill — aria-label or sr-only text for "Save 20%" context?
