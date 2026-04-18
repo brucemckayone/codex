@@ -90,7 +90,7 @@
     font-weight: var(--font-medium);
     border: none;
     white-space: nowrap;
-    height: var(--space-9);
+    height: var(--space-10);
   }
 
   .shape-level__preview-card {

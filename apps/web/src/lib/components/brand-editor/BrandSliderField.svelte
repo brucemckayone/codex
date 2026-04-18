@@ -44,6 +44,14 @@
     ariaValueText,
     oninput,
   }: Props = $props();
+
+  // Build aria-describedby from any hint ids that are actually rendered.
+  // Empty string → attribute omitted on the input (Svelte treats '' as absent for aria-*).
+  const describedBy = $derived(
+    [minLabel ? `${id}-min-hint` : '', maxLabel ? `${id}-max-hint` : '']
+      .filter(Boolean)
+      .join(' ') || undefined
+  );
 </script>
 
 <div class="slider-field">
@@ -53,7 +61,7 @@
   </label>
   <div class="slider-field__range-row">
     {#if minLabel}
-      <span class="slider-field__hint">{minLabel}</span>
+      <span id="{id}-min-hint" class="slider-field__hint">{minLabel}</span>
     {/if}
     <input
       {id}
@@ -65,9 +73,10 @@
       {oninput}
       class="slider-field__slider"
       aria-valuetext={ariaValueText}
+      aria-describedby={describedBy}
     />
     {#if maxLabel}
-      <span class="slider-field__hint slider-field__hint--end">{maxLabel}</span>
+      <span id="{id}-max-hint" class="slider-field__hint slider-field__hint--end">{maxLabel}</span>
     {/if}
   </div>
 </div>
@@ -114,5 +123,11 @@
   .slider-field__slider {
     flex: 1;
     accent-color: var(--color-interactive);
+  }
+
+  .slider-field__slider:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
   }
 </style>

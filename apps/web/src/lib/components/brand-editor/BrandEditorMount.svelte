@@ -17,6 +17,7 @@
   import { brandEditor } from '$lib/brand-editor';
   import { updateBrandingCommand } from '$lib/remote/branding.remote';
   import { toast } from '$lib/components/ui/Toast/toast-store';
+  import ConfirmDialog from '$lib/components/ui/Feedback/ConfirmDialog.svelte';
   import BrandEditorPanel from './BrandEditorPanel.svelte';
   import BrandEditorHeader from './BrandEditorHeader.svelte';
   import BrandEditorFooter from './BrandEditorFooter.svelte';
@@ -34,6 +35,7 @@
   import BrandEditorHeaderLayout from './levels/BrandEditorHeaderLayout.svelte';
 
   let saving = $state(false);
+  let discardDialogOpen = $state(false);
 
   async function handleSave() {
     const payload = brandEditor.getSavePayload();
@@ -44,6 +46,11 @@
       const overrides = payload.tokenOverrides ?? {};
       const hasOverrides = Object.keys(overrides).length > 0;
 
+      // tokenOverrides JSON is the single source of truth for fine-tune fields.
+      // The broken-out columns (textColorHex, shadowScale, etc.) still exist on
+      // the DB row and are read by the layout for backward compatibility with
+      // pre-JSON rows, but we no longer double-write them here — the JSON blob
+      // is authoritative for new saves (iter-04 Codex-2nl7).
       await updateBrandingCommand({
         orgId: brandEditor.orgId,
         primaryColorHex: payload.primaryColor,
@@ -55,12 +62,6 @@
         radiusValue: payload.radius,
         densityValue: payload.density,
         tokenOverrides: hasOverrides ? JSON.stringify(overrides) : '',
-        textColorHex: overrides['text'] ?? '',
-        shadowScale: overrides['shadow-scale'] ?? '',
-        shadowColor: overrides['shadow-color'] ?? '',
-        textScale: overrides['text-scale'] ?? '',
-        headingWeight: overrides['heading-weight'] ?? '',
-        bodyWeight: overrides['body-weight'] ?? '',
         darkModeOverrides: payload.darkOverrides ? JSON.stringify(payload.darkOverrides) : '',
         heroLayout: payload.heroLayout as
           | 'default' | 'split' | 'centered' | 'logo-hero' | 'minimal'
@@ -77,9 +78,18 @@
 
   function handleEditorClose() {
     if (brandEditor.isDirty) {
-      if (!confirm('You have unsaved brand changes. Discard?')) return;
-      brandEditor.discard();
+      discardDialogOpen = true;
+      return;
     }
+    finishClose();
+  }
+
+  function confirmDiscard() {
+    brandEditor.discard();
+    finishClose();
+  }
+
+  function finishClose() {
     brandEditor.close();
     const url = new URL(page.url);
     url.searchParams.delete('brandEditor');
@@ -122,3 +132,13 @@
     <BrandEditorFooter onsave={handleSave} {saving} />
   {/snippet}
 </BrandEditorPanel>
+
+<ConfirmDialog
+  bind:open={discardDialogOpen}
+  title="Discard unsaved changes?"
+  description="You have unsaved brand changes. Closing the editor now will discard them."
+  confirmText="Discard"
+  cancelText="Keep editing"
+  variant="destructive"
+  onConfirm={confirmDiscard}
+/>
