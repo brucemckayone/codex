@@ -975,6 +975,12 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-8);
+    /* Contributors section is far below the fold. content-visibility: auto
+       lets the browser skip its render/paint until it's scrolled near.
+       contain-intrinsic-size reserves realistic space so the scroll bar
+       and page layout stay stable. HTML remains in the DOM for SEO. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 400px;
   }
 
   /* ══════════════════════════════════════════
@@ -995,6 +1001,12 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-5);
+    /* Below-fold feed sections skip render/paint until scroll brings
+       them into range. HTML stays in DOM for SEO; visual rendering
+       is deferred. Size hint matches typical lede + carousel height
+       so the scroll bar and layout stay stable before first paint. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 600px;
   }
 
   .feed-section--catalogue {

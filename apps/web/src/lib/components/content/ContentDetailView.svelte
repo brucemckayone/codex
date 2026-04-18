@@ -1039,6 +1039,11 @@
     margin-top: var(--space-8);
     padding-top: var(--space-6);
     border-top: var(--border-width) var(--border-style) var(--color-border);
+    /* Related content is far below the fold — defer render/paint until
+       it scrolls near. Size hint reserves layout space so scrolling
+       doesn't jump when the browser starts painting. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 500px;
   }
 
   .content-detail__related-heading {
