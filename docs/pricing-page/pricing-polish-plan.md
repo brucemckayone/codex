@@ -81,7 +81,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 32 | **Trust strip icon differentiation** — swapped to Clock/Lock/CheckCircle (three distinct shapes) instead of two check-variants + lock | ✅ done | Commit on 2026-04-18 |
 | 33 | **Trust strip list semantics** — `role="list"` + `role="listitem"` + `aria-label` so screen readers announce as a cohesive list of guarantees | ✅ done | Commit on 2026-04-18 |
 | 34 | **Preview stats list semantics** — `role="list"` + `role="listitem"` + `aria-label="Library at a glance"` on the stat row | ✅ done | Commit on 2026-04-18 |
-| 35+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 35 | **Hero title clamp bumped** — +8px max at desktop (72→80px) after side-by-side comparison with landing's 128px hero | ✅ done | Commit on 2026-04-18 |
+| 36+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -544,3 +545,14 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Lighthouse**: 100/100/100 maintained, 36 passed (same count — list audit already scored a pass from Pass 33's trust strip).
 
   **Next pass prerequisite**: final design-language comparison pass against the landing page. Walk through both pages side-by-side and catch any remaining divergence. Candidates: hero typography cadence, section lede consistency, motion timing rhythm.
+
+- **2026-04-18 Pass 35 (Hero title lift + design-language comparison)**: Did the side-by-side comparison with the landing hero at the same brand (studio-alpha).
+  - **Findings**:
+    - Landing hero: title "Studio Alpha" at ~130px (clamp 3.5rem-8rem, 8vw mid), bottom-left anchored, full-viewport. Dramatic first-impression design.
+    - Pricing hero: title "Pricing" at 72px (clamp 2.5rem-4.5rem), centered, compact 391px hero. Functional page-header design.
+    - Both use the same rose brand color, same eyebrow+rule+title lede pattern, same design tokens. Differences are appropriate per-context.
+  - **Conclusion**: design-language consistency validated. The one remaining micro-divergence was in hero title scale.
+  - **Adjustment**: bumped `.pricing-hero__title` clamp from `clamp(2.5rem, 4vw + 1rem, 4.5rem)` → `clamp(2.75rem, 4.5vw + 1rem, 5rem)`. Title now renders 80px at desktop 1440 (was 72), 44px min mobile (was 40). +8px desktop, +4px mobile. Closer to landing's gravity without matching its full drama.
+  - **Verified**: 80px confirmed at 1440×900. Title still respects max-width 18ch + text-wrap balance for elegant line breaking.
+
+  **Next pass prerequisite**: test at ultra-wide (2560+) to see if the 5rem cap engages correctly. Also consider whether `.pricing-hero__subtitle` should also get a tiny bump for hierarchy preservation (currently `--text-xl` caps around 24px; with title at 80px the 3.3x ratio still reads well, but at larger titles it may need proportional scaling).

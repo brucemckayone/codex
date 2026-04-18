@@ -850,7 +850,7 @@
 
   .pricing-hero__title {
     font-family: var(--font-heading);
-    font-size: clamp(2.5rem, 4vw + 1rem, 4.5rem);
+    font-size: clamp(2.75rem, 4.5vw + 1rem, 5rem);
     font-weight: var(--font-bold);
     line-height: var(--leading-none);
     letter-spacing: var(--tracking-tighter);
