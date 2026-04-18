@@ -76,7 +76,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 27 | **Preview stats typography + categories cap** — bumped stat-number clamp to 2.75rem max (from 2.5rem), capped categories slice at 6 (was 8) | ✅ done | Commit on 2026-04-18 |
 | 28 | **Sticky Subscribe loading state + checkout-error scroll-into-view** — sticky Button was missing `loading` prop; error banner invisible when user clicks sticky from bottom of page | ✅ done | Commit on 2026-04-18 |
 | 29 | **Checkout error retry button** — "Try again" affordance inside the error banner so users don't have to scroll back to the tier cards to retry | ✅ done | Commit on 2026-04-18 |
-| 30+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 30 | **Retry button loading feedback** — button stays visible while retry is in flight, with "Retrying…" label, disabled state, and `cursor: progress` | ✅ done | Commit on 2026-04-18 |
+| 31+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -495,3 +496,11 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Single-click recovery**: replaces the previous "scroll back to cards + click Subscribe" two-step recovery path. For users who hit transient errors (network blip, Stripe rate-limit, etc), the retry is right where they're already looking.
 
   **Next pass prerequisite**: consider capping retries at ~3 before showing a "contact support" option — prevents thrashing on service-wide issues. Also: the retry button's loading state is implicit (Subscribe elsewhere handles spinner), but a user who clicks retry might wonder if anything happened. Could add a quick loading state on the retry button itself.
+
+- **2026-04-18 Pass 30 (Retry button loading feedback)**: Addressed Pass 29's "the retry button's loading state is implicit" concern. Previously the retry button hid during `checkoutLoading` — user clicked, button vanished, the Subscribe button's loading state appeared somewhere else on the page (tier card or sticky). User eye stayed on the error banner and saw nothing, wondering if the click registered.
+  - **Template change**: removed `!checkoutLoading` from the `{#if}` guard. Button now stays rendered throughout the retry. Label swaps: `Try again` → `Retrying…` when loading. `disabled={checkoutLoading !== null}` prevents double-submission.
+  - **Style change**: `.checkout-error__retry:hover` → `:hover:not(:disabled)` so disabled state doesn't show the hover intensity. Added `.checkout-error__retry:disabled { cursor: progress; opacity: var(--opacity-70, 0.7) }` — user's cursor visibly changes to "in progress" over the button.
+  - **UX flow now**: click retry → label flips to "Retrying…" + opacity drops to 0.7 + cursor becomes progress-wait. Immediate feedback at the exact spot the user is looking.
+  - **Accessibility**: `disabled` attribute is announced by screen readers as "dimmed" or "unavailable" depending on SR. The label change from "Try again" → "Retrying…" announces as a state update. Full feedback chain regardless of visual modality.
+
+  **Next pass prerequisite**: now the retry UX is good for single retries. Consider capping at 3 consecutive failures before showing a "Contact support" link — prevents users stuck in a retry loop if the service is broken. Implementation: track `retryCount` state, reset on success; after 3 fails show different secondary action.

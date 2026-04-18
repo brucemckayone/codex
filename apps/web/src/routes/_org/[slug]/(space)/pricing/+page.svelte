@@ -404,13 +404,14 @@
         <div class="checkout-error__body">
           <p class="checkout-error__title">Something went wrong</p>
           <p class="checkout-error__message">{checkoutError}</p>
-          {#if lastAttemptedTierId && !checkoutLoading}
+          {#if lastAttemptedTierId}
             <button
               type="button"
               class="checkout-error__retry"
               onclick={handleCheckoutRetry}
+              disabled={checkoutLoading !== null}
             >
-              Try again
+              {checkoutLoading !== null ? 'Retrying…' : 'Try again'}
             </button>
           {/if}
         </div>
@@ -2322,7 +2323,7 @@
       color var(--duration-normal) var(--ease-default);
   }
 
-  .checkout-error__retry:hover {
+  .checkout-error__retry:hover:not(:disabled) {
     background: color-mix(in srgb, var(--color-error-100) 95%, transparent);
     border-color: var(--color-error-600);
     color: var(--color-error-700);
@@ -2331,6 +2332,11 @@
   .checkout-error__retry:focus-visible {
     outline: var(--border-width-thick) solid var(--color-error-600);
     outline-offset: var(--space-0-5);
+  }
+
+  .checkout-error__retry:disabled {
+    cursor: progress;
+    opacity: var(--opacity-70, 0.7);
   }
 
   .checkout-error__dismiss {
