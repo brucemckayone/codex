@@ -4,6 +4,11 @@
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Declare support for both light and dark UA styles so scrollbars,
+         form controls, and the address bar render in the user's preferred
+         scheme before CSS paints. Prevents a brief flash of default light
+         scrollbar on dark theme in Chromium browsers. -->
+    <meta name="color-scheme" content="light dark" />
     <script>
       // Polyfill crypto.randomUUID for non-secure contexts (HTTP on lvh.me dev)
       if (typeof crypto !== 'undefined' && !crypto.randomUUID) {

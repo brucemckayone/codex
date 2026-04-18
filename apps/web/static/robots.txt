@@ -1,4 +1,13 @@
 User-agent: *
 Allow: /
 
+# Protected / non-public paths — don't waste crawl budget here.
+# Per-page robots meta noindex also covers additional cases (search
+# result URLs with ?q=, library, checkout success, etc).
+Disallow: /api/
+Disallow: /logout
+Disallow: /unsubscribe/
+Disallow: /studio/
+Disallow: /checkout/
+
 Sitemap: https://revelations.io/sitemap.xml
