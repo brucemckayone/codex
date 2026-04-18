@@ -53,13 +53,27 @@ function handleVisibilityChange(): void {
 }
 
 /**
- * Handle before unload
+ * Handle page hide
  *
- * Uses navigator.sendBeacon() for reliable delivery during page unload.
- * sendBeacon is fire-and-forget and guaranteed to be queued by the browser
- * even as the page terminates, unlike async fetch which may be cancelled.
+ * Uses `pagehide` rather than `beforeunload` — critical for enabling
+ * the browser back/forward cache (bfcache). Chrome/Safari skip bfcache
+ * entirely if ANY beforeunload listener is registered, even an empty
+ * one. `pagehide` fires on both real unload AND bfcache entry, and does
+ * not prevent bfcache. The `persisted` flag tells us which case we're
+ * in: when true, the page is going into bfcache (will return) so skip
+ * the sync; when false, it's a real navigation/close so sendBeacon fires.
+ *
+ * Uses navigator.sendBeacon() for reliable delivery during real unload.
+ * sendBeacon is fire-and-forget and guaranteed to be queued by the
+ * browser even as the page terminates, unlike async fetch which may
+ * be cancelled.
  */
-function handleBeforeUnload(): void {
+function handlePageHide(event: PageTransitionEvent): void {
+  // Don't sync when entering bfcache — the page isn't unloading, it's
+  // being preserved. When the user navigates back, we'll still have the
+  // progress data; the next visibilitychange will sync if needed.
+  if (event.persisted) return;
+
   const unsynced = getUnsyncedProgress();
   if (unsynced.length === 0) return;
 
@@ -115,8 +129,9 @@ export function initProgressSync(userId: string): void {
   // Listen for visibility changes
   document.addEventListener('visibilitychange', handleVisibilityChange);
 
-  // Listen for page unload
-  window.addEventListener('beforeunload', handleBeforeUnload);
+  // Listen for page hide (real unload OR bfcache entry). Using
+  // `pagehide` instead of `beforeunload` keeps bfcache enabled.
+  window.addEventListener('pagehide', handlePageHide);
 
   // Start syncing — progress will sync on first interval tick (2 min),
   // visibility change, or beforeunload. No immediate sync needed on init.
@@ -132,7 +147,7 @@ export function cleanupProgressSync(): void {
   if (!browser) return;
 
   document.removeEventListener('visibilitychange', handleVisibilityChange);
-  window.removeEventListener('beforeunload', handleBeforeUnload);
+  window.removeEventListener('pagehide', handlePageHide);
   stopSync();
   initializedForUser = null;
 }

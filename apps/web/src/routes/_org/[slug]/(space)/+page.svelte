@@ -378,11 +378,17 @@
       aria-label="Browse by category"
     >
       <div class="category-bar__inner">
-        <div class="category-pills__row" role="list">
+        <!-- The parent <nav aria-label="Browse by category"> already
+             provides semantic structure. `role="list"` on a div forces a
+             required child `role="listitem"` on each child — but listitem
+             is a non-interactive role incompatible with <a> (Lighthouse
+             ARIA audit flags this). Dropping both roles lets the anchors
+             announce as links inside a navigation landmark, which is
+             correct semantics without the conflict. -->
+        <div class="category-pills__row">
           <a href="/explore" class="category-pills__pill category-pills__pill--all">All</a>
           {#each stats?.categories ?? [] as category}
             <a
-              role="listitem"
               href="/explore?category={encodeURIComponent(category)}"
               class="category-pills__pill"
             >
