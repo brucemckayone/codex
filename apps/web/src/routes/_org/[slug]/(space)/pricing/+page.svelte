@@ -198,6 +198,14 @@
       checkoutError =
         err instanceof Error ? err.message : m.subscription_checkout_error();
       checkoutLoading = null;
+      // Scroll the error into view — the banner renders near the top of the
+      // page, but the user may have clicked Subscribe from the sticky CTA
+      // when scrolled near the bottom. Without this scroll, the error is
+      // invisible.
+      await tick();
+      document
+        .querySelector('.checkout-error')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }
 
@@ -666,7 +674,10 @@
           </span>
         {/if}
       </div>
-      <Button onclick={() => handleSubscribe(recommendedTier)}>
+      <Button
+        onclick={() => handleSubscribe(recommendedTier)}
+        loading={checkoutLoading === recommendedTier.id}
+      >
         {m.pricing_subscribe()}
       </Button>
       {#if !isMobile}

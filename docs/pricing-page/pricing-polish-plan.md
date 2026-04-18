@@ -74,7 +74,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 25 | **Preview hero tile title** — hero tile now shows one concrete content title as an anchor while supporting tiles stay as teaser blurs | ✅ done | Commit on 2026-04-18 |
 | 26 | **Mobile sticky-behind-nav bug** — caught via screenshot: sticky CTA completely obscured by MobileBottomNav on mobile (same z-index, DOM order tied). Fixed with `bottom: --space-16` offset on mobile + page padding-bottom expansion | ✅ done | Commit on 2026-04-18 |
 | 27 | **Preview stats typography + categories cap** — bumped stat-number clamp to 2.75rem max (from 2.5rem), capped categories slice at 6 (was 8) | ✅ done | Commit on 2026-04-18 |
-| 28+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 28 | **Sticky Subscribe loading state + checkout-error scroll-into-view** — sticky Button was missing `loading` prop; error banner invisible when user clicks sticky from bottom of page | ✅ done | Commit on 2026-04-18 |
+| 29+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -470,3 +471,10 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Verified**: stat numbers render at 44px font-size on 1440×900 desktop. Pill count for studio-alpha is 2 (Tutorials, Podcasts) so slice change is transparent there, but orgs with 7-8 categories now crop to 6.
 
   **Next pass prerequisite**: consider a "+N more" indicator after the 6 categories when more exist (via `stats.categories.length > 6`). Adds variety signal without cluttering. But only matters for multi-category orgs — `of-blood-and-bones` has 1, studio-alpha has 2, so the current cap is untested against real high-N data.
+
+- **2026-04-18 Pass 28 (Sticky loading state + error scroll-into-view)**: Two conversion-critical gaps in the sticky-Subscribe flow caught by careful UX review:
+  - **Gap 1 — missing `loading` prop on sticky Button**: tier card Subscribe buttons pass `loading={checkoutLoading === tier.id}` so the user sees a spinner while Stripe creates the checkout session. The sticky Button had no such prop — user clicked, got no feedback, wondered if anything happened. Added `loading={checkoutLoading === recommendedTier.id}`. Now the sticky shows the spinner during checkout-session creation too.
+  - **Gap 2 — error banner invisible from scrolled-down sticky click**: the `.checkout-error` banner renders near the top of `.pricing-page` (just above the tier cards). If a user clicks Subscribe from the sticky while scrolled near the bottom of the page and checkout fails, the error renders 1500+ pixels above their viewport — effectively invisible. User sees sticky unload its loading state with no other feedback = confusing. Added `await tick(); document.querySelector('.checkout-error')?.scrollIntoView({ behavior: 'smooth', block: 'center' })` inside the catch block. On error, page scrolls smoothly to center the error in the viewport so the user always sees it.
+  - **Why this matters**: users who click from the sticky are by definition already invested enough to have scrolled past the tier cards. Losing them at the final Subscribe-click-error moment is the highest-cost conversion leak. Loading state acknowledges their click; scroll-to-error ensures they understand what happened.
+
+  **Next pass prerequisite**: consider adding a retry affordance on the checkout-error banner itself (a "Try again" button that re-runs `handleSubscribe(recommendedTier)` or the last-attempted tier). Also: the error banner currently dismisses via X, but doesn't auto-dismiss. That's fine — user-controlled dismissal is respectful. But consider if errors persist too long in the UI, maybe a 10s auto-dismiss.
