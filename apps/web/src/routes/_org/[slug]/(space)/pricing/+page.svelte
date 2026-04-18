@@ -354,12 +354,12 @@
     />
   {:else}
     <!-- ═══ HERO ═══ -->
-    <section class="pricing-hero">
+    <section class="pricing-hero" aria-labelledby="pricing-hero-title">
       <div class="pricing-hero__backdrop" aria-hidden="true"></div>
       <header class="pricing-hero__lede">
         <p class="pricing-hero__eyebrow">Membership</p>
         <span class="pricing-hero__rule" aria-hidden="true"></span>
-        <h1 class="pricing-hero__title">
+        <h1 id="pricing-hero-title" class="pricing-hero__title">
           {m.subscription_pricing_title()}
         </h1>
         <p class="pricing-hero__subtitle">
@@ -578,11 +578,11 @@
       {#if (items?.length ?? 0) > 0}
         {@const tiles = withThumbs.slice(0, 4)}
         {@const spreadVariant = tiles.length === 1 ? 'solo' : tiles.length === 2 ? 'pair' : tiles.length === 3 ? 'trio' : 'magazine'}
-        <section class="preview reveal" data-reveal>
+        <section class="preview reveal" data-reveal aria-labelledby="preview-title">
           <header class="preview__lede">
             <p class="preview__eyebrow">Inside the library</p>
             <span class="preview__rule" aria-hidden="true"></span>
-            <h2 class="preview__title">A catalogue you'll never finish.</h2>
+            <h2 id="preview-title" class="preview__title">A catalogue you'll never finish.</h2>
             <p class="preview__subtitle">
               Video, audio, and writing from every creator — included with every membership.
             </p>
@@ -650,11 +650,11 @@
     {/await}
 
     <!-- ═══ FAQ ═══ -->
-    <section class="faq reveal" data-reveal>
+    <section class="faq reveal" data-reveal aria-labelledby="faq-title">
       <header class="faq__lede">
         <p class="faq__eyebrow">Before you subscribe</p>
         <span class="faq__rule" aria-hidden="true"></span>
-        <h2 class="faq__title">Questions, answered.</h2>
+        <h2 id="faq-title" class="faq__title">Questions, answered.</h2>
         <p class="faq__subtitle">
           The questions we hear most — answered straight.
         </p>

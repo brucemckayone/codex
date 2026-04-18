@@ -86,7 +86,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 37 | **Checkout error ARIA clarify** — removed redundant `aria-live="polite"` (conflicted with role="alert"'s implicit assertive), letting the urgency match the user's active-waiting state | ✅ done | Commit on 2026-04-18 |
 | 38 | **Retry count cap + escalation helper** — after 3 failed retries, show "refresh or try a different browser" note; counter resets on fresh tier, success, or dismiss | ✅ done | Commit on 2026-04-18 |
 | 39 | **Section labels + tier-specific Subscribe button names** — `aria-label="Subscription plans"` on tier-stage section; Subscribe buttons now say "Subscribe to {tier.name}" for SR users | ✅ done | Commit on 2026-04-18 |
-| 40+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 40 | **Explicit aria-labelledby on landmark sections** — hero / preview / faq sections now explicitly named by their headings for SR landmark navigation | ✅ done | Commit on 2026-04-18 |
+| 41+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -612,3 +613,15 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Lighthouse**: 100/100/100 maintained, 36 passed, 0 failed. SR audits stable.
 
   **Next pass prerequisite**: consider whether each `<section>` with a visible heading should also get explicit `aria-labelledby="{heading-id}"`. Currently implicit via heading proximity — may work fine, but explicit is more robust against reordering. Low-priority bikeshed.
+
+- **2026-04-18 Pass 40 (Explicit aria-labelledby on landmark sections)**: Addressed the open bikeshed from Pass 39's note. Added explicit `aria-labelledby` to the three `<section>` elements that have visible headings, pairing with `id` on the heading.
+  - `.pricing-hero` → `aria-labelledby="pricing-hero-title"` + `<h1 id="pricing-hero-title" class="pricing-hero__title">`
+  - `.preview` → `aria-labelledby="preview-title"` + `<h2 id="preview-title" class="preview__title">`
+  - `.faq` → `aria-labelledby="faq-title"` + `<h2 id="faq-title" class="faq__title">`
+  - `.tier-stage` kept its `aria-label="Subscription plans"` from Pass 39 (no visible heading).
+  - `.trust` is a `<footer>` not a `<section>` — landmarks have different naming rules for footer; no change needed.
+  - **Why explicit over implicit**: HTML spec says `<section>` without an accessible name is NOT announced as a landmark. SRs usually implicitly name a section from a child heading, but this isn't guaranteed across implementations. Explicit `aria-labelledby` makes every section a proper named landmark that SR users can navigate to via landmark shortcuts.
+  - **Lighthouse**: 100/100/100, 36 passed, 0 failed. SR landmark navigation now robust — every named section shows up in the landmark list.
+  - **Naming convention**: `{section-class}-title` pattern (`pricing-hero-title`, `preview-title`, `faq-title`). Consistent, scoped to the page, unlikely to collide with anything else on the site.
+
+  **Next pass prerequisite**: the page is at 40 passes now. Remaining meaningful polish is extremely edge-case. Consider declaring the loop complete at this natural milestone, or continuing with real-device iOS safe-area testing + lavender-brand contrast verification. The page has Lighthouse 100/100/100, comprehensive ARIA semantics, error recovery, mobile + ultra-wide + dark + light mode all verified. Genuinely ship-ready.
