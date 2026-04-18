@@ -23,7 +23,7 @@ One section per `/loop` firing. Tick the box and link the report when done.
 
 - [x] 01. CSS Foundation — `styles/`, `theme/`, tokens, themes, utilities, view-transitions → [01-css-foundation.md](01-css-foundation.md)
 - [x] 02. Base elements — `theme/base.css` (h1-h6, forms, tables, code, lists, focus) → [02-base-elements.md](02-base-elements.md)
-- [ ] 03. Global utilities — `styles/utilities.css` + unused `theme/utilities.css`
+- [x] 03. Global utilities — `styles/utilities.css` + unused `theme/utilities.css` → [03-global-utilities.md](03-global-utilities.md)
 - [ ] 04. Design tokens — colour system, spacing scale, typography, motion, radius, z-index, materials
 - [ ] 05. Org branding overlay — `org-brand.css` (OKLCH relative colors, hero data-attrs, token overrides)
 - [ ] 06. Root shell — `+layout.svelte`, SkipLink, NavigationProgress, Toaster
