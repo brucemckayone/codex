@@ -581,7 +581,7 @@
 
               {#if (stats?.categories?.length ?? 0) > 1}
                 <ul class="preview__categories" aria-label="Topics">
-                  {#each stats.categories.slice(0, 8) as cat}
+                  {#each stats.categories.slice(0, 6) as cat}
                     <li>{cat}</li>
                   {/each}
                 </ul>
@@ -1714,7 +1714,7 @@
 
   .preview__stat-number {
     font-family: var(--font-heading);
-    font-size: clamp(1.75rem, 2vw + 1rem, 2.5rem);
+    font-size: clamp(2rem, 2.2vw + 1rem, 2.75rem);
     font-weight: var(--font-bold);
     color: var(--color-text);
     line-height: var(--leading-none);

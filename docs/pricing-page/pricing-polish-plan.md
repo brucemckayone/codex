@@ -73,7 +73,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 24 | **Preview CTA hierarchy check + single-pill suppression** — verified Pass 23 bump doesn't compete with tier CTAs; hid the categories strip when only 1 category (isolated pill → visual noise) | ✅ done | Commit on 2026-04-18 |
 | 25 | **Preview hero tile title** — hero tile now shows one concrete content title as an anchor while supporting tiles stay as teaser blurs | ✅ done | Commit on 2026-04-18 |
 | 26 | **Mobile sticky-behind-nav bug** — caught via screenshot: sticky CTA completely obscured by MobileBottomNav on mobile (same z-index, DOM order tied). Fixed with `bottom: --space-16` offset on mobile + page padding-bottom expansion | ✅ done | Commit on 2026-04-18 |
-| 27+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 27 | **Preview stats typography + categories cap** — bumped stat-number clamp to 2.75rem max (from 2.5rem), capped categories slice at 6 (was 8) | ✅ done | Commit on 2026-04-18 |
+| 28+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -462,3 +463,10 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Why this survived 25 passes**: earlier visual verifications focused on desktop. Mobile was tested but the mobile-nav height wasn't obvious in my code-review-style tests. Only a fresh side-by-side screenshot of the bottom bars at scroll-past-tier-cards caught it. Argument for always testing mobile-with-all-fixed-bars-visible.
 
   **Next pass prerequisite**: check safe-area-inset-bottom handling on actual iOS notch devices — my `padding-bottom: 0` on mobile sticky could cut off content if there's a notch. MobileBottomNav presumably handles its own safe-area. The sticky sits above the nav at `--space-16`, but the nav's safe-area padding extends below its bottom. No safe-area issue for sticky in principle. But real device testing would confirm.
+
+- **2026-04-18 Pass 27 (Preview stats typography + categories slice cap)**: Two small polishes to tighten the preview footer.
+  - **`.preview__stat-number` clamp bumped**: `clamp(1.75rem, 2vw + 1rem, 2.5rem)` → `clamp(2rem, 2.2vw + 1rem, 2.75rem)`. Numbers render at 44px max vs 40px previously — closer to the landing page's hero-stat treatment (`clamp(2rem, 3vw + 1rem, 3.5rem)`) without matching its full drama. Still hierarchy-appropriate for a "supporting" stats row vs the landing's hero stats.
+  - **Categories slice cap 8 → 6**: `.slice(0, 8)` → `.slice(0, 6)`. Categories pills strip now shows max 6, reducing risk of two-row wrap at tablet widths (~768px). Also: 6 is the visual sweet spot for a horizontal category strip — enough variety signal without visual density.
+  - **Verified**: stat numbers render at 44px font-size on 1440×900 desktop. Pill count for studio-alpha is 2 (Tutorials, Podcasts) so slice change is transparent there, but orgs with 7-8 categories now crop to 6.
+
+  **Next pass prerequisite**: consider a "+N more" indicator after the 6 categories when more exist (via `stats.categories.length > 6`). Adds variety signal without cluttering. But only matters for multi-category orgs — `of-blood-and-bones` has 1, studio-alpha has 2, so the current cap is untested against real high-N data.
