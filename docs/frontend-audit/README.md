@@ -32,7 +32,7 @@ One section per `/loop` firing. Tick the box and link the report when done.
 
 - [x] 07. Platform home — `(platform)/+page.svelte` + landing sections → [07-platform-home.md](07-platform-home.md)
 - [x] 08. Platform discover — `(platform)/discover/` → [08-platform-discover.md](08-platform-discover.md)
-- [ ] 09. Platform library — `(platform)/library/`
+- [x] 09. Platform library — `(platform)/library/` → [09-platform-library.md](09-platform-library.md)
 - [ ] 10. Platform account — `(platform)/account/`
 - [ ] 11. Platform pricing — `(platform)/pricing/`
 - [ ] 12. Platform about & become-creator — static marketing
