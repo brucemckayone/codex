@@ -365,6 +365,7 @@
           tabindex={-1}
         >
           <button
+            type="button"
             class="toggle-option"
             class:active={billingInterval === 'month'}
             onclick={() => { billingInterval = 'month'; }}
@@ -375,6 +376,7 @@
             {m.pricing_monthly()}
           </button>
           <button
+            type="button"
             class="toggle-option"
             class:active={billingInterval === 'year'}
             onclick={() => { billingInterval = 'year'; }}
@@ -706,6 +708,7 @@
       </Button>
       {#if !isMobile}
         <button
+          type="button"
           class="sticky-bar__dismiss"
           onclick={() => { dismissedStickyCta = true; }}
           aria-label="Dismiss"

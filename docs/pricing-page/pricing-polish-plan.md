@@ -82,7 +82,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 33 | **Trust strip list semantics** — `role="list"` + `role="listitem"` + `aria-label` so screen readers announce as a cohesive list of guarantees | ✅ done | Commit on 2026-04-18 |
 | 34 | **Preview stats list semantics** — `role="list"` + `role="listitem"` + `aria-label="Library at a glance"` on the stat row | ✅ done | Commit on 2026-04-18 |
 | 35 | **Hero title clamp bumped** — +8px max at desktop (72→80px) after side-by-side comparison with landing's 128px hero | ✅ done | Commit on 2026-04-18 |
-| 36+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 36 | **Defensive `type="button"` + ultra-wide verification** — added explicit type to toggle + sticky dismiss buttons; confirmed 2560×1440 layout caps gracefully | ✅ done | Commit on 2026-04-18 |
+| 37+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -556,3 +557,21 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Verified**: 80px confirmed at 1440×900. Title still respects max-width 18ch + text-wrap balance for elegant line breaking.
 
   **Next pass prerequisite**: test at ultra-wide (2560+) to see if the 5rem cap engages correctly. Also consider whether `.pricing-hero__subtitle` should also get a tiny bump for hierarchy preservation (currently `--text-xl` caps around 24px; with title at 80px the 3.3x ratio still reads well, but at larger titles it may need proportional scaling).
+
+- **2026-04-18 Pass 36 (Ultra-wide verification + button type hardening)**: Two quick but meaningful defensive polishes.
+  - **Ultra-wide verification (2560×1440)**:
+    - Title renders at 80px (5rem cap engaged ✓)
+    - Page content max-width caps at 72rem (1152px) centered — gracious whitespace on left/right
+    - Tier cards in duo layout render at 406px each, capped via `max-width: 52rem` container
+    - Sticky bar centers at 44rem
+    - Gradient mesh contained within hero box (doesn't stretch full viewport)
+    - No layout regressions at extreme widths — all clamps and max-widths behave as designed
+  - **`type="button"` hardening**: added explicit `type="button"` to three buttons that lacked it:
+    - Monthly toggle
+    - Annual toggle
+    - Sticky-bar dismiss
+    - (Checkout-error retry and dismiss already had it from Pass 28/29)
+  - **Why this matters**: HTML `<button>` defaults to `type="submit"` when inside a `<form>`. Our pricing page isn't inside a form currently, but if this template is ever embedded or the Button component ever wraps with a form, implicit submit could cause unwanted navigation. Explicit `type="button"` is defensive — costs 2 characters × 3 elements, prevents a whole class of future regression.
+  - **Compiler behavior**: Svelte doesn't require `type="button"` for form elements (it's a DOM-level contract). No compiler warnings before or after, but the change is semantically correct.
+
+  **Next pass prerequisite**: consider whether the page needs a `data-testid` strategy for any critical CTAs (Subscribe buttons) to make e2e testing more robust. Also: the `.pricing-page` has `padding-bottom: var(--space-20)` on desktop — this creates a lot of empty space below the trust strip before the page ends. Could tighten to `--space-12` if visual breathing is still adequate.
