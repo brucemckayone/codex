@@ -78,7 +78,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 29 | **Checkout error retry button** — "Try again" affordance inside the error banner so users don't have to scroll back to the tier cards to retry | ✅ done | Commit on 2026-04-18 |
 | 30 | **Retry button loading feedback** — button stays visible while retry is in flight, with "Retrying…" label, disabled state, and `cursor: progress` | ✅ done | Commit on 2026-04-18 |
 | 31 | **prefers-reduced-transparency support** — a11y: respect users who disable OS-wide transparency/glassmorphism via solid-surface fallback | ✅ done | Commit on 2026-04-18 |
-| 32+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 32 | **Trust strip icon differentiation** — swapped to Clock/Lock/CheckCircle (three distinct shapes) instead of two check-variants + lock | ✅ done | Commit on 2026-04-18 |
+| 33+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -515,3 +516,14 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Why this matters**: users with visual sensitivities (migraine, vertigo, certain cognitive differences) often disable OS transparency. Respecting their preference without breaking the visual brand for everyone else is basic progressive enhancement.
 
   **Next pass prerequisite**: manually test on macOS with System Settings → Accessibility → Display → "Reduce transparency" enabled to confirm rendering. Also consider similar treatment for `prefers-reduced-data` (doesn't apply much here since we're not loading heavy assets, but worth checking).
+
+- **2026-04-18 Pass 32 (Trust strip icon differentiation)**: Fresh mobile full-page screenshot surfaced a subtle issue: the trust strip's three icons were CheckCircleIcon + LockIcon + CheckIcon — two of three are check-shape variants. Reads as repetitive when users scan the row.
+  - **Swap**: CheckCircleIcon ("Cancel anytime") → ClockIcon; CheckIcon ("Instant access") → CheckCircleIcon. Lock unchanged.
+  - **Semantic fit**:
+    - Clock for "Cancel anytime" — time + flexibility signal (the promise is about temporal freedom)
+    - Lock for "Secure checkout" — payment security (unchanged, canonical fit)
+    - Check-circle for "Instant access" — affirmative confirmation (the promise is "yes, included")
+  - **Added ClockIcon import** (was not in the file yet), removed no unused imports (CheckIcon still used 3× in tier card feature lists).
+  - **Result**: trust strip now has three visually distinct shapes — circle-with-hands, lock-body-shackle, circle-with-check. Users can parse the row at a glance instead of seeing "two similar things and a lock".
+
+  **Next pass prerequisite**: visually confirm on light and dark mode orgs that all three new icons render cleanly inside the `--space-5` tinted circles. ClockIcon may have thinner strokes than the others — if it looks under-weighted at small sizes, bump to size={15} or similar. Also: consider semantic alt for the trust strip — currently icons are `aria-hidden="true"` and labels are text only; fine for most SRs but could add an outer `role="list"` to the `.trust__signals` container.

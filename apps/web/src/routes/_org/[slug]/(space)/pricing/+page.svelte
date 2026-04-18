@@ -10,6 +10,7 @@
     AlertTriangleIcon,
     CheckIcon,
     CheckCircleIcon,
+    ClockIcon,
     LockIcon,
     XIcon,
   } from '$lib/components/ui/Icon';
@@ -652,7 +653,7 @@
       <span class="trust__rule" aria-hidden="true"></span>
       <div class="trust__signals">
         <span class="trust__signal">
-          <span class="trust__icon" aria-hidden="true"><CheckCircleIcon size={14} /></span>
+          <span class="trust__icon" aria-hidden="true"><ClockIcon size={14} /></span>
           <span class="trust__label">Cancel anytime</span>
         </span>
         <span class="trust__dot" aria-hidden="true"></span>
@@ -662,7 +663,7 @@
         </span>
         <span class="trust__dot" aria-hidden="true"></span>
         <span class="trust__signal">
-          <span class="trust__icon" aria-hidden="true"><CheckIcon size={14} /></span>
+          <span class="trust__icon" aria-hidden="true"><CheckCircleIcon size={14} /></span>
           <span class="trust__label">Instant access</span>
         </span>
       </div>
