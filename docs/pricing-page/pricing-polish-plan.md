@@ -85,7 +85,8 @@ Each cron fire (every 20 min) does **one pass** fully. After every pass: commit,
 | 36 | **Defensive `type="button"` + ultra-wide verification** — added explicit type to toggle + sticky dismiss buttons; confirmed 2560×1440 layout caps gracefully | ✅ done | Commit on 2026-04-18 |
 | 37 | **Checkout error ARIA clarify** — removed redundant `aria-live="polite"` (conflicted with role="alert"'s implicit assertive), letting the urgency match the user's active-waiting state | ✅ done | Commit on 2026-04-18 |
 | 38 | **Retry count cap + escalation helper** — after 3 failed retries, show "refresh or try a different browser" note; counter resets on fresh tier, success, or dismiss | ✅ done | Commit on 2026-04-18 |
-| 39+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
+| 39 | **Section labels + tier-specific Subscribe button names** — `aria-label="Subscription plans"` on tier-stage section; Subscribe buttons now say "Subscribe to {tier.name}" for SR users | ✅ done | Commit on 2026-04-18 |
+| 40+ | **Continuous refinement** — each re-fire picks the weakest remaining detail | ⬜ pending | |
 
 ---
 
@@ -601,3 +602,13 @@ Turn the hero from "centered pricing title" into an editorial masthead that esta
   - **Why not "Contact support"**: would require plumbing org's supportEmail through to the frontend (currently `data.org` doesn't expose it). Browser-level escalation is backend-free and still actionable. If support email becomes accessible later, this can upgrade to a mailto link.
 
   **Next pass prerequisite**: consider adding `retryCount` breakpoint-specific copy — at 5+ failures, escalate further to "Please contact the creator directly". But this may be unreachable in practice (users abandon before 5 retries). Keep current simple two-tier escalation for now.
+
+- **2026-04-18 Pass 39 (Section labels + tier-specific Subscribe button names)**: Two SR navigation improvements.
+  - **Section landmark label**: `.tier-stage` `<section>` had no heading (tier cards have their own h2 names). Without a heading, SRs may announce it as "section" without context — skippable/confusing for landmark navigation. Added `aria-label="Subscription plans"` so the landmark has a clear name.
+  - **Subscribe button aria-labels**: each tier card's Subscribe button just said "Subscribe". Three identical buttons for SR users = "Subscribe button. Subscribe button. Subscribe button." Ambiguous when tabbing. Added `aria-label="Subscribe to {tier.name}"` so each is named distinctly: "Subscribe to Soul Path", "Subscribe to Pro", etc.
+  - **Sticky bar Subscribe also updated** for consistency: `aria-label="Subscribe to {recommendedTier.name}"`.
+  - **Why aria-label over visible text change**: the visible "Subscribe" is correct for sighted users — the tier name is already visible in the card header. Changing visible text to "Subscribe to Pro" everywhere would clutter the button width and be redundant. The aria-label pattern gives SR users the disambiguation without affecting visual design.
+  - **Current-plan button unchanged**: it shows "Current Plan" text which is already self-describing. No aria-label needed.
+  - **Lighthouse**: 100/100/100 maintained, 36 passed, 0 failed. SR audits stable.
+
+  **Next pass prerequisite**: consider whether each `<section>` with a visible heading should also get explicit `aria-labelledby="{heading-id}"`. Currently implicit via heading proximity — may work fine, but explicit is more robust against reordering. Low-priority bikeshed.

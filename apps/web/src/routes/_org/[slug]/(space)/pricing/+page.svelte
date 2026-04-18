@@ -476,6 +476,7 @@
         class="tier-stage"
         class:tier-stage--single={tiers.length === 1}
         class:tier-stage--duo={tiers.length === 2}
+        aria-label="Subscription plans"
         bind:this={tierCardsRef}
       >
         {#each tiers as tier, i (tier.id)}
@@ -559,6 +560,7 @@
                     onclick={() => handleSubscribe(tier)}
                     loading={checkoutLoading === tier.id}
                     class="tier-cta"
+                    aria-label="Subscribe to {tier.name}"
                   >
                     {m.pricing_subscribe()}
                   </Button>
@@ -719,6 +721,7 @@
       <Button
         onclick={() => handleSubscribe(recommendedTier)}
         loading={checkoutLoading === recommendedTier.id}
+        aria-label="Subscribe to {recommendedTier.name}"
       >
         {m.pricing_subscribe()}
       </Button>
