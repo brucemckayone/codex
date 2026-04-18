@@ -58,7 +58,7 @@
     <div class="dialog-content-wrapper">
       <div
         use:melt={$content}
-        class="dialog-content {className}"
+        class="dialog-content {className ?? ''}"
         data-size={size}
         {...restProps}
       >

@@ -9,7 +9,7 @@
   const { children, class: className, ...restProps }: Props = $props();
 </script>
 
-<div class="dialog-footer {className}" {...restProps}>
+<div class="dialog-footer {className ?? ''}" {...restProps}>
   {@render children()}
 </div>
 

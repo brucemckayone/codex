@@ -9,17 +9,18 @@
   const { children, class: className, ...restProps }: Props = $props();
 </script>
 
-<div class="dialog-header {className ?? ''}" {...restProps}>
+<div class="dialog-body {className ?? ''}" {...restProps}>
   {@render children()}
 </div>
 
 <style>
-  .dialog-header {
+  .dialog-body {
     display: flex;
     flex-direction: column;
-    gap: var(--space-1);
-    text-align: left;
-    padding: var(--space-6) var(--space-6) var(--space-4);
-    border-bottom: var(--border-width) var(--border-style) var(--color-border-subtle);
+    gap: var(--space-4);
+    padding: var(--space-4) var(--space-6);
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
   }
 </style>
