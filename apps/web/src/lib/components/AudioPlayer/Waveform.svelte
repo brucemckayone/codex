@@ -17,8 +17,12 @@
   @prop {AudioAnalysis | null} audioAnalysis - Real-time frequency data from audio-analyser
 -->
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onDestroy, onMount, untrack } from 'svelte';
   import type { AudioAnalysis } from './audio-analyser';
+  import {
+    createSliderKeyboardHandler,
+    MediaLiveRegion,
+  } from '$lib/components/media-a11y';
 
   interface Props {
     data: number[] | null;
@@ -27,9 +31,22 @@
     playing?: boolean;
     onseek: (time: number) => void;
     audioAnalysis?: AudioAnalysis | null;
+    /** Loading state announced via the hidden live region (Ref 05 §Media §4). */
+    loading?: boolean;
+    /** Error message announced via the nested role="alert". */
+    error?: string | null;
   }
 
-  const { data, currentTime, duration, playing = false, onseek, audioAnalysis = null }: Props = $props();
+  const {
+    data,
+    currentTime,
+    duration,
+    playing = false,
+    onseek,
+    audioAnalysis = null,
+    loading = false,
+    error = null,
+  }: Props = $props();
 
   let canvasEl: HTMLCanvasElement | undefined = $state();
   let containerEl: HTMLDivElement | undefined = $state();
@@ -53,6 +70,8 @@
   }
 
   // ── Colour tokens (read from computed style) ──
+  // Fallbacks only used pre-mount / SSR edge. Tokens resolve in readColourTokens()
+  // at runtime once the container is in the DOM and org branding is applied.
   let brandPrimary = '#c24129';
   let brandPrimarySubtle = '#f5e6e3';
   let brandSecondary = '#4b5563';
@@ -95,12 +114,21 @@
   const ENTRANCE_DURATION = 450; // ms
   const ENTRANCE_STAGGER = 12; // ms per bar
 
-  // ── Reduced motion ──
-  let reducedMotion = false;
+  // ── Reduced motion (reactive subscription, Ref 05 §Media §8) ──
+  // `$state()` + mq.addEventListener keeps the component responsive when the user
+  // toggles the OS setting mid-session. Effect loop auto-stops when flipped to true.
+  let reducedMotion = $state(false);
+  let reducedMotionMq: MediaQueryList | null = null;
+  function onReducedMotionChange(e: MediaQueryListEvent) {
+    reducedMotion = e.matches;
+  }
 
   // ── rAF management ──
   let rafId = 0;
   let isAnimating = false;
+  // Burst rAF id — tracked so a new seek cancels any still-scheduled frame and
+  // prevents overlapping bursts from trampling each other (iter-013 Codex-34rji).
+  let burstRafId = 0;
 
   function startAnimationLoop() {
     if (isAnimating || reducedMotion) return;
@@ -437,23 +465,34 @@
     void playProgress;
     void hoverProgress;
     if (!isAnimating) {
-      // Burst animation for smooth seek transitions when paused
+      // Cancel any in-flight burst before scheduling a new one (Codex-34rji).
+      // Without this, rapid seek events would spawn overlapping bursts that
+      // race to mutate smoothProgress and leak rAF ids on unmount.
+      if (burstRafId) cancelAnimationFrame(burstRafId);
       let frames = 0;
-      let burstId = 0;
       function burst() {
         frames++;
         lerpProgress();
         draw();
         if (frames < 12 && Math.abs(playProgress - smoothProgress) > 0.002) {
-          burstId = requestAnimationFrame(burst);
+          burstRafId = requestAnimationFrame(burst);
+        } else {
+          burstRafId = 0;
         }
       }
-      requestAnimationFrame(burst);
+      burstRafId = requestAnimationFrame(burst);
     }
   });
 
   onMount(() => {
-    reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // Reactive reduced-motion: $state flip drives $effect rerun which halts the
+    // rAF loop without polling. Matches Ref 05 §Media §8 "CSS-first with JS
+    // subscription only when the value must drive JS calculations" — the rAF
+    // loop gating is that JS calculation.
+    reducedMotionMq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    reducedMotion = reducedMotionMq.matches;
+    reducedMotionMq.addEventListener('change', onReducedMotionChange);
+
     readColourTokens();
 
     // Skip entrance animation for now — render immediately
@@ -470,7 +509,26 @@
     return () => {
       observer.disconnect();
       stopAnimationLoop();
+      if (burstRafId) cancelAnimationFrame(burstRafId);
     };
+  });
+
+  onDestroy(() => {
+    reducedMotionMq?.removeEventListener('change', onReducedMotionChange);
+    reducedMotionMq = null;
+  });
+
+  // Canonical WAI-ARIA slider keyboard contract (Ref 05 §Media §10).
+  // Home/End, PageUp/PageDown, and Shift-modifier fine-grain for free —
+  // the previous inline handler only covered ArrowLeft/ArrowRight and
+  // violated APG. `createSliderKeyboardHandler` is the sibling of
+  // `createMediaKeyboardHandler` (iter-012) for canvas widgets with no
+  // underlying HTMLMediaElement.
+  // Getter form for duration so reactive prop updates flow through.
+  const handleKey = createSliderKeyboardHandler({
+    onSeek: (t) => onseek(t),
+    getCurrentTime: () => currentTime,
+    duration: () => duration,
   });
 </script>
 
@@ -487,17 +545,10 @@
   onpointermove={handlePointerMove}
   onpointerup={handlePointerUp}
   onpointerleave={handlePointerLeave}
-  onkeydown={(e) => {
-    if (e.key === 'ArrowLeft') {
-      e.preventDefault();
-      onseek(Math.max(0, currentTime - 10));
-    } else if (e.key === 'ArrowRight') {
-      e.preventDefault();
-      onseek(Math.min(duration, currentTime + 10));
-    }
-  }}
+  onkeydown={handleKey}
 >
   <canvas bind:this={canvasEl}></canvas>
+  <MediaLiveRegion {loading} {error} loadingLabel="Loading audio waveform…" />
 </div>
 
 <script lang="ts" module>
@@ -520,8 +571,11 @@
     overflow: hidden;
   }
 
+  /* R14 canonical focus ring — uses --color-focus so contrast + density follow
+     the design system instead of the brand palette (which can be low-contrast
+     on dark waveform backgrounds). */
   .waveform:focus-visible {
-    outline: 2px solid var(--color-brand-primary, var(--color-primary-500));
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 

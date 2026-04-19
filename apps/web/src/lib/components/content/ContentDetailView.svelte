@@ -1177,6 +1177,19 @@
     100% { background-position: -200% 0; }
   }
 
+  /* Keyframe animations run at full amplitude under reduced-motion because
+     motion.css only collapses --duration-* tokens, not @keyframes bodies
+     (Ref 05 §Media §5). Silencing only the three shimmers here — not a
+     blanket `*` rule — keeps the lock-pulse signal for users who still need
+     to see that content is loading. Codex-9xh1k. */
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton--audio,
+    .skeleton--player,
+    .skeleton--body-line {
+      animation: none;
+    }
+  }
+
   /* Responsive */
   @media (--breakpoint-md) {
     .content-detail {

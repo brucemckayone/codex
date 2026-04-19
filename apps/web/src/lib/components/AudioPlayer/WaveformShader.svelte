@@ -11,7 +11,7 @@
   @prop {string | null} poster - Cover art URL for blurred background
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import type { Snippet } from 'svelte';
   import {
     compileShader,
@@ -125,7 +125,14 @@
   let quad: ReturnType<typeof createQuad> | null = null;
   let rafId = 0;
   let startTime = 0;
-  let reducedMotion = false;
+  // Reactive reduced-motion (Ref 05 §Media §8). Mid-session toggles pause/resume
+  // the rAF render without remount. CSS block below is the belt-and-braces layer
+  // so the canvas hides visually too (Codex-8bhqd).
+  let reducedMotion = $state(false);
+  let reducedMotionMq: MediaQueryList | null = null;
+  function onReducedMotionChange(e: MediaQueryListEvent) {
+    reducedMotion = e.matches;
+  }
 
   // Smoothed amplitude for organic feel
   let smoothAmp = 0;
@@ -200,29 +207,63 @@
     rafId = requestAnimationFrame(render);
   }
 
+  let observer: ResizeObserver | null = null;
+  let glInitialised = false;
+
+  function stopRender() {
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = 0;
+    }
+  }
+
+  function startRender() {
+    if (rafId || reducedMotion) return;
+    rafId = requestAnimationFrame(render);
+  }
+
   onMount(() => {
-    reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    reducedMotionMq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    reducedMotion = reducedMotionMq.matches;
+    reducedMotionMq.addEventListener('change', onReducedMotionChange);
+
     readBrandColours();
 
-    if (reducedMotion || !initGL()) return;
+    // Init GL even when reduced-motion is on — the static frame isn't drawn but
+    // the resources are ready to go if the user flips the setting.
+    glInitialised = initGL();
+    if (!glInitialised) return;
 
     startTime = performance.now();
     resize();
-    rafId = requestAnimationFrame(render);
 
-    const observer = new ResizeObserver(() => {
+    if (!reducedMotion) startRender();
+
+    observer = new ResizeObserver(() => {
       readBrandColours();
       resize();
     });
     if (containerEl) observer.observe(containerEl);
+  });
 
-    return () => {
-      if (rafId) cancelAnimationFrame(rafId);
-      observer.disconnect();
-      if (gl && program) {
-        gl.deleteProgram(program);
-      }
-    };
+  // Reactive: pause on reduced-motion, resume when it clears.
+  $effect(() => {
+    if (reducedMotion) {
+      stopRender();
+    } else if (glInitialised) {
+      startRender();
+    }
+  });
+
+  onDestroy(() => {
+    stopRender();
+    observer?.disconnect();
+    observer = null;
+    reducedMotionMq?.removeEventListener('change', onReducedMotionChange);
+    reducedMotionMq = null;
+    if (gl && program) {
+      gl.deleteProgram(program);
+    }
   });
 </script>
 
@@ -277,5 +318,18 @@
     z-index: 2;
     width: 100%;
     height: 100%;
+  }
+
+  /* Belt-and-braces reduced-motion (Codex-8bhqd).
+     The JS subscription in the script halts the rAF loop; these rules remove
+     the canvas entirely and freeze the blur filter so nothing shimmers even
+     on the last painted frame. Ref 05 §Media §8. */
+  @media (prefers-reduced-motion: reduce) {
+    .waveform-shader__canvas {
+      display: none;
+    }
+    .waveform-shader__art {
+      filter: none;
+    }
   }
 </style>
