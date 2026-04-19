@@ -1,5 +1,12 @@
 <script lang="ts">
   import { brandEditor } from '$lib/brand-editor';
+  import {
+    ChevronLeftIcon,
+    MinusIcon,
+    MoonIcon,
+    SunIcon,
+    XIcon,
+  } from '$lib/components/ui/Icon';
 
   interface Props {
     onclose?: () => void;
@@ -20,8 +27,13 @@
 <div class="editor-header">
   <div class="editor-header__breadcrumb">
     {#if brandEditor.currentLevel.parent}
-      <button class="editor-header__back" onclick={handleBack} aria-label="Go back">
-        ◀
+      <button
+        type="button"
+        class="editor-header__back"
+        onclick={handleBack}
+        aria-label="Go back"
+      >
+        <ChevronLeftIcon size={16} />
       </button>
     {/if}
     <span class="editor-header__title">{brandEditor.currentLevel.label}</span>
@@ -29,24 +41,39 @@
 
   <div class="editor-header__actions">
     <button
+      type="button"
       class="editor-header__theme-toggle"
       onclick={toggleEditingTheme}
       aria-label="Switch editing theme"
       title="Edit {brandEditor.editingTheme === 'light' ? 'dark' : 'light'} theme"
     >
-      <span class="editor-header__theme-icon">{brandEditor.editingTheme === 'light' ? '☀' : '☾'}</span>
-      <span class="editor-header__theme-label">{brandEditor.editingTheme === 'light' ? 'Light' : 'Dark'}</span>
+      <span class="editor-header__theme-icon" aria-hidden="true">
+        {#if brandEditor.editingTheme === 'light'}
+          <SunIcon size={14} />
+        {:else}
+          <MoonIcon size={14} />
+        {/if}
+      </span>
+      <span class="editor-header__theme-label">
+        {brandEditor.editingTheme === 'light' ? 'Light' : 'Dark'}
+      </span>
     </button>
     <button
+      type="button"
       class="editor-header__btn"
       onclick={() => brandEditor.minimize()}
       aria-label="Minimize editor"
-    >─</button>
+    >
+      <MinusIcon size={16} />
+    </button>
     <button
+      type="button"
       class="editor-header__btn"
       onclick={() => onclose?.()}
       aria-label="Close editor"
-    >✕</button>
+    >
+      <XIcon size={16} />
+    </button>
   </div>
 </div>
 
@@ -69,8 +96,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
+    width: var(--space-6);
+    height: var(--space-6);
     border: none;
     background: transparent;
     color: var(--color-text-secondary);
@@ -84,6 +111,11 @@
   .editor-header__back:hover {
     background: var(--color-surface-secondary);
     color: var(--color-text);
+  }
+
+  .editor-header__back:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   .editor-header__title {
@@ -106,8 +138,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    width: var(--space-7);
+    height: var(--space-7);
     border: none;
     background: transparent;
     color: var(--color-text-secondary);
@@ -147,8 +179,15 @@
     color: var(--color-interactive);
   }
 
+  .editor-header__theme-toggle:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   .editor-header__theme-icon {
-    font-size: var(--text-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .editor-header__theme-label {

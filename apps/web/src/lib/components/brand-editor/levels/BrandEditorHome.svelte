@@ -1,7 +1,18 @@
 <script lang="ts">
-  import { brandEditor, LEVELS } from '$lib/brand-editor';
+  import {
+    BRAND_DEFAULT_ACCENT,
+    BRAND_DEFAULT_PRIMARY,
+    BRAND_DEFAULT_SECONDARY,
+    brandEditor,
+    LEVELS,
+  } from '$lib/brand-editor';
   import { generateFullPalettes, type FullPalette } from '$lib/brand-editor/palette-generator';
   import type { LevelId } from '$lib/brand-editor';
+  import {
+    ChevronDownIcon,
+    ChevronRightIcon,
+    ChevronUpIcon,
+  } from '$lib/components/ui/Icon';
 
   const CUSTOMIZE_CATEGORIES: LevelId[] = ['typography', 'shape'];
   const HERO_CATEGORIES: LevelId[] = ['header-layout', 'hero-effects', 'intro-video'];
@@ -10,7 +21,9 @@
   let showPalettes = $state(false);
 
   const palettes = $derived(
-    showPalettes ? generateFullPalettes(brandEditor.pending?.primaryColor ?? '#6366F1') : []
+    showPalettes
+      ? generateFullPalettes(brandEditor.pending?.primaryColor ?? BRAND_DEFAULT_PRIMARY)
+      : []
   );
 
   function applyFullPalette(palette: FullPalette) {
@@ -25,31 +38,49 @@
 <div class="home">
   <!-- Colors (primary element) -->
   <section class="home__section">
-    <button class="home__colors-row" onclick={() => brandEditor.navigateTo('colors')}>
+    <button
+      type="button"
+      class="home__colors-row"
+      onclick={() => brandEditor.navigateTo('colors')}
+    >
       <div class="home__color-swatches">
-        <span class="home__swatch" style:background={brandEditor.pending?.primaryColor ?? '#6366F1'}></span>
-        <span class="home__swatch home__swatch--sm" style:background={brandEditor.pending?.secondaryColor ?? '#737373'}></span>
-        <span class="home__swatch home__swatch--sm" style:background={brandEditor.pending?.accentColor ?? '#F59E0B'}></span>
+        <span class="home__swatch" style:background={brandEditor.pending?.primaryColor ?? BRAND_DEFAULT_PRIMARY}></span>
+        <span class="home__swatch home__swatch--sm" style:background={brandEditor.pending?.secondaryColor ?? BRAND_DEFAULT_SECONDARY}></span>
+        <span class="home__swatch home__swatch--sm" style:background={brandEditor.pending?.accentColor ?? BRAND_DEFAULT_ACCENT}></span>
       </div>
       <div class="home__colors-text">
         <span class="home__colors-label">Colors</span>
-        <span class="home__colors-hex">{brandEditor.pending?.primaryColor ?? '#6366F1'}</span>
+        <span class="home__colors-hex">{brandEditor.pending?.primaryColor ?? BRAND_DEFAULT_PRIMARY}</span>
       </div>
-      <span class="home__chevron" aria-hidden="true">›</span>
+      <span class="home__chevron" aria-hidden="true">
+        <ChevronRightIcon size={16} />
+      </span>
     </button>
   </section>
 
   <!-- Generate Palette -->
   <section class="home__section">
-    <button class="home__palette-btn" onclick={() => (showPalettes = !showPalettes)}>
+    <button
+      type="button"
+      class="home__palette-btn"
+      onclick={() => (showPalettes = !showPalettes)}
+      aria-expanded={showPalettes}
+    >
       Generate Palette
-      <span class="home__chevron">{showPalettes ? '−' : '+'}</span>
+      <span class="home__chevron" aria-hidden="true">
+        {#if showPalettes}
+          <ChevronUpIcon size={16} />
+        {:else}
+          <ChevronDownIcon size={16} />
+        {/if}
+      </span>
     </button>
 
     {#if showPalettes && palettes.length > 0}
       <div class="home__palette-grid">
-        {#each palettes as palette}
+        {#each palettes as palette (palette.name)}
           <button
+            type="button"
             class="home__palette-card"
             onclick={() => applyFullPalette(palette)}
             title={palette.name}
@@ -70,11 +101,11 @@
   <section class="home__section">
     <span class="home__section-label">Hero</span>
     <div class="home__categories">
-      {#each HERO_CATEGORIES as catId}
+      {#each HERO_CATEGORIES as catId (catId)}
         {@const cat = LEVELS[catId]}
-        <button class="home__category" onclick={() => brandEditor.navigateTo(catId)}>
+        <button type="button" class="home__category" onclick={() => brandEditor.navigateTo(catId)}>
           <div class="home__category-left">
-            <span class="home__category-icon">{cat.icon}</span>
+            <span class="home__category-icon" aria-hidden="true">{cat.icon}</span>
             <div class="home__category-text">
               <span class="home__category-name">{cat.label}</span>
               {#if cat.description}
@@ -82,7 +113,9 @@
               {/if}
             </div>
           </div>
-          <span class="home__chevron" aria-hidden="true">›</span>
+          <span class="home__chevron" aria-hidden="true">
+            <ChevronRightIcon size={16} />
+          </span>
         </button>
       {/each}
     </div>
@@ -92,11 +125,11 @@
   <section class="home__section">
     <span class="home__section-label">Customize</span>
     <div class="home__categories">
-      {#each CUSTOMIZE_CATEGORIES as catId}
+      {#each CUSTOMIZE_CATEGORIES as catId (catId)}
         {@const cat = LEVELS[catId]}
-        <button class="home__category" onclick={() => brandEditor.navigateTo(catId)}>
+        <button type="button" class="home__category" onclick={() => brandEditor.navigateTo(catId)}>
           <div class="home__category-left">
-            <span class="home__category-icon">{cat.icon}</span>
+            <span class="home__category-icon" aria-hidden="true">{cat.icon}</span>
             <div class="home__category-text">
               <span class="home__category-name">{cat.label}</span>
               {#if cat.description}
@@ -104,7 +137,9 @@
               {/if}
             </div>
           </div>
-          <span class="home__chevron" aria-hidden="true">›</span>
+          <span class="home__chevron" aria-hidden="true">
+            <ChevronRightIcon size={16} />
+          </span>
         </button>
       {/each}
     </div>
@@ -114,11 +149,11 @@
   <section class="home__section">
     <span class="home__section-label">Advanced</span>
     <div class="home__categories">
-      {#each ADVANCED_CATEGORIES as catId}
+      {#each ADVANCED_CATEGORIES as catId (catId)}
         {@const cat = LEVELS[catId]}
-        <button class="home__category" onclick={() => brandEditor.navigateTo(catId)}>
+        <button type="button" class="home__category" onclick={() => brandEditor.navigateTo(catId)}>
           <div class="home__category-left">
-            <span class="home__category-icon">{cat.icon}</span>
+            <span class="home__category-icon" aria-hidden="true">{cat.icon}</span>
             <div class="home__category-text">
               <span class="home__category-name">{cat.label}</span>
               {#if cat.description}
@@ -126,17 +161,25 @@
               {/if}
             </div>
           </div>
-          <span class="home__chevron" aria-hidden="true">›</span>
+          <span class="home__chevron" aria-hidden="true">
+            <ChevronRightIcon size={16} />
+          </span>
         </button>
       {/each}
     </div>
   </section>
 
   <!-- Presets link -->
-  <button class="home__presets-link" onclick={() => brandEditor.navigateTo('presets')}>
-    <span class="home__category-icon">✦</span>
+  <button
+    type="button"
+    class="home__presets-link"
+    onclick={() => brandEditor.navigateTo('presets')}
+  >
+    <span class="home__category-icon" aria-hidden="true">✦</span>
     <span class="home__presets-link-text">Browse Presets</span>
-    <span class="home__chevron" aria-hidden="true">›</span>
+    <span class="home__chevron" aria-hidden="true">
+      <ChevronRightIcon size={16} />
+    </span>
   </button>
 </div>
 
@@ -167,6 +210,9 @@
     font-size: var(--text-sm);
     color: var(--color-text-muted);
     flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
   /* ── Colors Row (primary element) ──────────────── */
@@ -188,6 +234,11 @@
   .home__colors-row:hover {
     border-color: var(--color-interactive);
     background: var(--color-surface-secondary);
+  }
+
+  .home__colors-row:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   .home__color-swatches {
@@ -252,6 +303,11 @@
     border-color: var(--color-interactive);
   }
 
+  .home__palette-btn:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   .home__palette-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -277,9 +333,14 @@
     background: var(--color-surface-secondary);
   }
 
+  .home__palette-card:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   .home__palette-bars {
     display: flex;
-    height: 40px;
+    height: var(--space-10);
     border-radius: var(--radius-sm);
     overflow: hidden;
     border: var(--border-width) var(--border-style) var(--color-border-subtle);
@@ -327,6 +388,11 @@
     background: var(--color-surface-secondary);
   }
 
+  .home__category:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   .home__category-left {
     display: flex;
     align-items: center;
@@ -337,7 +403,7 @@
   .home__category-icon {
     font-size: var(--text-lg);
     flex-shrink: 0;
-    width: 28px;
+    width: var(--space-7);
     text-align: center;
   }
 
@@ -377,6 +443,11 @@
   .home__presets-link:hover {
     background: var(--color-interactive);
     color: var(--color-text-on-brand);
+  }
+
+  .home__presets-link:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   .home__presets-link:hover .home__presets-link-text,

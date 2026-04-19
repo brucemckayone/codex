@@ -1,6 +1,5 @@
 // Brand Editor - Store
 export { brandEditor } from './brand-editor-store.svelte';
-
 // Brand Editor - CSS Injection
 export {
   clearBrandVars,
@@ -9,6 +8,13 @@ export {
   injectTokenOverrides,
   loadGoogleFont,
 } from './css-injection';
+// Brand Editor - Fallback defaults (used when an org has not branded)
+export {
+  BRAND_DEFAULT_ACCENT,
+  BRAND_DEFAULT_BACKGROUND,
+  BRAND_DEFAULT_PRIMARY,
+  BRAND_DEFAULT_SECONDARY,
+} from './defaults';
 // Brand Editor - Navigation
 export { getBreadcrumb, HOME_CATEGORIES, LEVELS } from './levels';
 export type {

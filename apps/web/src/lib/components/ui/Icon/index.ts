@@ -47,6 +47,7 @@ export { default as MaximizeIcon } from './MaximizeIcon.svelte';
 export { default as MenuIcon } from './MenuIcon.svelte';
 export { default as MicIcon } from './MicIcon.svelte';
 export { default as MinusCircleIcon } from './MinusCircleIcon.svelte';
+export { default as MinusIcon } from './MinusIcon.svelte';
 export { default as MoonIcon } from './MoonIcon.svelte';
 export { default as MoreHorizontalIcon } from './MoreHorizontalIcon.svelte';
 export { default as MusicIcon } from './MusicIcon.svelte';

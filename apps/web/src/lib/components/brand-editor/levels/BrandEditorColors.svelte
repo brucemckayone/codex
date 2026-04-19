@@ -1,15 +1,21 @@
 <script lang="ts">
-  import { brandEditor } from '$lib/brand-editor';
+  import {
+    BRAND_DEFAULT_ACCENT,
+    BRAND_DEFAULT_BACKGROUND,
+    BRAND_DEFAULT_PRIMARY,
+    BRAND_DEFAULT_SECONDARY,
+    brandEditor,
+  } from '$lib/brand-editor';
   import OklchColorPicker from '../color-picker/OklchColorPicker.svelte';
 
   type ColorField = 'primaryColor' | 'secondaryColor' | 'accentColor' | 'backgroundColor';
   type SectionId = 'primary' | 'secondary' | 'accent' | 'background';
 
   const SECTIONS: { id: SectionId; label: string; field: ColorField; fallback: string; clearable?: boolean }[] = [
-    { id: 'primary', label: 'Primary', field: 'primaryColor', fallback: '#6366F1' },
-    { id: 'secondary', label: 'Secondary', field: 'secondaryColor', fallback: '#737373' },
-    { id: 'accent', label: 'Accent', field: 'accentColor', fallback: '#F59E0B' },
-    { id: 'background', label: 'Background', field: 'backgroundColor', fallback: '#FFFFFF', clearable: true },
+    { id: 'primary', label: 'Primary', field: 'primaryColor', fallback: BRAND_DEFAULT_PRIMARY },
+    { id: 'secondary', label: 'Secondary', field: 'secondaryColor', fallback: BRAND_DEFAULT_SECONDARY },
+    { id: 'accent', label: 'Accent', field: 'accentColor', fallback: BRAND_DEFAULT_ACCENT },
+    { id: 'background', label: 'Background', field: 'backgroundColor', fallback: BRAND_DEFAULT_BACKGROUND, clearable: true },
   ];
 
   let expanded = $state<SectionId | null>(null);
