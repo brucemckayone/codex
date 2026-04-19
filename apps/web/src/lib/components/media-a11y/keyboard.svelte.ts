@@ -1,10 +1,24 @@
 /**
- * Shared keyboard handler for media players.
+ * Shared keyboard handlers for media-related widgets.
  *
- * Enforces the Ref 05 §"Media elements" §3 contract: keyboard shortcuts MUST be
- * scoped to the player wrapper (or portal node for portaled overlays) rather than
- * `<svelte:window>` so Space / Arrow / m / f don't hijack page-wide keyboard nav
- * whenever a player is mounted.
+ * Two sibling composables live here:
+ *
+ * 1. `createMediaKeyboardHandler` — for real `<audio>` / `<video>` elements. Mutates
+ *    `HTMLMediaElement.currentTime` directly. Enforces Ref 05 §"Media elements" §3:
+ *    keyboard shortcuts MUST be scoped to the player wrapper (or portal node for
+ *    portaled overlays) rather than `<svelte:window>` so Space / Arrow / m / f don't
+ *    hijack page-wide keyboard nav whenever a player is mounted.
+ *
+ * 2. `createSliderKeyboardHandler` — for canvas-based slider widgets (Waveform,
+ *    timeline scrubbers, XY pads) that expose `role="slider"` without a real media
+ *    element. Works through an `onSeek(time)` callback rather than `currentTime`
+ *    mutation. Implements the WAI-ARIA APG slider contract (Home/End/PageUp/PageDown
+ *    plus Shift+Arrow fine-grain). Ref 05 §"Media elements" §10 is the canonical spec.
+ *
+ * They are siblings, not one replacing the other — pick the one that matches your
+ * primitive. Canvas visualisers with no underlying media element use (2); real
+ * `<audio>` players with a seek bar UI use (1) (and may ALSO use (2) for a secondary
+ * canvas scrubber).
  *
  * Usage — wrapper-scoped (AudioPlayer, HeroInlineVideo):
  *   <script>
@@ -23,7 +37,17 @@
  *   and attach the handler directly on the portal node, with auto-focus on mount
  *   via `$effect(() => overlayEl?.focus())`.
  *
- * The handler preserves the INPUT/TEXTAREA/contentEditable guard so nested form
+ * Usage — canvas slider (Waveform):
+ *   <script>
+ *     const handleKey = createSliderKeyboardHandler({
+ *       onSeek: (t) => audioEl.currentTime = t,
+ *       getCurrentTime: () => currentTime,
+ *       duration,
+ *     });
+ *   </script>
+ *   <div role="slider" tabindex="0" onkeydown={handleKey}>...</div>
+ *
+ * Both handlers preserve the INPUT/TEXTAREA/contentEditable guard so nested form
  * controls (search inputs, caption editors) don't lose their keyboard.
  */
 
@@ -156,5 +180,103 @@ export function createMediaKeyboardHandler(
         }
         break;
     }
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * createSliderKeyboardHandler — canvas-based slider (role="slider")  *
+ * Ref 05 §"Media elements" §10                                        *
+ * ------------------------------------------------------------------ */
+
+interface CreateSliderKeyboardHandlerOptions {
+  /** Callback invoked with the new time (clamped to [0, duration]). */
+  onSeek: (time: number) => void;
+  /** Reads the current playhead value. Allows reactive state (e.g. $state) to flow. */
+  getCurrentTime: () => number;
+  /**
+   * Total duration in the same unit as `getCurrentTime()`. Accepts either a
+   * concrete number (for static durations) or a getter that returns the current
+   * value each call — use the getter form when the value lives in Svelte runes
+   * so reactive updates flow through the handler.
+   */
+  duration: number | (() => number);
+  /** Coarse step for ArrowLeft / ArrowRight / ArrowUp / ArrowDown. Default 5s. */
+  stepSecs?: number;
+  /** Page step for PageUp / PageDown. Defaults to 10% of duration. */
+  pageSecs?: number;
+}
+
+/**
+ * Builds a WAI-ARIA-compliant keyboard handler for a canvas-based slider. Attach
+ * to the slider wrapper via `onkeydown={handleKey}` — the element must also carry
+ * `role="slider"`, `tabindex="0"`, and the usual `aria-valuemin`/max/now attributes.
+ *
+ * Contract (per APG "Slider"):
+ *  - ArrowRight / ArrowUp    → +stepSecs (or +1s if Shift is held)
+ *  - ArrowLeft  / ArrowDown  → −stepSecs (or −1s if Shift is held)
+ *  - Home                    → 0
+ *  - End                     → duration
+ *  - PageUp                  → +pageSecs (default duration × 0.1)
+ *  - PageDown                → −pageSecs
+ *
+ * Keys outside the contract fall through untouched. The handler preserves the
+ * INPUT / TEXTAREA / contentEditable guard so embedded form controls keep their
+ * keyboard.
+ */
+export function createSliderKeyboardHandler(
+  opts: CreateSliderKeyboardHandlerOptions
+): (event: KeyboardEvent) => void {
+  const { onSeek, getCurrentTime } = opts;
+  const stepSecs = opts.stepSecs ?? 5;
+  const readDuration =
+    typeof opts.duration === 'function'
+      ? (opts.duration as () => number)
+      : () => opts.duration as number;
+  return function handleKey(e: KeyboardEvent) {
+    const target = e.target as HTMLElement | null;
+    if (
+      target &&
+      (target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable)
+    ) {
+      return;
+    }
+
+    const durationNow = readDuration();
+    const safeDuration =
+      Number.isFinite(durationNow) && durationNow > 0 ? durationNow : 0;
+    const page = opts.pageSecs ?? safeDuration * 0.1;
+    const now = getCurrentTime();
+    const step = e.shiftKey ? 1 : stepSecs;
+    let next = now;
+
+    switch (e.key) {
+      case 'ArrowRight':
+      case 'ArrowUp':
+        next = Math.min(safeDuration, now + step);
+        break;
+      case 'ArrowLeft':
+      case 'ArrowDown':
+        next = Math.max(0, now - step);
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = safeDuration;
+        break;
+      case 'PageUp':
+        next = Math.min(safeDuration, now + page);
+        break;
+      case 'PageDown':
+        next = Math.max(0, now - page);
+        break;
+      default:
+        return;
+    }
+
+    e.preventDefault();
+    onSeek(next);
   };
 }
