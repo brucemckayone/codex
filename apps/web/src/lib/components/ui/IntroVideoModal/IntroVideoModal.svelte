@@ -7,32 +7,55 @@
   The overlay uses backdrop-filter: blur so the shader background
   bleeds through. The video has CSS mask-image feathered edges that
   dissolve into the blurred backdrop — no hard rectangle.
+
+  @prop {boolean} open - Whether the modal is visible
+  @prop {string} src - HLS manifest URL
+  @prop {string} [title] - Content title for the `<video aria-label>` (ref 05 §"Media elements" §1)
+  @prop {Array<{src, srclang, label, default?}>} [captions] - Optional caption tracks
+    (ref 05 §"Media elements" §2). Intro videos are typically decorative — omit unless narration exists.
+  @prop {() => void} onclose - Called when the modal is dismissed
 -->
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onDestroy } from 'svelte';
   import { browser } from '$app/environment';
   import { createHlsPlayer } from '$lib/components/VideoPlayer/hls';
+  import { PlayIcon, XIcon, Volume2Icon, VolumeXIcon } from '$lib/components/ui/Icon';
+  import {
+    createMediaKeyboardHandler,
+    MediaLiveRegion,
+  } from '$lib/components/media-a11y';
   import type Hls from 'hls.js';
+
+  interface CaptionTrack {
+    src: string;
+    srclang: string;
+    label: string;
+    default?: boolean;
+  }
 
   interface Props {
     open: boolean;
     src: string;
+    title?: string;
+    /**
+     * Caption tracks per ref 05 §"Media elements" §2. Provide one entry per
+     * language; exactly one should carry `default: true`. Intro videos are
+     * typically decorative and can omit — the justification lives in the
+     * svelte-ignore comment below per §7.
+     */
+    captions?: CaptionTrack[];
     onclose: () => void;
   }
 
-  const { open, src, onclose }: Props = $props();
+  const { open, src, title = 'Intro video', captions, onclose }: Props = $props();
 
+  let dialogEl = $state<HTMLDivElement | undefined>(undefined);
   let videoEl = $state<HTMLVideoElement | undefined>(undefined);
   let hlsInstance: Hls | null = null;
   let playing = $state(false);
   let muted = $state(true);
+  let loading = $state(false);
   let error = $state<string | null>(null);
-  // svelte-ignore non_reactive_update
-  let dialogEl: HTMLDivElement;
-
-  const prefersReducedMotion = browser
-    ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    : false;
 
   // ── HLS init/teardown tied to open state ──
   $effect(() => {
@@ -42,11 +65,15 @@
 
     async function init() {
       error = null;
+      loading = true;
       try {
         hlsInstance = await createHlsPlayer({
           media: videoEl,
           src,
-          onError: (msg) => { error = msg; },
+          onError: (msg) => {
+            error = msg;
+            loading = false;
+          },
         });
 
         if (destroyed) {
@@ -54,14 +81,16 @@
           return;
         }
 
-        // Autoplay muted (skip if reduced motion)
-        if (!prefersReducedMotion) {
-          videoEl.muted = true;
-          muted = true;
-          try { await videoEl.play(); playing = true; } catch { /* autoplay blocked */ }
-        }
+        loading = false;
+
+        // Autoplay muted — the scale-in keyframe halts under
+        // prefers-reduced-motion via the CSS @media guard below.
+        videoEl.muted = true;
+        muted = true;
+        try { await videoEl.play(); playing = true; } catch { /* autoplay blocked */ }
       } catch {
         error = 'Failed to load video';
+        loading = false;
       }
     }
 
@@ -73,17 +102,9 @@
       hlsInstance = null;
       playing = false;
       muted = true;
+      loading = false;
     };
   });
-
-  // ── Keyboard handling ──
-  function handleKeydown(e: KeyboardEvent) {
-    if (!open) return;
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      onclose();
-    }
-  }
 
   // ── Click outside ──
   function handleOverlayClick(e: MouseEvent) {
@@ -93,6 +114,7 @@
   // ── Toggle play/pause ──
   function togglePlay() {
     if (!videoEl) return;
+    dialogEl?.focus({ preventScroll: true });
     if (videoEl.paused) {
       videoEl.muted = false;
       muted = false;
@@ -111,6 +133,27 @@
     muted = videoEl.muted;
   }
 
+  /**
+   * Dialog-scoped keyboard shortcuts (ref 05 §"Media elements" §3).
+   * Modal is a native dialog pattern — Escape closes, Space toggles play,
+   * arrow keys seek. Focus trap is implicit: focus enters the dialog via
+   * the close-button auto-focus on open; Tab cycles through interactive
+   * descendants of the dialog; the wrapper containment check keeps shortcuts
+   * scoped to the open dialog.
+   */
+  const handleKey = createMediaKeyboardHandler({
+    getWrapper: () => dialogEl,
+    getMedia: () => videoEl ?? null,
+    shortcuts: {
+      playPause: togglePlay,
+      mute: toggleMute,
+      // Wrap `onclose` so changes to the prop propagate — capturing the prop
+      // directly pins the initial value per Svelte 5 $props semantics.
+      escape: () => onclose(),
+      seekSecs: 10,
+    },
+  });
+
   // Focus trap: focus close button when modal opens
   let closeBtn = $state<HTMLButtonElement | undefined>(undefined);
   $effect(() => {
@@ -119,22 +162,28 @@
       requestAnimationFrame(() => closeBtn?.focus());
     }
   });
-</script>
 
-<svelte:window onkeydown={handleKeydown} />
+  onDestroy(() => {
+    hlsInstance?.destroy();
+    hlsInstance = null;
+  });
+</script>
 
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div
     class="intro-modal"
-    class:intro-modal--no-motion={prefersReducedMotion}
     role="dialog"
     tabindex="-1"
     aria-modal="true"
-    aria-label="Intro video"
+    aria-label={title || 'Intro video'}
     bind:this={dialogEl}
     onclick={handleOverlayClick}
+    onkeydown={handleKey}
   >
+    <!-- Live region per ref 05 §"Media elements" §4 — announces loading + errors. -->
+    <MediaLiveRegion {loading} {error} loadingLabel="Loading intro video…" />
+
     <!-- Close button -->
     <button
       bind:this={closeBtn}
@@ -142,53 +191,58 @@
       onclick={onclose}
       aria-label="Close video"
     >
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-        <line x1="18" y1="6" x2="6" y2="18" />
-        <line x1="6" y1="6" x2="18" y2="18" />
-      </svg>
+      <XIcon size={24} />
     </button>
 
     <!-- Video container with feathered edges -->
     <div class="intro-modal__player">
-      <!-- svelte-ignore a11y_media_has_caption -->
+      <!--
+        Intro video is demonstrably decorative (no narration) — captions are
+        omitted by design per ref 05 §"Media elements" §7. Pass `captions`
+        if future intros carry narration. The compile-time `<track>` branch
+        below satisfies `a11y_media_has_caption` without a suppression.
+      -->
       <video
         bind:this={videoEl}
         class="intro-modal__video"
+        aria-label={title}
         playsinline
         preload="auto"
         onclick={togglePlay}
-      ></video>
+      >
+        {#if captions && captions.length > 0}
+          {#each captions as track (track.srclang)}
+            <track
+              kind="captions"
+              src={track.src}
+              srclang={track.srclang}
+              label={track.label}
+              default={track.default ?? false}
+            />
+          {/each}
+        {/if}
+      </video>
 
       <!-- Center play overlay (shows when paused) -->
       {#if !playing}
         <button class="intro-modal__play-overlay" onclick={togglePlay} aria-label="Play video">
-          <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
-            <circle cx="32" cy="32" r="31" stroke="white" stroke-width="2" opacity="0.4" />
-            <path d="M26 20L46 32L26 44V20Z" fill="white" opacity="0.9" />
-          </svg>
+          <span class="intro-modal__play-ring" aria-hidden="true"></span>
+          <PlayIcon size={32} />
         </button>
       {/if}
 
       <!-- Mute toggle -->
       <button class="intro-modal__mute" onclick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'}>
         {#if muted}
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <path d="M11 5L6 9H2v6h4l5 4V5z" />
-            <line x1="23" y1="9" x2="17" y2="15" />
-            <line x1="17" y1="9" x2="23" y2="15" />
-          </svg>
+          <VolumeXIcon size={20} />
         {:else}
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <path d="M11 5L6 9H2v6h4l5 4V5z" />
-            <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-            <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-          </svg>
+          <Volume2Icon size={20} />
         {/if}
       </button>
     </div>
 
     {#if error}
-      <p class="intro-modal__error">{error}</p>
+      <p class="intro-modal__error" role="alert">{error}</p>
     {/if}
   </div>
 {/if}
@@ -205,10 +259,8 @@
     -webkit-backdrop-filter: blur(var(--blur-2xl));
     background: var(--color-player-surface-active);
     animation: modal-fade-in var(--duration-slow) var(--ease-out) both;
-  }
-
-  .intro-modal--no-motion {
-    animation: none;
+    /* Dialog is programmatically focused to enable scoped keyboard; hide the ring. */
+    outline: none;
   }
 
   @keyframes modal-fade-in {
@@ -235,7 +287,7 @@
   }
 
   .intro-modal__close:hover {
-    background: var(--color-player-overlay);
+    background: var(--color-player-overlay-heavy);
   }
 
   .intro-modal__close:focus-visible {
@@ -255,10 +307,6 @@
     /* Feathered edges — video dissolves into the blurred backdrop */
     mask-image: radial-gradient(ellipse 92% 92% at center, black 60%, transparent 100%);
     -webkit-mask-image: radial-gradient(ellipse 92% 92% at center, black 60%, transparent 100%);
-  }
-
-  .intro-modal--no-motion .intro-modal__player {
-    animation: none;
   }
 
   @keyframes modal-scale-in {
@@ -281,6 +329,7 @@
     align-items: center;
     justify-content: center;
     background: var(--color-player-surface-hover);
+    color: var(--color-player-text);
     border: none;
     cursor: pointer;
     transition: background var(--duration-fast) var(--ease-default);
@@ -288,6 +337,21 @@
 
   .intro-modal__play-overlay:hover {
     background: var(--color-player-surface-active);
+  }
+
+  .intro-modal__play-overlay:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: calc(var(--border-width-thick) * -2);
+  }
+
+  .intro-modal__play-ring {
+    position: absolute;
+    width: var(--space-16);
+    height: var(--space-16);
+    border: var(--border-width-thick) solid var(--color-player-text);
+    border-radius: var(--radius-full);
+    opacity: var(--opacity-40);
+    pointer-events: none;
   }
 
   .intro-modal__mute {
@@ -309,6 +373,11 @@
 
   .intro-modal__mute:hover {
     background: var(--color-player-overlay-heavy);
+  }
+
+  .intro-modal__mute:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-1);
   }
 
   .intro-modal__error {
@@ -333,6 +402,24 @@
     .intro-modal__close {
       top: var(--space-3);
       right: var(--space-3);
+    }
+  }
+
+  /*
+    Reduced-motion — ref 05 §"Media elements" §5 + §8.
+    CSS-first pattern replaces the previous JS matchMedia one-shot (which was
+    captured at mount and didn't re-evaluate mid-session toggles).
+  */
+  @media (prefers-reduced-motion: reduce) {
+    .intro-modal,
+    .intro-modal__player {
+      animation: none;
+    }
+
+    .intro-modal__close,
+    .intro-modal__play-overlay,
+    .intro-modal__mute {
+      transition: none;
     }
   }
 </style>

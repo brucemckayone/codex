@@ -19,14 +19,25 @@
   import { getShaderConfig, type ShaderPresetId, type ShaderConfig } from '$lib/components/ui/ShaderHero/shader-config';
   import type { ShaderRenderer, MouseState, AudioState } from '$lib/components/ui/ShaderHero/renderer-types';
   import { PlayIcon, PauseIcon, Volume2Icon, VolumeXIcon, XIcon } from '$lib/components/ui/Icon';
+  import {
+    createMediaKeyboardHandler,
+    MediaLiveRegion,
+  } from '$lib/components/media-a11y';
 
   interface Props {
     audioElement: HTMLAudioElement;
     shaderPreset: string;
     onclose: () => void;
+    /** Content title — threads through to `aria-label` on the overlay landmark. */
+    title?: string;
   }
 
-  const { audioElement, shaderPreset, onclose }: Props = $props();
+  const { audioElement, shaderPreset, onclose, title = '' }: Props = $props();
+
+  // Renderer/analyser failures currently exit via `onclose()`. Track a surfaced
+  // error so the live region can announce it before the overlay unmounts.
+  let rendererError = $state<string | null>(null);
+  let rendererReady = $state(false);
 
   let canvasEl: HTMLCanvasElement | undefined = $state();
   let overlayEl: HTMLDivElement | undefined = $state();
@@ -166,13 +177,19 @@
       antialias: false,
       preserveDrawingBuffer: false,
     });
-    if (!gl) return;
+    if (!gl) {
+      // Announce via live region before bailing out (ref 05 §"Media elements" §4).
+      rendererError = 'WebGL 2 is unavailable. Exiting immersive mode.';
+      setTimeout(() => onclose(), 1200);
+      return;
+    }
 
     // Load shader renderer
     const preset = shaderPreset as ShaderPresetId;
     renderer = await loadRenderer(preset);
     if (!renderer) {
-      onclose();
+      rendererError = 'Unable to load shader preset. Exiting immersive mode.';
+      setTimeout(() => onclose(), 1200);
       return;
     }
 
@@ -180,13 +197,21 @@
     resize();
     const ok = renderer.init(gl, canvasEl.width, canvasEl.height);
     if (!ok) {
-      onclose();
+      rendererError = 'Shader initialisation failed. Exiting immersive mode.';
+      setTimeout(() => onclose(), 1200);
       return;
     }
 
     // Create audio analyser (lazy — first time only, reuses via WeakMap)
-    analyser = createAudioAnalyser(audioElement);
-    await analyser.resume();
+    try {
+      analyser = createAudioAnalyser(audioElement);
+      await analyser.resume();
+    } catch {
+      rendererError = 'Audio analyser failed to start. Visuals will play without audio reactivity.';
+      // Not fatal — continue rendering.
+    }
+
+    rendererReady = true;
 
     // Start render loop
     startTime = performance.now();
@@ -249,19 +274,119 @@
       },
     };
   };
+
+  /**
+   * Auto-focus the portal root on mount (ref 05 §"Media elements" §9). Because
+   * the overlay is portaled under `document.body`, `wrapperEl?.contains(activeEl)`
+   * can never succeed — so we opt out of containment check and lean on focus
+   * being inside the overlay.
+   */
+  $effect(() => {
+    if (overlayEl) {
+      requestAnimationFrame(() => overlayEl?.focus());
+    }
+  });
+
+  /**
+   * Scoped keyboard handler for the portal overlay (ref 05 §"Media elements" §3
+   * + §9). Escape closes, Space toggles play, Arrow keys seek.
+   */
+  const handleKey = createMediaKeyboardHandler({
+    getMedia: () => audioElement,
+    skipContainmentCheck: true,
+    shortcuts: {
+      playPause: () => {
+        togglePlay();
+        showControls();
+      },
+      mute: () => {
+        toggleMute();
+        showControls();
+      },
+      // Wrap `onclose` so the reactive prop isn't captured by the initial value.
+      escape: () => onclose(),
+      seekSecs: 10,
+    },
+  });
+
+  /**
+   * Keyboard contract for the seek slider (ref 05 §"Media elements" §"slider contract").
+   * Slider child has role="slider" tabindex=0 — it needs its own arrow handler so
+   * focused keyboard users can seek without deferring to the overlay-level shortcut.
+   */
+  function handleSeekKey(e: KeyboardEvent) {
+    if (!duration || Number.isNaN(duration)) return;
+
+    const fineStep = 1;
+    const coarseStep = 5;
+
+    switch (e.key) {
+      case 'ArrowLeft': {
+        e.preventDefault();
+        e.stopPropagation();
+        const step = e.shiftKey ? fineStep : coarseStep;
+        audioElement.currentTime = Math.max(0, audioElement.currentTime - step);
+        showControls();
+        break;
+      }
+      case 'ArrowRight': {
+        e.preventDefault();
+        e.stopPropagation();
+        const step = e.shiftKey ? fineStep : coarseStep;
+        audioElement.currentTime = Math.min(duration, audioElement.currentTime + step);
+        showControls();
+        break;
+      }
+      case 'Home':
+        e.preventDefault();
+        e.stopPropagation();
+        audioElement.currentTime = 0;
+        showControls();
+        break;
+      case 'End':
+        e.preventDefault();
+        e.stopPropagation();
+        audioElement.currentTime = duration;
+        showControls();
+        break;
+    }
+  }
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+<!--
+  Portaled dialog (ref 05 §"Media elements" §9) — keydown lives on the portal
+  node itself and auto-focus on mount makes keyboard shortcuts reachable.
+  role="dialog" + aria-modal (instead of role="application") reflects the
+  modal nature: Escape closes and focus is trapped on mount.
+-->
+<!--
+  a11y_no_noninteractive_element_interactions is intentional: the overlay gets
+  pointer + keyboard handlers because it IS the player surface. Click events
+  now have a keyboard equivalent via `onkeydown={handleKey}` so we no longer
+  suppress a11y_click_events_have_key_events.
+-->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
   class="immersive"
   bind:this={overlayEl}
   use:portal
+  tabindex="-1"
   onpointermove={handlePointerMove}
   onclick={handleClick}
-  role="application"
-  aria-label="Immersive audio shader player"
+  onkeydown={handleKey}
+  role="dialog"
+  aria-modal="true"
+  aria-label={title ? `Immersive audio shader — ${title}` : 'Immersive audio shader player'}
 >
   <canvas bind:this={canvasEl} class="immersive__canvas"></canvas>
+
+  <!-- Live region for renderer loading/error — ref 05 §"Media elements" §4. -->
+  <MediaLiveRegion
+    loading={!rendererReady && !rendererError}
+    error={rendererError}
+    loadingLabel="Loading immersive shader…"
+    class="immersive__status"
+  />
 
   <!-- Controls overlay -->
   <div class="immersive__controls" class:visible={controlsVisible}>
@@ -272,7 +397,11 @@
 
     <!-- Bottom bar -->
     <div class="immersive__bar">
-      <!-- Seek bar -->
+      <!--
+        Seek slider — ref 05 §4 + §"Media elements" §6. Arrow keys seek ±5s
+        (Shift = fine ±1s), Home/End = start/end. stopPropagation prevents
+        the overlay-level handleKey from also seeking on the same keystroke.
+      -->
       <div
         class="immersive__seek"
         role="slider"
@@ -280,8 +409,10 @@
         aria-valuemin={0}
         aria-valuemax={Math.round(duration)}
         aria-valuenow={Math.round(currentTime)}
+        aria-valuetext="{formatTime(currentTime)} of {formatTime(duration)}"
         tabindex={0}
         onpointerdown={handleSeek}
+        onkeydown={handleSeekKey}
       >
         <div class="immersive__seek-fill" style:width="{seekProgress}%"></div>
       </div>
@@ -317,38 +448,6 @@
   </div>
 </div>
 
-<svelte:window
-  onkeydown={(e) => {
-    switch (e.key) {
-      case 'Escape':
-        e.preventDefault();
-        onclose();
-        break;
-      case ' ':
-        e.preventDefault();
-        togglePlay();
-        showControls();
-        break;
-      case 'ArrowLeft':
-        e.preventDefault();
-        audioElement.currentTime = Math.max(0, audioElement.currentTime - 10);
-        showControls();
-        break;
-      case 'ArrowRight':
-        e.preventDefault();
-        audioElement.currentTime = Math.min(duration, audioElement.currentTime + 10);
-        showControls();
-        break;
-      case 'm':
-      case 'M':
-        e.preventDefault();
-        toggleMute();
-        showControls();
-        break;
-    }
-  }}
-/>
-
 <style>
   .immersive {
     position: fixed;
@@ -356,10 +455,24 @@
     z-index: var(--z-modal, 50);
     background: var(--color-neutral-950, #000);
     cursor: none;
+    /* Remove programmatic-focus outline; :focus-visible below handles real keyboard focus. */
+    outline: none;
+  }
+
+  .immersive:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: calc(var(--border-width-thick) * -2);
   }
 
   .immersive:hover {
     cursor: default;
+  }
+
+  /* Portaled live region — visually out-of-flow; only SR sees it. */
+  :global(.immersive__status) {
+    position: absolute;
+    inset: auto 0 auto 0;
+    pointer-events: none;
   }
 
   .immersive__canvas {
@@ -375,7 +488,7 @@
     flex-direction: column;
     justify-content: space-between;
     opacity: 0;
-    transition: opacity 300ms ease;
+    transition: opacity var(--duration-slow) var(--ease-default);
     pointer-events: none;
   }
 
@@ -397,12 +510,17 @@
     border-radius: var(--radius-full);
     color: var(--color-player-text);
     cursor: pointer;
-    backdrop-filter: blur(8px);
-    transition: background 200ms ease;
+    backdrop-filter: blur(var(--blur-md));
+    transition: background var(--duration-fast) var(--ease-default);
   }
 
   .immersive__close:hover {
     background: var(--color-player-overlay-heavy);
+  }
+
+  .immersive__close:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   .immersive__bar {
@@ -413,7 +531,7 @@
 
   .immersive__seek {
     width: 100%;
-    height: 6px;
+    height: var(--space-1-5);
     background: var(--color-player-surface-hover);
     border-radius: var(--radius-xs);
     cursor: pointer;
@@ -421,11 +539,16 @@
     position: relative;
   }
 
+  .immersive__seek:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   .immersive__seek-fill {
     height: 100%;
     background: var(--color-brand-primary, var(--color-primary-500));
     border-radius: var(--radius-xs);
-    transition: width 200ms linear;
+    transition: width var(--duration-fast) linear;
   }
 
   .immersive__bar-inner {
@@ -444,12 +567,17 @@
     border-radius: var(--radius-full);
     color: var(--color-player-text);
     cursor: pointer;
-    backdrop-filter: blur(4px);
-    transition: background 200ms ease;
+    backdrop-filter: blur(var(--blur-sm));
+    transition: background var(--duration-fast) var(--ease-default);
   }
 
   .immersive__btn:hover {
     background: var(--color-player-surface-active);
+  }
+
+  .immersive__btn:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   .immersive__btn--close {
@@ -457,6 +585,11 @@
     padding: var(--space-2) var(--space-4);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
+  }
+
+  .immersive__btn--close:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   .immersive__time {
@@ -468,5 +601,16 @@
 
   .immersive__spacer {
     flex: 1;
+  }
+
+  /* Reduced-motion guard (ref 05 §"Media elements" §5). The shader canvas itself
+     is animation regardless — we only silence control-surface transitions. */
+  @media (prefers-reduced-motion: reduce) {
+    .immersive__controls,
+    .immersive__close,
+    .immersive__btn,
+    .immersive__seek-fill {
+      transition: none;
+    }
   }
 </style>

@@ -17,6 +17,10 @@
   import { createHlsPlayer } from '$lib/components/VideoPlayer/hls';
   import { createProgressTracker } from '$lib/components/VideoPlayer/progress.svelte.ts';
   import { AlertCircleIcon, PlayIcon, PauseIcon, Volume2Icon, VolumeXIcon, MaximizeIcon } from '$lib/components/ui/Icon';
+  import {
+    createMediaKeyboardHandler,
+    MediaLiveRegion,
+  } from '$lib/components/media-a11y';
   import { createAudioAnalyser } from './audio-analyser';
   import Waveform from './Waveform.svelte';
   import WaveformShader from './WaveformShader.svelte';
@@ -112,6 +116,9 @@
 
   function togglePlay() {
     if (!audioEl) return;
+    // Focus the wrapper so scoped `onkeydown` captures subsequent shortcuts —
+    // clicking a control otherwise leaves focus on the button only.
+    playerEl?.focus({ preventScroll: true });
     if (audioEl.paused) {
       audioEl.play();
     } else {
@@ -326,11 +333,29 @@
   });
 
   const RATES = [0.5, 1, 1.5, 2] as const;
+
+  /**
+   * Keyboard shortcuts scoped to the player wrapper (ref 05 §"Media elements" §3).
+   * Attached via `onkeydown` on `.audio-player` — NOT `<svelte:window>` — so
+   * Space / Arrow / m don't hijack every `<button>` on the page.
+   */
+  const handleKey = createMediaKeyboardHandler({
+    getWrapper: () => playerEl,
+    getMedia: () => audioEl ?? null,
+    shortcuts: {
+      playPause: togglePlay,
+      mute: toggleMute,
+      seekSecs: 10,
+    },
+  });
 </script>
 
-<!-- Hidden audio element -->
+<!-- Hidden audio element.
+     aria-label per ref 05 §"Media elements" §1 — threads through the `title` prop
+     so screen readers can distinguish players on pages with more than one. -->
 <audio
   bind:this={audioEl}
+  aria-label={title || 'Audio'}
   crossorigin="anonymous"
   preload="metadata"
   ontimeupdate={handleTimeUpdate}
@@ -342,16 +367,40 @@
   onerror={handleError}
 ></audio>
 
-<div class="audio-player" bind:this={playerEl}>
-  {#if errorMessage}
-    <div class="audio-player__error" role="alert">
-      <AlertCircleIcon size={24} />
-      <p class="audio-player__error-message">{errorMessage}</p>
-      <button class="audio-player__error-retry" onclick={retry}>
-        Try Again
-      </button>
-    </div>
-  {:else}
+<!--
+  Wrapper carries scoped `onkeydown` (ref 05 §"Media elements" §3) so shortcuts
+  only fire when a player-owned element has focus; `tabindex="-1"` lets us
+  programmatically focus the wrapper after a mouse click on a control.
+-->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<div
+  class="audio-player"
+  bind:this={playerEl}
+  role="region"
+  aria-label={title ? `Audio player — ${title}` : 'Audio player'}
+  tabindex="-1"
+  onkeydown={handleKey}
+>
+  <!-- Loading + error status live region per ref 05 §"Media elements" §4.
+       Render chrome (icon, retry) inside so sighted users see a consistent panel
+       while AT gets a stable role=status landmark. -->
+  <MediaLiveRegion
+    loading={loading && !errorMessage}
+    error={errorMessage || null}
+    loadingLabel="Loading audio…"
+  >
+    {#if errorMessage}
+      <div class="audio-player__error">
+        <AlertCircleIcon size={24} />
+        <p class="audio-player__error-message">{errorMessage}</p>
+        <button class="audio-player__error-retry" onclick={retry}>
+          Try Again
+        </button>
+      </div>
+    {/if}
+  </MediaLiveRegion>
+
+  {#if !errorMessage}
     <WaveformShader {audioAnalysis} {poster}>
       <div class="audio-player__body">
         <div class="audio-player__main">
@@ -502,46 +551,25 @@
   <ImmersiveShaderPlayer
     audioElement={audioEl}
     {shaderPreset}
+    {title}
     onclose={() => { showImmersive = false; }}
   />
 {/if}
-
-<svelte:window
-  onkeydown={(e) => {
-    if (!audioEl || errorMessage) return;
-
-    const target = e.target as HTMLElement;
-    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
-      return;
-    }
-
-    switch (e.key) {
-      case ' ':
-        e.preventDefault();
-        togglePlay();
-        break;
-      case 'ArrowLeft':
-        e.preventDefault();
-        handleSeek(currentTime - 10);
-        break;
-      case 'ArrowRight':
-        e.preventDefault();
-        handleSeek(currentTime + 10);
-        break;
-      case 'm':
-      case 'M':
-        e.preventDefault();
-        toggleMute();
-        break;
-    }
-  }}
-/>
 
 <style>
   .audio-player {
     width: 100%;
     border-radius: var(--radius-lg);
     overflow: hidden;
+    /* Remove the default tabindex="-1" focus ring so focus-visible only shows
+       when keyboard users actually focus controls — not when togglePlay()
+       programmatically focuses the wrapper. */
+    outline: none;
+  }
+
+  .audio-player:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   /* Immersive body — all content sits over the shader background */
@@ -594,7 +622,7 @@
     align-items: center;
     gap: var(--space-2);
     padding-top: var(--space-2);
-    border-top: 1px solid var(--color-player-border);
+    border-top: var(--border-width) solid var(--color-player-border);
   }
 
   .audio-player__btn {
@@ -615,6 +643,11 @@
     color: var(--color-player-text);
   }
 
+  .audio-player__btn:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   .audio-player__btn:disabled {
     opacity: var(--opacity-40);
     cursor: not-allowed;
@@ -629,7 +662,7 @@
     background: var(--color-player-surface);
     color: var(--color-player-text);
     border-radius: var(--radius-full);
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(var(--blur-md));
     transition: var(--transition-colors), var(--transition-transform);
   }
 
@@ -640,6 +673,11 @@
 
   .audio-player__btn--play:active {
     transform: scale(0.95);
+  }
+
+  .audio-player__btn--play:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   /* Shrink + fade when playing (Disney: secondary action) */
@@ -666,8 +704,8 @@
 
   /* Volume slider — brand fill, no thumb, expands on hover */
   .audio-player__volume {
-    width: 80px;
-    height: 4px;
+    width: var(--space-20);
+    height: var(--space-1);
     appearance: none;
     background: linear-gradient(
       to right,
@@ -681,7 +719,12 @@
   }
 
   .audio-player__volume:hover {
-    height: 6px;
+    height: var(--space-1-5);
+  }
+
+  .audio-player__volume:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   .audio-player__volume::-webkit-slider-thumb {
@@ -721,7 +764,7 @@
     font-weight: var(--font-medium);
     color: var(--color-player-text-muted);
     padding: var(--space-1) var(--space-2);
-    border: 1px solid var(--color-player-border);
+    border: var(--border-width) solid var(--color-player-border);
     border-radius: var(--radius-sm);
     background: none;
     cursor: pointer;
@@ -737,6 +780,11 @@
     border-color: var(--color-player-surface-active);
   }
 
+  .audio-player__speed-current:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   .audio-player__speed-options {
     display: flex;
     gap: var(--space-1);
@@ -749,7 +797,8 @@
 
   .audio-player__speed:hover .audio-player__speed-options,
   .audio-player__speed:focus-within .audio-player__speed-options {
-    max-width: 200px;
+    /* 200px = 50 × --space-unit; no --space-50 token exists. */
+    max-width: calc(var(--space-24) * 2);
     opacity: 1;
   }
 
@@ -757,7 +806,7 @@
     padding: var(--space-1) var(--space-2);
     font-size: var(--text-xs);
     background: none;
-    border: 1px solid transparent;
+    border: var(--border-width) solid transparent;
     color: var(--color-player-text-muted);
     cursor: pointer;
     border-radius: var(--radius-sm);
@@ -769,6 +818,11 @@
   .audio-player__speed-btn:hover {
     background: var(--color-player-surface);
     color: var(--color-player-text-secondary);
+  }
+
+  .audio-player__speed-btn:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   .audio-player__speed-btn.active {
@@ -786,6 +840,11 @@
   .audio-player__btn--immersive:hover {
     background: var(--color-primary-500);
     color: var(--color-player-text);
+  }
+
+  .audio-player__btn--immersive:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   .audio-player__error {
@@ -813,6 +872,11 @@
     cursor: pointer;
   }
 
+  .audio-player__error-retry:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   /* Mini-player */
   .audio-mini-player {
     position: fixed;
@@ -827,7 +891,7 @@
     background: var(--color-surface);
     border-top: var(--border-width) var(--border-style) var(--color-border);
     box-shadow: var(--shadow-lg);
-    animation: slide-up 200ms ease-out;
+    animation: slide-up var(--duration-fast) var(--ease-out);
   }
 
   @keyframes slide-up {
@@ -836,8 +900,8 @@
   }
 
   .audio-mini-player__art {
-    width: 40px;
-    height: 40px;
+    width: var(--space-10);
+    height: var(--space-10);
     border-radius: var(--radius-sm);
     object-fit: cover;
     flex-shrink: 0;
@@ -867,19 +931,25 @@
     flex-shrink: 0;
   }
 
+  .audio-mini-player__btn:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   .audio-mini-player__progress {
     position: absolute;
     top: 0;
     left: 0;
     right: 0;
-    height: 3px;
+    /* 3px — no exact spacing token; slightly larger than --border-width-thick (2px). */
+    height: var(--border-width-thick);
     background: var(--color-surface-secondary);
   }
 
   .audio-mini-player__progress-fill {
     height: 100%;
     background: var(--color-primary-500);
-    transition: width 200ms linear;
+    transition: width var(--duration-fast) linear;
   }
 
   .audio-mini-player__close {
@@ -890,6 +960,11 @@
     cursor: pointer;
     padding: var(--space-1);
     line-height: 1;
+  }
+
+  .audio-mini-player__close:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   /* Responsive */
@@ -907,8 +982,8 @@
 
     /* Volume gets wider on mobile for easier touch */
     .audio-player__volume {
-      width: 60px;
-      height: 6px;
+      width: var(--space-16);
+      height: var(--space-1-5);
     }
 
     /* On mobile: cycle button only, hide expanded options (no hover) */
@@ -933,6 +1008,27 @@
     .audio-player__speed-btn {
       min-height: var(--space-8);
       padding: var(--space-1) var(--space-3);
+    }
+  }
+
+  /* Reduced-motion guards — ref 05 §"Media elements" §5.
+     motion.css collapses --duration-* tokens under prefers-reduced-motion, but
+     @keyframes content (shimmer infinite, slide-up) still runs unless guarded. */
+  @media (prefers-reduced-motion: reduce) {
+    /* Shimmer: keep a subtle signal, don't silence (loading must stay visible). */
+    .skeleton--waveform {
+      animation-duration: 3s;
+    }
+
+    /* Slide-up: drop the transform, just appear. */
+    .audio-mini-player {
+      animation: none;
+    }
+
+    /* Play-button scale transforms are "spring" feedback — no transform under reduce. */
+    .audio-player__btn--play:hover,
+    .audio-player__btn--play:active {
+      transform: none;
     }
   }
 </style>
