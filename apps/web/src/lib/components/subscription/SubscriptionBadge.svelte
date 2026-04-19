@@ -3,10 +3,16 @@
 
   Small badge showing a subscription tier name.
   Used in library cards and content cards to indicate tier-gated content.
+
+  Note: previously truncated with `max-width: 120px` + `title={tierName}`
+  as overflow disclosure. That pattern fails WCAG 1.4.13 (Content on
+  Hover or Focus) — `title` only surfaces on pointer hover, so keyboard
+  users could not reveal the full tier name. The badge now sizes to
+  content: full tier name always visible, no tooltip needed. If a
+  future call site needs to bound the badge width, prefer wrapping in
+  Melt UI `createTooltip` over re-adding `title`.
 -->
 <script lang="ts">
-  import * as m from '$paraglide/messages';
-
   interface Props {
     tierName: string;
     class?: string;
@@ -15,7 +21,7 @@
   const { tierName, class: className }: Props = $props();
 </script>
 
-<span class="subscription-badge {className ?? ''}" title={tierName}>
+<span class="subscription-badge {className ?? ''}">
   {tierName}
 </span>
 
@@ -31,8 +37,5 @@
     background-color: var(--color-interactive-subtle);
     border-radius: var(--radius-full);
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 120px;
   }
 </style>

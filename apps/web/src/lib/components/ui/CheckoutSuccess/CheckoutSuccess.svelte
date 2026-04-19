@@ -72,7 +72,7 @@
 </svelte:head>
 
 <div class="checkout-success">
-  <div class="checkout-success__card">
+  <div class="checkout-success__card" aria-live="polite">
     {#if isComplete && content}
       <!-- Success: Animated checkmark + content preview + CTA + tips -->
       <div class="checkout-success__icon">
@@ -97,7 +97,7 @@
         </svg>
       </div>
 
-      <h1 class="checkout-success__title">{m.checkout_success_title()}</h1>
+      <h1 class="checkout-success__title" aria-live="polite">{m.checkout_success_title()}</h1>
       <p class="checkout-success__description">{m.checkout_success_description()}</p>
 
       <!-- Content preview card -->
@@ -226,22 +226,22 @@
 
   .checkmark__circle {
     stroke: var(--color-success-600);
-    stroke-width: 2;
+    stroke-width: var(--border-width-thick);
     fill: none;
     stroke-dasharray: 188;
     stroke-dashoffset: 188;
-    animation: checkmark-circle-draw 0.4s var(--ease-out) forwards;
+    animation: checkmark-circle-draw var(--duration-normal) var(--ease-out) forwards;
   }
 
   .checkmark__check {
     stroke: var(--color-success-600);
-    stroke-width: 3;
+    stroke-width: var(--border-width-thick);
     fill: none;
     stroke-linecap: round;
     stroke-linejoin: round;
     stroke-dasharray: 48;
     stroke-dashoffset: 48;
-    animation: checkmark-check-draw 0.3s var(--ease-out) 0.3s forwards;
+    animation: checkmark-check-draw var(--duration-fast) var(--ease-out) var(--duration-fast) forwards;
   }
 
   @keyframes checkmark-circle-draw {
@@ -263,7 +263,19 @@
     border-radius: 50%;
     border: var(--border-width-thick) solid var(--color-border);
     border-top-color: var(--color-interactive);
-    animation: spin 1s linear infinite;
+    animation: spin var(--duration-slower) linear infinite;
+  }
+
+  /* motion.css duration-collapse does NOT neutralise infinite keyframe
+     animations — a 500ms linear-infinite spin at 0.01ms becomes chaotic.
+     Explicit reduced-motion guard stops the rotation but keeps the
+     coloured border-top so there's still a non-animated visual indicator
+     that something is loading (ref 05 §Media §5). */
+  @media (prefers-reduced-motion: reduce) {
+    .checkout-success__spinner {
+      animation: none;
+      border-top-color: var(--color-interactive);
+    }
   }
 
   /* --- Typography --- */
@@ -348,6 +360,11 @@
     transition: var(--transition-colors);
   }
 
+  .checkout-success__btn:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   .checkout-success__btn--primary {
     background: var(--color-interactive);
     color: var(--color-text-inverse);
@@ -365,7 +382,7 @@
   }
 
   .checkout-success__btn--secondary:hover {
-    background: var(--color-surface);
+    background: var(--color-surface-secondary);
     color: var(--color-text);
   }
 
