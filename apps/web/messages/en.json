@@ -442,6 +442,8 @@
   "media_upload_browse": "browse files",
   "media_upload_hint": "Video or audio files. Max 5GB per file.",
   "media_upload_queued": "{count} file(s) queued",
+  "media_upload_error": "Upload failed. Please try again.",
+  "media_upload_rejected_type": "{name} is not a supported file type.",
   "media_status_uploading": "Uploading",
   "media_status_uploaded": "Uploaded",
   "media_status_processing": "Processing",

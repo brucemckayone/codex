@@ -3523,7 +3523,24 @@ export const media_upload_queued = (params) => `${params.count} file(s) queued`
 
 
 /**
- * 
+ *
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_upload_error = () => `Upload failed. Please try again.`
+
+
+/**
+ *
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_upload_rejected_type = (params) => `${params.name} is not a supported file type.`
+
+
+/**
+ *
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */

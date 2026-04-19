@@ -58,16 +58,18 @@
   <fieldset class="type-selector">
     <legend class="type-legend">{m.studio_content_form_content_type_label()}</legend>
     <div class="type-cards">
-      {#each types as type}
+      {#each types as type (type.value)}
         {@const Icon = type.icon}
+        {@const descId = `type-${type.value}-desc`}
         <label class="type-card" data-selected={selectedType === type.value || undefined}>
           <input
             {...form.fields.contentType.as('radio', type.value)}
+            aria-describedby={descId}
             class="sr-only"
           />
           <Icon size={24} />
           <span class="type-card-label">{type.label()}</span>
-          <span class="type-card-desc">{type.description}</span>
+          <span id={descId} class="type-card-desc">{type.description}</span>
         </label>
       {/each}
     </div>

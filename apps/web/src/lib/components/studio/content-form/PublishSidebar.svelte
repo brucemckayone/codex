@@ -15,7 +15,7 @@
 -->
 <script lang="ts">
   import { CheckIcon, CircleIcon } from '$lib/components/ui/Icon';
-  import { Badge, Button, Select } from '$lib/components/ui';
+  import { Button, Select } from '$lib/components/ui';
   import Switch from '$lib/components/ui/Switch/Switch.svelte';
   import * as m from '$paraglide/messages';
   import TagsInput from './TagsInput.svelte';
@@ -234,7 +234,7 @@
         class="btn-full"
         disabled={publishing || deleting || formPending || !isReadyToPublish}
         onclick={onPublishToggle}
-        title={isReadyToPublish ? '' : 'Complete all readiness checks before publishing'}
+        aria-describedby={!isReadyToPublish ? 'publish-hint' : undefined}
         loading={publishing}
       >
         {#if publishing}
@@ -243,6 +243,11 @@
           {m.studio_content_form_publish()}
         {/if}
       </Button>
+      {#if !isReadyToPublish}
+        <p class="field-hint" id="publish-hint">
+          Complete all readiness checks before publishing
+        </p>
+      {/if}
     {:else if isEdit && currentStatus === 'published'}
       <Button
         type="button"
@@ -278,14 +283,31 @@
     </ul>
   </div>
 
-  <!-- Access Type -->
+  <!-- Access Type — the label (treated as the disclosure trigger) carries
+       aria-expanded/aria-controls; the underlying radio input handles the
+       native radiogroup keyboard semantics. aria-expanded is not supported on
+       role="radio", so the disclosure relationship lives on the label. -->
   <div class="sidebar-section">
     <h4 class="sidebar-heading">{m.studio_content_form_access_label()}</h4>
     <div class="access-options" role="radiogroup" aria-label="Content access type">
       {#each accessTypeOptions as option (option.value)}
+        {@const controls =
+          option.value === 'paid'
+            ? 'paid-settings-panel'
+            : option.value === 'subscribers'
+              ? 'member-settings-panel'
+              : undefined}
+        {@const isExpanded =
+          option.value === 'paid'
+            ? showPriceField
+            : option.value === 'subscribers'
+              ? showTierField || showPriceField
+              : undefined}
         <label
           class="access-option"
           data-selected={accessTypeVal === option.value || undefined}
+          aria-controls={controls}
+          aria-expanded={isExpanded}
         >
           <input
             type="radio"
@@ -304,9 +326,15 @@
     </div>
   </div>
 
-  <!-- Price (shown for paid and subscribers) -->
+  <!-- Price panel (revealed when access is paid or subscribers).
+       <section> implicitly has role="region" when labelled, so no explicit role. -->
   {#if showPriceField}
-    <div class="sidebar-section" style="animation: slideIn var(--duration-normal) var(--ease-out);">
+    <section
+      id="paid-settings-panel"
+      class="sidebar-section sidebar-section--revealed"
+      aria-live="polite"
+      data-revealed="true"
+    >
       <h4 class="sidebar-heading">
         {#if accessTypeVal === 'subscribers'}
           {m.studio_content_form_access_also_purchasable()}
@@ -330,12 +358,17 @@
       {:else if accessTypeVal === 'subscribers'}
         <span class="field-hint">Optional. Leave at &pound;0 if only available via subscription.</span>
       {/if}
-    </div>
+    </section>
   {/if}
 
-  <!-- Minimum Subscription Tier (shown for subscribers access type) -->
+  <!-- Tier panel (revealed when access is subscribers and tiers exist) -->
   {#if showTierField}
-    <div class="sidebar-section" style="animation: slideIn var(--duration-normal) var(--ease-out);">
+    <section
+      id="member-settings-panel"
+      class="sidebar-section sidebar-section--revealed"
+      aria-live="polite"
+      data-revealed="true"
+    >
       <h4 class="sidebar-heading">Minimum Tier</h4>
       <Select
         options={tierSelectOptions}
@@ -346,7 +379,7 @@
       <span class="field-hint">
         Subscribers at or above this tier can access this content.
       </span>
-    </div>
+    </section>
   {/if}
 
   <!-- Category -->
@@ -390,20 +423,24 @@
         class="danger-toggle"
         onclick={() => (showDangerZone = !showDangerZone)}
         aria-expanded={showDangerZone}
+        aria-controls="danger-zone-region"
       >
-        Danger Zone {showDangerZone ? '−' : '+'}
+        <span>Danger Zone</span>
+        <span aria-hidden="true">{showDangerZone ? '−' : '+'}</span>
       </button>
       {#if showDangerZone}
-        <Button
-          type="button"
-          variant="destructive"
-          class="btn-full"
-          disabled={deleting || formPending}
-          onclick={onDelete}
-          loading={deleting}
-        >
-          {deleting ? 'Deleting...' : m.studio_content_form_delete()}
-        </Button>
+        <div id="danger-zone-region">
+          <Button
+            type="button"
+            variant="destructive"
+            class="btn-full"
+            disabled={deleting || formPending}
+            onclick={onDelete}
+            loading={deleting}
+          >
+            {deleting ? 'Deleting...' : m.studio_content_form_delete()}
+          </Button>
+        </div>
       {/if}
     </div>
   {/if}
@@ -458,18 +495,18 @@
     padding: var(--space-1) var(--space-3);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: var(--tracking-wider);
   }
 
   .status-badge[data-status='draft'] {
-    background-color: var(--color-warning-100, var(--color-warning-50));
+    background-color: var(--color-warning-100);
     color: var(--color-warning-700);
   }
 
   .status-badge[data-status='published'] {
-    background-color: var(--color-success-100, var(--color-success-50));
+    background-color: var(--color-success-100);
     color: var(--color-success-700);
   }
 
@@ -535,17 +572,17 @@
   }
 
   .access-option:hover {
-    border-color: var(--color-primary-300);
+    border-color: var(--color-border-hover);
   }
 
   .access-option[data-selected] {
-    border-color: var(--color-primary-500);
-    background-color: var(--color-primary-50);
+    border-color: var(--color-interactive);
+    background-color: var(--color-interactive-subtle);
   }
 
   .access-radio {
     margin-top: var(--space-1);
-    accent-color: var(--color-primary-500);
+    accent-color: var(--color-interactive);
   }
 
   .access-option-content {
@@ -579,7 +616,7 @@
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
     color: var(--color-text-secondary);
-    background-color: var(--color-surface-raised, var(--color-surface));
+    background-color: var(--color-surface-secondary);
     border: var(--border-width) var(--border-style) var(--color-border);
     border-right: none;
     border-radius: var(--radius-md) 0 0 var(--radius-md);
@@ -630,6 +667,25 @@
     letter-spacing: var(--tracking-wide);
     color: var(--color-error-600);
     cursor: pointer;
+  }
+
+  .danger-toggle:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Reveal animation — driven by data-revealed on .sidebar-section--revealed
+     instead of inline style="animation: …" so the scoped rule is token-linted
+     and the reduced-motion guard works. */
+  .sidebar-section--revealed[data-revealed='true'] {
+    animation: slideIn var(--duration-normal) var(--ease-out);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar-section--revealed[data-revealed='true'] {
+      animation: none;
+    }
   }
 
   @keyframes slideIn {

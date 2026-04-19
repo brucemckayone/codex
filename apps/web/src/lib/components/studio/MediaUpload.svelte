@@ -21,6 +21,11 @@
     error: string | null;
   }
 
+  interface Rejection {
+    name: string;
+    reason: string;
+  }
+
   interface Props {
     onUploadComplete?: (media: { id: string }) => void;
   }
@@ -28,16 +33,18 @@
   const { onUploadComplete }: Props = $props();
 
   let queue: UploadItem[] = $state([]);
-  let fileInput: HTMLInputElement | undefined = $state();
+  let rejections: Rejection[] = $state([]);
 
   const dropZone = useDropZone({
     onDrop: (files) => addFiles(files),
   });
 
   const hasItems = $derived(queue.length > 0);
+  const hasRejections = $derived(rejections.length > 0);
   const activeUploads = $derived(
     queue.filter((item) => item.status === 'uploading' || item.status === 'completing')
   );
+  const activeCount = $derived(activeUploads.length);
 
   /**
    * Accepted MIME types for media uploads
@@ -84,13 +91,21 @@
   }
 
   /**
-   * Add files to the upload queue and start processing
+   * Add files to the upload queue and start processing.
+   * Invalid files are recorded in `rejections` so the live region announces them.
    */
   function addFiles(files: FileList | File[]) {
     const fileArray = Array.from(files);
-    const validFiles = fileArray.filter(isValidFile);
+    const newRejections: Rejection[] = [];
 
-    for (const file of validFiles) {
+    for (const file of fileArray) {
+      if (!isValidFile(file)) {
+        newRejections.push({
+          name: file.name,
+          reason: m.media_upload_rejected_type({ name: file.name }),
+        });
+        continue;
+      }
       queue.push({
         file,
         id: null,
@@ -98,6 +113,10 @@
         status: 'queued',
         error: null,
       });
+    }
+
+    if (newRejections.length > 0) {
+      rejections = [...rejections, ...newRejections];
     }
 
     processQueue();
@@ -161,8 +180,15 @@
       onUploadComplete?.({ id: mediaId });
     } catch (error) {
       item.status = 'error';
-      item.error =
-        error instanceof Error ? error.message : 'Upload failed';
+      // Never echo provider/network errors — they may contain presigned URL
+      // fragments, internal paths, or other leakage. Surface a generic i18n
+      // message to the user; log the full error via ObservabilityClient.
+      logger.error('Media upload failed', {
+        error: error instanceof Error ? error.message : String(error),
+        mediaId: item.id,
+        fileName: item.file.name,
+      });
+      item.error = m.media_upload_error();
     }
 
     // Process next in queue
@@ -241,7 +267,7 @@
 
   // ─── Event Handlers ──────────────────────────────────────────────────────
 
-  function handleFileSelect(e: Event) {
+  function handleFileInputChange(e: Event) {
     const target = e.target as HTMLInputElement;
     if (target.files) {
       addFiles(target.files);
@@ -249,88 +275,113 @@
     }
   }
 
-  function handleBrowseClick() {
-    fileInput?.click();
+  function dismissRejection(index: number) {
+    rejections.splice(index, 1);
   }
 </script>
 
 <div class="upload-section">
   <h2 class="upload-heading">{m.media_upload_title()}</h2>
 
-  <!-- Drop Zone -->
-  <div
+  <!-- Drop Zone — label wraps hidden file input so keyboard / AT users reach the native file picker -->
+  <label
     class="drop-zone"
     class:dragging={dropZone.isDragging}
-    role="button"
-    tabindex="0"
-    aria-label={m.media_upload_title()}
+    for="media-file-input"
     ondragover={dropZone.handlers.dragover}
     ondragleave={dropZone.handlers.dragleave}
     ondrop={dropZone.handlers.drop}
-    onclick={handleBrowseClick}
-    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleBrowseClick(); }}}
   >
     <UploadIcon size={40} stroke-width="1.5" class="upload-icon" />
 
-    <p class="drop-text">
+    <span class="drop-text">
       {m.media_upload_drop()}
       <span class="browse-link">{m.media_upload_browse()}</span>
-    </p>
-    <p class="drop-hint">{m.media_upload_hint()}</p>
-  </div>
+    </span>
+    <span class="drop-hint">{m.media_upload_hint()}</span>
 
-  <input
-    bind:this={fileInput}
-    type="file"
-    accept={ACCEPTED_TYPES.join(',')}
-    multiple
-    class="file-input"
-    onchange={handleFileSelect}
-    tabindex="-1"
-    aria-hidden="true"
-  />
+    <input
+      id="media-file-input"
+      type="file"
+      accept={ACCEPTED_TYPES.join(',')}
+      multiple
+      class="sr-only"
+      onchange={handleFileInputChange}
+    />
+  </label>
 
-  <!-- Upload Queue -->
-  {#if hasItems}
-    <div class="queue" role="list" aria-label={m.media_upload_queued({ count: String(queue.length) })}>
-      {#each queue as item, index (item.file.name + index)}
-        <div class="queue-item" role="listitem">
-          <div class="queue-item-info">
-            <span class="queue-item-name">{item.file.name}</span>
-            <span class="queue-item-status" data-status={item.status}>
-              {#if item.status === 'queued'}
-                Queued
-              {:else if item.status === 'uploading'}
-                {item.progress}%
-              {:else if item.status === 'completing'}
-                {m.media_status_processing()}
-              {:else if item.status === 'done'}
-                {m.media_status_uploaded()}
-              {:else if item.status === 'error'}
-                {item.error ?? m.media_status_failed()}
-              {/if}
-            </span>
-          </div>
-
-          {#if item.status === 'uploading' || item.status === 'completing'}
-            <div class="progress-bar" role="progressbar" aria-valuenow={item.progress} aria-valuemin={0} aria-valuemax={100}>
-              <div class="progress-fill" style="width: {item.progress}%"></div>
-            </div>
-          {/if}
-
-          {#if item.status === 'done' || item.status === 'error'}
+  <!-- Upload Queue + rejections share a single polite live region so AT users
+       hear queue mutations, per-item progress, completions, and rejections. -->
+  <div
+    class="upload-queue"
+    role="status"
+    aria-live="polite"
+    aria-busy={activeCount > 0}
+  >
+    {#if hasRejections}
+      <ul class="rejection-list" aria-label="Rejected files">
+        {#each rejections as rejection, index (rejection.name + index)}
+          <li class="rejection-item">
+            <span role="alert">{rejection.reason}</span>
             <button
-              class="queue-item-remove"
-              aria-label="Remove"
-              onclick={() => removeItem(index)}
+              type="button"
+              class="rejection-dismiss"
+              aria-label={`Dismiss rejection for ${rejection.name}`}
+              onclick={() => dismissRejection(index)}
             >
               <XIcon size={14} />
             </button>
-          {/if}
-        </div>
-      {/each}
-    </div>
-  {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    {#if hasItems}
+      <div class="queue" role="list" aria-label={m.media_upload_queued({ count: String(queue.length) })}>
+        {#each queue as item, index (item.file.name + index)}
+          <div
+            class="queue-item"
+            role="listitem"
+            aria-busy={item.status === 'uploading' || item.status === 'completing'}
+          >
+            <div class="queue-item-info">
+              <span class="queue-item-name">{item.file.name}</span>
+              <span class="queue-item-status" data-status={item.status}>
+                {#if item.status === 'queued'}
+                  Queued
+                {:else if item.status === 'uploading'}
+                  {item.progress}%
+                {:else if item.status === 'completing'}
+                  {m.media_status_processing()}
+                {:else if item.status === 'done'}
+                  {m.media_status_uploaded()}
+                {:else if item.status === 'error'}
+                  <span role="alert">{item.error ?? m.media_status_failed()}</span>
+                {/if}
+              </span>
+            </div>
+
+            {#if item.status === 'uploading' || item.status === 'completing'}
+              <div class="progress-bar" role="progressbar" aria-valuenow={item.progress} aria-valuemin={0} aria-valuemax={100}>
+                <div class="progress-fill" style="width: {item.progress}%"></div>
+              </div>
+            {/if}
+
+            {#if item.status === 'done' || item.status === 'error'}
+              <button
+                type="button"
+                class="queue-item-remove"
+                aria-label={`Remove ${item.file.name}`}
+                onclick={() => removeItem(index)}
+              >
+                <XIcon size={14} />
+              </button>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </div>
 </div>
 
 <style>
@@ -362,20 +413,23 @@
     transition: var(--transition-colors);
   }
 
-  .drop-zone:hover,
-  .drop-zone:focus-visible {
+  .drop-zone:hover {
     border-color: var(--color-focus);
-    background-color: var(--color-interactive-subtle, var(--color-surface-secondary));
+    background-color: var(--color-interactive-subtle);
   }
 
   .drop-zone.dragging {
     border-color: var(--color-interactive);
-    background-color: var(--color-interactive-subtle, var(--color-surface-secondary));
+    background-color: var(--color-interactive-subtle);
   }
 
-  .drop-zone:focus-visible {
+  /* :focus-within surfaces the label's native focus-visible state when the
+     hidden file input inside receives keyboard focus (Tab). */
+  .drop-zone:focus-within {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
+    border-color: var(--color-focus);
+    background-color: var(--color-interactive-subtle);
   }
 
   .drop-text {
@@ -397,17 +451,62 @@
     margin: 0;
   }
 
-  .file-input {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
+  /* Queue + rejection live region */
+  .upload-queue {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
   }
 
-  /* Queue */
+  .rejection-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .rejection-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border: var(--border-width) var(--border-style) var(--color-error-200);
+    border-radius: var(--radius-md);
+    background-color: var(--color-error-50);
+    color: var(--color-error-700);
+    font-size: var(--text-sm);
+  }
+
+  .rejection-item > span {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .rejection-dismiss {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-6);
+    height: var(--space-6);
+    border: none;
+    background: none;
+    color: var(--color-error-600);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: var(--transition-colors);
+  }
+
+  .rejection-dismiss:hover {
+    background-color: var(--color-error-100);
+  }
+
+  .rejection-dismiss:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   .queue {
     display: flex;
     flex-direction: column;
@@ -500,6 +599,11 @@
   .queue-item-remove:hover {
     background-color: var(--color-surface-secondary);
     color: var(--color-text);
+  }
+
+  .queue-item-remove:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
 </style>

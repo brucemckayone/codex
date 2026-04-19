@@ -29,9 +29,11 @@
     };
     /** Studio name shown in the browser tab (e.g., "My Studio" or org name) */
     studioName: string;
+    /** Optional class forwarded to the root for layout composition (R13) */
+    class?: string;
   }
 
-  const { data, studioName }: Props = $props();
+  const { data, studioName, class: className }: Props = $props();
 
   // Delete state
   let showDeleteConfirm = $state(false);
@@ -123,17 +125,13 @@
       deleteTargetId = null;
     }
   }
-
-  function handlePageChange(newPage: number) {
-    void newPage;
-  }
 </script>
 
 <svelte:head>
   <title>{m.media_title()} | {studioName}</title>
 </svelte:head>
 
-<div class="media-page">
+<div class="media-page {className ?? ''}">
   <PageHeader title={m.media_title()} description={m.media_subtitle()} />
 
   <section class="upload-section">
@@ -147,6 +145,7 @@
           <button
             class="filter-btn"
             class:filter-btn--active={activeMediaType === option.value}
+            aria-pressed={activeMediaType === option.value}
             onclick={() => setFilter('mediaType', option.value)}
             type="button"
           >
@@ -160,6 +159,7 @@
           <button
             class="filter-btn"
             class:filter-btn--active={activeStatus === option.value}
+            aria-pressed={activeStatus === option.value}
             onclick={() => setFilter('status', option.value)}
             type="button"
           >
@@ -170,25 +170,28 @@
     </div>
   </section>
 
-  <section class="media-section">
-    <MediaGrid
-      items={data.mediaItems}
-      onEdit={handleEdit}
-      onDelete={handleDelete}
-    />
+  <!-- Live-region wraps the grid + pagination so SPA-mode route loads announce
+       when content refreshes after a filter change (studio runs ssr=false). -->
+  <div class="media-status-region" role="status" aria-live="polite" aria-busy={!data}>
+    <section class="media-section">
+      <MediaGrid
+        items={data.mediaItems}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+      />
 
-    {#if totalPages > 1}
-      <div class="pagination-container">
-        <Pagination
-          currentPage={currentPage}
-          {totalPages}
-          onPageChange={handlePageChange}
-          baseUrl={paginationBaseUrl}
-          paramName="page"
-        />
-      </div>
-    {/if}
-  </section>
+      {#if totalPages > 1}
+        <div class="pagination-container">
+          <Pagination
+            currentPage={currentPage}
+            {totalPages}
+            baseUrl={paginationBaseUrl}
+            paramName="page"
+          />
+        </div>
+      {/if}
+    </section>
+  </div>
 </div>
 
 <!-- Edit Media Dialog -->
@@ -260,7 +263,7 @@
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
     border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     background-color: var(--color-surface);
     color: var(--color-text-secondary);
     cursor: pointer;
@@ -288,6 +291,10 @@
   .filter-btn:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--border-width-thick);
+  }
+
+  .media-status-region {
+    display: contents;
   }
 
   .media-section {
