@@ -27,6 +27,7 @@
   import type { Snippet } from 'svelte';
   import { page } from '$app/state';
   import { browser } from '$app/environment';
+  import { invalidate } from '$app/navigation';
   import * as m from '$paraglide/messages';
   // PreviewPlayer must stay statically imported: it imports from
   // $lib/remote/checkout.remote, and SvelteKit's experimental remote
@@ -41,6 +42,9 @@
   import { LockIcon, CheckIcon } from '$lib/components/ui/Icon';
   import ProseContent from '$lib/components/editor/ProseContent.svelte';
   import { StructuredData } from '$lib/components/seo';
+  import { toast } from '$lib/components/ui/Toast';
+  import { followingStore } from '$lib/client/following.svelte';
+  import { followOrganization } from '$lib/remote/org.remote';
   import { extractPlainText } from '@codex/validation';
   import type { ContentWithRelations } from '$lib/types';
 
@@ -48,11 +52,25 @@
    * Extended content type that includes runtime-resolved media fields.
    * The public content API resolves R2 keys to full CDN URLs (thumbnailUrl,
    * hlsPreviewUrl) that don't exist on the base MediaItem schema type.
+   *
+   * `captions` is the list of `<track>` entries forwarded to VideoPlayer (Ref 05 §Media
+   * Elements §2). Back-end delivery is pending but the prop wiring + empty-array default
+   * below mean captions flow through automatically the moment the API starts emitting them.
    */
+  type CaptionTrack = {
+    src: string;
+    srclang: string;
+    label: string;
+    default?: boolean;
+  };
   type ContentDetail = ContentWithRelations & {
     mediaItem?: (ContentWithRelations['mediaItem'] extends infer M
       ? M extends object
-        ? M & { thumbnailUrl?: string | null; hlsPreviewUrl?: string | null }
+        ? M & {
+            thumbnailUrl?: string | null;
+            hlsPreviewUrl?: string | null;
+            captions?: CaptionTrack[] | null;
+          }
         : M
       : never) | null;
   };
@@ -140,6 +158,37 @@
   const isTeamOnly = $derived(
     !hasAccess && content.accessType === 'team'
   );
+
+  // Follow state — read from the localStorage-backed store hydrated by the
+  // org layout on mount. `$derived` makes the button reactive to optimistic
+  // updates without a page reload.
+  const isAlreadyFollowing = $derived(
+    content.organizationId
+      ? followingStore.get(content.organizationId)
+      : false
+  );
+  let followInFlight = $state(false);
+
+  async function handleFollow() {
+    const orgId = content.organizationId;
+    if (!orgId || followInFlight) return;
+    followInFlight = true;
+    // Optimistic update — flips the button to "Following" immediately;
+    // `hasAccess` resolves once the server load re-runs via invalidate().
+    followingStore.set(orgId, true);
+    try {
+      await followOrganization(orgId);
+      await invalidate('access:content');
+    } catch (error) {
+      followingStore.set(orgId, false);
+      toast.error(
+        m.org_follow(),
+        error instanceof Error ? error.message : undefined
+      );
+    } finally {
+      followInFlight = false;
+    }
+  }
 
   const previewUrl = $derived(content.mediaItem?.hlsPreviewUrl ?? undefined);
   const accessState = $derived(
@@ -305,7 +354,7 @@
 <div class="content-detail" data-access={hasAccess ? 'full' : 'preview'}>
   <!-- Video Player / Preview — renders FIRST (hero position) -->
   {#if content.contentType === 'video'}
-  <div class="content-detail__player" class:content-detail__player--cinema={cinemaMode} data-content-type="video">
+  <div class="content-detail__player" class:content-detail__player--cinema={cinemaMode} data-content-type="video" tabindex="-1">
     {#if hasAccess && streamingUrl}
       {#if VideoPlayer}
         <VideoPlayer
@@ -313,6 +362,7 @@
           contentId={content.id}
           initialProgress={progress?.positionSeconds ?? 0}
           poster={thumbnailUrl}
+          captions={content.mediaItem?.captions ?? []}
           {cinemaMode}
           oncinemachange={(v) => (cinemaMode = v)}
         />
@@ -405,7 +455,7 @@
 
     <!-- Audio Player — positioned below title/meta, above purchase/about -->
     {#if content.contentType === 'audio'}
-      <div class="content-detail__player content-detail__player--audio" data-content-type="audio">
+      <div class="content-detail__player content-detail__player--audio" data-content-type="audio" tabindex="-1">
         {#if hasAccess && streamingUrl}
           {#if AudioPlayer}
             <AudioPlayer
@@ -449,16 +499,12 @@
         </div>
 
         {#if isAuthenticated}
-          <button class="content-detail__purchase-btn" onclick={() => {
-            import('$lib/remote/org.remote').then(({ followOrganization }) => {
-              if (content.organizationId) {
-                followOrganization(content.organizationId).then(() => {
-                  window.location.reload();
-                });
-              }
-            });
-          }}>
-            {m.org_follow()}
+          <button
+            class="content-detail__purchase-btn"
+            onclick={handleFollow}
+            disabled={isAlreadyFollowing || followInFlight}
+          >
+            {isAlreadyFollowing ? m.org_following() : m.org_follow()}
           </button>
         {:else}
           <a href="/login" class="content-detail__purchase-btn content-detail__purchase-btn--link">
@@ -481,7 +527,10 @@
         </div>
 
         {#if isAuthenticated}
-          <a href="/pricing" class="content-detail__purchase-btn content-detail__purchase-btn--link">
+          <a
+            href={`/pricing?returnTo=${encodeURIComponent(page.url.pathname)}`}
+            class="content-detail__purchase-btn content-detail__purchase-btn--link"
+          >
             {hasSubscription ? m.upgrade_cta_title() : m.subscribe_cta_title()}
           </a>
         {:else}
@@ -659,6 +708,14 @@
     background: var(--color-surface-tertiary);
     aspect-ratio: 16 / 9;
     margin-bottom: var(--space-6);
+  }
+
+  /* tabindex="-1" lets the page load programmatically move focus here after
+     access is granted (e.g. subscribe/follow flow completes). A visible focus
+     ring for keyboard users satisfies WCAG 2.4.7 — R14 of the design system. */
+  .content-detail__player:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   /* Cinema mode — break out to fill the main content area (viewport minus sidebar).
