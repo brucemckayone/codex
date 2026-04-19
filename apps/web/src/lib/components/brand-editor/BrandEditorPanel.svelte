@@ -6,12 +6,17 @@
 
   States: closed (hidden), open (full panel), minimized (compact bar).
   Content transitions slide horizontally on level navigation.
+
+  Semantics: the panel is a persistent floating toolbox that coexists with
+  the page — NOT a blocking modal. It is exposed as an <aside> landmark
+  (implicit role="complementary") rather than role="dialog" so screen
+  readers don't announce the page as modally blocked.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { fly, fade } from 'svelte/transition';
   import { brandEditor } from '$lib/brand-editor';
   import Button from '$lib/components/ui/Button/Button.svelte';
+  import { ChevronUpIcon } from '$lib/components/ui/Icon';
 
   interface Props {
     /** Content rendered inside the scrollable area (level components). */
@@ -27,15 +32,18 @@
   }
 
   const { children, header, footer, onsave, saving = false }: Props = $props();
+
+  const headerLabelId = 'brand-editor-landmark-label';
 </script>
 
 {#if brandEditor.isOpen}
-  <div
+  <aside
     class="brand-panel"
-    role="dialog"
-    aria-label="Brand editor"
-    transition:fly={{ y: 40, duration: 300, opacity: 0 }}
+    aria-labelledby={headerLabelId}
   >
+    <span id={headerLabelId} class="sr-only">
+      Brand editor — {brandEditor.currentLevel.label}
+    </span>
     {#if header}
       <div class="brand-panel__header">
         {@render header()}
@@ -44,7 +52,7 @@
 
     <div class="brand-panel__content">
       {#key brandEditor.level}
-        <div class="brand-panel__level" in:fly={{ x: 80, duration: 200, opacity: 0 }}>
+        <div class="brand-panel__level">
           {#if children}
             {@render children()}
           {/if}
@@ -57,12 +65,9 @@
         {@render footer()}
       </div>
     {/if}
-  </div>
+  </aside>
 {:else if brandEditor.isMinimized}
-  <div
-    class="brand-bar"
-    transition:fly={{ y: 20, duration: 200, opacity: 0 }}
-  >
+  <aside class="brand-bar" aria-label="Brand editor — minimized">
     <span class="brand-bar__icon" aria-hidden="true">🎨</span>
 
     {#if brandEditor.isDirty}
@@ -76,13 +81,14 @@
     {/if}
 
     <button
+      type="button"
       class="brand-bar__expand"
       onclick={() => brandEditor.expand()}
       aria-label="Expand brand editor"
     >
-      ▲
+      <ChevronUpIcon size={16} />
     </button>
-  </div>
+  </aside>
 {/if}
 
 <style>
@@ -92,7 +98,7 @@
     position: fixed;
     bottom: var(--space-4);
     right: var(--space-4);
-    width: 360px;
+    width: min(360px, calc(100% - var(--space-8)));
     max-height: 85vh;
     z-index: var(--z-modal);
 
@@ -107,6 +113,8 @@
     box-shadow: var(--shadow-xl);
 
     overflow: hidden;
+
+    animation: brand-panel-enter var(--duration-slow) var(--ease-smooth) both;
   }
 
   .brand-panel__header {
@@ -124,12 +132,35 @@
 
   .brand-panel__level {
     padding: var(--space-4);
+    animation: brand-panel-level-enter var(--duration-normal) var(--ease-out) both;
   }
 
   .brand-panel__footer {
     flex-shrink: 0;
     padding: var(--space-3) var(--space-4);
     border-top: 1px solid var(--color-border-subtle);
+  }
+
+  @keyframes brand-panel-enter {
+    from {
+      transform: translateY(var(--space-10));
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  @keyframes brand-panel-level-enter {
+    from {
+      transform: translateX(var(--space-20));
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
   }
 
   /* ── Minimized Bar ───────────────────────────────────────────── */
@@ -143,7 +174,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    height: 48px;
+    height: var(--space-12);
     padding: 0 var(--space-4);
 
     background: var(--material-glass);
@@ -152,6 +183,19 @@
     border: 1px solid var(--material-glass-border);
     border-radius: var(--radius-full);
     box-shadow: var(--shadow-xl);
+
+    animation: brand-bar-enter var(--duration-normal) var(--ease-smooth) both;
+  }
+
+  @keyframes brand-bar-enter {
+    from {
+      transform: translateY(var(--space-5));
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
   }
 
   .brand-bar__icon {
@@ -169,8 +213,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    width: var(--space-7);
+    height: var(--space-7);
     border-radius: var(--radius-full);
     border: none;
     background: transparent;
@@ -183,6 +227,11 @@
   .brand-bar__expand:hover {
     background: var(--color-surface-secondary);
     color: var(--color-text);
+  }
+
+  .brand-bar__expand:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   /* ── Mobile ──────────────────────────────────────────────────── */

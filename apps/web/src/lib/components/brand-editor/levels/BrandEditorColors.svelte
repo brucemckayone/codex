@@ -28,11 +28,12 @@
 </script>
 
 <div class="colors-level">
-  {#each SECTIONS as section}
+  {#each SECTIONS as section (section.id)}
     {@const currentValue = getColor(section.field) ?? section.fallback}
     <section class="colors-level__section">
       <div class="colors-level__header-row">
         <button
+          type="button"
           class="colors-level__header"
           class:colors-level__header--expanded={expanded === section.id}
           onclick={() => toggle(section.id)}
@@ -40,10 +41,11 @@
           <span class="colors-level__swatch" style:background={currentValue}></span>
           <span class="colors-level__label">{section.label}</span>
           <span class="colors-level__hex">{currentValue}</span>
-          <span class="colors-level__chevron">{expanded === section.id ? '−' : '+'}</span>
+          <span class="colors-level__chevron" aria-hidden="true">{expanded === section.id ? '−' : '+'}</span>
         </button>
         {#if section.clearable && brandEditor.pending?.backgroundColor}
           <button
+            type="button"
             class="colors-level__clear"
             onclick={() => brandEditor.updateField('backgroundColor', null)}
           >
@@ -64,6 +66,7 @@
   {/each}
 
   <button
+    type="button"
     class="colors-level__drill"
     onclick={() => brandEditor.navigateTo('fine-tune-colors')}
   >
@@ -106,6 +109,11 @@
 
   .colors-level__header:hover {
     background: var(--color-surface-secondary);
+  }
+
+  .colors-level__header:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   .colors-level__header--expanded {
@@ -160,6 +168,11 @@
     color: var(--color-interactive);
   }
 
+  .colors-level__clear:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   .colors-level__picker {
     padding: var(--space-3);
     border: var(--border-width) var(--border-style) var(--color-border-subtle);
@@ -180,5 +193,10 @@
 
   .colors-level__drill:hover {
     color: var(--color-interactive-hover);
+  }
+
+  .colors-level__drill:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 </style>
