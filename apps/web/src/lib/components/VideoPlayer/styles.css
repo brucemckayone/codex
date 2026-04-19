@@ -31,6 +31,33 @@
   cursor: pointer;
 }
 
+/* Wrapper is `tabindex="-1"` — focused programmatically via `togglePlay()` so the
+   scoped `onkeydown` can capture shortcuts. Suppress the native focus ring since
+   the user did not arrive via keyboard; focus indicators live on individual
+   controls (play/mute/time-pill/etc). */
+.video-player-wrapper:focus {
+  outline: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Status live region — wraps loading + error states (ref 05 §"Media elements" §4)
+ * The wrapper MUST remain an accessibility element (role="status"), so we cannot
+ * use display:contents. Instead it spans the player so its children render in-frame.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.video-player-status {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  /* Allow click-through by default; children that need events (retry button)
+     re-enable their own pointer-events. */
+  pointer-events: none;
+}
+
+.video-player-status .video-player-error {
+  pointer-events: auto;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
  * Cinema mode — styling handled by parent; wrapper removes constraints
  * ═══════════════════════════════════════════════════════════════════════════ */
@@ -50,7 +77,6 @@
   align-items: center;
   justify-content: center;
   background-color: var(--color-neutral-900);
-  z-index: 2;
 }
 
 .video-player-loading-spinner {
@@ -80,7 +106,6 @@
   gap: var(--space-4);
   background-color: var(--color-neutral-900);
   color: var(--color-neutral-300);
-  z-index: 2;
   padding: var(--space-6);
   text-align: center;
 }
@@ -458,6 +483,11 @@ media-controller video {
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 .video-player-time-pill {
+  /* Now a native <button> — reset UA button defaults so .video-player-pill layout applies. */
+  appearance: none;
+  border: none;
+  color: var(--color-player-text);
+  font: inherit;
   padding: var(--space-1) var(--space-3);
   cursor: pointer;
   user-select: none;
@@ -509,7 +539,13 @@ media-controller video {
   transition-duration: 60ms;
 }
 
-.video-player-cinema-btn {
+.video-player-config-pill media-playback-rate-button:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-brand-primary, var(--color-primary-500));
+  outline-offset: var(--space-0-5);
+}
+
+.video-player-cinema-btn,
+.video-player-captions-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -525,6 +561,32 @@ media-controller video {
     transform var(--duration-normal) var(--ease-bounce),
     color var(--duration-normal) var(--ease-default),
     background var(--duration-fast) var(--ease-default);
+}
+
+.video-player-captions-label {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: 1;
+}
+
+.video-player-captions-btn:hover {
+  transform: scale(1.1);
+  background: var(--color-player-surface);
+}
+
+.video-player-captions-btn:active {
+  transform: scale(0.82) scaleY(0.9);
+  transition-duration: 60ms;
+}
+
+.video-player-captions-btn[aria-pressed="true"] {
+  color: var(--color-brand-primary, var(--color-primary-500));
+}
+
+.video-player-captions-btn:focus-visible {
+  outline: var(--border-width-thick) solid var(--color-brand-primary, var(--color-primary-500));
+  outline-offset: var(--space-0-5);
 }
 
 .video-player-cinema-btn:hover {
@@ -695,4 +757,82 @@ media-loading-indicator {
   0% { opacity: var(--opacity-100); transform: translateY(-50%) scale(1); }
   70% { opacity: var(--opacity-100); transform: translateY(-50%) scale(1); }
   100% { opacity: var(--opacity-0); transform: translateY(-50%) scale(0.8); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Reduced motion — ref 05 §"Media elements" §5
+ *
+ * motion.css collapses `--duration-*` tokens for transitions, but `@keyframes`
+ * content here (spring bounces on buttons, mute-X arc, seek indicator, spinner)
+ * runs at full amplitude regardless of tokens. Explicitly guard keyframe + any
+ * `transform`-based micro-motion under `prefers-reduced-motion: reduce`.
+ *
+ * Loading spinner is INTENTIONALLY kept moving (slow) — users still need a
+ * motion signal that the player is busy; silencing it would make loading state
+ * indistinguishable from a frozen player.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  .video-player-play-btn,
+  .video-player-mute-btn,
+  .video-player-cinema-btn,
+  .video-player-captions-btn,
+  .video-player-config-pill media-playback-rate-button,
+  .video-player-config-pill media-fullscreen-button,
+  .video-player-pill,
+  .video-player-volume-pill,
+  .video-player-time-pill {
+    transform: none;
+    transition: none;
+  }
+
+  .video-player-play-btn:hover,
+  .video-player-play-btn:active,
+  .video-player-mute-btn:hover,
+  .video-player-mute-btn:active,
+  .video-player-cinema-btn:hover,
+  .video-player-cinema-btn:active,
+  .video-player-captions-btn:hover,
+  .video-player-captions-btn:active,
+  .video-player-config-pill media-playback-rate-button:active,
+  .video-player-config-pill media-fullscreen-button:hover,
+  .video-player-config-pill media-fullscreen-button:active {
+    transform: none;
+  }
+
+  .video-player-play-icon,
+  .video-player-morph-path,
+  .video-player-vol-body,
+  .video-player-vol-wave1,
+  .video-player-vol-wave2 {
+    transition: none;
+  }
+
+  .video-player-vol-mute-x {
+    animation: none;
+  }
+
+  .video-player-seek-indicator {
+    animation: none;
+    opacity: var(--opacity-100);
+  }
+
+  .video-player-controls-container {
+    transition: opacity var(--duration-instant) linear;
+    transform: none;
+  }
+
+  /* Controls stay fully visible when reduced-motion: no slide animation to swap in. */
+  .video-player-controls-container--visible {
+    transform: none;
+  }
+
+  .video-player-mini-progress {
+    transition: none;
+  }
+
+  /* Keep spinner motion as a "work is happening" cue, but slow it so it isn't distracting. */
+  .video-player-loading-spinner {
+    animation-duration: 2s;
+  }
 }

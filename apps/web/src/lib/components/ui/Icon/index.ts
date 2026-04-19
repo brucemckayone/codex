@@ -14,6 +14,7 @@ export { default as ChevronRightIcon } from './ChevronRightIcon.svelte';
 export { default as ChevronsLeftIcon } from './ChevronsLeftIcon.svelte';
 export { default as ChevronsRightIcon } from './ChevronsRightIcon.svelte';
 export { default as ChevronUpIcon } from './ChevronUpIcon.svelte';
+export { default as CinemaIcon } from './CinemaIcon.svelte';
 // Shapes
 export { default as CircleIcon } from './CircleIcon.svelte';
 export { default as ClockIcon } from './ClockIcon.svelte';
@@ -72,6 +73,7 @@ export { default as UserPlusIcon } from './UserPlusIcon.svelte';
 export { default as UsersIcon } from './UsersIcon.svelte';
 export { default as VideoIcon } from './VideoIcon.svelte';
 export { default as Volume2Icon } from './Volume2Icon.svelte';
+export { default as VolumeIcon } from './VolumeIcon.svelte';
 export { default as VolumeXIcon } from './VolumeXIcon.svelte';
 export { default as XIcon } from './XIcon.svelte';
 export { default as YoutubeIcon } from './YoutubeIcon.svelte';

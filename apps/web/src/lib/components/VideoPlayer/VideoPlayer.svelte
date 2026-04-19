@@ -6,13 +6,21 @@
 
   @prop {string} src - HLS manifest URL or direct video URL
   @prop {string} contentId - Content ID for progress tracking
+  @prop {string} [contentTitle] - Content title; drives `<video aria-label>` so screen readers
+    distinguish players on a page that contains more than one video. Ref 05 §"Media elements" §1.
   @prop {number} [initialProgress=0] - Resume position in seconds
   @prop {string} [poster] - Poster/thumbnail image URL
+  @prop {Array<{ src; srclang; label; default? }>} [captions] - One `<track>` per language;
+    exactly one should carry `default`. Ref 05 §"Media elements" §2.
+  @prop {boolean} [cinemaMode=false] - Whether parent has activated cinema layout
+  @prop {(cinema: boolean) => void} [oncinemachange] - Notify parent when cinema toggles
+  @prop {string} [class] - Forward an additional class onto the wrapper root (R13)
 
   @example
   <VideoPlayer
     src={streamingUrl}
     contentId={content.id}
+    contentTitle={content.title}
     initialProgress={progress.positionSeconds}
     poster={content.thumbnailUrl}
   />
@@ -22,24 +30,49 @@
   import { createHlsPlayer } from './hls';
   import { createProgressTracker } from './progress.svelte.ts';
   import { loadPlayerPreferences, savePlayerPreferences } from './preferences';
-  import { AlertCircleIcon } from '$lib/components/ui/Icon';
+  import { AlertCircleIcon, CinemaIcon } from '$lib/components/ui/Icon';
   import './styles.css';
 
   import type Hls from 'hls.js';
 
+  interface CaptionTrack {
+    src: string;
+    srclang: string;
+    label: string;
+    default?: boolean;
+  }
+
   interface Props {
     src: string;
     contentId: string;
+    contentTitle?: string;
     initialProgress?: number;
     poster?: string;
-    captionsSrc?: string;
+    /**
+     * Caption tracks. Each entry renders one `<track kind="captions">`.
+     * Exactly one entry should set `default: true` to auto-show that language.
+     */
+    captions?: CaptionTrack[];
     cinemaMode?: boolean;
     oncinemachange?: (cinema: boolean) => void;
+    /** Forwarded onto the wrapper element. R13: callers can style/layout this root. */
+    class?: string;
   }
 
-  const { src, contentId, initialProgress = 0, poster, captionsSrc, cinemaMode = false, oncinemachange }: Props = $props();
+  const {
+    src,
+    contentId,
+    contentTitle,
+    initialProgress = 0,
+    poster,
+    captions,
+    cinemaMode = false,
+    oncinemachange,
+    class: className,
+  }: Props = $props();
 
   let videoEl: HTMLVideoElement | undefined = $state();
+  let wrapperEl: HTMLDivElement | undefined = $state();
   let hlsInstance: Hls | null = null;
   let loading = $state(true);
   let errorMessage = $state('');
@@ -50,6 +83,10 @@
   let hideControlsTimer: ReturnType<typeof setTimeout> | null = null;
   let controlsVisible = $derived(isHovering);
   let showRemaining = $state(false);
+
+  // Captions toggle — only meaningful when at least one caption track is present
+  const hasCaptions = $derived(Array.isArray(captions) && captions.length > 0);
+  let captionsEnabled = $state(false);
 
   // Volume state for animated icon
   let isMuted = $state(false);
@@ -62,6 +99,19 @@
 
   function toggleCinemaMode() {
     oncinemachange?.(!cinemaMode);
+  }
+
+  function toggleCaptions() {
+    if (!videoEl || !hasCaptions) return;
+    const tracks = videoEl.textTracks;
+    const next = !captionsEnabled;
+    for (let i = 0; i < tracks.length; i++) {
+      const track = tracks[i];
+      if (track.kind === 'captions' || track.kind === 'subtitles') {
+        track.mode = next ? 'showing' : 'disabled';
+      }
+    }
+    captionsEnabled = next;
   }
 
   function handleFullscreenChange() {
@@ -84,6 +134,9 @@
 
   function togglePlay() {
     if (!videoEl) return;
+    // Focus the wrapper so subsequent keyboard shortcuts are captured by the
+    // scoped `onkeydown` — clicking `<video>` does not focus it natively.
+    wrapperEl?.focus({ preventScroll: true });
     if (videoEl.paused) {
       videoEl.play();
     } else {
@@ -223,6 +276,18 @@
       volumeLevel = prefs.volume;
       isMuted = prefs.muted;
 
+      // Sync captions-enabled with the initially-active text track (if any)
+      if (hasCaptions) {
+        const tracks = videoEl.textTracks;
+        for (let i = 0; i < tracks.length; i++) {
+          const t = tracks[i];
+          if ((t.kind === 'captions' || t.kind === 'subtitles') && t.mode === 'showing') {
+            captionsEnabled = true;
+            break;
+          }
+        }
+      }
+
       // Track volume changes for animated icon + preferences
       videoEl.addEventListener('volumechange', () => {
         if (!videoEl) return;
@@ -251,54 +316,161 @@
 
   onMount(() => {
     initPlayer();
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
   });
 
   onDestroy(() => {
     tracker.detach();
     clearHideTimer();
     if (seekIndicatorTimer) clearTimeout(seekIndicatorTimer);
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    }
     if (hlsInstance) {
       hlsInstance.destroy();
       hlsInstance = null;
     }
   });
+
+  /**
+   * Keyboard shortcuts scoped to the player wrapper (ref 05 §"Media elements" §3).
+   *
+   * Attached via `onkeydown` on `.video-player-wrapper` rather than `<svelte:window>` so
+   * space/arrows do NOT intercept interactions elsewhere on the page (e.g. pressing
+   * space on an unrelated button must not toggle play).
+   *
+   * The tab-focusable time pill, mute button, etc. all live inside the wrapper, so the
+   * handler fires when any player-owned element has focus. The wrapper also gets
+   * `tabindex="-1"` so `togglePlay()` can programmatically focus it after a mouse click
+   * on the `<video>` element — keeping shortcuts alive even when focus otherwise would
+   * not have landed on a player descendant.
+   */
+  function handleKey(e: KeyboardEvent) {
+    if (!videoEl || errorMessage) return;
+
+    const target = e.target as HTMLElement | null;
+    // Preserve the existing input/textarea/contentEditable guard — in case keyboard lands
+    // on a form control embedded within a future caption editor / comment widget nested
+    // inside the wrapper.
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+      return;
+    }
+
+    switch (e.key) {
+      case ' ':
+      case 'k':
+      case 'K':
+        e.preventDefault();
+        if (videoEl.paused) {
+          videoEl.play();
+        } else {
+          videoEl.pause();
+        }
+        break;
+      case 'ArrowLeft':
+      case 'j':
+      case 'J':
+        e.preventDefault();
+        videoEl.currentTime = Math.max(0, videoEl.currentTime - 10);
+        break;
+      case 'ArrowRight':
+      case 'l':
+      case 'L':
+        e.preventDefault();
+        videoEl.currentTime = Math.min(videoEl.duration || 0, videoEl.currentTime + 10);
+        break;
+      case 'm':
+      case 'M':
+        e.preventDefault();
+        videoEl.muted = !videoEl.muted;
+        break;
+      case 'f':
+      case 'F':
+        e.preventDefault();
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        } else {
+          videoEl.closest('media-controller')?.requestFullscreen();
+        }
+        break;
+      case 't':
+      case 'T':
+        e.preventDefault();
+        toggleCinemaMode();
+        break;
+      case 'c':
+      case 'C':
+        if (hasCaptions) {
+          e.preventDefault();
+          toggleCaptions();
+        }
+        break;
+    }
+  }
 </script>
 
+<!--
+  The wrapper carries the scoped `onkeydown` (ref 05 §"Media elements" §3) plus
+  hover tracking that drives `controlsVisible`. Svelte flags this combo on a
+  `<div role="region">` via a11y_no_noninteractive_element_interactions; the
+  handlers are intentional — keyboard shortcuts must fire when any focused
+  descendant (time-pill button, mute, etc.) is inside this region so the
+  shortcuts do not leak to the rest of the page. Focusable children inside the
+  region put focus into the subtree; `tabindex="-1"` lets `focus()` target the
+  wrapper after a mouse click on the <video> so subsequent keys are captured.
+-->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
-  class="video-player-wrapper"
+  bind:this={wrapperEl}
+  class="video-player-wrapper {className ?? ''}"
   class:video-player-wrapper--controls-visible={controlsVisible}
   class:video-player-wrapper--cinema={cinemaMode}
   role="region"
   aria-label="Video player"
+  tabindex="-1"
   onmouseenter={handleMouseEnter}
   onmouseleave={handleMouseLeave}
   onmousemove={handleMouseMove}
   ontouchstart={handleMouseEnter}
+  onkeydown={handleKey}
 >
-  {#if loading}
-    <div class="video-player-loading">
-      <div class="video-player-loading-spinner" aria-label="Loading video"></div>
-    </div>
-  {/if}
+  <!-- Loading + error status live region (ref 05 §"Media elements" §4).
+       role=status implicitly aria-live=polite; error inner span escalates to assertive
+       without interrupting the outer polite context. -->
+  <div
+    class="video-player-status"
+    role="status"
+    aria-live="polite"
+    aria-busy={loading}
+  >
+    {#if loading && !errorMessage}
+      <div class="video-player-loading">
+        <span class="sr-only">Loading video…</span>
+        <div class="video-player-loading-spinner" aria-hidden="true"></div>
+      </div>
+    {/if}
 
-  {#if errorMessage}
-    <div class="video-player-error" role="alert">
-      <AlertCircleIcon class="video-player-error-icon" />
-      <p class="video-player-error-message">{errorMessage}</p>
-      <button class="video-player-error-retry" onclick={retry}>
-        Try Again
-      </button>
-    </div>
-  {:else}
-    <!-- Click on video to toggle play/pause -->
+    {#if errorMessage}
+      <div class="video-player-error">
+        <AlertCircleIcon class="video-player-error-icon" />
+        <p class="video-player-error-message" role="alert">{errorMessage}</p>
+        <button class="video-player-error-retry" onclick={retry}>
+          Try Again
+        </button>
+      </div>
+    {/if}
+  </div>
+
+  {#if !errorMessage}
+    <!-- Click on video to toggle play/pause; keyboard equivalents live on the wrapper. -->
     <media-controller
       hotkeys="noarrowleft noarrowright nospace nom nof"
       autohide="-1"
     >
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
       <video
         bind:this={videoEl}
         slot="media"
+        aria-label={contentTitle ?? 'Video'}
         crossorigin="anonymous"
         playsinline
         preload="metadata"
@@ -309,14 +481,26 @@
         onpause={handlePause}
         onclick={togglePlay}
       >
-        {#if captionsSrc}<track kind="captions" src={captionsSrc} />{/if}
+        {#if captions && captions.length > 0}
+          {#each captions as track (track.srclang)}
+            <track
+              kind="captions"
+              src={track.src}
+              srclang={track.srclang}
+              label={track.label}
+              default={track.default ?? false}
+            />
+          {/each}
+        {/if}
       </video>
 
       <media-loading-indicator slot="centered-chrome" noautohide></media-loading-indicator>
 
-      <!-- Double-tap seek zones (touch devices) -->
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
-      <div class="video-player-tap-zone" ontouchend={handleVideoTap} role="presentation">
+      <!-- Double-tap seek zones (touch devices). aria-hidden decorative overlay;
+           CSS `pointer-events: none` by default, re-enabled only on coarse
+           pointer. Double-tap is discoverable as a mobile convention — sighted
+           screen-reader users have keyboard shortcuts (ArrowLeft/Right). -->
+      <div class="video-player-tap-zone" ontouchend={handleVideoTap} aria-hidden="true">
         {#if seekIndicator === 'left'}
           <div class="video-player-seek-indicator video-player-seek-indicator--left">-10s</div>
         {/if}
@@ -329,13 +513,10 @@
       <div class="video-player-controls-container {controlsVisible ? 'video-player-controls-container--visible' : ''}">
         <!-- Row 2 (top): time pill + config pill -->
         <div class="video-player-controls-row video-player-controls-row--top">
-          <!-- svelte-ignore a11y_click_events_have_key_events -->
-          <div
+          <button
+            type="button"
             class="video-player-pill video-player-time-pill"
-            role="button"
-            tabindex="0"
             onclick={() => (showRemaining = !showRemaining)}
-            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showRemaining = !showRemaining; }}}
             aria-label={showRemaining ? 'Show elapsed time' : 'Show remaining time'}
           >
             {#if showRemaining}
@@ -343,10 +524,22 @@
             {:else}
               <media-time-display showduration></media-time-display>
             {/if}
-          </div>
+          </button>
           <div class="video-player-spacer"></div>
           <div class="video-player-pill video-player-config-pill">
             <media-playback-rate-button rates="0.5 1 1.5 2"></media-playback-rate-button>
+            {#if hasCaptions}
+              <span class="video-player-pill-divider"></span>
+              <button
+                class="video-player-captions-btn"
+                onclick={toggleCaptions}
+                aria-label={captionsEnabled ? 'Hide captions' : 'Show captions'}
+                aria-pressed={captionsEnabled}
+                title={captionsEnabled ? 'Hide captions (c)' : 'Show captions (c)'}
+              >
+                <span aria-hidden="true" class="video-player-captions-label">CC</span>
+              </button>
+            {/if}
             <span class="video-player-pill-divider"></span>
             <button
               class="video-player-cinema-btn"
@@ -355,13 +548,7 @@
               aria-pressed={cinemaMode}
               title={cinemaMode ? 'Exit cinema mode' : 'Cinema mode'}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                {#if cinemaMode}
-                  <rect x="4" y="6" width="16" height="12" rx="2" />
-                {:else}
-                  <rect x="2" y="7" width="20" height="10" rx="2" />
-                {/if}
-              </svg>
+              <CinemaIcon size={18} active={cinemaMode} />
             </button>
             <span class="video-player-pill-divider"></span>
             <media-fullscreen-button></media-fullscreen-button>
@@ -375,6 +562,13 @@
             onclick={togglePlay}
             aria-label={isPaused ? 'Play' : 'Pause'}
           >
+            <!--
+              Play ↔ Pause icon kept INLINE as a genuine exception.
+              Rationale: the "d" attribute is transitioned between two path definitions to
+              create a Disney-style morph (see styles.css .video-player-morph-path). IconBase
+              cannot express per-path `d` transitions — extracting would forfeit the morph.
+              Reference: ref 05 §"Media elements" refactor (iter-011).
+            -->
             <svg
               class="video-player-play-icon"
               width="22"
@@ -407,6 +601,13 @@
               onclick={() => { if (videoEl) videoEl.muted = !videoEl.muted; }}
               aria-label={isMuted ? 'Unmute' : 'Mute'}
             >
+              <!--
+                Volume icon kept INLINE for the same reason as play/pause: the per-path
+                opacity / transform / stroke-dash animations (Disney secondary action,
+                staggered follow-through, mute-X arc) are wired to classes that swap
+                `--active` state. Extracting to IconBase would forfeit the animation
+                surface. A static VolumeIcon primitive exists for non-animated callers.
+              -->
               <svg
                 class="video-player-volume-icon"
                 width="20"
@@ -452,52 +653,3 @@
     </media-controller>
   {/if}
 </div>
-
-<svelte:window
-  onkeydown={(e) => {
-    if (!videoEl || errorMessage) return;
-
-    const target = e.target as HTMLElement;
-    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
-      return;
-    }
-
-    switch (e.key) {
-      case ' ':
-        e.preventDefault();
-        if (videoEl.paused) {
-          videoEl.play();
-        } else {
-          videoEl.pause();
-        }
-        break;
-      case 'ArrowLeft':
-        e.preventDefault();
-        videoEl.currentTime = Math.max(0, videoEl.currentTime - 10);
-        break;
-      case 'ArrowRight':
-        e.preventDefault();
-        videoEl.currentTime = Math.min(videoEl.duration || 0, videoEl.currentTime + 10);
-        break;
-      case 'm':
-      case 'M':
-        e.preventDefault();
-        videoEl.muted = !videoEl.muted;
-        break;
-      case 'f':
-      case 'F':
-        e.preventDefault();
-        if (document.fullscreenElement) {
-          document.exitFullscreen();
-        } else {
-          videoEl.closest('media-controller')?.requestFullscreen();
-        }
-        break;
-      case 't':
-      case 'T':
-        e.preventDefault();
-        toggleCinemaMode();
-        break;
-    }
-  }}
-/>
