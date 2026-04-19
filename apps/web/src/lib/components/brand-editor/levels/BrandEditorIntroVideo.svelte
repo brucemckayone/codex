@@ -18,6 +18,7 @@
     deleteIntroVideo,
   } from '$lib/remote/branding.remote';
   import Button from '$lib/components/ui/Button/Button.svelte';
+  import { PlayIcon } from '$lib/components/ui/Icon';
 
   const ALLOWED_VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime'];
   const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
@@ -213,7 +214,9 @@
   {#if phase === 'idle'}
     <!-- Upload zone -->
     <div class="intro-video__zone">
-      <span class="intro-video__zone-icon">▶</span>
+      <span class="intro-video__zone-icon" aria-hidden="true">
+        <PlayIcon size={32} />
+      </span>
       <p class="intro-video__zone-text">Upload a short intro video for your hero section</p>
     </div>
 
@@ -238,8 +241,8 @@
 
   {:else if phase === 'creating' || phase === 'completing' || phase === 'linking'}
     <!-- Processing steps -->
-    <div class="intro-video__status">
-      <div class="intro-video__spinner"></div>
+    <div class="intro-video__status" role="status" aria-live="polite">
+      <div class="intro-video__spinner" aria-hidden="true"></div>
       <p class="intro-video__status-text">
         {phase === 'creating' ? 'Preparing upload...' : phase === 'completing' ? 'Starting transcoding...' : 'Linking to brand...'}
       </p>
@@ -247,8 +250,8 @@
 
   {:else if phase === 'uploading'}
     <!-- Upload progress -->
-    <div class="intro-video__status">
-      <div class="intro-video__progress-bar">
+    <div class="intro-video__status" role="status" aria-live="polite">
+      <div class="intro-video__progress-bar" aria-hidden="true">
         <div class="intro-video__progress-fill" style:width="{uploadProgress}%"></div>
       </div>
       <p class="intro-video__status-text">Uploading... {uploadProgress}%</p>
@@ -256,8 +259,8 @@
 
   {:else if phase === 'transcoding'}
     <!-- Transcoding in progress -->
-    <div class="intro-video__status">
-      <div class="intro-video__spinner"></div>
+    <div class="intro-video__status" role="status" aria-live="polite">
+      <div class="intro-video__spinner" aria-hidden="true"></div>
       <p class="intro-video__status-text">
         Processing video{transcodingProgress != null ? ` (${transcodingProgress}%)` : '...'}
       </p>
@@ -299,7 +302,7 @@
   {:else if phase === 'failed'}
     <!-- Error state -->
     <div class="intro-video__status">
-      <p class="intro-video__error">{error ?? 'Something went wrong'}</p>
+      <p class="intro-video__error" role="alert">{error ?? 'Something went wrong'}</p>
       <Button variant="secondary" size="sm" onclick={handleRetry}>
         Try Again
       </Button>
@@ -307,7 +310,7 @@
   {/if}
 
   {#if error && phase !== 'failed'}
-    <p class="intro-video__error">{error}</p>
+    <p class="intro-video__error" role="alert">{error}</p>
   {/if}
 </div>
 
@@ -333,8 +336,9 @@
   }
 
   .intro-video__zone-icon {
-    font-size: var(--text-3xl);
-    opacity: 0.4;
+    display: inline-flex;
+    color: var(--color-text-muted);
+    opacity: var(--opacity-40);
   }
 
   .intro-video__zone-text {
@@ -383,7 +387,7 @@
     height: 100%;
     background: var(--color-brand-primary);
     border-radius: var(--radius-full);
-    transition: width 200ms var(--ease-default);
+    transition: width var(--duration-fast) var(--ease-default);
   }
 
   .intro-video__spinner {
@@ -392,11 +396,17 @@
     border: var(--border-width-thick) solid var(--color-border-subtle);
     border-top-color: var(--color-brand-primary);
     border-radius: var(--radius-full);
-    animation: spin 0.8s linear infinite;
+    animation: spin var(--duration-slow) linear infinite;
   }
 
   @keyframes spin {
     to { transform: rotate(360deg); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .intro-video__spinner {
+      animation: none;
+    }
   }
 
   .intro-video__ready {

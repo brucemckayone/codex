@@ -1,5 +1,6 @@
 <script lang="ts">
   import { brandEditor } from '$lib/brand-editor';
+  import { SHADER_DEFAULT_PULSE_COLOR } from '$lib/brand-editor/defaults';
   import BrandSliderField from '../BrandSliderField.svelte';
 
   // ── Preset definitions ─────────────────────────────────────────────────
@@ -88,7 +89,7 @@
     'shader-cam-target': '-30',
     'shader-specular': '0.60',
     'shader-impulse-size': '0.040',
-    'shader-pulse-color': '#d10000',
+    'shader-pulse-color': SHADER_DEFAULT_PULSE_COLOR,
     // Ink
     'shader-ink-diffusion': '1.50',
     'shader-ink-advection': '0.80',
@@ -668,8 +669,9 @@
   <section class="hero-fx__section">
     <span class="hero-fx__section-label">Shader Preset</span>
     <div class="hero-fx__preset-grid">
-      {#each PRESETS as preset}
+      {#each PRESETS as preset (preset.id)}
         <button
+          type="button"
           class="hero-fx__preset-card"
           class:hero-fx__preset-card--active={activePreset === preset.id}
           onclick={() => selectPreset(preset.id)}
@@ -937,6 +939,7 @@
         <div class="hero-fx__toggle-row">
           <span class="hero-fx__toggle-label">Invert Colors</span>
           <button
+            type="button"
             class="hero-fx__toggle"
             class:hero-fx__toggle--on={invert}
             onclick={() => updateOverride('shader-invert', invert ? '0' : '1')}
@@ -1680,6 +1683,11 @@
     background: var(--color-surface-secondary);
   }
 
+  .hero-fx__preset-card:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   .hero-fx__preset-card--active {
     border-color: var(--color-interactive);
     background: var(--color-interactive-subtle);
@@ -1730,6 +1738,11 @@
     background: transparent;
   }
 
+  .hero-fx__color-input:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   .hero-fx__color-input::-webkit-color-swatch-wrapper {
     padding: 0;
   }
@@ -1770,6 +1783,11 @@
     padding: 0;
   }
 
+  .hero-fx__toggle:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   .hero-fx__toggle--on {
     background: var(--color-interactive);
   }
@@ -1780,7 +1798,7 @@
     left: var(--space-0-5);
     width: var(--space-4);
     height: var(--space-4);
-    background: white;
+    background: var(--color-text-inverse);
     border-radius: var(--radius-full);
     transition: transform var(--duration-normal) var(--ease-default);
   }

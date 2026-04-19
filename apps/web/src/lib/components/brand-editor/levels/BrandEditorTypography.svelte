@@ -22,7 +22,10 @@
       value={bodyFont}
       onValueChange={updateBody}
     />
-    <p class="typography-level__preview" style="font-family: {bodyFont ? `'${bodyFont}'` : 'var(--font-sans)'}">
+    <p
+      class="typography-level__preview"
+      style:--preview-font={bodyFont ? `'${bodyFont}'` : 'var(--font-sans)'}
+    >
       The quick brown fox jumps over the lazy dog.
     </p>
   </section>
@@ -34,12 +37,16 @@
       value={headingFont}
       onValueChange={updateHeading}
     />
-    <p class="typography-level__preview typography-level__preview--heading" style="font-family: {headingFont ? `'${headingFont}'` : 'var(--font-heading)'}">
+    <p
+      class="typography-level__preview typography-level__preview--heading"
+      style:--preview-font={headingFont ? `'${headingFont}'` : 'var(--font-heading)'}
+    >
       Heading Sample
     </p>
   </section>
 
   <button
+    type="button"
     class="typography-level__drill"
     onclick={() => brandEditor.navigateTo('fine-tune-typography')}
   >
@@ -61,6 +68,7 @@
   }
 
   .typography-level__preview {
+    font-family: var(--preview-font, var(--font-sans));
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
     padding: var(--space-3);
@@ -87,5 +95,10 @@
 
   .typography-level__drill:hover {
     color: var(--color-interactive-hover);
+  }
+
+  .typography-level__drill:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 </style>

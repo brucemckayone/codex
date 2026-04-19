@@ -61,7 +61,10 @@
       ariaValueText="{Number(textScale).toFixed(2)}x scale"
       oninput={handleScaleInput}
     />
-    <p class="fine-type__preview" style="font-size: calc(var(--text-base) * {textScale})">
+    <p
+      class="fine-type__preview"
+      style:--preview-scale={textScale}
+    >
       The quick brown fox jumps over the lazy dog.
     </p>
   </section>
@@ -69,11 +72,14 @@
   <section class="fine-type__section">
     <label class="fine-type__label" for="heading-weight">Heading Weight</label>
     <select id="heading-weight" class="fine-type__select" value={headingWeight} onchange={handleHeadingWeight}>
-      {#each WEIGHT_OPTIONS as opt}
+      {#each WEIGHT_OPTIONS as opt (opt.value)}
         <option value={opt.value}>{opt.label}</option>
       {/each}
     </select>
-    <p class="fine-type__preview fine-type__preview--heading" style="font-weight: {headingWeight || 'var(--font-bold)'}">
+    <p
+      class="fine-type__preview fine-type__preview--heading"
+      style:--preview-weight={headingWeight || 'var(--font-bold)'}
+    >
       Heading Preview
     </p>
   </section>
@@ -81,11 +87,14 @@
   <section class="fine-type__section">
     <label class="fine-type__label" for="body-weight">Body Weight</label>
     <select id="body-weight" class="fine-type__select" value={bodyWeight} onchange={handleBodyWeight}>
-      {#each WEIGHT_OPTIONS as opt}
+      {#each WEIGHT_OPTIONS as opt (opt.value)}
         <option value={opt.value}>{opt.label}</option>
       {/each}
     </select>
-    <p class="fine-type__preview" style="font-weight: {bodyWeight || 'var(--font-normal)'}">
+    <p
+      class="fine-type__preview"
+      style:--preview-weight={bodyWeight || 'var(--font-normal)'}
+    >
       Body text preview with the selected weight applied.
     </p>
   </section>
@@ -119,8 +128,14 @@
     color: var(--color-text);
   }
 
+  .fine-type__select:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   .fine-type__preview {
-    font-size: var(--text-sm);
+    font-size: calc(var(--text-base) * var(--preview-scale, 1));
+    font-weight: var(--preview-weight, var(--font-normal));
     color: var(--color-text-secondary);
     padding: var(--space-3);
     border: var(--border-width) var(--border-style) var(--color-border-subtle);
@@ -128,7 +143,7 @@
   }
 
   .fine-type__preview--heading {
-    font-size: var(--text-xl);
+    font-size: calc(var(--text-xl) * var(--preview-scale, 1));
     font-family: var(--font-heading);
     color: var(--color-text);
   }
