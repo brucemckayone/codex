@@ -53,10 +53,17 @@ export async function createHlsPlayer(
     return null;
   }
 
+  // RunPod encodes ~6s HLS segments; a 30s forward buffer holds ~5 segments, which balances
+  // mobile-data friendliness (we don't pre-fetch the whole movie) against keeping enough ahead
+  // of the playhead to ride out a 5–10s network dip. `maxMaxBufferLength` is the hard ceiling
+  // HLS.js may grow to under backpressure; capping at 60s prevents unbounded RAM on long
+  // sessions. See ref 05 §"Media elements" buffer tuning.
   const hls = new HlsJs({
     enableWorker: true,
     startLevel: -1, // auto quality
     lowLatencyMode: false,
+    maxBufferLength: 30,
+    maxMaxBufferLength: 60,
   });
 
   let mediaErrorRecoveryAttempts = 0;
