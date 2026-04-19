@@ -35,6 +35,8 @@
     loading?: boolean;
     /** Error message announced via the nested role="alert". */
     error?: string | null;
+    /** Forward additional class onto the root wrapper. R13 composition seam. */
+    class?: string;
   }
 
   const {
@@ -46,6 +48,7 @@
     audioAnalysis = null,
     loading = false,
     error = null,
+    class: className,
   }: Props = $props();
 
   let canvasEl: HTMLCanvasElement | undefined = $state();
@@ -533,7 +536,7 @@
 </script>
 
 <div
-  class="waveform"
+  class="waveform {className ?? ''}"
   bind:this={containerEl}
   role="slider"
   aria-label="Audio seek bar"

@@ -45,6 +45,7 @@
   import { toast } from '$lib/components/ui/Toast';
   import { followingStore } from '$lib/client/following.svelte';
   import { followOrganization } from '$lib/remote/org.remote';
+  import { MediaLiveRegion } from '$lib/components/media-a11y';
   import { extractPlainText } from '@codex/validation';
   import type { ContentWithRelations } from '$lib/types';
 
@@ -556,9 +557,20 @@
           <span class="content-detail__price-label">{m.content_detail_purchase_cta_description()}</span>
         </div>
 
-        {#if formResult?.checkoutError}
-          <p class="content-detail__purchase-error" role="alert">{formResult.checkoutError}</p>
-        {/if}
+        <!-- MediaLiveRegion widened beyond media surfaces: checkout errors announce
+             to AT via the region's nested role="alert" (escalated aria-live=
+             "assertive") while the visible <p> in the children snippet keeps the
+             existing purchase-error styling for sighted users. The visible <p>
+             intentionally has NO role so AT doesn't hear the error twice.
+             Codex-wuye8. -->
+        <MediaLiveRegion
+          error={formResult?.checkoutError ?? null}
+          class="content-detail__purchase-error-region"
+        >
+          {#if formResult?.checkoutError}
+            <p class="content-detail__purchase-error" aria-hidden="true">{formResult.checkoutError}</p>
+          {/if}
+        </MediaLiveRegion>
 
         {#if isAuthenticated && purchaseForm}
           {@render purchaseForm()}

@@ -14,101 +14,36 @@
   import { onDestroy, onMount } from 'svelte';
   import type { Snippet } from 'svelte';
   import {
-    compileShader,
     createProgram,
     createQuad,
     drawQuad,
     getUniforms,
   } from '$lib/components/ui/ShaderHero/webgl-utils';
+  import { WAVEFORM_FLOW_VERT } from '$lib/components/ui/ShaderHero/shaders/waveform-flow.vert';
+  import { WAVEFORM_FLOW_FRAG } from '$lib/components/ui/ShaderHero/shaders/waveform-flow.frag';
   import type { AudioAnalysis } from './audio-analyser';
 
   interface Props {
     audioAnalysis?: AudioAnalysis | null;
     poster?: string | null;
     children?: Snippet;
+    /** Forward additional class onto the root wrapper. R13 composition seam. */
+    class?: string;
   }
 
-  const { audioAnalysis = null, poster = null, children }: Props = $props();
+  const {
+    audioAnalysis = null,
+    poster = null,
+    children,
+    class: className,
+  }: Props = $props();
 
   let containerEl: HTMLDivElement | undefined = $state();
   let canvasEl: HTMLCanvasElement | undefined = $state();
 
-  // ── Shader source ──
-
-  const VERT = `#version 300 es
-    in vec2 a_position;
-    out vec2 v_uv;
-    void main() {
-      v_uv = a_position * 0.5 + 0.5;
-      gl_Position = vec4(a_position, 0, 1);
-    }
-  `;
-
-  // Flowing organic noise — simplex-like via value noise with smooth interpolation
-  const FRAG = `#version 300 es
-    precision mediump float;
-    in vec2 v_uv;
-    out vec4 fragColor;
-
-    uniform float u_time;
-    uniform vec2 u_resolution;
-    uniform vec3 u_color1;
-    uniform vec3 u_color2;
-    uniform float u_amplitude;
-    uniform float u_speed;
-
-    // Simple hash-based noise
-    float hash(vec2 p) {
-      return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-    }
-
-    float noise(vec2 p) {
-      vec2 i = floor(p);
-      vec2 f = fract(p);
-      f = f * f * (3.0 - 2.0 * f); // smoothstep
-
-      float a = hash(i);
-      float b = hash(i + vec2(1.0, 0.0));
-      float c = hash(i + vec2(0.0, 1.0));
-      float d = hash(i + vec2(1.0, 1.0));
-
-      return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-    }
-
-    float fbm(vec2 p) {
-      float val = 0.0;
-      float amp = 0.5;
-      float freq = 1.0;
-      for (int i = 0; i < 4; i++) {
-        val += amp * noise(p * freq);
-        freq *= 2.0;
-        amp *= 0.5;
-      }
-      return val;
-    }
-
-    void main() {
-      vec2 uv = v_uv;
-      float t = u_time * u_speed;
-
-      // Flowing displacement
-      float n1 = fbm(uv * 3.0 + vec2(t * 0.3, t * 0.2));
-      float n2 = fbm(uv * 2.0 + vec2(-t * 0.2, t * 0.15) + n1 * 0.5);
-
-      // Mix brand colours based on noise
-      float blend = smoothstep(0.3, 0.7, n2);
-      vec3 col = mix(u_color1, u_color2, blend);
-
-      // Subtle brightness variation
-      float brightness = 0.15 + n1 * 0.1 + u_amplitude * 0.08;
-
-      // Vignette — darker at edges
-      float vig = 1.0 - length((uv - 0.5) * vec2(1.8, 1.2)) * 0.5;
-      vig = clamp(vig, 0.0, 1.0);
-
-      fragColor = vec4(col * brightness * vig, 0.85);
-    }
-  `;
+  // ── Shader source (extracted to shaders/waveform-flow.*.ts per /shader-preset-pipeline) ──
+  const VERT = WAVEFORM_FLOW_VERT;
+  const FRAG = WAVEFORM_FLOW_FRAG;
 
   const UNIFORM_NAMES = [
     'u_time',
@@ -268,7 +203,7 @@
 </script>
 
 <div
-  class="waveform-shader"
+  class="waveform-shader {className ?? ''}"
   bind:this={containerEl}
   style:--poster-url={poster ? `url(${poster})` : 'none'}
 >
@@ -291,14 +226,19 @@
     background: var(--color-neutral-900);
   }
 
-  /* Blurred cover art — deepest layer */
+  /* Blurred cover art — deepest layer. Negative inset extends slightly beyond
+     the container so the blur's soft edge is clipped by overflow: hidden rather
+     than visible against the background. --space-5 (20px) matches the original
+     inset exactly. Blur uses calc(var(--blur-xl) * 2) to preserve the 40px
+     radius — the materials palette has --blur-xl (20px) and --blur-2xl (60px)
+     but nothing at 40px. */
   .waveform-shader__art {
     position: absolute;
-    inset: -20px; /* extend beyond container to hide blur edges */
+    inset: calc(-1 * var(--space-5));
     background-image: var(--poster-url);
     background-size: cover;
     background-position: center;
-    filter: blur(40px) brightness(0.3) saturate(1.2);
+    filter: blur(calc(var(--blur-xl) * 2)) brightness(0.3) saturate(1.2);
     z-index: 0;
   }
 
