@@ -16,11 +16,14 @@ import type {
 } from '@codex/access';
 import type {
   ActivityFeedResponse,
+  ContentPerformanceItem,
   CustomerDetails,
   CustomerListItem,
   DashboardStats,
-  RevenueAnalyticsResponse,
-  TopContentAnalyticsResponse,
+  FollowerStats,
+  RevenueStats,
+  SubscriberStats,
+  TopContentItem,
 } from '@codex/admin';
 import {
   COOKIES,
@@ -1111,69 +1114,89 @@ export function createServerApi(
      */
     analytics: {
       /**
-       * Get revenue statistics
+       * Get revenue statistics with optional period-over-period comparison.
        *
        * Query parameters (from AdminRevenueQueryInput):
        * - startDate: ISO date string, e.g., '2025-01-01' (optional)
        * - endDate: ISO date string, e.g., '2025-01-31' (optional)
+       * - compareFrom / compareTo: ISO date strings for comparison period (both-or-neither)
        *
-       * Note: Maximum date range is 365 days (enforced by backend).
-       *
-       * @example
-       * ```typescript
-       * const params = new URLSearchParams();
-       * params.set('startDate', '2025-01-01');
-       * params.set('endDate', '2025-01-31');
-       * const revenue = await api.analytics.getRevenue(params);
-       * ```
-       *
-       * @see {@link AdminRevenueQueryInput}
+       * When compareFrom/compareTo are provided, `previous` is populated on the response.
+       * Maximum date range is 365 days per window (enforced by backend).
        */
       getRevenue: (params?: URLSearchParams) =>
-        request<RevenueAnalyticsResponse>(
+        request<RevenueStats>(
           'admin',
           `/api/admin/analytics/revenue${params ? `?${params}` : ''}`
         ),
 
       /**
-       * Get top content by revenue
-       * Returns array of { contentId, contentTitle, revenueCents, purchaseCount }
+       * Get top content ranked by revenue with optional per-row trend delta.
        *
        * Query parameters (from AdminTopContentQueryInput):
-       * - limit: number of items to return (1-100, default: 10)
+       * - limit: number of items (1-100, default: 10)
+       * - startDate / endDate: ISO date strings (optional)
+       * - compareFrom / compareTo: ISO date strings for trend-delta comparison (both-or-neither)
        *
-       * @example
-       * ```typescript
-       * const params = new URLSearchParams();
-       * params.set('limit', '20');
-       * const topContent = await api.analytics.getTopContent(params);
-       * ```
-       *
-       * @see {@link AdminTopContentQueryInput}
+       * Per-row fields include `thumbnailUrl`, `viewsInPeriod`, and `trendDelta`
+       * (null when comparison not requested).
        */
       getTopContent: (params?: URLSearchParams) =>
-        request<TopContentAnalyticsResponse>(
+        request<PaginatedListResponse<TopContentItem>>(
           'admin',
           `/api/admin/analytics/top-content${params ? `?${params}` : ''}`
         ),
 
       /**
-       * Get combined dashboard statistics (revenue, customers, top content)
+       * Get subscriber statistics (active / new / churned) with optional
+       * period-over-period comparison.
        *
-       * Single endpoint replacing 3 parallel calls. Returns:
-       * - revenue: RevenueStats (includes revenueByDay[])
-       * - customers: CustomerStats (totalCustomers, newCustomersLast30Days)
-       * - topContent: PaginatedListResponse<TopContentItem>
+       * Query parameters (from AdminSubscribersQueryInput):
+       * - startDate / endDate / compareFrom / compareTo (all optional, ISO strings)
+       *
+       * When compareFrom/compareTo are provided, `previous` is populated on the response.
+       */
+      getSubscribers: (params?: URLSearchParams) =>
+        request<SubscriberStats>(
+          'admin',
+          `/api/admin/analytics/subscribers${params ? `?${params}` : ''}`
+        ),
+
+      /**
+       * Get follower statistics (total / new) with optional period-over-period
+       * comparison. Note: unfollows hard-delete rows, so `totalFollowers` is an
+       * approximation for historical windows.
+       *
+       * Query parameters (from AdminFollowersQueryInput):
+       * - startDate / endDate / compareFrom / compareTo (all optional, ISO strings)
+       */
+      getFollowers: (params?: URLSearchParams) =>
+        request<FollowerStats>(
+          'admin',
+          `/api/admin/analytics/followers${params ? `?${params}` : ''}`
+        ),
+
+      /**
+       * Get per-content engagement metrics (views, watch time, completion %)
+       * with optional per-row watch-time trend delta.
+       *
+       * Query parameters (from AdminContentPerformanceQueryInput):
+       * - limit: number of items (1-100, default: 10)
+       * - startDate / endDate / compareFrom / compareTo (all optional, ISO strings)
+       *
+       * LEFT-JOIN semantics — content with zero playback still appears (zeroed).
+       */
+      getContentPerformance: (params?: URLSearchParams) =>
+        request<PaginatedListResponse<ContentPerformanceItem>>(
+          'admin',
+          `/api/admin/analytics/content-performance${params ? `?${params}` : ''}`
+        ),
+
+      /**
+       * Get combined dashboard statistics (revenue, customers, top content).
        *
        * Query parameters (from adminDashboardStatsQuerySchema):
        * - organizationId: UUID (required)
-       *
-       * @example
-       * ```typescript
-       * const params = new URLSearchParams();
-       * params.set('organizationId', orgId);
-       * const stats = await api.analytics.getDashboardStats(params);
-       * ```
        */
       getDashboardStats: (params?: URLSearchParams) =>
         request<DashboardStats>(

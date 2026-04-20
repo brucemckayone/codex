@@ -93,29 +93,57 @@ export const getDashboardStats = query(z.string().uuid(), async (orgId) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Analytics date-range primitives
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ISO-date strings travel end-to-end as strings; the admin-api re-parses them
+// via isoDateSchema on receipt. Forwarding verbatim avoids a Date → ISO round-trip.
+const dateRangeFields = {
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  compareFrom: z.string().optional(),
+  compareTo: z.string().optional(),
+} as const;
+
+function setDateRangeParams(
+  searchParams: URLSearchParams,
+  params: {
+    startDate?: string;
+    endDate?: string;
+    compareFrom?: string;
+    compareTo?: string;
+  }
+) {
+  if (params.startDate) searchParams.set('startDate', params.startDate);
+  if (params.endDate) searchParams.set('endDate', params.endDate);
+  if (params.compareFrom) searchParams.set('compareFrom', params.compareFrom);
+  if (params.compareTo) searchParams.set('compareTo', params.compareTo);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Analytics Revenue
 // ─────────────────────────────────────────────────────────────────────────────
 
 const revenueQuerySchema = z.object({
   organizationId: z.string().uuid(),
-  dateFrom: z.string().optional(),
-  dateTo: z.string().optional(),
-  granularity: z.enum(['day', 'week', 'month']).optional(),
+  ...dateRangeFields,
 });
 
 /**
- * Revenue analytics over time with optional date range and granularity
+ * Revenue analytics with optional period-over-period comparison.
+ *
+ * When both compareFrom and compareTo are provided, the response includes a
+ * `previous` block with the comparison-window figures.
  *
  * Usage:
  * ```svelte
- * <script>
- *   const revenue = await getAnalyticsRevenue({
- *     organizationId: orgId,
- *     dateFrom: '2025-01-01',
- *     dateTo: '2025-01-31',
- *     granularity: 'day'
- *   });
- * </script>
+ * const revenue = await getAnalyticsRevenue({
+ *   organizationId: orgId,
+ *   startDate: '2026-03-01',
+ *   endDate: '2026-03-31',
+ *   compareFrom: '2026-02-01',
+ *   compareTo: '2026-02-28',
+ * });
  * ```
  */
 export const getAnalyticsRevenue = query(revenueQuerySchema, async (params) => {
@@ -123,14 +151,10 @@ export const getAnalyticsRevenue = query(revenueQuerySchema, async (params) => {
   const api = createServerApi(platform, cookies);
 
   const searchParams = new URLSearchParams();
-  if (params.dateFrom) searchParams.set('dateFrom', params.dateFrom);
-  if (params.dateTo) searchParams.set('dateTo', params.dateTo);
-  if (params.granularity) searchParams.set('granularity', params.granularity);
   searchParams.set('organizationId', params.organizationId);
+  setDateRangeParams(searchParams, params);
 
-  return api.analytics.getRevenue(
-    searchParams.toString() ? searchParams : undefined
-  );
+  return api.analytics.getRevenue(searchParams);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -140,20 +164,20 @@ export const getAnalyticsRevenue = query(revenueQuerySchema, async (params) => {
 const topContentQuerySchema = z.object({
   organizationId: z.string().uuid(),
   limit: z.coerce.number().min(1).max(100).optional().default(10),
+  ...dateRangeFields,
 });
 
 /**
- * Top performing content by views and revenue
+ * Top content leaderboard (revenue-ranked) with per-row thumbnail, period
+ * views, and optional revenue trend delta vs the comparison window.
  *
  * Usage:
  * ```svelte
- * <script>
- *   const topContent = await getAnalyticsTopContent({ organizationId: orgId, limit: 10 });
- * </script>
- *
- * {#each topContent.items as content}
- *   <ContentPerformanceRow content={content} />
- * {/each}
+ * const top = await getAnalyticsTopContent({
+ *   organizationId: orgId,
+ *   limit: 10,
+ *   startDate, endDate, compareFrom, compareTo,
+ * });
  * ```
  */
 export const getAnalyticsTopContent = query(
@@ -165,8 +189,98 @@ export const getAnalyticsTopContent = query(
     const searchParams = new URLSearchParams();
     searchParams.set('organizationId', params.organizationId);
     searchParams.set('limit', String(params.limit));
+    setDateRangeParams(searchParams, params);
 
     return api.analytics.getTopContent(searchParams);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Analytics Subscribers
+// ─────────────────────────────────────────────────────────────────────────────
+
+const subscribersQuerySchema = z.object({
+  organizationId: z.string().uuid(),
+  ...dateRangeFields,
+});
+
+/**
+ * Subscriber KPIs: active / new / churned with daily breakdown and optional
+ * period-over-period `previous` block.
+ */
+export const getAnalyticsSubscribers = query(
+  subscribersQuerySchema,
+  async (params) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    const searchParams = new URLSearchParams();
+    searchParams.set('organizationId', params.organizationId);
+    setDateRangeParams(searchParams, params);
+
+    return api.analytics.getSubscribers(searchParams);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Analytics Followers
+// ─────────────────────────────────────────────────────────────────────────────
+
+const followersQuerySchema = z.object({
+  organizationId: z.string().uuid(),
+  ...dateRangeFields,
+});
+
+/**
+ * Follower KPIs: total / new with daily breakdown and optional
+ * period-over-period `previous` block.
+ *
+ * Note: unfollows hard-delete the row, so `totalFollowers` for past windows is
+ * a lower-bound approximation — see FollowerBlock docstring in @codex/admin.
+ */
+export const getAnalyticsFollowers = query(
+  followersQuerySchema,
+  async (params) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    const searchParams = new URLSearchParams();
+    searchParams.set('organizationId', params.organizationId);
+    setDateRangeParams(searchParams, params);
+
+    return api.analytics.getFollowers(searchParams);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Analytics Content Performance
+// ─────────────────────────────────────────────────────────────────────────────
+
+const contentPerformanceQuerySchema = z.object({
+  organizationId: z.string().uuid(),
+  limit: z.coerce.number().min(1).max(100).optional().default(10),
+  ...dateRangeFields,
+});
+
+/**
+ * Per-content engagement metrics — distinct viewers, watch time, average
+ * completion — with optional watch-time trend delta vs the comparison window.
+ *
+ * LEFT-JOIN semantics: content with zero playback activity in the window still
+ * appears with zero metrics (useful for surfacing under-performers).
+ */
+export const getAnalyticsContentPerformance = query(
+  contentPerformanceQuerySchema,
+  async (params) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    const searchParams = new URLSearchParams();
+    searchParams.set('organizationId', params.organizationId);
+    searchParams.set('limit', String(params.limit));
+    setDateRangeParams(searchParams, params);
+
+    return api.analytics.getContentPerformance(searchParams);
   }
 );
 

@@ -31,16 +31,24 @@
 
   const isAuthorized = $derived(data.userRole === 'admin' || data.userRole === 'owner');
 
-  // Parse date range from URL, default to last 30 days
-  const dateFrom = $derived.by(() => {
+  // Parse date range from URL, default to last 30 days.
+  // URL params use `startDate`/`endDate` to match the admin-api schema;
+  // legacy `dateFrom`/`dateTo` are still accepted for backward-compat links.
+  const startDate = $derived.by(() => {
     const now = new Date();
     const defaultFrom = new Date(now);
     defaultFrom.setDate(defaultFrom.getDate() - 30);
-    return page.url.searchParams.get('dateFrom') ?? defaultFrom.toISOString().split('T')[0];
+    return (
+      page.url.searchParams.get('startDate') ??
+      page.url.searchParams.get('dateFrom') ??
+      defaultFrom.toISOString().split('T')[0]
+    );
   });
 
-  const dateTo = $derived(
-    page.url.searchParams.get('dateTo') ?? new Date().toISOString().split('T')[0]
+  const endDate = $derived(
+    page.url.searchParams.get('endDate') ??
+      page.url.searchParams.get('dateTo') ??
+      new Date().toISOString().split('T')[0]
   );
 
   // $derived queries react to URL param changes
@@ -48,8 +56,8 @@
     isAuthorized
       ? getAnalyticsRevenue({
           organizationId: data.org.id,
-          dateFrom,
-          dateTo,
+          startDate,
+          endDate,
         })
       : null
   );
@@ -81,7 +89,7 @@
    */
   function getActivePreset(): string {
     const now = new Date();
-    const from = new Date(dateFrom);
+    const from = new Date(startDate);
     const diffDays = Math.round(
       (now.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)
     );
@@ -103,8 +111,8 @@
     from.setDate(from.getDate() - days);
 
     const params = new URLSearchParams();
-    params.set('dateFrom', from.toISOString().split('T')[0]);
-    params.set('dateTo', now.toISOString().split('T')[0]);
+    params.set('startDate', from.toISOString().split('T')[0]);
+    params.set('endDate', now.toISOString().split('T')[0]);
 
     goto(`/studio/analytics?${params}`, {
       keepFocus: true,
