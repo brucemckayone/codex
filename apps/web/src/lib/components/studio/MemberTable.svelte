@@ -8,6 +8,7 @@
   @prop {(userId: string, role: string) => void} onChangeRole - Callback when role is changed
   @prop {(userId: string) => void} onRemove - Callback when member is removed
   @prop {boolean} loading - Whether the data is loading
+  @prop {string} [class] - Optional class forwarded to the root element of each conditional branch
 -->
 <script lang="ts">
   import type { OrgMemberItem } from '$lib/types';
@@ -25,9 +26,16 @@
     onChangeRole?: (userId: string, role: string) => void;
     onRemove?: (userId: string) => void;
     loading?: boolean;
+    class?: string;
   }
 
-  const { members, onChangeRole, onRemove, loading = false }: Props = $props();
+  const {
+    members,
+    onChangeRole,
+    onRemove,
+    loading = false,
+    class: className = '',
+  }: Props = $props();
 
   const isEmpty = $derived(members.length === 0);
 
@@ -99,15 +107,17 @@
 </script>
 
 {#if loading}
-  <div class="loading-state">
+  <div class="loading-state {className}">
     <div class="skeleton-row"></div>
     <div class="skeleton-row"></div>
     <div class="skeleton-row"></div>
   </div>
 {:else if isEmpty}
-  <EmptyState title={m.team_empty()} icon={UsersIcon} />
+  <div class="empty-state {className}">
+    <EmptyState title={m.team_empty()} icon={UsersIcon} />
+  </div>
 {:else}
-  <div class="table-wrapper">
+  <div class="table-wrapper {className}">
     <Table.Root>
       <Table.Header>
         <Table.Row>
@@ -254,7 +264,7 @@
   }
 
   .remove-btn:focus-visible {
-    outline: 2px solid var(--color-error-500);
+    outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 
@@ -272,6 +282,24 @@
     animation: pulse 1.5s ease-in-out infinite;
   }
 
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: var(--opacity-40);
+    }
+    50% {
+      opacity: var(--opacity-80);
+    }
+  }
+
+  /* Infinite-iteration animations bypass the token-level duration collapse;
+     neutralise for vestibular safety (ref 03 §9 Skeleton Contract). */
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton-row {
+      animation: none;
+    }
+  }
+
   /* Global cell styles */
   :global(.email-cell) {
     color: var(--color-text-secondary);
@@ -284,3 +312,4 @@
   }
 
 </style>
+</content>

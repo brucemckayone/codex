@@ -9,7 +9,7 @@
   const { children, class: className, ...restProps }: Props = $props();
 </script>
 
-<th class="table-head {className}" {...restProps}>
+<th scope="col" class="table-head {className ?? ''}" {...restProps}>
   {@render children()}
 </th>
 

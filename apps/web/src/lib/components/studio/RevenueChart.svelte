@@ -3,10 +3,13 @@
 
   A simple CSS-only bar chart for revenue over time.
   Each bar represents one day, with height proportional to max revenue.
-  Includes hover tooltip with date and amount.
+  Includes hover tooltip with date and amount, plus an sr-only data table
+  so keyboard + screen-reader users can access the full dataset
+  (per ref 05 §Data visualisation, WCAG 2.1.1 + 1.3.1).
 
   @prop {{ date: string; revenue: number }[]} data - Revenue data points
   @prop {boolean} loading - Whether the data is loading
+  @prop {string} [class] - Optional class forwarded to the root element
 -->
 <script lang="ts">
   import * as m from '$paraglide/messages';
@@ -15,9 +18,14 @@
   interface Props {
     data: { date: string; revenue: number }[];
     loading?: boolean;
+    class?: string;
   }
 
-  const { data, loading = false }: Props = $props();
+  const {
+    data,
+    loading = false,
+    class: className = '',
+  }: Props = $props();
 
   const maxRevenue = $derived(
     data.length > 0 ? Math.max(...data.map((d) => d.revenue), 1) : 1
@@ -26,19 +34,28 @@
   const isEmpty = $derived(data.length === 0 || data.every((d) => d.revenue === 0));
 
   /**
-   * Build aria-label summarizing the chart
+   * Build aria-label summarising the chart — total, peak, and low so SR
+   * users get extremes not just aggregate (ref 05 §Data visualisation).
    */
-  const chartLabel = $derived(() => {
+  const chartLabel = $derived.by(() => {
     if (isEmpty) return m.analytics_empty();
     const total = data.reduce((sum, d) => sum + d.revenue, 0);
-    return `Revenue chart: ${formatPriceCompact(total)} total over ${data.length} days`;
+    let peakIdx = 0;
+    let lowIdx = 0;
+    for (let i = 1; i < data.length; i++) {
+      if (data[i].revenue > data[peakIdx].revenue) peakIdx = i;
+      if (data[i].revenue < data[lowIdx].revenue) lowIdx = i;
+    }
+    const peak = data[peakIdx];
+    const low = data[lowIdx];
+    return `Revenue over ${data.length} days — total ${formatPriceCompact(total)}, peak ${formatPriceCompact(peak.revenue)} on ${formatDate(peak.date)}, lowest ${formatPriceCompact(low.revenue)} on ${formatDate(low.date)}`;
   });
 </script>
 
 {#if loading}
-  <div class="chart-skeleton">
+  <div class="chart-skeleton {className}">
     <div class="skeleton-bars">
-      {#each Array(14) as _, i}
+      {#each Array(14) as _, i (i)}
         <div
           class="skeleton-bar"
           style="height: {20 + Math.random() * 60}%"
@@ -47,20 +64,20 @@
     </div>
   </div>
 {:else if isEmpty}
-  <div class="chart-empty">
+  <div class="chart-empty {className}">
     <p class="empty-text">{m.analytics_empty()}</p>
   </div>
 {:else}
   <div
-    class="chart-container"
+    class="chart-container {className}"
     role="img"
-    aria-label={chartLabel()}
+    aria-label={chartLabel}
   >
     <div class="chart-bars">
       {#each data as point, index (point.date)}
         {@const heightPercent = (point.revenue / maxRevenue) * 100}
         <div class="bar-wrapper" title="{formatDate(point.date)}: {formatPriceCompact(point.revenue)}">
-          <div class="bar-tooltip">
+          <div class="bar-tooltip" aria-hidden="true">
             <span class="tooltip-date">{formatDate(point.date)}</span>
             <span class="tooltip-value">{formatPriceCompact(point.revenue)}</span>
           </div>
@@ -72,6 +89,29 @@
         </div>
       {/each}
     </div>
+
+    <!--
+      Screen-reader-only data table mirrors the chart's data array so
+      keyboard + SR users get the per-day detail that sighted mouse users
+      see in the hover tooltip (WCAG 1.3.1 + 2.1.1; ref 05 §Data visualisation).
+    -->
+    <table class="sr-only">
+      <caption>Revenue by day, past {data.length} days</caption>
+      <thead>
+        <tr>
+          <th scope="col">Day</th>
+          <th scope="col">Revenue</th>
+        </tr>
+      </thead>
+      <tbody>
+        {#each data as point (point.date)}
+          <tr>
+            <td>{formatDate(point.date)}</td>
+            <td>{formatPriceCompact(point.revenue)}</td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
   </div>
 {/if}
 
@@ -81,12 +121,13 @@
     min-height: 200px;
     max-height: 280px;
     padding: var(--space-2) 0;
+    position: relative;
   }
 
   .chart-bars {
     display: flex;
     align-items: flex-end;
-    gap: 2px;
+    gap: var(--space-0-5);
     height: 200px;
     width: 100%;
   }
@@ -105,7 +146,7 @@
   .bar {
     background-color: var(--color-interactive);
     border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-    transition: background-color var(--duration-fast) var(--ease-default);
+    transition: var(--transition-colors);
     min-height: 2px;
   }
 
@@ -121,7 +162,8 @@
     background-color: var(--color-border);
   }
 
-  /* Tooltip */
+  /* Tooltip — sighted-mouse polish only.
+     Keyboard + SR users consume the sibling sr-only table. */
   .bar-tooltip {
     position: absolute;
     bottom: calc(100% + var(--space-1));
@@ -136,7 +178,7 @@
     display: none;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
+    gap: var(--space-0-5);
     z-index: 10;
     pointer-events: none;
   }
@@ -163,7 +205,7 @@
   .skeleton-bars {
     display: flex;
     align-items: flex-end;
-    gap: 4px;
+    gap: var(--space-1);
     height: 200px;
   }
 
@@ -198,4 +240,12 @@
     }
   }
 
+  /* Infinite-iteration animations bypass the token-level duration collapse;
+     neutralise for vestibular safety (ref 03 §9 Skeleton Contract). */
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton-bar {
+      animation: none;
+    }
+  }
 </style>
+</content>

@@ -12,12 +12,13 @@
   @prop {(key: string, order: 'asc' | 'desc') => void} [onSort] - Sort change handler
   @prop {boolean} [selectable] - Enable row selection with checkboxes
   @prop {Snippet<[Set<string>]>} [bulkActions] - Bulk action buttons snippet
+  @prop {string} [class] - Optional class forwarded to the root element
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { CustomerListItem } from '@codex/shared-types';
   import DataTable from '$lib/components/ui/DataTable/DataTable.svelte';
-  import { UsersIcon, EyeIcon } from '$lib/components/ui/Icon';
+  import { UsersIcon, EyeIcon, CopyIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { formatDate, formatPrice, formatRelativeTime, getInitials } from '$lib/utils/format';
   import * as m from '$paraglide/messages';
@@ -31,6 +32,7 @@
     onSort?: (key: string, order: 'asc' | 'desc') => void;
     selectable?: boolean;
     bulkActions?: Snippet<[Set<string>]>;
+    class?: string;
   }
 
   const {
@@ -42,6 +44,7 @@
     onSort,
     selectable = false,
     bulkActions,
+    class: className = '',
   }: Props = $props();
 
   const isEmpty = $derived(customers.length === 0);
@@ -57,9 +60,12 @@
 </script>
 
 {#if isEmpty}
-  <EmptyState title={m.studio_customers_empty()} icon={UsersIcon} />
+  <div class="customer-table-empty {className}">
+    <EmptyState title={m.studio_customers_empty()} icon={UsersIcon} />
+  </div>
 {:else}
   <DataTable
+    class={className}
     {columns}
     data={customers}
     {sortKey}
@@ -94,13 +100,10 @@
           <button
             class="row-action-btn"
             onclick={(e) => { e.stopPropagation(); onCopyEmail?.(row.email); }}
-            aria-label={m.studio_customers_action_copy_email()}
+            aria-label={`Copy ${row.email}`}
             title={m.studio_customers_action_copy_email()}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
+            <CopyIcon size={14} />
           </button>
           <button
             class="row-action-btn"
@@ -207,3 +210,4 @@
     outline-offset: 1px;
   }
 </style>
+</content>

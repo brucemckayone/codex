@@ -21,6 +21,7 @@ export { default as ClockIcon } from './ClockIcon.svelte';
 export { default as CoinsIcon } from './CoinsIcon.svelte';
 export { default as CommandIcon } from './CommandIcon.svelte';
 export { default as CompassIcon } from './CompassIcon.svelte';
+export { default as CopyIcon } from './CopyIcon.svelte';
 // Layout / sidebar
 export { default as CreditCardIcon } from './CreditCardIcon.svelte';
 export { default as DownloadIcon } from './DownloadIcon.svelte';
