@@ -154,19 +154,24 @@
     contentPerformanceQuery?.current?.items ?? []
   );
 
-  // Loading flags reflect ONLY the query's own loading signal. We deliberately
-  // don't OR in `!current` — if the endpoint errors (e.g. 404 on a worker that
-  // hasn't reloaded BE-7 routes, or any transient failure), `.loading` flips
-  // false but `.current` stays undefined. Treating that as "still loading"
-  // would hang the dashboard in a perpetual skeleton state and prevent the
-  // zero-state guard from ever resolving.
-  const revenueLoading = $derived(revenueQuery?.loading ?? true);
-  const subscribersLoading = $derived(subscribersQuery?.loading ?? true);
-  const followersLoading = $derived(followersQuery?.loading ?? true);
-  const topContentLoading = $derived(topContentQuery?.loading ?? true);
-  const contentPerformanceLoading = $derived(
-    contentPerformanceQuery?.loading ?? true
-  );
+  // Loading flag: request is in flight when we're authorised AND we have
+  // neither resolved data nor an error. The `.loading` property on the remote
+  // query handle has been unreliable in testing (staying undefined after
+  // settle), so we derive from the settlement signals directly — this treats
+  // errored queries as "settled" (not loading) so the dashboard can still
+  // render fallbacks and the zero-state can resolve.
+  function isLoading<T>(
+    q: { current?: T; error?: unknown } | null | undefined
+  ): boolean {
+    if (!q) return false;
+    return q.current === undefined && q.error === undefined;
+  }
+
+  const revenueLoading = $derived(isLoading(revenueQuery));
+  const subscribersLoading = $derived(isLoading(subscribersQuery));
+  const followersLoading = $derived(isLoading(followersQuery));
+  const topContentLoading = $derived(isLoading(topContentQuery));
+  const contentPerformanceLoading = $derived(isLoading(contentPerformanceQuery));
 
   // Zero-state gating waits for every query to settle (success or error).
   // Using .loading (not .current) means errored queries still "resolve" for
