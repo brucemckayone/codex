@@ -1071,6 +1071,22 @@ export const studio_switcher_add_organisation = () => `Add Organisation`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_switcher_switch_studio = () => `Studio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_open_menu = () => `Open studio menu`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const org_create_title = () => `Create Organisation`
 
 
@@ -3523,7 +3539,7 @@ export const media_upload_queued = (params) => `${params.count} file(s) queued`
 
 
 /**
- *
+ * 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
@@ -3531,7 +3547,6 @@ export const media_upload_error = () => `Upload failed. Please try again.`
 
 
 /**
- *
  * @param {{ name: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -3540,7 +3555,7 @@ export const media_upload_rejected_type = (params) => `${params.name} is not a s
 
 
 /**
- *
+ * 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
@@ -6112,7 +6127,199 @@ export const analytics_date_year = () => `Year`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_date_range_label = () => `Date range`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_custom_range = () => `Custom`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_custom_range_heading = () => `Custom date range`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_start_date = () => `Start date`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_end_date = () => `End date`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_apply = () => `Apply`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_compare_toggle = () => `Compare to previous period`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_compare_custom_link = () => `Customise compare range`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_compare_custom_heading = () => `Custom compare range`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_compare_from = () => `Compare from`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_compare_to = () => `Compare to`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const analytics_empty = () => `No analytics data available for this period.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_chart_tab_revenue = () => `Revenue`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_chart_tab_subscribers = () => `Subscribers`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_chart_tab_followers = () => `Followers`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_chart_empty = () => `Not enough data yet for this window.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_chart_loading_label = () => `Loading chart`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_chart_compare_label = () => `Previous period`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_chart_current_label = () => `Current period`
+
+
+/**
+ * @param {{ percent: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_chart_tooltip_delta_up = (params) => `+${params.percent}% vs previous`
+
+
+/**
+ * @param {{ percent: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_chart_tooltip_delta_down = (params) => `${params.percent}% vs previous`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_chart_tooltip_delta_flat = () => `No change vs previous`
+
+
+/**
+ * @param {{ days: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_chart_aria_revenue = (params) => `Revenue over ${params.days} days, total ${params.total}`
+
+
+/**
+ * @param {{ days: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_chart_aria_subscribers = (params) => `New subscribers over ${params.days} days, total ${params.total}`
+
+
+/**
+ * @param {{ days: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_chart_aria_followers = (params) => `New followers over ${params.days} days, total ${params.total}`
 
 
 /**
@@ -6169,6 +6376,182 @@ export const analytics_error_description = () => `Something went wrong loading a
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const analytics_error_back_to_studio = () => `Back to Studio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const kpi_loading_label = () => `Loading metric`
+
+
+/**
+ * @param {{ percent: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const kpi_delta_increase = (params) => `increased by ${params.percent} percent`
+
+
+/**
+ * @param {{ percent: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const kpi_delta_decrease = (params) => `decreased by ${params.percent} percent`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const kpi_delta_no_change = () => `no change`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, min: NonNullable<unknown>, max: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const kpi_sparkline_label = (params) => `Trend over the last ${params.count} data points, ranging from ${params.min} to ${params.max}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_aria_label = () => `At-a-glance summary`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_loading_label = () => `Loading summary`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_no_compare = () => `No comparison window selected yet — turn on compare-to-previous to see trends.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_no_data = () => `Still early days — as your audience grows, this is where you'll see your wins.`
+
+
+/**
+ * @param {{ percent: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_revenue_big_win = (params) => `Revenue climbed ${params.percent}% to ${params.amount} — your strongest stretch yet.`
+
+
+/**
+ * @param {{ percent: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_revenue_win = (params) => `Revenue rose ${params.percent}% to ${params.amount}, a healthy step up on last period.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_revenue_flat = (params) => `Revenue held steady at ${params.amount} — a solid base to build on.`
+
+
+/**
+ * @param {{ percent: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_revenue_loss = (params) => `Revenue eased off ${params.percent}% to ${params.amount} — a quiet window, but the audience is still there.`
+
+
+/**
+ * @param {{ percent: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_revenue_big_loss = (params) => `Revenue dipped ${params.percent}% to ${params.amount} — worth a closer look at what shifted.`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_revenue_first = (params) => `You brought in ${params.amount} this period — a real start to build from.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, multiplier: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_subscribers_big_win = (params) => `${params.count} new subscribers joined — almost ${params.multiplier}x last period.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, percent: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_subscribers_win = (params) => `${params.count} new subscribers signed up, up ${params.percent}% on last period.`
+
+
+/**
+ * @param {{ percent: NonNullable<unknown>, count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_subscribers_loss = (params) => `New subscribers eased back ${params.percent}% — still ${params.count} joined this window.`
+
+
+/**
+ * @param {{ percent: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_followers_win = (params) => `Followers grew ${params.percent}% — early signs of momentum.`
+
+
+/**
+ * @param {{ percent: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_followers_loss = (params) => `Follower growth slowed ${params.percent}% — a quieter window for reach.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown>, amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_top_performer = (params) => `Your top performer was ${params.title}, pulling in ${params.amount}.`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_narrative_top_rising = (params) => `${params.title} is on the rise — watch time up meaningfully vs last period.`
 
 
 /**
@@ -6353,6 +6736,38 @@ export const checkout_success_tip_library = () => `Find all your purchases in yo
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const checkout_success_tip_devices = () => `Watch on any device — your progress syncs everywhere.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_success_expired_title = () => `Checkout session expired`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_success_expired_description = () => `Your checkout session timed out before payment was confirmed. No charge was taken — you can start over whenever you're ready.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_success_start_over = () => `Start Over`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const checkout_success_icon_alt = () => `Purchase confirmed`
 
 
 /**
@@ -7201,6 +7616,38 @@ export const preview_player_load_error = () => `Failed to load preview.`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const preview_player_init_error = () => `Failed to initialize preview player.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const preview_player_loading = () => `Loading preview`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const preview_player_ready = () => `Preview ready`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const preview_player_error_status = () => `Error loading preview`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const video_player_loading_player = () => `Loading player…`
 
 
 /**
