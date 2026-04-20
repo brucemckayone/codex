@@ -75,6 +75,12 @@
 
   // Immersive shader mode
   let showImmersive = $state(false);
+  // When content has no preset assigned (or 'none'), fall back to 'nebula' so
+  // every audio piece is immersive-capable — all 25 presets are audio-reactive,
+  // so there's no UX reason to hide the entry point.
+  const resolvedShaderPreset = $derived(
+    shaderPreset && shaderPreset !== 'none' ? shaderPreset : 'nebula'
+  );
 
   // Audio analysis for waveform reactivity
   let analyserHandle: AudioAnalyserHandle | null = null;
@@ -492,17 +498,16 @@
             </div>
           </div>
 
-          <!-- Immersive mode (only when shader preset is set) -->
-          {#if shaderPreset && shaderPreset !== 'none'}
-            <button
-              class="audio-player__btn audio-player__btn--immersive"
-              onclick={() => { showImmersive = true; }}
-              aria-label="Enter immersive mode"
-              title="Immersive shader mode"
-            >
-              <MaximizeIcon size={18} />
-            </button>
-          {/if}
+          <!-- Immersive mode — always available; falls back to 'nebula' when
+               content has no preset assigned. -->
+          <button
+            class="audio-player__btn audio-player__btn--immersive"
+            onclick={() => { showImmersive = true; }}
+            aria-label="Enter immersive mode"
+            title="Immersive shader mode"
+          >
+            <MaximizeIcon size={18} />
+          </button>
         </div>
       </div>
     </WaveformShader>
@@ -547,10 +552,10 @@
 {/if}
 
 <!-- Immersive shader player (fullscreen overlay) -->
-{#if showImmersive && audioEl && shaderPreset && shaderPreset !== 'none'}
+{#if showImmersive && audioEl}
   <ImmersiveShaderPlayer
     audioElement={audioEl}
-    {shaderPreset}
+    shaderPreset={resolvedShaderPreset}
     {title}
     onclose={() => { showImmersive = false; }}
   />
