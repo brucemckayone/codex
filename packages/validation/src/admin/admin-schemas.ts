@@ -148,11 +148,19 @@ export type AdminRevenueQueryInput = z.infer<typeof adminRevenueQuerySchema>;
 
 /**
  * Top content query parameters
- * Limit the number of top content items returned
+ * Optional main date range plus optional compare date range for per-row
+ * revenue-trend deltas, with a limit capping the result set.
+ * Max range per window: 365 days (prevents DoS via large data queries).
  */
-export const adminTopContentQuerySchema = z.object({
-  limit: analyticsLimitSchema,
-});
+export const adminTopContentQuerySchema = applyDateRangeRefinements(
+  z.object({
+    startDate: isoDateSchema.optional(),
+    endDate: isoDateSchema.optional(),
+    compareFrom: isoDateSchema.optional(),
+    compareTo: isoDateSchema.optional(),
+    limit: analyticsLimitSchema,
+  })
+);
 
 export type AdminTopContentQueryInput = z.infer<
   typeof adminTopContentQuerySchema

@@ -25,11 +25,14 @@ import {
   adminActivityQuerySchema,
   adminContentIdParamsSchema,
   adminContentListQuerySchema,
+  adminContentPerformanceQuerySchema,
   adminCustomerIdParamsSchema,
   adminCustomerListQuerySchema,
   adminDashboardStatsQuerySchema,
+  adminFollowersQuerySchema,
   adminGrantAccessParamsSchema,
   adminRevenueQuerySchema,
+  adminSubscribersQuerySchema,
   adminTopContentQuerySchema,
 } from '@codex/validation';
 import {
@@ -136,7 +139,79 @@ app.get(
     handler: async (ctx) => {
       const result = await ctx.services.adminAnalytics.getTopContent(
         ctx.organizationId,
-        { limit: ctx.input.query.limit }
+        ctx.input.query
+      );
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * GET /api/admin/analytics/subscribers
+ * Get subscriber statistics (active/new/churned + daily breakdown)
+ * for the platform owner's organization. Supports optional main date range
+ * and optional compare-period for period-over-period KPIs.
+ */
+app.get(
+  '/api/admin/analytics/subscribers',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
+    input: { query: adminSubscribersQuerySchema },
+    handler: async (ctx) => {
+      return await ctx.services.adminAnalytics.getSubscriberStats(
+        ctx.organizationId,
+        ctx.input.query
+      );
+    },
+  })
+);
+
+/**
+ * GET /api/admin/analytics/followers
+ * Get follower statistics (total/new + daily breakdown) for the platform
+ * owner's organization. Supports optional main date range and optional
+ * compare-period for period-over-period KPIs.
+ */
+app.get(
+  '/api/admin/analytics/followers',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
+    input: { query: adminFollowersQuerySchema },
+    handler: async (ctx) => {
+      return await ctx.services.adminAnalytics.getFollowerStats(
+        ctx.organizationId,
+        ctx.input.query
+      );
+    },
+  })
+);
+
+/**
+ * GET /api/admin/analytics/content-performance
+ * Get content performance ranked by watch time, with optional main date
+ * range and optional compare-period for per-row trend deltas.
+ */
+app.get(
+  '/api/admin/analytics/content-performance',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
+    input: { query: adminContentPerformanceQuerySchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.adminAnalytics.getContentPerformance(
+        ctx.organizationId,
+        ctx.input.query
       );
       return new PaginatedResult(result.items, result.pagination);
     },
