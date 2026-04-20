@@ -13,18 +13,34 @@ import type {
   PaginationMetadata,
 } from '@codex/shared-types';
 import type { AdminActivityQueryInput } from '@codex/validation';
-import { and, countDistinct, desc, eq, gte, lte, sql } from 'drizzle-orm';
+import {
+  and,
+  countDistinct,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNull,
+  lte,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { DEFAULT_TOP_CONTENT_LIMIT } from '../constants';
 import type {
   ActivityFeedItem,
   ActivityFeedResponse,
   CustomerStats,
   DailyRevenue,
+  DailySubscribers,
   DashboardStats,
   DashboardStatsOptions,
   RevenueBlock,
   RevenueQueryOptions,
   RevenueStats,
+  SubscriberBlock,
+  SubscriberQueryOptions,
+  SubscriberStats,
   TopContentItem,
 } from '../types';
 
@@ -141,6 +157,136 @@ export class AdminAnalyticsService extends BaseService {
       organizationFeeCents: stats.organizationFeeCents,
       creatorPayoutCents: stats.creatorPayoutCents,
       revenueByDay,
+    };
+  }
+
+  /**
+   * Get subscriber statistics for an organization.
+   *
+   * Returns active / new / churned counts plus a daily new-subscriber
+   * breakdown over the same requested range. Pass `compareFrom`/`compareTo`
+   * to get a `previous` block for delta-vs-previous KPIs — if either is
+   * absent the comparison is skipped and the result matches the original
+   * single-period shape.
+   */
+  async getSubscriberStats(
+    organizationId: string,
+    options?: SubscriberQueryOptions
+  ): Promise<SubscriberStats> {
+    try {
+      const current = await this.computeSubscriberBlock(
+        organizationId,
+        options?.startDate,
+        options?.endDate
+      );
+
+      if (options?.compareFrom && options?.compareTo) {
+        const previous = await this.computeSubscriberBlock(
+          organizationId,
+          options.compareFrom,
+          options.compareTo
+        );
+        return { ...current, previous };
+      }
+
+      return current;
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        throw error;
+      }
+      this.handleError(error, 'getSubscriberStats');
+    }
+  }
+
+  /**
+   * Aggregate + daily breakdown for subscribers in a single period. Daily
+   * new-subscriber rows use the same date window as the aggregates so the
+   * two views stay consistent. When no range is provided we fall back to
+   * the trend-days default (matching the revenue helper) so zero-argument
+   * callers still get a sensible recent trend.
+   */
+  private async computeSubscriberBlock(
+    organizationId: string,
+    startDate?: Date,
+    endDate?: Date
+  ): Promise<SubscriberBlock> {
+    const defaultStart = new Date();
+    defaultStart.setDate(defaultStart.getDate() - ANALYTICS.TREND_DAYS_DEFAULT);
+    const effectiveStart = startDate ?? defaultStart;
+    const effectiveEnd = endDate ?? new Date();
+
+    // Active at end of period: alive-alive statuses and
+    //   createdAt <= end AND (cancelledAt IS NULL OR cancelledAt > end)
+    const activeResult = await this.db
+      .select({ count: sql<number>`COUNT(*)::int` })
+      .from(schema.subscriptions)
+      .where(
+        and(
+          eq(schema.subscriptions.organizationId, organizationId),
+          inArray(schema.subscriptions.status, [
+            'active',
+            'past_due',
+            'cancelling',
+          ]),
+          lte(schema.subscriptions.createdAt, effectiveEnd),
+          or(
+            isNull(schema.subscriptions.cancelledAt),
+            gt(schema.subscriptions.cancelledAt, effectiveEnd)
+          )
+        )
+      );
+
+    // New in period: createdAt within [start, end]
+    const newResult = await this.db
+      .select({ count: sql<number>`COUNT(*)::int` })
+      .from(schema.subscriptions)
+      .where(
+        and(
+          eq(schema.subscriptions.organizationId, organizationId),
+          gte(schema.subscriptions.createdAt, effectiveStart),
+          lte(schema.subscriptions.createdAt, effectiveEnd)
+        )
+      );
+
+    // Churned in period: cancelledAt within [start, end]
+    const churnedResult = await this.db
+      .select({ count: sql<number>`COUNT(*)::int` })
+      .from(schema.subscriptions)
+      .where(
+        and(
+          eq(schema.subscriptions.organizationId, organizationId),
+          gte(schema.subscriptions.cancelledAt, effectiveStart),
+          lte(schema.subscriptions.cancelledAt, effectiveEnd)
+        )
+      );
+
+    // Daily new subscribers, grouped by DATE(createdAt), most recent first
+    const dailyRows = await this.db
+      .select({
+        date: sql<string>`DATE(${schema.subscriptions.createdAt})::text`,
+        newSubscribers: sql<number>`COUNT(*)::int`,
+      })
+      .from(schema.subscriptions)
+      .where(
+        and(
+          eq(schema.subscriptions.organizationId, organizationId),
+          gte(schema.subscriptions.createdAt, effectiveStart),
+          lte(schema.subscriptions.createdAt, effectiveEnd)
+        )
+      )
+      .groupBy(sql`DATE(${schema.subscriptions.createdAt})`)
+      .orderBy(desc(sql`DATE(${schema.subscriptions.createdAt})`));
+
+    const subscribersByDay: DailySubscribers[] = dailyRows.map((row) => ({
+      date: row.date,
+      newSubscribers: row.newSubscribers,
+    }));
+
+    return {
+      activeSubscribers: activeResult[0]?.count ?? 0,
+      newSubscribers: newResult[0]?.count ?? 0,
+      churnedSubscribers: churnedResult[0]?.count ?? 0,
+      subscribersByDay,
     };
   }
 

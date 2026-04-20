@@ -21,6 +21,8 @@ import {
   organizationMemberships,
   organizations,
   purchases,
+  subscriptions,
+  subscriptionTiers,
 } from '@codex/database/schema';
 import {
   createTestMediaItemInput,
@@ -599,6 +601,342 @@ describe('AdminAnalyticsService', () => {
       expect(onlyFrom.previous).toBeUndefined();
       expect(onlyTo.previous).toBeUndefined();
       expect(neither.previous).toBeUndefined();
+    });
+  });
+
+  describe('getSubscriberStats', () => {
+    // Helper: insert a tier for a given org
+    async function insertTier(orgId: string, label: string) {
+      const [tier] = await db
+        .insert(subscriptionTiers)
+        .values({
+          organizationId: orgId,
+          name: `Tier-${label}`,
+          sortOrder: 1,
+          priceMonthly: 1000,
+          priceAnnual: 10000,
+        })
+        .returning();
+      return tier;
+    }
+
+    // Helper: build a valid subscription insert payload
+    function subRow(params: {
+      orgId: string;
+      userId: string;
+      tierId: string;
+      label: string;
+      status: 'active' | 'past_due' | 'cancelling' | 'cancelled' | 'incomplete';
+      createdAt: Date;
+      cancelledAt?: Date | null;
+    }) {
+      const start = new Date(params.createdAt);
+      const end = new Date(start);
+      end.setMonth(end.getMonth() + 1);
+      return {
+        userId: params.userId,
+        organizationId: params.orgId,
+        tierId: params.tierId,
+        stripeSubscriptionId: `sub_test_${Date.now()}_${params.label}_${Math.random().toString(36).slice(2, 8)}`,
+        stripeCustomerId: `cus_test_${params.label}`,
+        status: params.status,
+        billingInterval: 'month' as const,
+        currentPeriodStart: start,
+        currentPeriodEnd: end,
+        amountCents: 1000,
+        platformFeeCents: 100,
+        organizationFeeCents: 50,
+        creatorPayoutCents: 850,
+        cancelledAt: params.cancelledAt ?? null,
+        createdAt: params.createdAt,
+      };
+    }
+
+    it('should return zero stats for organization with no subscriptions', async () => {
+      const [emptyOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const stats = await service.getSubscriberStats(emptyOrg.id);
+
+      expect(stats.activeSubscribers).toBe(0);
+      expect(stats.newSubscribers).toBe(0);
+      expect(stats.churnedSubscribers).toBe(0);
+      expect(stats.subscribersByDay).toEqual([]);
+      expect(stats.previous).toBeUndefined();
+    });
+
+    it('should count active, new, and churned correctly across mixed statuses in and out of the range', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const tier = await insertTier(testOrg.id, 'mixed');
+      const [u1, u2, u3, u4, u5] = await seedTestUsers(db, 5);
+
+      const now = new Date();
+      const tenDaysAgo = new Date(now);
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+      const fiveDaysAgo = new Date(now);
+      fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
+      const twoDaysAgo = new Date(now);
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+      const fortyDaysAgo = new Date(now);
+      fortyDaysAgo.setDate(fortyDaysAgo.getDate() - 40);
+
+      // Window: last 7 days → start = fiveDaysAgo-ish → use fiveDaysAgo as start, now as end.
+      // Expected inside window:
+      //   - new: subs created within [fiveDaysAgo, now]
+      //   - churned: subs cancelled within [fiveDaysAgo, now]
+      //   - active at end of window: alive-status subs with createdAt<=now
+      //     AND (cancelledAt IS NULL OR cancelledAt > now)
+
+      await db.insert(subscriptions).values([
+        // Created inside window, active → counts as new + active
+        subRow({
+          orgId: testOrg.id,
+          userId: u1,
+          tierId: tier.id,
+          label: 'new-active',
+          status: 'active',
+          createdAt: twoDaysAgo,
+        }),
+        // Created before window, still active → active only (not new, not churned)
+        subRow({
+          orgId: testOrg.id,
+          userId: u2,
+          tierId: tier.id,
+          label: 'old-active',
+          status: 'active',
+          createdAt: fortyDaysAgo,
+        }),
+        // Created before window, cancelled inside window → churned only (not new, not active at end)
+        subRow({
+          orgId: testOrg.id,
+          userId: u3,
+          tierId: tier.id,
+          label: 'old-churned',
+          status: 'cancelled',
+          createdAt: fortyDaysAgo,
+          cancelledAt: twoDaysAgo,
+        }),
+        // Created inside window, cancelled inside window → new + churned
+        subRow({
+          orgId: testOrg.id,
+          userId: u4,
+          tierId: tier.id,
+          label: 'new-churned',
+          status: 'cancelled',
+          createdAt: fiveDaysAgo,
+          cancelledAt: twoDaysAgo,
+        }),
+        // Created before window, cancelled before window → nothing
+        subRow({
+          orgId: testOrg.id,
+          userId: u5,
+          tierId: tier.id,
+          label: 'long-gone',
+          status: 'cancelled',
+          createdAt: fortyDaysAgo,
+          cancelledAt: tenDaysAgo,
+        }),
+      ]);
+
+      const stats = await service.getSubscriberStats(testOrg.id, {
+        startDate: fiveDaysAgo,
+        endDate: now,
+      });
+
+      // New = u1 + u4
+      expect(stats.newSubscribers).toBe(2);
+      // Churned = u3 + u4
+      expect(stats.churnedSubscribers).toBe(2);
+      // Active at end of window = u1 (alive) + u2 (alive). u3, u4 cancelled before end, u5 too old.
+      expect(stats.activeSubscribers).toBe(2);
+      // Daily breakdown should only contain new-sub rows inside the window (u1 on twoDaysAgo, u4 on fiveDaysAgo)
+      expect(stats.subscribersByDay).toHaveLength(2);
+      expect(
+        stats.subscribersByDay.reduce((acc, d) => acc + d.newSubscribers, 0)
+      ).toBe(2);
+    });
+
+    it('should scope subscriber stats to the given organization only', async () => {
+      const [orgA] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+      const [orgB] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const tierA = await insertTier(orgA.id, 'scope-a');
+      const tierB = await insertTier(orgB.id, 'scope-b');
+
+      const [ua, ub] = await seedTestUsers(db, 2);
+      const now = new Date();
+      const twoDaysAgo = new Date(now);
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+      await db.insert(subscriptions).values([
+        subRow({
+          orgId: orgA.id,
+          userId: ua,
+          tierId: tierA.id,
+          label: 'scope-a-new',
+          status: 'active',
+          createdAt: twoDaysAgo,
+        }),
+        subRow({
+          orgId: orgB.id,
+          userId: ub,
+          tierId: tierB.id,
+          label: 'scope-b-new',
+          status: 'active',
+          createdAt: twoDaysAgo,
+        }),
+      ]);
+
+      const aStats = await service.getSubscriberStats(orgA.id);
+      const bStats = await service.getSubscriberStats(orgB.id);
+
+      expect(aStats.newSubscribers).toBe(1);
+      expect(aStats.activeSubscribers).toBe(1);
+      expect(bStats.newSubscribers).toBe(1);
+      expect(bStats.activeSubscribers).toBe(1);
+    });
+
+    it('should include a previous block when compareFrom and compareTo are provided, and omit it otherwise', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const tier = await insertTier(testOrg.id, 'compare');
+      const [u1, u2, u3] = await seedTestUsers(db, 3);
+
+      const now = new Date();
+      const sevenDaysAgo = new Date(now);
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const fourteenDaysAgo = new Date(now);
+      fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+      const tenDaysAgo = new Date(now);
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+      const threeDaysAgo = new Date(now);
+      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+
+      await db.insert(subscriptions).values([
+        // Current window: 2 new subs in last 7 days
+        subRow({
+          orgId: testOrg.id,
+          userId: u1,
+          tierId: tier.id,
+          label: 'cur-1',
+          status: 'active',
+          createdAt: threeDaysAgo,
+        }),
+        subRow({
+          orgId: testOrg.id,
+          userId: u2,
+          tierId: tier.id,
+          label: 'cur-2',
+          status: 'active',
+          createdAt: threeDaysAgo,
+        }),
+        // Previous window: 1 new sub 7-14 days ago
+        subRow({
+          orgId: testOrg.id,
+          userId: u3,
+          tierId: tier.id,
+          label: 'prev-1',
+          status: 'active',
+          createdAt: tenDaysAgo,
+        }),
+      ]);
+
+      const withCompare = await service.getSubscriberStats(testOrg.id, {
+        startDate: sevenDaysAgo,
+        endDate: now,
+        compareFrom: fourteenDaysAgo,
+        compareTo: sevenDaysAgo,
+      });
+
+      expect(withCompare.newSubscribers).toBe(2);
+      expect(withCompare.previous).toBeDefined();
+      expect(withCompare.previous?.newSubscribers).toBe(1);
+      // previous block must not itself carry a nested previous
+      expect(
+        (withCompare.previous as unknown as { previous?: unknown })?.previous
+      ).toBeUndefined();
+
+      const onlyFrom = await service.getSubscriberStats(testOrg.id, {
+        compareFrom: fourteenDaysAgo,
+      });
+      const onlyTo = await service.getSubscriberStats(testOrg.id, {
+        compareTo: sevenDaysAgo,
+      });
+      const neither = await service.getSubscriberStats(testOrg.id);
+
+      expect(onlyFrom.previous).toBeUndefined();
+      expect(onlyTo.previous).toBeUndefined();
+      expect(neither.previous).toBeUndefined();
+    });
+
+    it('should restrict daily breakdown to the requested date range', async () => {
+      // Regression guard against the revenue bug fixed in BE-1: the daily
+      // breakdown must use the same window as aggregates, not a hardcoded
+      // TREND_DAYS_DEFAULT window.
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const tier = await insertTier(testOrg.id, 'daily-range');
+      const [uIn, uOut] = await seedTestUsers(db, 2);
+
+      const today = new Date();
+      const twoDaysAgo = new Date(today);
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+      const tenDaysAgo = new Date(today);
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+      const fiveDaysAgo = new Date(today);
+      fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
+
+      await db.insert(subscriptions).values([
+        subRow({
+          orgId: testOrg.id,
+          userId: uIn,
+          tierId: tier.id,
+          label: 'in-range',
+          status: 'active',
+          createdAt: twoDaysAgo,
+        }),
+        subRow({
+          orgId: testOrg.id,
+          userId: uOut,
+          tierId: tier.id,
+          label: 'out-of-range',
+          status: 'active',
+          createdAt: tenDaysAgo,
+        }),
+      ]);
+
+      const stats = await service.getSubscriberStats(testOrg.id, {
+        startDate: fiveDaysAgo,
+        endDate: today,
+      });
+
+      // Aggregates respect the window
+      expect(stats.newSubscribers).toBe(1);
+      // Daily rows reflect the same window — no row older than start
+      expect(stats.subscribersByDay).toHaveLength(1);
+      expect(
+        new Date(stats.subscribersByDay[0].date).getTime()
+      ).toBeGreaterThanOrEqual(
+        new Date(fiveDaysAgo.toISOString().split('T')[0]).getTime()
+      );
     });
   });
 

@@ -64,6 +64,52 @@ export interface DailyRevenue {
 }
 
 /**
+ * Daily new-subscriber breakdown
+ */
+export interface DailySubscribers {
+  date: string; // ISO date string YYYY-MM-DD
+  newSubscribers: number;
+}
+
+/**
+ * Subscriber figures for a single period. The standalone block shape is
+ * reused inside `SubscriberStats.previous` when a comparison period is
+ * requested, so the type must stay flat (no nested `previous`).
+ */
+export interface SubscriberBlock {
+  /** Subscriptions alive at the end of the period (active / past_due / cancelling) */
+  activeSubscribers: number;
+  /** Subscriptions created within the period */
+  newSubscribers: number;
+  /** Subscriptions cancelled within the period */
+  churnedSubscribers: number;
+  /** Daily new-subscriber breakdown across the queried period */
+  subscribersByDay: DailySubscribers[];
+}
+
+/**
+ * Subscriber statistics for an organization. Fields are inherited from
+ * SubscriberBlock; `previous` is populated only when compareFrom/compareTo
+ * are provided so existing callers keep their original shape.
+ */
+export interface SubscriberStats extends SubscriberBlock {
+  /** Comparison-period figures — present only when requested */
+  previous?: SubscriberBlock;
+}
+
+/**
+ * Subscriber query options. `compareFrom`/`compareTo` opt into the
+ * previous-period block on the response; if either is missing the comparison
+ * is skipped.
+ */
+export interface SubscriberQueryOptions {
+  startDate?: Date;
+  endDate?: Date;
+  compareFrom?: Date;
+  compareTo?: Date;
+}
+
+/**
  * Customer statistics for an organization
  */
 export interface CustomerStats {
