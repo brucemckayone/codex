@@ -30,6 +30,8 @@ import { DEFAULT_TOP_CONTENT_LIMIT } from '../constants';
 import type {
   ActivityFeedItem,
   ActivityFeedResponse,
+  ContentPerformanceItem,
+  ContentPerformanceQueryOptions,
   CustomerStats,
   DailyFollowers,
   DailyRevenue,
@@ -598,6 +600,172 @@ export class AdminAnalyticsService extends BaseService {
       }
       this.handleError(error, 'getTopContent');
     }
+  }
+
+  /**
+   * Get content performance ranked by watch-time.
+   *
+   * Unlike `getTopContent` (ranked by purchase revenue), this method is
+   * engagement-first: content is scanned from the `content` table so that
+   * items with zero playback still surface (LEFT JOIN), and the ordering is
+   * by cumulative in-period watch time. All aggregates are bounded by the
+   * playback row's `updated_at` sitting inside the window — so a content
+   * item with historical but no recent playback reports zeros.
+   *
+   * See `ContentPerformanceItem` for the exact semantics of each metric and
+   * the known lower-bound behaviour of `totalWatchTimeSeconds` given
+   * upserted playback state.
+   *
+   * When `compareFrom`/`compareTo` are provided, `trendDelta` is populated
+   * by a second query bounded to the already-returned top-N contentIds so
+   * the comparison never scans more rows than the result set.
+   */
+  async getContentPerformance(
+    organizationId: string,
+    options?: ContentPerformanceQueryOptions
+  ): Promise<PaginatedListResponse<ContentPerformanceItem>> {
+    try {
+      const limit = options?.limit ?? DEFAULT_TOP_CONTENT_LIMIT;
+      const defaultStart = new Date();
+      defaultStart.setDate(
+        defaultStart.getDate() - ANALYTICS.TREND_DAYS_DEFAULT
+      );
+      const effectiveStart = options?.startDate ?? defaultStart;
+      const effectiveEnd = options?.endDate ?? new Date();
+
+      const currentRows = await this.runContentPerformanceWindow(
+        organizationId,
+        effectiveStart,
+        effectiveEnd,
+        limit
+      );
+
+      const items: ContentPerformanceItem[] = currentRows.map((row) => ({
+        contentId: row.contentId,
+        title: row.title,
+        totalViews: row.totalViews,
+        totalWatchTimeSeconds: row.totalWatchTimeSeconds,
+        avgCompletionPercent: row.avgCompletionPercent,
+        trendDelta: null,
+      }));
+
+      const wantsCompare = Boolean(options?.compareFrom && options?.compareTo);
+      if (wantsCompare && items.length > 0) {
+        const contentIds = items.map((item) => item.contentId);
+        // Non-null assertions are safe: wantsCompare is only true when both
+        // compareFrom and compareTo are defined above.
+        const previousWatchTime = await this.db
+          .select({
+            contentId: schema.videoPlayback.contentId,
+            totalWatchTimeSeconds: sql<number>`COALESCE(SUM(${schema.videoPlayback.positionSeconds}), 0)::int`,
+          })
+          .from(schema.videoPlayback)
+          .where(
+            and(
+              inArray(schema.videoPlayback.contentId, contentIds),
+              gte(schema.videoPlayback.updatedAt, options!.compareFrom!),
+              lte(schema.videoPlayback.updatedAt, options!.compareTo!)
+            )
+          )
+          .groupBy(schema.videoPlayback.contentId);
+
+        const prevById = new Map(
+          previousWatchTime.map((row) => [
+            row.contentId,
+            row.totalWatchTimeSeconds,
+          ])
+        );
+
+        for (const item of items) {
+          const prev = prevById.get(item.contentId) ?? 0;
+          item.trendDelta = item.totalWatchTimeSeconds - prev;
+        }
+      }
+
+      const pagination: PaginationMetadata = {
+        page: 1,
+        limit,
+        total: items.length,
+        totalPages: 1,
+      };
+
+      return { items, pagination };
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        throw error;
+      }
+      this.handleError(error, 'getContentPerformance');
+    }
+  }
+
+  /**
+   * Single-window engagement aggregate for `getContentPerformance`. Kept
+   * private + positional so both the current window and (future) comparison
+   * windows go through the same shape. The date range is folded into the
+   * LEFT JOIN predicate so content rows with zero in-window playback still
+   * surface as zero-row results rather than being filtered out.
+   */
+  private async runContentPerformanceWindow(
+    organizationId: string,
+    startDate: Date,
+    endDate: Date,
+    limit: number
+  ): Promise<
+    Array<{
+      contentId: string;
+      title: string;
+      totalViews: number;
+      totalWatchTimeSeconds: number;
+      avgCompletionPercent: number;
+    }>
+  > {
+    const rows = await this.db
+      .select({
+        contentId: schema.content.id,
+        title: schema.content.title,
+        totalViews: sql<number>`COUNT(DISTINCT ${schema.videoPlayback.userId})::int`,
+        totalWatchTimeSeconds: sql<number>`COALESCE(SUM(${schema.videoPlayback.positionSeconds}), 0)::int`,
+        avgCompletionPercent: sql<number>`COALESCE(
+          AVG(
+            CASE
+              WHEN ${schema.videoPlayback.durationSeconds} > 0 THEN
+                LEAST(
+                  100,
+                  GREATEST(
+                    0,
+                    ${schema.videoPlayback.positionSeconds}::float
+                      / ${schema.videoPlayback.durationSeconds} * 100
+                  )
+                )
+              ELSE NULL
+            END
+          )::float,
+          0
+        )`,
+      })
+      .from(schema.content)
+      .leftJoin(
+        schema.videoPlayback,
+        and(
+          eq(schema.videoPlayback.contentId, schema.content.id),
+          gte(schema.videoPlayback.updatedAt, startDate),
+          lte(schema.videoPlayback.updatedAt, endDate)
+        )
+      )
+      .where(
+        and(
+          eq(schema.content.organizationId, organizationId),
+          isNull(schema.content.deletedAt)
+        )
+      )
+      .groupBy(schema.content.id, schema.content.title)
+      .orderBy(
+        desc(sql`COALESCE(SUM(${schema.videoPlayback.positionSeconds}), 0)`),
+        desc(sql`COUNT(DISTINCT ${schema.videoPlayback.userId})`)
+      )
+      .limit(limit);
+
+    return rows;
   }
 
   /**

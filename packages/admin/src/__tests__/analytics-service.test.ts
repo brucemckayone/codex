@@ -1725,6 +1725,405 @@ describe('AdminAnalyticsService', () => {
     // Service trusts that organizationId is valid when passed from authenticated context
   });
 
+  describe('getContentPerformance', () => {
+    it('should return zero rows for an organization with no content', async () => {
+      const [emptyOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const stats = await service.getContentPerformance(emptyOrg.id);
+
+      expect(stats.items).toEqual([]);
+      expect(stats.pagination.total).toBe(0);
+    });
+
+    it('should include content with zero playback as a zero-row result', async () => {
+      // LEFT JOIN semantics — content without any in-window playback should
+      // still surface so the studio UI can communicate "no engagement yet"
+      // rather than silently hiding the row.
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      const [quiet] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Quiet Content',
+          slug: createUniqueSlug('cp-quiet'),
+          contentType: 'video',
+          status: 'published',
+          priceCents: 0,
+        })
+        .returning();
+
+      const stats = await service.getContentPerformance(testOrg.id);
+
+      const item = stats.items.find((i) => i.contentId === quiet.id);
+      expect(item).toBeDefined();
+      expect(item?.totalViews).toBe(0);
+      expect(item?.totalWatchTimeSeconds).toBe(0);
+      expect(item?.avgCompletionPercent).toBe(0);
+      expect(item?.trendDelta).toBeNull();
+    });
+
+    it('should aggregate watch time and compute average completion from playback', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      const [feature] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Feature Content',
+          slug: createUniqueSlug('cp-feature'),
+          contentType: 'video',
+          status: 'published',
+          priceCents: 0,
+        })
+        .returning();
+
+      const [viewer1, viewer2] = await seedTestUsers(db, 2);
+
+      const now = new Date();
+      const oneDayAgo = new Date(now);
+      oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+
+      // viewer1: 300/600 = 50% completion, 300s watched
+      // viewer2: 600/600 = 100% completion, 600s watched
+      // expected: totalViews=2, totalWatchTime=900, avgCompletion=(50+100)/2=75
+      await db.insert(videoPlayback).values([
+        {
+          userId: viewer1,
+          contentId: feature.id,
+          positionSeconds: 300,
+          durationSeconds: 600,
+          completed: false,
+          updatedAt: oneDayAgo,
+          createdAt: oneDayAgo,
+        },
+        {
+          userId: viewer2,
+          contentId: feature.id,
+          positionSeconds: 600,
+          durationSeconds: 600,
+          completed: true,
+          updatedAt: oneDayAgo,
+          createdAt: oneDayAgo,
+        },
+      ]);
+
+      const stats = await service.getContentPerformance(testOrg.id);
+
+      const item = stats.items.find((i) => i.contentId === feature.id);
+      expect(item).toBeDefined();
+      expect(item?.totalViews).toBe(2);
+      expect(item?.totalWatchTimeSeconds).toBe(900);
+      // Average may be a float — assert with a small tolerance to avoid
+      // fragile equality on pg float math.
+      expect(item?.avgCompletionPercent).toBeGreaterThanOrEqual(74);
+      expect(item?.avgCompletionPercent).toBeLessThanOrEqual(76);
+    });
+
+    it('should clamp per-row completion to 0..100 so corrupt positions cannot inflate the average', async () => {
+      // Defends the GREATEST/LEAST clamp + NULLIF: a row with
+      // position > duration, or duration = 0, must not blow the average
+      // past 100 or crash on divide-by-zero.
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      const [corruptContent] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Corrupt Position Content',
+          slug: createUniqueSlug('cp-corrupt'),
+          contentType: 'video',
+          status: 'published',
+          priceCents: 0,
+        })
+        .returning();
+
+      const [healthy] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Healthy Clamp Content',
+          slug: createUniqueSlug('cp-healthy-clamp'),
+          contentType: 'video',
+          status: 'published',
+          priceCents: 0,
+        })
+        .returning();
+
+      const [viewer1, viewer2, viewer3] = await seedTestUsers(db, 3);
+
+      const now = new Date();
+      const oneDayAgo = new Date(now);
+      oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+
+      await db.insert(videoPlayback).values([
+        // Beyond-duration position — clamped to 100%.
+        {
+          userId: viewer1,
+          contentId: corruptContent.id,
+          positionSeconds: 9000,
+          durationSeconds: 600,
+          updatedAt: oneDayAgo,
+          createdAt: oneDayAgo,
+        },
+        // Zero-duration row — NULLIF drops it from AVG denominator. AVG must
+        // still evaluate (COALESCE → 0 when no rows remain).
+        {
+          userId: viewer2,
+          contentId: corruptContent.id,
+          positionSeconds: 42,
+          durationSeconds: 0,
+          updatedAt: oneDayAgo,
+          createdAt: oneDayAgo,
+        },
+        // Clean half-watched row on a separate content for a sanity baseline.
+        {
+          userId: viewer3,
+          contentId: healthy.id,
+          positionSeconds: 50,
+          durationSeconds: 100,
+          updatedAt: oneDayAgo,
+          createdAt: oneDayAgo,
+        },
+      ]);
+
+      const stats = await service.getContentPerformance(testOrg.id);
+
+      const corruptRow = stats.items.find(
+        (i) => i.contentId === corruptContent.id
+      );
+      const healthyRow = stats.items.find((i) => i.contentId === healthy.id);
+
+      expect(corruptRow).toBeDefined();
+      // The zero-duration row is dropped from the average; only the clamped
+      // 100% row contributes → avg = 100.
+      expect(corruptRow?.avgCompletionPercent).toBeLessThanOrEqual(100);
+      expect(corruptRow?.avgCompletionPercent).toBeGreaterThanOrEqual(99);
+
+      expect(healthyRow?.avgCompletionPercent).toBeGreaterThanOrEqual(49);
+      expect(healthyRow?.avgCompletionPercent).toBeLessThanOrEqual(51);
+    });
+
+    it('should populate trendDelta as current-vs-previous watch-time when compare dates are provided', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      const [contentRow] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Trending Content',
+          slug: createUniqueSlug('cp-trend'),
+          contentType: 'video',
+          status: 'published',
+          priceCents: 0,
+        })
+        .returning();
+
+      const [u1, u2, u3] = await seedTestUsers(db, 3);
+
+      const now = new Date();
+      const threeDaysAgo = new Date(now);
+      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+      const sevenDaysAgo = new Date(now);
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const tenDaysAgo = new Date(now);
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+      const fourteenDaysAgo = new Date(now);
+      fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+
+      // Current window (last 7 days): 400 + 200 = 600s watched.
+      // Previous window (14..7 days ago): 300s watched. Delta = +300.
+      await db.insert(videoPlayback).values([
+        {
+          userId: u1,
+          contentId: contentRow.id,
+          positionSeconds: 400,
+          durationSeconds: 1000,
+          updatedAt: threeDaysAgo,
+          createdAt: threeDaysAgo,
+        },
+        {
+          userId: u2,
+          contentId: contentRow.id,
+          positionSeconds: 200,
+          durationSeconds: 1000,
+          updatedAt: threeDaysAgo,
+          createdAt: threeDaysAgo,
+        },
+        {
+          userId: u3,
+          contentId: contentRow.id,
+          positionSeconds: 300,
+          durationSeconds: 1000,
+          updatedAt: tenDaysAgo,
+          createdAt: tenDaysAgo,
+        },
+      ]);
+
+      const withCompare = await service.getContentPerformance(testOrg.id, {
+        startDate: sevenDaysAgo,
+        endDate: now,
+        compareFrom: fourteenDaysAgo,
+        compareTo: sevenDaysAgo,
+      });
+
+      const item = withCompare.items.find((i) => i.contentId === contentRow.id);
+      expect(item?.totalWatchTimeSeconds).toBe(600);
+      expect(item?.trendDelta).toBe(300);
+
+      const withoutCompare = await service.getContentPerformance(testOrg.id, {
+        startDate: sevenDaysAgo,
+        endDate: now,
+      });
+      const noDeltaItem = withoutCompare.items.find(
+        (i) => i.contentId === contentRow.id
+      );
+      expect(noDeltaItem?.trendDelta).toBeNull();
+    });
+
+    it('should never surface content from another organization', async () => {
+      // Cross-org guard: orgA's call must exclude orgB content entirely, even
+      // when orgB content has playback rows. Protects the
+      // `eq(content.organizationId, organizationId)` predicate.
+      const [orgA] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+      const [orgB] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      const [aContent] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: orgA.id,
+          mediaItemId: media.id,
+          title: 'Org A Engagement',
+          slug: createUniqueSlug('cp-org-a'),
+          contentType: 'video',
+          status: 'published',
+          priceCents: 0,
+        })
+        .returning();
+
+      const [bContent] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: orgB.id,
+          mediaItemId: media.id,
+          title: 'Org B Engagement',
+          slug: createUniqueSlug('cp-org-b'),
+          contentType: 'video',
+          status: 'published',
+          priceCents: 0,
+        })
+        .returning();
+
+      const [viewer] = await seedTestUsers(db, 1);
+
+      const now = new Date();
+      const oneDayAgo = new Date(now);
+      oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+
+      await db.insert(videoPlayback).values({
+        userId: viewer,
+        contentId: bContent.id,
+        positionSeconds: 100,
+        durationSeconds: 200,
+        updatedAt: oneDayAgo,
+        createdAt: oneDayAgo,
+      });
+
+      const aStats = await service.getContentPerformance(orgA.id);
+      const bStats = await service.getContentPerformance(orgB.id);
+
+      expect(aStats.items.map((i) => i.contentId)).toContain(aContent.id);
+      expect(aStats.items.map((i) => i.contentId)).not.toContain(bContent.id);
+
+      const bItem = bStats.items.find((i) => i.contentId === bContent.id);
+      expect(bItem?.totalViews).toBe(1);
+      expect(bItem?.totalWatchTimeSeconds).toBe(100);
+    });
+  });
+
   describe('getDashboardStats', () => {
     it('should return zero stats for organization with no data', async () => {
       const [emptyOrg] = await db

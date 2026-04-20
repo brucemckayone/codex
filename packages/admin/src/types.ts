@@ -207,6 +207,52 @@ export interface TopContentQueryOptions {
 }
 
 /**
+ * Per-content engagement row sourced from video_playback joined to content.
+ *
+ * Notes on the metrics:
+ *  - `totalViews` is `COUNT(DISTINCT user_id)` over video_playback rows
+ *    whose `updated_at` sits inside the window — one row per (user, content)
+ *    is enforced by the table's composite unique, so this is "distinct
+ *    engaged viewers", not total impressions or session counts.
+ *  - `totalWatchTimeSeconds` is `SUM(position_seconds)`. Because playback
+ *    state is an upserted last-known position (not an append-only log), a
+ *    user who scrubbed backward leaves a smaller position behind — this is
+ *    therefore a lower-bound proxy for watch time, not an exact stopwatch.
+ *  - `avgCompletionPercent` averages `position_seconds / duration_seconds`
+ *    across rows, clamped 0..100 per-row so corrupt positions beyond the
+ *    duration cannot blow the mean past the display range. Rows with
+ *    `duration_seconds = 0` resolve to NULL via a CASE guard (not NULLIF
+ *    — `GREATEST(0, NULL)` collapses to 0 in Postgres, which would have
+ *    smuggled a 0% row back into the average), so AVG skips them cleanly.
+ *  - Content with zero playback activity still appears (LEFT JOIN), with
+ *    `totalViews = 0`, `totalWatchTimeSeconds = 0`, and
+ *    `avgCompletionPercent = 0`.
+ *  - `trendDelta` is the change in `totalWatchTimeSeconds` vs the previous
+ *    window; `null` when `compareFrom`/`compareTo` are not supplied.
+ */
+export interface ContentPerformanceItem {
+  contentId: string;
+  title: string;
+  totalViews: number;
+  totalWatchTimeSeconds: number;
+  avgCompletionPercent: number;
+  trendDelta: number | null;
+}
+
+/**
+ * Content-performance query options. `compareFrom`/`compareTo` opt into
+ * per-row `trendDelta` (change in total watch-time vs previous window);
+ * if either is missing the delta stays null.
+ */
+export interface ContentPerformanceQueryOptions {
+  limit?: number;
+  startDate?: Date;
+  endDate?: Date;
+  compareFrom?: Date;
+  compareTo?: Date;
+}
+
+/**
  * Revenue query options. `compareFrom`/`compareTo` opt into the previous-period
  * block on the response; if either is missing the comparison is skipped.
  */
