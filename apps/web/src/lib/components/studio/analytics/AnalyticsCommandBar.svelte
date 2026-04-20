@@ -71,7 +71,16 @@
   }
 
   function navigate(params: URLSearchParams) {
-    goto(`${page.url.pathname}?${params}`, {
+    // Guard against no-op navigations. Melt UI's Switch echoes its `checked`
+    // prop through `onCheckedChange` on mount/sync, which would otherwise
+    // trigger `handleCompareToggle` → `navigate` with the same URL we're
+    // already on — Chrome's IPC flood guard treats rapid identical goto()s
+    // as an infinite loop and throttles the whole tab. Diffing the search
+    // string breaks that cycle cleanly.
+    const target = params.toString();
+    const current = page.url.searchParams.toString();
+    if (target === current) return;
+    goto(`${page.url.pathname}?${target}`, {
       keepFocus: true,
       noScroll: true,
     });
@@ -151,6 +160,11 @@
 
   // ─── Compare toggle ───────────────────────────────────────────────────
   function handleCompareToggle(next: boolean) {
+    // Bail when the toggle is echoing its current state — Melt UI's Switch
+    // fires onCheckedChange during mount/re-render sync, which otherwise
+    // loops through navigate → URL update → prop re-derive → Switch syncs.
+    if (next === compareEnabled) return;
+
     const params = baseParams();
     params.set('startDate', startDate);
     params.set('endDate', endDate);
