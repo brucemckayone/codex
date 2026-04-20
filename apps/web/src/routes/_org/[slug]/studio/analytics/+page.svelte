@@ -19,7 +19,6 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
-  import { PageHeader } from '$lib/components/ui';
   import {
     AnalyticsCommandBar,
     AnalyticsZeroState,
@@ -265,11 +264,6 @@
   <!-- Redirect in-flight — render nothing to avoid a flash of unauthorised UI. -->
 {:else}
   <div class="analytics-page">
-    <PageHeader
-      title={m.analytics_title()}
-      description={m.analytics_page_description()}
-    />
-
     <AnalyticsCommandBar
       {startDate}
       {endDate}

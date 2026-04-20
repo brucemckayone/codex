@@ -6255,6 +6255,62 @@ export const analytics_cmd_compare_to = () => `Compare to`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_eyebrow = () => `Studio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_window_last_7d = () => `Last 7 days`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_window_last_30d = () => `Last 30 days`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_window_last_90d = () => `Last 90 days`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_window_last_year = () => `Last year`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_window_custom = () => `Custom range`
+
+
+/**
+ * @param {{ label: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_cmd_window_aria = (params) => `Current window: ${params.label}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const analytics_empty = () => `No analytics data available for this period.`
 
 

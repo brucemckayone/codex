@@ -203,49 +203,91 @@
     compareCustomOpen = false;
     navigate(params);
   }
+
+  // ─── Window-chip label (count-chip analog in the identity zone) ───────
+  // When a preset is active we show "LAST N DAYS"; on a custom range we
+  // format the start–end pair. The chip mirrors the count-chip vocabulary
+  // from ContentListCommandBar so the studio header family stays coherent.
+  const chipDateFormatter = new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+  });
+
+  const windowLabel = $derived.by(() => {
+    if (activePreset === '7d') return m.analytics_cmd_window_last_7d();
+    if (activePreset === '30d') return m.analytics_cmd_window_last_30d();
+    if (activePreset === '90d') return m.analytics_cmd_window_last_90d();
+    if (activePreset === 'year') return m.analytics_cmd_window_last_year();
+    // Custom range: "21 Mar – 20 Apr"
+    try {
+      const from = chipDateFormatter.format(new Date(startDate));
+      const to = chipDateFormatter.format(new Date(endDate));
+      return `${from} – ${to}`;
+    } catch {
+      return m.analytics_cmd_window_custom();
+    }
+  });
 </script>
 
-<div class="command-bar">
-  <div class="preset-row" role="group" aria-label={m.analytics_cmd_date_range_label()}>
+<div class="command-bar" role="toolbar" aria-label={m.analytics_cmd_date_range_label()}>
+  <div class="bar-identity">
+    <a href="/studio" class="breadcrumb">
+      <span class="breadcrumb-root">{m.analytics_cmd_eyebrow()}</span>
+      <span class="breadcrumb-sep" aria-hidden="true">/</span>
+      <span class="breadcrumb-leaf">{m.analytics_title()}</span>
+    </a>
+    <span class="window-chip" aria-label={m.analytics_cmd_window_aria({ label: windowLabel })}>
+      <span class="window-chip__value">{windowLabel}</span>
+    </span>
+  </div>
+
+  <div class="bar-filters" role="tablist" aria-label={m.analytics_cmd_date_range_label()}>
     <button
       type="button"
-      class="preset-btn"
-      data-active={activePreset === '7d'}
-      aria-pressed={activePreset === '7d'}
+      role="tab"
+      class="filter-tab"
+      data-active={activePreset === '7d' || undefined}
+      aria-selected={activePreset === '7d'}
       onclick={() => applyPreset(7)}
     >
       {m.analytics_date_7d()}
     </button>
     <button
       type="button"
-      class="preset-btn"
-      data-active={activePreset === '30d'}
-      aria-pressed={activePreset === '30d'}
+      role="tab"
+      class="filter-tab"
+      data-active={activePreset === '30d' || undefined}
+      aria-selected={activePreset === '30d'}
       onclick={() => applyPreset(30)}
     >
       {m.analytics_date_30d()}
     </button>
     <button
       type="button"
-      class="preset-btn"
-      data-active={activePreset === '90d'}
-      aria-pressed={activePreset === '90d'}
+      role="tab"
+      class="filter-tab"
+      data-active={activePreset === '90d' || undefined}
+      aria-selected={activePreset === '90d'}
       onclick={() => applyPreset(90)}
     >
       {m.analytics_date_90d()}
     </button>
     <button
       type="button"
-      class="preset-btn"
-      data-active={activePreset === 'year'}
-      aria-pressed={activePreset === 'year'}
+      role="tab"
+      class="filter-tab"
+      data-active={activePreset === 'year' || undefined}
+      aria-selected={activePreset === 'year'}
       onclick={() => applyPreset(365)}
     >
       {m.analytics_date_year()}
     </button>
 
     <Popover.Root bind:open={customRangeOpen}>
-      <Popover.Trigger class="preset-btn preset-btn--custom" data-active={activePreset === null}>
+      <Popover.Trigger
+        class="filter-tab"
+        data-active={activePreset === null || undefined}
+      >
         {m.analytics_cmd_custom_range()}
       </Popover.Trigger>
       <Popover.Content class="range-popover">
@@ -289,7 +331,7 @@
     </Popover.Root>
   </div>
 
-  <div class="compare-row">
+  <div class="bar-actions">
     <label class="compare-toggle">
       <Switch
         checked={compareEnabled}
@@ -347,65 +389,172 @@
 </div>
 
 <style>
+  /* Mirrors ContentListCommandBar / DashboardCommandBar vocabulary — sticky,
+     backdrop-blurred surface with a 3-zone grid: identity | filters | actions.
+     Keeps the studio header family visually coherent across routes. */
   .command-bar {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  /* ─── Preset row ─────────────────────────────────────────────────── */
-  .preset-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
+    display: grid;
+    grid-template-columns: minmax(0, auto) minmax(0, 1fr) minmax(0, auto);
     align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-5);
+    background-color: color-mix(in srgb, var(--color-surface) 88%, transparent);
+    backdrop-filter: blur(var(--blur-2xl, 24px));
+    -webkit-backdrop-filter: blur(var(--blur-2xl, 24px));
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow:
+      0 var(--space-1) var(--space-4)
+        color-mix(in srgb, var(--color-text) 6%, transparent);
   }
 
-  .preset-btn {
-    padding: var(--space-1) var(--space-3);
-    font-family: inherit;
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    line-height: var(--leading-tight);
-    color: var(--color-text-secondary);
-    background-color: var(--color-surface);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-md);
-    cursor: pointer;
+  @media (--below-lg) {
+    .command-bar {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        'identity actions'
+        'filters  filters';
+      row-gap: var(--space-3);
+      padding: var(--space-3) var(--space-4);
+    }
+    .bar-identity { grid-area: identity; }
+    .bar-filters  { grid-area: filters; overflow-x: auto; flex-wrap: nowrap; }
+    .bar-actions  { grid-area: actions; }
+  }
+
+  /* ── Identity (breadcrumb + window chip) ────────────────── */
+  .bar-identity {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+  }
+
+  .breadcrumb {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    text-decoration: none;
+    color: var(--color-text);
+    font-family: var(--font-heading);
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    letter-spacing: var(--tracking-tight);
+    min-width: 0;
     transition: var(--transition-colors);
   }
 
-  .preset-btn:hover {
-    background-color: var(--color-surface-secondary);
-    color: var(--color-text);
+  .breadcrumb:hover { color: var(--color-interactive); }
+
+  .breadcrumb:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
   }
 
-  .preset-btn:focus-visible {
+  .breadcrumb-root {
+    font-weight: var(--font-normal);
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wider);
+  }
+
+  .breadcrumb-sep {
+    color: var(--color-text-muted);
+    font-weight: var(--font-normal);
+  }
+
+  .breadcrumb-leaf {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .window-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-3);
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum', 'zero';
+    font-variant-numeric: tabular-nums slashed-zero;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-full, 9999px);
+    background: var(--color-surface);
+    white-space: nowrap;
+  }
+
+  .window-chip__value {
+    font-weight: var(--font-semibold);
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wider);
+  }
+
+  /* ── Segmented filter pills ─────────────────────────────── */
+  .bar-filters {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-0-5, 2px);
+    padding: var(--space-0-5, 2px);
+    border-radius: var(--radius-full, 9999px);
+    border: var(--border-width) var(--border-style) var(--color-border);
+    background: color-mix(in srgb, var(--color-surface-secondary) 60%, var(--color-surface));
+    justify-self: center;
+  }
+
+  @media (--below-lg) {
+    .bar-filters { justify-self: start; }
+  }
+
+  .filter-tab {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--color-text-muted);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wider);
+    padding: var(--space-1-5, 6px) var(--space-3);
+    border-radius: var(--radius-full, 9999px);
+    cursor: pointer;
+    white-space: nowrap;
+    transition:
+      background-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
+  }
+
+  .filter-tab:hover { color: var(--color-text-secondary); }
+
+  .filter-tab[data-active] {
+    background: var(--color-surface);
+    color: var(--color-text);
+    box-shadow:
+      0 1px 0 color-mix(in srgb, var(--color-text) 6%, transparent),
+      0 1px 2px color-mix(in srgb, var(--color-text) 8%, transparent);
+  }
+
+  .filter-tab:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: 2px;
   }
 
-  .preset-btn[data-active='true'] {
-    background-color: var(--color-interactive);
-    border-color: var(--color-interactive);
-    color: var(--color-text-on-brand);
-  }
-
-  .preset-btn[data-active='true']:hover {
-    background-color: var(--color-interactive-hover);
-    border-color: var(--color-interactive-hover);
-  }
-
-  .preset-btn--custom {
-    margin-inline-start: var(--space-1);
-  }
-
-  /* ─── Compare row ────────────────────────────────────────────────── */
-  .compare-row {
-    display: flex;
-    flex-wrap: wrap;
+  /* ── Actions (compare toggle + customise link) ──────────── */
+  .bar-actions {
+    display: inline-flex;
     align-items: center;
     gap: var(--space-3);
+    justify-content: flex-end;
+    white-space: nowrap;
   }
 
   .compare-toggle {
@@ -417,22 +566,26 @@
   }
 
   .compare-toggle__text {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wider);
+    color: var(--color-text-secondary);
   }
 
   .compare-custom-link {
-    padding: var(--space-1) var(--space-2);
-    font-family: inherit;
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--color-interactive);
+    appearance: none;
     background: transparent;
-    border: none;
+    border: 0;
+    padding: var(--space-1) var(--space-2);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wider);
+    color: var(--color-interactive);
     border-radius: var(--radius-sm);
-    text-decoration: underline;
-    text-underline-offset: 0.125em;
     cursor: pointer;
     transition: var(--transition-colors);
   }
