@@ -1,16 +1,19 @@
 /**
  * Nebula fragment shader — Single-pass raymarched volumetric cosmic dust.
  *
- * Volumetric gas clouds rendered via front-to-back compositing. Each depth
- * layer is tinted with a different brand color: primary (near), secondary
- * (mid-ground), accent (far/highlights). Background star field sits behind.
+ * Shadertoy-grade polish pass:
+ *  - iq value noise replaces sin(x)*sin(y) — no more checkerboard artefacts
+ *    at higher FBM octaves; produces organic cloud shapes
+ *  - Smooth 3-stop palette interpolation (primary → secondary → accent)
+ *    with smoothstep weights; no per-pixel branching
+ *  - ACES filmic tone map replaces the old min(x, 0.7) clip — HDR cloud
+ *    cores roll off instead of flattening
+ *  - Bloom-adjacent highlight boost on bright cloud cores
+ *  - Radial cosmic-space background gradient (was flat u_bgColor * 0.3)
+ *  - Luminance-aware film grain (filmic)
  *
- * Mouse creates "stellar wind" — displaces the gas UVs smoothly.
- * Click creates a bright star flash (Gaussian burst) at the cursor.
- *
- * Noise: sin(p.x)*sin(p.y) consistent with warp convention.
- * FBM: 3 octaves with mat2(0.8, 0.6, -0.6, 0.8) inter-octave rotation.
- * Post-processing: Reinhard tone map, cap 0.7, intensity blend, vignette, grain.
+ * Front-to-back volumetric compositing unchanged — that's the good part
+ * of the original and doesn't need fixing.
  */
 export const NEBULA_FRAG = `#version 300 es
 precision highp float;
@@ -19,25 +22,44 @@ out vec4 fragColor;
 
 uniform float u_time;
 uniform vec2 u_resolution;
-uniform vec2 u_mouse;          // normalized 0-1, lerped
-uniform float u_burstStrength;  // click burst (decays)
-uniform vec3 u_brandPrimary;   // near gas color
-uniform vec3 u_brandSecondary; // mid dust color
-uniform vec3 u_brandAccent;    // far/highlight color
-uniform vec3 u_bgColor;        // deep space base
-uniform float u_density;       // gas opacity
-uniform float u_speed;         // evolution speed
-uniform float u_scale;         // cloud scale
-uniform int u_depth;           // ray steps (quality, 4-16)
-uniform float u_wind;          // mouse wind strength
-uniform float u_stars;         // background star density
-uniform float u_intensity;     // overall blend
-uniform float u_grain;         // film grain
-uniform float u_vignette;      // vignette
+uniform vec2 u_mouse;
+uniform float u_burstStrength;
+uniform vec3 u_brandPrimary;
+uniform vec3 u_brandSecondary;
+uniform vec3 u_brandAccent;
+uniform vec3 u_bgColor;
+uniform float u_density;
+uniform float u_speed;
+uniform float u_scale;
+uniform int u_depth;
+uniform float u_wind;
+uniform float u_stars;
+uniform float u_intensity;
+uniform float u_grain;
+uniform float u_vignette;
 
-// -- Noise: smooth periodic function (same convention as warp) --
+// -- iq-style value noise --
+float hash1(vec2 p) {
+  p = 50.0 * fract(p * 0.3183099 + vec2(0.71, 0.113));
+  return -1.0 + 2.0 * fract(p.x * p.y * (p.x + p.y));
+}
+
 float noise(vec2 p) {
-  return sin(p.x) * sin(p.y);
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(hash1(i + vec2(0.0, 0.0)), hash1(i + vec2(1.0, 0.0)), u.x),
+    mix(hash1(i + vec2(0.0, 1.0)), hash1(i + vec2(1.0, 1.0)), u.x),
+    u.y
+  );
+}
+
+// -- Hash for grain + star field --
+float hash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
 }
 
 // -- FBM: 3 octaves with inter-octave rotation --
@@ -51,60 +73,64 @@ float fbm3(vec2 p) {
   return f / 0.875;
 }
 
-// -- Hash for film grain + star field --
-float hash(vec2 p) {
-  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.x + p3.y) * p3.z);
+// -- Smooth 3-stop palette --
+vec3 nebulaPalette(float t) {
+  t = clamp(t, 0.0, 1.0);
+  float w0 = smoothstep(0.6, 0.0, t);
+  float w1 = 1.0 - smoothstep(0.0, 0.5, abs(t - 0.5) * 2.0);
+  float w2 = smoothstep(0.4, 1.0, t);
+  float total = w0 + w1 + w2;
+  return (u_brandPrimary * w0 + u_brandSecondary * w1 + u_brandAccent * w2) / max(total, 0.001);
+}
+
+// -- ACES filmic tone map --
+vec3 aces(vec3 x) {
+  const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
 // -- Star field: grid-based random stars with twinkle --
 float starField(vec2 uv, float starDensity, float time) {
   if (starDensity <= 0.0) return 0.0;
-
   float stars = 0.0;
-  // Two layers at different scales for depth
   for (int layer = 0; layer < 2; layer++) {
     float scale = 30.0 + float(layer) * 20.0;
     vec2 cell = floor(uv * scale);
     vec2 frac = fract(uv * scale);
-
-    // Random star position within cell
     vec2 starPos = vec2(hash(cell), hash(cell + vec2(127.1, 311.7)));
-
-    // Distance to star center
     float d = length(frac - starPos);
-
-    // Star brightness with threshold based on density
     float threshold = 1.0 - starDensity * 0.3;
     float starBright = hash(cell + vec2(42.0, 17.0));
     if (starBright > threshold) {
-      // Twinkle
       float twinkle = 0.7 + 0.3 * sin(time * (2.0 + starBright * 3.0) + starBright * 6.28);
-      // Point-like falloff
-      float glow = smoothstep(0.05, 0.0, d) * twinkle;
+      // Softer falloff + size variation based on brightness
+      float sizeMul = mix(0.04, 0.08, smoothstep(threshold, 1.0, starBright));
+      float glow = smoothstep(sizeMul, 0.0, d) * twinkle;
       stars += glow * (starBright - threshold) / (1.0 - threshold);
     }
   }
-
   return clamp(stars, 0.0, 1.0);
 }
 
 void main() {
   float t = u_time * u_speed;
 
-  // --- Aspect-correct UVs ---
   vec2 uv = (2.0 * gl_FragCoord.xy - u_resolution) / u_resolution.y;
 
-  // --- Stellar wind: offset gas UVs by mouse ---
   vec2 windOffset = (u_mouse - 0.5) * u_wind;
   vec2 gasUv = uv + windOffset;
 
-  // --- Star field (behind gas, uses v_uv so stars stay fixed) ---
+  // ── Stars (stable position, tinted by cell hash) ──────────────
   float stars = starField(v_uv, u_stars, u_time);
-  vec3 starColor = mix(u_brandAccent, vec3(1.0), 0.7) * stars;
+  // Per-star tint: some stars lean cold (primary), others warm (accent)
+  float starTintHash = hash(floor(v_uv * 30.0) + vec2(17.3));
+  vec3 starColor = mix(
+    mix(u_brandPrimary * 1.2, vec3(1.0), 0.75),
+    mix(u_brandAccent * 1.2, vec3(1.0), 0.75),
+    starTintHash
+  ) * stars;
 
-  // --- Raymarch: front-to-back volumetric compositing ---
+  // ── Raymarch: front-to-back volumetric compositing ──────────
   vec3 accColor = vec3(0.0);
   float accAlpha = 0.0;
 
@@ -112,81 +138,76 @@ void main() {
     if (i >= u_depth) break;
     if (accAlpha > 0.95) break;
 
-    // Depth fraction: 0=near, 1=far
     float depthFrac = float(i) / float(u_depth - 1);
-
-    // Per-layer depth offset and rotation angle
     float layerDepth = 1.0 + depthFrac * 3.0;
     float rotAngle = depthFrac * 1.5 + t * 0.3;
-    float c = cos(rotAngle), s = sin(rotAngle);
-    mat2 layerRot = mat2(c, -s, s, c);
+    float cR = cos(rotAngle), sR = sin(rotAngle);
+    mat2 layerRot = mat2(cR, -sR, sR, cR);
 
-    // Sample position: scaled, rotated, time-evolving
     vec2 samplePos = layerRot * (gasUv * u_scale * layerDepth) + vec2(t * 0.7, t * 0.5);
 
-    // FBM noise sample
+    // FBM on value noise — organic cloud shapes
     float n = fbm3(samplePos);
-
-    // Remap noise to cloud density (threshold for cloud edges)
     float cloudDensity = smoothstep(0.05, 0.45, n * 0.5 + 0.5);
 
-    // Edge glow: bright at cloud boundaries
+    // Edge glow: bright at cloud boundaries (classic nebula rim light)
     float edgeGlow = smoothstep(0.1, 0.3, cloudDensity) * smoothstep(0.7, 0.5, cloudDensity);
 
-    // Color by depth: near=primary, mid=secondary, far=accent
-    vec3 layerColor;
-    if (depthFrac < 0.5) {
-      layerColor = mix(u_brandPrimary, u_brandSecondary, depthFrac * 2.0);
-    } else {
-      layerColor = mix(u_brandSecondary, u_brandAccent, (depthFrac - 0.5) * 2.0);
-    }
+    // Smooth palette lookup by depth
+    vec3 layerColor = nebulaPalette(depthFrac);
+    // Rim adds accent + white
+    layerColor += edgeGlow * mix(u_brandAccent, vec3(1.0), 0.3) * 0.5;
 
-    // Add edge glow highlight
-    layerColor += edgeGlow * mix(u_brandAccent, vec3(1.0), 0.3) * 0.4;
-
-    // Front-to-back compositing
+    // Front-to-back compositing with depth attenuation
     float layerAlpha = cloudDensity * u_density * (1.0 - accAlpha);
-    // Attenuate far layers
     layerAlpha *= (1.0 - depthFrac * 0.3);
     accColor += layerColor * layerAlpha;
     accAlpha += layerAlpha;
   }
 
-  // --- Click burst: bright star flash at cursor ---
+  // ── Click burst ────────────────────────────────────────────
   if (u_burstStrength > 0.01) {
     vec2 burstUv = (2.0 * u_mouse - 1.0);
     burstUv.x *= u_resolution.x / u_resolution.y;
     vec2 toMouse = uv - burstUv;
     float burstDist = dot(toMouse, toMouse);
     float burst = u_burstStrength * exp(-burstDist * 8.0);
-    accColor += mix(u_brandAccent, vec3(1.0), 0.6) * burst * 2.0;
+    accColor += mix(u_brandAccent, vec3(1.0), 0.6) * burst * 2.5;
     accAlpha = min(accAlpha + burst * 0.5, 1.0);
   }
 
-  // --- Composite: stars behind gas on deep space ---
-  vec3 spaceColor = u_bgColor * 0.3;
+  // ── Cosmic background gradient (was flat u_bgColor * 0.3) ──
+  vec2 vc = v_uv * 2.0 - 1.0;
+  float r2 = dot(vc, vc);
+  // Darker at edges, gentle primary lift near centre for deep-space warmth
+  vec3 spaceColor = mix(
+    u_bgColor * 0.35 + u_brandPrimary * 0.03,  // centre: slight warm lift
+    u_bgColor * 0.18,                           // edges: deep black
+    smoothstep(0.0, 1.6, r2)
+  );
+
   vec3 background = spaceColor + starColor;
   vec3 color = background * (1.0 - accAlpha) + accColor;
 
-  // --- Post-processing ---
+  // ── Bloom-adjacent highlight boost on bright cloud cores ──
+  float cloudLum = dot(accColor, vec3(0.299, 0.587, 0.114));
+  color += pow(cloudLum, 2.5) * mix(u_brandSecondary, u_brandAccent, 0.5) * 0.3;
 
-  // Reinhard tone mapping
-  color = color / (1.0 + color);
+  // ── Post-process ────────────────────────────────────────────
+  // ACES (replaces min(x, 0.7) clip)
+  color = aces(color);
 
-  // Cap maximum brightness
-  color = min(color, vec3(0.7));
-
-  // Intensity blend: mix background with nebula
+  // Intensity blend
   color = mix(u_bgColor, color, u_intensity);
 
   // Vignette
-  vec2 vc = v_uv * 2.0 - 1.0;
-  color *= clamp(1.0 - dot(vc, vc) * u_vignette, 0.0, 1.0);
+  color *= clamp(1.0 - r2 * u_vignette, 0.0, 1.0);
 
-  // Film grain
-  color += (hash(gl_FragCoord.xy + fract(u_time * 7.13)) - 0.5) * u_grain;
+  // Luminance-aware grain
+  float lum = dot(color, vec3(0.299, 0.587, 0.114));
+  float grainAmt = u_grain * mix(1.4, 0.35, lum);
+  color += (hash(gl_FragCoord.xy + fract(u_time * 7.13)) - 0.5) * grainAmt;
 
-  // Final clamp
-  fragColor = vec4(clamp(color, 0.0, 0.7), 1.0);
+  fragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
 `;
