@@ -107,3 +107,6 @@ skills-lock.json
 .vibe/
 .windsurf/
 .zencoder/
+
+# Local-only shader verification scripts
+apps/web/.*-shot.mjs
