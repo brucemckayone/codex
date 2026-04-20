@@ -22,6 +22,7 @@ import type {
   DailyRevenue,
   DashboardStats,
   DashboardStatsOptions,
+  RevenueBlock,
   RevenueQueryOptions,
   RevenueStats,
   TopContentItem,
@@ -29,103 +30,118 @@ import type {
 
 export class AdminAnalyticsService extends BaseService {
   /**
-   * Get revenue statistics for an organization
+   * Get revenue statistics for an organization.
    *
-   * Returns aggregate revenue metrics and daily breakdown.
-   * Only counts completed purchases.
+   * Returns aggregate revenue metrics and a daily breakdown over the same
+   * requested range. Only counts completed purchases. Pass
+   * `compareFrom`/`compareTo` to get a `previous` block for delta-vs-previous
+   * KPIs — if either is absent the comparison is skipped and the result
+   * matches the original single-period shape.
    */
   async getRevenueStats(
     organizationId: string,
     options?: RevenueQueryOptions
   ): Promise<RevenueStats> {
     try {
-      // Note: Organization existence is validated by middleware via organizationMemberships FK constraint
-      // Build date filter conditions
-      const dateConditions = [
-        eq(schema.purchases.organizationId, organizationId),
-        eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED),
-      ];
-
-      if (options?.startDate) {
-        dateConditions.push(
-          gte(schema.purchases.purchasedAt, options.startDate)
-        );
-      }
-      if (options?.endDate) {
-        dateConditions.push(lte(schema.purchases.purchasedAt, options.endDate));
-      }
-
-      // Get aggregate stats using SQL aggregation
-      const aggregateResult = await this.db
-        .select({
-          totalRevenueCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
-          totalPurchases: sql<number>`COUNT(*)::int`,
-          platformFeeCents: sql<number>`COALESCE(SUM(${schema.purchases.platformFeeCents}), 0)::int`,
-          organizationFeeCents: sql<number>`COALESCE(SUM(${schema.purchases.organizationFeeCents}), 0)::int`,
-          creatorPayoutCents: sql<number>`COALESCE(SUM(${schema.purchases.creatorPayoutCents}), 0)::int`,
-        })
-        .from(schema.purchases)
-        .where(and(...dateConditions));
-
-      const stats = aggregateResult[0] ?? {
-        totalRevenueCents: 0,
-        totalPurchases: 0,
-        platformFeeCents: 0,
-        organizationFeeCents: 0,
-        creatorPayoutCents: 0,
-      };
-
-      // Calculate average order value (avoid division by zero)
-      const averageOrderValueCents =
-        stats.totalPurchases > 0
-          ? Math.round(stats.totalRevenueCents / stats.totalPurchases)
-          : 0;
-
-      // Get daily revenue for default trend period
-      const trendPeriodStartDate = new Date();
-      trendPeriodStartDate.setDate(
-        trendPeriodStartDate.getDate() - ANALYTICS.TREND_DAYS_DEFAULT
+      const current = await this.computeRevenueBlock(
+        organizationId,
+        options?.startDate,
+        options?.endDate
       );
 
-      const dailyRevenue = await this.db
-        .select({
-          date: sql<string>`DATE(${schema.purchases.purchasedAt})::text`,
-          revenueCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
-          purchaseCount: sql<number>`COUNT(*)::int`,
-        })
-        .from(schema.purchases)
-        .where(
-          and(
-            eq(schema.purchases.organizationId, organizationId),
-            eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED),
-            gte(schema.purchases.purchasedAt, trendPeriodStartDate)
-          )
-        )
-        .groupBy(sql`DATE(${schema.purchases.purchasedAt})`)
-        .orderBy(desc(sql`DATE(${schema.purchases.purchasedAt})`));
+      if (options?.compareFrom && options?.compareTo) {
+        const previous = await this.computeRevenueBlock(
+          organizationId,
+          options.compareFrom,
+          options.compareTo
+        );
+        return { ...current, previous };
+      }
 
-      // Map to proper format
-      const revenueByDay: DailyRevenue[] = dailyRevenue.map((row) => ({
-        date: row.date,
-        revenueCents: row.revenueCents,
-        purchaseCount: row.purchaseCount,
-      }));
-
-      return {
-        totalRevenueCents: stats.totalRevenueCents,
-        totalPurchases: stats.totalPurchases,
-        averageOrderValueCents,
-        platformFeeCents: stats.platformFeeCents,
-        organizationFeeCents: stats.organizationFeeCents,
-        creatorPayoutCents: stats.creatorPayoutCents,
-        revenueByDay,
-      };
+      return current;
     } catch (error) {
       if (error instanceof NotFoundError) {
         throw error;
       }
       this.handleError(error, 'getRevenueStats');
     }
+  }
+
+  /**
+   * Aggregate + daily breakdown for a single period. Daily rows use the same
+   * date window as the aggregate so the two views stay consistent — the
+   * previous implementation hardcoded the last 30 days for the daily query,
+   * which diverged from the aggregate once a caller passed `startDate`/`endDate`.
+   * When no range is provided we fall back to the trend-days default so the
+   * dashboard's zero-argument call still returns a sensible recent trend.
+   */
+  private async computeRevenueBlock(
+    organizationId: string,
+    startDate?: Date,
+    endDate?: Date
+  ): Promise<RevenueBlock> {
+    const defaultStart = new Date();
+    defaultStart.setDate(defaultStart.getDate() - ANALYTICS.TREND_DAYS_DEFAULT);
+    const effectiveStart = startDate ?? defaultStart;
+    const effectiveEnd = endDate ?? new Date();
+
+    const baseConditions = [
+      eq(schema.purchases.organizationId, organizationId),
+      eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED),
+      gte(schema.purchases.purchasedAt, effectiveStart),
+      lte(schema.purchases.purchasedAt, effectiveEnd),
+    ];
+
+    const aggregateResult = await this.db
+      .select({
+        totalRevenueCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
+        totalPurchases: sql<number>`COUNT(*)::int`,
+        platformFeeCents: sql<number>`COALESCE(SUM(${schema.purchases.platformFeeCents}), 0)::int`,
+        organizationFeeCents: sql<number>`COALESCE(SUM(${schema.purchases.organizationFeeCents}), 0)::int`,
+        creatorPayoutCents: sql<number>`COALESCE(SUM(${schema.purchases.creatorPayoutCents}), 0)::int`,
+      })
+      .from(schema.purchases)
+      .where(and(...baseConditions));
+
+    const stats = aggregateResult[0] ?? {
+      totalRevenueCents: 0,
+      totalPurchases: 0,
+      platformFeeCents: 0,
+      organizationFeeCents: 0,
+      creatorPayoutCents: 0,
+    };
+
+    const averageOrderValueCents =
+      stats.totalPurchases > 0
+        ? Math.round(stats.totalRevenueCents / stats.totalPurchases)
+        : 0;
+
+    const dailyRows = await this.db
+      .select({
+        date: sql<string>`DATE(${schema.purchases.purchasedAt})::text`,
+        revenueCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
+        purchaseCount: sql<number>`COUNT(*)::int`,
+      })
+      .from(schema.purchases)
+      .where(and(...baseConditions))
+      .groupBy(sql`DATE(${schema.purchases.purchasedAt})`)
+      .orderBy(desc(sql`DATE(${schema.purchases.purchasedAt})`));
+
+    const revenueByDay: DailyRevenue[] = dailyRows.map((row) => ({
+      date: row.date,
+      revenueCents: row.revenueCents,
+      purchaseCount: row.purchaseCount,
+    }));
+
+    return {
+      totalRevenueCents: stats.totalRevenueCents,
+      totalPurchases: stats.totalPurchases,
+      averageOrderValueCents,
+      platformFeeCents: stats.platformFeeCents,
+      organizationFeeCents: stats.organizationFeeCents,
+      creatorPayoutCents: stats.creatorPayoutCents,
+      revenueByDay,
+    };
   }
 
   /**

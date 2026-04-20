@@ -23,9 +23,11 @@ export type { PaginatedListResponse, PaginationMetadata, PaginationParams };
 // ============================================================================
 
 /**
- * Revenue statistics for an organization
+ * Revenue figures for a single period. The standalone block shape is
+ * reused inside `RevenueStats.previous` when a comparison period is
+ * requested, so the type must stay flat (no nested `previous`).
  */
-export interface RevenueStats {
+export interface RevenueBlock {
   /** Total revenue in cents (gross) */
   totalRevenueCents: number;
   /** Total number of completed purchases */
@@ -38,8 +40,18 @@ export interface RevenueStats {
   organizationFeeCents: number;
   /** Creator payout amount in cents */
   creatorPayoutCents: number;
-  /** Daily revenue breakdown for last 30 days */
+  /** Daily revenue breakdown across the queried period */
   revenueByDay: DailyRevenue[];
+}
+
+/**
+ * Revenue statistics for an organization. Fields are inherited from
+ * RevenueBlock; `previous` is populated only when compareFrom/compareTo
+ * are provided so existing callers keep their original shape.
+ */
+export interface RevenueStats extends RevenueBlock {
+  /** Comparison-period figures — present only when requested */
+  previous?: RevenueBlock;
 }
 
 /**
@@ -72,11 +84,14 @@ export interface TopContentItem {
 }
 
 /**
- * Revenue query options
+ * Revenue query options. `compareFrom`/`compareTo` opt into the previous-period
+ * block on the response; if either is missing the comparison is skipped.
  */
 export interface RevenueQueryOptions {
   startDate?: Date;
   endDate?: Date;
+  compareFrom?: Date;
+  compareTo?: Date;
 }
 
 /**

@@ -396,6 +396,210 @@ describe('AdminAnalyticsService', () => {
       expect(org2Stats.totalRevenueCents).toBe(2000);
       expect(org2Stats.totalPurchases).toBe(1);
     });
+
+    it('should restrict daily breakdown to the requested date range', async () => {
+      // Regression: previously the daily breakdown always ran against the
+      // last TREND_DAYS_DEFAULT (30 days) and ignored options.startDate/endDate,
+      // so aggregate totals and the daily rows drifted apart. After the fix
+      // both must reflect the same window.
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      const [testContent] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Daily Range',
+          slug: createUniqueSlug('daily-range'),
+          contentType: 'video',
+          status: 'published',
+          visibility: 'purchased_only',
+          priceCents: 1500,
+        })
+        .returning();
+
+      const today = new Date();
+      const tenDaysAgo = new Date(today);
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+      const twoDaysAgo = new Date(today);
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+      await db.insert(purchases).values([
+        {
+          customerId,
+          contentId: testContent.id,
+          organizationId: testOrg.id,
+          amountPaidCents: 1500,
+          platformFeeCents: 150,
+          organizationFeeCents: 0,
+          creatorPayoutCents: 1350,
+          stripePaymentIntentId: `pi_in_${Date.now()}`,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: twoDaysAgo,
+        },
+        {
+          customerId,
+          contentId: testContent.id,
+          organizationId: testOrg.id,
+          amountPaidCents: 1500,
+          platformFeeCents: 150,
+          organizationFeeCents: 0,
+          creatorPayoutCents: 1350,
+          stripePaymentIntentId: `pi_out_${Date.now()}`,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: tenDaysAgo,
+        },
+      ]);
+
+      const fiveDaysAgo = new Date(today);
+      fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
+
+      const stats = await service.getRevenueStats(testOrg.id, {
+        startDate: fiveDaysAgo,
+        endDate: today,
+      });
+
+      // Aggregate only sees the recent purchase
+      expect(stats.totalRevenueCents).toBe(1500);
+      expect(stats.totalPurchases).toBe(1);
+      // Daily rows must reflect the same window — no row older than start
+      expect(stats.revenueByDay.length).toBe(1);
+      expect(
+        new Date(stats.revenueByDay[0].date).getTime()
+      ).toBeGreaterThanOrEqual(
+        new Date(fiveDaysAgo.toISOString().split('T')[0]).getTime()
+      );
+    });
+
+    it('should include a previous block when compareFrom and compareTo are provided', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      const [testContent] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Compare',
+          slug: createUniqueSlug('compare-range'),
+          contentType: 'video',
+          status: 'published',
+          visibility: 'purchased_only',
+          priceCents: 2000,
+        })
+        .returning();
+
+      const now = new Date();
+      const sevenDaysAgo = new Date(now);
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const fourteenDaysAgo = new Date(now);
+      fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+
+      // Two purchases in current window (last 7d), one in previous window (7-14d ago)
+      await db.insert(purchases).values([
+        {
+          customerId,
+          contentId: testContent.id,
+          organizationId: testOrg.id,
+          amountPaidCents: 2000,
+          platformFeeCents: 200,
+          organizationFeeCents: 0,
+          creatorPayoutCents: 1800,
+          stripePaymentIntentId: `pi_cur1_${Date.now()}`,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: now,
+        },
+        {
+          customerId,
+          contentId: testContent.id,
+          organizationId: testOrg.id,
+          amountPaidCents: 2000,
+          platformFeeCents: 200,
+          organizationFeeCents: 0,
+          creatorPayoutCents: 1800,
+          stripePaymentIntentId: `pi_cur2_${Date.now()}`,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: now,
+        },
+        {
+          customerId,
+          contentId: testContent.id,
+          organizationId: testOrg.id,
+          amountPaidCents: 2000,
+          platformFeeCents: 200,
+          organizationFeeCents: 0,
+          creatorPayoutCents: 1800,
+          stripePaymentIntentId: `pi_prev_${Date.now()}`,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: new Date(fourteenDaysAgo.getTime() + 60_000), // just inside previous window
+        },
+      ]);
+
+      const stats = await service.getRevenueStats(testOrg.id, {
+        startDate: sevenDaysAgo,
+        endDate: now,
+        compareFrom: fourteenDaysAgo,
+        compareTo: sevenDaysAgo,
+      });
+
+      expect(stats.totalRevenueCents).toBe(4000);
+      expect(stats.totalPurchases).toBe(2);
+      expect(stats.previous).toBeDefined();
+      expect(stats.previous?.totalRevenueCents).toBe(2000);
+      expect(stats.previous?.totalPurchases).toBe(1);
+      // previous block must not itself carry a nested previous
+      expect(
+        (stats.previous as unknown as { previous?: unknown })?.previous
+      ).toBeUndefined();
+    });
+
+    it('should omit previous block when compareFrom or compareTo is missing', async () => {
+      // Backward-compat: callers that don't opt into comparison should see the
+      // original RevenueStats shape (no `previous` key).
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const onlyFrom = await service.getRevenueStats(testOrg.id, {
+        compareFrom: new Date(),
+      });
+      const onlyTo = await service.getRevenueStats(testOrg.id, {
+        compareTo: new Date(),
+      });
+      const neither = await service.getRevenueStats(testOrg.id);
+
+      expect(onlyFrom.previous).toBeUndefined();
+      expect(onlyTo.previous).toBeUndefined();
+      expect(neither.previous).toBeUndefined();
+    });
   });
 
   describe('getCustomerStats', () => {
