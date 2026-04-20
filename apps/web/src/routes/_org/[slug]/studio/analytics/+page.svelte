@@ -11,6 +11,11 @@
   @prop data - Parent studio layout data: { org, userRole, ... }
 -->
 <script lang="ts">
+  import type {
+    FollowerStats,
+    RevenueStats,
+    SubscriberStats,
+  } from '@codex/admin';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
@@ -150,26 +155,23 @@
     contentPerformanceQuery?.current?.items ?? []
   );
 
-  const revenueLoading = $derived(
-    (revenueQuery?.loading ?? true) || !revenueQuery?.current
-  );
-  const subscribersLoading = $derived(
-    (subscribersQuery?.loading ?? true) || !subscribersQuery?.current
-  );
-  const followersLoading = $derived(
-    (followersQuery?.loading ?? true) || !followersQuery?.current
-  );
-  const topContentLoading = $derived(
-    (topContentQuery?.loading ?? true) || !topContentQuery?.current
-  );
+  // Loading flags reflect ONLY the query's own loading signal. We deliberately
+  // don't OR in `!current` — if the endpoint errors (e.g. 404 on a worker that
+  // hasn't reloaded BE-7 routes, or any transient failure), `.loading` flips
+  // false but `.current` stays undefined. Treating that as "still loading"
+  // would hang the dashboard in a perpetual skeleton state and prevent the
+  // zero-state guard from ever resolving.
+  const revenueLoading = $derived(revenueQuery?.loading ?? true);
+  const subscribersLoading = $derived(subscribersQuery?.loading ?? true);
+  const followersLoading = $derived(followersQuery?.loading ?? true);
+  const topContentLoading = $derived(topContentQuery?.loading ?? true);
   const contentPerformanceLoading = $derived(
-    (contentPerformanceQuery?.loading ?? true) ||
-      !contentPerformanceQuery?.current
+    contentPerformanceQuery?.loading ?? true
   );
 
-  // Narrative + zero-state gating wait for every query to resolve at least
-  // once. We don't want to flash the zero state while revenue is still
-  // pending — that would look like data loss.
+  // Zero-state gating waits for every query to settle (success or error).
+  // Using .loading (not .current) means errored queries still "resolve" for
+  // gating purposes — the dashboard renders with whatever data landed.
   const allResolved = $derived(
     !revenueLoading &&
       !subscribersLoading &&
@@ -227,6 +229,32 @@
       value: d.purchaseCount,
     }))
   );
+
+  // Stable empty-shape fallbacks. Declared once at component-module scope so
+  // their object identity is stable across re-renders — critical because the
+  // hand-rolled SVG chart's $derived blocks read revenue/subscribers/followers
+  // by reference. Inline `??{...}` fallbacks would hand the chart a brand-new
+  // object every reactive tick and thrash its geometry derivations.
+  const EMPTY_REVENUE: RevenueStats = {
+    totalRevenueCents: 0,
+    totalPurchases: 0,
+    averageOrderValueCents: 0,
+    platformFeeCents: 0,
+    organizationFeeCents: 0,
+    creatorPayoutCents: 0,
+    revenueByDay: [],
+  };
+  const EMPTY_SUBSCRIBERS: SubscriberStats = {
+    activeSubscribers: 0,
+    newSubscribers: 0,
+    churnedSubscribers: 0,
+    subscribersByDay: [],
+  };
+  const EMPTY_FOLLOWERS: FollowerStats = {
+    totalFollowers: 0,
+    newFollowers: 0,
+    followersByDay: [],
+  };
 </script>
 
 <svelte:head>
@@ -253,26 +281,9 @@
       <AnalyticsZeroState />
     {:else}
       <NarrativeSummary
-        revenue={revenue ?? {
-          totalRevenueCents: 0,
-          totalPurchases: 0,
-          averageOrderValueCents: 0,
-          platformFeeCents: 0,
-          organizationFeeCents: 0,
-          creatorPayoutCents: 0,
-          revenueByDay: [],
-        }}
-        subscribers={subscribers ?? {
-          activeSubscribers: 0,
-          newSubscribers: 0,
-          churnedSubscribers: 0,
-          subscribersByDay: [],
-        }}
-        followers={followers ?? {
-          totalFollowers: 0,
-          newFollowers: 0,
-          followersByDay: [],
-        }}
+        revenue={revenue ?? EMPTY_REVENUE}
+        subscribers={subscribers ?? EMPTY_SUBSCRIBERS}
+        followers={followers ?? EMPTY_FOLLOWERS}
         topContent={topContent}
         topPerformance={contentPerformance}
         {hasCompareWindow}
@@ -322,26 +333,9 @@
         aria-label={m.analytics_section_chart_label()}
       >
         <HeroAnalyticsChart
-          revenue={revenue ?? {
-            totalRevenueCents: 0,
-            totalPurchases: 0,
-            averageOrderValueCents: 0,
-            platformFeeCents: 0,
-            organizationFeeCents: 0,
-            creatorPayoutCents: 0,
-            revenueByDay: [],
-          }}
-          subscribers={subscribers ?? {
-            activeSubscribers: 0,
-            newSubscribers: 0,
-            churnedSubscribers: 0,
-            subscribersByDay: [],
-          }}
-          followers={followers ?? {
-            totalFollowers: 0,
-            newFollowers: 0,
-            followersByDay: [],
-          }}
+          revenue={revenue ?? EMPTY_REVENUE}
+          subscribers={subscribers ?? EMPTY_SUBSCRIBERS}
+          followers={followers ?? EMPTY_FOLLOWERS}
           {hasCompareWindow}
           loading={revenueLoading || subscribersLoading || followersLoading}
         />
