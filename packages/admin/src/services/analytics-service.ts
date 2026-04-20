@@ -31,10 +31,14 @@ import type {
   ActivityFeedItem,
   ActivityFeedResponse,
   CustomerStats,
+  DailyFollowers,
   DailyRevenue,
   DailySubscribers,
   DashboardStats,
   DashboardStatsOptions,
+  FollowerBlock,
+  FollowerQueryOptions,
+  FollowerStats,
   RevenueBlock,
   RevenueQueryOptions,
   RevenueStats,
@@ -287,6 +291,124 @@ export class AdminAnalyticsService extends BaseService {
       newSubscribers: newResult[0]?.count ?? 0,
       churnedSubscribers: churnedResult[0]?.count ?? 0,
       subscribersByDay,
+    };
+  }
+
+  /**
+   * Get follower statistics for an organization.
+   *
+   * Returns total / new counts plus a daily new-follower breakdown over the
+   * same requested range. Pass `compareFrom`/`compareTo` to get a `previous`
+   * block for delta-vs-previous KPIs — if either is absent the comparison is
+   * skipped and the result matches the original single-period shape.
+   */
+  async getFollowerStats(
+    organizationId: string,
+    options?: FollowerQueryOptions
+  ): Promise<FollowerStats> {
+    try {
+      const current = await this.computeFollowerBlock(
+        organizationId,
+        options?.startDate,
+        options?.endDate
+      );
+
+      if (options?.compareFrom && options?.compareTo) {
+        const previous = await this.computeFollowerBlock(
+          organizationId,
+          options.compareFrom,
+          options.compareTo
+        );
+        return { ...current, previous };
+      }
+
+      return current;
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        throw error;
+      }
+      this.handleError(error, 'getFollowerStats');
+    }
+  }
+
+  /**
+   * Aggregate + daily breakdown for followers in a single period. Daily
+   * new-follower rows use the same date window as the aggregates so the two
+   * views stay consistent. When no range is provided we fall back to the
+   * trend-days default (matching the revenue/subscriber helpers) so
+   * zero-argument callers still get a sensible recent trend.
+   *
+   * Limitation: `organizationFollowers` has no status or cancellation
+   * column — unfollowing hard-deletes the row (intentional, see schema
+   * comment). That means `totalFollowers` is the count of rows whose
+   * `createdAt <= effectiveEnd` at query time: users who followed and
+   * unfollowed within the window leave no trace, so this is an
+   * approximation of "follower population at end of period" rather than
+   * a historical point-in-time snapshot. It is exact when `endDate` is
+   * "now" (equivalent to a live follower count).
+   */
+  private async computeFollowerBlock(
+    organizationId: string,
+    startDate?: Date,
+    endDate?: Date
+  ): Promise<FollowerBlock> {
+    const defaultStart = new Date();
+    defaultStart.setDate(defaultStart.getDate() - ANALYTICS.TREND_DAYS_DEFAULT);
+    const effectiveStart = startDate ?? defaultStart;
+    const effectiveEnd = endDate ?? new Date();
+
+    // Total followers at end of period: rows that exist now with
+    // createdAt <= effectiveEnd. Unfollows are hard-deletes so "was
+    // following at X" can only be approximated as "row exists AND was
+    // created by X".
+    const totalResult = await this.db
+      .select({ count: sql<number>`COUNT(*)::int` })
+      .from(schema.organizationFollowers)
+      .where(
+        and(
+          eq(schema.organizationFollowers.organizationId, organizationId),
+          lte(schema.organizationFollowers.createdAt, effectiveEnd)
+        )
+      );
+
+    // New followers in period: createdAt within [start, end]
+    const newResult = await this.db
+      .select({ count: sql<number>`COUNT(*)::int` })
+      .from(schema.organizationFollowers)
+      .where(
+        and(
+          eq(schema.organizationFollowers.organizationId, organizationId),
+          gte(schema.organizationFollowers.createdAt, effectiveStart),
+          lte(schema.organizationFollowers.createdAt, effectiveEnd)
+        )
+      );
+
+    // Daily new followers, grouped by DATE(createdAt), most recent first
+    const dailyRows = await this.db
+      .select({
+        date: sql<string>`DATE(${schema.organizationFollowers.createdAt})::text`,
+        newFollowers: sql<number>`COUNT(*)::int`,
+      })
+      .from(schema.organizationFollowers)
+      .where(
+        and(
+          eq(schema.organizationFollowers.organizationId, organizationId),
+          gte(schema.organizationFollowers.createdAt, effectiveStart),
+          lte(schema.organizationFollowers.createdAt, effectiveEnd)
+        )
+      )
+      .groupBy(sql`DATE(${schema.organizationFollowers.createdAt})`)
+      .orderBy(desc(sql`DATE(${schema.organizationFollowers.createdAt})`));
+
+    const followersByDay: DailyFollowers[] = dailyRows.map((row) => ({
+      date: row.date,
+      newFollowers: row.newFollowers,
+    }));
+
+    return {
+      totalFollowers: totalResult[0]?.count ?? 0,
+      newFollowers: newResult[0]?.count ?? 0,
+      followersByDay,
     };
   }
 

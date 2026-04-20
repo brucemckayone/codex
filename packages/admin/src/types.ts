@@ -110,6 +110,57 @@ export interface SubscriberQueryOptions {
 }
 
 /**
+ * Daily new-follower breakdown
+ */
+export interface DailyFollowers {
+  date: string; // ISO date string YYYY-MM-DD
+  newFollowers: number;
+}
+
+/**
+ * Follower figures for a single period. The standalone block shape is
+ * reused inside `FollowerStats.previous` when a comparison period is
+ * requested, so the type must stay flat (no nested `previous`).
+ *
+ * Note: following has no status/cancellation column — unfollowing
+ * hard-deletes the row. `totalFollowers` is therefore an approximation
+ * of "rows that existed and were created by the end of the period"; a
+ * user who followed and then unfollowed within the window leaves no
+ * trace. Live "active follower" counts are only accurate when
+ * `endDate` is now.
+ */
+export interface FollowerBlock {
+  /** Rows created on or before the end of the period (approximation — see note) */
+  totalFollowers: number;
+  /** Follows created within the period */
+  newFollowers: number;
+  /** Daily new-follower breakdown across the queried period */
+  followersByDay: DailyFollowers[];
+}
+
+/**
+ * Follower statistics for an organization. Fields are inherited from
+ * FollowerBlock; `previous` is populated only when compareFrom/compareTo
+ * are provided so existing callers keep their original shape.
+ */
+export interface FollowerStats extends FollowerBlock {
+  /** Comparison-period figures — present only when requested */
+  previous?: FollowerBlock;
+}
+
+/**
+ * Follower query options. `compareFrom`/`compareTo` opt into the
+ * previous-period block on the response; if either is missing the comparison
+ * is skipped.
+ */
+export interface FollowerQueryOptions {
+  startDate?: Date;
+  endDate?: Date;
+  compareFrom?: Date;
+  compareTo?: Date;
+}
+
+/**
  * Customer statistics for an organization
  */
 export interface CustomerStats {

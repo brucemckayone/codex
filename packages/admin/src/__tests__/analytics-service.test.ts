@@ -18,6 +18,7 @@ import { PURCHASE_STATUS } from '@codex/constants';
 import {
   content as contentTable,
   mediaItems,
+  organizationFollowers,
   organizationMemberships,
   organizations,
   purchases,
@@ -934,6 +935,223 @@ describe('AdminAnalyticsService', () => {
       expect(stats.subscribersByDay).toHaveLength(1);
       expect(
         new Date(stats.subscribersByDay[0].date).getTime()
+      ).toBeGreaterThanOrEqual(
+        new Date(fiveDaysAgo.toISOString().split('T')[0]).getTime()
+      );
+    });
+  });
+
+  describe('getFollowerStats', () => {
+    it('should return zero stats for organization with no followers', async () => {
+      const [emptyOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const stats = await service.getFollowerStats(emptyOrg.id);
+
+      expect(stats.totalFollowers).toBe(0);
+      expect(stats.newFollowers).toBe(0);
+      expect(stats.followersByDay).toEqual([]);
+      expect(stats.previous).toBeUndefined();
+    });
+
+    it('should count total and new correctly when followers were created before, during, and after the range', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      // Three users: one pre-range, one in-range, one post-range
+      const [uBefore, uIn, uAfter] = await seedTestUsers(db, 3);
+
+      const now = new Date();
+      const fortyDaysAgo = new Date(now);
+      fortyDaysAgo.setDate(fortyDaysAgo.getDate() - 40);
+      const sevenDaysAgo = new Date(now);
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const threeDaysAgo = new Date(now);
+      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+      const oneDayAhead = new Date(now);
+      oneDayAhead.setDate(oneDayAhead.getDate() + 1);
+
+      await db.insert(organizationFollowers).values([
+        {
+          organizationId: testOrg.id,
+          userId: uBefore,
+          createdAt: fortyDaysAgo,
+        },
+        {
+          organizationId: testOrg.id,
+          userId: uIn,
+          createdAt: threeDaysAgo,
+        },
+        {
+          organizationId: testOrg.id,
+          userId: uAfter,
+          createdAt: oneDayAhead,
+        },
+      ]);
+
+      // Window: last 7 days. Expected: new = 1 (uIn), total (rows created
+      // on or before end=now) = 2 (uBefore + uIn). The future row is excluded.
+      const stats = await service.getFollowerStats(testOrg.id, {
+        startDate: sevenDaysAgo,
+        endDate: now,
+      });
+
+      expect(stats.newFollowers).toBe(1);
+      expect(stats.totalFollowers).toBe(2);
+      expect(stats.followersByDay).toHaveLength(1);
+      expect(stats.followersByDay[0].newFollowers).toBe(1);
+    });
+
+    it('should scope follower stats to the given organization only', async () => {
+      const [orgA] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+      const [orgB] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [ua, ub] = await seedTestUsers(db, 2);
+      const now = new Date();
+      const twoDaysAgo = new Date(now);
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+      await db.insert(organizationFollowers).values([
+        {
+          organizationId: orgA.id,
+          userId: ua,
+          createdAt: twoDaysAgo,
+        },
+        {
+          organizationId: orgB.id,
+          userId: ub,
+          createdAt: twoDaysAgo,
+        },
+      ]);
+
+      const aStats = await service.getFollowerStats(orgA.id);
+      const bStats = await service.getFollowerStats(orgB.id);
+
+      expect(aStats.newFollowers).toBe(1);
+      expect(aStats.totalFollowers).toBe(1);
+      expect(bStats.newFollowers).toBe(1);
+      expect(bStats.totalFollowers).toBe(1);
+    });
+
+    it('should include a previous block when compareFrom and compareTo are provided, and omit it otherwise', async () => {
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [u1, u2, u3] = await seedTestUsers(db, 3);
+
+      const now = new Date();
+      const sevenDaysAgo = new Date(now);
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const fourteenDaysAgo = new Date(now);
+      fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+      const tenDaysAgo = new Date(now);
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+      const threeDaysAgo = new Date(now);
+      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+
+      await db.insert(organizationFollowers).values([
+        // Current window: 2 new follows in last 7 days
+        {
+          organizationId: testOrg.id,
+          userId: u1,
+          createdAt: threeDaysAgo,
+        },
+        {
+          organizationId: testOrg.id,
+          userId: u2,
+          createdAt: threeDaysAgo,
+        },
+        // Previous window: 1 new follow 7-14 days ago
+        {
+          organizationId: testOrg.id,
+          userId: u3,
+          createdAt: tenDaysAgo,
+        },
+      ]);
+
+      const withCompare = await service.getFollowerStats(testOrg.id, {
+        startDate: sevenDaysAgo,
+        endDate: now,
+        compareFrom: fourteenDaysAgo,
+        compareTo: sevenDaysAgo,
+      });
+
+      expect(withCompare.newFollowers).toBe(2);
+      expect(withCompare.previous).toBeDefined();
+      expect(withCompare.previous?.newFollowers).toBe(1);
+      // previous block must not itself carry a nested previous
+      expect(
+        (withCompare.previous as unknown as { previous?: unknown })?.previous
+      ).toBeUndefined();
+
+      const onlyFrom = await service.getFollowerStats(testOrg.id, {
+        compareFrom: fourteenDaysAgo,
+      });
+      const onlyTo = await service.getFollowerStats(testOrg.id, {
+        compareTo: sevenDaysAgo,
+      });
+      const neither = await service.getFollowerStats(testOrg.id);
+
+      expect(onlyFrom.previous).toBeUndefined();
+      expect(onlyTo.previous).toBeUndefined();
+      expect(neither.previous).toBeUndefined();
+    });
+
+    it('should restrict daily breakdown to the requested date range', async () => {
+      // Regression guard against the revenue bug fixed in BE-1: the daily
+      // breakdown must use the same window as aggregates, not a hardcoded
+      // TREND_DAYS_DEFAULT window.
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [uIn, uOut] = await seedTestUsers(db, 2);
+
+      const today = new Date();
+      const twoDaysAgo = new Date(today);
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+      const tenDaysAgo = new Date(today);
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+      const fiveDaysAgo = new Date(today);
+      fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
+
+      await db.insert(organizationFollowers).values([
+        {
+          organizationId: testOrg.id,
+          userId: uIn,
+          createdAt: twoDaysAgo,
+        },
+        {
+          organizationId: testOrg.id,
+          userId: uOut,
+          createdAt: tenDaysAgo,
+        },
+      ]);
+
+      const stats = await service.getFollowerStats(testOrg.id, {
+        startDate: fiveDaysAgo,
+        endDate: today,
+      });
+
+      // Aggregates respect the window
+      expect(stats.newFollowers).toBe(1);
+      // Daily rows reflect the same window — no row older than start
+      expect(stats.followersByDay).toHaveLength(1);
+      expect(
+        new Date(stats.followersByDay[0].date).getTime()
       ).toBeGreaterThanOrEqual(
         new Date(fiveDaysAgo.toISOString().split('T')[0]).getTime()
       );
