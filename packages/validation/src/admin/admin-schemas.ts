@@ -24,59 +24,134 @@ import { paginationSchema } from '../shared/pagination-schema';
 const MAX_DATE_RANGE_DAYS = 365;
 
 /**
- * Revenue analytics query parameters
- * Optional date range for filtering revenue data
- * Max range: 365 days (prevents DoS via large data queries)
+ * Shared shape for analytics queries that support an optional main date range
+ * and an optional comparison date range (for period-over-period comparisons).
+ *
+ * All four fields are independently optional at the field level; cross-field
+ * rules (chronological order, max range size, both-or-neither for compare)
+ * are enforced by {@link applyDateRangeRefinements}.
  */
-export const adminRevenueQuerySchema = z
-  .object({
+type DateRangeFields = {
+  startDate?: Date;
+  endDate?: Date;
+  compareFrom?: Date;
+  compareTo?: Date;
+};
+
+/**
+ * Apply the five cross-field refinements shared by all date-range analytics
+ * queries (revenue, dashboard, subscribers, followers, content performance):
+ *
+ *  1. `startDate <= endDate` when both provided.
+ *  2. Main range size <= MAX_DATE_RANGE_DAYS.
+ *  3. `compareFrom <= compareTo` when both provided.
+ *  4. Compare range size <= MAX_DATE_RANGE_DAYS.
+ *  5. Compare range is both-or-neither (half-set is a caller bug).
+ *
+ * Generic over the schema type so we can reuse on schemas that also carry
+ * additional fields (e.g. `limit` on dashboard/content-performance).
+ */
+function applyDateRangeRefinements<T extends DateRangeFields>(
+  schema: z.ZodType<T>
+): z.ZodType<T> {
+  return schema
+    .refine(
+      (data) => {
+        if (data.startDate && data.endDate) {
+          return data.startDate <= data.endDate;
+        }
+        return true;
+      },
+      {
+        message: 'Start date must be before or equal to end date',
+        path: ['startDate'],
+      }
+    )
+    .refine(
+      (data) => {
+        if (data.startDate && data.endDate) {
+          const diffMs = data.endDate.getTime() - data.startDate.getTime();
+          const diffDays = diffMs / (1000 * 60 * 60 * 24);
+          return diffDays <= MAX_DATE_RANGE_DAYS;
+        }
+        return true;
+      },
+      {
+        message: `Date range cannot exceed ${MAX_DATE_RANGE_DAYS} days`,
+        path: ['endDate'],
+      }
+    )
+    .refine(
+      (data) => {
+        if (data.compareFrom && data.compareTo) {
+          return data.compareFrom <= data.compareTo;
+        }
+        return true;
+      },
+      {
+        message: 'Compare-from must be before or equal to compare-to',
+        path: ['compareFrom'],
+      }
+    )
+    .refine(
+      (data) => {
+        if (data.compareFrom && data.compareTo) {
+          const diffMs = data.compareTo.getTime() - data.compareFrom.getTime();
+          const diffDays = diffMs / (1000 * 60 * 60 * 24);
+          return diffDays <= MAX_DATE_RANGE_DAYS;
+        }
+        return true;
+      },
+      {
+        message: `Compare range cannot exceed ${MAX_DATE_RANGE_DAYS} days`,
+        path: ['compareTo'],
+      }
+    )
+    .refine(
+      (data) =>
+        (data.compareFrom === undefined && data.compareTo === undefined) ||
+        (data.compareFrom !== undefined && data.compareTo !== undefined),
+      {
+        message:
+          'Both compareFrom and compareTo must be provided together, or neither',
+        path: ['compareFrom'],
+      }
+    );
+}
+
+/**
+ * Reusable `limit` field for analytics queries that cap result counts.
+ * Matches the constraints used by `adminTopContentQuerySchema`.
+ */
+const analyticsLimitSchema = z.coerce
+  .number()
+  .int({ message: 'Limit must be a whole number' })
+  .min(1, { message: 'Limit must be at least 1' })
+  .max(100, { message: 'Limit must be 100 or less' })
+  .default(10);
+
+/**
+ * Revenue analytics query parameters
+ * Optional main date range plus optional compare date range for period-over-period.
+ * Max range per window: 365 days (prevents DoS via large data queries).
+ */
+export const adminRevenueQuerySchema = applyDateRangeRefinements(
+  z.object({
     startDate: isoDateSchema.optional(),
     endDate: isoDateSchema.optional(),
+    compareFrom: isoDateSchema.optional(),
+    compareTo: isoDateSchema.optional(),
   })
-  .refine(
-    (data) => {
-      if (data.startDate && data.endDate) {
-        return data.startDate <= data.endDate;
-      }
-      return true;
-    },
-    {
-      message: 'Start date must be before or equal to end date',
-      path: ['startDate'],
-    }
-  )
-  .refine(
-    (data) => {
-      if (data.startDate && data.endDate) {
-        const diffMs = data.endDate.getTime() - data.startDate.getTime();
-        const diffDays = diffMs / (1000 * 60 * 60 * 24);
-        return diffDays <= MAX_DATE_RANGE_DAYS;
-      }
-      return true;
-    },
-    {
-      message: `Date range cannot exceed ${MAX_DATE_RANGE_DAYS} days`,
-      path: ['endDate'],
-    }
-  );
+);
 
 export type AdminRevenueQueryInput = z.infer<typeof adminRevenueQuerySchema>;
-
-// ============================================================================
-// Analytics Schemas
-// ============================================================================
 
 /**
  * Top content query parameters
  * Limit the number of top content items returned
  */
 export const adminTopContentQuerySchema = z.object({
-  limit: z.coerce
-    .number()
-    .int({ message: 'Limit must be a whole number' })
-    .min(1, { message: 'Limit must be at least 1' })
-    .max(100, { message: 'Limit must be 100 or less' })
-    .default(10),
+  limit: analyticsLimitSchema,
 });
 
 export type AdminTopContentQueryInput = z.infer<
@@ -85,48 +160,76 @@ export type AdminTopContentQueryInput = z.infer<
 
 /**
  * Dashboard stats query parameters
- * Combines revenue date range filter with top content limit
+ * Combines revenue/compare date ranges with top content limit.
  */
-export const adminDashboardStatsQuerySchema = z
-  .object({
+export const adminDashboardStatsQuerySchema = applyDateRangeRefinements(
+  z.object({
     startDate: isoDateSchema.optional(),
     endDate: isoDateSchema.optional(),
-    limit: z.coerce
-      .number()
-      .int({ message: 'Limit must be a whole number' })
-      .min(1, { message: 'Limit must be at least 1' })
-      .max(100, { message: 'Limit must be 100 or less' })
-      .default(10),
+    compareFrom: isoDateSchema.optional(),
+    compareTo: isoDateSchema.optional(),
+    limit: analyticsLimitSchema,
   })
-  .refine(
-    (data) => {
-      if (data.startDate && data.endDate) {
-        return data.startDate <= data.endDate;
-      }
-      return true;
-    },
-    {
-      message: 'Start date must be before or equal to end date',
-      path: ['startDate'],
-    }
-  )
-  .refine(
-    (data) => {
-      if (data.startDate && data.endDate) {
-        const diffMs = data.endDate.getTime() - data.startDate.getTime();
-        const diffDays = diffMs / (1000 * 60 * 60 * 24);
-        return diffDays <= MAX_DATE_RANGE_DAYS;
-      }
-      return true;
-    },
-    {
-      message: `Date range cannot exceed ${MAX_DATE_RANGE_DAYS} days`,
-      path: ['endDate'],
-    }
-  );
+);
 
 export type AdminDashboardStatsQueryInput = z.infer<
   typeof adminDashboardStatsQuerySchema
+>;
+
+/**
+ * Subscriber analytics query parameters
+ * Optional main date range plus optional compare date range.
+ * Powers `getSubscriberStats` (period-over-period subscriber metrics).
+ */
+export const adminSubscribersQuerySchema = applyDateRangeRefinements(
+  z.object({
+    startDate: isoDateSchema.optional(),
+    endDate: isoDateSchema.optional(),
+    compareFrom: isoDateSchema.optional(),
+    compareTo: isoDateSchema.optional(),
+  })
+);
+
+export type AdminSubscribersQueryInput = z.infer<
+  typeof adminSubscribersQuerySchema
+>;
+
+/**
+ * Follower analytics query parameters
+ * Optional main date range plus optional compare date range.
+ * Powers `getFollowerStats` (period-over-period follower metrics).
+ */
+export const adminFollowersQuerySchema = applyDateRangeRefinements(
+  z.object({
+    startDate: isoDateSchema.optional(),
+    endDate: isoDateSchema.optional(),
+    compareFrom: isoDateSchema.optional(),
+    compareTo: isoDateSchema.optional(),
+  })
+);
+
+export type AdminFollowersQueryInput = z.infer<
+  typeof adminFollowersQuerySchema
+>;
+
+/**
+ * Content performance analytics query parameters
+ * Optional main date range plus optional compare date range, with a limit
+ * for the number of content items returned.
+ * Powers `getContentPerformance` (per-content metrics over a window).
+ */
+export const adminContentPerformanceQuerySchema = applyDateRangeRefinements(
+  z.object({
+    startDate: isoDateSchema.optional(),
+    endDate: isoDateSchema.optional(),
+    compareFrom: isoDateSchema.optional(),
+    compareTo: isoDateSchema.optional(),
+    limit: analyticsLimitSchema,
+  })
+);
+
+export type AdminContentPerformanceQueryInput = z.infer<
+  typeof adminContentPerformanceQuerySchema
 >;
 
 // ============================================================================
