@@ -6359,6 +6359,94 @@ export const analytics_col_purchases = () => `Purchases`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const analytics_leaderboard_col_rank = () => `#`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_leaderboard_col_title = () => `Title`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_leaderboard_col_revenue = () => `Revenue`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_leaderboard_col_purchases = () => `Purchases`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_leaderboard_col_views = () => `Views`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_leaderboard_col_trend = () => `Trend`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_leaderboard_empty = () => `No content in this period yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_leaderboard_loading_label = () => `Loading leaderboard`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_leaderboard_no_thumbnail_alt = () => `No thumbnail`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_leaderboard_delta_increase = (params) => `increased by ${params.amount}`
+
+
+/**
+ * @param {{ amount: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_leaderboard_delta_decrease = (params) => `decreased by ${params.amount}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const analytics_error_title = () => `Analytics Error`
 
 
