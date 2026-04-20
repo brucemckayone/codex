@@ -22,7 +22,7 @@
   const { form, optional = false, class: className = '' }: Props = $props();
 
   const contentValue = $derived(form.fields.contentBody.value() ?? '');
-  const contentBodyIssues = $derived(form.fields.contentBody.issues());
+  const contentBodyIssues = $derived(form.fields.contentBody.issues() ?? []);
   const contentBodyErrorText = $derived(
     contentBodyIssues.map((issue) => issue.message).join(' '),
   );

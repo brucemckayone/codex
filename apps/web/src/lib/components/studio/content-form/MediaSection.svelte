@@ -62,23 +62,17 @@
     class: className = '',
   }: Props = $props();
 
-  let selectedMediaId = $derived<string | null>(form.fields.mediaItemId?.value() ?? null);
+  const selectedMediaId = $derived<string | null>(form.fields.mediaItemId?.value() ?? null);
 
   const selectedMedia = $derived(
     selectedMediaId ? mediaItems.find((m) => m.id === selectedMediaId) : null
   );
 
-  const mediaItemIssues = $derived(form.fields.mediaItemId.issues());
+  const mediaItemIssues = $derived(form.fields.mediaItemId.issues() ?? []);
   const mediaItemErrorText = $derived(
     mediaItemIssues.map((issue) => issue.message).join(' '),
   );
 
-  // Inline player gate:
-  //  – must have a selected ready media item
-  //  – must have a contentId (edit mode)
-  //  – content must be published so getStreamingUrl won't throw NotFound
-  //
-  // We still show the metadata fallback otherwise; no half-broken UI.
   const canPreview = $derived(
     !!contentId &&
     contentStatus === 'published' &&
@@ -89,7 +83,6 @@
   const streamQuery = $derived(canPreview && contentId ? getStreamingUrl(contentId) : null);
 
   function handleMediaChange(id: string | null) {
-    selectedMediaId = id;
     form.fields.mediaItemId.set(id ?? '');
   }
 </script>

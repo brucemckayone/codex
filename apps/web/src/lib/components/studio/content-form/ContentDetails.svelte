@@ -33,8 +33,10 @@
   }: Props = $props();
 
   const descriptionValue = $derived(form.fields.description.value() ?? '');
-  const titleIssues = $derived(form.fields.title.issues());
-  const descriptionIssues = $derived(form.fields.description.issues());
+  // issues() can return undefined before the form is initialised — fall back
+  // to an empty array so downstream .length / .map calls don't throw at setup.
+  const titleIssues = $derived(form.fields.title.issues() ?? []);
+  const descriptionIssues = $derived(form.fields.description.issues() ?? []);
   const titleErrorText = $derived(titleIssues.map((issue) => issue.message).join(' '));
   const descriptionErrorText = $derived(
     descriptionIssues.map((issue) => issue.message).join(' '),
