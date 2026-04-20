@@ -20,14 +20,28 @@
     creatorUsername?: string | null;
     organizationId?: string | null;
     contentId?: string | null;
+    class?: string;
   }
 
-  const { form, orgSlug, creatorUsername, organizationId, contentId }: Props = $props();
+  const {
+    form,
+    orgSlug,
+    creatorUsername,
+    organizationId,
+    contentId,
+    class: className = '',
+  }: Props = $props();
 
   const descriptionValue = $derived(form.fields.description.value() ?? '');
+  const titleIssues = $derived(form.fields.title.issues());
+  const descriptionIssues = $derived(form.fields.description.issues());
+  const titleErrorText = $derived(titleIssues.map((issue) => issue.message).join(' '));
+  const descriptionErrorText = $derived(
+    descriptionIssues.map((issue) => issue.message).join(' '),
+  );
 </script>
 
-<section class="form-card">
+<section class="form-card {className}">
   <h3 class="card-title">{m.studio_content_form_section_details()}</h3>
 
   <div class="form-fields">
@@ -41,10 +55,12 @@
         id="title"
         class="field-input"
         placeholder={m.studio_content_form_title_placeholder()}
+        aria-invalid={titleIssues.length > 0}
+        aria-describedby={titleIssues.length > 0 ? 'title-error' : undefined}
       />
-      {#each form.fields.title.issues() as issue}
-        <p class="field-error">{issue.message}</p>
-      {/each}
+      {#if titleIssues.length > 0}
+        <p id="title-error" class="field-error">{titleErrorText}</p>
+      {/if}
     </div>
 
     <!-- Slug -->
@@ -63,9 +79,12 @@
         maxLength={10000}
         formFieldAttrs={form.fields.description.as('text')}
       />
-      {#each form.fields.description.issues() as issue}
-        <p class="field-error">{issue.message}</p>
-      {/each}
+      <!-- RichTextEditor does not currently forward aria-invalid / aria-describedby
+           to its inner contentEditable; wiring described-by here would be inert.
+           Leaving the error list in place — follow-up to extend RichTextEditor Props. -->
+      {#if descriptionIssues.length > 0}
+        <p id="description-error" class="field-error">{descriptionErrorText}</p>
+      {/if}
     </div>
   </div>
 </section>
@@ -116,7 +135,7 @@
     font-family: inherit;
   }
 
-  .field-input:focus {
+  .field-input:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: -1px;
     border-color: var(--color-border-focus);

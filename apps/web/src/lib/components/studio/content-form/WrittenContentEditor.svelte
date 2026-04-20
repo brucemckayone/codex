@@ -16,21 +16,26 @@
   interface Props {
     form: ContentForm;
     optional?: boolean;
+    class?: string;
   }
 
-  const { form, optional = false }: Props = $props();
+  const { form, optional = false, class: className = '' }: Props = $props();
 
   const contentValue = $derived(form.fields.contentBody.value() ?? '');
+  const contentBodyIssues = $derived(form.fields.contentBody.issues());
+  const contentBodyErrorText = $derived(
+    contentBodyIssues.map((issue) => issue.message).join(' '),
+  );
 
-  function handleInput(json: string) {
-    // Sync editor JSON back to the form field via the hidden textarea's input event.
-    // The RichTextEditor component handles this internally via formFieldAttrs,
-    // but we also call this for any additional side-effects (e.g. validation).
+  function handleInput() {
+    // RichTextEditor already syncs JSON back to the form field via formFieldAttrs;
+    // we only use this hook to re-run validation for any additional side-effects.
+    // The `json` payload from RichTextEditor's oninput is unused here.
     form.validate?.();
   }
 </script>
 
-<section class="form-card">
+<section class="form-card {className}">
   <h3 class="card-title">
     {m.studio_content_form_section_body()}
     {#if optional}<span class="optional-hint">Optional</span>{/if}
@@ -44,9 +49,9 @@
     oninput={handleInput}
   />
 
-  {#each form.fields.contentBody.issues() as issue}
-    <p class="field-error">{issue.message}</p>
-  {/each}
+  {#if contentBodyIssues.length > 0}
+    <p class="field-error">{contentBodyErrorText}</p>
+  {/if}
 </section>
 
 <style>
