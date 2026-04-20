@@ -2171,6 +2171,46 @@ export const content_detail_purchase_cta_description = () => `Get access to this
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_signin_watch_cta = () => `Sign in to watch`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_signin_watch_description = () => `It's free — sign in to start watching`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_signin_listen_cta = () => `Sign in to listen`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_signin_listen_description = () => `It's free — sign in to start listening`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_signin_free_cta = () => `Sign in to watch`
+
+
+/**
  * @param {{ creator: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -6464,6 +6504,78 @@ export const analytics_error_description = () => `Something went wrong loading a
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const analytics_error_back_to_studio = () => `Back to Studio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_page_description = () => `Measure the pulse of your platform — revenue, audience, and engagement at a glance.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_kpi_revenue_label = () => `Revenue`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_kpi_subscribers_label = () => `Active subscribers`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_kpi_followers_label = () => `Followers`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_kpi_purchases_label = () => `Purchases`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_section_kpis_label = () => `Headline metrics`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_section_chart_label = () => `Trend over time`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_section_leaderboard_label = () => `Top content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_section_leaderboard_heading = () => `Top content by revenue`
 
 
 /**

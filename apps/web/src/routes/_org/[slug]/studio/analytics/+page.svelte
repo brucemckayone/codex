@@ -1,39 +1,55 @@
 <!--
   @component StudioAnalytics
 
-  Analytics page showing revenue chart and top content table.
-  Supports date range preset buttons (7d, 30d, 90d, year) that update the URL.
-  Fetches data client-side to avoid __data.json round-trips.
+  Studio analytics dashboard. Four URL params drive the entire page
+  (startDate, endDate, compareFrom, compareTo) via the AnalyticsCommandBar.
+  Five remote queries fetch revenue / subscribers / followers / top-content /
+  content-performance; each component owns its own skeleton. When every
+  query resolves with genuinely empty data, the full-page zero state renders
+  instead of the dashboard.
 
-  @prop data - Org info and userRole from parent studio layout
+  @prop data - Parent studio layout data: { org, userRole, ... }
 -->
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
-  import { Card, PageHeader } from '$lib/components/ui';
-  import RevenueChart from '$lib/components/studio/RevenueChart.svelte';
-  import TopContentTable from '$lib/components/studio/TopContentTable.svelte';
+  import { PageHeader } from '$lib/components/ui';
   import {
+    AnalyticsCommandBar,
+    AnalyticsZeroState,
+    HeroAnalyticsChart,
+    KPICard,
+    NarrativeSummary,
+    TopContentLeaderboard,
+  } from '$lib/components/studio/analytics';
+  import {
+    getAnalyticsContentPerformance,
+    getAnalyticsFollowers,
     getAnalyticsRevenue,
+    getAnalyticsSubscribers,
     getAnalyticsTopContent,
   } from '$lib/remote/admin.remote';
-  import { formatPriceCompact } from '$lib/utils/format';
 
   let { data } = $props();
 
-  // Role guard: admin/owner only
+  // ─── Auth / role guard ────────────────────────────────────────────────
+  // Preserve parity with FE-7: admin + owner only.
   $effect(() => {
     if (data.userRole !== 'admin' && data.userRole !== 'owner') {
       goto('/studio');
     }
   });
 
-  const isAuthorized = $derived(data.userRole === 'admin' || data.userRole === 'owner');
+  const isAuthorized = $derived(
+    data.userRole === 'admin' || data.userRole === 'owner'
+  );
 
-  // Parse date range from URL, default to last 30 days.
-  // URL params use `startDate`/`endDate` to match the admin-api schema;
-  // legacy `dateFrom`/`dateTo` are still accepted for backward-compat links.
+  // ─── URL → state ──────────────────────────────────────────────────────
+  // AnalyticsCommandBar writes these four params; we derive here and pass
+  // the resolved values back into the bar (controlled component pattern).
+  // Legacy `dateFrom` / `dateTo` params are accepted for backward-compat
+  // links that predate FE-1's rename.
   const startDate = $derived.by(() => {
     const now = new Date();
     const defaultFrom = new Date(now);
@@ -51,13 +67,50 @@
       new Date().toISOString().split('T')[0]
   );
 
-  // $derived queries react to URL param changes
+  const compareFrom = $derived(
+    page.url.searchParams.get('compareFrom') ?? undefined
+  );
+  const compareTo = $derived(
+    page.url.searchParams.get('compareTo') ?? undefined
+  );
+
+  const hasCompareWindow = $derived(Boolean(compareFrom && compareTo));
+
+  // ─── Remote queries ───────────────────────────────────────────────────
+  // All five queries re-key off the same (orgId, window) tuple so URL-param
+  // navigation automatically refetches. Each returns `{ current, loading }`.
   const revenueQuery = $derived(
     isAuthorized
       ? getAnalyticsRevenue({
           organizationId: data.org.id,
           startDate,
           endDate,
+          compareFrom,
+          compareTo,
+        })
+      : null
+  );
+
+  const subscribersQuery = $derived(
+    isAuthorized
+      ? getAnalyticsSubscribers({
+          organizationId: data.org.id,
+          startDate,
+          endDate,
+          compareFrom,
+          compareTo,
+        })
+      : null
+  );
+
+  const followersQuery = $derived(
+    isAuthorized
+      ? getAnalyticsFollowers({
+          organizationId: data.org.id,
+          startDate,
+          endDate,
+          compareFrom,
+          compareTo,
         })
       : null
   );
@@ -67,59 +120,113 @@
       ? getAnalyticsTopContent({
           organizationId: data.org.id,
           limit: 10,
+          startDate,
+          endDate,
+          compareFrom,
+          compareTo,
         })
       : null
   );
 
-  // Derive chart data from revenue response
-  const chartData = $derived(
-    (revenueQuery?.current?.revenueByDay ?? []).map((d: any) => ({
+  const contentPerformanceQuery = $derived(
+    isAuthorized
+      ? getAnalyticsContentPerformance({
+          organizationId: data.org.id,
+          limit: 10,
+          startDate,
+          endDate,
+          compareFrom,
+          compareTo,
+        })
+      : null
+  );
+
+  // ─── Resolved data + loading flags ────────────────────────────────────
+  const revenue = $derived(revenueQuery?.current);
+  const subscribers = $derived(subscribersQuery?.current);
+  const followers = $derived(followersQuery?.current);
+  const topContent = $derived(topContentQuery?.current?.items ?? []);
+  const contentPerformance = $derived(
+    contentPerformanceQuery?.current?.items ?? []
+  );
+
+  const revenueLoading = $derived(
+    (revenueQuery?.loading ?? true) || !revenueQuery?.current
+  );
+  const subscribersLoading = $derived(
+    (subscribersQuery?.loading ?? true) || !subscribersQuery?.current
+  );
+  const followersLoading = $derived(
+    (followersQuery?.loading ?? true) || !followersQuery?.current
+  );
+  const topContentLoading = $derived(
+    (topContentQuery?.loading ?? true) || !topContentQuery?.current
+  );
+  const contentPerformanceLoading = $derived(
+    (contentPerformanceQuery?.loading ?? true) ||
+      !contentPerformanceQuery?.current
+  );
+
+  // Narrative + zero-state gating wait for every query to resolve at least
+  // once. We don't want to flash the zero state while revenue is still
+  // pending — that would look like data loss.
+  const allResolved = $derived(
+    !revenueLoading &&
+      !subscribersLoading &&
+      !followersLoading &&
+      !topContentLoading
+  );
+
+  const narrativeLoading = $derived(
+    revenueLoading || subscribersLoading || followersLoading
+  );
+
+  // ─── Zero-state detection ─────────────────────────────────────────────
+  // "Brand-new org" = zero across every axis. Any signal (revenue, any
+  // subscriber activity, any follower activity, any top-content row) flips
+  // into the full dashboard. When top-content alone is empty we rely on
+  // TopContentLeaderboard's inline empty state instead.
+  const isZeroState = $derived.by(() => {
+    if (!allResolved || !revenue || !subscribers || !followers) return false;
+    const noRevenue = revenue.totalRevenueCents === 0;
+    const noSubs =
+      subscribers.activeSubscribers === 0 &&
+      subscribers.newSubscribers === 0 &&
+      subscribers.churnedSubscribers === 0;
+    const noFollowers =
+      followers.totalFollowers === 0 && followers.newFollowers === 0;
+    const noContent = topContent.length === 0;
+    return noRevenue && noSubs && noFollowers && noContent;
+  });
+
+  // ─── KPI sparkline + previousValue derivations ────────────────────────
+  const revenueSparkline = $derived(
+    (revenue?.revenueByDay ?? []).map((d) => ({
       date: d.date,
-      revenue: d.revenueCents,
+      value: d.revenueCents,
     }))
   );
 
-  // Derive top content items
-  const topContentItems = $derived(topContentQuery?.current?.items ?? []);
+  const subscriberSparkline = $derived(
+    (subscribers?.subscribersByDay ?? []).map((d) => ({
+      date: d.date,
+      value: d.newSubscribers,
+    }))
+  );
 
-  const loading = $derived((revenueQuery?.loading ?? true) || (topContentQuery?.loading ?? true));
+  const followerSparkline = $derived(
+    (followers?.followersByDay ?? []).map((d) => ({
+      date: d.date,
+      value: d.newFollowers,
+    }))
+  );
 
-  /**
-   * Calculate how many days back a date range covers from today
-   */
-  function getActivePreset(): string {
-    const now = new Date();
-    const from = new Date(startDate);
-    const diffDays = Math.round(
-      (now.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)
-    );
-
-    if (diffDays <= 8) return '7d';
-    if (diffDays <= 31) return '30d';
-    if (diffDays <= 91) return '90d';
-    return 'year';
-  }
-
-  const activePreset = $derived(getActivePreset());
-
-  /**
-   * Navigate to the analytics page with a new date range
-   */
-  function setDateRange(days: number) {
-    const now = new Date();
-    const from = new Date(now);
-    from.setDate(from.getDate() - days);
-
-    const params = new URLSearchParams();
-    params.set('startDate', from.toISOString().split('T')[0]);
-    params.set('endDate', now.toISOString().split('T')[0]);
-
-    goto(`/studio/analytics?${params}`, {
-      keepFocus: true,
-      noScroll: true,
-    });
-  }
-
+  const purchaseSparkline = $derived(
+    (revenue?.revenueByDay ?? []).map((d) => ({
+      date: d.date,
+      value: d.purchaseCount,
+    }))
+  );
 </script>
 
 <svelte:head>
@@ -127,96 +234,137 @@
 </svelte:head>
 
 {#if !isAuthorized}
-  <!-- Redirecting... -->
+  <!-- Redirect in-flight — render nothing to avoid a flash of unauthorised UI. -->
 {:else}
-<div class="analytics-page">
-  <PageHeader title={m.analytics_title()} />
+  <div class="analytics-page">
+    <PageHeader
+      title={m.analytics_title()}
+      description={m.analytics_page_description()}
+    />
 
-  <!-- Date Range Presets -->
-  <div class="date-presets" role="group" aria-label="Date range">
-    <button
-      class="preset-btn"
-      class:active={activePreset === '7d'}
-      onclick={() => setDateRange(7)}
-    >
-      {m.analytics_date_7d()}
-    </button>
-    <button
-      class="preset-btn"
-      class:active={activePreset === '30d'}
-      onclick={() => setDateRange(30)}
-    >
-      {m.analytics_date_30d()}
-    </button>
-    <button
-      class="preset-btn"
-      class:active={activePreset === '90d'}
-      onclick={() => setDateRange(90)}
-    >
-      {m.analytics_date_90d()}
-    </button>
-    <button
-      class="preset-btn"
-      class:active={activePreset === 'year'}
-      onclick={() => setDateRange(365)}
-    >
-      {m.analytics_date_year()}
-    </button>
+    <AnalyticsCommandBar
+      {startDate}
+      {endDate}
+      {compareFrom}
+      {compareTo}
+    />
+
+    {#if isZeroState}
+      <AnalyticsZeroState />
+    {:else}
+      <NarrativeSummary
+        revenue={revenue ?? {
+          totalRevenueCents: 0,
+          totalPurchases: 0,
+          averageOrderValueCents: 0,
+          platformFeeCents: 0,
+          organizationFeeCents: 0,
+          creatorPayoutCents: 0,
+          revenueByDay: [],
+        }}
+        subscribers={subscribers ?? {
+          activeSubscribers: 0,
+          newSubscribers: 0,
+          churnedSubscribers: 0,
+          subscribersByDay: [],
+        }}
+        followers={followers ?? {
+          totalFollowers: 0,
+          newFollowers: 0,
+          followersByDay: [],
+        }}
+        topContent={topContent}
+        topPerformance={contentPerformance}
+        {hasCompareWindow}
+        loading={narrativeLoading}
+      />
+
+      <section
+        class="kpi-row"
+        aria-label={m.analytics_section_kpis_label()}
+      >
+        <KPICard
+          label={m.analytics_kpi_revenue_label()}
+          value={revenue?.totalRevenueCents ?? 0}
+          format="money"
+          previousValue={revenue?.previous?.totalRevenueCents ?? null}
+          sparkline={revenueSparkline}
+          loading={revenueLoading}
+        />
+        <KPICard
+          label={m.analytics_kpi_subscribers_label()}
+          value={subscribers?.activeSubscribers ?? 0}
+          format="number"
+          previousValue={subscribers?.previous?.activeSubscribers ?? null}
+          sparkline={subscriberSparkline}
+          loading={subscribersLoading}
+        />
+        <KPICard
+          label={m.analytics_kpi_followers_label()}
+          value={followers?.totalFollowers ?? 0}
+          format="number"
+          previousValue={followers?.previous?.totalFollowers ?? null}
+          sparkline={followerSparkline}
+          loading={followersLoading}
+        />
+        <KPICard
+          label={m.analytics_kpi_purchases_label()}
+          value={revenue?.totalPurchases ?? 0}
+          format="number"
+          previousValue={revenue?.previous?.totalPurchases ?? null}
+          sparkline={purchaseSparkline}
+          loading={revenueLoading}
+        />
+      </section>
+
+      <section
+        class="chart-section"
+        aria-label={m.analytics_section_chart_label()}
+      >
+        <HeroAnalyticsChart
+          revenue={revenue ?? {
+            totalRevenueCents: 0,
+            totalPurchases: 0,
+            averageOrderValueCents: 0,
+            platformFeeCents: 0,
+            organizationFeeCents: 0,
+            creatorPayoutCents: 0,
+            revenueByDay: [],
+          }}
+          subscribers={subscribers ?? {
+            activeSubscribers: 0,
+            newSubscribers: 0,
+            churnedSubscribers: 0,
+            subscribersByDay: [],
+          }}
+          followers={followers ?? {
+            totalFollowers: 0,
+            newFollowers: 0,
+            followersByDay: [],
+          }}
+          {hasCompareWindow}
+          loading={revenueLoading || subscribersLoading || followersLoading}
+        />
+      </section>
+
+      <section
+        class="leaderboard-section"
+        aria-labelledby="analytics-leaderboard-heading"
+      >
+        <h2
+          id="analytics-leaderboard-heading"
+          class="leaderboard-section__heading"
+        >
+          {m.analytics_section_leaderboard_heading()}
+        </h2>
+        <TopContentLeaderboard
+          items={topContent}
+          {hasCompareWindow}
+          loading={topContentLoading}
+        />
+      </section>
+    {/if}
   </div>
-
-  <!-- Revenue Summary -->
-  {#if revenueQuery?.current}
-    {@const revenue = revenueQuery.current}
-    <div class="summary-cards">
-      <Card.Root class="summary-card">
-        <Card.Content>
-          <span class="summary-label">{m.billing_total_revenue()}</span>
-          <span class="summary-value">
-            {formatPriceCompact(revenue.totalRevenueCents)}
-          </span>
-        </Card.Content>
-      </Card.Root>
-      <Card.Root class="summary-card">
-        <Card.Content>
-          <span class="summary-label">{m.billing_total_purchases()}</span>
-          <span class="summary-value">{revenue.totalPurchases}</span>
-        </Card.Content>
-      </Card.Root>
-      <Card.Root class="summary-card">
-        <Card.Content>
-          <span class="summary-label">{m.billing_avg_order()}</span>
-          <span class="summary-value">
-            {formatPriceCompact(revenue.averageOrderValueCents)}
-          </span>
-        </Card.Content>
-      </Card.Root>
-    </div>
-  {/if}
-
-  <!-- Revenue Chart -->
-  <section class="chart-section">
-    <Card.Root>
-      <Card.Header>
-        <Card.Title level={2}>{m.analytics_revenue_title()}</Card.Title>
-      </Card.Header>
-      <Card.Content>
-        <RevenueChart data={chartData} loading={loading || !revenueQuery?.current} />
-      </Card.Content>
-    </Card.Root>
-  </section>
-
-  <!-- Top Content -->
-  <section class="table-section">
-    <Card.Root>
-      <Card.Header>
-        <Card.Title level={2}>{m.analytics_top_content()}</Card.Title>
-      </Card.Header>
-      <Card.Content>
-        <TopContentTable items={topContentItems} loading={loading || !topContentQuery?.current} />
-      </Card.Content>
-    </Card.Root>
-  </section>
-</div>
 {/if}
 
 <style>
@@ -224,74 +372,43 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    max-width: 1200px;
+    width: 100%;
   }
 
-  /* Date Range Presets */
-  .date-presets {
-    display: flex;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-  }
-
-  .preset-btn {
-    padding: var(--space-1) var(--space-3);
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    border-radius: var(--radius-md);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    background-color: var(--color-surface);
-    color: var(--color-text-secondary);
-    cursor: pointer;
-    transition: var(--transition-colors);
-  }
-
-  .preset-btn:hover {
-    background-color: var(--color-surface-secondary);
-    color: var(--color-text);
-  }
-
-  .preset-btn:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
-  }
-
-  .preset-btn.active {
-    background-color: var(--color-interactive);
-    border-color: var(--color-interactive);
-    color: var(--color-text-on-brand);
-  }
-
-  .preset-btn.active:hover {
-    background-color: var(--color-interactive-hover);
-  }
-
-  /* Summary Cards */
-  .summary-cards {
+  /* KPI row: 4-up desktop, 2-up tablet, 1-up mobile.
+     auto-fit with minmax keeps it honest on mid-range widths and lets the
+     cards breathe to the studio content width. */
+  .kpi-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: var(--space-4);
   }
 
-  :global(.summary-card .card-content) {
+  @media (max-width: 1024px) {
+    .kpi-row {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 560px) {
+    .kpi-row {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  .chart-section,
+  .leaderboard-section {
     display: flex;
     flex-direction: column;
-    gap: var(--space-1);
+    gap: var(--space-3);
   }
 
-  .summary-label {
-    font-size: var(--text-xs);
-    font-weight: var(--font-medium);
-    color: var(--color-text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .summary-value {
-    font-size: var(--text-xl);
-    font-weight: var(--font-bold);
+  .leaderboard-section__heading {
+    margin: 0;
+    font-family: var(--font-heading);
+    font-size: var(--text-lg);
+    font-weight: var(--font-semibold);
     color: var(--color-text);
-    font-variant-numeric: tabular-nums;
+    line-height: var(--leading-snug);
   }
-
 </style>
