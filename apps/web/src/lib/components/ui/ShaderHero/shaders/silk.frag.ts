@@ -1,34 +1,18 @@
 /**
- * Silk Fabric fragment shader — flowing fabric with soft wrap-around lighting.
+ * Silk Fabric fragment shader — flowing fabric with iridescent sheen.
  *
- * Technique: FBM heightfield (4 octaves, sin-based noise with mat2 rotation between
- * octaves) generates a draped-fabric surface. Normals computed via finite differences
- * (FBM evaluated 3x per pixel). Wrap-around diffuse lighting for soft fabric feel,
- * broad sheen highlight (pow(NdotH, 4)).
+ * Technique: FBM (4 octaves) of iq-style value noise drives a heightfield;
+ * normals from finite differences; dual-lobe specular (broad sheen + narrow
+ * anisotropic streak along the heightfield gradient); Fresnel-biased
+ * accent iridescence at grazing angles (fakes shot-silk colour shift);
+ * secondary colour bleeds into valleys via `u_lining`; ACES tone map
+ * (replaces the old 0.75 brightness cap); luminance-aware film grain.
  *
- * Primary = fabric colour. Secondary appears in deep valleys via `lining` param.
- * NO accent colour used. Mouse creates Gaussian depression in the fabric.
- *
- * Single-pass fragment shader. No FBOs needed.
- *
- * Uniforms:
- *   u_time           — elapsed time in seconds
- *   u_resolution     — canvas pixel dimensions
- *   u_mouse          — mouse position normalized 0..1
- *   u_mouseActive    — 1.0 if mouse is over canvas
- *   u_burst          — click burst intensity
- *   u_brandPrimary   — fabric colour
- *   u_brandSecondary — deep valley / lining colour
- *   u_bgColor        — background colour
- *   u_foldScale      — noise frequency (fabric fold density)
- *   u_foldDepth      — amplitude of surface displacement
- *   u_speed          — animation speed
- *   u_softness       — wrap-around diffuse softness (0-1)
- *   u_sheen          — specular/sheen intensity
- *   u_lining         — how much secondary colour bleeds into valleys
- *   u_intensity      — overall brightness multiplier
- *   u_grain          — film grain strength
- *   u_vignette       — vignette strength
+ * Uniforms (unchanged from previous revision):
+ *   u_time, u_resolution, u_mouse, u_mouseActive, u_burst,
+ *   u_brandPrimary, u_brandSecondary, u_brandAccent, u_bgColor,
+ *   u_foldScale, u_foldDepth, u_speed, u_softness, u_sheen, u_lining,
+ *   u_intensity, u_grain, u_vignette
  */
 export const SILK_FRAG = `#version 300 es
 precision highp float;
@@ -42,6 +26,7 @@ uniform float u_mouseActive;
 uniform float u_burst;
 uniform vec3 u_brandPrimary;
 uniform vec3 u_brandSecondary;
+uniform vec3 u_brandAccent;
 uniform vec3 u_bgColor;
 uniform float u_foldScale;
 uniform float u_foldDepth;
@@ -53,118 +38,153 @@ uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
 
-// -- Hash for film grain --
-float hash(vec2 p) {
+// -- iq-style value noise (replaces sin(x)*sin(y) which produced checkerboard artefacts) --
+float hash1(vec2 p) {
+  p = 50.0 * fract(p * 0.3183099 + vec2(0.71, 0.113));
+  return -1.0 + 2.0 * fract(p.x * p.y * (p.x + p.y));
+}
+
+float noise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(hash1(i + vec2(0.0, 0.0)), hash1(i + vec2(1.0, 0.0)), u.x),
+    mix(hash1(i + vec2(0.0, 1.0)), hash1(i + vec2(1.0, 1.0)), u.x),
+    u.y
+  );
+}
+
+// -- Cheap hash for grain --
+float grainHash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
   return fract((p3.x + p3.y) * p3.z);
 }
 
-// -- Noise: smooth periodic function (sin-based like warp) --
-float noise(vec2 p) {
-  return sin(p.x) * sin(p.y);
-}
-
-// -- FBM with rotation between octaves (4 octaves) --
 const mat2 octaveRot = mat2(0.8, 0.6, -0.6, 0.8);
 
 float fbm(vec2 p) {
   float f = 0.0;
   float amp = 0.5;
   float totalAmp = 0.0;
-
   for (int i = 0; i < 4; i++) {
     f += amp * noise(p);
     totalAmp += amp;
     p = octaveRot * p * 2.02;
     amp *= 0.5;
   }
-
   return totalAmp > 0.0 ? f / totalAmp : 0.0;
 }
 
-// -- Heightfield with animation and mouse depression --
 float heightfield(vec2 uv) {
   float aspect = u_resolution.x / u_resolution.y;
   vec2 p = vec2(uv.x * aspect, uv.y) * u_foldScale;
   float t = u_time * u_speed;
 
-  // Animate the noise domain — slow drift for flowing fabric
+  // Slow domain drift — fabric flowing
   p += vec2(t * 0.4, t * 0.25);
 
   float h = fbm(p) * u_foldDepth;
 
-  // Mouse depression — Gaussian dip in the fabric surface
+  // Mouse depression — Gaussian dip
   vec2 mouseUV = vec2(u_mouse.x * aspect, u_mouse.y);
   vec2 fragUV = vec2(uv.x * aspect, uv.y);
   float mouseDist = distance(fragUV, mouseUV);
-
   float hoverDepth = u_mouseActive * u_foldDepth * 0.25 * exp(-mouseDist * mouseDist * 18.0);
   float burstDepth = u_burst * u_foldDepth * 0.5 * exp(-mouseDist * mouseDist * 8.0);
-
   h -= hoverDepth + burstDepth;
 
   return h;
 }
 
+// -- ACES filmic tone map (Narkowicz 2015) --
+vec3 aces(vec3 x) {
+  const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
 void main() {
-  // ── 1. Compute heightfield and normals via finite differences ────
+  // ── 1. Heightfield + normal via finite differences ────────────
   float eps = 1.0 / u_resolution.x;
   float hC = heightfield(v_uv);
   float hR = heightfield(v_uv + vec2(eps, 0.0));
   float hU = heightfield(v_uv + vec2(0.0, eps));
 
-  // Surface normal from finite differences
+  // Normal — spacing of eps*2 keeps gradient scale sane
   vec3 N = normalize(vec3(hC - hR, hC - hU, eps * 2.0));
 
-  // ── 2. Lighting setup ────────────────────────────────────────────
-  // Fixed light direction (upper-right, slightly forward)
-  vec3 L = normalize(vec3(0.5, 0.7, 0.8));
-  // View direction (straight on)
-  vec3 V = vec3(0.0, 0.0, 1.0);
-  // Half vector for sheen
+  // Tangent direction (along the heightfield gradient, projected to 2D)
+  // Used for anisotropic specular streak — the "grain" of the silk.
+  vec2 tangent2D = normalize(vec2(hR - hC, hU - hC) + vec2(0.0001));
+
+  // ── 2. Lighting setup ─────────────────────────────────────────
+  vec3 L = normalize(vec3(0.5, 0.7, 0.8));       // upper-right key light
+  vec3 V = vec3(0.0, 0.0, 1.0);                  // straight-on viewer
   vec3 H = normalize(L + V);
 
-  // ── 3. Wrap-around diffuse: (NdotL + softness) / (1 + softness) ─
+  // ── 3. Wrap-around diffuse ───────────────────────────────────
   float NdotL = dot(N, L);
   float diffuse = (NdotL + u_softness) / (1.0 + u_softness);
   diffuse = max(diffuse, 0.0);
 
-  // ── 4. Broad sheen highlight: pow(NdotH, 4) ─────────────────────
+  // ── 4. Dual-lobe specular ────────────────────────────────────
+  // Lobe A: broad sheen (pow 4) — diffuse velvet-like highlight
   float NdotH = max(dot(N, H), 0.0);
-  float sheen = pow(NdotH, 4.0) * u_sheen;
+  float broadSheen = pow(NdotH, 4.0);
 
-  // ── 5. Fabric colour — primary, with secondary in deep valleys ───
-  // Remap height to 0..1 range for valley detection
+  // Lobe B: narrow anisotropic streak aligned with fabric grain.
+  // Squash H's projection along the tangent direction — stretches the highlight.
+  vec2 H2D = H.xy;
+  float alongGrain = abs(dot(H2D, tangent2D));
+  float acrossGrain = abs(dot(H2D, vec2(-tangent2D.y, tangent2D.x)));
+  float anisoH = 1.0 - (alongGrain * 0.3 + acrossGrain * 1.7);
+  float aniso = pow(max(anisoH, 0.0), 28.0);
+
+  // ── 5. Fresnel-biased iridescence (shot-silk colour shift) ───
+  float NdotV = max(dot(N, V), 0.0);
+  float fresnel = pow(1.0 - NdotV, 3.0);
+
+  // Sheen colour: warm broad lobe (accent) + cool narrow streak (primary->accent)
+  vec3 broadSheenColor = mix(vec3(1.0), u_brandAccent, 0.35);
+  vec3 anisoColor = mix(u_brandPrimary * 2.2, u_brandAccent * 1.8, fresnel);
+
+  vec3 specular = broadSheenColor * broadSheen * u_sheen
+                + anisoColor       * aniso      * u_sheen * 1.2;
+
+  // ── 6. Fabric colour — primary, with secondary in valleys, subtle accent in peaks ─
   float hNorm = clamp(hC / u_foldDepth * 0.5 + 0.5, 0.0, 1.0);
-  float valleyMask = smoothstep(0.45, 0.25, hNorm) * u_lining;
+  float valleyMask = smoothstep(0.45, 0.20, hNorm) * u_lining;
+  float peakMask = smoothstep(0.55, 0.85, hNorm) * 0.18;
 
-  vec3 fabricColor = mix(u_brandPrimary, u_brandSecondary, valleyMask);
+  vec3 fabricBase = mix(u_brandPrimary, u_brandSecondary, valleyMask);
+  fabricBase = mix(fabricBase, u_brandAccent, peakMask);
 
-  // ── 6. Combine lighting ──────────────────────────────────────────
-  vec3 color = fabricColor * diffuse * u_intensity + sheen * vec3(1.0);
+  // ── 7. Combine ───────────────────────────────────────────────
+  vec3 color = fabricBase * diffuse * u_intensity + specular;
 
-  // Subtle ambient fill to prevent pure black
-  color += fabricColor * 0.08;
+  // Coloured ambient — primary-tinted instead of pure fabric-scaled
+  vec3 ambient = mix(u_brandPrimary, u_bgColor, 0.65) * 0.12;
+  color += ambient;
 
-  // ── 7. Post-processing ───────────────────────────────────────────
+  // ── 8. Post-processing ───────────────────────────────────────
 
-  // Reinhard tone map
-  color = color / (1.0 + color);
+  // ACES tone map — replaces the old min(x, 0.75) brutal clip
+  color = aces(color);
 
-  // Brightness cap at 75%
-  color = min(color, vec3(0.75));
-
-  // Mix with background by intensity
+  // Final blend with bg
   color = mix(u_bgColor, color, u_intensity);
 
-  // Vignette
+  // Radial vignette
   vec2 vc = v_uv * 2.0 - 1.0;
-  color *= clamp(1.0 - dot(vc, vc) * u_vignette, 0.0, 1.0);
+  float r2 = dot(vc, vc);
+  color *= clamp(1.0 - r2 * u_vignette, 0.0, 1.0);
 
-  // Film grain
-  color += (hash(gl_FragCoord.xy + fract(u_time * 7.13)) - 0.5) * u_grain;
+  // Luminance-aware grain: more in shadows, clean in highlights
+  float lum = dot(color, vec3(0.299, 0.587, 0.114));
+  float grainAmt = u_grain * mix(1.4, 0.35, lum);
+  color += (grainHash(gl_FragCoord.xy + fract(u_time * 7.13)) - 0.5) * grainAmt;
 
-  fragColor = vec4(clamp(color, 0.0, 0.75), 1.0);
+  fragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
 `;

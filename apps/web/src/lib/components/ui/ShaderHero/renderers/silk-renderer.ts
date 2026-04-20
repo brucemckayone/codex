@@ -27,6 +27,7 @@ const UNIFORM_NAMES = [
   'u_burst',
   'u_brandPrimary',
   'u_brandSecondary',
+  'u_brandAccent',
   'u_bgColor',
   'u_foldScale',
   'u_foldDepth',
@@ -101,15 +102,15 @@ export function createSilkRenderer(): ShaderRenderer {
       gl.uniform1f(uniforms.u_mouseActive, mouse.active ? 1.0 : 0.0);
       gl.uniform1f(uniforms.u_burst, mouse.burstStrength ?? 0.0);
 
-      // Immersive colour cycling when audio is active
-      // Silk only uses primary + secondary (no accent uniform), but we still
-      // cycle all channels so the palette drifts coherently.
+      // Immersive colour cycling when audio is active.
+      // Silk uses primary + secondary + accent (iridescent sheen).
       const colours = audio?.active
         ? computeImmersiveColours(time, cfg.colors, amp)
         : cfg.colors;
 
       gl.uniform3fv(uniforms.u_brandPrimary, colours.primary);
       gl.uniform3fv(uniforms.u_brandSecondary, colours.secondary);
+      gl.uniform3fv(uniforms.u_brandAccent, colours.accent);
       gl.uniform3fv(uniforms.u_bgColor, colours.bg);
 
       // Preset-specific config with defaults
