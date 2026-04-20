@@ -6555,6 +6555,30 @@ export const analytics_narrative_top_rising = (params) => `${params.title} is on
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_zero_state_heading = () => `Your analytics will appear here.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_zero_state_description = () => `As customers engage with your content, trends and insights will fill in automatically.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_zero_state_illustration_alt = () => `Faint flat chart lines suggesting a blank analytics view waiting for data.`
+
+
+/**
  * @param {{ price: NonNullable<unknown> }} params
  * @returns {string}
  */
