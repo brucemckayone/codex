@@ -136,7 +136,7 @@ app.get(
     handler: async (ctx) => {
       const result = await ctx.services.adminAnalytics.getTopContent(
         ctx.organizationId,
-        ctx.input.query.limit
+        { limit: ctx.input.query.limit }
       );
       return new PaginatedResult(result.items, result.pagination);
     },

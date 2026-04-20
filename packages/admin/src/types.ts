@@ -171,13 +171,39 @@ export interface CustomerStats {
 }
 
 /**
- * Top content item by revenue
+ * Top content item by revenue.
+ *
+ * `viewsInPeriod` counts distinct users with a `videoPlayback` row updated
+ * within the current period — a single row per (user, content) means this is
+ * "distinct engaged viewers", not total impressions. `trendDelta` is the
+ * revenue change vs the previous period in cents; it is `null` when
+ * `compareFrom`/`compareTo` are not provided (so existing callers that don't
+ * request a comparison keep a stable shape).
  */
 export interface TopContentItem {
   contentId: string;
   contentTitle: string;
+  /** Content thumbnail URL (custom-uploaded) for leaderboard rendering — null when not set */
+  thumbnailUrl: string | null;
   revenueCents: number;
   purchaseCount: number;
+  /** Distinct users with playback activity in the current period */
+  viewsInPeriod: number;
+  /** Revenue change vs previous period in cents — null when comparison not requested */
+  trendDelta: number | null;
+}
+
+/**
+ * Top-content query options. `compareFrom`/`compareTo` opt into per-row
+ * `trendDelta` on the response; if either is missing the delta stays null
+ * and the query matches a single-period shape.
+ */
+export interface TopContentQueryOptions {
+  limit?: number;
+  startDate?: Date;
+  endDate?: Date;
+  compareFrom?: Date;
+  compareTo?: Date;
 }
 
 /**

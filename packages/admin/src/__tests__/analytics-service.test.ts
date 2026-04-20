@@ -24,6 +24,7 @@ import {
   purchases,
   subscriptions,
   subscriptionTiers,
+  videoPlayback,
 } from '@codex/database/schema';
 import {
   createTestMediaItemInput,
@@ -1344,16 +1345,20 @@ describe('AdminAnalyticsService', () => {
         },
       ]);
 
-      const topContent = await service.getTopContent(
-        testOrg.id,
-        DEFAULT_TOP_CONTENT_LIMIT
-      );
+      const topContent = await service.getTopContent(testOrg.id, {
+        limit: DEFAULT_TOP_CONTENT_LIMIT,
+      });
 
       expect(topContent.items).toHaveLength(2);
       expect(topContent.items[0].contentId).toBe(highRevenue.id);
       expect(topContent.items[0].revenueCents).toBe(5000);
       expect(topContent.items[1].contentId).toBe(lowRevenue.id);
       expect(topContent.items[1].revenueCents).toBe(100);
+      // New default-shape fields: views zero (no playback), trendDelta null
+      // when no compare window is requested.
+      expect(topContent.items[0].viewsInPeriod).toBe(0);
+      expect(topContent.items[0].trendDelta).toBeNull();
+      expect(topContent.items[0].thumbnailUrl).toBeNull();
     });
 
     it('should respect limit parameter', async () => {
@@ -1403,9 +1408,317 @@ describe('AdminAnalyticsService', () => {
         });
       }
 
-      const topContent = await service.getTopContent(testOrg.id, 3);
+      const topContent = await service.getTopContent(testOrg.id, { limit: 3 });
 
       expect(topContent.items).toHaveLength(3);
+    });
+
+    it('should count distinct playback viewers only within the requested period', async () => {
+      // Only videoPlayback rows whose updatedAt falls inside the window should
+      // contribute to viewsInPeriod. Each (user, content) pair is a single row
+      // due to the composite unique — so "views" here is "distinct users
+      // engaged in the window", not total impressions.
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      const [testContent] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Views Test Content',
+          slug: createUniqueSlug('views-test'),
+          contentType: 'video',
+          status: 'published',
+          thumbnailUrl: 'https://cdn.example/thumb.jpg',
+          priceCents: 500,
+        })
+        .returning();
+
+      // Need a completed purchase so the content surfaces in the top list.
+      await db.insert(purchases).values({
+        customerId,
+        contentId: testContent.id,
+        organizationId: testOrg.id,
+        amountPaidCents: 500,
+        platformFeeCents: 50,
+        organizationFeeCents: 0,
+        creatorPayoutCents: 450,
+        stripePaymentIntentId: `pi_views_${Date.now()}`,
+        status: PURCHASE_STATUS.COMPLETED,
+        purchasedAt: new Date(),
+      });
+
+      // Three viewers, one with playback that falls outside the window.
+      const [viewerIn1, viewerIn2, viewerOut] = await seedTestUsers(db, 3);
+
+      const now = new Date();
+      const twoDaysAgo = new Date(now);
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+      const fiveDaysAgo = new Date(now);
+      fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
+      const twentyDaysAgo = new Date(now);
+      twentyDaysAgo.setDate(twentyDaysAgo.getDate() - 20);
+
+      await db.insert(videoPlayback).values([
+        {
+          userId: viewerIn1,
+          contentId: testContent.id,
+          positionSeconds: 120,
+          durationSeconds: 600,
+          updatedAt: twoDaysAgo,
+          createdAt: twoDaysAgo,
+        },
+        {
+          userId: viewerIn2,
+          contentId: testContent.id,
+          positionSeconds: 300,
+          durationSeconds: 600,
+          updatedAt: twoDaysAgo,
+          createdAt: twoDaysAgo,
+        },
+        {
+          userId: viewerOut,
+          contentId: testContent.id,
+          positionSeconds: 50,
+          durationSeconds: 600,
+          updatedAt: twentyDaysAgo,
+          createdAt: twentyDaysAgo,
+        },
+      ]);
+
+      const stats = await service.getTopContent(testOrg.id, {
+        startDate: fiveDaysAgo,
+        endDate: now,
+      });
+
+      const item = stats.items.find((i) => i.contentId === testContent.id);
+      expect(item).toBeDefined();
+      expect(item?.viewsInPeriod).toBe(2);
+      expect(item?.thumbnailUrl).toBe('https://cdn.example/thumb.jpg');
+      expect(item?.trendDelta).toBeNull();
+    });
+
+    it('should populate per-row trendDelta when compareFrom and compareTo are provided', async () => {
+      // Same content has purchases in both windows. Delta is current-period
+      // revenue minus previous-period revenue, scoped per contentId. A missing
+      // previous-period match must resolve to delta = current (prev defaults 0).
+      const [testOrg] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      const [growing] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Growing Content',
+          slug: createUniqueSlug('trend-growing'),
+          contentType: 'video',
+          status: 'published',
+          priceCents: 1000,
+        })
+        .returning();
+
+      const [newcomer] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: testOrg.id,
+          mediaItemId: media.id,
+          title: 'Newcomer Content',
+          slug: createUniqueSlug('trend-newcomer'),
+          contentType: 'video',
+          status: 'published',
+          priceCents: 500,
+        })
+        .returning();
+
+      const now = new Date();
+      const threeDaysAgo = new Date(now);
+      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+      const sevenDaysAgo = new Date(now);
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const tenDaysAgo = new Date(now);
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+      const fourteenDaysAgo = new Date(now);
+      fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+
+      await db.insert(purchases).values([
+        // Growing: 2000 current, 1000 previous → delta +1000
+        {
+          customerId,
+          contentId: growing.id,
+          organizationId: testOrg.id,
+          amountPaidCents: 2000,
+          platformFeeCents: 200,
+          organizationFeeCents: 0,
+          creatorPayoutCents: 1800,
+          stripePaymentIntentId: `pi_trend_growing_curr_${Date.now()}`,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: threeDaysAgo,
+        },
+        {
+          customerId,
+          contentId: growing.id,
+          organizationId: testOrg.id,
+          amountPaidCents: 1000,
+          platformFeeCents: 100,
+          organizationFeeCents: 0,
+          creatorPayoutCents: 900,
+          stripePaymentIntentId: `pi_trend_growing_prev_${Date.now()}`,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: tenDaysAgo,
+        },
+        // Newcomer: 500 current only → delta +500 (no prev match)
+        {
+          customerId,
+          contentId: newcomer.id,
+          organizationId: testOrg.id,
+          amountPaidCents: 500,
+          platformFeeCents: 50,
+          organizationFeeCents: 0,
+          creatorPayoutCents: 450,
+          stripePaymentIntentId: `pi_trend_newcomer_${Date.now()}`,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: threeDaysAgo,
+        },
+      ]);
+
+      const stats = await service.getTopContent(testOrg.id, {
+        startDate: sevenDaysAgo,
+        endDate: now,
+        compareFrom: fourteenDaysAgo,
+        compareTo: sevenDaysAgo,
+      });
+
+      const growingItem = stats.items.find((i) => i.contentId === growing.id);
+      const newcomerItem = stats.items.find((i) => i.contentId === newcomer.id);
+
+      expect(growingItem?.trendDelta).toBe(1000);
+      expect(newcomerItem?.trendDelta).toBe(500);
+
+      // Without compare dates, trendDelta stays null even if prior sales exist.
+      const noCompare = await service.getTopContent(testOrg.id, {
+        startDate: sevenDaysAgo,
+        endDate: now,
+      });
+      expect(
+        noCompare.items.find((i) => i.contentId === growing.id)?.trendDelta
+      ).toBeNull();
+    });
+
+    it('should scope revenue and views to the given organization only', async () => {
+      // A content row in orgB must never surface in orgA's top list, even when
+      // both orgs have purchases at the same priceCents. This guards the
+      // `eq(purchases.organizationId, organizationId)` predicate against
+      // regressions that would otherwise leak cross-org figures.
+      const [orgA] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+      const [orgB] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const [media] = await db
+        .insert(mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, {
+            mediaType: 'video',
+            status: 'ready',
+          })
+        )
+        .returning();
+
+      const [contentA] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: orgA.id,
+          mediaItemId: media.id,
+          title: 'Org A Content',
+          slug: createUniqueSlug('org-a-scope'),
+          contentType: 'video',
+          status: 'published',
+          priceCents: 500,
+        })
+        .returning();
+
+      const [contentB] = await db
+        .insert(contentTable)
+        .values({
+          creatorId,
+          organizationId: orgB.id,
+          mediaItemId: media.id,
+          title: 'Org B Content',
+          slug: createUniqueSlug('org-b-scope'),
+          contentType: 'video',
+          status: 'published',
+          priceCents: 500,
+        })
+        .returning();
+
+      await db.insert(purchases).values([
+        {
+          customerId,
+          contentId: contentA.id,
+          organizationId: orgA.id,
+          amountPaidCents: 500,
+          platformFeeCents: 50,
+          organizationFeeCents: 0,
+          creatorPayoutCents: 450,
+          stripePaymentIntentId: `pi_scope_a_${Date.now()}`,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: new Date(),
+        },
+        {
+          customerId,
+          contentId: contentB.id,
+          organizationId: orgB.id,
+          amountPaidCents: 500,
+          platformFeeCents: 50,
+          organizationFeeCents: 0,
+          creatorPayoutCents: 450,
+          stripePaymentIntentId: `pi_scope_b_${Date.now()}`,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: new Date(),
+        },
+      ]);
+
+      const aStats = await service.getTopContent(orgA.id);
+      const bStats = await service.getTopContent(orgB.id);
+
+      expect(aStats.items.map((i) => i.contentId)).toContain(contentA.id);
+      expect(aStats.items.map((i) => i.contentId)).not.toContain(contentB.id);
+      expect(bStats.items.map((i) => i.contentId)).toContain(contentB.id);
+      expect(bStats.items.map((i) => i.contentId)).not.toContain(contentA.id);
     });
 
     // Note: Organization existence validation is handled by middleware (requirePlatformOwner)

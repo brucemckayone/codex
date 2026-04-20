@@ -46,6 +46,7 @@ import type {
   SubscriberQueryOptions,
   SubscriberStats,
   TopContentItem,
+  TopContentQueryOptions,
 } from '../types';
 
 export class AdminAnalyticsService extends BaseService {
@@ -473,24 +474,49 @@ export class AdminAnalyticsService extends BaseService {
   }
 
   /**
-   * Get top content by revenue
+   * Get top content by revenue.
    *
-   * Returns content ranked by total revenue from completed purchases.
-   * Response is wrapped in PaginatedListResponse for consistency with other list endpoints.
+   * Ranks content by total revenue from completed purchases within the
+   * requested period, annotated with distinct playback viewers for the same
+   * window and — when `compareFrom`/`compareTo` are provided — a per-row
+   * `trendDelta` measuring revenue change vs the previous window. When no
+   * date range is provided we fall back to `ANALYTICS.TREND_DAYS_DEFAULT`,
+   * matching the revenue/subscriber/follower helpers so the studio dashboard
+   * sees a consistent recent-trend window across cards.
+   *
+   * The previous-period revenue is fetched in a second query scoped to the
+   * content ids already returned, so the comparison never scans more rows
+   * than the top-N result set.
    */
   async getTopContent(
     organizationId: string,
-    limit = DEFAULT_TOP_CONTENT_LIMIT
+    options?: TopContentQueryOptions
   ): Promise<PaginatedListResponse<TopContentItem>> {
     try {
-      // Note: Organization existence is validated by middleware via organizationMemberships FK constraint
-      // Get top content by revenue with JOIN to content table
+      const limit = options?.limit ?? DEFAULT_TOP_CONTENT_LIMIT;
+      const defaultStart = new Date();
+      defaultStart.setDate(
+        defaultStart.getDate() - ANALYTICS.TREND_DAYS_DEFAULT
+      );
+      const effectiveStart = options?.startDate ?? defaultStart;
+      const effectiveEnd = options?.endDate ?? new Date();
+
+      const viewsInPeriod = sql<number>`(
+        SELECT COUNT(DISTINCT ${schema.videoPlayback.userId})::int
+        FROM ${schema.videoPlayback}
+        WHERE ${schema.videoPlayback.contentId} = ${schema.purchases.contentId}
+          AND ${schema.videoPlayback.updatedAt} >= ${effectiveStart}
+          AND ${schema.videoPlayback.updatedAt} <= ${effectiveEnd}
+      )::int`;
+
       const result = await this.db
         .select({
           contentId: schema.purchases.contentId,
           contentTitle: schema.content.title,
+          thumbnailUrl: schema.content.thumbnailUrl,
           revenueCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
           purchaseCount: sql<number>`COUNT(*)::int`,
+          viewsInPeriod,
         })
         .from(schema.purchases)
         .innerJoin(
@@ -500,19 +526,60 @@ export class AdminAnalyticsService extends BaseService {
         .where(
           and(
             eq(schema.purchases.organizationId, organizationId),
-            eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED)
+            eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED),
+            gte(schema.purchases.purchasedAt, effectiveStart),
+            lte(schema.purchases.purchasedAt, effectiveEnd)
           )
         )
-        .groupBy(schema.purchases.contentId, schema.content.title)
+        .groupBy(
+          schema.purchases.contentId,
+          schema.content.title,
+          schema.content.thumbnailUrl
+        )
         .orderBy(desc(sql`SUM(${schema.purchases.amountPaidCents})`))
         .limit(limit);
 
       const items: TopContentItem[] = result.map((row) => ({
         contentId: row.contentId,
         contentTitle: row.contentTitle,
+        thumbnailUrl: row.thumbnailUrl,
         revenueCents: row.revenueCents,
         purchaseCount: row.purchaseCount,
+        viewsInPeriod: row.viewsInPeriod,
+        trendDelta: null,
       }));
+
+      const wantsCompare = Boolean(options?.compareFrom && options?.compareTo);
+      if (wantsCompare && items.length > 0) {
+        const contentIds = items.map((item) => item.contentId);
+        const previousRows = await this.db
+          .select({
+            contentId: schema.purchases.contentId,
+            revenueCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
+          })
+          .from(schema.purchases)
+          .where(
+            and(
+              eq(schema.purchases.organizationId, organizationId),
+              eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED),
+              // Non-null assertions are safe here: wantsCompare is only true
+              // when both compareFrom and compareTo are defined.
+              gte(schema.purchases.purchasedAt, options!.compareFrom!),
+              lte(schema.purchases.purchasedAt, options!.compareTo!),
+              inArray(schema.purchases.contentId, contentIds)
+            )
+          )
+          .groupBy(schema.purchases.contentId);
+
+        const previousRevenueById = new Map(
+          previousRows.map((row) => [row.contentId, row.revenueCents])
+        );
+
+        for (const item of items) {
+          const prev = previousRevenueById.get(item.contentId) ?? 0;
+          item.trendDelta = item.revenueCents - prev;
+        }
+      }
 
       // Build pagination metadata
       // Since this is a "top N" query without true pagination, we return page 1
@@ -671,10 +738,11 @@ export class AdminAnalyticsService extends BaseService {
           endDate: options?.endDate,
         }),
         this.getCustomerStats(organizationId),
-        this.getTopContent(
-          organizationId,
-          options?.topContentLimit ?? DEFAULT_TOP_CONTENT_LIMIT
-        ),
+        this.getTopContent(organizationId, {
+          limit: options?.topContentLimit ?? DEFAULT_TOP_CONTENT_LIMIT,
+          startDate: options?.startDate,
+          endDate: options?.endDate,
+        }),
       ]);
 
       return {
