@@ -1,14 +1,14 @@
 /**
  * Geode (Agate Cross-Section) fragment shader.
  *
- * Concentric irregular mineral bands with a Voronoi crystal cavity at the centre.
- * Domain-warped FBM distance from centre creates organic band boundaries.
- * Crystal cavity has animated facets with mouse-driven specular highlights.
- *
- * Single-pass: fullscreen quad, no FBOs.
- * u_bands is an int uniform (number of mineral bands).
- * Mouse shifts specular light source for crystal cavity.
- * Click adds rotation impulse via u_burst.
+ * Shadertoy-grade polish pass:
+ *  - iq value-noise FBM replaces sin×sin for band warping
+ *  - 4-step band palette (bg → primary → secondary → primary*0.8) built via
+ *    mix chain instead of per-pixel if/else branching
+ *  - ACES filmic tone map replaces min(x, 0.75) clip
+ *  - HDR crystal specular (> 1.0) so ACES maps sparkle to bright glints
+ *  - Bloom halo around crystal cavity
+ *  - Luminance-aware filmic grain
  */
 export const GEODE_FRAG = `#version 300 es
 precision highp float;
@@ -33,7 +33,6 @@ uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
 
-// -- Hash for grain + Voronoi cell IDs --
 float hash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -46,12 +45,23 @@ vec2 hash2(vec2 p) {
   return fract((p3.xx + p3.yz) * p3.zx);
 }
 
-// -- Noise (sin-based, same as topo/warp) --
-float noise(vec2 p) {
-  return sin(p.x) * sin(p.y);
+// -- iq value noise --
+float hash1(vec2 p) {
+  p = 50.0 * fract(p * 0.3183099 + vec2(0.71, 0.113));
+  return -1.0 + 2.0 * fract(p.x * p.y * (p.x + p.y));
 }
 
-// -- FBM with rotation (3 octaves) --
+float valueNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(hash1(i + vec2(0.0, 0.0)), hash1(i + vec2(1.0, 0.0)), u.x),
+    mix(hash1(i + vec2(0.0, 1.0)), hash1(i + vec2(1.0, 1.0)), u.x),
+    u.y
+  );
+}
+
 const mat2 octaveRot = mat2(0.8, 0.6, -0.6, 0.8);
 
 float fbm(vec2 p) {
@@ -59,7 +69,7 @@ float fbm(vec2 p) {
   float amp = 0.5;
   float total = 0.0;
   for (int i = 0; i < 3; i++) {
-    f += amp * noise(p);
+    f += amp * valueNoise(p);
     total += amp;
     p = octaveRot * p * 2.02;
     amp *= 0.5;
@@ -67,7 +77,6 @@ float fbm(vec2 p) {
   return total > 0.0 ? f / total : 0.0;
 }
 
-// -- Voronoi (9-cell, returns (dist-to-edge, cell-id-hash)) --
 vec2 voronoi(vec2 p) {
   vec2 n = floor(p);
   vec2 f = fract(p);
@@ -90,8 +99,21 @@ vec2 voronoi(vec2 p) {
       }
     }
   }
-  float edge = minDist2 - minDist;
-  return vec2(edge, cellId);
+  return vec2(minDist2 - minDist, cellId);
+}
+
+vec3 aces(vec3 x) {
+  const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+// -- 4-step band palette via mix chain (no per-pixel branching) --
+// idx 0: bg, 1: primary, 2: secondary, 3: primary*0.8
+vec3 bandPalette(int idx) {
+  // GLSL doesn't guarantee constant-index optimization on all drivers,
+  // so use array indexing for branch-free lookup.
+  vec3 palette[4] = vec3[4](u_bgColor * 1.3, u_brandPrimary, u_brandSecondary, u_brandPrimary * 0.8);
+  return palette[idx];
 }
 
 void main() {
@@ -99,104 +121,79 @@ void main() {
   vec2 uv = v_uv;
   float aspect = u_resolution.x / u_resolution.y;
 
-  // Centre and aspect-correct
   vec2 p = vec2((uv.x - 0.5) * aspect, uv.y - 0.5);
 
-  // Slow rotation (+ burst rotation impulse)
   float angle = t * 0.5 + u_burst * 0.5;
   float ca = cos(angle), sa = sin(angle);
   p = mat2(ca, sa, -sa, ca) * p;
 
-  // Distance from centre
-  float rawDist = length(p);
-
-  // Domain warp the distance field
   vec2 warpedP = p + u_warp * 0.3 * vec2(fbm(p * 3.0 + t * 0.2), fbm(p * 3.0 + 100.0 + t * 0.15));
   float dist = length(warpedP);
-
-  // Normalise to 0..1 range (clamp at radius ~0.8)
   float normDist = clamp(dist / 0.8, 0.0, 1.0);
 
   vec3 color;
 
-  // Narrow smoothstep transition for cavity/band boundary
-  float cavityEdge = smoothstep(u_cavity - 0.02, u_cavity + 0.02, normDist);
-
   if (normDist < u_cavity) {
-    // -- Crystal cavity --
+    // ── Crystal cavity ──
     vec2 vor = voronoi(warpedP * 12.0);
     float edge = vor.x;
     float id = vor.y;
 
-    // Base crystal colour: accent with per-cell variation
-    vec3 crystalCol = u_brandAccent * (0.7 + 0.6 * id);
+    // Per-cell variation on accent
+    vec3 crystalCol = u_brandAccent * (0.75 + 0.5 * id);
 
-    // Crystal edge highlight (bright crack lines)
+    // Bright crack edges
     float edgeLine = 1.0 - smoothstep(0.0, 0.08, edge);
-    crystalCol = mix(crystalCol, vec3(1.0), edgeLine * 0.4);
+    crystalCol = mix(crystalCol, mix(u_brandAccent, vec3(1.0), 0.6), edgeLine * 0.6);
 
-    // Specular from mouse light source
+    // Mouse-driven specular with HDR emission
     vec3 lightDir = normalize(vec3(u_mouse.x - 0.5, u_mouse.y - 0.5, 0.5));
-    // Pseudo-normal from local gradient (edge direction)
-    vec3 normal = normalize(vec3(
-      dFdx(edge) * 10.0,
-      dFdy(edge) * 10.0,
-      1.0
-    ));
+    vec3 normal = normalize(vec3(dFdx(edge) * 10.0, dFdy(edge) * 10.0, 1.0));
     float spec = pow(max(dot(normal, lightDir), 0.0), 16.0) * u_sparkle;
-    crystalCol += spec * u_mouseActive;
+    // HDR scale so ACES turns glints bright-white
+    crystalCol += spec * u_mouseActive * 2.5;
 
     color = crystalCol;
   } else {
-    // -- Mineral bands --
+    // ── Mineral bands (branch-free palette lookup) ──
     float bandF = normDist * float(u_bands);
     float bandIdx = floor(bandF);
     float bandFrac = fract(bandF);
 
-    // Smooth anti-aliased band edges
     float fw = fwidth(bandF);
     float edgeSmooth = smoothstep(0.5 - fw, 0.5 + fw, bandFrac);
 
-    // Colour cycling: bg(0), primary(1), secondary(2), primary(3), repeat
     int idx = int(mod(bandIdx, 4.0));
-    vec3 bandColor;
-    if (idx == 0) bandColor = u_bgColor * 1.3;
-    else if (idx == 1) bandColor = u_brandPrimary;
-    else if (idx == 2) bandColor = u_brandSecondary;
-    else bandColor = u_brandPrimary * 0.8;
-
-    // Next band colour for smooth transition
     int nextIdx = int(mod(bandIdx + 1.0, 4.0));
-    vec3 nextColor;
-    if (nextIdx == 0) nextColor = u_bgColor * 1.3;
-    else if (nextIdx == 1) nextColor = u_brandPrimary;
-    else if (nextIdx == 2) nextColor = u_brandSecondary;
-    else nextColor = u_brandPrimary * 0.8;
 
-    // Slight luminance variation per band (geological variation)
+    vec3 bandColor = bandPalette(idx);
+    vec3 nextColor = bandPalette(nextIdx);
+
     float variation = 0.85 + 0.3 * hash(vec2(bandIdx, 0.0));
+    float nextVariation = 0.85 + 0.3 * hash(vec2(bandIdx + 1.0, 0.0));
     bandColor *= variation;
-    nextColor *= (0.85 + 0.3 * hash(vec2(bandIdx + 1.0, 0.0)));
+    nextColor *= nextVariation;
 
     color = mix(bandColor, nextColor, edgeSmooth);
-
-    // Darken outermost bands more (rough stone exterior)
     color *= smoothstep(1.0, 0.7, normDist);
   }
 
-  // -- Post-processing --
-  // Reinhard tone map
-  color = color / (1.0 + color);
-  color = min(color, vec3(0.75));
+  // ── Bloom halo around cavity boundary (catches spec glints bleeding out) ──
+  float cavityProx = smoothstep(u_cavity + 0.04, u_cavity - 0.04, normDist);
+  float sparkleLum = dot(color, vec3(0.299, 0.587, 0.114));
+  color += pow(sparkleLum * cavityProx, 2.0) * u_brandAccent * 0.4;
+
+  // ── Post-process ───────────────────────────────────────────
+  color = aces(color);
   color = mix(u_bgColor, color, u_intensity);
 
-  // Vignette
   vec2 vc = v_uv * 2.0 - 1.0;
   color *= clamp(1.0 - dot(vc, vc) * u_vignette, 0.0, 1.0);
 
-  // Film grain
-  color += (hash(gl_FragCoord.xy + fract(u_time * 7.13)) - 0.5) * u_grain;
+  float lum = dot(color, vec3(0.299, 0.587, 0.114));
+  float grainAmt = u_grain * mix(1.4, 0.35, lum);
+  color += (hash(gl_FragCoord.xy + fract(u_time * 7.13)) - 0.5) * grainAmt;
 
-  fragColor = vec4(clamp(color, 0.0, 0.75), 1.0);
+  fragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
 `;
