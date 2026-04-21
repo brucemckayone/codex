@@ -1,12 +1,14 @@
 /**
  * Vortex fragment shader — Polar volumetric spirals.
  *
- * Single-pass: fullscreen quad, no FBOs.
- * Multiple volumetric layers accumulated via ray stepping in polar space.
- * Each step rotates by depth + angle with cell repetition via mod.
- * Spiral glow and ring edge highlights driven by brand colors.
- * Mouse shifts the polar centre; click creates a twist distortion.
- * Post-processing: Reinhard tone map, vignette, grain.
+ * Shadertoy-grade polish pass:
+ *  - Smooth 3-stop cyclic palette replaces if/else hue wheel
+ *  - ACES filmic tone map replaces min(x, 0.75) clip
+ *  - HDR core glow (secondary * exp + 0.5 → * 0.8) lets ACES render
+ *    centre bright without clipping
+ *  - Ring-edge highlights HDR-scaled for bright radial filaments
+ *  - Bloom-adjacent halo on brightest spiral arms
+ *  - Luminance-aware filmic grain
  */
 export const VORTEX_FRAG = `#version 300 es
 precision highp float;
@@ -30,28 +32,40 @@ uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
 
-// -- Hash for film grain --
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+vec3 aces(vec3 x) {
+  const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+// -- Cyclic 3-stop palette (wraps at 1.0 → 0.0) --
+// Use smooth triangular weights around the three color pivots.
+vec3 cyclicPalette(float t) {
+  t = fract(t);
+  // Distance to each pivot on the unit circle (0, 1/3, 2/3)
+  float d0 = min(t, 1.0 - t);               // distance to 0
+  float d1 = min(abs(t - 0.333), 1.0 - abs(t - 0.333));
+  float d2 = min(abs(t - 0.666), 1.0 - abs(t - 0.666));
+  float w0 = smoothstep(0.333, 0.0, d0);
+  float w1 = smoothstep(0.333, 0.0, d1);
+  float w2 = smoothstep(0.333, 0.0, d2);
+  float total = w0 + w1 + w2;
+  return (u_brandPrimary * w0 + u_brandSecondary * w1 + u_brandAccent * w2) / max(total, 0.001);
 }
 
 void main() {
   float t = u_time * u_speed;
 
-  // Aspect-correct UVs
   vec2 uv = (2.0 * gl_FragCoord.xy - u_resolution) / u_resolution.y;
-
-  // Mouse offset shifts vortex centre
   uv += (u_mouse - 0.5) * 0.5;
 
-  // Polar coordinates
   float r = length(uv);
   float theta = atan(uv.y, uv.x);
-
-  // Click twist distortion
   theta += u_burstStrength * 3.0 * exp(-r * 2.0);
 
-  // Volumetric accumulation
   vec3 acc = vec3(0.0);
 
   for (int i = 0; i < 60; i++) {
@@ -59,66 +73,49 @@ void main() {
 
     float d = float(i) / float(u_density - 1);
 
-    // Per-step rotation
     float angle = d * 6.283 * u_twist + theta + t;
     float c = cos(angle), s = sin(angle);
     vec2 p = mat2(c, -s, s, c) * uv * (1.0 + d * 2.0);
 
-    // Cell repetition
     float cellSize = 1.0 / u_rings;
     vec2 cell = mod(p + 0.5 * cellSize, cellSize) - 0.5 * cellSize;
     float shape = length(cell);
 
-    // SDF: blended sphere + ring
     float sdfVal = smoothstep(0.2, 0.0, shape) + smoothstep(0.02, 0.0, abs(shape - 0.15));
 
-    // Spiral arm alignment
     float spiralPhase = fract(theta / 6.283 * 3.0 + d * u_twist + t * 0.5);
     float spiralBright = smoothstep(0.35, 0.15, abs(spiralPhase - 0.5)) * u_spiral;
 
-    // Color by angle + depth (3-segment cyclic)
-    float hue = fract(theta / 6.283 + 0.5 + d * 0.5 + t * 0.2);
-    vec3 layerColor;
-    if (hue < 0.33) {
-      layerColor = mix(u_brandPrimary, u_brandSecondary, hue / 0.33);
-    } else if (hue < 0.66) {
-      layerColor = mix(u_brandSecondary, u_brandAccent, (hue - 0.33) / 0.33);
-    } else {
-      layerColor = mix(u_brandAccent, u_brandPrimary, (hue - 0.66) / 0.34);
-    }
+    // ── Smooth cyclic palette (branchless) ──
+    float hue = theta / 6.283 + 0.5 + d * 0.5 + t * 0.2;
+    vec3 layerColor = cyclicPalette(hue);
 
-    // Ring edge highlight
+    // Ring-edge HDR highlight
     float ringEdge = smoothstep(0.03, 0.0, abs(fract(r * u_rings * 4.0) - 0.5));
-    layerColor += u_brandAccent * ringEdge * 0.3;
+    layerColor += mix(u_brandAccent, vec3(1.0), 0.35) * ringEdge * 0.6;
 
-    // Accumulate with depth falloff (energy-normalized)
     float brightness = (sdfVal + spiralBright) * exp(-d * 3.0);
     acc += layerColor * brightness / float(u_density);
   }
 
-  // Central core glow
-  acc += u_brandSecondary * exp(-r * r * 4.0) * 0.5;
+  // Central core glow — slightly bumped for ACES
+  acc += mix(u_brandSecondary, u_brandAccent, 0.3) * exp(-r * r * 4.0) * 0.8;
 
-  // -- Post-processing --
-  vec3 color = acc;
+  // Bloom halo on brightest spiral arms
+  float armLum = dot(acc, vec3(0.299, 0.587, 0.114));
+  acc += pow(armLum, 2.3) * mix(u_brandSecondary, u_brandAccent, 0.5) * 0.35;
 
-  // Reinhard tone map
-  color = color / (1.0 + color);
-
-  // Cap maximum brightness
-  color = min(color, vec3(0.75));
-
-  // Intensity blend
+  // ── Post-process ───────────────────────────────────────────
+  vec3 color = aces(acc);
   color = mix(u_bgColor, color, u_intensity);
 
-  // Vignette
   vec2 vc = v_uv * 2.0 - 1.0;
   color *= clamp(1.0 - dot(vc, vc) * u_vignette, 0.0, 1.0);
 
-  // Film grain
-  color += (hash(gl_FragCoord.xy + fract(u_time * 7.13)) - 0.5) * u_grain;
+  float lum = dot(color, vec3(0.299, 0.587, 0.114));
+  float grainAmt = u_grain * mix(1.4, 0.35, lum);
+  color += (hash(gl_FragCoord.xy + fract(u_time * 7.13)) - 0.5) * grainAmt;
 
-  // Final clamp
-  fragColor = vec4(clamp(color, 0.0, 0.75), 1.0);
+  fragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
 `;
