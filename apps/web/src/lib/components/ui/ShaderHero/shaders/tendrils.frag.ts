@@ -1,11 +1,17 @@
 /**
  * Curl Noise Tendrils fragment shader (GLSL ES 3.0).
  *
- * Single-pass: curl noise advected UV with density accumulation.
- * 3D FBM noise field generates a divergence-free curl velocity field.
- * Backward Euler advection traces streamlines, accumulating density.
- * Mouse creates a radial vortex force. Click produces a density flash.
- * Lerped mouse input for smooth vortex response.
+ * Shadertoy-grade polish pass:
+ *  - ACES filmic tone map replaces min(x, 0.7) clip
+ *  - Array-indexed 5-stop palette (bg → primary → secondary → accent →
+ *    white) replaces 4-way if/else chain
+ *  - HDR tendril emission (* 1.3 scalar on the density→colour mapping)
+ *    gives ACES headroom so bright tendrils glow white-hot
+ *  - Bloom halo on densest tendril regions
+ *  - Luminance-aware filmic grain
+ *
+ * 3D curl-noise advection + backward Euler preserved — that's the
+ * mathematical heart and doesn't need fixing.
  */
 export const TENDRILS_FRAG = `#version 300 es
 precision highp float;
@@ -29,14 +35,12 @@ uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
 
-// -- Hash for film grain --
 float hash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
   return fract((p3.x + p3.y) * p3.z);
 }
 
-// -- 3D value noise --
 float hash31(vec3 p) {
   p = fract(p * vec3(443.897, 441.423, 437.195));
   p += dot(p, p.yzx + 19.19);
@@ -62,7 +66,6 @@ float noise3(vec3 p) {
   );
 }
 
-// -- FBM 3 octaves with rotation --
 const mat2 octaveRot = mat2(0.8, 0.6, -0.6, 0.8);
 
 float fbm3d(vec3 p) {
@@ -73,7 +76,6 @@ float fbm3d(vec3 p) {
   return f / 0.875;
 }
 
-// -- Curl noise: gradient of scalar potential --
 vec2 curlNoise(vec2 p, float t) {
   float eps = 0.01;
   vec3 p3 = vec3(p, t);
@@ -82,15 +84,29 @@ vec2 curlNoise(vec2 p, float t) {
   return vec2(dPdy, -dPdx) * u_curl;
 }
 
+vec3 aces(vec3 x) {
+  const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+// -- Array-indexed 5-stop density palette --
+vec3 tendrilPalette(float t) {
+  t = clamp(t, 0.0, 1.0);
+  vec3 stops[5] = vec3[5](u_bgColor, u_brandPrimary, u_brandSecondary, u_brandAccent, vec3(1.0));
+  float scaled = t * 4.0;
+  int idx = int(floor(scaled));
+  idx = clamp(idx, 0, 3);
+  float f = fract(scaled);
+  return mix(stops[idx], stops[idx + 1], f);
+}
+
 void main() {
   float t = u_time * u_speed;
   vec2 uv = (2.0 * gl_FragCoord.xy - u_resolution) / u_resolution.y;
 
-  // Mouse influence (aspect-corrected)
   vec2 mouseUv = (u_mouse - 0.5) * 2.0;
   mouseUv.x *= u_resolution.x / u_resolution.y;
 
-  // Backward advection along curl noise field
   vec2 pos = uv * u_scale;
   float density = 0.0;
   float dt = 0.15;
@@ -98,64 +114,49 @@ void main() {
   for (int i = 0; i < 7; i++) {
     if (i >= u_steps) break;
 
-    // Curl noise velocity at current position
     vec2 vel = curlNoise(pos, t);
 
-    // Mouse vortex force
     vec2 toMouse = pos - mouseUv * u_scale;
     float mouseDist = length(toMouse);
     float mouseFalloff = exp(-mouseDist * mouseDist * 4.0);
     vec2 perp = vec2(-toMouse.y, toMouse.x);
     vel += (perp * 0.8 + normalize(toMouse + 0.001) * 0.2) * mouseFalloff * u_curl * 0.5;
 
-    // Advect backward
     pos -= vel * dt;
 
-    // Sample density: use a narrow band of noise to create thin tendrils
-    // Only the 0.45-0.55 isoline of the noise field produces visible density
     float n = fbm3d(vec3(pos, t * 0.5));
     float band = 1.0 - smoothstep(0.0, 0.08, abs(n - 0.5));
     float weight = 1.0 - float(i) / float(u_steps);
     density += band * weight;
   }
   density /= float(u_steps);
-
-  // Apply fade (thickness control)
   density = clamp(density * u_fade * 2.0, 0.0, 1.0);
 
-  // Brand colour mapping: bg -> primary -> secondary -> accent
-  vec3 color;
-  if (density < 0.25) {
-    color = mix(u_bgColor, u_brandPrimary, density * 4.0);
-  } else if (density < 0.5) {
-    color = mix(u_brandPrimary, u_brandSecondary, (density - 0.25) * 4.0);
-  } else if (density < 0.75) {
-    color = mix(u_brandSecondary, u_brandAccent, (density - 0.5) * 4.0);
-  } else {
-    color = mix(u_brandAccent, vec3(1.0), (density - 0.75) * 2.0);
-  }
+  // Branch-free 5-stop palette, HDR-scaled for ACES
+  vec3 color = tendrilPalette(density) * 1.3;
 
-  // Click burst
   if (u_burstStrength > 0.01) {
     vec2 burstUv = (2.0 * u_mouse - 1.0);
     burstUv.x *= u_resolution.x / u_resolution.y;
     float burstDist = dot(uv - burstUv, uv - burstUv);
     float burst = u_burstStrength * exp(-burstDist * 6.0);
-    color += mix(u_brandAccent, vec3(1.0), 0.5) * burst * 1.5;
+    color += mix(u_brandAccent, vec3(1.0), 0.5) * burst * 1.8;
   }
 
-  // Post-process
-  color = color / (1.0 + color);                    // Reinhard
-  color = min(color, vec3(0.7));                     // Brightness cap
-  color = mix(u_bgColor, color, u_intensity);        // Intensity blend
+  // Bloom halo on densest tendrils
+  color += pow(density, 2.2) * mix(u_brandSecondary, u_brandAccent, 0.5) * 0.3;
 
-  // Vignette
+  // ── Post-process ──────────────────────────────────────────
+  color = aces(color);
+  color = mix(u_bgColor, color, u_intensity);
+
   vec2 vc = v_uv * 2.0 - 1.0;
   color *= clamp(1.0 - dot(vc, vc) * u_vignette, 0.0, 1.0);
 
-  // Film grain
-  color += (hash(gl_FragCoord.xy + fract(u_time * 7.13)) - 0.5) * u_grain;
+  float lum = dot(color, vec3(0.299, 0.587, 0.114));
+  float grainAmt = u_grain * mix(1.4, 0.35, lum);
+  color += (hash(gl_FragCoord.xy + fract(u_time * 7.13)) - 0.5) * grainAmt;
 
-  fragColor = vec4(clamp(color, 0.0, 0.7), 1.0);
+  fragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
 `;
