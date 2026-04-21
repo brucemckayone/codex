@@ -1,14 +1,14 @@
 /**
  * Film fragment shader — Oil film thin-film interference (iridescence).
  *
- * Technique: Film thickness derived from FBM noise (sin-based, 3 octaves).
- * Cyclic brand palette: thickness * bands → bg → primary → secondary → accent → primary (wraps).
- * Fresnel-like shift based on distance from screen center.
- * Mouse hover: radial wave shifting thickness via sin(dist - time).
- * Click: larger propagating ripple. Specular highlight via dFdx/dFdy.
- *
- * Single-pass fragment shader. No FBOs needed.
- * Post-processing: Reinhard tone map (0.75 cap), vignette, film grain.
+ * Shadertoy-grade polish pass:
+ *  - iq value-noise FBM replaces sin(x)*sin(y) — organic thickness variation
+ *    instead of checkerboard interference
+ *  - Array-indexed 4-stop cyclic palette replaces if/else chain
+ *  - ACES filmic tone map replaces min(x, 0.75) clip
+ *  - HDR specular (pow 16, * 0.3 → * 1.2) for proper iridescent glint
+ *  - Bloom halo on brightest film highlights — soap-bubble rainbow glow
+ *  - Luminance-aware filmic grain
  */
 export const FILM_FRAG = `#version 300 es
 precision highp float;
@@ -17,8 +17,8 @@ out vec4 fragColor;
 
 uniform float u_time;
 uniform vec2 u_resolution;
-uniform vec2 u_mouse;            // normalized 0-1, lerped
-uniform float u_burstStrength;   // click ripple strength, decays
+uniform vec2 u_mouse;
+uniform float u_burstStrength;
 uniform vec3 u_brandPrimary;
 uniform vec3 u_brandSecondary;
 uniform vec3 u_brandAccent;
@@ -32,69 +32,76 @@ uniform float u_intensity;
 uniform float u_grain;
 uniform float u_vignette;
 
-// -- Hash for film grain --
 float hash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
   return fract((p3.x + p3.y) * p3.z);
 }
 
-// -- Sin-based noise (matches warp pattern) --
-float noise(vec2 p) {
-  return sin(p.x) * sin(p.y);
+// -- iq value noise --
+float hash1(vec2 p) {
+  p = 50.0 * fract(p * 0.3183099 + vec2(0.71, 0.113));
+  return -1.0 + 2.0 * fract(p.x * p.y * (p.x + p.y));
 }
 
-// -- FBM: 3 octaves with rotation to break axis alignment --
+float valueNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(hash1(i + vec2(0.0, 0.0)), hash1(i + vec2(1.0, 0.0)), u.x),
+    mix(hash1(i + vec2(0.0, 1.0)), hash1(i + vec2(1.0, 1.0)), u.x),
+    u.y
+  );
+}
+
 const mat2 octaveRot = mat2(0.8, 0.6, -0.6, 0.8);
 
 float fbm3(vec2 p) {
   float f = 0.0;
-  f += 0.5000 * noise(p); p = octaveRot * p * 2.02;
-  f += 0.2500 * noise(p); p = octaveRot * p * 2.03;
-  f += 0.1250 * noise(p);
-  return f / 0.875;  // normalize sum of weights
+  f += 0.5000 * valueNoise(p); p = octaveRot * p * 2.02;
+  f += 0.2500 * valueNoise(p); p = octaveRot * p * 2.03;
+  f += 0.1250 * valueNoise(p);
+  return f / 0.875;
 }
 
-// -- Cyclic brand palette lookup --
-// Maps a 0-1 value cyclically through: bg -> primary -> secondary -> accent -> primary
+// -- Cyclic 4-stop brand palette (array-indexed) --
 vec3 brandPalette(float t) {
-  t = fract(t); // wrap to 0-1
+  t = fract(t);
   float segments = 4.0;
   float seg = t * segments;
   float f = fract(seg);
-
-  // Smooth hermite interpolation for fluid transitions
   f = f * f * (3.0 - 2.0 * f);
-
+  vec3 stops[5] = vec3[5](
+    u_bgColor, u_brandPrimary, u_brandSecondary, u_brandAccent, u_brandPrimary
+  );
   int idx = int(floor(seg));
-  if (idx == 0) return mix(u_bgColor, u_brandPrimary, f);
-  if (idx == 1) return mix(u_brandPrimary, u_brandSecondary, f);
-  if (idx == 2) return mix(u_brandSecondary, u_brandAccent, f);
-  return mix(u_brandAccent, u_brandPrimary, f);
+  idx = clamp(idx, 0, 3);
+  return mix(stops[idx], stops[idx + 1], f);
+}
+
+vec3 aces(vec3 x) {
+  const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
 void main() {
   float t = u_time * u_filmSpeed;
 
-  // Aspect-corrected coordinates
   vec2 aspect = vec2(u_resolution.x / u_resolution.y, 1.0);
   vec2 uv = v_uv * aspect;
 
-  // Base film thickness from FBM noise
   vec2 noiseCoord = uv * u_filmScale + vec2(t * 0.1, t * 0.07);
-  float thickness = fbm3(noiseCoord) * 0.5 + 0.5; // remap to 0-1
+  float thickness = fbm3(noiseCoord) * 0.5 + 0.5;
 
-  // Slow undulation in thickness
   thickness += 0.1 * sin(uv.x * 3.0 + t * 0.3) * sin(uv.y * 2.5 + t * 0.2);
 
-  // Fresnel-like shift from screen center
   vec2 center = aspect * 0.5;
   float centerDist = distance(uv, center);
   float maxDist = length(center);
   float fresnel = centerDist / maxDist;
   thickness += u_shift * fresnel * 0.3;
 
-  // Mouse hover — radial wave shifting thickness
   vec2 mouseUV = u_mouse * aspect;
   float mouseDist = distance(uv, mouseUV);
   float mouseWave = u_ripple * sin(mouseDist * 20.0 - t * 4.0)
@@ -102,7 +109,6 @@ void main() {
                   * 0.15;
   thickness += mouseWave;
 
-  // Click burst — larger propagating ripple
   if (u_burstStrength > 0.01) {
     float burstWave = sin(mouseDist * 15.0 - t * 6.0)
                     * u_burstStrength
@@ -111,44 +117,39 @@ void main() {
     thickness += burstWave;
   }
 
-  // Map thickness through cyclic brand palette
+  // Palette lookup (branch-free array index)
   float paletteIdx = thickness * u_bands;
   vec3 filmColor = brandPalette(paletteIdx);
 
-  // Specular highlight from surface normal approximation (dFdx/dFdy)
+  // Specular via surface normal approximation
   float dTdx = dFdx(thickness);
   float dTdy = dFdy(thickness);
   vec3 surfaceNormal = normalize(vec3(-dTdx * 8.0, -dTdy * 8.0, 1.0));
-
-  // Light from above-right
   vec3 lightDir = normalize(vec3(0.3, 0.5, 1.0));
   float specular = pow(max(dot(surfaceNormal, lightDir), 0.0), 16.0);
 
-  // Add specular as white highlight
-  filmColor += specular * 0.3;
+  // HDR specular — ACES renders iridescent glint as near-white
+  filmColor += mix(vec3(1.0), u_brandAccent, 0.2) * specular * 1.2;
 
   // Subtle iridescent brightness variation
   float iridescence = 0.85 + 0.15 * sin(thickness * 6.2831 * u_bands * 0.5 + t);
   filmColor *= iridescence;
 
-  // -- Post-processing --
+  // Bloom halo on brightest film highlights
+  float filmLum = dot(filmColor, vec3(0.299, 0.587, 0.114));
+  filmColor += pow(filmLum, 2.2) * mix(u_brandSecondary, u_brandAccent, 0.5) * 0.3;
 
-  // Reinhard tone map
-  filmColor = filmColor / (1.0 + filmColor);
-
-  // Brightness cap at 75%
-  filmColor = min(filmColor, vec3(0.75));
-
-  // Mix with background by intensity
+  // ── Post-process ──────────────────────────────────────────
+  filmColor = aces(filmColor);
   vec3 color = mix(u_bgColor, filmColor, u_intensity);
 
-  // Vignette
   vec2 vc = v_uv * 2.0 - 1.0;
   color *= clamp(1.0 - dot(vc, vc) * u_vignette, 0.0, 1.0);
 
-  // Film grain
-  color += (hash(gl_FragCoord.xy + fract(u_time * 7.13)) - 0.5) * u_grain;
+  float lum = dot(color, vec3(0.299, 0.587, 0.114));
+  float grainAmt = u_grain * mix(1.4, 0.35, lum);
+  color += (hash(gl_FragCoord.xy + fract(u_time * 7.13)) - 0.5) * grainAmt;
 
-  fragColor = vec4(clamp(color, 0.0, 0.75), 1.0);
+  fragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
 `;
