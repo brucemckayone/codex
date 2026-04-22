@@ -18,7 +18,9 @@ import { seedMedia } from './seed/media';
 import { seedOrganizations } from './seed/organizations';
 import { seedPlayback } from './seed/playback';
 import { clearR2Buckets, seedR2Files } from './seed/r2';
+import { seedTiers } from './seed/tiers';
 import { seedUsers } from './seed/users';
+import { validateContentSeed } from './seed/validate';
 import { seedTemplates } from './seed-email-templates';
 
 /**
@@ -85,22 +87,27 @@ async function seedData() {
   }
 
   // Step 1: Truncate all tables
-  console.log('\n  [1/4] Resetting database...');
+  console.log('\n  [1/5] Resetting database...');
   const tableList = TABLES_TO_TRUNCATE.join(', ');
   await dbWs.execute(sql.raw(`TRUNCATE TABLE ${tableList} CASCADE`));
   console.log(`  Truncated ${TABLES_TO_TRUNCATE.length} tables`);
 
   // Step 2: Re-seed email templates
-  console.log('\n  [2/4] Seeding email templates...');
+  console.log('\n  [2/5] Seeding email templates...');
   await seedTemplates();
 
   // Step 3: Seed all DB tables in dependency order (within a transaction)
-  console.log('\n  [3/4] Seeding application data...');
+  console.log('\n  [3/5] Seeding application data...');
   await dbWs.transaction(async (tx) => {
     // Cast: tx has same insert API as dbWs for our purposes
     const db = tx as unknown as typeof dbWs;
     await seedUsers(db);
     await seedOrganizations(db);
+    // Tiers MUST be seeded before content so `content.minimumTierId` FK
+    // targets exist at insert time. Historically this ran inside
+    // `seedCommerce()` after content, which forced a post-hoc update pass
+    // that silently missed hybrid (paid + tier) rows. See Codex-32nb5.
+    await seedTiers(db);
     await seedMedia(db);
     await seedContent(db);
     await seedCommerce(db);
@@ -108,9 +115,15 @@ async function seedData() {
   });
 
   // Step 4: Clear + seed R2 files
-  console.log('\n  [4/4] Seeding R2 files...');
+  console.log('\n  [4/5] Seeding R2 files...');
   await clearR2Buckets();
   await seedR2Files();
+
+  // Step 5: Validate post-seed invariants (access-mode truth-table coverage
+  // and (accessType, minimumTierId) coupling). Throws on drift so CI catches
+  // regressions in the seed constants before they reach local dev.
+  console.log('\n  [5/5] Validating seed invariants...');
+  await validateContentSeed(dbWs);
 
   // Summary
   console.log(`\n${'─'.repeat(50)}`);
