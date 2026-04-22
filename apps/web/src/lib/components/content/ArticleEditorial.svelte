@@ -110,7 +110,9 @@
             {/if}
             {#if leadDuration}
               <span class="article-lead__meta-sep" aria-hidden="true">·</span>
-              <span>{formatDurationHuman(leadDuration)}</span>
+              <span aria-label="Duration {formatDurationHuman(leadDuration)}">
+                {formatDurationHuman(leadDuration)}
+              </span>
             {/if}
           </div>
 
