@@ -20,6 +20,12 @@
     ]
   },
 
+  // Cron Triggers (scheduled handler)
+  // - 0 * * * * : every hour — recovers media stuck in 'transcoding' (no webhook received)
+  "triggers": {
+    "crons": ["0 * * * *"]
+  },
+
   // Migrations for Durable Objects (using new_sqlite_classes for free plan compatibility)
   "migrations": [
     {

@@ -106,6 +106,14 @@ def save_template(api_key, registry_auth_id=None):
                 "value": "{{ RUNPOD_SECRET_r2_secret_access_key }}",
             },
             {"key": "R2_BUCKET_NAME", "value": "{{ RUNPOD_SECRET_r2_bucket_name }}"},
+            # Feature flags — toggle pipeline steps without a redeploy.
+            # Mezzanine is off until a consumer is wired up; others match
+            # current production behavior. See handler/main.py FEATURES dict.
+            {"key": "ENABLE_MEZZANINE", "value": "false"},
+            {"key": "ENABLE_LOUDNESS_ANALYSIS", "value": "true"},
+            {"key": "ENABLE_WAVEFORM_IMAGE", "value": "true"},
+            {"key": "ENABLE_THUMBNAIL_VARIANTS", "value": "true"},
+            {"key": "ENABLE_VIDEO_PREVIEW", "value": "true"},
         ],
         "isServerless": True,
     }

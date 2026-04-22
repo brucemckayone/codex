@@ -29,7 +29,11 @@
  * - /internal/orphan-cleanup/* - Orphan cleanup DO management (internal)
  */
 
+import { createDbClient } from '@codex/database';
+import { ObservabilityClient } from '@codex/observability';
 import { workerAuth as createWorkerAuth } from '@codex/security';
+import type { Bindings } from '@codex/shared-types';
+import { TranscodingService } from '@codex/transcoding';
 import {
   createEnvValidationMiddleware,
   createKvCheck,
@@ -151,7 +155,90 @@ app.all(
 );
 
 // ============================================================================
+// Scheduled Handler (Cron Triggers)
+// ============================================================================
+
+/**
+ * Recover media items stuck in 'transcoding' status.
+ *
+ * Runs on the cron schedule defined in wrangler.jsonc (`triggers.crons`).
+ * If a RunPod webhook is lost (network failure, RunPod outage), the media
+ * row stays in 'transcoding' indefinitely — this handler finds rows older
+ * than STUCK_MAX_AGE_MINUTES and marks them 'failed' so they become
+ * retryable by the creator.
+ *
+ * Error handling: NEVER throws. Scheduled handlers that throw uncaught
+ * errors crash the invocation; we log and exit cleanly instead.
+ */
+const STUCK_MAX_AGE_MINUTES = 120;
+
+async function runRecoverStuckTranscoding(
+  env: Bindings,
+  ctx: ExecutionContext
+): Promise<void> {
+  const obs = new ObservabilityClient(
+    'media-api-cron',
+    env.ENVIRONMENT ?? 'development'
+  );
+
+  // Guard against missing env vars — don't throw, log and exit.
+  const runpodApiKey = env.RUNPOD_API_KEY;
+  const runpodEndpointId = env.RUNPOD_ENDPOINT_ID;
+  if (!env.DATABASE_URL || !runpodApiKey || !runpodEndpointId) {
+    obs.error(
+      'Cron recoverStuckTranscoding: missing required env vars, skipping',
+      {
+        hasDatabaseUrl: Boolean(env.DATABASE_URL),
+        hasRunpodApiKey: Boolean(runpodApiKey),
+        hasRunpodEndpointId: Boolean(runpodEndpointId),
+      }
+    );
+    return;
+  }
+
+  try {
+    const db = createDbClient(env);
+
+    const service = new TranscodingService({
+      db,
+      environment: env.ENVIRONMENT ?? 'development',
+      runpodApiKey,
+      runpodEndpointId,
+      webhookBaseUrl: env.API_URL ?? 'http://localhost:4002',
+    });
+
+    const recovered = await service.recoverStuckTranscoding(
+      STUCK_MAX_AGE_MINUTES
+    );
+
+    obs.info('Cron recoverStuckTranscoding completed', {
+      recovered,
+      maxAgeMinutes: STUCK_MAX_AGE_MINUTES,
+    });
+  } catch (error) {
+    obs.error('Cron recoverStuckTranscoding failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  // Reference ctx to satisfy lint — reserved for future waitUntil usage
+  // (recoverStuckTranscoding is a single DB UPDATE; no post-response work).
+  void ctx;
+}
+
+// ============================================================================
 // Export
 // ============================================================================
 
-export default app;
+export default {
+  fetch: app.fetch,
+  async scheduled(
+    _controller: ScheduledController,
+    env: Bindings,
+    ctx: ExecutionContext
+  ): Promise<void> {
+    // Wrap in waitUntil so the cron invocation isn't killed before
+    // logging/DB work settles, even if the promise is slow.
+    ctx.waitUntil(runRecoverStuckTranscoding(env, ctx));
+  },
+};

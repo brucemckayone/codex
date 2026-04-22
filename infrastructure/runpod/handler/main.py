@@ -40,6 +40,31 @@ import requests
 import runpod
 
 # =============================================================================
+# Feature Flags
+# =============================================================================
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    """Parse a boolean env var. Unset → default; common truthy strings → True."""
+    value = os.environ.get(name, "").strip().lower()
+    if value == "":
+        return default
+    return value in ("true", "1", "yes", "on")
+
+
+# Pipeline feature toggles. Defaults match current production behavior except
+# mezzanine, which stays off until a consumer is wired up — the B2 upload
+# doubles per-job GPU time for no current beneficiary.
+FEATURES = {
+    "mezzanine": _env_flag("ENABLE_MEZZANINE", default=False),
+    "loudness_analysis": _env_flag("ENABLE_LOUDNESS_ANALYSIS", default=True),
+    "waveform_image": _env_flag("ENABLE_WAVEFORM_IMAGE", default=True),
+    "thumbnail_variants": _env_flag("ENABLE_THUMBNAIL_VARIANTS", default=True),
+    "video_preview": _env_flag("ENABLE_VIDEO_PREVIEW", default=True),
+}
+
+
+# =============================================================================
 # Type Definitions
 # =============================================================================
 
@@ -77,9 +102,9 @@ class WebhookOutput(TypedDict):
     width: int | None
     height: int | None
     readyVariants: list[str]
-    loudnessIntegrated: int
-    loudnessPeak: int
-    loudnessRange: int
+    loudnessIntegrated: int | None
+    loudnessPeak: int | None
+    loudnessRange: int | None
 
 
 # =============================================================================
@@ -899,18 +924,33 @@ ALLOWED_THUMBNAIL_SIZES: frozenset[str] = frozenset({"sm", "md", "lg"})
 
 
 def extract_thumbnail_variants(
-    input_path: str, output_dir: str, duration: int
+    input_path: str,
+    output_dir: str,
+    duration: int,
+    requested_sizes: list[str] | None = None,
 ) -> dict[str, str]:
-    """Extract thumbnail at 10% mark and generate 3 WebP size variants."""
-    print("Extracting thumbnail variants (sm/md/lg)...")
+    """Extract thumbnail at 10% mark and generate WebP size variants.
 
-    timestamp = max(1, int(duration * 0.1))
-
-    sizes = {
+    When requested_sizes is None, produces all three (sm/md/lg). Pass
+    ['lg'] to produce only the canonical size — the others are unused
+    on the frontend today so callers can skip them via feature flag.
+    """
+    all_sizes = {
         "sm": {"width": 200, "quality": 75, "compression": 6},
         "md": {"width": 400, "quality": 80, "compression": 5},
         "lg": {"width": 800, "quality": 82, "compression": 4},
     }
+
+    if requested_sizes is None:
+        sizes = all_sizes
+    else:
+        sizes = {k: all_sizes[k] for k in requested_sizes if k in all_sizes}
+        if not sizes:
+            raise ValueError(f"No valid sizes in {requested_sizes}")
+
+    print(f"Extracting thumbnail variants ({'/'.join(sizes.keys())})...")
+
+    timestamp = max(1, int(duration * 0.1))
 
     for size_name in sizes:
         if size_name not in ALLOWED_THUMBNAIL_SIZES:
@@ -950,8 +990,15 @@ def extract_thumbnail_variants(
     return variants
 
 
-def generate_waveform(input_path: str, json_path: str, image_path: str) -> None:
-    """Generate audio waveform data and image using audiowaveform."""
+def generate_waveform(
+    input_path: str, json_path: str, image_path: str | None = None
+) -> None:
+    """Generate audio waveform JSON (always) and optional PNG image.
+
+    Pass image_path=None to skip PNG generation — the JSON is the
+    canonical data consumed by the audio player; the PNG is a static
+    preview currently unused on the frontend.
+    """
     print("Generating audio waveform...")
 
     cmd_json = [
@@ -966,6 +1013,9 @@ def generate_waveform(input_path: str, json_path: str, image_path: str) -> None:
         "8",
     ]
     run_ffmpeg(cmd_json, timeout=120, description="waveform JSON")
+
+    if image_path is None:
+        return
 
     cmd_png = [
         "audiowaveform",
@@ -1090,6 +1140,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         )
 
     print(f"Starting transcoding job for {media_type}: {media_id}")
+    print(f"Active features: {FEATURES}")
 
     # Progress tracking — captured early so steps can report progress
     webhook_url = job_input["webhookUrl"]
@@ -1161,24 +1212,29 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
 
         validate_streams(probe_data, media_type)
 
-        # Step 3: Create mezzanine → Upload to B2
-        send_progress(webhook_url, webhook_secret, job_id, "mezzanine", 6, media_id)
-        mezzanine_path = os.path.join(work_dir, "mezzanine.mp4")
-        mezzanine_key = f"{creator_id}/mezzanine/{media_id}/mezzanine.mp4"
-
-        if media_type == "video":
+        # Step 3: Create mezzanine → Upload to B2 (gated)
+        mezzanine_key = None
+        if FEATURES["mezzanine"] and media_type == "video":
+            send_progress(webhook_url, webhook_secret, job_id, "mezzanine", 6, media_id)
+            mezzanine_path = os.path.join(work_dir, "mezzanine.mp4")
+            mezzanine_key = f"{creator_id}/mezzanine/{media_id}/mezzanine.mp4"
             create_mezzanine(input_path, mezzanine_path, use_gpu)
             upload_file(
                 b2_client, b2_bucket_name, mezzanine_key, mezzanine_path, "video/mp4"
             )
             uploaded_keys.append((b2_client, b2_bucket_name, mezzanine_key))
-        else:
-            mezzanine_key = None
 
-        # Step 4: Loudness analysis
-        send_progress(webhook_url, webhook_secret, job_id, "loudness", 15, media_id)
-        loudness = analyze_loudness(input_path)
-        print(f"Loudness: {loudness}")
+        # Step 4: Loudness analysis (gated — stats only, not fed back to encoder)
+        loudness_integrated: int | None = None
+        loudness_peak: int | None = None
+        loudness_range: int | None = None
+        if FEATURES["loudness_analysis"]:
+            send_progress(webhook_url, webhook_secret, job_id, "loudness", 15, media_id)
+            loudness = analyze_loudness(input_path)
+            print(f"Loudness: {loudness}")
+            loudness_integrated = max(-10000, min(1000, int(loudness["input_i"] * 100)))
+            loudness_peak = max(-10000, min(2000, int(loudness["input_tp"] * 100)))
+            loudness_range = max(0, min(50000, int(loudness["input_lra"] * 100)))
 
         # Step 5: Transcode HLS variants
         send_progress(
@@ -1193,10 +1249,12 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             ready_variants = transcode_audio_hls(input_path, hls_dir)
 
         # Step 6: Create preview BEFORE uploading HLS dir (preview goes into hls_dir)
-        send_progress(webhook_url, webhook_secret, job_id, "preview", 72, media_id)
         hls_preview_key = None
-        if media_type == "video" and duration > 0:
+        preview_generated = False
+        if FEATURES["video_preview"] and media_type == "video" and duration > 0:
+            send_progress(webhook_url, webhook_secret, job_id, "preview", 72, media_id)
             create_preview(input_path, hls_dir, duration, use_gpu)
+            preview_generated = True
 
         # Upload HLS to R2 (includes preview if generated above)
         hls_prefix = f"{creator_id}/hls/{media_id}/"
@@ -1205,7 +1263,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         )
         uploaded_keys.extend(hls_uploaded)
         hls_master_key = f"{hls_prefix}master.m3u8"
-        if media_type == "video":
+        if preview_generated:
             hls_preview_key = f"{hls_prefix}preview/preview.m3u8"
 
         # Step 7: Extract thumbnail variants (video only)
@@ -1213,7 +1271,10 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         thumbnail_key = None
         thumbnail_variants = None
         if media_type == "video" and duration > 0:
-            thumbnail_files = extract_thumbnail_variants(input_path, work_dir, duration)
+            requested_sizes = None if FEATURES["thumbnail_variants"] else ["lg"]
+            thumbnail_files = extract_thumbnail_variants(
+                input_path, work_dir, duration, requested_sizes=requested_sizes
+            )
 
             thumbnail_variants = {}
             for size_name, local_path in thumbnail_files.items():
@@ -1239,11 +1300,14 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         waveform_image_key = None
         if media_type == "audio":
             waveform_json_path = os.path.join(work_dir, "waveform.json")
-            waveform_png_path = os.path.join(work_dir, "waveform.png")
+            waveform_png_path = (
+                os.path.join(work_dir, "waveform.png")
+                if FEATURES["waveform_image"]
+                else None
+            )
             generate_waveform(input_path, waveform_json_path, waveform_png_path)
 
             waveform_key = f"{creator_id}/waveforms/{media_id}/waveform.json"
-            waveform_image_key = f"{creator_id}/waveforms/{media_id}/waveform.png"
             upload_file(
                 r2_client,
                 r2_bucket_name,
@@ -1252,14 +1316,17 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
                 "application/json",
             )
             uploaded_keys.append((r2_client, r2_bucket_name, waveform_key))
-            upload_file(
-                r2_client,
-                r2_bucket_name,
-                waveform_image_key,
-                waveform_png_path,
-                "image/png",
-            )
-            uploaded_keys.append((r2_client, r2_bucket_name, waveform_image_key))
+
+            if waveform_png_path is not None:
+                waveform_image_key = f"{creator_id}/waveforms/{media_id}/waveform.png"
+                upload_file(
+                    r2_client,
+                    r2_bucket_name,
+                    waveform_image_key,
+                    waveform_png_path,
+                    "image/png",
+                )
+                uploaded_keys.append((r2_client, r2_bucket_name, waveform_image_key))
 
         # Build result — field names must match runpodWebhookOutputSchema
         result: WebhookOutput = {
@@ -1276,11 +1343,9 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             "width": width,
             "height": height,
             "readyVariants": ready_variants,
-            "loudnessIntegrated": max(
-                -10000, min(1000, int(loudness["input_i"] * 100))
-            ),
-            "loudnessPeak": max(-10000, min(2000, int(loudness["input_tp"] * 100))),
-            "loudnessRange": max(0, min(50000, int(loudness["input_lra"] * 100))),
+            "loudnessIntegrated": loudness_integrated,
+            "loudnessPeak": loudness_peak,
+            "loudnessRange": loudness_range,
         }
 
         # Step 10: Send completion webhook
@@ -1315,6 +1380,9 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             send_webhook(webhook_url, webhook_secret, webhook_payload)
         except Exception as webhook_error:
             print(f"Failed to send error webhook: {webhook_error}")
+            # Re-raise so RunPod surfaces this as an exception in its error logs
+            # rather than a quiet error-dict return. Idempotent retry is safe.
+            raise
 
         return {"status": "error", "error": error_msg}
 
