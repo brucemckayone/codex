@@ -441,12 +441,16 @@ export const CONTENT = {
     viewCount: 0,
     purchaseCount: 0,
   },
+  // Hybrid mode — `paid` + non-null minimumTierId. Standard subscribers get
+  // this included in their sub; everyone else can pay £9.99 one-off.
+  // This is the canonical encoding of the hybrid-paid/subscriber mode from
+  // the six-mode access table (see packages/access/CLAUDE.md).
   membersOnly: {
     id: seedUuid('seed-content-members-only'),
     title: 'Production Workshop [Standard + £9.99]',
     slug: 'members-only-workshop',
     contentType: 'video' as const,
-    accessType: 'subscribers' as const,
+    accessType: 'paid' as const,
     priceCents: 999, // Standard subscription OR £9.99 one-off purchase
     minimumTierId: TIERS.alphaStandard.id,
     status: 'published' as const,
@@ -653,6 +657,8 @@ export const CONTENT = {
     viewCount: 980,
     purchaseCount: 0,
   },
+  // Second hybrid-mode row (paid + tier) on the bones org for symmetry —
+  // £29.99 one-off OR included in Soul Path subscription.
   held: {
     id: seedUuid('seed-content-held'),
     title: 'H.E.L.D',
@@ -660,6 +666,7 @@ export const CONTENT = {
     contentType: 'written' as const,
     accessType: 'paid' as const,
     priceCents: 2999,
+    minimumTierId: TIERS.bonesSoulPath.id,
     status: 'published' as const,
     orgId: ORGS.bones.id,
     mediaId: null,

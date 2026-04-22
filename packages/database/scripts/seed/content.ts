@@ -80,47 +80,67 @@ export async function seedContent(db: typeof DbClient) {
   const items = Object.values(CONTENT);
 
   await db.insert(schema.content).values(
-    items.map((c) => ({
-      id: c.id,
-      creatorId: c.creatorId,
-      organizationId: c.orgId,
-      mediaItemId: c.mediaId,
-      title: c.title,
-      slug: c.slug,
-      description:
-        DESCRIPTIONS[c.slug] ??
-        `${c.title} — seed content for local development.`,
-      contentType: c.contentType,
-      contentBody: null,
-      contentBodyJson:
-        c.contentType === 'written'
-          ? c.orgId === ORGS.bones.id
-            ? OFFERING_BODY_JSON
-            : ARTICLE_BODY_JSON
-          : null,
-      thumbnailUrl: thumbnailUrl(c.creatorId, c.mediaId, c.slug, c.orgId),
-      category:
-        c.orgId === ORGS.bones.id
-          ? 'healing'
-          : c.contentType === 'audio'
-            ? 'podcasts'
-            : 'tutorials',
-      tags: ['seed-data', c.contentType],
-      accessType:
-        'accessType' in c ? (c as { accessType: string }).accessType : 'free',
-      priceCents: c.priceCents,
-      status: c.status,
-      publishedAt:
-        c.status === 'published'
-          ? publishedAt
-          : c.status === 'archived'
-            ? archivedAt
+    items.map((c) => {
+      const accessType =
+        'accessType' in c ? (c as { accessType: string }).accessType : 'free';
+
+      // Defense-in-depth clamp mirroring the service-layer normalization
+      // in `ContentService.create/update` (commit 848944eb). `minimumTierId`
+      // is only meaningful for `subscribers` (required) and `paid` (optional,
+      // hybrid). For any other accessType we force null regardless of what
+      // the seed constants declare, so a nonsensical (accessType, tier) pair
+      // can never land in the DB even if the constants drift.
+      const rawTierId =
+        'minimumTierId' in c
+          ? (c as { minimumTierId: string | null }).minimumTierId
+          : null;
+      const minimumTierId =
+        accessType === 'subscribers' || accessType === 'paid'
+          ? (rawTierId ?? null)
+          : null;
+
+      return {
+        id: c.id,
+        creatorId: c.creatorId,
+        organizationId: c.orgId,
+        mediaItemId: c.mediaId,
+        title: c.title,
+        slug: c.slug,
+        description:
+          DESCRIPTIONS[c.slug] ??
+          `${c.title} — seed content for local development.`,
+        contentType: c.contentType,
+        contentBody: null,
+        contentBodyJson:
+          c.contentType === 'written'
+            ? c.orgId === ORGS.bones.id
+              ? OFFERING_BODY_JSON
+              : ARTICLE_BODY_JSON
             : null,
-      viewCount: c.viewCount,
-      purchaseCount: c.purchaseCount,
-      createdAt: now,
-      updatedAt: now,
-    }))
+        thumbnailUrl: thumbnailUrl(c.creatorId, c.mediaId, c.slug, c.orgId),
+        category:
+          c.orgId === ORGS.bones.id
+            ? 'healing'
+            : c.contentType === 'audio'
+              ? 'podcasts'
+              : 'tutorials',
+        tags: ['seed-data', c.contentType],
+        accessType,
+        priceCents: c.priceCents,
+        minimumTierId,
+        status: c.status,
+        publishedAt:
+          c.status === 'published'
+            ? publishedAt
+            : c.status === 'archived'
+              ? archivedAt
+              : null,
+        viewCount: c.viewCount,
+        purchaseCount: c.purchaseCount,
+        createdAt: now,
+        updatedAt: now,
+      };
+    })
   );
 
   console.log(`  Seeded ${items.length} content items`);

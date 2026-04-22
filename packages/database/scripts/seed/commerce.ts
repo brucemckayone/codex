@@ -497,62 +497,9 @@ export async function seedCommerce(db: typeof DbClient) {
   ]);
 
   // ── Subscription Tiers ────────────────────────────────────────────
-  // Seed tiers for both orgs so subscription-based access can be tested.
-  // Stripe Products/Prices are created below when STRIPE_SECRET_KEY is available.
-  await db.insert(schema.subscriptionTiers).values([
-    {
-      id: TIERS.alphaStandard.id,
-      organizationId: ORGS.alpha.id,
-      name: TIERS.alphaStandard.name,
-      description: TIERS.alphaStandard.description,
-      sortOrder: TIERS.alphaStandard.sortOrder,
-      priceMonthly: TIERS.alphaStandard.priceMonthly,
-      priceAnnual: TIERS.alphaStandard.priceAnnual,
-      isActive: true,
-      isRecommended: false,
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: TIERS.alphaPro.id,
-      organizationId: ORGS.alpha.id,
-      name: TIERS.alphaPro.name,
-      description: TIERS.alphaPro.description,
-      sortOrder: TIERS.alphaPro.sortOrder,
-      priceMonthly: TIERS.alphaPro.priceMonthly,
-      priceAnnual: TIERS.alphaPro.priceAnnual,
-      isActive: true,
-      isRecommended: true,
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: TIERS.betaStandard.id,
-      organizationId: ORGS.beta.id,
-      name: TIERS.betaStandard.name,
-      description: TIERS.betaStandard.description,
-      sortOrder: TIERS.betaStandard.sortOrder,
-      priceMonthly: TIERS.betaStandard.priceMonthly,
-      priceAnnual: TIERS.betaStandard.priceAnnual,
-      isActive: true,
-      isRecommended: false,
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: TIERS.bonesSoulPath.id,
-      organizationId: ORGS.bones.id,
-      name: TIERS.bonesSoulPath.name,
-      description: TIERS.bonesSoulPath.description,
-      sortOrder: TIERS.bonesSoulPath.sortOrder,
-      priceMonthly: TIERS.bonesSoulPath.priceMonthly,
-      priceAnnual: TIERS.bonesSoulPath.priceAnnual,
-      isActive: true,
-      isRecommended: true,
-      createdAt: now,
-      updatedAt: now,
-    },
-  ]);
+  // Tiers are now seeded in `seedTiers()` before content (FK ordering), so
+  // content rows can reference `minimumTierId` at insert time. Stripe
+  // Product/Price linkage still happens here, below.
 
   // ── Stripe Objects (Products, Prices, Connect) ──────────────────
   // Only runs when STRIPE_SECRET_KEY is available.
@@ -621,33 +568,10 @@ export async function seedCommerce(db: typeof DbClient) {
     );
   }
 
-  // ── Link content to tiers ────────────────────────────────────────────
-  // Content was seeded before tiers (FK ordering), so update minimumTierId now.
-  // Advanced Svelte → Pro tier (subscription only — no one-off purchase)
-  // TS Deep Dive → Standard tier (subscription only — no one-off purchase)
-  // Members Only Workshop → Standard tier (subscription OR £9.99 one-off)
-  await db
-    .update(schema.content)
-    .set({ minimumTierId: TIERS.alphaPro.id })
-    .where(eq(schema.content.id, CONTENT.advancedSvelte.id));
-  await db
-    .update(schema.content)
-    .set({ minimumTierId: TIERS.alphaStandard.id })
-    .where(eq(schema.content.id, CONTENT.tsDeepDive.id));
-  await db
-    .update(schema.content)
-    .set({ minimumTierId: TIERS.alphaStandard.id })
-    .where(eq(schema.content.id, CONTENT.membersOnly.id));
-
-  // Of Blood & Bones: Soul Path tier → subscriber-only content
-  await db
-    .update(schema.content)
-    .set({ minimumTierId: TIERS.bonesSoulPath.id })
-    .where(eq(schema.content.id, CONTENT.soulPath.id));
-  await db
-    .update(schema.content)
-    .set({ minimumTierId: TIERS.bonesSoulPath.id })
-    .where(eq(schema.content.id, CONTENT.sacredCalendar.id));
+  // Content-to-tier linkage was previously patched up here because content
+  // was inserted before tiers existed. Now that tiers are seeded in
+  // `seedTiers()` before content, the FK is set at insert time inside
+  // `seedContent` — no post-hoc update needed.
 
   // ── Subscriptions ──────────────────────────────────────────────────
   // viewer@test.com subscribes to Alpha Standard tier.
