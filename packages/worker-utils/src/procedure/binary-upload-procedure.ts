@@ -44,20 +44,18 @@ import type { ObservabilityClient } from '@codex/observability';
 import { mapErrorToResponse, ValidationError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
 import type { Context } from 'hono';
-import {
-  enforcePolicyInline,
-  generateRequestId,
-  getClientIP,
-  validateInput,
-} from './helpers';
-import { PaginatedResult } from './paginated-result';
-import { createServiceRegistry } from './service-registry';
+import { validateInput } from './helpers';
 import type {
   InputSchema,
   ProcedureContext,
   ProcedurePolicy,
   ServiceRegistry,
 } from './types';
+import {
+  buildUploadBaseContext,
+  runUploadOrchestration,
+  sendUploadResponse,
+} from './upload-shared';
 
 // ============================================================================
 // Types
@@ -156,94 +154,36 @@ export function binaryUploadProcedure<
 
   return async (c: Context<HonoEnv>) => {
     const obs = c.get('obs') as ObservabilityClient | undefined;
-    let organizationId = c.get('organizationId');
-
-    let registry: ReturnType<typeof createServiceRegistry>['registry'];
     let cleanup: (() => Promise<void>) | undefined;
 
     try {
-      // ====================================================================
-      // Step 1: Enforce Policy (auth, RBAC, IP, org membership)
-      // ====================================================================
-      await enforcePolicyInline(c, policy, obs);
-      organizationId = c.get('organizationId');
+      // Policy enforcement + service registry (shared scaffold).
+      const orchestration = await runUploadOrchestration(c, policy, obs);
+      cleanup = orchestration.cleanup;
 
-      // ====================================================================
-      // Step 2: Create Service Registry
-      // ====================================================================
-      const registryResult = createServiceRegistry(
-        c.env,
-        obs,
-        organizationId,
-        c.executionCtx
-      );
-      registry = registryResult.registry;
-      cleanup = registryResult.cleanup;
-
-      // ====================================================================
-      // Step 3: Validate URL params/query (not body — that's raw binary)
-      // ====================================================================
+      // URL params/query — body is raw binary, not Zod-validated here.
       const validatedInput = await validateInput(c, input, false);
 
-      // ====================================================================
-      // Step 4: Read and Validate Binary Body
-      // ====================================================================
+      // Binary-specific step: read raw body + validate Content-Type / size.
       const validatedFile = await validateBinaryBody(c, fileConfig);
 
-      // ====================================================================
-      // Step 5: Build Context
-      // ====================================================================
       const ctx: BinaryUploadContext<TPolicy, TInput> = {
-        user: c.get('user') as BinaryUploadContext<TPolicy, TInput>['user'],
-        session: c.get('session') as BinaryUploadContext<
-          TPolicy,
-          TInput
-        >['session'],
-        input: validatedInput as BinaryUploadContext<TPolicy, TInput>['input'],
+        ...buildUploadBaseContext<TPolicy, TInput>(
+          c,
+          orchestration.organizationId,
+          validatedInput,
+          orchestration.registry,
+          obs
+        ),
         file: validatedFile,
-        requestId: c.get('requestId') || generateRequestId(),
-        clientIP: c.get('clientIP') || getClientIP(c),
-        userAgent: c.req.header('User-Agent') || 'unknown',
-        organizationId: organizationId as BinaryUploadContext<
-          TPolicy,
-          TInput
-        >['organizationId'],
-        organizationRole: c.get('organizationRole'),
-        env: c.env,
-        executionCtx: c.executionCtx,
-        obs,
-        services: registry,
       };
 
-      // ====================================================================
-      // Step 6: Execute Handler
-      // ====================================================================
       const result = await handler(ctx);
-
-      // ====================================================================
-      // Step 7: Return Response
-      // ====================================================================
-      if (successStatus === 204) {
-        return c.body(null, 204);
-      }
-
-      if (result instanceof PaginatedResult) {
-        return c.json(
-          { items: result.items, pagination: result.pagination },
-          successStatus
-        );
-      }
-      return c.json({ data: result }, successStatus);
+      return sendUploadResponse(c, result, successStatus);
     } catch (error) {
-      // ====================================================================
-      // Step 8: Error Handling
-      // ====================================================================
       const { statusCode, response } = mapErrorToResponse(error, { obs });
       return c.json(response, statusCode);
     } finally {
-      // ====================================================================
-      // Step 9: Cleanup
-      // ====================================================================
       if (cleanup) {
         c.executionCtx.waitUntil(cleanup());
       }

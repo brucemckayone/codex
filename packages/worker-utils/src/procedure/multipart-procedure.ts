@@ -39,20 +39,18 @@ import type { ObservabilityClient } from '@codex/observability';
 import { mapErrorToResponse, ValidationError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
 import type { Context } from 'hono';
-import {
-  enforcePolicyInline,
-  generateRequestId,
-  getClientIP,
-  validateInput,
-} from './helpers';
-import { PaginatedResult } from './paginated-result';
-import { createServiceRegistry } from './service-registry';
+import { validateInput } from './helpers';
 import type {
   InputSchema,
   ProcedureContext,
   ProcedurePolicy,
   ServiceRegistry,
 } from './types';
+import {
+  buildUploadBaseContext,
+  runUploadOrchestration,
+  sendUploadResponse,
+} from './upload-shared';
 
 // ============================================================================
 // Types
@@ -214,105 +212,37 @@ export function multipartProcedure<
 
   return async (c: Context<HonoEnv>) => {
     const obs = c.get('obs') as ObservabilityClient | undefined;
-    let organizationId = c.get('organizationId');
-
-    let registry: ReturnType<typeof createServiceRegistry>['registry'];
     let cleanup: (() => Promise<void>) | undefined;
 
     try {
-      // ====================================================================
-      // Step 1: Enforce Policy (auth, RBAC, IP, org membership)
-      // ====================================================================
-      await enforcePolicyInline(c, policy, obs);
-      organizationId = c.get('organizationId');
+      // Policy enforcement + service registry (shared scaffold).
+      const orchestration = await runUploadOrchestration(c, policy, obs);
+      cleanup = orchestration.cleanup;
 
-      // ====================================================================
-      // Step 2: Create Service Registry
-      // ====================================================================
-      const registryResult = createServiceRegistry(
-        c.env,
-        obs,
-        organizationId,
-        c.executionCtx
-      );
-      registry = registryResult.registry;
-      cleanup = registryResult.cleanup;
-
-      // ====================================================================
-      // Step 3: Validate URL params/query (not body - that's FormData)
-      // ====================================================================
+      // URL params/query — body is FormData, parsed below.
       const validatedInput = await validateInput(c, input, false);
 
-      // ====================================================================
-      // Step 4: Parse and Validate FormData
-      // ====================================================================
+      // Multipart-specific step: parse FormData + validate per-field.
       const formData = await c.req.formData();
       const validatedFiles = await validateFiles(formData, fileSchema);
 
-      // ====================================================================
-      // Step 5: Build Context
-      // ====================================================================
       const ctx: MultipartProcedureContext<TPolicy, TInput, TFiles> = {
-        user: c.get('user') as MultipartProcedureContext<
-          TPolicy,
-          TInput,
-          TFiles
-        >['user'],
-        session: c.get('session') as MultipartProcedureContext<
-          TPolicy,
-          TInput,
-          TFiles
-        >['session'],
-        input: validatedInput as MultipartProcedureContext<
-          TPolicy,
-          TInput,
-          TFiles
-        >['input'],
+        ...buildUploadBaseContext<TPolicy, TInput>(
+          c,
+          orchestration.organizationId,
+          validatedInput,
+          orchestration.registry,
+          obs
+        ),
         files: validatedFiles as InferFiles<TFiles>,
-        requestId: c.get('requestId') || generateRequestId(),
-        clientIP: c.get('clientIP') || getClientIP(c),
-        userAgent: c.req.header('User-Agent') || 'unknown',
-        organizationId: organizationId as MultipartProcedureContext<
-          TPolicy,
-          TInput,
-          TFiles
-        >['organizationId'],
-        organizationRole: c.get('organizationRole'),
-        env: c.env,
-        executionCtx: c.executionCtx,
-        obs,
-        services: registry,
       };
 
-      // ====================================================================
-      // Step 6: Execute Handler
-      // ====================================================================
       const result = await handler(ctx);
-
-      // ====================================================================
-      // Step 7: Return Response
-      // ====================================================================
-      if (successStatus === 204) {
-        return c.body(null, 204);
-      }
-
-      if (result instanceof PaginatedResult) {
-        return c.json(
-          { items: result.items, pagination: result.pagination },
-          successStatus
-        );
-      }
-      return c.json({ data: result }, successStatus);
+      return sendUploadResponse(c, result, successStatus);
     } catch (error) {
-      // ====================================================================
-      // Step 8: Error Handling
-      // ====================================================================
       const { statusCode, response } = mapErrorToResponse(error, { obs });
       return c.json(response, statusCode);
     } finally {
-      // ====================================================================
-      // Step 9: Cleanup
-      // ====================================================================
       if (cleanup) {
         c.executionCtx.waitUntil(cleanup());
       }
