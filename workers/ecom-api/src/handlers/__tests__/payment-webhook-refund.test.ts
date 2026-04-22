@@ -365,9 +365,9 @@ describe('handlePaymentWebhook — charge.refunded', () => {
 
     expect(sendEmailToWorker).toHaveBeenCalledTimes(1);
     const call = (sendEmailToWorker as ReturnType<typeof vi.fn>).mock
-      .calls[0][2];
-    expect(call.to).toBe('fallback@example.com');
-    expect(call.templateName).toBe('refund-processed');
+      .calls[0]?.[2];
+    expect(call?.to).toBe('fallback@example.com');
+    expect(call?.templateName).toBe('refund-processed');
   });
 
   it('refund metadata round-trip: stripeRefundId + amount_refunded + reason → processRefund', async () => {
@@ -401,9 +401,9 @@ describe('handlePaymentWebhook — charge.refunded', () => {
     await handlePaymentWebhook(event, mockStripe, bundle.context);
 
     const call = (sendEmailToWorker as ReturnType<typeof vi.fn>).mock
-      .calls[0][2];
-    expect(call.data.refundAmount).toBe('£25.00');
-    expect(call.data.originalAmount).toBe('£25.00');
-    expect(call.data.contentTitle).toBe('Test Content');
+      .calls[0]?.[2];
+    expect(call?.data.refundAmount).toBe('£25.00');
+    expect(call?.data.originalAmount).toBe('£25.00');
+    expect(call?.data.contentTitle).toBe('Test Content');
   });
 });
