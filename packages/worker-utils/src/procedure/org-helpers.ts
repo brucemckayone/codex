@@ -9,15 +9,7 @@ import { createDbClient, schema } from '@codex/database';
 import type { ObservabilityClient } from '@codex/observability';
 import type { Bindings } from '@codex/shared-types';
 import { and, eq } from 'drizzle-orm';
-
-/**
- * Organization membership info
- */
-export interface OrganizationMembership {
-  role: string;
-  status: string;
-  joinedAt: Date;
-}
+import type { OrganizationMembership } from './helpers';
 
 /**
  * Extract organization ID from subdomain

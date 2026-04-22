@@ -28,7 +28,7 @@ import type {
   ServiceRegistry,
 } from './types';
 
-export interface UploadOrchestrationResult {
+interface UploadOrchestrationResult {
   organizationId: string | undefined;
   registry: ServiceRegistry;
   cleanup: () => Promise<void>;
