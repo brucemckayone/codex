@@ -497,6 +497,7 @@ export class TranscodingService extends BaseService {
         mediaId,
         error: error instanceof Error ? error.message : String(error),
       });
+      throw error;
     }
   }
 

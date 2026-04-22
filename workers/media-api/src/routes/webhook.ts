@@ -72,6 +72,11 @@ app.post(
         const zodErrors = result.error.issues
           .map((i) => `${i.path.join('.')}: ${i.message}`)
           .join('; ');
+        console.error(
+          '[webhook] Schema validation failed:',
+          zodErrors,
+          JSON.stringify(payload).slice(0, 500)
+        );
         throw new ValidationError(`Invalid webhook payload: ${zodErrors}`);
       }
 
@@ -122,9 +127,10 @@ app.post(
         error instanceof Error ? error.message : 'Unknown webhook error';
 
       if (isPermanent) {
-        // Log so schema mismatches are visible in Worker logs
-        console.error('[webhook] Permanent webhook error:', message);
-        // Acknowledge receipt so RunPod doesn't retry a non-fixable error
+        console.error(
+          '[webhook] Permanent webhook error (returning 200, no retry):',
+          message
+        );
         return c.json({ received: true, error: message }, 200);
       }
 

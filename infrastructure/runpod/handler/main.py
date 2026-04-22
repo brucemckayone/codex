@@ -1276,9 +1276,11 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             "width": width,
             "height": height,
             "readyVariants": ready_variants,
-            "loudnessIntegrated": int(loudness["input_i"] * 100),
-            "loudnessPeak": int(loudness["input_tp"] * 100),
-            "loudnessRange": int(loudness["input_lra"] * 100),
+            "loudnessIntegrated": max(
+                -10000, min(1000, int(loudness["input_i"] * 100))
+            ),
+            "loudnessPeak": max(-10000, min(2000, int(loudness["input_tp"] * 100))),
+            "loudnessRange": max(0, min(50000, int(loudness["input_lra"] * 100))),
         }
 
         # Step 10: Send completion webhook

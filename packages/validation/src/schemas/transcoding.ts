@@ -128,30 +128,32 @@ export const runpodWebhookOutputSchema = z.object({
   readyVariants: z.array(hlsVariantSchema).min(1).max(10),
 
   // Audio loudness (×100 for precision)
-  // Integrated Loudness (LUFS × 100): Range -10000 to 0 (-100.00 to 0.00 LUFS)
+  // Integrated Loudness (LUFS × 100): Range -10000 to 1000 (-100.00 to +10.00 LUFS)
+  // Upper bound is generous: ffmpeg can measure positive LUFS for heavily clipped audio.
   loudnessIntegrated: z
     .number()
     .int()
     .min(-10000)
-    .max(0)
+    .max(1000)
     .optional()
     .describe('Integrated loudness in LUFS * 100 (e.g. -1400 = -14.0 LUFS)'),
 
-  // True Peak (dBTP × 100): Range -10000 to 200 (-100.00 to +2.00 dBTP)
+  // True Peak (dBTP × 100): Range -10000 to 2000 (-100.00 to +20.00 dBTP)
+  // Upper bound is generous: clipped audio can measure true peaks above +2 dBTP.
   loudnessPeak: z
     .number()
     .int()
     .min(-10000)
-    .max(200)
+    .max(2000)
     .optional()
     .describe('True peak in dBTP * 100 (e.g. -100 = -1.0 dBTP)'),
 
-  // Loudness Range (LU × 100): Range 0 to 10000 (0.00 to 100.00 LU)
+  // Loudness Range (LU × 100): Range 0 to 50000 (0.00 to 500.00 LU)
   loudnessRange: z
     .number()
     .int()
     .min(0)
-    .max(10000)
+    .max(50000)
     .optional()
     .describe('Loudness range in LU * 100 (e.g. 700 = 7.0 LU)'),
 });
