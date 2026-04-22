@@ -1,9 +1,11 @@
 /**
  * Feed section types for the org landing page.
  *
- * The homepage is composed of typed sections, each rendered as either a
- * spread (1–2 items) or a carousel (3+ items). See +page.server.ts for
- * composition and +page.svelte for render rules.
+ * The homepage is composed of typed sections. Each section carries an
+ * explicit `layout` tag that the renderer dispatches on — this keeps
+ * layout choice on the server (where we know the data shape) and the
+ * template simple. See +page.server.ts for composition and +page.svelte
+ * for render dispatch.
  */
 
 import type { getPublicContent } from '$lib/remote/content.remote';
@@ -12,15 +14,38 @@ export type ContentItem = NonNullable<
   Awaited<ReturnType<typeof getPublicContent>>
 >['items'][number];
 
+/**
+ * Layout contract for the landing page. Each variant renders a distinct
+ * section shape:
+ *
+ *   spotlight  — one hero-sized item on an animated shader backdrop (anchor)
+ *   spread     — 2-up editorial spread (Editor's Picks)
+ *   carousel   — horizontally-scrolling row (videos, per-category, free)
+ *   mosaic     — static grid of square tiles (audio wall)
+ *   editorial  — 60/40 split: lead article spread + vertical list (articles)
+ *   bento      — varied-tile grid with 2 hero + 4 minor items (Discover Mix)
+ */
+export type FeedLayout =
+  | 'spotlight'
+  | 'spread'
+  | 'carousel'
+  | 'mosaic'
+  | 'editorial'
+  | 'bento';
+
 export type FeedSection = {
   /** Stable id used for #each keying. */
   id:
+    | 'spotlight'
     | 'featured'
     | 'videos'
     | 'audio'
     | 'articles'
     | 'free'
+    | 'discover-mix'
     | `category:${string}`;
+  /** Layout dispatch tag — renderer picks the component from this. */
+  layout: FeedLayout;
   /** Small-caps label above the section title. */
   eyebrow: string;
   /** Display title. */
@@ -28,10 +53,6 @@ export type FeedSection = {
   /** Optional "View all →" link. */
   viewAllHref?: string;
   viewAllLabel?: string;
-  /**
-   * Section contents. The renderer picks format by length:
-   *   items.length <= 2 → stacked spreads
-   *   items.length >= 3 → carousel with hero first tile
-   */
+  /** Section contents. Spotlight uses `items[0]` as the hero. */
   items: ContentItem[];
 };

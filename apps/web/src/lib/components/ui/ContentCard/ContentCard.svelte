@@ -162,6 +162,7 @@
   class:cc--loading={loading}
   class:cc--access-dimmed={isDimmed}
   data-variant={variant}
+  data-content-type={contentType || undefined}
   data-access-state={accessState !== 'active' ? accessState : undefined}
   aria-labelledby={!loading ? titleId : undefined}
   {...rest}
@@ -869,5 +870,62 @@
       padding: var(--space-4);
       gap: var(--space-2);
     }
+  }
+
+  /* ═══════════════════════════════════════════
+     CONTENT TYPE DIFFERENTIATION
+     Type is signalled STRUCTURALLY — aspect ratio, not colour.
+     Section-level layouts (AudioWall mosaic, ArticleEditorial list)
+     carry the rest of the type identity. Kept neutral palette across
+     all cards so the grid reads as one coherent surface.
+     ═══════════════════════════════════════════ */
+
+  /* ── AUDIO: square album-art ratio ────────────────────────── */
+
+  .cc[data-content-type='audio'] .cc__thumb {
+    aspect-ratio: 1 / 1;
+  }
+
+  /* Scale up the music icon so it fills the square like album art */
+  .cc[data-content-type='audio'] .cc__placeholder :global(svg) {
+    width: var(--space-12);
+    height: var(--space-12);
+    opacity: var(--opacity-40);
+  }
+
+  /* ── ARTICLE: 3:2 editorial crop ──────────────────────────── */
+
+  .cc[data-content-type='article'] .cc__thumb {
+    aspect-ratio: 3 / 2;
+  }
+
+  /* When no real image — hide the thumb and let text take over. */
+  .cc[data-content-type='article'] .cc__thumb:has(.cc__placeholder:not(.hidden)) {
+    display: none;
+  }
+
+  /* Scale up the article icon — symmetry with audio */
+  .cc[data-content-type='article'] .cc__placeholder :global(svg) {
+    width: var(--space-12);
+    height: var(--space-12);
+    opacity: var(--opacity-30);
+  }
+
+  /* Text IS the content — description always visible in grid/featured */
+  .cc[data-content-type='article'] .cc__description {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+  }
+
+  /* Allow the headline to breathe — articles lead with their title */
+  .cc[data-content-type='article'] .cc__title {
+    -webkit-line-clamp: 3;
+  }
+
+  /* list/featured already override aspect-ratio; no article 3:2 bleed needed there */
+  .cc[data-variant='list'][data-content-type='article'] .cc__thumb,
+  .cc[data-variant='featured'][data-content-type='article'] .cc__thumb {
+    aspect-ratio: auto;
+    display: block;
   }
 </style>

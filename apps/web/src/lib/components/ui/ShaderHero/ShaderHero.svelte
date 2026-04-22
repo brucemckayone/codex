@@ -22,9 +22,16 @@
 
   interface Props {
     class?: string;
+    /**
+     * Optional preset override. When set, this preset is used regardless
+     * of the org's `--brand-shader-preset` CSS custom property. Useful for
+     * decorative surfaces (Spotlight cards, banners) that want a shader
+     * even when the org hasn't configured one on the main hero.
+     */
+    preset?: ShaderPresetId;
   }
 
-  const { class: className }: Props = $props();
+  const { class: className, preset: presetOverride }: Props = $props();
 
   let canvasEl: HTMLCanvasElement | undefined = $state();
   let containerEl: HTMLDivElement | undefined = $state();
@@ -92,15 +99,17 @@
     // ── Config polling ─────────────────────────────────────────
     // Read shader config from CSS vars. Called each frame to pick up
     // live brand editor changes without needing a Svelte store bridge.
+    // If a `preset` prop is supplied, we pass it to `getShaderConfig` as
+    // an override so callers can force a preset regardless of org config.
     let configPollCounter = 0;
-    let cachedConfig = getShaderConfig();
+    let cachedConfig = getShaderConfig(undefined, presetOverride);
 
     function pollConfig() {
       // Poll every 30 frames (~0.5s at 60fps) to avoid getComputedStyle overhead
       configPollCounter++;
       if (configPollCounter >= 30) {
         configPollCounter = 0;
-        cachedConfig = getShaderConfig();
+        cachedConfig = getShaderConfig(undefined, presetOverride);
       }
       return cachedConfig;
     }
@@ -224,7 +233,7 @@
     if (containerEl) resizeObserver.observe(containerEl);
 
     // ── Start ──────────────────────────────────────────────────
-    const initialConfig = getShaderConfig();
+    const initialConfig = getShaderConfig(undefined, presetOverride);
     ensureRenderer(initialConfig.preset).then(() => {
       animFrameId = requestAnimationFrame(frame);
     });

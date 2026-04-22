@@ -14,6 +14,10 @@
   import { CreatorCarouselCard, SkeletonCreatorCard } from '$lib/components/ui/CreatorCard';
   import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
   import Carousel from '$lib/components/carousel/Carousel.svelte';
+  import Spotlight from '$lib/components/content/Spotlight.svelte';
+  import AudioWall from '$lib/components/content/AudioWall.svelte';
+  import ArticleEditorial from '$lib/components/content/ArticleEditorial.svelte';
+  import SubscribeCTA from '$lib/components/subscription/SubscribeCTA.svelte';
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
   import { buildContentUrl } from '$lib/utils/subdomain';
@@ -76,6 +80,17 @@
   const stats = $derived(data.stats);
   const user = $derived(data.user);
   const introVideoUrl = $derived(data.org?.introVideoUrl ?? null);
+
+  // Anchor the Subscribe CTA banner after the content-richest reading section
+  // in the feed. We prefer inserting after Articles (the editorial anchor);
+  // if there are no articles, fall back to Audio, then Videos. Returns null
+  // when no section would make sense — in that case the banner is skipped.
+  const subscribeAnchorId = $derived(
+    data.sections.find((s) => s.id === 'articles')?.id ??
+      data.sections.find((s) => s.id === 'audio')?.id ??
+      data.sections.find((s) => s.id === 'videos')?.id ??
+      null
+  );
 
   // Canonical URL is the org's own subdomain origin. Prevents SEO
   // duplicate-content issues if the platform ever links to the same org
@@ -414,7 +429,6 @@
     {@const href = buildContentUrl(page.url, c)}
     {@const duration = c.mediaItem?.durationSeconds ?? null}
     {@const titleId = `feature-title-${c.id}`}
-    {@const typeLabel = c.contentType === 'audio' ? 'Audio' : c.contentType === 'written' ? 'Article' : 'Video'}
     {@const ctaLabel = c.contentType === 'audio' ? 'Listen now' : c.contentType === 'written' ? 'Read now' : 'Watch now'}
     <article class="feature-spread" aria-labelledby={titleId}>
       <a class="feature-spread__link" {href}>
@@ -431,7 +445,6 @@
           {:else}
             <div class="feature-spread__fallback" aria-hidden="true"></div>
           {/if}
-          <span class="feature-spread__type-badge">{typeLabel}</span>
         </figure>
         <div class="feature-spread__body">
           {#if c.category}
@@ -499,46 +512,72 @@
   {/snippet}
 
   {#each data.sections as section (section.id)}
-    <section class="feed-section">
-      <header class="lede">
-        <hr class="lede__rule" aria-hidden="true" />
-        <div class="lede__title-row">
-          <h2 class="lede__title">{section.title}</h2>
-          {#if section.viewAllHref}
-            <a href={section.viewAllHref} class="lede__view-all">
-              {section.viewAllLabel ?? m.org_view_all_content()}
-              <span aria-hidden="true">→</span>
-            </a>
-          {/if}
-        </div>
-      </header>
+    {#if section.layout === 'spotlight' && section.items[0]}
+      <!-- Anchor beat — full-bleed featured item on shader backdrop.
+           No surrounding .feed-section/.lede header; Spotlight renders
+           its own section wrapper with an internal h2. -->
+      <Spotlight item={section.items[0]} />
+    {:else}
+      <section class="feed-section" data-layout={section.layout}>
+        <header class="lede">
+          <hr class="lede__rule" aria-hidden="true" />
+          <div class="lede__title-row">
+            <h2 class="lede__title">{section.title}</h2>
+            {#if section.viewAllHref}
+              <a href={section.viewAllHref} class="lede__view-all">
+                {section.viewAllLabel ?? m.org_view_all_content()}
+                <span aria-hidden="true">→</span>
+              </a>
+            {/if}
+          </div>
+        </header>
 
-      {#if section.id === 'featured' && section.items.length === 1}
-        <!-- Editorial anchor — reserved for the single-item Featured
-             case, where the creator has flagged one piece as hero. -->
-        {@render spread(section.items[0])}
-      {:else if section.items.length === 2}
-        <!-- Exactly 2 items — use a fill-row grid so the tiles span
-             the available width at 50/50 instead of sitting in a
-             carousel's left corner with wasted space to the right. -->
-        <div class="feed-pair">
-          {#each section.items as item (item.id)}
-            {@render gridCard(item, 'grid')}
-          {/each}
-        </div>
-      {:else}
-        <Carousel
-          items={section.items}
-          itemMinWidth="16rem"
-          gap="var(--space-4)"
-          ariaLabel={section.title}
-        >
-          {#snippet renderItem(c)}
-            {@render gridCard(c, 'grid')}
-          {/snippet}
-        </Carousel>
-      {/if}
-    </section>
+        {#if section.layout === 'spread'}
+          <!-- Editor's Picks — 1-2 items as 2-up editorial spread -->
+          <div class="feed-spread-grid">
+            {#each section.items as item (item.id)}
+              {@render spread(item)}
+            {/each}
+          </div>
+        {:else if section.layout === 'mosaic'}
+          <!-- Audio wall — responsive square mosaic, caps to 8 tiles -->
+          <AudioWall items={section.items} {access} />
+        {:else if section.layout === 'editorial'}
+          <!-- Articles — 60/40 split: lead article + vertical list -->
+          <ArticleEditorial items={section.items} {access} />
+        {:else if section.layout === 'carousel' && section.items.length === 2}
+          <!-- Exactly 2 carousel items fill the row as a grid (no chrome) -->
+          <div class="feed-pair">
+            {#each section.items as item (item.id)}
+              {@render gridCard(item, 'grid')}
+            {/each}
+          </div>
+        {:else}
+          <!-- Default: horizontally-scrolling carousel -->
+          <Carousel
+            items={section.items}
+            itemMinWidth="16rem"
+            gap="var(--space-4)"
+            ariaLabel={section.title}
+          >
+            {#snippet renderItem(c)}
+              {@render gridCard(c, 'grid')}
+            {/snippet}
+          </Carousel>
+        {/if}
+      </section>
+    {/if}
+
+    <!-- Subscribe CTA — anchor beat inserted once, right after the section
+         chosen by `subscribeAnchorId` (typically Articles). Falls back if
+         the org has no articles section so the banner still appears. -->
+    {#if section.id === subscribeAnchorId && data.org?.id}
+      <SubscribeCTA
+        organizationId={data.org.id}
+        orgName={data.org.name ?? 'us'}
+        isAuthenticated={!!user}
+      />
+    {/if}
   {/each}
 
   <!-- Bottom catalogue — flat grid of every published item. Carries the
@@ -1409,6 +1448,103 @@
 
   .feature-spread__link:hover .feature-spread__cta-arrow {
     transform: translateX(var(--space-1));
+  }
+
+  /* ══════════════════════════════════════════
+     FEED SPREAD GRID — 2-up Editor's Picks layout
+     Wraps 1-2 .feature-spread articles in a responsive grid.
+     Each spread stacks image-over-text vertically (since each
+     column is ~half the page width) instead of the original
+     full-width 2fr 3fr horizontal split — keeps both tiles
+     legible without cramming a horizontal spread into a tight box.
+     ══════════════════════════════════════════ */
+  .feed-spread-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-8);
+    padding-inline: var(--space-4);
+  }
+
+  @media (--breakpoint-md) {
+    .feed-spread-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: var(--space-10);
+      padding-inline: 0;
+    }
+  }
+
+  /* Single-item spread keeps the original magazine feel: one side image,
+     the other side a column of copy. Multi-item gets the vertical stack. */
+  .feed-spread-grid:has(.feature-spread:only-child) .feature-spread__link {
+    grid-template-columns: 2fr 3fr;
+    gap: var(--space-10);
+  }
+
+  .feed-spread-grid .feature-spread {
+    padding: var(--space-6);
+    background: color-mix(in srgb, var(--color-surface-card) 78%, transparent);
+    border: var(--border-width) var(--border-style)
+      color-mix(in srgb, var(--color-border) 30%, transparent);
+    border-radius: var(--radius-xl);
+    backdrop-filter: blur(var(--blur-lg));
+    -webkit-backdrop-filter: blur(var(--blur-lg));
+    transition:
+      transform var(--duration-slow) var(--ease-smooth),
+      box-shadow var(--duration-slow) var(--ease-smooth),
+      border-color var(--duration-fast) var(--ease-default);
+  }
+
+  .feed-spread-grid .feature-spread:hover {
+    transform: translateY(calc(-1 * var(--space-0-5)));
+    box-shadow: var(--shadow-xl);
+    border-color: color-mix(in srgb, var(--color-interactive) 28%, transparent);
+  }
+
+  /* In 2-up mode (multi-item spread-grid), each spread stacks vertically */
+  .feed-spread-grid:not(:has(.feature-spread:only-child)) .feature-spread__link {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-5);
+    align-items: start;
+  }
+
+  /* Tighter title ramp inside 2-up cards — clamp lower max so both
+     headlines feel parallel rather than one dwarfing the other. */
+  .feed-spread-grid:not(:has(.feature-spread:only-child)) .feature-spread__title {
+    font-size: clamp(var(--text-2xl), 3vw, var(--text-4xl));
+    max-width: none;
+  }
+
+  /* Constrain description inside 2-up tiles too */
+  .feed-spread-grid:not(:has(.feature-spread:only-child)) .feature-spread__description {
+    font-size: var(--text-base);
+    max-width: none;
+    -webkit-line-clamp: 3;
+  }
+
+  /* Reveal on enter — staggered 80ms for the second tile. */
+  @media (prefers-reduced-motion: no-preference) {
+    .feed-spread-grid .feature-spread {
+      opacity: 0;
+      transform: translateY(var(--space-4));
+      animation: feed-spread-in var(--duration-slower) var(--ease-out) forwards;
+    }
+
+    .feed-spread-grid .feature-spread:nth-child(2) {
+      animation-delay: 80ms;
+    }
+  }
+
+  @keyframes feed-spread-in {
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .feed-spread-grid .feature-spread {
+      transition: none;
+    }
   }
 
   /* Tablet + mobile — stack image on top, body below */
