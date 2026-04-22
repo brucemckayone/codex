@@ -372,6 +372,20 @@
       "when": 1776409177445,
       "tag": "0052_careless_spitfire",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1776807435668,
+      "tag": "0053_absurd_silver_sable",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1776808138897,
+      "tag": "0054_happy_killer_shrike",
+      "breakpoints": true
     }
   ]
 }

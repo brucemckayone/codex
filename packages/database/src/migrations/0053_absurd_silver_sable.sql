@@ -1,0 +1,2 @@
+ALTER TABLE "subscriptions" DROP CONSTRAINT "check_subscription_status";--> statement-breakpoint
+ALTER TABLE "subscriptions" ADD CONSTRAINT "check_subscription_status" CHECK ("subscriptions"."status" IN ('active', 'past_due', 'cancelling', 'cancelled', 'incomplete', 'paused'));
