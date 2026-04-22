@@ -17,7 +17,7 @@ export interface SlashCommandItem {
 }
 
 /** Available slash command items for the full preset */
-export const SLASH_COMMAND_ITEMS: SlashCommandItem[] = [
+const SLASH_COMMAND_ITEMS: SlashCommandItem[] = [
   {
     title: 'Heading 1',
     description: 'Large section heading',

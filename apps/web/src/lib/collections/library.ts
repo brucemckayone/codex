@@ -25,7 +25,7 @@ export type LibraryItem = UserLibraryResponse['items'][number];
 /**
  * Progress data type for library items
  */
-export type LibraryProgress = NonNullable<LibraryItem['progress']>;
+type LibraryProgress = NonNullable<LibraryItem['progress']>;
 
 /**
  * Library Collection
@@ -113,7 +113,8 @@ export function updateProgress(
 ): void {
   if (!libraryCollection) return;
   const completed =
-    durationSeconds > 0 && positionSeconds / durationSeconds >= VIDEO_PROGRESS.COMPLETION_THRESHOLD;
+    durationSeconds > 0 &&
+    positionSeconds / durationSeconds >= VIDEO_PROGRESS.COMPLETION_THRESHOLD;
   const percentComplete =
     durationSeconds > 0
       ? Math.round((positionSeconds / durationSeconds) * 100)

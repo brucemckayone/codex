@@ -16,6 +16,7 @@ import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import {
   handlePurchaseAction,
+  isPublicAccessType,
   loadAccessAndProgress,
   loadSubscriptionContext,
 } from '$lib/server/content-detail';
@@ -28,7 +29,9 @@ export const load: PageServerLoad = async ({
   setHeaders,
   platform,
   cookies,
+  depends,
 }) => {
+  depends('app:auth');
   const { contentSlug } = params;
   // Strip leading @ from username (URL convention: /@alex-creator)
   const username = params.username.replace(/^@/, '');
@@ -80,8 +83,13 @@ export const load: PageServerLoad = async ({
     locals.user ? CACHE_HEADERS.PRIVATE : CACHE_HEADERS.DYNAMIC_PUBLIC
   );
 
-  // Render written content body to HTML
-  const contentBodyHtml = await renderContentBody(content);
+  // Body gating: only render the body once access is confirmed. Free content
+  // renders immediately (SEO + first-paint). Everything else (followers /
+  // subscribers / paid / team) waits for the authenticated access check below
+  // — this is what prevents a non-follower from reading the article text
+  // through view-source or the SvelteKit load payload.
+  const isPublic = isPublicAccessType(content.accessType);
+  const publicBodyHtml = isPublic ? await renderContentBody(content) : null;
 
   // Fetch related content — returned as a bare promise (streamed, below fold)
   const relatedPromise = content.organization?.id
@@ -98,10 +106,17 @@ export const load: PageServerLoad = async ({
         [] as Awaited<ReturnType<typeof getPublicContent>>['items']
       );
 
-  // Subscription context (org-scoped content may have tier gating)
-  const subContextPromise = content.organization?.id
+  // Subscription context (org-scoped content may have tier gating).
+  // Skip the round-trip entirely for content that can't require a
+  // subscription — non-subscriber accessType and no minimum tier.
+  // Saves 2-3 round-trips per non-gated page load (Codex-585ie).
+  const mayRequireSubscription =
+    !!content.organization?.id &&
+    (content.accessType === 'subscribers' || !!content.minimumTierId);
+
+  const subContextPromise = mayRequireSubscription
     ? loadSubscriptionContext(
-        content.organization.id,
+        content.organization!.id,
         content.minimumTierId ?? null,
         platform,
         cookies,
@@ -122,12 +137,13 @@ export const load: PageServerLoad = async ({
         tiers: [],
       });
 
-  // For unauthenticated visitors — no access checks, no streaming
+  // For unauthenticated visitors — body unlocks for public (free) content
+  // so visitors can read it; streaming stays locked (no cookie, no signed URL).
   if (!locals.user) {
     return {
       content,
-      contentBodyHtml,
-      hasAccess: false as const,
+      contentBodyHtml: publicBodyHtml,
+      hasAccess: isPublic,
       streamingUrl: null,
       progress: null,
       accessAndProgress: null,
@@ -138,22 +154,63 @@ export const load: PageServerLoad = async ({
     };
   }
 
-  // For authenticated users — stream access+progress (secondary, not needed for first paint)
+  // Authenticated + free content: fast path — body already rendered, stream
+  // the access+progress for the player/streaming URL.
+  if (isPublic) {
+    return {
+      content,
+      contentBodyHtml: publicBodyHtml,
+      hasAccess: null,
+      streamingUrl: null,
+      progress: null,
+      accessAndProgress: loadAccessAndProgress(
+        content.id,
+        platform,
+        cookies,
+        content.accessType
+      ).catch(() => ({
+        hasAccess: isPublic,
+        streamingUrl: null,
+        waveformUrl: null,
+        expiresAt: null,
+        revocationReason: null,
+        progress: null,
+      })),
+      subscriptionContext: subContextPromise,
+      creatorProfile,
+      username,
+      relatedContent: relatedPromise,
+    };
+  }
+
+  // Gated content + authenticated user: await the access check so we can
+  // render the body conditionally. Non-followers never receive the text via
+  // the load payload.
+  const accessResult = await loadAccessAndProgress(
+    content.id,
+    platform,
+    cookies,
+    content.accessType
+  ).catch(() => ({
+    hasAccess: false,
+    streamingUrl: null,
+    waveformUrl: null,
+    expiresAt: null,
+    revocationReason: null,
+    progress: null,
+  }));
+
+  const gatedBodyHtml = accessResult.hasAccess
+    ? await renderContentBody(content)
+    : null;
+
   return {
     content,
-    contentBodyHtml,
+    contentBodyHtml: gatedBodyHtml,
     hasAccess: null,
     streamingUrl: null,
     progress: null,
-    accessAndProgress: loadAccessAndProgress(
-      content.id,
-      platform,
-      cookies
-    ).catch(() => ({
-      hasAccess: false as const,
-      streamingUrl: null,
-      progress: null,
-    })),
+    accessAndProgress: Promise.resolve(accessResult),
     subscriptionContext: subContextPromise,
     creatorProfile,
     username,

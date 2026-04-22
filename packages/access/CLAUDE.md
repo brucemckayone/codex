@@ -42,15 +42,19 @@ const service = createContentAccessService(env);
 
 ## Access Decision Logic
 
-`getStreamingUrl()` checks in order (transaction for consistency):
+`getStreamingUrl()` branches by `accessType` (transaction for consistency):
 
-1. Content must be published and non-deleted
-2. `priceCents === 0` or `null` → free access granted
-3. User has a completed purchase → access granted
-4. User is an org member (any role) → access granted
-5. User has a following relationship → access granted (org followers)
-6. User has an active subscription to the org meeting the content's `minimumTierId` → access granted
-7. Otherwise → `AccessDeniedError` (403)
+| accessType | Granted when |
+|---|---|
+| `team` | User has a management role in the org (owner / admin / creator). |
+| `followers` | User follows the org **or** has a management role. An active subscription alone does **not** grant access — subscribers must explicitly follow. |
+| `subscribers` | User has an active subscription meeting the content's `minimumTierId` **or** has a completed purchase **or** has a management role. |
+| paid (`priceCents > 0`) | User has a completed purchase **or** an active subscription meeting `minimumTierId` (if set) **or** a management role. |
+| `free` / `null` (no price) | Granted — subject only to content being published and non-deleted. |
+
+Content must always be published and non-deleted. Otherwise → `AccessDeniedError` (403).
+
+**Why follower ≠ subscriber:** the two relationships are intentionally independent. Following is a free, low-friction signal of interest; subscribing is a paid commitment. Creators can gate content to followers for community-building reasons without implicitly bundling it into every paid tier. A subscriber who wants follower-only posts simply clicks Follow (free).
 
 ## Library Query
 

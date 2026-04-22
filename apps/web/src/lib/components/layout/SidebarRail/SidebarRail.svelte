@@ -147,7 +147,10 @@
 
 <style>
 	.sidebar-rail {
-		--rail-width-collapsed: var(--space-16);
+		/* --app-sidebar-width is the single source of truth for the collapsed
+		   rail width — consumed by any component that offsets from it (cinema
+		   mode, full-bleed containers). Defined in tokens/layout.css. */
+		--rail-width-collapsed: var(--app-sidebar-width);
 		--rail-width-expanded: 240px;
 		--rail-glass-bg: color-mix(in oklch, var(--color-surface) 75%, transparent);
 		--rail-glass-border: color-mix(in oklch, var(--color-border) 50%, transparent);

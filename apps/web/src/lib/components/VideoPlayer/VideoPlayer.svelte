@@ -30,7 +30,8 @@
   import { createHlsPlayer } from './hls';
   import { createProgressTracker } from './progress.svelte.ts';
   import { loadPlayerPreferences, savePlayerPreferences } from './preferences';
-  import { AlertCircleIcon, CinemaIcon } from '$lib/components/ui/Icon';
+  import { AlertCircleIcon, CinemaIcon, PlayIcon } from '$lib/components/ui/Icon';
+  import { refreshStreamingUrl } from '$lib/remote/library.remote';
   import './styles.css';
 
   import type Hls from 'hls.js';
@@ -57,6 +58,13 @@
     oncinemachange?: (cinema: boolean) => void;
     /** Forwarded onto the wrapper element. R13: callers can style/layout this root. */
     class?: string;
+    /**
+     * ISO 8601 timestamp when `src` is expected to expire. Optional — when
+     * provided, the player schedules a pre-emptive refresh 60s before expiry
+     * so playback never hits a 403 in the first place. When omitted, the
+     * player still recovers reactively via the 403 / MEDIA_ERR_NETWORK path.
+     */
+    expiresAt?: string | null;
   }
 
   const {
@@ -69,13 +77,67 @@
     cinemaMode = false,
     oncinemachange,
     class: className,
+    expiresAt,
   }: Props = $props();
 
   let videoEl: HTMLVideoElement | undefined = $state();
   let wrapperEl: HTMLDivElement | undefined = $state();
   let hlsInstance: Hls | null = null;
+  let hlsCleanup: (() => void) | null = null;
+  /**
+   * Track the src we last handed to HLS.js so the src-change `$effect` below
+   * only reinitialises when the URL actually changes. Without this guard,
+   * any unrelated prop change would tear down and re-create the HLS instance
+   * mid-playback.
+   */
+  let lastInitialisedSrc: string | null = null;
+  /**
+   * Preserve playback position across a refresh-and-reload cycle. The 403
+   * recovery path destroys the HLS instance, which resets the video element;
+   * we capture the last known time right before teardown so the rebuilt
+   * player can seek back to it.
+   */
+  let lastCurrentTime = 0;
+  /**
+   * Guard against concurrent refresh attempts. If a 403 fires while we're
+   * already refreshing (e.g. races between multiple in-flight segments),
+   * we'd otherwise trigger a cascade of redundant server calls.
+   */
+  let refreshInFlight = false;
+  /** Pre-emptive refresh timer (browser setTimeout handle). */
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let loading = $state(true);
   let errorMessage = $state('');
+  /**
+   * Mid-playback buffering state. Distinct from `loading` (initial manifest +
+   * segment load). Driven by the native `waiting`/`playing` events. A short
+   * delay before flipping true prevents the gradient from flashing on
+   * micro-stalls (quality switches, sub-400ms buffer dips) — same rationale
+   * media-chrome uses for its own `loading-delay` default. Cleared on
+   * `playing` or `canplay` so we never get stuck if the events interleave.
+   */
+  let buffering = $state(false);
+  let bufferingTimer: ReturnType<typeof setTimeout> | null = null;
+  const BUFFERING_DELAY_MS = 400;
+  /**
+   * Latch that arms the buffering detector. Between `canplay` (first frame
+   * decodable) and first user `play`, HLS rapidly fires `waiting`/`playing`
+   * while it fills the buffer — without this latch, those oscillations would
+   * re-trigger the gradient overlay and cause visible flashing. Once the user
+   * has actually played, buffering is a real mid-playback stall and the
+   * gradient should show. Reset when `src` changes so a new video starts in
+   * thumbnail state.
+   */
+  let hasStartedPlayback = $state(false);
+  /**
+   * Trailing-edge debounce for volume preference writes. The native
+   * `volumechange` event fires at native input rate during slider drags
+   * (can hit 60 Hz), which would thrash localStorage. 250ms is long enough
+   * to coalesce a drag into one save and short enough that the user has
+   * already let go before the write lands. Ratechange stays undebounced —
+   * playback rate changes are discrete button clicks, not slider drags.
+   */
+  let volumeSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Playback & interaction state for premium controls
   let isPaused = $state(true);
@@ -124,6 +186,7 @@
 
   function handlePlay() {
     isPaused = false;
+    hasStartedPlayback = true;
     scheduleHideControls();
   }
 
@@ -175,13 +238,30 @@
     }
   }
 
-  // Double-tap seek (mobile)
+  // Double-tap seek (mobile) — unified input path.
+  //
+  // Decision (iter-09 audit): previously the video element had its own
+  // `onclick={togglePlay}` while the tap-zone handled `ontouchend`. On
+  // touch devices the browser synthesises a click ~300ms after touchend,
+  // which could fire AFTER a double-tap if timing landed near the boundary
+  // (double-tap called `preventDefault` on touchend, which suppresses that
+  // touch's synthetic click — but the PREVIOUS tap's synthetic click had
+  // already fired and reached the `<video>` underneath).
+  //
+  // Fix: remove `<video onclick>` entirely. The tap-zone now owns ALL
+  // single-tap play/pause AND double-tap seek. On desktop the tap-zone
+  // keeps `pointer-events: none` so clicks still reach media-chrome chrome
+  // behind it — but the wrapper carries an explicit `onclick` on the
+  // tap-zone for desktop single-click play/pause. One input path, zero
+  // double-fire risk. `lastTapSide` still tracks tap position so the
+  // double-tap direction is stable across the 300ms window.
   let lastTapTime = 0;
   let lastTapSide: 'left' | 'right' | null = null;
+  let lastTouchEndAt = 0;
   let seekIndicator = $state<'left' | 'right' | null>(null);
   let seekIndicatorTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function handleVideoTap(e: MouseEvent | TouchEvent) {
+  function handleVideoTap(e: TouchEvent) {
     if (!videoEl) return;
 
     const target = e.target as HTMLElement;
@@ -189,12 +269,15 @@
     if (target.closest('.video-player-controls-container')) return;
 
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const clientX = 'touches' in e ? e.changedTouches[0].clientX : e.clientX;
+    const clientX = e.changedTouches[0].clientX;
     const side = clientX < rect.left + rect.width / 2 ? 'left' : 'right';
     const now = Date.now();
+    lastTouchEndAt = now;
 
     if (now - lastTapTime < 300 && lastTapSide === side) {
-      // Double tap — seek
+      // Double tap — seek. preventDefault suppresses the synthetic click
+      // that would otherwise fire ~300ms later and cascade a play/pause
+      // toggle on top of the seek.
       e.preventDefault();
       if (side === 'left') {
         videoEl.currentTime = Math.max(0, videoEl.currentTime - 10);
@@ -208,6 +291,20 @@
       lastTapTime = now;
       lastTapSide = side;
     }
+  }
+
+  function handleTapZoneClick(e: MouseEvent) {
+    // Skip the synthetic click that immediately follows a real touch.
+    // Covers iOS + Android which dispatch a ghost click ~300ms after
+    // touchend; if we let it through, a double-tap that called
+    // preventDefault on touchend could still land a ghost click here from
+    // the *previous* tap in the pair.
+    if (Date.now() - lastTouchEndAt < 400) return;
+
+    const target = e.target as HTMLElement;
+    if (target.closest('.video-player-controls-container')) return;
+
+    togglePlay();
   }
 
   function showSeekIndicator(side: 'left' | 'right') {
@@ -225,6 +322,33 @@
 
   function handleCanPlay() {
     loading = false;
+    clearBuffering();
+  }
+
+  function clearBuffering() {
+    if (bufferingTimer) {
+      clearTimeout(bufferingTimer);
+      bufferingTimer = null;
+    }
+    buffering = false;
+  }
+
+  function handleWaiting() {
+    /* Only treat as buffering AFTER the user has actually started playback.
+       Between `canplay` and first `play`, HLS fires rapid waiting/playing
+       oscillations while filling the buffer — arming the overlay there
+       causes visible flashing. We're in thumbnail state at that point, so
+       the overlay should stay hidden anyway. */
+    if (loading || !hasStartedPlayback) return;
+    if (bufferingTimer) clearTimeout(bufferingTimer);
+    bufferingTimer = setTimeout(() => {
+      buffering = true;
+      bufferingTimer = null;
+    }, BUFFERING_DELAY_MS);
+  }
+
+  function handlePlaying() {
+    clearBuffering();
   }
 
   function handleError() {
@@ -232,6 +356,13 @@
       errorMessage = 'Failed to load video. Please check your connection and try again.';
     }
     loading = false;
+    // Null the HLS reference — the instance may already have been destroyed
+    // by hls.ts's fatal-error path, but the local reference is what the
+    // src-change $effect checks. Without this, navigating to a working video
+    // on the same component instance would take the `loadSource()` fast path
+    // on a dead instance and silently drop the new URL.
+    hlsInstance = null;
+    lastInitialisedSrc = null;
   }
 
   async function initPlayer() {
@@ -239,19 +370,35 @@
 
     loading = true;
     errorMessage = '';
+    hasStartedPlayback = false;
+    clearBuffering();
+    lastInitialisedSrc = src;
 
     try {
       // Import media-chrome dynamically on the client
       await import('media-chrome');
 
-      hlsInstance = await createHlsPlayer({
+      const handle = await createHlsPlayer({
         media: videoEl,
         src,
         onError: (msg) => {
           errorMessage = msg;
           loading = false;
+          // hls.ts destroys the instance internally before calling onError —
+          // null our reference so the src-change $effect takes the rebuild
+          // path instead of calling loadSource() on a dead instance.
+          hlsInstance = null;
+          lastInitialisedSrc = null;
+        },
+        onUrlExpired: () => {
+          // HLS.js path: instance has already been destroyed by hls.ts.
+          // Safari path: `<video>` is still attached. Either way we need a
+          // fresh URL + a new player instance pointing at it.
+          void handleUrlExpired();
         },
       });
+      hlsInstance = handle.hls;
+      hlsCleanup = handle.cleanup;
 
       // Set initial progress (resume position)
       if (initialProgress > 0) {
@@ -288,12 +435,19 @@
         }
       }
 
-      // Track volume changes for animated icon + preferences
+      // Track volume changes for animated icon + preferences. Icon state
+      // updates eagerly (every event) so the UI stays in lock-step with
+      // the slider; the localStorage write is debounced 250ms so a drag
+      // collapses into one save instead of up to 60 per second.
       videoEl.addEventListener('volumechange', () => {
         if (!videoEl) return;
         volumeLevel = videoEl.volume;
         isMuted = videoEl.muted;
-        savePlayerPreferences({ volume: videoEl.volume, muted: videoEl.muted });
+        if (volumeSaveTimer) clearTimeout(volumeSaveTimer);
+        volumeSaveTimer = setTimeout(() => {
+          if (!videoEl) return;
+          savePlayerPreferences({ volume: videoEl.volume, muted: videoEl.muted });
+        }, 250);
       });
       videoEl.addEventListener('ratechange', () => {
         if (videoEl) savePlayerPreferences({ playbackRate: videoEl.playbackRate });
@@ -306,30 +460,205 @@
     }
   }
 
-  async function retry() {
+  /**
+   * Tear down the current HLS.js instance (if any) AND the media-element
+   * error listener on the Safari native path. Called from `retry`,
+   * `handleUrlExpired`, the src-change effect, and `onDestroy` so the
+   * instance/listener are never orphaned.
+   */
+  function teardownHls() {
+    if (hlsCleanup) {
+      hlsCleanup();
+      hlsCleanup = null;
+    }
     if (hlsInstance) {
       hlsInstance.destroy();
       hlsInstance = null;
     }
-    await initPlayer();
+  }
+
+  /**
+   * Refresh the signed URL and reinitialise the player. Preserves
+   * currentTime so playback resumes where it was — the user should only
+   * see a brief buffering blip. Guarded by `refreshInFlight` so concurrent
+   * 403s don't stampede the access worker.
+   */
+  async function handleUrlExpired() {
+    if (refreshInFlight) return;
+    refreshInFlight = true;
+    try {
+      if (videoEl && Number.isFinite(videoEl.currentTime)) {
+        lastCurrentTime = videoEl.currentTime;
+      }
+      teardownHls();
+      const fresh = await refreshStreamingUrl(contentId);
+      if (!videoEl) return;
+      lastInitialisedSrc = fresh.streamingUrl;
+      loading = true;
+      errorMessage = '';
+      const handle = await createHlsPlayer({
+        media: videoEl,
+        src: fresh.streamingUrl,
+        onError: (msg) => {
+          errorMessage = msg;
+          loading = false;
+          // hls.ts destroys the instance internally before calling onError —
+          // null our reference so the src-change $effect takes the rebuild
+          // path instead of calling loadSource() on a dead instance.
+          hlsInstance = null;
+          lastInitialisedSrc = null;
+        },
+        onUrlExpired: () => {
+          void handleUrlExpired();
+        },
+      });
+      hlsInstance = handle.hls;
+      hlsCleanup = handle.cleanup;
+      if (lastCurrentTime > 0) {
+        const resumeAt = lastCurrentTime;
+        if (videoEl.readyState >= 1) {
+          videoEl.currentTime = resumeAt;
+        } else {
+          videoEl.addEventListener(
+            'loadedmetadata',
+            () => {
+              if (videoEl) videoEl.currentTime = resumeAt;
+            },
+            { once: true }
+          );
+        }
+      }
+      scheduleRefresh();
+    } catch {
+      errorMessage =
+        'Playback link expired and could not be refreshed. Please try again.';
+      loading = false;
+    } finally {
+      refreshInFlight = false;
+    }
+  }
+
+  /**
+   * Pre-emptive refresh — schedule a URL refresh 60s before `expiresAt`.
+   * Skips when `expiresAt` is unset or already past; the reactive 403 path
+   * still catches those cases. 60s is enough margin for a slow-network
+   * refresh to finish before the existing URL dies.
+   */
+  function scheduleRefresh() {
+    teardownRefresh();
+    if (!expiresAt) return;
+    const expiresMs = Date.parse(expiresAt);
+    if (!Number.isFinite(expiresMs)) return;
+    const refreshAt = expiresMs - 60_000;
+    const delay = refreshAt - Date.now();
+    if (delay <= 0) return;
+    refreshTimer = setTimeout(() => {
+      void handleUrlExpired();
+    }, delay);
+  }
+
+  function teardownRefresh() {
+    if (refreshTimer) {
+      clearTimeout(refreshTimer);
+      refreshTimer = null;
+    }
+  }
+
+  async function retry() {
+    // The Retry button most often fires because the URL expired, so
+    // refresh it before reinitialising — otherwise Retry would 403 again.
+    teardownHls();
+    try {
+      const fresh = await refreshStreamingUrl(contentId);
+      if (!videoEl) return;
+      lastInitialisedSrc = fresh.streamingUrl;
+      loading = true;
+      errorMessage = '';
+      const handle = await createHlsPlayer({
+        media: videoEl,
+        src: fresh.streamingUrl,
+        onError: (msg) => {
+          errorMessage = msg;
+          loading = false;
+          // hls.ts destroys the instance internally before calling onError —
+          // null our reference so the src-change $effect takes the rebuild
+          // path instead of calling loadSource() on a dead instance.
+          hlsInstance = null;
+          lastInitialisedSrc = null;
+        },
+        onUrlExpired: () => {
+          void handleUrlExpired();
+        },
+      });
+      hlsInstance = handle.hls;
+      hlsCleanup = handle.cleanup;
+      scheduleRefresh();
+    } catch {
+      // Refresh endpoint itself unreachable — fall back to the original
+      // src; the network blip that caused the error may have already
+      // recovered.
+      await initPlayer();
+    }
   }
 
   onMount(() => {
     initPlayer();
+    scheduleRefresh();
     document.addEventListener('fullscreenchange', handleFullscreenChange);
+  });
+
+  /**
+   * React to `src` prop changes. Parents update `src` when the server-side
+   * access flow re-runs (follow/subscribe unlock) and returns a freshly
+   * signed URL. Without this effect the player would keep streaming the
+   * old URL until unmounted.
+   */
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+    if (!videoEl) return;
+    if (!src) return;
+    if (src === lastInitialisedSrc) return;
+    // Belt-and-braces: any prior error forces a full rebuild, even if the
+    // error handlers failed to null `hlsInstance` for some reason. Otherwise
+    // a stuck-error state can stay visible after navigating to a new video.
+    if (hlsInstance && !errorMessage) {
+      lastInitialisedSrc = src;
+      hlsInstance.loadSource(src);
+      scheduleRefresh();
+    } else {
+      teardownHls();
+      void initPlayer();
+      scheduleRefresh();
+    }
+  });
+
+  /**
+   * React to `expiresAt` prop changes so the pre-emptive refresh timer
+   * always fires relative to the latest expiry (not a stale one).
+   */
+  $effect(() => {
+    void expiresAt;
+    if (typeof window === 'undefined') return;
+    scheduleRefresh();
   });
 
   onDestroy(() => {
     tracker.detach();
     clearHideTimer();
+    teardownRefresh();
     if (seekIndicatorTimer) clearTimeout(seekIndicatorTimer);
+    if (volumeSaveTimer) {
+      clearTimeout(volumeSaveTimer);
+      volumeSaveTimer = null;
+    }
+    if (bufferingTimer) {
+      clearTimeout(bufferingTimer);
+      bufferingTimer = null;
+    }
     if (typeof document !== 'undefined') {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
     }
-    if (hlsInstance) {
-      hlsInstance.destroy();
-      hlsInstance = null;
-    }
+    teardownHls();
   });
 
   /**
@@ -441,12 +770,27 @@
     class="video-player-status"
     role="status"
     aria-live="polite"
-    aria-busy={loading}
+    aria-busy={loading || buffering}
   >
-    {#if loading && !errorMessage}
-      <div class="video-player-loading">
-        <span class="sr-only">Loading video…</span>
-        <div class="video-player-loading-spinner" aria-hidden="true"></div>
+    {#if !errorMessage}
+      <!-- Single branded overlay for BOTH initial load AND mid-playback
+           buffering — replaces media-chrome's default spinner. Kept in the DOM
+           across state transitions so the gradient can softly crossfade to
+           the <video>'s native poster (initial) or the last-rendered frame
+           (buffering) underneath. Opacity animates over `--duration-slowest`,
+           then `pointer-events: none` releases clicks to the controls. Inner
+           animations pause when hidden so the compositor stops work. -->
+      <div
+        class="video-player-loading"
+        class:video-player-loading--hidden={!loading && !buffering}
+        aria-hidden={!loading && !buffering}
+      >
+        {#if loading}
+          <span class="sr-only">Loading video…</span>
+        {:else if buffering}
+          <span class="sr-only">Buffering…</span>
+        {/if}
+        <div class="video-player-loading-gradient" aria-hidden="true"></div>
       </div>
     {/if}
 
@@ -462,6 +806,26 @@
   </div>
 
   {#if !errorMessage}
+    <!-- Thumbnail "ready to play" affordance. Lives between load-complete and
+         first playback; fades in as the gradient fades out so both transitions
+         share the same duration/easing for a continuous curtain-up feel. When
+         hidden (loading OR playback has started), `pointer-events: none` lets
+         clicks fall through to the tap-zone inside `<media-controller>`, which
+         owns play/pause during playback. Keyboard users get the wrapper-level
+         Space/ArrowKeys shortcuts, plus direct focus here when visible. -->
+    <button
+      type="button"
+      class="video-player-play-overlay"
+      class:video-player-play-overlay--hidden={loading || hasStartedPlayback}
+      aria-label="Play video"
+      tabindex={loading || hasStartedPlayback ? -1 : 0}
+      onclick={togglePlay}
+    >
+      <span class="video-player-play-overlay-circle" aria-hidden="true">
+        <PlayIcon class="video-player-play-overlay-icon" />
+      </span>
+    </button>
+
     <!-- Click on video to toggle play/pause; keyboard equivalents live on the wrapper. -->
     <media-controller
       hotkeys="noarrowleft noarrowright nospace nom nof"
@@ -479,7 +843,8 @@
         onerror={handleError}
         onplay={handlePlay}
         onpause={handlePause}
-        onclick={togglePlay}
+        onwaiting={handleWaiting}
+        onplaying={handlePlaying}
       >
         {#if captions && captions.length > 0}
           {#each captions as track (track.srclang)}
@@ -494,13 +859,23 @@
         {/if}
       </video>
 
-      <media-loading-indicator slot="centered-chrome" noautohide></media-loading-indicator>
-
-      <!-- Double-tap seek zones (touch devices). aria-hidden decorative overlay;
-           CSS `pointer-events: none` by default, re-enabled only on coarse
-           pointer. Double-tap is discoverable as a mobile convention — sighted
-           screen-reader users have keyboard shortcuts (ArrowLeft/Right). -->
-      <div class="video-player-tap-zone" ontouchend={handleVideoTap} aria-hidden="true">
+      <!-- Unified tap/click zone. aria-hidden decorative overlay; owns ALL
+           single-tap play/pause + double-tap seek. Single path prevents the
+           iOS/Android synthetic click from racing a native click when the
+           video element owned `onclick` directly (iter-09 audit, Codex-04ozt).
+           Pointer-events are enabled on both coarse and fine pointers now that
+           this zone carries the click handler — media-chrome controls still
+           take priority via the `.closest('.video-player-controls-container')`
+           guard inside handleTapZoneClick/handleVideoTap. Sighted SR users
+           have keyboard shortcuts (Space/ArrowLeft/ArrowRight) scoped to the
+           wrapper — ref 05 §"Media elements" §3 — so this overlay does NOT
+           need its own key handlers. -->
+      <div
+        class="video-player-tap-zone"
+        onclick={handleTapZoneClick}
+        ontouchend={handleVideoTap}
+        aria-hidden="true"
+      >
         {#if seekIndicator === 'left'}
           <div class="video-player-seek-indicator video-player-seek-indicator--left">-10s</div>
         {/if}

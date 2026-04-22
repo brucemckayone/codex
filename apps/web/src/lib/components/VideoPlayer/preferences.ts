@@ -2,7 +2,7 @@ import { browser } from '$app/environment';
 
 const STORAGE_KEY = 'codex-player-prefs';
 
-export interface PlayerPreferences {
+interface PlayerPreferences {
   volume: number;
   muted: boolean;
   playbackRate: number;
@@ -21,9 +21,15 @@ export function loadPlayerPreferences(): PlayerPreferences {
     if (!raw) return DEFAULTS;
     const parsed = JSON.parse(raw);
     return {
-      volume: typeof parsed.volume === 'number' ? Math.max(0, Math.min(1, parsed.volume)) : DEFAULTS.volume,
+      volume:
+        typeof parsed.volume === 'number'
+          ? Math.max(0, Math.min(1, parsed.volume))
+          : DEFAULTS.volume,
       muted: typeof parsed.muted === 'boolean' ? parsed.muted : DEFAULTS.muted,
-      playbackRate: typeof parsed.playbackRate === 'number' ? parsed.playbackRate : DEFAULTS.playbackRate,
+      playbackRate:
+        typeof parsed.playbackRate === 'number'
+          ? parsed.playbackRate
+          : DEFAULTS.playbackRate,
     };
   } catch {
     return DEFAULTS;

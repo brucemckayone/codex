@@ -15,15 +15,66 @@ import type { CurrentSubscription, SubscriptionTier } from '$lib/types';
 import { createServerApi } from './api';
 import { ApiError } from './errors';
 
+/**
+ * Revocation reasons surfaced from `AccessDeniedError` when a previously-
+ * authorised user lost access (subscription cancelled, payment failed,
+ * refund, admin revoke). Mirrors the union in
+ * `packages/access/src/services/access-revocation.ts` — kept inline here
+ * rather than importing so the web app doesn't pull the server-only
+ * `@codex/access` package through the SSR bundle.
+ */
+export type AccessRevocationReason =
+  | 'subscription_deleted'
+  | 'payment_failed'
+  | 'refund'
+  | 'admin_revoke';
+
 interface AccessAndProgress {
   hasAccess: boolean;
   streamingUrl: string | null;
   waveformUrl: string | null;
+  /**
+   * ISO 8601 timestamp when the signed streaming/waveform URL expires.
+   * Null when the access branch doesn't produce a stream (access denied or
+   * call failed). Threaded into the player so it can pre-emptively refresh
+   * before the URL dies (Codex-1ywzr). Serialised as string rather than
+   * Date because SvelteKit devalue doesn't consistently round-trip Dates
+   * through streamed promise boundaries.
+   */
+  expiresAt: string | null;
+  /**
+   * Revocation reason extracted from a 403 `AccessDeniedError` response.
+   * Null on grant, generic denial (no reason), or any non-revocation error.
+   * Drives the contextual `AccessRevokedOverlay` copy on the content page
+   * — see Codex-zdf2u.
+   */
+  revocationReason: AccessRevocationReason | null;
   progress: {
     positionSeconds: number;
     durationSeconds: number;
     completed: boolean;
   } | null;
+}
+
+const REVOCATION_REASONS: ReadonlySet<AccessRevocationReason> = new Set([
+  'subscription_deleted',
+  'payment_failed',
+  'refund',
+  'admin_revoke',
+]);
+
+function extractRevocationReason(
+  error: unknown
+): AccessRevocationReason | null {
+  if (!ApiError.isApiError(error)) return null;
+  if (error.status !== 403) return null;
+  const details = error.details;
+  if (!details || typeof details !== 'object') return null;
+  const reason = (details as { reason?: unknown }).reason;
+  if (typeof reason !== 'string') return null;
+  return REVOCATION_REASONS.has(reason as AccessRevocationReason)
+    ? (reason as AccessRevocationReason)
+    : null;
 }
 
 export interface SubscriptionContext {
@@ -40,26 +91,87 @@ export interface SubscriptionContext {
 }
 
 /**
+ * `accessType` values recognised by the content schema. Mirrors the DB CHECK
+ * constraint in packages/database/src/schema/content.ts.
+ */
+export type ContentAccessType =
+  | 'free'
+  | 'paid'
+  | 'followers'
+  | 'subscribers'
+  | 'team';
+
+/**
+ * Free content is publicly readable — the body and metadata render for
+ * everyone regardless of auth. The media stream still requires an
+ * authenticated user (because signed R2 URLs are issued per-user), but the
+ * page shell should not be gated behind that.
+ *
+ * All other access types (paid / followers / subscribers / team) keep the
+ * body gated behind the authenticated access check: anonymous visitors see
+ * the paywall teaser, signed-in users fall through to `loadAccessAndProgress`
+ * which asks the backend authoritatively.
+ */
+export function isPublicAccessType(
+  accessType: string | null | undefined
+): boolean {
+  return accessType === 'free';
+}
+
+/**
  * Fetch streaming URL and playback progress for an authenticated user.
  *
  * Returns `{ hasAccess, streamingUrl, progress }`.
  * Gracefully handles 403 / network errors by returning hasAccess=false.
+ *
+ * `accessType` short-circuits the result for free content: `hasAccess` is
+ * forced to `true` even if the stream fetch fails, so the body stays visible
+ * when the stream worker is degraded. Authenticated streaming still runs so
+ * we can render the player when the URL is available.
  */
 export async function loadAccessAndProgress(
   contentId: string,
   platform: App.Platform | undefined,
-  cookies: Cookies
+  cookies: Cookies,
+  accessType?: string | null
 ): Promise<AccessAndProgress> {
   const api = createServerApi(platform, cookies);
 
-  const [streamResult, progressResult] = await Promise.all([
-    api.access.getStreamingUrl(contentId).catch(() => null),
+  // Capture the stream rejection separately so we can extract the
+  // revocation `reason` from AccessDeniedError without bubbling the error
+  // out of the server load. `.catch(() => null)` would swallow the detail
+  // — we need the ApiError instance.
+  type StreamResult = Awaited<ReturnType<typeof api.access.getStreamingUrl>>;
+  let streamResult: StreamResult | null = null;
+  let streamError: unknown = null;
+
+  const [, progressResult] = await Promise.all([
+    api.access
+      .getStreamingUrl(contentId)
+      .then((r) => {
+        streamResult = r;
+      })
+      .catch((err: unknown) => {
+        streamError = err;
+      }),
     api.access.getProgress(contentId).catch(() => null),
   ]);
 
-  const hasAccess = !!streamResult?.streamingUrl;
-  const streamingUrl = streamResult?.streamingUrl ?? null;
-  const waveformUrl = streamResult?.waveformUrl ?? null;
+  // A successful response from /stream means the access check passed,
+  // even when streamingUrl is null (written articles — no media to sign).
+  // Only a thrown error (403 denied, network failure) means no access.
+  const accessGranted = streamResult !== null;
+  const hasAccess = isPublicAccessType(accessType) || accessGranted;
+  const streamingUrl =
+    (streamResult as StreamResult | null)?.streamingUrl ?? null;
+  const waveformUrl =
+    (streamResult as StreamResult | null)?.waveformUrl ?? null;
+  // `expiresAt` comes back as an ISO 8601 string from the access worker
+  // (JSON-encoded Date). Preserve the string as-is for stable wire format.
+  const expiresAt = (streamResult as StreamResult | null)?.expiresAt ?? null;
+  const revocationReason = accessGranted
+    ? null
+    : extractRevocationReason(streamError);
   const progress = progressResult
     ? {
         positionSeconds: progressResult.positionSeconds,
@@ -68,7 +180,14 @@ export async function loadAccessAndProgress(
       }
     : null;
 
-  return { hasAccess, streamingUrl, waveformUrl, progress };
+  return {
+    hasAccess,
+    streamingUrl,
+    waveformUrl,
+    expiresAt,
+    revocationReason,
+    progress,
+  };
 }
 
 /**
@@ -183,8 +302,12 @@ export async function handlePurchaseAction({
     return { sessionUrl: result.sessionUrl };
   } catch (err) {
     if (err instanceof ApiError && err.status === 409) {
+      // 409 = "already have access" — not an error, it's a happy-path
+      // outcome the user simply didn't realise. Surface as an info banner
+      // with a "Play now" CTA rather than a red alert. Codex-mmju5.
       return fail(409, {
-        checkoutError: 'You already have access to this content.',
+        info: 'You already have access to this content.',
+        alreadyOwned: true,
       });
     }
 

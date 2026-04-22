@@ -11,13 +11,15 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import { enhance } from '$app/forms';
+  import { invalidate } from '$app/navigation';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
-  import { ContentDetailView } from '$lib/components/content';
-  import { ContentCard } from '$lib/components/ui/ContentCard';
+  import { ContentDetailView, RelatedContent } from '$lib/components/content';
   import { hydrateIfNeeded } from '$lib/collections';
   import { formatPrice } from '$lib/utils/format';
   import { buildContentUrl } from '$lib/utils/subdomain';
+  import { useSubscriptionContext } from '$lib/utils/subscription-context.svelte';
+  import type { AccessRevocationReason } from '$lib/server/content-detail';
   import type { PageData } from './$types';
 
   interface Props {
@@ -44,64 +46,38 @@
   /** Feature flag from org layout — when false, subscription UI is hidden */
   const enableSubscriptions = $derived(data.enableSubscriptions ?? true);
 
-  // Subscription context — resolves asynchronously without blocking render.
-  // Gate on enableSubscriptions: when disabled, never show subscription prompts.
-  // Writable $derived: resets to content-based defaults on navigation, overwritten by $effect below.
-  let subCtx = $derived({
-    requiresSubscription:
-      data.content.accessType === 'subscribers' || !!data.content.minimumTierId,
-    hasSubscription: false,
-    subscriptionCoversContent: false,
-  });
-
-  // Guard against stale promise resolution when navigating between content items.
-  // Without this, content A's subscriptionContext can resolve after navigating to B
-  // and overwrite B's subscription state with A's data.
-  let resolvedSubPromise: Promise<unknown> | null = null;
-
-  $effect(() => {
-    if (!enableSubscriptions) {
-      untrack(() => {
-        subCtx = {
-          requiresSubscription: false,
-          hasSubscription: false,
-          subscriptionCoversContent: false,
-        };
-        resolvedSubPromise = null;
-      });
-      return;
-    }
-    const promise = data.subscriptionContext;
-    untrack(() => {
-      if (promise && promise !== resolvedSubPromise) {
-        resolvedSubPromise = promise;
-        promise.then((ctx) => {
-          if (resolvedSubPromise === promise) {
-            subCtx = {
-              requiresSubscription: ctx.requiresSubscription,
-              hasSubscription: ctx.hasSubscription,
-              subscriptionCoversContent: ctx.subscriptionCoversContent,
-            };
-          }
-        });
-      } else if (!promise) {
-        subCtx = {
-          requiresSubscription:
-            data.content.accessType === 'subscribers' || !!data.content.minimumTierId,
-          hasSubscription: false,
-          subscriptionCoversContent: false,
-        };
-        resolvedSubPromise = null;
-      }
-    });
-  });
+  // Subscription context — shared composable (see
+  // `$lib/utils/subscription-context.svelte.ts`). Handles the two-layer
+  // promise-seeded + live-collection-override pattern and the stale-promise
+  // guard when navigating between content items.
+  const subscription = useSubscriptionContext(() => ({
+    subscriptionContext: data.subscriptionContext,
+    organizationId: data.content.organizationId,
+    enableSubscriptions,
+    accessType: data.content.accessType,
+    minimumTierId: data.content.minimumTierId,
+  }));
 
   // Access state — resolved reactively from the streaming promise.
   // A single ContentDetailView stays mounted; only these props change.
+  //
+  // `streamingExpiresAt` is the ISO 8601 expiry of the signed R2 URL from
+  // loadAccessAndProgress (Codex-1ywzr). Threaded into VideoPlayer /
+  // AudioPlayer so they can pre-emptively refresh before the signature
+  // lapses, and reactively refresh via the 403 / MEDIA_ERR_NETWORK path
+  // if the pre-emptive one doesn't fire (e.g. backgrounded tab).
   let accessState = $state({
-    hasAccess: false,
+    // Seeded from the server load: `hasAccess` may already be true for
+    // publicly-accessible content (accessType === 'free') even when the
+    // streaming promise is absent (unauthenticated visitor) or has yet to
+    // resolve. The $effect below keeps this in sync with the streamed
+    // result once it lands.
+    // svelte-ignore state_referenced_locally
+    hasAccess: data.hasAccess === true,
     streamingUrl: null as string | null,
     waveformUrl: null as string | null,
+    streamingExpiresAt: null as string | null,
+    revocationReason: null as AccessRevocationReason | null,
     progress: null as {
       positionSeconds: number;
       durationSeconds: number;
@@ -126,14 +102,23 @@
             accessState.hasAccess = result.hasAccess;
             accessState.streamingUrl = result.streamingUrl;
             accessState.waveformUrl = result.waveformUrl ?? null;
+            accessState.streamingExpiresAt = result.expiresAt ?? null;
+            accessState.revocationReason =
+              (result as { revocationReason?: AccessRevocationReason | null })
+                .revocationReason ?? null;
             accessState.progress = result.progress;
             accessState.loading = false;
           }
         });
       } else if (!promise) {
-        accessState.hasAccess = false;
+        // No streaming promise (unauthenticated visitor). Body access still
+        // follows the server-computed policy — keep it honest by reading
+        // data.hasAccess rather than forcing false.
+        accessState.hasAccess = data.hasAccess === true;
         accessState.streamingUrl = null;
         accessState.waveformUrl = null;
+        accessState.streamingExpiresAt = null;
+        accessState.revocationReason = null;
         accessState.progress = null;
         accessState.loading = false;
         resolvedPromise = null;
@@ -176,15 +161,24 @@
   accessLoading={accessState.loading}
   streamingUrl={accessState.streamingUrl}
   waveformUrl={accessState.waveformUrl}
+  streamingExpiresAt={accessState.streamingExpiresAt}
+  revocationReason={accessState.revocationReason}
+  onaccessrestored={() => {
+    // Clear the reason optimistically, then force a server-load re-run
+    // so the next streaming URL request can succeed. `app:auth` is the
+    // narrowest dep shared across content-detail loads.
+    accessState.revocationReason = null;
+    void invalidate('app:auth');
+  }}
   progress={accessState.progress}
   isAuthenticated={!!data.accessAndProgress}
   formResult={form}
   {purchasing}
   {creatorName}
   {titleSuffix}
-  requiresSubscription={subCtx.requiresSubscription}
-  hasSubscription={subCtx.hasSubscription}
-  subscriptionCoversContent={subCtx.subscriptionCoversContent}
+  requiresSubscription={subscription.subCtx.requiresSubscription}
+  hasSubscription={subscription.subCtx.hasSubscription}
+  subscriptionCoversContent={subscription.subCtx.subscriptionCoversContent}
 >
   {#snippet purchaseForm()}
     {#if accessState.loading}
@@ -232,31 +226,12 @@
     {@const filtered = relatedItems
       .filter((item) => item.id !== content.id && item.creator?.id === content.creator?.id)
       .slice(0, 4)}
-    {#if filtered.length > 0}
-      <section class="content-detail__related content-detail__related--streamed">
-        <h2 class="content-detail__related-heading">
-          {m.content_detail_more_from_creator({ creator: creatorName })}
-        </h2>
-        <div class="content-detail__related-grid">
-          {#each filtered as item (item.id)}
-            {@const mediaItem = item.mediaItem as { thumbnailUrl?: string | null; durationSeconds?: number | null } | null}
-            <ContentCard
-              id={item.id}
-              title={item.title}
-              thumbnail={mediaItem?.thumbnailUrl ?? null}
-              description={item.description}
-              contentType={item.contentType === 'written' ? 'article' : (item.contentType as 'video' | 'audio')}
-              duration={mediaItem?.durationSeconds ?? null}
-              href={buildContentUrl(page.url, item)}
-              price={item.priceCents != null
-                ? { amount: item.priceCents, currency: 'GBP' }
-                : null}
-              contentAccessType={item.accessType}
-            />
-          {/each}
-        </div>
-      </section>
-    {/if}
+    <RelatedContent
+      items={filtered}
+      {creatorName}
+      hrefBuilder={(item) => buildContentUrl(page.url, item)}
+      class="content-detail__related--streamed"
+    />
   {/if}
 {/await}
 {/key}
@@ -323,21 +298,9 @@
     padding: 0 var(--space-4) var(--space-8);
   }
 
-  .content-detail__related-heading {
-    font-size: var(--text-lg);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    margin: 0 0 var(--space-4);
-    padding-top: var(--space-6);
-    border-top: var(--border-width) var(--border-style) var(--color-border);
-  }
-
-  .content-detail__related-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: var(--space-4);
-  }
-
+  /* Skeleton row layout used by the {#await} pending state — the resolved
+     state renders via the shared <RelatedContent> component, so only the
+     skeleton selectors remain here. */
   .related-skeleton__header {
     padding-top: var(--space-6);
     margin-bottom: var(--space-4);
@@ -357,7 +320,6 @@
   }
 
   @media (--breakpoint-sm) {
-    .content-detail__related-grid,
     .related-skeleton__grid {
       grid-template-columns: repeat(2, 1fr);
     }
@@ -370,7 +332,6 @@
   }
 
   @media (--breakpoint-lg) {
-    .content-detail__related-grid,
     .related-skeleton__grid {
       grid-template-columns: repeat(4, 1fr);
     }

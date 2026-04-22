@@ -31,10 +31,22 @@ vi.mock('@codex/database', () => ({
 
 vi.mock('@codex/subscription', () => ({
   SubscriptionService: vi.fn(),
+  // The handler also imports `invalidateForUser` — stub it so the module
+  // mock is complete. Cache-invalidation contract is tested separately in
+  // `subscription-webhook-invalidation.test.ts`.
+  invalidateForUser: vi.fn(),
+}));
+
+// The subscription-webhook handler dispatches emails via `sendEmailToWorker`
+// from `@codex/worker-utils`. Mock it so no real fetch is attempted and so
+// the trial_will_end tests can assert on dispatch.
+vi.mock('@codex/worker-utils', () => ({
+  sendEmailToWorker: vi.fn(),
 }));
 
 import { createPerRequestDbClient } from '@codex/database';
 import { SubscriptionService } from '@codex/subscription';
+import { sendEmailToWorker } from '@codex/worker-utils';
 import { handleSubscriptionWebhook } from '../subscription-webhook';
 
 function createContext(
@@ -46,6 +58,15 @@ function createContext(
   const mock = createMockHonoContext<StripeWebhookEnv['Bindings']>({
     env: envOverrides,
   });
+  // Attach executionCtx — createMockHonoContext omits it by default.
+  // The webhook handler (since Codex-esikl) reads `c.executionCtx.waitUntil`
+  // to wire the SubscriptionService orchestrator hook. Tests in this file
+  // mock SubscriptionService so the waitUntil is never actually invoked,
+  // but we still need the property to exist for `.bind(c.executionCtx)`.
+  (mock as unknown as Record<string, unknown>).executionCtx = {
+    waitUntil: vi.fn(),
+    passThroughOnException: vi.fn(),
+  };
   return {
     context: mock as unknown as Context<StripeWebhookEnv>,
     mock,
@@ -61,6 +82,9 @@ describe('handleSubscriptionWebhook', () => {
   let mockHandleDeleted: ReturnType<typeof vi.fn>;
   let mockHandleInvoiceSuccess: ReturnType<typeof vi.fn>;
   let mockHandleInvoiceFailed: ReturnType<typeof vi.fn>;
+  let mockHandleTrialWillEnd: ReturnType<typeof vi.fn>;
+  let mockHandlePaused: ReturnType<typeof vi.fn>;
+  let mockHandleResumed: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -70,6 +94,9 @@ describe('handleSubscriptionWebhook', () => {
     mockHandleDeleted = vi.fn().mockResolvedValue(undefined);
     mockHandleInvoiceSuccess = vi.fn().mockResolvedValue(undefined);
     mockHandleInvoiceFailed = vi.fn().mockResolvedValue(undefined);
+    mockHandleTrialWillEnd = vi.fn().mockResolvedValue(undefined);
+    mockHandlePaused = vi.fn().mockResolvedValue(undefined);
+    mockHandleResumed = vi.fn().mockResolvedValue(undefined);
     mockCleanup = vi.fn();
     mockDb = { mock: 'database' };
 
@@ -93,8 +120,11 @@ describe('handleSubscriptionWebhook', () => {
       handleSubscriptionCreated: mockHandleCreated,
       handleSubscriptionUpdated: mockHandleUpdated,
       handleSubscriptionDeleted: mockHandleDeleted,
+      handleSubscriptionPaused: mockHandlePaused,
+      handleSubscriptionResumed: mockHandleResumed,
       handleInvoicePaymentSucceeded: mockHandleInvoiceSuccess,
       handleInvoicePaymentFailed: mockHandleInvoiceFailed,
+      handleTrialWillEnd: mockHandleTrialWillEnd,
     }));
   });
 
@@ -285,18 +315,118 @@ describe('handleSubscriptionWebhook', () => {
     });
   });
 
+  // ─── customer.subscription.trial_will_end (Codex-lvxev) ────────────────────
+  //
+  // Trial-will-end is handled but is a deliberate non-participant in the
+  // cache + revocation system:
+  //   - Service method (`handleTrialWillEnd`) is called with the Stripe
+  //     subscription object + webAppUrl.
+  //   - Email is dispatched via `sendEmailToWorker` when the service
+  //     returns an email payload.
+  //   - No revocation write, no cache bump — asserted at the service-level
+  //     orchestrator test; here we assert the handler returns 200 cleanly.
+  //   - Missing metadata (service returns undefined) is tolerated — no
+  //     crash, no email dispatch.
+
+  describe('customer.subscription.trial_will_end', () => {
+    it('positive: calls handleTrialWillEnd and dispatches email', async () => {
+      mockHandleTrialWillEnd.mockResolvedValueOnce({
+        userId: 'user_trial',
+        orgId: 'org_trial',
+        trialEndAt: new Date(),
+        email: {
+          to: 'trial@example.com',
+          toName: 'Trial User',
+          templateName: 'trial-ending-soon',
+          category: 'transactional',
+          userId: 'user_trial',
+          data: {
+            userName: 'Trial User',
+            planName: 'Basic',
+            trialEndDate: '01/01/2026',
+            manageUrl: 'https://example.com/account/subscriptions',
+          },
+        },
+      });
+
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_TRIAL_WILL_END, {
+        id: 'sub_trial_end_1',
+      });
+      const { context, mock } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      // Service method dispatched with the subscription object + webAppUrl.
+      expect(mockHandleTrialWillEnd).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'sub_trial_end_1' }),
+        expect.any(String)
+      );
+
+      // Email dispatched once via sendEmailToWorker.
+      expect(sendEmailToWorker).toHaveBeenCalledTimes(1);
+      expect(sendEmailToWorker).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({
+          templateName: 'trial-ending-soon',
+          to: 'trial@example.com',
+        })
+      );
+
+      // Logged at info level.
+      expect(mock._obs.info).toHaveBeenCalledWith(
+        'Subscription trial will end',
+        expect.objectContaining({ subscriptionId: 'sub_trial_end_1' })
+      );
+
+      // Access-reducing handlers MUST NOT be called for this event.
+      expect(mockHandleDeleted).not.toHaveBeenCalled();
+      expect(mockHandleUpdated).not.toHaveBeenCalled();
+      expect(mockHandleInvoiceFailed).not.toHaveBeenCalled();
+    });
+
+    it('negative: missing metadata (service returns undefined) → no email, still 200', async () => {
+      // Service returns undefined when metadata.codex_user_id is missing.
+      // The handler must not crash and must not dispatch an email.
+      mockHandleTrialWillEnd.mockResolvedValueOnce(undefined);
+
+      const event = createEvent(STRIPE_EVENTS.SUBSCRIPTION_TRIAL_WILL_END, {
+        id: 'sub_trial_end_noop',
+      });
+      const { context, mock } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mockHandleTrialWillEnd).toHaveBeenCalledTimes(1);
+      expect(sendEmailToWorker).not.toHaveBeenCalled();
+
+      // Handler still runs to completion and logs the info line.
+      expect(mock._obs.info).toHaveBeenCalledWith(
+        'Subscription trial will end',
+        expect.objectContaining({ subscriptionId: 'sub_trial_end_noop' })
+      );
+    });
+  });
+
   // ─── Unhandled event types ──────────────────────────────────────────────────
 
   describe('unhandled event types', () => {
     it('should log info for unrecognised event types', async () => {
-      const event = createEvent('customer.subscription.paused');
+      // Codex-a0vk2 added `customer.subscription.paused`, Codex-rh0on added
+      // `customer.subscription.resumed` — pick an event type that remains
+      // genuinely unhandled to preserve this test's contract (the switch's
+      // `default` arm). `pending_update_applied` is a real Stripe event the
+      // handler does not currently case on.
+      const event = createEvent('customer.subscription.pending_update_applied');
       const { context, mock } = createContext();
 
       await handleSubscriptionWebhook(event, mockStripe, context);
 
       expect(mock._obs.info).toHaveBeenCalledWith(
         'Unhandled subscription webhook event',
-        expect.objectContaining({ type: 'customer.subscription.paused' })
+        expect.objectContaining({
+          type: 'customer.subscription.pending_update_applied',
+        })
       );
     });
   });

@@ -83,6 +83,50 @@ export const getStreamingUrl = query(z.string().uuid(), async (contentId) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Refresh Streaming URL (client-callable)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Shape returned by `refreshStreamingUrl`. Mirrors `StreamingUrlResponse`
+ * minus `contentType` — callers already know the content type from their
+ * page data; the player only needs the URLs + expiry.
+ */
+export interface RefreshStreamingUrlResult {
+  streamingUrl: string;
+  waveformUrl: string | null;
+  expiresAt: string;
+}
+
+/**
+ * Refresh the signed streaming URL for a piece of content.
+ *
+ * Unlike {@link getStreamingUrl}, this is intended to be called from the
+ * browser at runtime when the existing URL's signature has expired — HLS.js
+ * saw a 403 on a segment fetch, or Safari native HLS surfaced
+ * MEDIA_ERR_NETWORK. The server re-runs the access check and returns a
+ * freshly signed URL with a new `expiresAt`.
+ *
+ * Declared as a `query()` rather than `command()` because the underlying
+ * access check is idempotent and does not mutate state. Callers that need
+ * to force a server round-trip can use the query cache's `refresh()`
+ * mechanism; in practice the Video/AudioPlayer call this fresh every time
+ * they need a new URL.
+ */
+export const refreshStreamingUrl = query(
+  z.string().uuid(),
+  async (contentId): Promise<RefreshStreamingUrlResult> => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    const result = await api.access.getStreamingUrl(contentId);
+    return {
+      streamingUrl: result.streamingUrl,
+      waveformUrl: result.waveformUrl,
+      expiresAt: result.expiresAt,
+    };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Playback Progress Query
 // ─────────────────────────────────────────────────────────────────────────────
 

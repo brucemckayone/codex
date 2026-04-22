@@ -36,13 +36,13 @@ export function clearClientState(): void {
   }
 }
 
-export type VersionMap = Record<string, string | null>;
+type VersionMap = Record<string, string | null>;
 
 /**
  * Read stored versions from localStorage.
  * Returns {} on SSR or parse error.
  */
-export function getStoredVersions(): Record<string, string> {
+function getStoredVersions(): Record<string, string> {
   if (!browser) return {};
   try {
     return JSON.parse(localStorage.getItem(MANIFEST_KEY) ?? '{}');

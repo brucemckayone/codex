@@ -59,6 +59,7 @@ import type {
   CreateSubscriptionCheckoutInput,
   CreateTierInput,
   ReactivateSubscriptionInput,
+  ResumeSubscriptionInput,
   UpdateBrandingInput,
   UpdateContactInput,
   UpdateFeaturesInput,
@@ -198,17 +199,31 @@ export function createServerApi(
     timer.end({ method: options?.method ?? 'GET', status: response.status });
 
     if (!response.ok) {
-      const error = (await response
-        .json()
-        .catch(() => ({ message: 'Unknown error' }))) as {
+      const body = (await response.json().catch(() => null)) as Record<
+        string,
+        unknown
+      > | null;
+      // Workers wrap errors in `{ error: { code, message, details } }`
+      // (see @codex/service-errors `mapErrorToResponse`). Older callers
+      // sometimes emit a flat `{ message, code }` shape (BetterAuth,
+      // non-procedure routes) — fall back gracefully.
+      const nested =
+        body && typeof body === 'object' && body.error
+          ? (body.error as {
+              code?: string;
+              message?: string;
+              details?: unknown;
+            })
+          : undefined;
+      const flat = body as {
         message?: string;
         code?: string;
-      };
-      throw new ApiError(
-        response.status,
-        error.message ?? 'API Error',
-        error.code
-      );
+        details?: unknown;
+      } | null;
+      const message = nested?.message ?? flat?.message ?? 'API Error';
+      const code = nested?.code ?? flat?.code;
+      const details = nested?.details ?? flat?.details;
+      throw new ApiError(response.status, message, code, details);
     }
 
     // Handle 204 No Content
@@ -290,17 +305,27 @@ export function createServerApi(
       timer.end({ method: options?.method ?? 'GET', status: response.status });
 
       if (!response.ok) {
-        const error = (await response
-          .json()
-          .catch(() => ({ message: 'Unknown error' }))) as {
+        const body = (await response.json().catch(() => null)) as Record<
+          string,
+          unknown
+        > | null;
+        const nested =
+          body && typeof body === 'object' && body.error
+            ? (body.error as {
+                code?: string;
+                message?: string;
+                details?: unknown;
+              })
+            : undefined;
+        const flat = body as {
           message?: string;
           code?: string;
-        };
-        throw new ApiError(
-          response.status,
-          error.message ?? 'API Error',
-          error.code
-        );
+          details?: unknown;
+        } | null;
+        const message = nested?.message ?? flat?.message ?? 'API Error';
+        const code = nested?.code ?? flat?.code;
+        const details = nested?.details ?? flat?.details;
+        throw new ApiError(response.status, message, code, details);
       }
 
       if (response.status === 204) {
@@ -1508,6 +1533,16 @@ export function createServerApi(
        */
       reactivate: (data: ReactivateSubscriptionInput) =>
         request<CurrentSubscription>('ecom', '/subscriptions/reactivate', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+
+      /**
+       * Resume a PAUSED subscription (user-initiated, parallel to reactivate
+       * but for the paused→active path rather than cancelling→active).
+       */
+      resume: (data: ResumeSubscriptionInput) =>
+        request<CurrentSubscription>('ecom', '/subscriptions/resume', {
           method: 'POST',
           body: JSON.stringify(data),
         }),

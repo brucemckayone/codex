@@ -6,7 +6,7 @@
  * creation of unused services and enabling proper cleanup.
  */
 
-import { ContentAccessService } from '@codex/access';
+import { AccessRevocation, ContentAccessService } from '@codex/access';
 import {
   AdminAnalyticsService,
   AdminContentManagementService,
@@ -76,7 +76,8 @@ export interface ServiceRegistryResult {
 export function createServiceRegistry(
   env: Bindings,
   _obs?: ObservabilityClient,
-  organizationId?: string
+  organizationId?: string,
+  executionCtx?: ExecutionContext
 ): ServiceRegistryResult {
   // Track cleanup functions for per-request DB clients
   const cleanupFns: Array<() => Promise<void>> = [];
@@ -272,11 +273,22 @@ export function createServiceRegistry(
           );
         }
 
+        // Wire AccessRevocation when CACHE_KV is bound so the progress
+        // save path (and, in a follow-up, streaming URL minting) can
+        // short-circuit on webhook-written revocation keys before hitting
+        // the DB. When KV is absent, the service still enforces the
+        // DB-level access check — revocation is defense-in-depth, not
+        // the primary gate.
+        const revocation = env.CACHE_KV
+          ? new AccessRevocation(env.CACHE_KV)
+          : undefined;
+
         _access = new ContentAccessService({
           db: getSharedDb(),
           environment: getEnvironment(),
           r2: r2Signer,
           purchaseService: registry.purchase,
+          revocation,
         });
       }
       return _access;
@@ -375,10 +387,29 @@ export function createServiceRegistry(
 
     get subscription() {
       if (!_subscription) {
+        // Wire the cache + waitUntil orchestrator hook when both are
+        // available so every public mutation on SubscriptionService
+        // bumps the per-user library + per-org subscription KV version
+        // keys fire-and-forget. When CACHE_KV is absent (local tests,
+        // misconfigured env) or there's no executionCtx (shouldn't
+        // happen inside `procedure()` but be defensive), the service
+        // silently degrades to no-op — the mutation still succeeds.
+        //
+        // Mirror of the AccessRevocation wiring on `access` above —
+        // same gating shape, same graceful-degrade semantics.
+        const cache = env.CACHE_KV
+          ? new VersionedCache({ kv: env.CACHE_KV, prefix: 'cache' })
+          : undefined;
+        const waitUntil = executionCtx
+          ? executionCtx.waitUntil.bind(executionCtx)
+          : undefined;
+
         _subscription = new SubscriptionService(
           {
             db: getSharedDb(),
             environment: getEnvironment(),
+            cache,
+            waitUntil,
           },
           getStripeClient()
         );

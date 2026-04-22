@@ -73,23 +73,172 @@
 .video-player-loading {
   position: absolute;
   inset: 0;
+  overflow: hidden;
+  background-color: var(--color-neutral-900);
+  opacity: 1;
+  /* `--ease-smooth` = cubic-bezier(0.16, 1, 0.3, 1), a decelerate-out curve
+     that moves a lot early and settles gently — reads like a "reveal" rather
+     than a uniform fade. `--duration-slowest` (800ms) is the reveal-class
+     token; both auto-collapse to ~0ms under reduced-motion via the global
+     token override in motion.css. */
+  transition: opacity var(--duration-slowest) var(--ease-smooth);
+}
+
+/* Revealed state after the player is ready: gradient dissolves to show the
+   <video>'s native poster (and, once `play` fires, the first frame). Inner
+   animations are paused so the compositor skips paint cycles on the hidden
+   layer. Pointer-events released so controls underneath stay clickable. */
+.video-player-loading--hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.video-player-loading--hidden .video-player-loading-gradient,
+.video-player-loading--hidden .video-player-loading-gradient::after {
+  animation-play-state: paused;
+}
+
+/* Branded gradient skeleton. Two layers:
+   1. Base drift — radial blobs of brand primary/secondary blended over the
+      player neutral via `color-mix` so organisations automatically tint it
+      without us hardcoding their hex. Drifts slowly on `background-position`.
+   2. Shimmer sweep — a diagonal pass matching the `Skeleton` primitive, tinted
+      with brand primary so it reads as branded rather than the generic white
+      skeleton used elsewhere.
+   Fallbacks: when `--color-brand-*` is unset (platform routes, not org), it
+   resolves to `--color-primary-*` — still on-palette, just not org-specific. */
+.video-player-loading-gradient {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      ellipse at 25% 35%,
+      color-mix(in oklch, var(--color-brand-primary, var(--color-primary-500)) 32%, transparent) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse at 75% 65%,
+      color-mix(in oklch, var(--color-brand-secondary, var(--color-primary-700)) 28%, transparent) 0%,
+      transparent 65%
+    ),
+    linear-gradient(
+      135deg,
+      var(--color-neutral-900) 0%,
+      color-mix(in oklch, var(--color-brand-primary, var(--color-primary-500)) 6%, var(--color-neutral-900)) 50%,
+      var(--color-neutral-900) 100%
+    );
+  background-size: 220% 220%, 220% 220%, 200% 200%;
+  animation: vp-loading-drift 8s ease-in-out infinite alternate;
+}
+
+.video-player-loading-gradient::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    transparent 0%,
+    color-mix(in oklch, var(--color-brand-primary, var(--color-primary-500)) 10%, transparent) 45%,
+    color-mix(in oklch, white 8%, transparent) 50%,
+    color-mix(in oklch, var(--color-brand-primary, var(--color-primary-500)) 10%, transparent) 55%,
+    transparent 100%
+  );
+  background-size: 220% 100%;
+  animation: vp-loading-shimmer 2.4s ease-in-out infinite;
+}
+
+@keyframes vp-loading-drift {
+  0%   { background-position: 0% 0%, 100% 100%, 0% 50%; }
+  100% { background-position: 100% 100%, 0% 0%, 100% 50%; }
+}
+
+@keyframes vp-loading-shimmer {
+  0%   { background-position: -120% 0; }
+  100% { background-position: 220% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .video-player-loading-gradient,
+  .video-player-loading-gradient::after {
+    animation: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Thumbnail play affordance (pre-play state)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* The full-area button catches clicks anywhere on the thumbnail. Its circle
+   child carries the visual weight. Fade-in matches the loading overlay's
+   fade-out (`--duration-slowest` + `--ease-smooth`) so both transitions read
+   as one continuous curtain-up. */
+.video-player-play-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--color-neutral-900);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  opacity: 1;
+  transition: opacity var(--duration-slowest) var(--ease-smooth);
 }
 
-.video-player-loading-spinner {
-  width: var(--space-12);
-  height: var(--space-12);
-  border: var(--border-width-thick) solid hsl(0 0% 100% / var(--media-loading-spinner-bg));
-  border-top-color: var(--color-brand-primary, var(--color-primary-500));
+.video-player-play-overlay--hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Circular glass affordance. Brand-tinted border + backdrop blur give it a
+   premium feel without fighting the poster. Scales up slightly on hover as a
+   micro-interaction cue. */
+.video-player-play-overlay-circle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-20);
+  height: var(--space-20);
   border-radius: var(--radius-full);
-  animation: vp-spin var(--duration-slower) linear infinite;
+  background: color-mix(in oklch, var(--color-neutral-900) 55%, transparent);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  border: var(--border-width) solid color-mix(in oklch, var(--color-brand-primary, var(--color-primary-500)) 60%, transparent);
+  box-shadow:
+    0 0 0 var(--border-width) color-mix(in oklch, var(--color-neutral-50) 10%, transparent),
+    var(--shadow-lg);
+  transition:
+    transform var(--duration-slow) var(--ease-smooth),
+    background-color var(--duration-slow) var(--ease-smooth),
+    border-color var(--duration-slow) var(--ease-smooth);
 }
 
-@keyframes vp-spin {
-  to { transform: rotate(360deg); }
+.video-player-play-overlay:hover .video-player-play-overlay-circle,
+.video-player-play-overlay:focus-visible .video-player-play-overlay-circle {
+  transform: scale(1.06);
+  background: color-mix(in oklch, var(--color-brand-primary, var(--color-primary-500)) 70%, var(--color-neutral-900));
+  border-color: color-mix(in oklch, var(--color-brand-primary, var(--color-primary-500)) 90%, white);
+}
+
+.video-player-play-overlay:focus-visible {
+  outline: none;
+}
+
+.video-player-play-overlay-icon {
+  width: var(--space-8);
+  height: var(--space-8);
+  color: var(--color-player-text);
+  /* Optical centering — the triangular play glyph's visual mass sits left of
+     its geometric centre, so a small nudge right makes it look centred. */
+  transform: translateX(2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .video-player-play-overlay:hover .video-player-play-overlay-circle,
+  .video-player-play-overlay:focus-visible .video-player-play-overlay-circle {
+    transform: none;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -669,15 +818,6 @@ media-controller video {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- * Loading indicator
- * ═══════════════════════════════════════════════════════════════════════════ */
-
-media-loading-indicator {
-  --media-loading-indicator-icon-width: var(--space-12);
-  --media-loading-indicator-icon-height: var(--space-12);
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
  * Mobile / touch
  * ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -717,17 +857,17 @@ media-loading-indicator {
  * Double-tap seek zones + indicator
  * ═══════════════════════════════════════════════════════════════════════════ */
 
+/* Unified tap/click zone owns single-tap play/pause AND double-tap seek.
+   Pointer-events stay auto on all devices (iter-09 audit) so desktop click
+   hits this layer first rather than the video beneath, eliminating the
+   touch→click double-fire we had when `<video>` also listened. Controls
+   container lives at a higher z-index so `.closest()` inside the handlers
+   still defers to media-chrome chrome. */
 .video-player-tap-zone {
   position: absolute;
   inset: 0;
   z-index: 1;
-  pointer-events: none;
-}
-
-@media (pointer: coarse) {
-  .video-player-tap-zone {
-    pointer-events: auto;
-  }
+  pointer-events: auto;
 }
 
 .video-player-seek-indicator {
@@ -829,10 +969,5 @@ media-loading-indicator {
 
   .video-player-mini-progress {
     transition: none;
-  }
-
-  /* Keep spinner motion as a "work is happening" cue, but slow it so it isn't distracting. */
-  .video-player-loading-spinner {
-    animation-duration: 2s;
   }
 }

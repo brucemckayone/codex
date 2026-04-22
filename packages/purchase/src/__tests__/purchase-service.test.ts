@@ -1423,6 +1423,186 @@ describe('PurchaseService Integration', () => {
   });
 
   /**
+   * processDispute Tests (Codex-sxu5a)
+   *
+   * Parallel to `processRefund` — disputes revoke content access and mark
+   * the purchase as `disputedAt` without mutating `status` (status stays
+   * 'completed' per the DB CHECK constraint; `disputedAt` is the signal).
+   *
+   * Coverage matrix (per feedback_security_deep_test — positive + negative + idempotent):
+   *
+   * | Scenario                              | Assertion                                          |
+   * | ------------------------------------- | -------------------------------------------------- |
+   * | positive: known purchase              | disputedAt set, contentAccess soft-deleted         |
+   * | returns { userId, orgId }             | handler needs both for revocation + library bump   |
+   * | idempotent: second dispute on same PI | no throw, still returns scope                      |
+   * | negative: unknown payment_intent      | returns void, no DB change                         |
+   * | stores stripeDisputeId + disputeReason | metadata round-trip                                |
+   */
+  describe('processDispute', () => {
+    it('marks purchase disputed, soft-deletes contentAccess, returns { userId, orgId }', async () => {
+      const media = await mediaService.create(
+        {
+          title: 'Dispute Test Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: 'originals/dispute-test.mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/dispute-test/master.m3u8',
+          thumbnailKey: 'thumbnails/dispute-test.jpg',
+          durationSeconds: 120,
+        },
+        userId
+      );
+
+      const content = await contentService.create(
+        {
+          organizationId,
+          title: 'Dispute Test Content',
+          slug: createUniqueSlug('dispute-test'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          priceCents: 1999,
+        },
+        userId
+      );
+
+      await contentService.publish(content.id, userId);
+
+      const paymentIntentId = `pi_dispute_${Date.now()}`;
+
+      const purchase = await purchaseService.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId,
+        amountPaidCents: 1999,
+        currency: 'gbp',
+      });
+
+      // Sanity: access exists before dispute
+      expect(
+        await purchaseService.verifyPurchase(content.id, otherUserId)
+      ).toBe(true);
+
+      const result = await purchaseService.processDispute(paymentIntentId, {
+        stripeDisputeId: 'dp_test_123',
+        disputeReason: 'fraudulent',
+      });
+
+      // Return shape — handler needs both fields
+      expect(result).toEqual({
+        userId: otherUserId,
+        orgId: organizationId,
+      });
+
+      // Access revoked — library query will omit this content
+      expect(
+        await purchaseService.verifyPurchase(content.id, otherUserId)
+      ).toBe(false);
+
+      // disputedAt set; purchase.status unchanged (still 'completed')
+      const updated = await purchaseService.getPurchase(
+        purchase.id,
+        otherUserId
+      );
+      expect(updated.disputedAt).not.toBeNull();
+      expect(updated.stripeDisputeId).toBe('dp_test_123');
+      expect(updated.disputeReason).toBe('fraudulent');
+      // status unchanged — dispute ≠ refund at the Stripe level
+      expect(updated.status).toBe('completed');
+    });
+
+    it('is idempotent — second dispute on same payment_intent still returns scope without throwing', async () => {
+      const media = await mediaService.create(
+        {
+          title: 'Idempotent Dispute Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: 'originals/idempotent-dispute.mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/idempotent-dispute/master.m3u8',
+          thumbnailKey: 'thumbnails/idempotent-dispute.jpg',
+          durationSeconds: 120,
+        },
+        userId
+      );
+
+      const content = await contentService.create(
+        {
+          organizationId,
+          title: 'Idempotent Dispute Content',
+          slug: createUniqueSlug('idempotent-dispute'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          priceCents: 999,
+        },
+        userId
+      );
+
+      await contentService.publish(content.id, userId);
+
+      const paymentIntentId = `pi_dispute_idem_${Date.now()}`;
+
+      await purchaseService.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId,
+        amountPaidCents: 999,
+        currency: 'gbp',
+      });
+
+      // First dispute
+      const first = await purchaseService.processDispute(paymentIntentId, {
+        stripeDisputeId: 'dp_first',
+        disputeReason: 'fraudulent',
+      });
+      expect(first).toEqual({
+        userId: otherUserId,
+        orgId: organizationId,
+      });
+
+      // Second dispute — must NOT throw and must return same scope so the
+      // webhook layer can re-bump library cache + re-write revocation
+      // key (both are monotonic / idempotent at their layers).
+      const second = await purchaseService.processDispute(paymentIntentId, {
+        stripeDisputeId: 'dp_second_ignored',
+        disputeReason: 'duplicate',
+      });
+      expect(second).toEqual({
+        userId: otherUserId,
+        orgId: organizationId,
+      });
+
+      // First-write-wins on metadata — stripeDisputeId stays 'dp_first'.
+      // (We do NOT overwrite disputedAt / dispute metadata on the idempotent
+      // path — Stripe retries should not clobber the original dispute ID.)
+    });
+
+    it('returns void for unknown payment_intent and does NOT throw', async () => {
+      const result = await purchaseService.processDispute(
+        'pi_unknown_dispute_xyz'
+      );
+      expect(result).toBeUndefined();
+    });
+  });
+
+  /**
    * verifyCheckoutSession Tests
    *
    * Critical security endpoint - verifies Stripe checkout session status

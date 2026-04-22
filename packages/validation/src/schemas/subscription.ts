@@ -11,7 +11,7 @@ import { checkoutRedirectUrlSchema } from './purchase';
  * Database constraint alignment:
  * - subscription_tiers.sort_order: positive integer (CHECK sort_order > 0)
  * - subscription_tiers.price_monthly/annual: non-negative integer in pence
- * - subscriptions.status: 'active' | 'past_due' | 'cancelling' | 'cancelled' | 'incomplete'
+ * - subscriptions.status: 'active' | 'past_due' | 'cancelling' | 'cancelled' | 'incomplete' | 'paused'
  * - subscriptions.billing_interval: 'month' | 'year'
  * - stripe_connect_accounts.status: 'onboarding' | 'active' | 'restricted' | 'disabled'
  *
@@ -26,7 +26,7 @@ import { checkoutRedirectUrlSchema } from './purchase';
 // ============================================================================
 
 export const subscriptionStatusEnum = z.enum(
-  ['active', 'past_due', 'cancelling', 'cancelled', 'incomplete'],
+  ['active', 'past_due', 'cancelling', 'cancelled', 'incomplete', 'paused'],
   { message: 'Invalid subscription status' }
 );
 
@@ -128,6 +128,10 @@ export const reactivateSubscriptionSchema = z.object({
   organizationId: uuidSchema,
 });
 
+export const resumeSubscriptionSchema = z.object({
+  organizationId: uuidSchema,
+});
+
 // ============================================================================
 // Query Schemas
 // ============================================================================
@@ -183,6 +187,7 @@ export type CancelSubscriptionInput = z.infer<typeof cancelSubscriptionSchema>;
 export type ReactivateSubscriptionInput = z.infer<
   typeof reactivateSubscriptionSchema
 >;
+export type ResumeSubscriptionInput = z.infer<typeof resumeSubscriptionSchema>;
 export type ListSubscribersQueryInput = z.infer<
   typeof listSubscribersQuerySchema
 >;

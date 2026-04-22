@@ -25,4 +25,32 @@
   --container-lg: var(--breakpoint-lg);
   --container-xl: var(--breakpoint-xl);
   --container-max: 80rem;    /* 1280px max content width */
+
+  /* ========================================
+   * APP CHROME WIDTHS
+   * ========================================
+   * Sidebar rail width — single source of truth consumed by SidebarRail
+   * and by any component that needs to offset from it (cinema mode, full-
+   * bleed containers). Mobile collapses to 0 via the (--below-md) query
+   * below, since the rail is display:none on narrow viewports.
+   */
+  --app-sidebar-width: var(--space-16);  /* 64px collapsed rail */
+
+  /* ========================================
+   * PLAYER HEIGHTS
+   * ========================================
+   * Audio player pinned height — shared by the skeleton and the live
+   * player wrapper to prevent CLS on mount (Codex-qlvth). Sized to the
+   * real player composition: body padding (2 × --space-5 = 40px) +
+   * waveform (--space-24 = 96px) + controls row (~40px) ≈ 176-192px.
+   */
+  --player-height-audio: 12rem;  /* 192px */
+}
+
+@media (--below-md) {
+  :root {
+    /* Sidebar rail is display:none below md — collapse its width token so
+       consumers (cinema mode calc, etc) reclaim the full viewport. */
+    --app-sidebar-width: 0px;
+  }
 }

@@ -11,15 +11,12 @@ export { default as CheckIcon } from './CheckIcon.svelte';
 export { default as ChevronDownIcon } from './ChevronDownIcon.svelte';
 export { default as ChevronLeftIcon } from './ChevronLeftIcon.svelte';
 export { default as ChevronRightIcon } from './ChevronRightIcon.svelte';
-export { default as ChevronsLeftIcon } from './ChevronsLeftIcon.svelte';
-export { default as ChevronsRightIcon } from './ChevronsRightIcon.svelte';
 export { default as ChevronUpIcon } from './ChevronUpIcon.svelte';
 export { default as CinemaIcon } from './CinemaIcon.svelte';
 // Shapes
 export { default as CircleIcon } from './CircleIcon.svelte';
 export { default as ClockIcon } from './ClockIcon.svelte';
 export { default as CoinsIcon } from './CoinsIcon.svelte';
-export { default as CommandIcon } from './CommandIcon.svelte';
 export { default as CompassIcon } from './CompassIcon.svelte';
 export { default as CopyIcon } from './CopyIcon.svelte';
 // Layout / sidebar
@@ -35,7 +32,6 @@ export { default as FileTextIcon } from './FileTextIcon.svelte';
 export { default as FilmIcon } from './FilmIcon.svelte';
 export { default as GlobeIcon } from './GlobeIcon.svelte';
 export { default as HomeIcon } from './HomeIcon.svelte';
-export { default as IconBase } from './IconBase.svelte';
 export { default as ImageIcon } from './ImageIcon.svelte';
 // Social
 export { default as InstagramIcon } from './InstagramIcon.svelte';
@@ -48,7 +44,6 @@ export { default as LogInIcon } from './LogInIcon.svelte';
 export { default as MaximizeIcon } from './MaximizeIcon.svelte';
 export { default as MenuIcon } from './MenuIcon.svelte';
 export { default as MicIcon } from './MicIcon.svelte';
-export { default as MinusCircleIcon } from './MinusCircleIcon.svelte';
 export { default as MinusIcon } from './MinusIcon.svelte';
 export { default as MoonIcon } from './MoonIcon.svelte';
 export { default as MoreHorizontalIcon } from './MoreHorizontalIcon.svelte';
@@ -66,7 +61,6 @@ export { default as TagIcon } from './TagIcon.svelte';
 export { default as TrashIcon } from './TrashIcon.svelte';
 export { default as TrendingUpIcon } from './TrendingUpIcon.svelte';
 export { default as TwitterIcon } from './TwitterIcon.svelte';
-export type { IconProps } from './types';
 export { default as UploadIcon } from './UploadIcon.svelte';
 // User
 export { default as UserIcon } from './UserIcon.svelte';
@@ -74,7 +68,6 @@ export { default as UserPlusIcon } from './UserPlusIcon.svelte';
 export { default as UsersIcon } from './UsersIcon.svelte';
 export { default as VideoIcon } from './VideoIcon.svelte';
 export { default as Volume2Icon } from './Volume2Icon.svelte';
-export { default as VolumeIcon } from './VolumeIcon.svelte';
 export { default as VolumeXIcon } from './VolumeXIcon.svelte';
 export { default as XIcon } from './XIcon.svelte';
 export { default as YoutubeIcon } from './YoutubeIcon.svelte';

@@ -32,6 +32,28 @@ describe('ApiError', () => {
 
       expect(error.code).toBeUndefined();
     });
+
+    it('carries structured details when provided (Codex-zdf2u)', () => {
+      const details = {
+        reason: 'subscription_deleted',
+        organizationId: 'org-1',
+      };
+      const error = new ApiError(
+        403,
+        'Access revoked',
+        'ACCESS_DENIED',
+        details
+      );
+
+      expect(error.details).toEqual(details);
+      expect(error.code).toBe('ACCESS_DENIED');
+      expect(error.status).toBe(403);
+    });
+
+    it('leaves details undefined when omitted', () => {
+      const error = new ApiError(404, 'Not found');
+      expect(error.details).toBeUndefined();
+    });
   });
 
   describe('isApiError', () => {

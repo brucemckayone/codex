@@ -9,12 +9,21 @@
   @prop {'default' | 'prominent'} variant - Layout variant. 'prominent' uses larger min-width and bottom border.
 -->
 <script lang="ts">
-  import type { LibraryItem } from '$lib/collections';
+  import {
+    subscriptionCollection,
+    useLiveQuery,
+    type LibraryItem,
+    type SubscriptionItem,
+  } from '$lib/collections';
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import Carousel from '$lib/components/carousel/Carousel.svelte';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { buildContentUrl } from '$lib/utils/subdomain';
+  import {
+    getLibraryAccessState,
+    indexSubscriptionsBySlug,
+  } from '$lib/subscription/library-access';
 
   interface Props {
     items: LibraryItem[];
@@ -40,9 +49,27 @@
   });
 
   const itemMinWidth = $derived(variant === 'prominent' ? '280px' : '240px');
+
+  // Subscription-backed access state (Codex-k7ppt).
+  const subsQuery = useLiveQuery(
+    (q) => q.from({ sub: subscriptionCollection }),
+    undefined,
+    { ssrData: [] as SubscriptionItem[] }
+  );
+
+  const subsBySlug = $derived(
+    indexSubscriptionsBySlug((subsQuery.data ?? []) as SubscriptionItem[])
+  );
 </script>
 
 {#snippet renderItem(item: LibraryItem)}
+  {@const access = getLibraryAccessState(
+    {
+      accessType: item.accessType,
+      organizationSlug: item.content.organizationSlug ?? null,
+    },
+    subsBySlug
+  )}
   <ContentCard
     variant="resume"
     id={item.content.id}
@@ -52,6 +79,8 @@
     duration={item.content.durationSeconds}
     progress={item.progress}
     href={buildContentUrl(page.url, item.content)}
+    accessState={access.kind}
+    accessStatePeriodEnd={access.kind === 'cancelling' ? access.periodEnd : null}
   />
 {/snippet}
 

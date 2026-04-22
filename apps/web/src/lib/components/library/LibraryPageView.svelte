@@ -39,6 +39,12 @@
   import { ViewToggle } from '$lib/components/ui/ViewToggle';
   import { BackToTop } from '$lib/components/ui/BackToTop';
   import { useViewMode } from '$lib/utils/view-mode.svelte';
+  import { subscriptionCollection, useLiveQuery } from '$lib/collections';
+  import type { SubscriptionItem } from '$lib/collections';
+  import {
+    indexSubscriptionsBySlug,
+    getLibraryAccessState,
+  } from '$lib/subscription/library-access';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -125,6 +131,33 @@
     unavailable: m.library_error_unavailable(),
     default: m.library_error_default(),
   });
+
+  // ── Subscription-backed access state join (Codex-k7ppt) ─────────────────
+  // Live query over subscriptionCollection so cards flip to 'cancelling' /
+  // 'revoked' in real time when a Stripe webhook reconciles the row. No data
+  // during SSR — decoration only, so an empty fallback is safe.
+  const subsQuery = useLiveQuery(
+    (q) => q.from({ sub: subscriptionCollection }),
+    undefined,
+    { ssrData: [] as SubscriptionItem[] }
+  );
+
+  const subsBySlug = $derived(
+    indexSubscriptionsBySlug((subsQuery.data ?? []) as SubscriptionItem[])
+  );
+
+  function stateForItem(item: Props['items'][number]) {
+    const accessType = (item as { accessType?: string }).accessType;
+    const organizationSlug =
+      (item.content as { organizationSlug?: string | null }).organizationSlug ?? null;
+    if (accessType !== 'purchased' && accessType !== 'membership' && accessType !== 'subscription') {
+      return { kind: 'active' as const };
+    }
+    return getLibraryAccessState(
+      { accessType, organizationSlug },
+      subsBySlug
+    );
+  }
 </script>
 
 <div class="library">
@@ -146,7 +179,7 @@
     />
   {:else if isLoading && items.length === 0}
     <div class="content-grid content-grid--compact">
-      {#each Array(6) as _}
+      {#each Array(6) as _, i (i)}
         <SkeletonContentCard />
       {/each}
     </div>
@@ -197,6 +230,7 @@
     {:else}
       <div class="content-grid content-grid--compact" data-view={viewMode}>
         {#each items as item (item.content.id)}
+          {@const access = stateForItem(item)}
           <ContentCard
             id={item.content.id}
             title={item.content.title}
@@ -204,8 +238,11 @@
             contentType={(item.content.contentType === 'written' ? 'article' : item.content.contentType) as 'video' | 'audio' | 'article'}
             duration={item.content.durationSeconds}
             progress={item.progress}
-            accessType={item.accessType}
+            purchased={item.accessType === 'purchased'}
+            included={item.accessType === 'subscription' || item.accessType === 'membership'}
             href={buildItemHref(item)}
+            accessState={access.kind}
+            accessStatePeriodEnd={access.kind === 'cancelling' ? access.periodEnd : null}
           />
         {/each}
       </div>

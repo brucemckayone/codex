@@ -27,5 +27,4 @@ describe('remote/org.remote', () => {
     const { getOrgSettings } = await import('./org.remote');
     expect(getOrgSettings).toBeDefined();
   });
-
 });

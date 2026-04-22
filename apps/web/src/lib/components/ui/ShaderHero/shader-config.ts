@@ -50,7 +50,7 @@ export type ShaderPresetId =
   | 'none';
 
 /** Shared configuration fields present on all presets. */
-export interface ShaderConfigBase {
+interface ShaderConfigBase {
   preset: ShaderPresetId;
   intensity: number;
   grain: number;
@@ -162,7 +162,7 @@ export interface SilkConfig extends ShaderConfigBase {
   lining: number;
 }
 
-export interface GlassConfig extends ShaderConfigBase {
+interface GlassConfig extends ShaderConfigBase {
   preset: 'glass';
   cellSize: number;
   border: number;
@@ -171,7 +171,7 @@ export interface GlassConfig extends ShaderConfigBase {
   light: number;
 }
 
-export interface FilmConfig extends ShaderConfigBase {
+interface FilmConfig extends ShaderConfigBase {
   preset: 'film';
   filmScale: number;
   filmSpeed: number;
@@ -199,7 +199,7 @@ export interface LavaConfig extends ShaderConfigBase {
   heat: number;
 }
 
-export interface CausticConfig extends ShaderConfigBase {
+interface CausticConfig extends ShaderConfigBase {
   preset: 'caustic';
   scale: number;
   speed: number;
@@ -208,7 +208,7 @@ export interface CausticConfig extends ShaderConfigBase {
   ripple: number;
 }
 
-export interface PhysarumConfig extends ShaderConfigBase {
+interface PhysarumConfig extends ShaderConfigBase {
   preset: 'physarum';
   diffusion: number;
   decay: number;
@@ -217,7 +217,7 @@ export interface PhysarumConfig extends ShaderConfigBase {
   turn: number;
 }
 
-export interface RainConfig extends ShaderConfigBase {
+interface RainConfig extends ShaderConfigBase {
   preset: 'rain';
   density: number;
   speed: number;
@@ -226,7 +226,7 @@ export interface RainConfig extends ShaderConfigBase {
   blur: number;
 }
 
-export interface FrostConfig extends ShaderConfigBase {
+interface FrostConfig extends ShaderConfigBase {
   preset: 'frost';
   growth: number;
   branch: number;
@@ -235,7 +235,7 @@ export interface FrostConfig extends ShaderConfigBase {
   glow: number;
 }
 
-export interface GlowConfig extends ShaderConfigBase {
+interface GlowConfig extends ShaderConfigBase {
   preset: 'glow';
   count: number;
   pulse: number;
@@ -443,7 +443,7 @@ export interface PlasmaConfig extends ShaderConfigBase {
   diffusion: number;
 }
 
-export interface NoneConfig extends ShaderConfigBase {
+interface NoneConfig extends ShaderConfigBase {
   preset: 'none';
 }
 

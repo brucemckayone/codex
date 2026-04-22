@@ -16,9 +16,18 @@
 
   const { data }: Props = $props();
 
+  // If the webhook hasn't fired yet (verification null / retries exhausted)
+  // but we still have a contentSlug from the URL, route the user back to the
+  // content page anyway — the access check on that page will gate streaming
+  // and it's a more useful destination than /library. buildContentUrl uses
+  // `slug ?? id` for the path so we pass the slug in both slots when the
+  // verified id isn't available yet (typed fallback, not a real navigation id).
   const contentUrl = $derived(
-    data.contentSlug && data.verification?.content
-      ? buildContentUrl(page.url, { slug: data.contentSlug, id: data.verification.content.id })
+    data.contentSlug
+      ? buildContentUrl(page.url, {
+          slug: data.contentSlug,
+          id: data.verification?.content?.id ?? data.contentSlug
+        })
       : '/library'
   );
 </script>

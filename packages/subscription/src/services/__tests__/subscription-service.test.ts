@@ -295,6 +295,36 @@ describe('SubscriptionService', () => {
       // Should not throw — just returns silently
       await service.handleSubscriptionCreated(mockSub);
     });
+
+    // Codex-0g6yq: the created handler must return { userId, orgId } so the
+    // webhook route bumps both library and per-org subscription caches.
+    it('should return { userId, orgId } extracted from Stripe metadata', async () => {
+      const { org, tier1 } = await createFullOrg('wh-created-return-shape');
+      const mockSub = createMockStripeSubscription({
+        metadata: {
+          codex_user_id: otherCreatorId,
+          codex_organization_id: org.id,
+          codex_tier_id: tier1.id,
+        },
+      }) as unknown as Stripe.Subscription;
+
+      const result = await service.handleSubscriptionCreated(mockSub);
+
+      expect(result).toBeDefined();
+      expect(result?.userId).toBe(otherCreatorId);
+      expect(result?.orgId).toBe(org.id);
+    });
+
+    it('should return void (undefined) when metadata is missing (negative path)', async () => {
+      // Negative path — malformed/early webhook legitimately has no context,
+      // and the route's invalidateForUser will skip since ids are missing.
+      const mockSub = createMockStripeSubscription({
+        metadata: {},
+      }) as unknown as Stripe.Subscription;
+
+      const result = await service.handleSubscriptionCreated(mockSub);
+      expect(result).toBeUndefined();
+    });
   });
 
   // ─── membership role hierarchy ────────────────────────────────────
@@ -720,6 +750,51 @@ describe('SubscriptionService', () => {
       } as unknown as Stripe.Subscription);
       // No throw = pass
     });
+
+    // Codex-0g6yq: return shape carries { userId, orgId } pulled from the DB
+    // row (not Stripe metadata — metadata may be empty on update events).
+    it('should return { userId, orgId } from the matched DB subscription', async () => {
+      const { org, tier1 } = await createFullOrg('wh-updated-return-shape');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const result = await service.handleSubscriptionUpdated({
+        id: sub.stripeSubscriptionId,
+        status: 'active',
+        cancel_at_period_end: false,
+        metadata: {}, // Empty — orgId must come from DB lookup, not metadata
+        items: {
+          data: [
+            {
+              current_period_start: Math.floor(Date.now() / 1000),
+              current_period_end: Math.floor(Date.now() / 1000) + 86400,
+            },
+          ],
+        },
+      } as unknown as Stripe.Subscription);
+
+      expect(result).toBeDefined();
+      expect(result?.userId).toBe(otherCreatorId);
+      expect(result?.orgId).toBe(org.id);
+    });
+
+    it('should return undefined when the subscription is not found (negative path)', async () => {
+      const result = await service.handleSubscriptionUpdated({
+        id: 'sub_unknown_shape_negative',
+        status: 'active',
+        cancel_at_period_end: false,
+        metadata: {},
+        items: { data: [{ current_period_start: 0, current_period_end: 0 }] },
+      } as unknown as Stripe.Subscription);
+
+      expect(result).toBeUndefined();
+    });
   });
 
   // ─── handleSubscriptionDeleted ────────────────────────────────────
@@ -747,6 +822,220 @@ describe('SubscriptionService', () => {
         .where(eq(subscriptions.id, sub.id));
       expect(updated.status).toBe('cancelled');
       expect(updated.cancelledAt).not.toBeNull();
+    });
+
+    // Codex-0g6yq: the deleted handler extracts { userId, orgId } from Stripe
+    // metadata — Stripe preserves subscription metadata on cancellation.
+    it('should return { userId, orgId } extracted from Stripe metadata', async () => {
+      const { org, tier1 } = await createFullOrg('wh-deleted-return-shape');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'cancelling',
+          })
+        )
+        .returning();
+
+      const result = await service.handleSubscriptionDeleted({
+        id: sub.stripeSubscriptionId,
+        metadata: {
+          codex_user_id: otherCreatorId,
+          codex_organization_id: org.id,
+          codex_tier_id: tier1.id,
+        },
+      } as unknown as Stripe.Subscription);
+
+      expect(result.userId).toBe(otherCreatorId);
+      expect(result.orgId).toBe(org.id);
+    });
+
+    it('should return { userId: undefined, orgId: undefined } when metadata is absent (negative path)', async () => {
+      // Negative path — subscription was created before metadata was stamped
+      // (legacy data). Handler must still update the DB row and return an
+      // object so the route code paths remain uniform; ids are undefined so
+      // invalidateForUser skips the cache bump per its documented contract.
+      const { org, tier1 } = await createFullOrg('wh-deleted-no-metadata');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'cancelling',
+          })
+        )
+        .returning();
+
+      const result = await service.handleSubscriptionDeleted({
+        id: sub.stripeSubscriptionId,
+        metadata: {},
+      } as unknown as Stripe.Subscription);
+
+      expect(result.userId).toBeUndefined();
+      expect(result.orgId).toBeUndefined();
+    });
+  });
+
+  // ─── handleSubscriptionPaused (Codex-a0vk2) ────────────────────────
+  //
+  // `customer.subscription.paused` is access-reducing but NOT terminal:
+  // the subscription row is flipped to status='paused' and access is revoked
+  // for the paused window. A sibling bead (Codex-rh0on) handles the
+  // `customer.subscription.resumed` event that flips status back to 'active'.
+  //
+  // Contract (positive + negative per feedback_security_deep_test):
+  //   1. Positive path: event with a known subscription + metadata →
+  //      DB row flips to 'paused', return shape = { userId, orgId }.
+  //   2. Negative path: metadata missing → still flip the row (the
+  //      stripeSubscriptionId is authoritative) but return ids undefined
+  //      so downstream invalidation + revocation helpers skip.
+  describe('handleSubscriptionPaused', () => {
+    it('should flip status to paused and return { userId, orgId }', async () => {
+      const { org, tier1 } = await createFullOrg('wh-paused');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const result = await service.handleSubscriptionPaused({
+        id: sub.stripeSubscriptionId,
+        metadata: {
+          codex_user_id: otherCreatorId,
+          codex_organization_id: org.id,
+          codex_tier_id: tier1.id,
+        },
+      } as unknown as Stripe.Subscription);
+
+      expect(result.userId).toBe(otherCreatorId);
+      expect(result.orgId).toBe(org.id);
+
+      const { eq } = await import('drizzle-orm');
+      const [updated] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.id, sub.id));
+      expect(updated.status).toBe('paused');
+      // cancelledAt must NOT be set — pause is not a cancellation.
+      expect(updated.cancelledAt).toBeNull();
+    });
+
+    it('should return ids undefined when metadata is absent (negative path)', async () => {
+      // Negative path — webhook arrives without metadata (legacy data or
+      // malformed event). Handler must still flip the DB row (Stripe id is
+      // authoritative) and return a result object; undefined ids naturally
+      // gate out the invalidation + revocation helpers.
+      const { org, tier1 } = await createFullOrg('wh-paused-no-metadata');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const result = await service.handleSubscriptionPaused({
+        id: sub.stripeSubscriptionId,
+        metadata: {},
+      } as unknown as Stripe.Subscription);
+
+      expect(result.userId).toBeUndefined();
+      expect(result.orgId).toBeUndefined();
+
+      // DB row still flipped — Stripe id drives the UPDATE, not metadata.
+      const { eq } = await import('drizzle-orm');
+      const [updated] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.id, sub.id));
+      expect(updated.status).toBe('paused');
+    });
+  });
+
+  // ─── handleSubscriptionResumed (Codex-rh0on) ───────────────────────
+  //
+  // `customer.subscription.resumed` is the access-RESTORING counterpart to
+  // `customer.subscription.paused`. The row flips from status='paused' back
+  // to status='active' (or whatever status Stripe reports — expected
+  // 'active'). The webhook layer clears the revocation key written by the
+  // earlier pause event.
+  //
+  // Contract (positive + negative per feedback_security_deep_test):
+  //   1. Positive path: paused subscription + metadata + Stripe status=active
+  //      → DB row flips to 'active', return shape = { userId, orgId }.
+  //   2. Negative path: metadata missing → still flip the row (Stripe id is
+  //      authoritative) but return ids undefined so the webhook's
+  //      clearAccess helper skips and doesn't crash.
+  describe('handleSubscriptionResumed', () => {
+    it('should flip status from paused back to active and return { userId, orgId }', async () => {
+      const { org, tier1 } = await createFullOrg('wh-resumed');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'paused',
+          })
+        )
+        .returning();
+
+      const result = await service.handleSubscriptionResumed({
+        id: sub.stripeSubscriptionId,
+        status: 'active',
+        metadata: {
+          codex_user_id: otherCreatorId,
+          codex_organization_id: org.id,
+          codex_tier_id: tier1.id,
+        },
+      } as unknown as Stripe.Subscription);
+
+      expect(result.userId).toBe(otherCreatorId);
+      expect(result.orgId).toBe(org.id);
+
+      const { eq } = await import('drizzle-orm');
+      const [updated] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.id, sub.id));
+      expect(updated.status).toBe('active');
+      // cancelledAt must stay NULL — resume is not a cancellation.
+      expect(updated.cancelledAt).toBeNull();
+    });
+
+    it('should return ids undefined when metadata is absent (negative path)', async () => {
+      // Negative path — resume event without metadata (legacy data or
+      // malformed event). Handler must still flip the DB row (Stripe id is
+      // authoritative) and return a result object; undefined ids naturally
+      // gate out the invalidation + clear-access helpers.
+      const { org, tier1 } = await createFullOrg('wh-resumed-no-metadata');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'paused',
+          })
+        )
+        .returning();
+
+      const result = await service.handleSubscriptionResumed({
+        id: sub.stripeSubscriptionId,
+        status: 'active',
+        metadata: {},
+      } as unknown as Stripe.Subscription);
+
+      expect(result.userId).toBeUndefined();
+      expect(result.orgId).toBeUndefined();
+
+      // DB row still flipped back to active — Stripe id drives the UPDATE,
+      // not metadata.
+      const { eq } = await import('drizzle-orm');
+      const [updated] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.id, sub.id));
+      expect(updated.status).toBe('active');
     });
   });
 
@@ -804,6 +1093,28 @@ describe('SubscriptionService', () => {
         )
       ).rejects.toThrow(TierNotFoundError);
     });
+
+    // Codex-0g6yq: return shape carries { userId, orgId } so the route handler
+    // can feed invalidateForUser without re-fetching. See
+    // docs/subscription-cache-audit/phase-1-p0.md.
+    it('should return { userId, orgId, subscription } with org matching the subscription', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('change-return-shape');
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
+
+      const result = await service.changeTier(
+        otherCreatorId,
+        org.id,
+        tier2.id,
+        'month'
+      );
+
+      expect(result.userId).toBe(otherCreatorId);
+      expect(result.orgId).toBe(org.id);
+      expect(result.subscription.organizationId).toBe(org.id);
+      expect(result.subscription.userId).toBe(otherCreatorId);
+    });
   });
 
   // ─── cancelSubscription ───────────────────────────────────────────
@@ -843,6 +1154,28 @@ describe('SubscriptionService', () => {
       await expect(
         service.cancelSubscription(thirdUserId, org.id)
       ).rejects.toThrow(SubscriptionNotFoundError);
+    });
+
+    // Codex-0g6yq: return shape carries { userId, orgId } so the route handler
+    // can feed invalidateForUser without re-fetching.
+    it('should return { userId, orgId, subscription } with org matching the subscription', async () => {
+      const { org, tier1 } = await createFullOrg('cancel-return-shape');
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          status: 'active',
+        })
+      );
+
+      const result = await service.cancelSubscription(
+        otherCreatorId,
+        org.id,
+        'shape-test'
+      );
+
+      expect(result.userId).toBe(otherCreatorId);
+      expect(result.orgId).toBe(org.id);
+      expect(result.subscription.organizationId).toBe(org.id);
+      expect(result.subscription.userId).toBe(otherCreatorId);
     });
   });
 
@@ -889,6 +1222,152 @@ describe('SubscriptionService', () => {
       await expect(
         service.reactivateSubscription(otherCreatorId, org.id)
       ).rejects.toThrow(SubscriptionCheckoutError);
+    });
+
+    // Codex-0g6yq: return shape carries { userId, orgId } so the route handler
+    // can feed invalidateForUser without re-fetching.
+    it('should return { userId, orgId, subscription } with org matching the subscription', async () => {
+      const { org, tier1 } = await createFullOrg('react-return-shape');
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          status: 'cancelling',
+        })
+      );
+
+      const result = await service.reactivateSubscription(
+        otherCreatorId,
+        org.id
+      );
+
+      expect(result.userId).toBe(otherCreatorId);
+      expect(result.orgId).toBe(org.id);
+      expect(result.subscription.organizationId).toBe(org.id);
+      expect(result.subscription.userId).toBe(otherCreatorId);
+    });
+  });
+
+  // ─── resumeSubscription (Codex-7h4vo) ─────────────────────────────
+  //
+  // User-initiated resume of a PAUSED subscription. Parallel to
+  // reactivateSubscription but for the paused→active transition.
+  // Positive + negative paths per feedback_security_deep_test:
+  //   - Positive: paused sub flipped to active; Stripe resume called;
+  //     return shape carries { userId, orgId, subscription }.
+  //   - Negative: no subscription → SubscriptionNotFoundError.
+  //   - Negative: subscription exists but status is 'active' (not paused)
+  //     → SubscriptionNotFoundError (the query whitelists PAUSED only).
+  //   - Negative: subscription belongs to a different user (scoping)
+  //     → SubscriptionNotFoundError.
+
+  describe('resumeSubscription', () => {
+    it('should call stripe.subscriptions.resume and flip status to ACTIVE', async () => {
+      const { org, tier1 } = await createFullOrg('resume-ok');
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          status: 'paused',
+        })
+      );
+
+      await service.resumeSubscription(otherCreatorId, org.id);
+
+      // Stripe resume must be called with billing_cycle_anchor='unchanged'
+      // to preserve the existing cycle (avoids surprise re-billing) and
+      // with an idempotency key per packages/subscription/CLAUDE.md.
+      expect(stripe.subscriptions.resume).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ billing_cycle_anchor: 'unchanged' }),
+        expect.objectContaining({
+          idempotencyKey: expect.stringContaining('resume_'),
+        })
+      );
+
+      const { eq, and } = await import('drizzle-orm');
+      const [updated] = await db
+        .select()
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.userId, otherCreatorId),
+            eq(subscriptions.organizationId, org.id)
+          )
+        );
+      expect(updated.status).toBe('active');
+    });
+
+    it('should return { userId, orgId, subscription } with org matching the subscription', async () => {
+      const { org, tier1 } = await createFullOrg('resume-shape');
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          status: 'paused',
+        })
+      );
+
+      const result = await service.resumeSubscription(otherCreatorId, org.id);
+
+      expect(result.userId).toBe(otherCreatorId);
+      expect(result.orgId).toBe(org.id);
+      expect(result.subscription.organizationId).toBe(org.id);
+      expect(result.subscription.userId).toBe(otherCreatorId);
+    });
+
+    it('should throw SubscriptionNotFoundError when no subscription exists', async () => {
+      const { org } = await createFullOrg('resume-none');
+
+      await expect(
+        service.resumeSubscription(thirdUserId, org.id)
+      ).rejects.toThrow(SubscriptionNotFoundError);
+
+      // Stripe must NOT be touched on the negative path.
+      expect(stripe.subscriptions.resume).not.toHaveBeenCalled();
+    });
+
+    it('should throw SubscriptionNotFoundError when subscription status is not paused (e.g. active)', async () => {
+      const { org, tier1 } = await createFullOrg('resume-wrong-status');
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          status: 'active',
+        })
+      );
+
+      // Throws because the lookup whitelists PAUSED only. Matches the
+      // "must be in the expected state" contract used by reactivate.
+      await expect(
+        service.resumeSubscription(otherCreatorId, org.id)
+      ).rejects.toThrow(SubscriptionNotFoundError);
+
+      expect(stripe.subscriptions.resume).not.toHaveBeenCalled();
+    });
+
+    it('should enforce user scoping: a different user cannot resume the subscription', async () => {
+      const { org, tier1 } = await createFullOrg('resume-scope');
+      // otherCreatorId owns the paused subscription.
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          status: 'paused',
+        })
+      );
+
+      // thirdUserId attempts to resume — the query filters by userId so
+      // this surfaces as NotFound (no information disclosure, matches
+      // the behaviour of getSubscriptionOrThrow).
+      await expect(
+        service.resumeSubscription(thirdUserId, org.id)
+      ).rejects.toThrow(SubscriptionNotFoundError);
+
+      expect(stripe.subscriptions.resume).not.toHaveBeenCalled();
+
+      // And the paused subscription must remain paused.
+      const { eq, and } = await import('drizzle-orm');
+      const [row] = await db
+        .select()
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.userId, otherCreatorId),
+            eq(subscriptions.organizationId, org.id)
+          )
+        );
+      expect(row.status).toBe('paused');
     });
   });
 
@@ -1043,6 +1522,248 @@ describe('SubscriptionService', () => {
       // Should not throw — logs warning and returns
       await service.handleInvoicePaymentSucceeded(mockInvoice);
       expect(stripe.transfers.create).not.toHaveBeenCalled();
+    });
+
+    // Codex-0g6yq: explicit { userId, orgId } return-shape assertions for the
+    // initial (subscription_create) invoice and the renewal (subscription_cycle)
+    // invoice. Negative path: unknown subscription returns undefined rather
+    // than throwing. See docs/subscription-cache-audit/phase-1-p0.md.
+    it('should return { userId, orgId } for an initial invoice (subscription_create)', async () => {
+      const { org, tier1 } = await createFullOrg('invoice-success-initial');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        billing_reason: 'subscription_create',
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const result = await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      expect(result).toBeDefined();
+      expect(result?.userId).toBe(otherCreatorId);
+      expect(result?.orgId).toBe(org.id);
+    });
+
+    it('should return { userId, orgId } for a renewal invoice (subscription_cycle)', async () => {
+      const { org, tier1 } = await createFullOrg('invoice-success-renewal');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        billing_reason: 'subscription_cycle',
+        customer_email: 'renewal@example.com',
+        customer_name: 'Renewal User',
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const result = await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      expect(result).toBeDefined();
+      expect(result?.userId).toBe(otherCreatorId);
+      expect(result?.orgId).toBe(org.id);
+      // Renewal invoices also attach an email payload (not required for
+      // invalidation but confirms the handler walked the full renewal branch).
+      expect(result?.email).toBeDefined();
+    });
+
+    it('should return undefined for an invoice whose subscription is not in the DB', async () => {
+      // Negative path per feedback_security_deep_test — service must not
+      // crash when a webhook arrives before the DB subscription exists.
+      const mockInvoice = createMockStripeInvoice({
+        parent: {
+          subscription_details: { subscription: 'sub_no_match_in_db_xyz' },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const result = await service.handleInvoicePaymentSucceeded(mockInvoice);
+      expect(result).toBeUndefined();
+    });
+  });
+
+  // ─── handleInvoicePaymentFailed ───────────────────────────────────
+
+  describe('handleInvoicePaymentFailed', () => {
+    // Codex-0g6yq: the failed-invoice handler must surface { userId, orgId }
+    // so the route bumps both library and per-org subscription caches —
+    // users need their UI to reflect past_due state across devices.
+    it('should return { userId, orgId } when the subscription exists', async () => {
+      const { org, tier1 } = await createFullOrg('invoice-failed-positive');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_due: 499,
+        customer_email: 'fail@example.com',
+        customer_name: 'Fail User',
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const result = await service.handleInvoicePaymentFailed(mockInvoice);
+
+      expect(result).toBeDefined();
+      expect(result?.userId).toBe(otherCreatorId);
+      expect(result?.orgId).toBe(org.id);
+
+      // Sanity check: status should be flipped to past_due as a side effect.
+      const { eq } = await import('drizzle-orm');
+      const [updated] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.id, sub.id));
+      expect(updated.status).toBe('past_due');
+    });
+
+    it('should return { userId: undefined, orgId: undefined } for an unknown subscription', async () => {
+      // Negative path — webhook for a subscription that never reached our DB.
+      // Handler must not crash; userId/orgId are undefined so the route
+      // skips the cache bump (documented semantics of invalidateForUser).
+      const mockInvoice = createMockStripeInvoice({
+        customer_email: 'unknown@example.com',
+        parent: {
+          subscription_details: { subscription: 'sub_unknown_failed_xyz' },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const result = await service.handleInvoicePaymentFailed(mockInvoice);
+
+      // email may still be built (we have customer_email) but ids are absent.
+      expect(result).toBeDefined();
+      expect(result?.userId).toBeUndefined();
+      expect(result?.orgId).toBeUndefined();
+    });
+  });
+
+  // ─── handleTrialWillEnd (Codex-lvxev) ─────────────────────────────────
+  //
+  // `customer.subscription.trial_will_end` fires ~3 days before a trial
+  // ends. Access is NOT changing — the user is still in the trial. Contract
+  // for this handler:
+  //   1. Extracts { userId, orgId } from Stripe metadata → returns alongside
+  //      a `trialEndAt` Date and an email payload.
+  //   2. Missing metadata → returns `undefined` (webhook still returns 200).
+  //   3. Does NOT invalidate caches (asserted in the orchestrator test,
+  //      where the cache spy is wired in — this integration test uses a
+  //      real DB path without the cache hook).
+  //
+  // Positive + negative per feedback_security_deep_test.
+  describe('handleTrialWillEnd', () => {
+    it('should return { userId, orgId, trialEndAt, email } when metadata is present', async () => {
+      const { org, tier1 } = await createFullOrg('trial-will-end-positive');
+      const trialEndUnix = Math.floor(Date.now() / 1000) + 3 * 24 * 60 * 60;
+
+      const mockSub = createMockStripeSubscription({
+        metadata: {
+          codex_user_id: otherCreatorId,
+          codex_organization_id: org.id,
+          codex_tier_id: tier1.id,
+        },
+        trial_end: trialEndUnix,
+      }) as unknown as Stripe.Subscription;
+
+      const result = await service.handleTrialWillEnd(
+        mockSub,
+        'https://example.com'
+      );
+
+      expect(result).toBeDefined();
+      expect(result?.userId).toBe(otherCreatorId);
+      expect(result?.orgId).toBe(org.id);
+      expect(result?.trialEndAt).toBeInstanceOf(Date);
+      expect(result?.trialEndAt.getTime()).toBe(trialEndUnix * 1000);
+
+      // Email payload uses the trial-ending-soon template (may not exist
+      // yet — notifications service warns + skips send in that case; still
+      // a well-formed payload here).
+      expect(result?.email?.templateName).toBe('trial-ending-soon');
+      expect(result?.email?.category).toBe('transactional');
+      expect(result?.email?.data).toMatchObject({
+        planName: 'Basic',
+      });
+      expect(result?.email?.data.trialEndDate).toBeDefined();
+      expect(result?.email?.data.manageUrl).toBe(
+        'https://example.com/account/subscriptions'
+      );
+    });
+
+    it('should return undefined when metadata is missing userId', async () => {
+      // Negative path — webhook with no codex_user_id. Handler must return
+      // undefined so the webhook still completes with 200. No DB writes,
+      // no email dispatched by the caller (handler returns void).
+      const mockSub = createMockStripeSubscription({
+        metadata: {},
+      }) as unknown as Stripe.Subscription;
+
+      const result = await service.handleTrialWillEnd(mockSub);
+      expect(result).toBeUndefined();
+    });
+
+    it('should return undefined when metadata is missing orgId', async () => {
+      const mockSub = createMockStripeSubscription({
+        metadata: { codex_user_id: otherCreatorId },
+      }) as unknown as Stripe.Subscription;
+
+      const result = await service.handleTrialWillEnd(mockSub);
+      expect(result).toBeUndefined();
+    });
+
+    it('should NOT flip subscription status when trial_will_end fires', async () => {
+      // Access continues — this handler must not mutate the local
+      // subscription record. Create a subscription, fire trial_will_end,
+      // assert status is unchanged.
+      const { org, tier1 } = await createFullOrg('trial-will-end-no-status');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const mockSub = createMockStripeSubscription({
+        id: sub.stripeSubscriptionId,
+        metadata: {
+          codex_user_id: otherCreatorId,
+          codex_organization_id: org.id,
+          codex_tier_id: tier1.id,
+        },
+      }) as unknown as Stripe.Subscription;
+
+      await service.handleTrialWillEnd(mockSub);
+
+      const { eq } = await import('drizzle-orm');
+      const [after] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.id, sub.id));
+      expect(after.status).toBe('active');
     });
   });
 });

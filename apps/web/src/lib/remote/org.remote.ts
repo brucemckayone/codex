@@ -90,7 +90,7 @@ interface PublicOrgInfo {
  * Get public org info by slug — no auth required.
  * Uses createServerApi but doesn't require cookies.
  */
-export const getPublicOrgInfo = query(z.string().min(1), async (slug) => {
+const getPublicOrgInfo = query(z.string().min(1), async (slug) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
   const result = await api.org.getPublicInfo(slug);
@@ -359,7 +359,7 @@ export const getFollowingStatus = query(z.string().uuid(), async (orgId) => {
 /**
  * Get follower count for an organization (public).
  */
-export const getFollowerCount = query(z.string().uuid(), async (orgId) => {
+const getFollowerCount = query(z.string().uuid(), async (orgId) => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
   return api.org.getFollowerCount(orgId);

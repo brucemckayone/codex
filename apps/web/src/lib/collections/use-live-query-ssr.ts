@@ -44,7 +44,7 @@ import { browser } from '$app/environment';
 /**
  * Options for SSR-safe useLiveQuery
  */
-export interface UseLiveQuerySSROptions {
+interface UseLiveQuerySSROptions {
   /** Static data to return during SSR. Falls back to empty array if undefined. */
   ssrData?: object[];
 }

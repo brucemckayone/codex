@@ -80,7 +80,10 @@ app.use(
       'ENVIRONMENT',
       'WEB_APP_URL',
       'API_URL',
-      // Customer and dispute webhooks are logging stubs only
+      // Customer webhook is a logging stub only.
+      // Dispute webhook is handled by handlePaymentWebhook (Codex-sxu5a) —
+      // in production the endpoint has its own signing secret; in dev the
+      // dev router forwards all `charge.*` events to the payment handler.
       'STRIPE_WEBHOOK_SECRET_CUSTOMER',
       'STRIPE_WEBHOOK_SECRET_DISPUTE',
     ],
@@ -183,12 +186,17 @@ app.post(
 
 /**
  * Dispute events webhook
- * Handles: charge.dispute.*, radar.early_fraud_warning.*
+ * Handles: charge.dispute.created (via handlePaymentWebhook — Codex-sxu5a)
+ *
+ * Other dispute lifecycle events (charge.dispute.updated, closed,
+ * funds_reinstated, funds_withdrawn) and radar.early_fraud_warning.* are
+ * still logging-only and flow through the switch's `default` branch inside
+ * `handlePaymentWebhook`.
  */
 app.post(
   '/webhooks/stripe/dispute',
   verifyStripeSignature(),
-  createWebhookHandler('Dispute')
+  createWebhookHandler('Dispute', handlePaymentWebhook)
 );
 
 // ============================================================================

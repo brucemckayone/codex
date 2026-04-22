@@ -122,10 +122,39 @@ export function getUnsyncedProgress(): PlaybackProgress[] {
 }
 
 /**
+ * Detect a 403 response from the progress save command.
+ *
+ * The SvelteKit remote `command()` wrapper rethrows server errors;
+ * the underlying `ApiError` (from `$lib/server/errors.ts`) carries the
+ * upstream status on `.status`, and the generic `Response` branch
+ * carries `.status` too. Both surfaces are probed here so the client
+ * stops retrying as soon as access is revoked, rather than hammering
+ * the endpoint every 2 minutes until the user re-logs.
+ *
+ * Log-only — progress is an ambient, best-effort heartbeat. A toast on
+ * every save would be awful UX, and the user will discover the access
+ * change on their next navigation anyway.
+ */
+function isForbiddenError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const status = (error as { status?: unknown }).status;
+  return status === 403;
+}
+
+/**
  * Sync unsynced progress to server
  *
  * Call this periodically or on page visibility change.
  * Failed syncs will be retried on next call.
+ *
+ * 403 handling: the server rejects progress saves from users without
+ * active access (see `ContentAccessService.savePlaybackProgress`). When
+ * that happens we MUST NOT retry on the next tick — the revocation will
+ * persist until the user re-subscribes or is re-granted access, and
+ * repeated 403s at 2-minute cadence would amount to a self-inflicted
+ * rate-limit attack. Mark the entry synced so it drops out of the
+ * unsynced set; a future position update will resurface it as unsynced
+ * and retry naturally, giving revocation reversals a clean path forward.
  */
 export async function syncProgressToServer(): Promise<void> {
   if (!browser || !progressCollection) return;
@@ -145,6 +174,20 @@ export async function syncProgressToServer(): Promise<void> {
         draft.syncedAt = new Date().toISOString();
       });
     } catch (error) {
+      if (isForbiddenError(error)) {
+        // Access was revoked (cancellation, refund, etc.). Stop retrying
+        // this entry — mark it "synced" so the unsynced loop doesn't keep
+        // POSTing. Local progress is preserved; the user still sees their
+        // position, we just can't persist it server-side anymore.
+        logger.info('Progress save forbidden — access revoked, dropping', {
+          contentId: progress.contentId,
+        });
+        progressCollection.update(progress.contentId, (draft) => {
+          draft.syncedAt = new Date().toISOString();
+        });
+        continue;
+      }
+
       logger.error('Failed to sync progress', {
         error: error instanceof Error ? error.message : String(error),
       });

@@ -7,7 +7,8 @@
   and fallback (retries exhausted, friendly messaging).
 
   Auto-retry: When verification is null or not complete, polls via
-  invalidate('checkout:verify') every 3 seconds, up to 5 times.
+  invalidate('checkout:verify') every 3 seconds, up to 10 times (~30s
+  total window — Stripe webhooks occasionally take 5-30s in production).
 -->
 <script lang="ts">
   import { invalidate } from '$app/navigation';
@@ -41,10 +42,15 @@
   const purchase = $derived(verification?.purchase);
 
   // --- Auto-retry polling ---
+  // 10 retries * 3s = 30s window. Stripe webhooks occasionally take 5-30s
+  // to fire in production (previously 5 * 3s = 15s which was too tight).
+  // We short-circuit below when sessionStatus is 'expired' — no point
+  // polling a session Stripe has already declared dead.
   let retryCount = $state(0);
-  const MAX_RETRIES = 5;
+  const MAX_RETRIES = 10;
   const RETRY_INTERVAL_MS = 3000;
-  const shouldRetry = $derived(!isComplete && retryCount < MAX_RETRIES);
+  const isExpired = $derived(verification?.sessionStatus === 'expired');
+  const shouldRetry = $derived(!isComplete && !isExpired && retryCount < MAX_RETRIES);
 
   $effect(() => {
     if (!shouldRetry) return;
@@ -82,7 +88,7 @@
           width="64"
           height="64"
           role="img"
-          aria-label="Purchase confirmed"
+          aria-label={m.checkout_success_icon_alt()}
         >
           <circle
             class="checkmark__circle"
@@ -157,15 +163,32 @@
 
     {:else if shouldRetry}
       <!-- Pending: Spinner + auto-retry -->
-      <div class="checkout-success__icon" role="status" aria-label="Verifying purchase" aria-live="polite">
+      <div class="checkout-success__icon" role="status" aria-label={m.checkout_success_verifying()} aria-live="polite">
         <div class="checkout-success__spinner"></div>
       </div>
 
       <h1 class="checkout-success__title">{m.checkout_success_confirming()}</h1>
       <p class="checkout-success__description">{m.checkout_success_confirming_description()}</p>
 
+    {:else if isExpired}
+      <!-- Expired: Stripe session timed out before payment landed. No
+           charge was taken; distinct message from the retry-exhausted
+           fallback so users know they need to start a new checkout. -->
+      <div class="checkout-success__icon checkout-success__icon--pending">
+        <ClockIcon size={48} />
+      </div>
+
+      <h1 class="checkout-success__title">{m.checkout_success_expired_title()}</h1>
+      <p class="checkout-success__description">{m.checkout_success_expired_description()}</p>
+
+      <div class="checkout-success__actions">
+        <a href={browseUrl} class="checkout-success__btn checkout-success__btn--primary">
+          {m.checkout_success_start_over()}
+        </a>
+      </div>
+
     {:else}
-      <!-- Fallback: Retries exhausted or session open/expired -->
+      <!-- Fallback: Retries exhausted with session still open/pending -->
       <div class="checkout-success__icon checkout-success__icon--pending">
         <ClockIcon size={48} />
       </div>

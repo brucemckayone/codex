@@ -1,2 +1,2 @@
-export { type AccessState, deriveAccessState } from './access-state';
+export { deriveAccessState } from './access-state';
 export { default as PreviewPlayer } from './PreviewPlayer.svelte';

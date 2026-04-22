@@ -20,14 +20,20 @@ import {
   loadLibraryFromServer,
 } from './library';
 import { queryClient } from './query-client';
+import {
+  loadSubscriptionFromServer,
+  subscriptionCollection,
+} from './subscription';
 
 /**
  * Collection keys — kept for content (QueryClient-backed).
- * Library uses localStorage so these keys are content-only in practice.
+ * Library and subscription use localStorage so these keys are content-only
+ * in practice (QueryClient cache lookups).
  */
 export const COLLECTION_KEYS = {
   content: ['content'] as const,
   library: ['library'] as const,
+  subscription: ['subscription'] as const,
 } as const;
 
 export type CollectionKey = keyof typeof COLLECTION_KEYS;
@@ -114,6 +120,15 @@ export async function invalidateCollection(
 ): Promise<void> {
   if (collection === 'library') {
     await loadLibraryFromServer();
+    return;
+  }
+  if (collection === 'subscription') {
+    // Reconcile every tracked org subscription. The user may be subscribed
+    // to multiple orgs; each entry is keyed by organizationId so we fan out.
+    if (!subscriptionCollection) return;
+    const orgIds = Array.from(subscriptionCollection.state.keys());
+    if (orgIds.length === 0) return;
+    await Promise.all(orgIds.map((orgId) => loadSubscriptionFromServer(orgId)));
     return;
   }
   if (!queryClient) return;

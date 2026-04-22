@@ -5,6 +5,10 @@
   --duration-normal: 200ms;
   --duration-slow: 300ms;
   --duration-slower: 500ms;
+  /* Reserved for reveal-class transitions (skeleton → content crossfades,
+     cinema-mode curtains, hero intros). Long enough to feel deliberate without
+     tipping into sluggish — see Disney-principled motion in the design system. */
+  --duration-slowest: 800ms;
 
   /* Easings */
   --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
@@ -33,6 +37,7 @@
     --duration-normal: 0.01ms;
     --duration-slow: 0.01ms;
     --duration-slower: 0.01ms;
+    --duration-slowest: 0.01ms;
   }
 
   *, *::before, *::after {

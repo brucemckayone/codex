@@ -229,7 +229,12 @@ export function multipartProcedure<
       // ====================================================================
       // Step 2: Create Service Registry
       // ====================================================================
-      const registryResult = createServiceRegistry(c.env, obs, organizationId);
+      const registryResult = createServiceRegistry(
+        c.env,
+        obs,
+        organizationId,
+        c.executionCtx
+      );
       registry = registryResult.registry;
       cleanup = registryResult.cleanup;
 

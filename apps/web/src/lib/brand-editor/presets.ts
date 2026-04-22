@@ -18,7 +18,7 @@ export type PresetCategory =
   | 'Playful'
   | 'Atmospheric';
 
-export interface CategorizedPreset extends BrandPreset {
+interface CategorizedPreset extends BrandPreset {
   category: PresetCategory;
 }
 

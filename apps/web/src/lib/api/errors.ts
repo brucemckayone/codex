@@ -10,7 +10,14 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
-    public code?: string
+    public code?: string,
+    /**
+     * Structured error details from the worker's `{ error: { code, message,
+     * details } }` envelope. Carries revocation `reason`, Zod field issues,
+     * etc. Kept as `unknown` so callers do the narrowing — the wire schema
+     * varies per error class and pinning it here would force brittle unions.
+     */
+    public details?: unknown
   ) {
     super(message);
     this.name = 'ApiError';

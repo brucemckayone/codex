@@ -9,7 +9,7 @@
 // ── Editor State ──────────────────────────────────────────────────────────
 
 /** Color fields that can be overridden per-theme. */
-export interface ThemeColors {
+interface ThemeColors {
   primaryColor: string;
   secondaryColor: string | null;
   accentColor: string | null;
@@ -39,10 +39,7 @@ export interface BrandEditorState {
 }
 
 /** The subset of BrandEditorState that gets saved to the API. */
-export type BrandEditorPayload = Omit<
-  BrandEditorState,
-  'tokenOverrides' | 'logoUrl'
->;
+type BrandEditorPayload = Omit<BrandEditorState, 'tokenOverrides' | 'logoUrl'>;
 
 // ── Presets ───────────────────────────────────────────────────────────────
 
@@ -76,7 +73,7 @@ export type LevelId =
   | 'fine-tune-typography';
 
 /** Depth in the breadcrumb hierarchy. */
-export type LevelDepth = 0 | 1 | 2;
+type LevelDepth = 0 | 1 | 2;
 
 /** Metadata for a navigation level. */
 export interface LevelMeta {

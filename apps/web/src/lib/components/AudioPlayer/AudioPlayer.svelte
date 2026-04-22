@@ -16,6 +16,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { createHlsPlayer } from '$lib/components/VideoPlayer/hls';
   import { createProgressTracker } from '$lib/components/VideoPlayer/progress.svelte.ts';
+  import { refreshStreamingUrl } from '$lib/remote/library.remote';
   import { AlertCircleIcon, PlayIcon, PauseIcon, Volume2Icon, VolumeXIcon, MaximizeIcon } from '$lib/components/ui/Icon';
   import {
     createMediaKeyboardHandler,
@@ -37,6 +38,12 @@
     poster?: string | null;
     title?: string;
     shaderPreset?: string | null;
+    /**
+     * ISO 8601 timestamp when `src` / `waveformUrl` are expected to expire.
+     * Both URLs are signed in the same access call so share an expiry.
+     * Optional; omission falls back to reactive 403 recovery only.
+     */
+    expiresAt?: string | null;
   }
 
   const {
@@ -47,11 +54,22 @@
     poster = null,
     title = '',
     shaderPreset = null,
+    expiresAt = null,
   }: Props = $props();
 
   let audioEl: HTMLAudioElement | undefined = $state();
   let playerEl: HTMLDivElement | undefined = $state();
   let hlsInstance: Hls | null = null;
+  let hlsCleanup: (() => void) | null = null;
+  /**
+   * Track the most recent waveform URL we loaded so a mid-session URL
+   * refresh re-fetches against the freshly signed URL instead of the
+   * expired original.
+   */
+  let currentWaveformUrl: string | null = waveformUrl ?? null;
+  let lastCurrentTime = 0;
+  let refreshInFlight = false;
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let loading = $state(true);
   let errorMessage = $state('');
 
@@ -73,11 +91,10 @@
   // Mini-player
   let miniMode = $state(false);
 
-  // Immersive shader mode
+  // Immersive shader mode. When content has no preset assigned (or 'none'),
+  // fall back to 'nebula' so every audio piece is immersive-capable — all 25
+  // presets are audio-reactive, so there's no UX reason to hide the entry.
   let showImmersive = $state(false);
-  // When content has no preset assigned (or 'none'), fall back to 'nebula' so
-  // every audio piece is immersive-capable — all 25 presets are audio-reactive,
-  // so there's no UX reason to hide the entry point.
   const resolvedShaderPreset = $derived(
     shaderPreset && shaderPreset !== 'none' ? shaderPreset : 'nebula'
   );
@@ -211,10 +228,13 @@
   }
 
   async function loadWaveform() {
-    if (!waveformUrl || waveformLoaded) return;
+    // Use the local `currentWaveformUrl` so handleUrlExpired can re-fetch
+    // the waveform against a fresh signed URL after a refresh.
+    const url = currentWaveformUrl;
+    if (!url || waveformLoaded) return;
     waveformLoaded = true;
     try {
-      const res = await fetch(waveformUrl);
+      const res = await fetch(url);
       if (res.ok) {
         const json = await res.json();
         const raw: number[] | null = Array.isArray(json)
@@ -256,20 +276,21 @@
     errorMessage = '';
 
     try {
-      // Destroy previous instance if re-initializing with a different src
-      if (hlsInstance) {
-        hlsInstance.destroy();
-        hlsInstance = null;
-      }
+      teardownHls();
 
-      hlsInstance = await createHlsPlayer({
+      const handle = await createHlsPlayer({
         media: audioEl,
         src,
         onError: (msg) => {
           errorMessage = msg;
           loading = false;
         },
+        onUrlExpired: () => {
+          void handleUrlExpired();
+        },
       });
+      hlsInstance = handle.hls;
+      hlsCleanup = handle.cleanup;
 
       // Set initial progress (resume position)
       if (initialProgress > 0) {
@@ -293,23 +314,162 @@
     }
   }
 
-  async function retry() {
+  /**
+   * Tear down the current HLS.js instance and any Safari error listener.
+   * `hlsCleanup` is the callback returned from `createHlsPlayer` — a no-op
+   * on the HLS.js branch and a `removeEventListener` on Safari native.
+   */
+  function teardownHls() {
+    if (hlsCleanup) {
+      hlsCleanup();
+      hlsCleanup = null;
+    }
     if (hlsInstance) {
       hlsInstance.destroy();
       hlsInstance = null;
     }
-    await initPlayer();
+  }
+
+  /**
+   * Signed-URL expiry recovery — mirrors VideoPlayer. Audio and waveform
+   * share an expiry (both signed in the same `getStreamingUrl` access
+   * call), so a single refresh swaps both URLs.
+   */
+  async function handleUrlExpired() {
+    if (refreshInFlight) return;
+    refreshInFlight = true;
+    try {
+      if (audioEl && Number.isFinite(audioEl.currentTime)) {
+        lastCurrentTime = audioEl.currentTime;
+      }
+      teardownHls();
+      const fresh = await refreshStreamingUrl(contentId);
+      if (!audioEl) return;
+      initializedSrc = fresh.streamingUrl;
+      loading = true;
+      errorMessage = '';
+      const handle = await createHlsPlayer({
+        media: audioEl,
+        src: fresh.streamingUrl,
+        onError: (msg) => {
+          errorMessage = msg;
+          loading = false;
+        },
+        onUrlExpired: () => {
+          void handleUrlExpired();
+        },
+      });
+      hlsInstance = handle.hls;
+      hlsCleanup = handle.cleanup;
+      if (lastCurrentTime > 0) {
+        const resumeAt = lastCurrentTime;
+        if (audioEl.readyState >= 1) {
+          audioEl.currentTime = resumeAt;
+        } else {
+          audioEl.addEventListener(
+            'loadedmetadata',
+            () => {
+              if (audioEl) audioEl.currentTime = resumeAt;
+            },
+            { once: true }
+          );
+        }
+      }
+      // Waveform URL shares the same signature lifecycle — refetch it so
+      // the waveform keeps rendering after expiry.
+      currentWaveformUrl = fresh.waveformUrl;
+      waveformLoaded = false;
+      waveformData = null;
+      void loadWaveform();
+      scheduleRefresh();
+    } catch {
+      errorMessage =
+        'Playback link expired and could not be refreshed. Please try again.';
+      loading = false;
+    } finally {
+      refreshInFlight = false;
+    }
+  }
+
+  /**
+   * Pre-emptive refresh 60s before `expiresAt`. Skips when unset / past —
+   * the reactive 403 path handles those cases.
+   */
+  function scheduleRefresh() {
+    teardownRefresh();
+    if (!expiresAt) return;
+    const expiresMs = Date.parse(expiresAt);
+    if (!Number.isFinite(expiresMs)) return;
+    const refreshAt = expiresMs - 60_000;
+    const delay = refreshAt - Date.now();
+    if (delay <= 0) return;
+    refreshTimer = setTimeout(() => {
+      void handleUrlExpired();
+    }, delay);
+  }
+
+  function teardownRefresh() {
+    if (refreshTimer) {
+      clearTimeout(refreshTimer);
+      refreshTimer = null;
+    }
+  }
+
+  async function retry() {
+    // Most often Retry fires because the URL expired; refresh first so
+    // Retry doesn't immediately 403 again.
+    teardownHls();
+    try {
+      const fresh = await refreshStreamingUrl(contentId);
+      if (!audioEl) return;
+      initializedSrc = fresh.streamingUrl;
+      loading = true;
+      errorMessage = '';
+      const handle = await createHlsPlayer({
+        media: audioEl,
+        src: fresh.streamingUrl,
+        onError: (msg) => {
+          errorMessage = msg;
+          loading = false;
+        },
+        onUrlExpired: () => {
+          void handleUrlExpired();
+        },
+      });
+      hlsInstance = handle.hls;
+      hlsCleanup = handle.cleanup;
+      currentWaveformUrl = fresh.waveformUrl;
+      waveformLoaded = false;
+      waveformData = null;
+      void loadWaveform();
+      scheduleRefresh();
+    } catch {
+      // Refresh endpoint itself failed — reset the init guard and try the
+      // original src path; transient network blips may self-heal.
+      initializedSrc = '';
+      await initPlayer();
+    }
   }
 
   onMount(() => {
     initPlayer();
     loadWaveform();
+    scheduleRefresh();
 
-    // Mini-player: IntersectionObserver on the main player container
+    // Mini-player: IntersectionObserver on the main player container.
+    // Show when the main player leaves the viewport while playback started;
+    // hide when the main player is back in view. Pausing from the mini-player
+    // MUST NOT dismiss it — the user needs a visible resume target.
     if (playerEl) {
       const observer = new IntersectionObserver(
         ([entry]) => {
-          miniMode = !entry.isIntersecting && isPlaying;
+          if (entry.isIntersecting) {
+            miniMode = false;
+          } else if (isPlaying) {
+            miniMode = true;
+          }
+          // else: off-screen + paused — leave miniMode untouched so a paused
+          // mini-player stays visible for resume.
         },
         { threshold: 0 }
       );
@@ -318,24 +478,42 @@
     }
   });
 
+  /**
+   * React to `waveformUrl` prop changes. Parents update this after a
+   * server-side access-re-run returns a freshly signed bundle; keeping
+   * the local cached copy in sync lets `loadWaveform` and
+   * `handleUrlExpired` work against the latest URL.
+   */
+  $effect(() => {
+    const next = waveformUrl ?? null;
+    if (next === currentWaveformUrl) return;
+    currentWaveformUrl = next;
+    waveformLoaded = false;
+    waveformData = null;
+    if (typeof window !== 'undefined' && next) {
+      void loadWaveform();
+    }
+  });
+
+  /**
+   * React to `expiresAt` prop changes — reschedule the pre-emptive refresh
+   * so the next cycle fires relative to the new expiry, not the old one.
+   */
+  $effect(() => {
+    void expiresAt;
+    if (typeof window === 'undefined') return;
+    scheduleRefresh();
+  });
+
   onDestroy(() => {
     tracker.detach();
     stopAnalysisLoop();
+    teardownRefresh();
     if (analyserHandle) {
       analyserHandle.destroy();
       analyserHandle = null;
     }
-    if (hlsInstance) {
-      hlsInstance.destroy();
-      hlsInstance = null;
-    }
-  });
-
-  // Keep mini-mode in sync with play state
-  $effect(() => {
-    if (!isPlaying) {
-      miniMode = false;
-    }
+    teardownHls();
   });
 
   const RATES = [0.5, 1, 1.5, 2] as const;
@@ -514,40 +692,58 @@
   {/if}
 </div>
 
-<!-- Mini-player (sticky bottom bar) -->
+<!-- Mini-player (floating card, bottom-centered, clears MobileBottomNav) -->
 {#if miniMode}
   <div class="audio-mini-player" role="complementary" aria-label="Audio mini player">
-    {#if poster}
-      <img src={poster} alt="" class="audio-mini-player__art" />
-    {/if}
-    <span class="audio-mini-player__title">{title}</span>
+    <div class="audio-mini-player__card">
+      <WaveformShader {audioAnalysis} {poster} class="audio-mini-player__shader">
+        <div class="audio-mini-player__inner">
+          {#if poster}
+            <img src={poster} alt="" class="audio-mini-player__art" />
+          {/if}
 
-    <button
-      class="audio-mini-player__btn"
-      onclick={togglePlay}
-      aria-label={isPlaying ? 'Pause' : 'Play'}
-    >
-      {#if isPlaying}
-        <PauseIcon size={18} />
-      {:else}
-        <PlayIcon size={18} />
-      {/if}
-    </button>
+          <div class="audio-mini-player__body">
+            <div class="audio-mini-player__row">
+              <span class="audio-mini-player__title">{title}</span>
+              <span class="audio-mini-player__time">
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </span>
+            </div>
 
-    <div class="audio-mini-player__progress">
-      <div
-        class="audio-mini-player__progress-fill"
-        style:width="{duration > 0 ? (currentTime / duration) * 100 : 0}%"
-      ></div>
+            <div class="audio-mini-player__waveform">
+              <Waveform
+                data={waveformData}
+                {currentTime}
+                {duration}
+                playing={isPlaying}
+                onseek={handleSeek}
+                {audioAnalysis}
+              />
+            </div>
+          </div>
+
+          <button
+            class="audio-mini-player__btn"
+            onclick={togglePlay}
+            aria-label={isPlaying ? 'Pause' : 'Play'}
+          >
+            {#if isPlaying}
+              <PauseIcon size={18} />
+            {:else}
+              <PlayIcon size={18} />
+            {/if}
+          </button>
+        </div>
+      </WaveformShader>
+
+      <button
+        class="audio-mini-player__close"
+        onclick={() => { miniMode = false; }}
+        aria-label="Close mini player"
+      >
+        &times;
+      </button>
     </div>
-
-    <button
-      class="audio-mini-player__close"
-      onclick={() => { miniMode = false; }}
-      aria-label="Close mini player"
-    >
-      &times;
-    </button>
   </div>
 {/if}
 
@@ -882,34 +1078,83 @@
     outline-offset: 2px;
   }
 
-  /* Mini-player */
+  /* Mini-player — floating, bottom-centered card.
+     Clears MobileBottomNav (height var(--space-16)) on mobile; sits closer to
+     the viewport edge on desktop where no bottom nav competes for space. */
   .audio-mini-player {
     position: fixed;
-    bottom: 0;
     left: 0;
     right: 0;
+    bottom: calc(var(--space-16) + var(--space-3) + env(safe-area-inset-bottom, 0px));
     z-index: var(--z-sticky, 40);
+    padding-inline: var(--space-3);
     display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-4);
-    background: var(--color-surface);
-    border-top: var(--border-width) var(--border-style) var(--color-border);
-    box-shadow: var(--shadow-lg);
+    justify-content: center;
+    pointer-events: none;
     animation: slide-up var(--duration-fast) var(--ease-out);
   }
 
+  /* Desktop: MobileBottomNav is not rendered — drop the clearance. */
+  @media (--breakpoint-md) {
+    .audio-mini-player {
+      bottom: var(--space-4);
+      padding-inline: var(--space-4);
+    }
+  }
+
+  .audio-mini-player__card {
+    position: relative;
+    pointer-events: auto;
+    width: 100%;
+    max-width: calc(var(--space-24) * 9); /* ~864px — matches content-detail width rhythm */
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  /* Shader fills the card; card rounding clips the canvas.
+     Mirrors the main player — no border on the shader surface. */
+  .audio-mini-player__card :global(.audio-mini-player__shader) {
+    border-radius: inherit;
+  }
+
+  /* Flex row of art + body + play button, sitting over the shader. */
+  .audio-mini-player__inner {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    /* Leave room for the absolutely-positioned close button on the right. */
+    padding-right: var(--space-10);
+  }
+
   @keyframes slide-up {
-    from { transform: translateY(100%); }
-    to { transform: translateY(0); }
+    from { transform: translateY(calc(100% + var(--space-16))); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
   }
 
   .audio-mini-player__art {
-    width: var(--space-10);
-    height: var(--space-10);
-    border-radius: var(--radius-sm);
+    width: var(--space-12);
+    height: var(--space-12);
+    border-radius: var(--radius-md);
     object-fit: cover;
     flex-shrink: 0;
+  }
+
+  /* Body: stacks title-row above the compact waveform. */
+  .audio-mini-player__body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .audio-mini-player__row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
   }
 
   .audio-mini-player__title {
@@ -917,23 +1162,52 @@
     min-width: 0;
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-text);
+    /* Player-surface text tokens — shader background is coloured/dark, so
+       mirror .audio-player__body's contrast treatment (see main player). */
+    color: var(--color-player-text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .audio-mini-player__time {
+    font-size: var(--text-xs);
+    color: var(--color-player-text-muted);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+
+  /* Compact waveform — override --waveform-height so the shared Waveform
+     component renders at mini scale. The component reads --waveform-height
+     from its ancestor, so a local custom property is all that's needed. */
+  .audio-mini-player__waveform {
+    --waveform-height: var(--space-8);
+    width: 100%;
   }
 
   .audio-mini-player__btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: var(--space-2);
+    width: var(--space-10);
+    height: var(--space-10);
+    padding: 0;
     background: var(--color-primary-500);
     color: var(--color-text-on-primary, var(--color-player-text));
     border: none;
     border-radius: var(--radius-full);
     cursor: pointer;
     flex-shrink: 0;
+    transition: var(--transition-colors), var(--transition-transform);
+  }
+
+  .audio-mini-player__btn:hover {
+    background: var(--color-primary-600, var(--color-primary-500));
+    transform: scale(1.05);
+  }
+
+  .audio-mini-player__btn:active {
+    transform: scale(0.95);
   }
 
   .audio-mini-player__btn:focus-visible {
@@ -941,30 +1215,34 @@
     outline-offset: 2px;
   }
 
-  .audio-mini-player__progress {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    /* 3px — no exact spacing token; slightly larger than --border-width-thick (2px). */
-    height: var(--border-width-thick);
-    background: var(--color-surface-secondary);
-  }
-
-  .audio-mini-player__progress-fill {
-    height: 100%;
-    background: var(--color-primary-500);
-    transition: width var(--duration-fast) linear;
-  }
-
+  /* Close button — positioned over the shader, top-right of card.
+     Uses player-surface tokens so it remains legible on the coloured,
+     animated background. */
   .audio-mini-player__close {
+    position: absolute;
+    top: var(--space-1);
+    right: var(--space-1);
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-8);
+    height: var(--space-8);
     background: none;
     border: none;
-    color: var(--color-text-secondary);
-    font-size: var(--text-lg);
+    color: var(--color-player-text-secondary);
+    font-size: var(--text-xl);
     cursor: pointer;
-    padding: var(--space-1);
+    padding: 0;
     line-height: 1;
+    border-radius: var(--radius-sm);
+    transition: var(--transition-colors);
+    flex-shrink: 0;
+  }
+
+  .audio-mini-player__close:hover {
+    color: var(--color-player-text);
+    background: var(--color-player-surface);
   }
 
   .audio-mini-player__close:focus-visible {
@@ -1032,7 +1310,9 @@
 
     /* Play-button scale transforms are "spring" feedback — no transform under reduce. */
     .audio-player__btn--play:hover,
-    .audio-player__btn--play:active {
+    .audio-player__btn--play:active,
+    .audio-mini-player__btn:hover,
+    .audio-mini-player__btn:active {
       transform: none;
     }
   }

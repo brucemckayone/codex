@@ -19,7 +19,7 @@ import {
 } from './slash-commands.js';
 import type { EditorExtensionOptions } from './types.js';
 
-export interface FullExtensionOptions extends EditorExtensionOptions {
+interface FullExtensionOptions extends EditorExtensionOptions {
   /** Render function for slash command popup — only needed client-side */
   slashCommandRender?: SlashCommandRender;
   /** DOM element for the bubble menu — only needed client-side */

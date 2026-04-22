@@ -19,6 +19,16 @@ import { logger } from '$lib/observability';
 export interface SubscriptionItem {
   /** The org this subscription belongs to — collection key */
   organizationId: string;
+  /**
+   * Org slug for subscription-to-library joins.
+   *
+   * Library items only expose `organizationSlug` (not `organizationId`),
+   * so slug is the join key used by library surfaces to resolve a card's
+   * underlying subscription status. Optional for backwards-compatibility
+   * with entries written before Codex-k7ppt landed — callers should treat
+   * `undefined` as "slug unknown, skip this entry when joining by slug".
+   */
+  organizationSlug?: string;
   /** Tier details for badge computation */
   tier: {
     id: string;
@@ -46,8 +56,17 @@ export const subscriptionCollection = browser
  * Fetch subscription from server and reconcile with localStorage.
  * Called on version staleness detection (cross-device sync)
  * and on first hydration from SSR data.
+ *
+ * @param orgId - Organisation ID (collection key)
+ * @param orgSlug - Optional org slug; stored alongside so library surfaces
+ *   can join by slug (library items only carry `organizationSlug`). Passing
+ *   the slug preserves it across reconciliation. If omitted, any existing
+ *   slug on the stored entry is preserved.
  */
-export async function loadSubscriptionFromServer(orgId: string): Promise<void> {
+export async function loadSubscriptionFromServer(
+  orgId: string,
+  orgSlug?: string
+): Promise<void> {
   if (!subscriptionCollection) return;
   try {
     const { getCurrentSubscription } = await import(
@@ -57,8 +76,14 @@ export async function loadSubscriptionFromServer(orgId: string): Promise<void> {
 
     if (sub && sub.tier) {
       const periodEnd = sub.currentPeriodEnd;
+      // Preserve a previously-stored slug if this caller didn't supply one.
+      const existingSlug =
+        subscriptionCollection.state.get(orgId)?.organizationSlug;
       const item: SubscriptionItem = {
         organizationId: orgId,
+        ...(orgSlug || existingSlug
+          ? { organizationSlug: orgSlug ?? existingSlug }
+          : {}),
         tier: sub.tier,
         status: sub.cancelAtPeriodEnd ? 'cancelling' : 'active',
         currentPeriodEnd:

@@ -8,4 +8,5 @@ export default packageVitestConfig({
   hookTimeout: 60000,
   enableNeonTesting: true, // Enable ephemeral Neon branches in CI
   sequentialTests: true, // Run tests sequentially to avoid database conflicts
+  include: ['src/**/*.{test,spec}.{js,ts}', 'scripts/**/*.{test,spec}.{js,ts}'],
 });

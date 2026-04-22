@@ -177,16 +177,19 @@ const updateBrandingCommandSchema = z.object({
     .optional(),
   radiusValue: z.number().min(0).max(2).optional(),
   densityValue: z.number().min(0.75).max(1.25).optional(),
-  // Fine-tune fields
-  tokenOverrides: nullableString, // JSON string of Record<string, string | null>
-  textColorHex: hexColorNullable,
-  shadowScale: nullableString,
-  shadowColor: nullableString,
-  textScale: nullableString,
-  headingWeight: nullableString,
-  bodyWeight: nullableString,
+  // Fine-tune fields — all optional: tokenOverrides JSON is the single source
+  // of truth for new saves; the broken-out columns still exist on the DB row
+  // for legacy read compatibility (iter-04 Codex-2nl7) but are no longer
+  // written by the editor.
+  tokenOverrides: nullableString.optional(), // JSON string of Record<string, string | null>
+  textColorHex: hexColorNullable.optional(),
+  shadowScale: nullableString.optional(),
+  shadowColor: nullableString.optional(),
+  textScale: nullableString.optional(),
+  headingWeight: nullableString.optional(),
+  bodyWeight: nullableString.optional(),
   // Dark mode overrides
-  darkModeOverrides: nullableString, // JSON string of Partial<ThemeColors>
+  darkModeOverrides: nullableString.optional(), // JSON string of Partial<ThemeColors>
   // Hero layout
   heroLayout: z
     .enum([

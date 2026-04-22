@@ -9,10 +9,14 @@ import type { PaginationMetadata, ProgressData } from '@codex/shared-types';
 
 /**
  * Response for GET /api/access/content/:id/stream
- * Provides streaming URL for content playback
+ *
+ * `streamingUrl` is null for written content (articles) — access is still
+ * verified, but there is no media stream to sign. The client uses a null
+ * streamingUrl together with a successful response as a "has access, body
+ * unlocks" signal.
  */
 export interface StreamingUrlResponse {
-  streamingUrl: string;
+  streamingUrl: string | null;
   waveformUrl: string | null;
   expiresAt: string; // ISO 8601 timestamp
   contentType: string;

@@ -18,8 +18,7 @@
   @prop {object | null} progress - Playback progress data
   @prop {{ amount; currency } | null} price - Price info (null = hidden, 0 = Free)
   @prop {boolean} purchased - Whether user has purchased this content
-  @prop {boolean} included - Whether user's subscription covers this content
-  @prop {'purchased' | 'subscription' | 'membership' | null} accessType - Access type badge (list variant)
+  @prop {boolean} included - Whether user's subscription/membership covers this content
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
@@ -31,7 +30,7 @@
   import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
   import { Skeleton } from '../Skeleton';
   import { PriceBadge } from '../PriceBadge';
-  import { PlayIcon, MusicIcon, FileTextIcon, CheckIcon } from '$lib/components/ui/Icon';
+  import { PlayIcon, MusicIcon, FileTextIcon } from '$lib/components/ui/Icon';
   import { extractPlainText } from '@codex/validation';
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
@@ -62,7 +61,6 @@
     } | null;
     purchased?: boolean;
     included?: boolean;
-    accessType?: 'purchased' | 'subscription' | 'membership' | null;
     /** Content-level access strategy from DB (forwarded to PriceBadge) */
     contentAccessType?: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | null;
     /** Whether the user follows this org (contextualizes followers badge) */
@@ -71,6 +69,22 @@
     tierName?: string | null;
     /** Content category (shown as overlay tag on thumbnail) */
     category?: string | null;
+    /**
+     * Subscription-backed access state for library surfaces (Codex-k7ppt).
+     *
+     * Only library/continue-watching consumers set this. Browse grids leave
+     * it undefined and get the existing visual treatment.
+     *
+     *   'active'     — no change
+     *   'cancelling' — corner 'Ends {date}' badge, card still fully accessible
+     *   'past_due'   — dimmed card + hover CTA 'Payment failed — update payment'
+     *   'revoked'    — dimmed card + hover CTA 'Subscription ended — reactivate'
+     */
+    accessState?: 'active' | 'cancelling' | 'past_due' | 'revoked';
+    /** ISO period-end date, paired with accessState='cancelling' for the badge copy. */
+    accessStatePeriodEnd?: string | null;
+    /** Destination for the reactivate/update-payment affordance. Defaults to /account/subscriptions. */
+    accessStateActionHref?: string;
   }
 
   const {
@@ -89,11 +103,13 @@
     price = null,
     purchased = false,
     included = false,
-    accessType = null,
     contentAccessType = null,
     isFollower = false,
     tierName = null,
     category = null,
+    accessState = 'active',
+    accessStatePeriodEnd = null,
+    accessStateActionHref = '/account/subscriptions',
     class: className,
     ...rest
   }: Props = $props();
@@ -104,40 +120,49 @@
   const hasProgress = $derived(progress != null && (progress.completed || progressPercent > 0));
   const isCompleted = $derived(progress?.completed ?? false);
 
-  const timeRemaining = $derived.by(() => {
-    if (!progress || isCompleted) return null;
-    const remaining = (progress.durationSeconds ?? 0) - (progress.positionSeconds ?? 0);
-    if (remaining <= 0) return null;
-    return formatDurationHuman(remaining);
-  });
-
   const resumeTime = $derived(formatDuration(progress?.positionSeconds ?? 0));
-
-  const accessBadgeLabel = $derived.by(() => {
-    switch (accessType) {
-      case 'purchased': return m.library_access_badge_purchased();
-      case 'subscription': return m.library_access_badge_subscription();
-      case 'membership': return m.library_access_badge_membership();
-      default: return null;
-    }
-  });
 
   const showCreator = $derived(variant === 'grid' || variant === 'featured');
   const showDescription = $derived((variant === 'featured' || variant === 'grid') && !!description);
   const showPriceBadge = $derived(
-    accessType == null &&
     variant !== 'compact' && variant !== 'resume' &&
     (price != null || purchased || included || contentAccessType != null)
   );
-  const showAccessBadge = $derived(accessBadgeLabel != null && variant !== 'compact' && variant !== 'resume');
-  const showProgressStatus = $derived(hasProgress && accessType != null && variant !== 'compact' && variant !== 'resume');
   const showResumeInfo = $derived(variant === 'resume');
+
+  // ── Access-state decoration (Codex-k7ppt) ─────────────────────────────
+  // Cancelling: card stays fully interactive; small corner badge.
+  // past_due / revoked: card is dimmed + hover CTA overlay.
+  const isDimmed = $derived(
+    accessState === 'past_due' || accessState === 'revoked'
+  );
+  const accessCtaLabel = $derived(
+    accessState === 'past_due'
+      ? m.library_access_payment_failed()
+      : accessState === 'revoked'
+        ? m.library_access_subscription_ended()
+        : ''
+  );
+  // Format the period-end date for the 'Ends {date}' badge using the
+  // user's locale. Short form keeps the badge compact.
+  const cancellingBadgeText = $derived.by(() => {
+    if (accessState !== 'cancelling' || !accessStatePeriodEnd) return '';
+    const d = new Date(accessStatePeriodEnd);
+    if (Number.isNaN(d.getTime())) return '';
+    const formatted = d.toLocaleDateString(undefined, {
+      day: 'numeric',
+      month: 'short',
+    });
+    return m.library_access_ends_on({ date: formatted });
+  });
 </script>
 
 <article
   class="cc {className ?? ''}"
   class:cc--loading={loading}
+  class:cc--access-dimmed={isDimmed}
   data-variant={variant}
+  data-access-state={accessState !== 'active' ? accessState : undefined}
   aria-labelledby={!loading ? titleId : undefined}
   {...rest}
 >
@@ -228,7 +253,25 @@
           ></div>
         </div>
       {/if}
+
+      <!-- Access state: cancelling badge (top-left corner of thumbnail) -->
+      {#if accessState === 'cancelling' && cancellingBadgeText}
+        <span class="cc__access-badge" aria-label={cancellingBadgeText}>
+          {cancellingBadgeText}
+        </span>
+      {/if}
     </div>
+
+    <!-- Access state: hover/tap CTA for past_due / revoked -->
+    {#if isDimmed}
+      <a
+        class="cc__access-cta"
+        href={accessStateActionHref}
+        data-access-cta={accessState}
+      >
+        {accessCtaLabel}
+      </a>
+    {/if}
 
     <!-- Body -->
     <div class="cc__body">
@@ -247,29 +290,6 @@
            the thumbnail, and the content type is self-evident from the
            title + thumbnail context. Kept the `showMetadata` derivation
            in case future variants want it back. -->
-
-      {#if showAccessBadge}
-        <span class="cc__access-badge cc__access-badge--{accessType}">
-          {accessBadgeLabel}
-        </span>
-      {/if}
-
-      {#if showProgressStatus}
-        {#if isCompleted}
-          <div class="cc__progress-status cc__progress-status--completed">
-            <CheckIcon size={14} />
-            {m.content_progress_completed()}
-          </div>
-        {:else if hasProgress}
-          <div class="cc__progress-status">
-            {m.content_progress_percent({ percent: String(progressPercent) })}
-            {#if timeRemaining}
-              <span class="cc__meta-sep" aria-hidden="true">&middot;</span>
-              {m.library_time_remaining({ time: timeRemaining })}
-            {/if}
-          </div>
-        {/if}
-      {/if}
 
       {#if showResumeInfo}
         <p class="cc__resume-text">{m.library_resume_from({ time: resumeTime })}</p>
@@ -442,6 +462,102 @@
   }
 
   /* ═══════════════════════════════════════════
+     ACCESS STATE (Codex-k7ppt)
+     Library surfaces decorate the card with a small 'Ends {date}' badge
+     when the underlying subscription is cancelling, and dim + expose a
+     hover/tap CTA when the subscription is past_due / revoked. Browse
+     grids pass no accessState, so none of this renders there.
+     ═══════════════════════════════════════════ */
+
+  /* Cancelling badge — top-left so it doesn't collide with the top-right PriceBadge. */
+  .cc__access-badge {
+    position: absolute;
+    top: var(--space-2);
+    left: var(--space-2);
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    padding: var(--space-0-5) var(--space-2);
+    font-family: var(--font-body);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-normal);
+    color: var(--color-warning-700);
+    background: color-mix(in srgb, var(--color-warning-100) 92%, transparent);
+    border: var(--border-width) var(--border-style) var(--color-warning-200);
+    border-radius: var(--radius-xs);
+    backdrop-filter: blur(var(--blur-sm));
+    -webkit-backdrop-filter: blur(var(--blur-sm));
+  }
+
+  /* Dim the card when the underlying subscription has lapsed.
+     Per design: use opacity, NOT colour — keeps the brand palette intact. */
+  .cc--access-dimmed .cc__thumb,
+  .cc--access-dimmed .cc__body {
+    opacity: var(--opacity-60);
+  }
+
+  /* Hover/tap CTA — sits above .cc__link so the CTA route wins when the
+     card is dimmed. Visible on hover/focus-within (or tap — the CTA has
+     pointer-events even when visually hidden, so taps work on touch). */
+  .cc__access-cta {
+    position: absolute;
+    inset: auto 0 0 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-2) var(--space-3);
+    font-family: var(--font-body);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    letter-spacing: var(--tracking-normal);
+    color: var(--color-text-inverse);
+    background: color-mix(in srgb, var(--color-neutral-900) 82%, transparent);
+    backdrop-filter: blur(var(--blur-sm));
+    -webkit-backdrop-filter: blur(var(--blur-sm));
+    text-decoration: none;
+    text-align: center;
+    opacity: 0;
+    transform: translateY(var(--space-1));
+    transition:
+      opacity var(--duration-fast) var(--ease-default),
+      transform var(--duration-fast) var(--ease-default);
+    pointer-events: none;
+  }
+
+  .cc--access-dimmed:hover .cc__access-cta,
+  .cc--access-dimmed:focus-within .cc__access-cta,
+  .cc__access-cta:focus-visible {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  .cc__access-cta:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: calc(-1 * var(--border-width-thick));
+  }
+
+  /* On touch devices (no hover), keep the CTA permanently visible so taps
+     work — otherwise the user would have to tap through the card link. */
+  @media (hover: none) {
+    .cc--access-dimmed .cc__access-cta {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cc__access-cta {
+      transition: opacity var(--duration-fast) var(--ease-default);
+      transform: none;
+    }
+  }
+
+  /* ═══════════════════════════════════════════
      PROGRESS BAR
      ═══════════════════════════════════════════ */
 
@@ -520,55 +636,6 @@
     overflow: hidden;
   }
 
-  /* Dot separator used in progress-status text for time-remaining */
-  .cc__meta-sep {
-    opacity: var(--opacity-50);
-  }
-
-  /* Access badge (list variant) */
-  .cc__access-badge {
-    display: inline-flex;
-    align-items: center;
-    align-self: flex-start;
-    padding: var(--space-0-5) var(--space-2);
-    font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    line-height: 1;
-    border-radius: var(--radius-full);
-    text-transform: var(--text-transform-label, uppercase);
-    letter-spacing: var(--tracking-wider);
-    white-space: nowrap;
-  }
-
-  .cc__access-badge--purchased {
-    background-color: var(--color-success-100);
-    color: var(--color-success-700);
-  }
-
-  .cc__access-badge--subscription {
-    background-color: var(--color-info-100);
-    color: var(--color-info-700);
-  }
-
-  .cc__access-badge--membership {
-    background-color: var(--color-warning-100);
-    color: var(--color-warning-700);
-  }
-
-  /* Progress status text (list variant) */
-  .cc__progress-status {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-    font-size: var(--text-xs);
-    font-weight: var(--font-medium);
-    color: var(--color-text-secondary);
-  }
-
-  .cc__progress-status--completed {
-    color: var(--color-success);
-  }
-
   /* Resume info (resume variant) */
   .cc__resume-text {
     margin: 0;
@@ -636,7 +703,7 @@
   }
 
   /* ═══════════════════════════════════════════
-     VARIANT: LIST (replaces LibraryCard)
+     VARIANT: LIST
      ═══════════════════════════════════════════ */
 
   .cc[data-variant='list'] {

@@ -10,7 +10,7 @@
 
 import { clampToGamut, hexToOklch, oklchToHex } from './oklch-math';
 
-export type PaletteStrategy =
+type PaletteStrategy =
   | 'complementary'
   | 'analogous'
   | 'split-complementary'
@@ -26,7 +26,7 @@ export interface FullPalette {
   background: string | null;
 }
 
-export interface PaletteResult {
+interface PaletteResult {
   secondary: string;
   accent: string;
 }
@@ -49,7 +49,7 @@ const STRATEGY_META: Record<
   triadic: { label: 'Triadic', secondaryOffset: 120, accentOffset: 240 },
 };
 
-export const PALETTE_STRATEGIES = Object.entries(STRATEGY_META).map(
+const PALETTE_STRATEGIES = Object.entries(STRATEGY_META).map(
   ([id, { label }]) => ({
     id: id as PaletteStrategy,
     label,
@@ -64,7 +64,7 @@ function wrapHue(h: number): number {
 /**
  * Generate a palette from a primary hex color (legacy — secondary + accent only).
  */
-export function generatePalette(
+function generatePalette(
   primaryHex: string,
   strategy: PaletteStrategy
 ): PaletteResult {

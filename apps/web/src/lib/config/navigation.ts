@@ -26,13 +26,13 @@ export interface SidebarLink extends NavLink {
 }
 
 /** Platform-level navigation (top header on codex.com) */
-export const PLATFORM_NAV: NavLink[] = [
+const PLATFORM_NAV: NavLink[] = [
   { href: '/discover', label: 'Discover' },
   { href: '/library', label: 'Library' },
 ];
 
 /** Organization-level navigation (org subdomain header) */
-export function getOrgNav(_slug: string): NavLink[] {
+function getOrgNav(_slug: string): NavLink[] {
   // On org subdomains, the slug is in the hostname — paths are relative to root
   return [
     { href: '/explore', label: 'Explore' },
@@ -43,7 +43,7 @@ export function getOrgNav(_slug: string): NavLink[] {
 }
 
 /** Studio header navigation (mobile menu links) */
-export const STUDIO_NAV: NavLink[] = [
+const STUDIO_NAV: NavLink[] = [
   { href: '/studio', label: 'Dashboard' },
   { href: '/studio/content', label: 'Content' },
   { href: '/studio/media', label: 'Media' },
@@ -100,7 +100,7 @@ export type RailIcon =
   | 'search'
   | 'users';
 
-export interface RailNavLink extends NavLink {
+interface RailNavLink extends NavLink {
   icon: RailIcon;
 }
 

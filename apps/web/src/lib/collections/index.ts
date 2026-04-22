@@ -12,7 +12,6 @@
 
 // Re-export TanStack DB utilities for convenient imports
 export {
-  and,
   createCollection,
   eq,
   gt,
@@ -23,18 +22,11 @@ export {
   or,
 } from '@tanstack/db';
 export { queryCollectionOptions } from '@tanstack/query-db-collection';
-// Also export the original for advanced use cases
-export { useLiveQuery as useLiveQueryUnsafe } from '@tanstack/svelte-db';
 // Collection exports
-export {
-  contentCollection,
-  loadContentForOrg,
-  loadContentWithFilters,
-} from './content';
+export { contentCollection } from './content';
 // SSR Hydration utilities
 export {
   COLLECTION_KEYS,
-  type CollectionKey,
   hydrateCollection,
   hydrateIfNeeded,
   invalidateCollection,
@@ -42,28 +34,10 @@ export {
 } from './hydration';
 export {
   type LibraryItem,
-  type LibraryProgress,
   libraryCollection,
   loadLibraryFromServer,
-  markAsCompleted,
-  resetProgress,
-  updateProgress,
 } from './library';
-export {
-  clearAllProgress,
-  clearProgress,
-  getProgress,
-  mergeServerProgress,
-  type PlaybackProgress,
-  progressCollection,
-  syncProgressToServer,
-  updateLocalProgress,
-} from './progress';
-export {
-  cleanupProgressSync,
-  forceSync,
-  initProgressSync,
-} from './progress-sync';
+export { progressCollection } from './progress';
 // QueryClient is defined in ./query-client.ts to avoid circular dependencies.
 // Collections import it directly from there; we re-export for external consumers.
 export { queryClient } from './query-client';
@@ -84,7 +58,4 @@ export {
  * During SSR, returns static data from `ssrOptions.ssrData` (or empty array).
  * On the client, delegates to the real `@tanstack/svelte-db` useLiveQuery.
  */
-export {
-  type UseLiveQuerySSROptions,
-  useLiveQuerySSR as useLiveQuery,
-} from './use-live-query-ssr';
+export { useLiveQuerySSR as useLiveQuery } from './use-live-query-ssr';

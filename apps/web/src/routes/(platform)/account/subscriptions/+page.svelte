@@ -5,7 +5,7 @@
   Lists all active/cancelling subscriptions with cancel and org navigation.
 -->
 <script lang="ts">
-  import { goto, invalidate } from '$app/navigation';
+  import { invalidate } from '$app/navigation';
   import * as m from '$paraglide/messages';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import * as Card from '$lib/components/ui/Card';
@@ -18,12 +18,20 @@
     reactivateSubscription,
   } from '$lib/remote/subscription.remote';
   import { openBillingPortal } from '$lib/remote/account.remote';
+  import { invalidateCollection } from '$lib/collections';
   import type { UserOrgSubscription } from '$lib/types';
   import { page } from '$app/state';
   import { buildOrgUrl } from '$lib/utils/subdomain';
   import { formatPrice, formatDate } from '$lib/utils/format';
 
   let { data } = $props();
+
+  // `data` from SvelteKit is deeply reactive in Svelte 5 — mutating entries
+  // of `data.subscriptions` (for optimistic updates) triggers re-renders.
+  // When the server load re-runs after `invalidate('account:subscriptions')`,
+  // `data.subscriptions` is fully replaced, so optimistic state is naturally
+  // reconciled with authoritative server state.
+  const subscriptions = $derived(data.subscriptions);
 
   let cancelDialogOpen = $state(false);
   let cancellingSubscription = $state<UserOrgSubscription | null>(null);
@@ -63,15 +71,38 @@
     if (!cancellingSubscription) return;
     cancelLoading = true;
     cancelError = '';
+
+    const organizationId = cancellingSubscription.organizationId;
+    const reason = cancelReason || undefined;
+    const existing = subscriptions.find(
+      (s) => s.organizationId === organizationId
+    );
+    const previousStatus = existing?.status;
+    const previousCancelAtPeriodEnd = existing?.cancelAtPeriodEnd;
+
+    // Optimistic flip — idempotent guard (Melt controlled-component echo safe).
+    // If the state already matches (e.g. server re-render with same status),
+    // early-return to avoid re-triggering effect dependencies.
+    if (existing && existing.status !== 'cancelling') {
+      existing.status = 'cancelling';
+      existing.cancelAtPeriodEnd = true;
+    }
+
     try {
-      await cancelSubscription({
-        organizationId: cancellingSubscription.organizationId,
-        reason: cancelReason || undefined,
-      });
+      await cancelSubscription({ organizationId, reason });
       cancelDialogOpen = false;
       cancellingSubscription = null;
-      await invalidate('cache:versions');
+      await Promise.all([
+        invalidate('account:subscriptions'),
+        invalidateCollection('library'),
+        invalidateCollection('subscription'),
+      ]);
     } catch (error) {
+      // Rollback optimistic state on failure
+      if (existing && previousStatus !== undefined) {
+        existing.status = previousStatus;
+        existing.cancelAtPeriodEnd = previousCancelAtPeriodEnd ?? false;
+      }
       cancelError = error instanceof Error ? error.message : 'Failed to cancel subscription';
     } finally {
       cancelLoading = false;
@@ -81,10 +112,32 @@
   async function handleReactivate(sub: UserOrgSubscription) {
     reactivateLoading = sub.id;
     reactivateError = '';
+
+    const existing = subscriptions.find(
+      (s) => s.organizationId === sub.organizationId
+    );
+    const previousStatus = existing?.status;
+    const previousCancelAtPeriodEnd = existing?.cancelAtPeriodEnd;
+
+    // Optimistic flip — idempotent guard against echo re-entry.
+    if (existing && existing.status !== 'active') {
+      existing.status = 'active';
+      existing.cancelAtPeriodEnd = false;
+    }
+
     try {
       await reactivateSubscription({ organizationId: sub.organizationId });
-      await invalidate('cache:versions');
+      await Promise.all([
+        invalidate('account:subscriptions'),
+        invalidateCollection('library'),
+        invalidateCollection('subscription'),
+      ]);
     } catch (error) {
+      // Rollback optimistic state on failure
+      if (existing && previousStatus !== undefined) {
+        existing.status = previousStatus;
+        existing.cancelAtPeriodEnd = previousCancelAtPeriodEnd ?? false;
+      }
       reactivateError = error instanceof Error ? error.message : 'Failed to reactivate subscription';
     } finally {
       reactivateLoading = null;
@@ -113,14 +166,14 @@
 <div class="subscriptions-page">
   <h1 class="page-title">{m.subscription_manage()}</h1>
 
-  {#if data.subscriptions.length === 0}
+  {#if subscriptions.length === 0}
     <EmptyState
       title={m.subscription_no_subscriptions()}
       description={m.subscription_no_subscriptions_description()}
     />
   {:else}
     <div class="subscription-list">
-      {#each data.subscriptions as sub (sub.id)}
+      {#each subscriptions as sub (sub.id)}
         <Card.Root>
           <Card.Content>
             <div class="subscription-card">

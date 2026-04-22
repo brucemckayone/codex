@@ -1345,4 +1345,75 @@ describe('ContentService', () => {
       }
     });
   });
+
+  describe('listPublic', () => {
+    // Regression guard for the followers-only content body leak: listPublic
+    // is a public, KV-cached endpoint, so any gated content's body text
+    // (contentBody / contentBodyJson) MUST be stripped before returning.
+    // Free content keeps its body so search / SEO still index the article.
+    it('strips body columns from non-free content and preserves them for free', async () => {
+      // Arrange: 'followers' accessType requires an organizationId, so we
+      // need an org before creating the gated article.
+      const [org] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const freeArticle = await service.create(
+        {
+          title: 'Free Article',
+          slug: createUniqueSlug('free-article'),
+          contentType: 'written',
+          visibility: 'public',
+          accessType: 'free',
+          priceCents: 0,
+          tags: [],
+          contentBody: 'This is the freely readable article body.',
+        },
+        creatorId
+      );
+      await service.publish(freeArticle.id, creatorId);
+
+      const followersArticle = await service.create(
+        {
+          title: 'Followers Only Article',
+          slug: createUniqueSlug('followers-article'),
+          contentType: 'written',
+          visibility: 'public',
+          accessType: 'followers',
+          organizationId: org.id,
+          priceCents: 0,
+          tags: [],
+          contentBody: 'SECRET body text that non-followers must not receive.',
+        },
+        creatorId
+      );
+      await service.publish(followersArticle.id, creatorId);
+
+      // Act: call the public listing (no user context — as if a random
+      // visitor were hitting /api/content/public).
+      const result = await service.listPublic({
+        page: 1,
+        limit: 20,
+        sort: 'newest',
+      });
+
+      const free = result.items.find((i) => i.id === freeArticle.id);
+      const followers = result.items.find((i) => i.id === followersArticle.id);
+
+      // Free article exposes its body.
+      expect(free).toBeDefined();
+      expect(free?.contentBody).toBe(
+        'This is the freely readable article body.'
+      );
+
+      // Followers-only article is listed (metadata is public) but body
+      // columns are nulled before leaving the service boundary.
+      expect(followers).toBeDefined();
+      expect(followers?.title).toBe('Followers Only Article');
+      expect(followers?.accessType).toBe('followers');
+      expect(followers?.contentBody).toBeNull();
+      expect(followers?.contentBodyJson).toBeNull();
+    });
+  });
 });

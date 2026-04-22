@@ -367,7 +367,7 @@ const DARK_VAR_PROPS = new Set([
 ]);
 
 /** Find the org layout element that holds the brand CSS variables. */
-export function getOrgLayoutElement(): HTMLElement | null {
+function getOrgLayoutElement(): HTMLElement | null {
   if (!browser) return null;
   return document.querySelector('.org-layout');
 }

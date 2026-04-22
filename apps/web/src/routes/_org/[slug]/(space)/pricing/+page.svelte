@@ -15,11 +15,23 @@
     XIcon,
   } from '$lib/components/ui/Icon';
   import * as Accordion from '$lib/components/ui/Accordion';
-  import { createSubscriptionCheckoutSession } from '$lib/remote/subscription.remote';
+  import { invalidate } from '$app/navigation';
+  import {
+    createSubscriptionCheckoutSession,
+    reactivateSubscription,
+    resumeSubscription,
+  } from '$lib/remote/subscription.remote';
+  import { openBillingPortal } from '$lib/remote/account.remote';
+  import { invalidateCollection } from '$lib/collections';
   import { getPricingFaq } from '$lib/remote/branding.remote';
   import type { SubscriptionTier } from '$lib/types';
   import type { PricingFaqItem } from '@codex/validation';
-  import { formatPrice } from '$lib/utils/format';
+  import { formatDate, formatPrice } from '$lib/utils/format';
+  import { buildPlatformUrl } from '$lib/utils/subdomain';
+  import {
+    getEffectiveStatus,
+    type SubscriptionStatus,
+  } from './status';
 
   let { data } = $props();
 
@@ -47,7 +59,17 @@
   // ── Resolved Streamed Data ────────────────────────────────────────
   let tiers = $state<SubscriptionTier[]>([]);
   let currentTierId = $state<string | null>(null);
+  let currentStatus = $state<SubscriptionStatus | null>(null);
+  let currentCancelAtPeriodEnd = $state(false);
+  let currentPeriodEnd = $state<string | null>(null);
   let pricingLoading = $state(true);
+
+  // Reactivate / payment-update / resume flow state
+  let reactivateLoading = $state(false);
+  let reactivateError = $state('');
+  let paymentPortalLoading = $state(false);
+  let resumeLoading = $state(false);
+  let resumeError = $state('');
 
   let resolvedTiersPromise: Promise<unknown> | null = null;
   $effect(() => {
@@ -73,14 +95,41 @@
       if (promise && promise !== resolvedSubPromise) {
         resolvedSubPromise = promise;
         Promise.resolve(promise).then((result) => {
-          if (resolvedSubPromise === promise) {
-            currentTierId =
-              (result as { tierId?: string } | null)?.tierId ?? null;
-          }
+          if (resolvedSubPromise !== promise) return;
+          const sub = result as {
+            tierId?: string;
+            status?: SubscriptionStatus | string;
+            cancelAtPeriodEnd?: boolean;
+            currentPeriodEnd?: string | Date;
+          } | null;
+          currentTierId = sub?.tierId ?? null;
+          const rawStatus = (sub?.status as SubscriptionStatus | undefined) ?? null;
+          currentStatus = rawStatus ?? (sub ? 'active' : null);
+          currentCancelAtPeriodEnd = sub?.cancelAtPeriodEnd ?? false;
+          const periodEnd = sub?.currentPeriodEnd;
+          currentPeriodEnd =
+            periodEnd instanceof Date
+              ? periodEnd.toISOString()
+              : (periodEnd ?? null);
         });
       }
     });
   });
+
+  // Derived effective state per the UX matrix — implemented in ./status.ts
+  // as a pure function so it can be unit-tested without rendering the page.
+  const effectiveStatus = $derived<SubscriptionStatus | null>(
+    getEffectiveStatus({
+      currentTierId,
+      status: currentStatus,
+      cancelAtPeriodEnd: currentCancelAtPeriodEnd,
+    })
+  );
+
+  // /account/subscriptions lives on the platform origin — on an org
+  // subdomain the link needs a full cross-origin URL. SSR-safe: page.url
+  // is always available.
+  const manageUrl = $derived(buildPlatformUrl(page.url, '/account/subscriptions'));
 
   // ── Recommended Tier ──────────────────────────────────────────────
   const recommendedTier = $derived.by(() => {
@@ -227,6 +276,93 @@
       document
         .querySelector('.checkout-error')
         ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+
+  // ── Lifecycle actions (reactivate + update payment) ───────────────
+  // Mirrors the optimistic pattern from account/subscriptions/+page.svelte.
+  // Melt echo guard: early return if the local state already matches the
+  // target ("active" for reactivate) so re-entry doesn't re-fire effects.
+  async function handleReactivate() {
+    if (reactivateLoading) return;
+    if (effectiveStatus === 'active') return; // echo guard
+
+    const previousStatus = currentStatus;
+    const previousCancelAtPeriodEnd = currentCancelAtPeriodEnd;
+
+    reactivateLoading = true;
+    reactivateError = '';
+
+    // Optimistic flip — only mutate if different (echo-safe).
+    if (currentStatus !== 'active') currentStatus = 'active';
+    if (currentCancelAtPeriodEnd) currentCancelAtPeriodEnd = false;
+
+    try {
+      await reactivateSubscription({ organizationId: data.org.id });
+      await Promise.all([
+        invalidate('account:subscriptions'),
+        invalidateCollection('library'),
+        invalidateCollection('subscription'),
+      ]);
+    } catch (err) {
+      // Rollback
+      currentStatus = previousStatus;
+      currentCancelAtPeriodEnd = previousCancelAtPeriodEnd;
+      reactivateError =
+        err instanceof Error ? err.message : 'Failed to reactivate subscription';
+    } finally {
+      reactivateLoading = false;
+    }
+  }
+
+  // Resume flow (Codex-7h4vo) — user-initiated resume of a PAUSED
+  // subscription. Parallel pattern to reactivate: optimistic flip, echo
+  // guard, rollback on error, parallel invalidation of the three version
+  // keys (account subscriptions depend, library, subscription).
+  async function handleResume() {
+    if (resumeLoading) return;
+    if (effectiveStatus === 'active') return; // echo guard
+
+    const previousStatus = currentStatus;
+
+    resumeLoading = true;
+    resumeError = '';
+
+    // Optimistic flip — paused → active. Only mutate if different (echo-safe).
+    if (currentStatus !== 'active') currentStatus = 'active';
+
+    try {
+      await resumeSubscription({ organizationId: data.org.id });
+      await Promise.all([
+        invalidate('account:subscriptions'),
+        invalidateCollection('library'),
+        invalidateCollection('subscription'),
+      ]);
+    } catch (err) {
+      // Rollback
+      currentStatus = previousStatus;
+      resumeError =
+        err instanceof Error ? err.message : 'Failed to resume subscription';
+    } finally {
+      resumeLoading = false;
+    }
+  }
+
+  async function handleUpdatePayment() {
+    if (paymentPortalLoading) return;
+    paymentPortalLoading = true;
+    try {
+      const result = await openBillingPortal({ returnUrl: page.url.href });
+      if (result?.url) {
+        window.location.href = result.url;
+        return;
+      }
+      // No portal available — fall through to account subscriptions page.
+      window.location.href = '/account/subscriptions';
+    } catch {
+      window.location.href = '/account/subscriptions';
+    } finally {
+      paymentPortalLoading = false;
     }
   }
 
@@ -497,7 +633,41 @@
 
             <div class="card__inner">
               {#if isCurrentPlan}
-                <span class="card__label card__label--current">{m.pricing_current_plan()}</span>
+                {#if effectiveStatus === 'cancelling'}
+                  <span
+                    class="card__label card__label--warning"
+                    data-testid="tier-status-badge"
+                    data-status="cancelling"
+                  >
+                    {currentPeriodEnd
+                      ? m.pricing_plan_ends_on({ date: formatDate(currentPeriodEnd) })
+                      : m.subscription_status_cancelling()}
+                  </span>
+                {:else if effectiveStatus === 'past_due'}
+                  <span
+                    class="card__label card__label--danger"
+                    data-testid="tier-status-badge"
+                    data-status="past_due"
+                  >
+                    {m.pricing_payment_failed()}
+                  </span>
+                {:else if effectiveStatus === 'paused'}
+                  <span
+                    class="card__label card__label--warning"
+                    data-testid="tier-status-badge"
+                    data-status="paused"
+                  >
+                    {m.pricing_plan_paused()}
+                  </span>
+                {:else}
+                  <span
+                    class="card__label card__label--current"
+                    data-testid="tier-status-badge"
+                    data-status="active"
+                  >
+                    {m.pricing_current_plan()}
+                  </span>
+                {/if}
               {/if}
 
               <header class="card__header">
@@ -549,11 +719,77 @@
                 </li>
               </ul>
 
-              <div class="card__action">
-                {#if isCurrentPlan}
-                  <Button variant="secondary" disabled class="tier-cta">
+              <div class="card__action" data-testid="tier-action">
+                {#if isCurrentPlan && effectiveStatus === 'cancelling'}
+                  <Button
+                    variant="primary"
+                    onclick={handleReactivate}
+                    loading={reactivateLoading}
+                    class="tier-cta"
+                    data-testid="tier-cta-reactivate"
+                    aria-label="Reactivate {tier.name} plan"
+                  >
+                    {m.pricing_reactivate_plan()}
+                  </Button>
+                  <a
+                    href={manageUrl}
+                    class="tier-secondary"
+                    data-testid="tier-cta-manage"
+                  >
+                    {m.pricing_manage_plan()}
+                  </a>
+                {:else if isCurrentPlan && effectiveStatus === 'past_due'}
+                  <Button
+                    variant="primary"
+                    onclick={handleUpdatePayment}
+                    loading={paymentPortalLoading}
+                    class="tier-cta"
+                    data-testid="tier-cta-update-payment"
+                    aria-label="Update payment method"
+                  >
+                    {m.pricing_update_payment()}
+                  </Button>
+                  <a
+                    href={manageUrl}
+                    class="tier-secondary"
+                    data-testid="tier-cta-manage"
+                  >
+                    {m.pricing_manage_plan()}
+                  </a>
+                {:else if isCurrentPlan && effectiveStatus === 'paused'}
+                  <Button
+                    variant="primary"
+                    onclick={handleResume}
+                    loading={resumeLoading}
+                    class="tier-cta"
+                    data-testid="tier-cta-resume"
+                    aria-label="Resume {tier.name} plan"
+                  >
+                    {m.pricing_resume_plan()}
+                  </Button>
+                  <a
+                    href={manageUrl}
+                    class="tier-secondary"
+                    data-testid="tier-cta-manage"
+                  >
+                    {m.pricing_manage_plan()}
+                  </a>
+                {:else if isCurrentPlan}
+                  <Button
+                    variant="secondary"
+                    disabled
+                    class="tier-cta"
+                    data-testid="tier-cta-current"
+                  >
                     {m.pricing_current_plan()}
                   </Button>
+                  <a
+                    href={manageUrl}
+                    class="tier-secondary"
+                    data-testid="tier-cta-manage"
+                  >
+                    {m.pricing_manage_plan()}
+                  </a>
                 {:else}
                   <Button
                     variant={isRecommended ? 'primary' : 'secondary'}
@@ -566,6 +802,24 @@
                   </Button>
                 {/if}
               </div>
+              {#if isCurrentPlan && reactivateError}
+                <p
+                  class="card__status-error"
+                  role="alert"
+                  data-testid="tier-reactivate-error"
+                >
+                  {reactivateError}
+                </p>
+              {/if}
+              {#if isCurrentPlan && resumeError}
+                <p
+                  class="card__status-error"
+                  role="alert"
+                  data-testid="tier-resume-error"
+                >
+                  {resumeError}
+                </p>
+              {/if}
             </div>
           </article>
         {/each}
@@ -1288,6 +1542,66 @@
     border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-interactive) 20%, transparent);
   }
 
+  .card__label--warning {
+    color: var(--color-warning-700);
+    background: color-mix(in srgb, var(--color-warning-100) 85%, var(--color-surface));
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-warning-200) 90%, transparent);
+    animation: cardStatusFade var(--duration-normal) var(--ease-default);
+  }
+
+  .card__label--danger {
+    color: var(--color-error-700);
+    background: color-mix(in srgb, var(--color-error-100) 80%, var(--color-surface));
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-error-200) 90%, transparent);
+    animation: cardStatusFade var(--duration-normal) var(--ease-default);
+  }
+
+  @keyframes cardStatusFade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .card__label--warning,
+    .card__label--danger {
+      animation: none;
+    }
+  }
+
+  /* Secondary "Manage plan" link — sits below the primary CTA on
+     current-plan variants. Neutral tone so it doesn't compete with the
+     Reactivate / Update Payment primary button. */
+  .tier-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-1) var(--space-2);
+    margin-top: var(--space-2);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text-secondary);
+    text-decoration: underline;
+    text-underline-offset: var(--space-1);
+    transition: var(--transition-colors);
+    border-radius: var(--radius-sm);
+  }
+
+  .tier-secondary:hover {
+    color: var(--color-text);
+  }
+
+  .tier-secondary:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  .card__status-error {
+    margin: var(--space-2) 0 0;
+    font-size: var(--text-xs);
+    color: var(--color-error-700);
+    text-align: center;
+  }
+
   /* ── CARD CONTENT ──────────────────────────────────────────────── */
 
   .card__header {
@@ -1433,6 +1747,9 @@
 
   .card__action {
     margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   :global(.tier-cta) {

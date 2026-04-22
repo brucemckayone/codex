@@ -708,7 +708,7 @@ export class PurchaseService extends BaseService {
       refundAmountCents?: number;
       refundReason?: string;
     }
-  ): Promise<void> {
+  ): Promise<{ userId: string } | void> {
     try {
       const purchase = await this.db.query.purchases.findFirst({
         where: eq(purchases.stripePaymentIntentId, paymentIntentId),
@@ -719,13 +719,15 @@ export class PurchaseService extends BaseService {
         return;
       }
 
-      // Idempotent: already refunded
+      // Idempotent: already refunded — still return the userId so the caller
+      // can re-bump the library cache (KV version increments are monotonic
+      // and cheap; idempotent at the Stripe layer, not the cache layer).
       if (purchase.status === PURCHASE_STATUS.REFUNDED) {
         this.obs.info('Refund already processed', {
           purchaseId: purchase.id,
           paymentIntentId,
         });
-        return;
+        return { userId: purchase.customerId };
       }
 
       // Atomically update purchase status AND revoke content access
@@ -762,8 +764,115 @@ export class PurchaseService extends BaseService {
         customerId: purchase.customerId,
         paymentIntentId,
       });
+
+      // Return the purchaser's userId so the webhook route can bump
+      // COLLECTION_USER_LIBRARY — refunded content disappears from the
+      // user's library on their next fetch. No orgId: one-time purchases
+      // are content-scoped, not org-scoped, so only the library cache bumps.
+      return { userId: purchase.customerId };
     } catch (error) {
       this.handleError(error, 'processRefund');
+    }
+  }
+
+  /**
+   * Process a dispute from a `charge.dispute.created` webhook event.
+   *
+   * Disputes are treated identically to refunds for access purposes:
+   * - Mark `disputedAt = now()` on the purchase (status stays 'completed'
+   *   until the dispute resolves — this keeps the purchase_status CHECK
+   *   constraint happy and matches Stripe's semantics where a disputed
+   *   charge is still a completed payment until it is evaluated)
+   * - Soft-delete matching `contentAccess` rows (the content disappears
+   *   from the user's library on the next fetch — same as refund)
+   *
+   * Idempotent: if the purchase already has `disputedAt` set, this is a
+   * near-no-op — we still return `{ userId, orgId }` so the webhook
+   * handler can re-invalidate the library cache and re-write the
+   * AccessRevocation KV key (both are monotonic / idempotent at their
+   * respective layers).
+   *
+   * Purchases are org-scoped (`organizationId` is NOT NULL on the
+   * `purchases` table), so unlike `processRefund` we can always return
+   * `orgId`. The webhook handler then writes
+   * `AccessRevocation.revoke(userId, orgId, 'refund')` — the revocation
+   * reason enum intentionally doesn't include 'dispute' because it's
+   * observability-only and disputes are the same access-reducing class
+   * as refunds.
+   *
+   * @param paymentIntentId - The payment intent ID from the disputed charge
+   * @param disputeDetails - Optional Stripe dispute metadata
+   * @returns `{ userId, orgId }` when a matching purchase exists; `void` otherwise
+   */
+  async processDispute(
+    paymentIntentId: string,
+    disputeDetails?: {
+      stripeDisputeId?: string;
+      disputeReason?: string;
+    }
+  ): Promise<{ userId: string; orgId: string } | void> {
+    try {
+      const purchase = await this.db.query.purchases.findFirst({
+        where: eq(purchases.stripePaymentIntentId, paymentIntentId),
+      });
+
+      if (!purchase) {
+        this.obs.warn('Dispute for unknown purchase', { paymentIntentId });
+        return;
+      }
+
+      // Idempotent: already disputed — still return scope so the caller
+      // can bump library cache + re-write revocation monotonically.
+      if (purchase.disputedAt) {
+        this.obs.info('Dispute already processed', {
+          purchaseId: purchase.id,
+          paymentIntentId,
+        });
+        return {
+          userId: purchase.customerId,
+          orgId: purchase.organizationId,
+        };
+      }
+
+      // Atomically mark the purchase as disputed AND revoke content access.
+      await this.db.transaction(async (tx) => {
+        await tx
+          .update(purchases)
+          .set({
+            updatedAt: new Date(),
+            disputedAt: new Date(),
+            disputeReason: disputeDetails?.disputeReason ?? null,
+            stripeDisputeId: disputeDetails?.stripeDisputeId ?? null,
+          })
+          .where(eq(purchases.id, purchase.id));
+
+        await tx
+          .update(contentAccess)
+          .set({ deletedAt: new Date() })
+          .where(
+            and(
+              eq(contentAccess.userId, purchase.customerId),
+              eq(contentAccess.contentId, purchase.contentId),
+              isNull(contentAccess.deletedAt)
+            )
+          );
+      });
+
+      this.obs.info('Dispute processed', {
+        purchaseId: purchase.id,
+        contentId: purchase.contentId,
+        customerId: purchase.customerId,
+        organizationId: purchase.organizationId,
+        paymentIntentId,
+        stripeDisputeId: disputeDetails?.stripeDisputeId,
+      });
+
+      return {
+        userId: purchase.customerId,
+        orgId: purchase.organizationId,
+      };
+    } catch (error) {
+      this.handleError(error, 'processDispute');
     }
   }
 

@@ -37,6 +37,8 @@ vi.mock('$lib/remote/library.remote', () => ({
 
 vi.mock('$app/environment', () => ({
   browser: false,
+  dev: false,
+  building: false,
 }));
 
 // We'll import the actual hydration module but mock the index's queryClient
@@ -79,6 +81,11 @@ describe('collections/hydration', () => {
       const { COLLECTION_KEYS } = await import('./hydration');
       expect(COLLECTION_KEYS.library).toEqual(['library']);
     });
+
+    it('has subscription key', async () => {
+      const { COLLECTION_KEYS } = await import('./hydration');
+      expect(COLLECTION_KEYS.subscription).toEqual(['subscription']);
+    });
   });
 
   describe('hydrateCollection', () => {
@@ -116,6 +123,16 @@ describe('collections/hydration', () => {
       const { invalidateCollection } = await import('./hydration');
       const result = invalidateCollection('content');
       expect(result).toBeInstanceOf(Promise);
+    });
+
+    it('accepts the "subscription" key and resolves without error', async () => {
+      const { invalidateCollection } = await import('./hydration');
+      // In the SSR-mocked test env, subscriptionCollection is undefined, so
+      // the branch short-circuits and returns quickly. The important contract
+      // is that 'subscription' is a valid key at the type/runtime level.
+      await expect(
+        invalidateCollection('subscription')
+      ).resolves.toBeUndefined();
     });
   });
 });

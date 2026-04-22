@@ -2,8 +2,9 @@
   @component ContentDetailView
 
   Shared content detail view used by both org and creator content detail pages.
-  Handles player/preview rendering, metadata display, purchase section,
-  "What you'll get" benefits, and related content grid.
+  Handles player/preview rendering, metadata display, a single-gate CTA chain,
+  "What you'll get" benefits, and the written-article body. The related-content
+  grid is rendered by the page wrappers via the shared RelatedContent component.
 
   The purchase form and creator attribution are passed as snippets to allow
   page-specific customization (form actions, creator link styling).
@@ -14,14 +15,12 @@
   @prop {string | null} streamingUrl - HLS streaming URL (null if no access)
   @prop {object | null} progress - Playback progress data
   @prop {boolean} isAuthenticated - Whether the user is logged in
-  @prop {{ sessionUrl?: string; checkoutError?: string } | null} formResult - Form action result
+  @prop {{ sessionUrl?: string; checkoutError?: string; info?: string; alreadyOwned?: boolean; retryCount?: number } | null} formResult - Form action result
   @prop {boolean} purchasing - Whether a purchase is in flight
   @prop {string} creatorName - Display name for the creator
   @prop {string} titleSuffix - Suffix for the page title
   @prop {Snippet} [creatorAttribution] - Custom creator attribution line
   @prop {Snippet} [purchaseForm] - Purchase form with use:enhance
-  @prop {ContentWithRelations[]} [relatedContent] - Related content items
-  @prop {(item: ContentWithRelations) => string} [buildRelatedHref] - Href builder for related cards
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
@@ -36,10 +35,12 @@
   // VideoPlayer and AudioPlayer are heavy but don't touch remote
   // files, so they're dynamically loaded further down.
   import { PreviewPlayer, deriveAccessState } from '$lib/components/player';
-  import { ContentCard } from '$lib/components/ui/ContentCard';
+  import SubscribeButton from '$lib/components/subscription/SubscribeButton.svelte';
   import { formatPrice, formatDurationHuman } from '$lib/utils/format';
   import { PriceBadge } from '$lib/components/ui/PriceBadge';
-  import { LockIcon, CheckIcon } from '$lib/components/ui/Icon';
+  import { LockIcon, CheckIcon, XIcon, PlayIcon } from '$lib/components/ui/Icon';
+  import { AccessRevokedOverlay } from '$lib/components/AccessRevokedOverlay';
+  import type { AccessRevocationReason } from '$lib/server/content-detail';
   import ProseContent from '$lib/components/editor/ProseContent.svelte';
   import { StructuredData } from '$lib/components/seo';
   import { toast } from '$lib/components/ui/Toast';
@@ -76,19 +77,40 @@
       : never) | null;
   };
 
+  /**
+   * Form action result shape. Codex-mmju5: `info` + `alreadyOwned` carry the
+   * 409 happy-path ("you already own this") so it renders as an info banner
+   * with a Play-now CTA rather than a red error. `retryCount` drives the
+   * 3-attempt escalation copy (Codex-8aibi).
+   */
+  type FormResult = {
+    sessionUrl?: string;
+    checkoutError?: string;
+    info?: string;
+    alreadyOwned?: boolean;
+    retryCount?: number;
+  };
+
   interface Props {
     content: ContentDetail;
     contentBodyHtml: string | null;
     hasAccess: boolean;
     streamingUrl: string | null;
     waveformUrl?: string | null;
+    /**
+     * ISO 8601 expiry of the signed streaming URL. Forwarded through to the
+     * player so it can pre-emptively refresh before the URL dies (Codex-1ywzr).
+     * The component itself doesn't consume it — we just forward it to children
+     * without mutation.
+     */
+    streamingExpiresAt?: string | null;
     progress: {
       positionSeconds: number;
       durationSeconds: number;
       completed: boolean;
     } | null;
     isAuthenticated: boolean;
-    formResult: { sessionUrl?: string; checkoutError?: string } | null;
+    formResult: FormResult | null;
     purchasing: boolean;
     creatorName: string;
     titleSuffix: string;
@@ -100,10 +122,20 @@
     subscriptionCoversContent?: boolean;
     /** True while the access check is still resolving (skeleton state) */
     accessLoading?: boolean;
+    /**
+     * Reason the user's previously-granted access was revoked — drives the
+     * contextual `AccessRevokedOverlay` over the player (Codex-zdf2u).
+     * Null on grant, generic 403, or any non-revocation denial.
+     */
+    revocationReason?: AccessRevocationReason | null;
+    /**
+     * Called after the user successfully reactivates their subscription from
+     * the overlay. Wire this to an `invalidate()` so the server load reruns
+     * and either grants access or surfaces the next gate.
+     */
+    onaccessrestored?: () => void;
     creatorAttribution?: Snippet;
     purchaseForm?: Snippet;
-    relatedContent?: ContentDetail[];
-    buildRelatedHref?: (item: ContentDetail) => string;
   }
 
   const {
@@ -112,21 +144,39 @@
     hasAccess,
     streamingUrl,
     waveformUrl,
+    streamingExpiresAt,
     progress,
     isAuthenticated,
     formResult,
-    purchasing,
+    purchasing: _purchasing,
     creatorName,
     titleSuffix,
     requiresSubscription,
     hasSubscription,
     subscriptionCoversContent,
     accessLoading = false,
+    revocationReason = null,
+    onaccessrestored,
     creatorAttribution,
     purchaseForm,
-    relatedContent,
-    buildRelatedHref,
   }: Props = $props();
+
+  // Show the overlay only when the user lost access they previously had —
+  // never for first-time paywall encounters (those render the purchase /
+  // subscribe gates below). A non-null revocation reason is the signal.
+  const showRevokedOverlay = $derived(!hasAccess && !!revocationReason);
+
+  // Checkout-error dismiss state (Codex-8aibi). Resets whenever a fresh
+  // formResult identity lands, so a new error shows even if the previous
+  // one was dismissed.
+  let errorDismissed = $state(false);
+  let lastResultSeen: FormResult | null = null;
+  $effect(() => {
+    if (formResult !== lastResultSeen) {
+      errorDismissed = false;
+      lastResultSeen = formResult;
+    }
+  });
 
   function displayPrice(cents: number | null): string {
     if (!cents) return m.content_price_free();
@@ -144,6 +194,31 @@
   );
 
   const description = $derived(extractPlainText(content.description));
+
+  /**
+   * Short description — first sentence or first ~160 chars, whichever is
+   * shorter. Lifted above the gate CTAs so browsers see what the content is
+   * about BEFORE the sales pitch. Codex-8i22f.
+   */
+  const shortDescription = $derived.by<string | null>(() => {
+    if (!description) return null;
+    if (description.length <= 160) return description;
+    const firstSentenceEnd = description.search(/[.!?](\s|$)/);
+    if (firstSentenceEnd > 0 && firstSentenceEnd < 200) {
+      return description.slice(0, firstSentenceEnd + 1);
+    }
+    // Fallback: hard-cut at word boundary near 160 chars.
+    const cut = description.slice(0, 160);
+    const lastSpace = cut.lastIndexOf(' ');
+    return (lastSpace > 100 ? cut.slice(0, lastSpace) : cut) + '…';
+  });
+
+  /** When description is short enough to fit entirely in the lede above, skip
+   *  the full "About" section below to avoid duplicate copy. */
+  const descriptionFullyShownAbove = $derived(
+    !!description && description.length <= 160
+  );
+
   const thumbnailUrl = $derived(content.mediaItem?.thumbnailUrl ?? undefined);
   const duration = $derived(content.mediaItem?.durationSeconds ?? 0);
   const priceCents = $derived(content.priceCents ?? null);
@@ -174,12 +249,17 @@
     const orgId = content.organizationId;
     if (!orgId || followInFlight) return;
     followInFlight = true;
-    // Optimistic update — flips the button to "Following" immediately;
-    // `hasAccess` resolves once the server load re-runs via invalidate().
+    // Optimistic update — flips the button to "Following" immediately.
+    // The server load then re-runs, re-awaits the access check, and the
+    // body HTML lands in the payload this time — so the article unlocks
+    // without a manual refresh. `'app:auth'` is the narrowest dep the
+    // content-detail load declares (see onaccessrestored for the revoke
+    // counterpart). Writing to `followingStore` only flips the button copy;
+    // it's the invalidate() that triggers the body to render.
     followingStore.set(orgId, true);
     try {
       await followOrganization(orgId);
-      await invalidate('access:content');
+      await invalidate('app:auth');
     } catch (error) {
       followingStore.set(orgId, false);
       toast.error(
@@ -203,6 +283,25 @@
     })
   );
 
+  /**
+   * Live-region announcement for screen readers when the access state flips
+   * (unlock, preview start, locked, loading). Short and polite — AT will
+   * announce on every change without being disruptive. Codex-jo819 O3.
+   */
+  const accessAnnouncement = $derived.by<string>(() => {
+    if (accessLoading) return '';
+    if (accessState.status === 'unlocked') return 'Content unlocked.';
+    if (accessState.status === 'preview') return 'Preview playing.';
+    if (accessState.status === 'locked') {
+      if (isFollowersOnly) return 'Follow to unlock this content.';
+      if (isTeamOnly) return 'Team-only content.';
+      if (needsSubscription) return 'Subscription required.';
+      if (!isAuthenticated) return 'Sign in required.';
+      return 'Purchase required.';
+    }
+    return '';
+  });
+
   // Content-type-aware primary benefit
   const primaryBenefit = $derived(
     content.contentType === 'video'
@@ -212,15 +311,61 @@
         : m.content_detail_benefit_full_article()
   );
 
-  // Related content filtered by same creator, excluding current item
-  const filteredRelated = $derived(
-    (relatedContent ?? [])
-      .filter(
-        (item) =>
-          item.id !== content.id && item.creator?.id === content.creator?.id
-      )
-      .slice(0, 4)
-  );
+  // Free content shown to an unauthenticated visitor: the body is already
+  // readable (server-side policy) but the media stream still needs a signed
+  // URL, which needs auth. Swap the "Purchase to watch" lock copy for a
+  // sign-in prompt so we don't claim there's a paywall where there isn't.
+  const isFreeSigninPrompt = $derived(isFree && !isAuthenticated);
+
+  const lockCtaText = $derived.by<string>(() => {
+    if (isFreeSigninPrompt) {
+      return content.contentType === 'audio'
+        ? m.content_detail_signin_listen_cta()
+        : m.content_detail_signin_watch_cta();
+    }
+    return m.content_detail_purchase_cta();
+  });
+
+  const lockCtaSubtext = $derived.by<string>(() => {
+    if (isFreeSigninPrompt) {
+      return content.contentType === 'audio'
+        ? m.content_detail_signin_listen_description()
+        : m.content_detail_signin_watch_description();
+    }
+    return m.content_detail_purchase_cta_description();
+  });
+
+  /**
+   * Body-lock copy, branched by the real reason the body is gated.
+   * Codex-jdmp6 — previously generic purchase copy for every gate.
+   */
+  const bodyLockText = $derived.by<string>(() => {
+    if (isFollowersOnly) return m.followers_only_cta_description();
+    if (isTeamOnly) return m.team_only_cta_description();
+    if (needsSubscription) {
+      return hasSubscription
+        ? m.upgrade_cta_description()
+        : m.subscribe_cta_description();
+    }
+    if (!isAuthenticated) return m.checkout_signin_to_purchase();
+    return m.content_detail_purchase_cta_description();
+  });
+
+  /**
+   * Paywall teaser paragraphs for written content — first ~400 chars of body
+   * as PLAIN TEXT, split into paragraph chunks for rendering. Using plain
+   * text (not HTML) keeps us safe from truncated-tag XSS without needing
+   * {@html}. Codex-79g3m.
+   */
+  const bodyTeaserParagraphs = $derived.by<string[] | null>(() => {
+    if (!contentBodyHtml) return null;
+    const plain = extractPlainText(contentBodyHtml);
+    if (!plain) return null;
+    const chunks = plain.split(/\n{2,}/).slice(0, 3);
+    const teaser = chunks.join('\n\n').slice(0, 400).trim();
+    if (!teaser) return null;
+    return teaser.split(/\n{2,}/);
+  });
 
   // ── Lazy-loaded player components ──────────────────────────────
   // VideoPlayer (+ media-chrome + HLS) and AudioPlayer are loaded only
@@ -352,11 +497,40 @@
 
 <StructuredData data={contentSchema} />
 
-<div class="content-detail" data-access={hasAccess ? 'full' : 'preview'}>
+<!--
+  Root is an <article> (Codex-jo819 O1) — this is the semantic owner of the
+  content page. The nested live region announces access-state transitions to
+  AT without visual noise (O3).
+-->
+<article class="content-detail" data-access={hasAccess ? 'full' : 'preview'}>
+  <div
+    class="content-detail__player-status sr-only"
+    role="status"
+    aria-live="polite"
+    aria-atomic="true"
+  >
+    {accessAnnouncement}
+  </div>
+
   <!-- Video Player / Preview — renders FIRST (hero position) -->
   {#if content.contentType === 'video'}
   <div class="content-detail__player" class:content-detail__player--cinema={cinemaMode} data-content-type="video" tabindex="-1">
-    {#if hasAccess && streamingUrl}
+    {#if showRevokedOverlay}
+      <!-- Revoked overlay sits over the poster / preview so the user sees
+           "why" without losing the thumbnail context (Codex-zdf2u). -->
+      {#if thumbnailUrl}
+        <img
+          class="content-detail__preview-image"
+          src={thumbnailUrl}
+          alt={m.content_thumbnail_alt({ title: content.title })}
+        />
+      {/if}
+      <AccessRevokedOverlay
+        reason={revocationReason}
+        organizationId={content.organizationId ?? undefined}
+        onreactivated={onaccessrestored}
+      />
+    {:else if hasAccess && streamingUrl}
       {#if VideoPlayer}
         <VideoPlayer
           src={streamingUrl}
@@ -364,6 +538,7 @@
           initialProgress={progress?.positionSeconds ?? 0}
           poster={thumbnailUrl}
           captions={content.mediaItem?.captions ?? []}
+          expiresAt={streamingExpiresAt ?? null}
           {cinemaMode}
           oncinemachange={(v) => (cinemaMode = v)}
         />
@@ -382,7 +557,7 @@
           {accessState}
           autoplay={true}
         />
-        {#snippet failed(error, reset)}
+        {#snippet failed(_error, _reset)}
           <div class="content-detail__preview">
             {#if thumbnailUrl}
               <img
@@ -393,8 +568,8 @@
             {/if}
             <div class="content-detail__preview-overlay">
               <div class="content-detail__preview-cta">
-                <p class="content-detail__cta-text">{m.content_detail_purchase_cta()}</p>
-                <p class="content-detail__cta-subtext">{m.content_detail_purchase_cta_description()}</p>
+                <p class="content-detail__cta-text">{lockCtaText}</p>
+                <p class="content-detail__cta-subtext">{lockCtaSubtext}</p>
               </div>
             </div>
           </div>
@@ -416,8 +591,8 @@
         <div class="content-detail__preview-overlay">
           <div class="content-detail__preview-cta">
             <LockIcon size={40} class="content-detail__lock-icon" stroke-width="1.5" />
-            <p class="content-detail__cta-text">{m.content_detail_purchase_cta()}</p>
-            <p class="content-detail__cta-subtext">{m.content_detail_purchase_cta_description()}</p>
+            <p class="content-detail__cta-text">{lockCtaText}</p>
+            <p class="content-detail__cta-subtext">{lockCtaSubtext}</p>
           </div>
         </div>
       </div>
@@ -450,14 +625,42 @@
       </p>
     {/if}
 
+    <!--
+      Short description (lede) — lifted above the gate CTAs so browsers see
+      what the content IS before the sales pitch. Codex-8i22f.
+    -->
+    {#if shortDescription}
+      <p class="content-detail__short-description">{shortDescription}</p>
+    {/if}
+
     {#if progress?.completed}
       <span class="content-detail__completed-badge">{m.content_progress_completed()}</span>
     {/if}
 
-    <!-- Audio Player — positioned below title/meta, above purchase/about -->
+    <!--
+      Audio Player — positioned below title/meta, above purchase/about.
+      Codex-066ye: for LOCKED audio content we render a symmetric locked-state
+      card mirroring the video preview overlay (thumbnail + lock overlay + CTA
+      copy), instead of leaving the audio slot empty above the fold.
+    -->
     {#if content.contentType === 'audio'}
       <div class="content-detail__player content-detail__player--audio" data-content-type="audio" tabindex="-1">
-        {#if hasAccess && streamingUrl}
+        {#if showRevokedOverlay}
+          <div class="content-detail__audio-locked">
+            {#if thumbnailUrl}
+              <img
+                class="content-detail__audio-locked-image"
+                src={thumbnailUrl}
+                alt={m.content_thumbnail_alt({ title: content.title })}
+              />
+            {/if}
+            <AccessRevokedOverlay
+              reason={revocationReason}
+              organizationId={content.organizationId ?? undefined}
+              onreactivated={onaccessrestored}
+            />
+          </div>
+        {:else if hasAccess && streamingUrl}
           {#if AudioPlayer}
             <AudioPlayer
               src={streamingUrl}
@@ -467,6 +670,7 @@
               poster={thumbnailUrl}
               title={content.title}
               shaderPreset={content.shaderPreset ?? null}
+              expiresAt={streamingExpiresAt ?? null}
             />
           {:else}
             <div class="audio-player-skeleton">
@@ -477,169 +681,237 @@
           <div class="audio-player-skeleton">
             <div class="skeleton skeleton--audio"></div>
           </div>
-        {/if}
-      </div>
-    {/if}
-
-    <!-- Team-only Section — only management roles can access -->
-    {#if !accessLoading && isTeamOnly}
-      <div class="content-detail__purchase">
-        <div class="content-detail__price">
-          <span class="content-detail__price-amount">{m.team_only_cta_title()}</span>
-          <span class="content-detail__price-label">{m.team_only_cta_description()}</span>
-        </div>
-      </div>
-    {/if}
-
-    <!-- Followers-only Section — follow to access -->
-    {#if !accessLoading && isFollowersOnly}
-      <div class="content-detail__purchase">
-        <div class="content-detail__price">
-          <span class="content-detail__price-amount">{m.followers_only_cta_title()}</span>
-          <span class="content-detail__price-label">{m.followers_only_cta_description()}</span>
-        </div>
-
-        {#if isAuthenticated}
-          <button
-            class="content-detail__purchase-btn"
-            onclick={handleFollow}
-            disabled={isAlreadyFollowing || followInFlight}
-          >
-            {isAlreadyFollowing ? m.org_following() : m.org_follow()}
-          </button>
         {:else}
-          <a href="/login" class="content-detail__purchase-btn content-detail__purchase-btn--link">
-            {m.checkout_signin_to_purchase()}
-          </a>
+          <!-- Locked audio preview card (Codex-066ye) -->
+          <div class="content-detail__audio-locked">
+            {#if thumbnailUrl}
+              <img
+                class="content-detail__audio-locked-image"
+                src={thumbnailUrl}
+                alt={m.content_thumbnail_alt({ title: content.title })}
+              />
+            {/if}
+            <div class="content-detail__audio-locked-overlay">
+              <LockIcon size={32} class="content-detail__lock-icon" stroke-width="1.5" />
+              <p class="content-detail__cta-text">{lockCtaText}</p>
+              <p class="content-detail__cta-subtext">{lockCtaSubtext}</p>
+            </div>
+          </div>
         {/if}
       </div>
     {/if}
 
-    <!-- Subscription Section (tier-gated content) — hidden during access loading -->
-    {#if !accessLoading && needsSubscription}
-      <div class="content-detail__purchase">
-        <div class="content-detail__price">
-          <span class="content-detail__price-amount">
-            {hasSubscription ? m.upgrade_cta_title() : m.subscribe_cta_title()}
-          </span>
-          <span class="content-detail__price-label">
-            {hasSubscription ? m.upgrade_cta_description() : m.subscribe_cta_description()}
-          </span>
-        </div>
+    <!--
+      Unified gate-CTA chain (Codex-ledjq). Previously FIVE parallel {#if}
+      blocks — overlapping conditions (e.g. follower-gated + paid content)
+      would render two CTAs stacked. The {:else if} chain now guarantees
+      exactly ONE gate renders. Each gate is a <section> labelled by its
+      price amount span (Codex-jo819 O2).
+    -->
+    {#if !accessLoading}
+      {#if isTeamOnly}
+        <section class="content-detail__purchase" aria-labelledby="purchase-label-team">
+          <div class="content-detail__price">
+            <span id="purchase-label-team" class="content-detail__price-amount">{m.team_only_cta_title()}</span>
+            <span class="content-detail__price-label">{m.team_only_cta_description()}</span>
+          </div>
+        </section>
+      {:else if isFollowersOnly}
+        <section class="content-detail__purchase" aria-labelledby="purchase-label-followers">
+          <div class="content-detail__price">
+            <span id="purchase-label-followers" class="content-detail__price-amount">{m.followers_only_cta_title()}</span>
+            <span class="content-detail__price-label">{m.followers_only_cta_description()}</span>
+          </div>
 
-        {#if isAuthenticated}
-          <a
-            href={`/pricing?returnTo=${encodeURIComponent(page.url.pathname)}`}
-            class="content-detail__purchase-btn content-detail__purchase-btn--link"
+          {#if isAuthenticated}
+            <button
+              class="content-detail__purchase-btn"
+              onclick={handleFollow}
+              disabled={isAlreadyFollowing || followInFlight}
+            >
+              {isAlreadyFollowing ? m.org_following() : m.org_follow()}
+            </button>
+          {:else}
+            <a href="/login" class="content-detail__purchase-btn content-detail__purchase-btn--link">
+              {m.checkout_signin_to_purchase()}
+            </a>
+          {/if}
+        </section>
+      {:else if needsSubscription}
+        <section class="content-detail__purchase" aria-labelledby="purchase-label-sub">
+          <div class="content-detail__price">
+            <span id="purchase-label-sub" class="content-detail__price-amount">
+              {hasSubscription ? m.upgrade_cta_title() : m.subscribe_cta_title()}
+            </span>
+            <span class="content-detail__price-label">
+              {hasSubscription ? m.upgrade_cta_description() : m.subscribe_cta_description()}
+            </span>
+          </div>
+
+          {#if isAuthenticated && content.organizationId}
+            <!--
+              State-aware CTA (Codex-g5vbp). Renders:
+                no sub          → Subscribe → pricing
+                active + upgrade→ "Upgrade to Watch" + Manage plan
+                cancelling      → "Ends {date}" badge + Reactivate + Manage
+                past_due        → "Payment failed" badge + Update payment + Manage
+                paused          → "Paused" badge + Resume (interactive — Codex-7h4vo) + Manage
+              The component reads live state from subscriptionCollection and
+              handles its own optimistic reactivate + Stripe portal redirect.
+            -->
+            <SubscribeButton
+              organizationId={content.organizationId}
+              {isAuthenticated}
+              subscribeHref={`/pricing?returnTo=${encodeURIComponent(page.url.pathname)}`}
+              upgradeRequired={hasSubscription ?? false}
+              class="content-detail__subscribe-button"
+            />
+          {:else if !isAuthenticated}
+            <a href="/login" class="content-detail__purchase-btn content-detail__purchase-btn--link">
+              {m.checkout_signin_to_purchase()}
+            </a>
+          {/if}
+
+          {#if isPaid}
+            <span class="content-detail__or-divider">or purchase for {displayPrice(priceCents)}</span>
+            {#if isAuthenticated && purchaseForm}
+              {@render purchaseForm()}
+            {/if}
+          {/if}
+        </section>
+      {:else if needsPurchase}
+        <section class="content-detail__purchase" aria-labelledby="purchase-label-buy">
+          <div class="content-detail__price">
+            <span id="purchase-label-buy" class="content-detail__price-amount">{displayPrice(priceCents)}</span>
+            <span class="content-detail__price-label">{m.content_detail_purchase_cta_description()}</span>
+          </div>
+
+          <!-- MediaLiveRegion widened beyond media surfaces: checkout errors announce
+               to AT via the region's nested role="alert" (escalated aria-live=
+               "assertive") while the visible banner keeps the existing styling for
+               sighted users. The visible banner intentionally has NO role so AT
+               doesn't hear the error twice. Codex-wuye8. -->
+          <MediaLiveRegion
+            error={formResult?.checkoutError ?? null}
+            class="content-detail__purchase-error-region"
           >
-            {hasSubscription ? m.upgrade_cta_title() : m.subscribe_cta_title()}
-          </a>
-        {:else}
-          <a href="/login" class="content-detail__purchase-btn content-detail__purchase-btn--link">
-            {m.checkout_signin_to_purchase()}
-          </a>
-        {/if}
+            {#if formResult?.info || formResult?.alreadyOwned}
+              <!-- 409 "already own" → info banner with Play-now CTA (Codex-mmju5) -->
+              <div class="content-detail__purchase-info" aria-hidden="true">
+                <CheckIcon size={18} class="content-detail__purchase-info-icon" />
+                <p class="content-detail__purchase-info-text">
+                  {formResult?.info ?? 'You already have access to this content.'}
+                </p>
+                <a
+                  href={page.url.pathname}
+                  class="content-detail__purchase-info-action"
+                >
+                  <PlayIcon size={14} />
+                  Play now
+                </a>
+              </div>
+            {:else if formResult?.checkoutError && !errorDismissed}
+              <!-- Error banner with dismiss + 3-retry escalation (Codex-8aibi) -->
+              <div class="content-detail__purchase-error" aria-hidden="true">
+                <div class="content-detail__purchase-error-body">
+                  <p class="content-detail__purchase-error-text">{formResult.checkoutError}</p>
+                  {#if (formResult?.retryCount ?? 0) >= 3}
+                    <p class="content-detail__purchase-error-escalation">
+                      Still stuck? <a href="mailto:support@codex.example?subject=Checkout%20help">Contact support</a>.
+                    </p>
+                  {/if}
+                </div>
+                <button
+                  type="button"
+                  class="content-detail__purchase-error-dismiss"
+                  onclick={() => (errorDismissed = true)}
+                  aria-label="Dismiss error"
+                >
+                  <XIcon size={14} />
+                </button>
+              </div>
+            {/if}
+          </MediaLiveRegion>
 
-        {#if isPaid}
-          <span class="content-detail__or-divider">or purchase for {displayPrice(priceCents)}</span>
           {#if isAuthenticated && purchaseForm}
             {@render purchaseForm()}
+          {:else if !isAuthenticated}
+            <a href="/login" class="content-detail__purchase-btn content-detail__purchase-btn--link">
+              {m.checkout_signin_to_purchase()}
+            </a>
           {/if}
-        {/if}
-      </div>
+
+          <!-- What you'll get -->
+          <div class="content-detail__benefits">
+            <h2 class="content-detail__benefits-heading">{m.content_detail_benefits_heading()}</h2>
+            <ul class="content-detail__benefits-list">
+              <li class="content-detail__benefits-item">
+                <CheckIcon size={16} class="content-detail__benefits-icon" />
+                <span>{primaryBenefit}</span>
+              </li>
+              <li class="content-detail__benefits-item">
+                <CheckIcon size={16} class="content-detail__benefits-icon" />
+                <span>{m.content_detail_benefit_lifetime_access()}</span>
+              </li>
+              <li class="content-detail__benefits-item">
+                <CheckIcon size={16} class="content-detail__benefits-icon" />
+                <span>{m.content_detail_benefit_progress_tracking()}</span>
+              </li>
+              <li class="content-detail__benefits-item">
+                <CheckIcon size={16} class="content-detail__benefits-icon" />
+                <span>{m.content_detail_benefit_any_device()}</span>
+              </li>
+            </ul>
+          </div>
+        </section>
+      {:else if isFree && !isAuthenticated}
+        <!--
+          Free content + unauthenticated visitor. Body is already readable via
+          the public-access policy; the CTA here lets them sign in to play
+          the media stream (which still requires auth). Authenticated free
+          visitors see no gate — they already have full access.
+        -->
+        <section class="content-detail__purchase" aria-labelledby="purchase-label-free">
+          <div class="content-detail__price">
+            <span id="purchase-label-free" class="content-detail__price-amount content-detail__price-amount--free">{m.content_price_free()}</span>
+          </div>
+          <a href="/login" class="content-detail__purchase-btn content-detail__purchase-btn--link">
+            {content.contentType === 'audio'
+              ? m.content_detail_signin_listen_cta()
+              : m.content_detail_signin_watch_cta()}
+          </a>
+
+          <!-- What you'll get (free content) -->
+          <div class="content-detail__benefits">
+            <h2 class="content-detail__benefits-heading">{m.content_detail_benefits_heading()}</h2>
+            <ul class="content-detail__benefits-list">
+              <li class="content-detail__benefits-item">
+                <CheckIcon size={16} class="content-detail__benefits-icon" />
+                <span>{primaryBenefit}</span>
+              </li>
+              <li class="content-detail__benefits-item">
+                <CheckIcon size={16} class="content-detail__benefits-icon" />
+                <span>{m.content_detail_benefit_lifetime_access()}</span>
+              </li>
+              <li class="content-detail__benefits-item">
+                <CheckIcon size={16} class="content-detail__benefits-icon" />
+                <span>{m.content_detail_benefit_progress_tracking()}</span>
+              </li>
+              <li class="content-detail__benefits-item">
+                <CheckIcon size={16} class="content-detail__benefits-icon" />
+                <span>{m.content_detail_benefit_any_device()}</span>
+              </li>
+            </ul>
+          </div>
+        </section>
+      {/if}
     {/if}
 
-    <!-- Purchase Section (one-time purchase) — hidden during access loading -->
-    {#if !accessLoading && needsPurchase}
-      <div class="content-detail__purchase">
-        <div class="content-detail__price">
-          <span class="content-detail__price-amount">{displayPrice(priceCents)}</span>
-          <span class="content-detail__price-label">{m.content_detail_purchase_cta_description()}</span>
-        </div>
-
-        <!-- MediaLiveRegion widened beyond media surfaces: checkout errors announce
-             to AT via the region's nested role="alert" (escalated aria-live=
-             "assertive") while the visible <p> in the children snippet keeps the
-             existing purchase-error styling for sighted users. The visible <p>
-             intentionally has NO role so AT doesn't hear the error twice.
-             Codex-wuye8. -->
-        <MediaLiveRegion
-          error={formResult?.checkoutError ?? null}
-          class="content-detail__purchase-error-region"
-        >
-          {#if formResult?.checkoutError}
-            <p class="content-detail__purchase-error" aria-hidden="true">{formResult.checkoutError}</p>
-          {/if}
-        </MediaLiveRegion>
-
-        {#if isAuthenticated && purchaseForm}
-          {@render purchaseForm()}
-        {:else if !isAuthenticated}
-          <a href="/login" class="content-detail__purchase-btn content-detail__purchase-btn--link">
-            {m.checkout_signin_to_purchase()}
-          </a>
-        {/if}
-
-        <!-- What you'll get -->
-        <div class="content-detail__benefits">
-          <h3 class="content-detail__benefits-heading">{m.content_detail_benefits_heading()}</h3>
-          <ul class="content-detail__benefits-list">
-            <li class="content-detail__benefits-item">
-              <CheckIcon size={16} class="content-detail__benefits-icon" />
-              <span>{primaryBenefit}</span>
-            </li>
-            <li class="content-detail__benefits-item">
-              <CheckIcon size={16} class="content-detail__benefits-icon" />
-              <span>{m.content_detail_benefit_lifetime_access()}</span>
-            </li>
-            <li class="content-detail__benefits-item">
-              <CheckIcon size={16} class="content-detail__benefits-icon" />
-              <span>{m.content_detail_benefit_progress_tracking()}</span>
-            </li>
-            <li class="content-detail__benefits-item">
-              <CheckIcon size={16} class="content-detail__benefits-icon" />
-              <span>{m.content_detail_benefit_any_device()}</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-    {:else if !accessLoading && isFree && !hasAccess}
-      <div class="content-detail__purchase">
-        <div class="content-detail__price">
-          <span class="content-detail__price-amount content-detail__price-amount--free">{m.content_price_free()}</span>
-        </div>
-        {#if !isAuthenticated}
-          <a href="/login" class="content-detail__purchase-btn content-detail__purchase-btn--link">
-            {m.checkout_signin_to_purchase()}
-          </a>
-        {/if}
-
-        <!-- What you'll get (free content) -->
-        <div class="content-detail__benefits">
-          <h3 class="content-detail__benefits-heading">{m.content_detail_benefits_heading()}</h3>
-          <ul class="content-detail__benefits-list">
-            <li class="content-detail__benefits-item">
-              <CheckIcon size={16} class="content-detail__benefits-icon" />
-              <span>{primaryBenefit}</span>
-            </li>
-            <li class="content-detail__benefits-item">
-              <CheckIcon size={16} class="content-detail__benefits-icon" />
-              <span>{m.content_detail_benefit_lifetime_access()}</span>
-            </li>
-            <li class="content-detail__benefits-item">
-              <CheckIcon size={16} class="content-detail__benefits-icon" />
-              <span>{m.content_detail_benefit_progress_tracking()}</span>
-            </li>
-            <li class="content-detail__benefits-item">
-              <CheckIcon size={16} class="content-detail__benefits-icon" />
-              <span>{m.content_detail_benefit_any_device()}</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-    {/if}
-
-    {#if description}
+    <!--
+      Full "About" section — skipped when the short lede above already
+      showed the entire description (avoids duplicate copy). Codex-8i22f.
+    -->
+    {#if description && !descriptionFullyShownAbove}
       <div class="content-detail__description">
         <h2 class="content-detail__description-heading">{m.content_detail_about()}</h2>
         <p>{description}</p>
@@ -659,50 +931,28 @@
           </div>
         </div>
       {:else}
+        <!--
+          Paywall-masked teaser (Codex-79g3m). Renders the first ~400 chars of
+          body with a bottom fade hand-off to the lock CTA — users see real
+          value before the purchase ask, instead of a tiny lock box alone.
+        -->
         <div class="content-detail__body content-detail__body--locked">
+          {#if bodyTeaserParagraphs}
+            <div class="content-detail__body-teaser" aria-hidden="true">
+              {#each bodyTeaserParagraphs as paragraph, i (i)}
+                <p>{paragraph}</p>
+              {/each}
+            </div>
+          {/if}
           <div class="content-detail__body-lock">
             <LockIcon size={24} class="content-detail__body-lock-icon" />
-            <p class="content-detail__body-lock-text">
-              {#if needsSubscription}
-                {hasSubscription ? m.upgrade_cta_description() : m.subscribe_cta_description()}
-              {:else if !isAuthenticated}
-                {m.checkout_signin_to_purchase()}
-              {:else}
-                {m.content_detail_purchase_cta_description()}
-              {/if}
-            </p>
+            <p class="content-detail__body-lock-text">{bodyLockText}</p>
           </div>
         </div>
       {/if}
     {/if}
   </div>
-
-  <!-- Related Content Section -->
-  {#if filteredRelated.length > 0}
-    <section class="content-detail__related">
-      <h2 class="content-detail__related-heading">
-        {m.content_detail_more_from_creator({ creator: creatorName })}
-      </h2>
-      <div class="content-detail__related-grid">
-        {#each filteredRelated as item (item.id)}
-          <ContentCard
-            id={item.id}
-            title={item.title}
-            thumbnail={item.mediaItem?.thumbnailUrl}
-            description={item.description}
-            contentType={item.contentType === 'written' ? 'article' : item.contentType as 'video' | 'audio'}
-            duration={item.mediaItem?.durationSeconds}
-            href={buildRelatedHref?.(item) ?? `/content/${item.slug ?? item.id}`}
-            price={item.priceCents != null
-              ? { amount: item.priceCents, currency: 'GBP' }
-              : null}
-            contentAccessType={item.accessType}
-          />
-        {/each}
-      </div>
-    </section>
-  {/if}
-</div>
+</article>
 
 <style>
   .content-detail {
@@ -712,8 +962,21 @@
     padding: var(--space-4) var(--space-4) var(--space-8);
   }
 
+  /*
+    Mobile: reserve bottom padding to clear the fixed MobileBottomNav
+    (height = --space-16; see apps/web/src/lib/components/layout/MobileNav/
+    MobileBottomNav.svelte). Without this the final CTA or lock card is
+    occluded by the nav bar. Codex-ki3m5.
+  */
+  @media (--below-md) {
+    .content-detail {
+      padding-bottom: calc(var(--space-16) + env(safe-area-inset-bottom, 0px));
+    }
+  }
+
   /* Player / Preview */
   .content-detail__player {
+    position: relative;
     width: 100%;
     border-radius: var(--radius-lg);
     overflow: hidden;
@@ -730,11 +993,12 @@
     outline-offset: 2px;
   }
 
-  /* Cinema mode — break out to fill the main content area (viewport minus sidebar).
-     --space-16 = sidebar rail width (64px). The calc accounts for the sidebar
-     so the player's left edge aligns with the main area, not hidden under the rail. */
+  /* Cinema mode — break out to fill the main content area (viewport minus
+     sidebar). Uses --app-sidebar-width (Codex-4g697) so the calc stays
+     correct if the rail resizes. The token collapses to 0 below md via
+     a media query in layout.css, so no mobile override is needed here. */
   .content-detail__player--cinema {
-    --cinema-width: calc(100vw - var(--space-16));
+    --cinema-width: calc(100vw - var(--app-sidebar-width));
     width: var(--cinema-width);
     max-width: none;
     margin-inline: calc(var(--cinema-width) / -2 + 50%);
@@ -743,19 +1007,15 @@
       border-radius var(--duration-fast) var(--ease-default);
   }
 
-  /* Mobile: no sidebar, use full viewport */
-  @media (--below-md) {
-    .content-detail__player--cinema {
-      --cinema-width: 100vw;
-    }
-  }
-
-  /* Audio player — sits inline within the info section, not as a hero */
+  /* Audio player — sits inline within the info section, not as a hero.
+     `min-height` is pinned to `--player-height-audio` so the skeleton →
+     live-player swap doesn't shift layout (Codex-qlvth). */
   .content-detail__player--audio {
     aspect-ratio: unset;
     background: transparent;
     margin-bottom: var(--space-4);
     margin-top: var(--space-2);
+    min-height: var(--player-height-audio);
   }
 
   .audio-player-skeleton {
@@ -763,9 +1023,12 @@
     overflow: hidden;
   }
 
+  /* Skeleton height matches the live AudioPlayer so the skeleton → player
+     swap doesn't CLS (Codex-qlvth). The player body composes to ~12rem:
+     body padding (2 × --space-5) + waveform (--space-24) + controls row. */
   .skeleton--audio {
     width: 100%;
-    height: var(--space-24, 96px);
+    height: var(--player-height-audio);
     background: linear-gradient(
       90deg,
       var(--color-surface-secondary) 25%,
@@ -775,6 +1038,45 @@
     background-size: 200% 100%;
     animation: shimmer calc(var(--duration-slower) * 3) infinite;
     border-radius: var(--radius-lg);
+  }
+
+  /* Locked audio preview card (Codex-066ye) — mirrors the video preview
+     overlay at the height of the live audio player so the layout doesn't
+     collapse above the fold when no stream is available yet. */
+  .content-detail__audio-locked {
+    position: relative;
+    width: 100%;
+    min-height: var(--player-height-audio);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--color-surface-tertiary);
+  }
+
+  .content-detail__audio-locked-image {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .content-detail__audio-locked-overlay {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1);
+    padding: var(--space-6) var(--space-4);
+    color: var(--color-text-inverse);
+    text-align: center;
+    background: linear-gradient(
+      to top,
+      var(--color-player-overlay-heavy) 0%,
+      var(--color-player-overlay) 50%,
+      var(--color-player-surface-hover) 100%
+    );
   }
 
   .content-detail__preview {
@@ -867,8 +1169,15 @@
     gap: var(--space-2);
   }
 
+  /* Fluid title typography (Codex-27w37) — replaces the breakpoint-md jump
+     from text-2xl → text-3xl with a continuous clamp so the title scales
+     smoothly across viewports instead of snapping at 768px. The token
+     endpoints themselves are already clamps, so we pin the floor and
+     ceiling and let the middle term interpolate. At ~720px viewport the
+     clamp sits near text-2xl's ceiling; at ~1280px it lands at
+     text-3xl's ceiling (40px). */
   .content-detail__title {
-    font-size: var(--text-2xl);
+    font-size: clamp(var(--text-2xl), 2vw + 1rem, var(--text-3xl));
     font-weight: var(--font-bold);
     color: var(--color-text);
     margin: 0;
@@ -906,6 +1215,14 @@
     margin: 0;
   }
 
+  /* Short description lede (Codex-8i22f) — sits above the gate CTAs */
+  .content-detail__short-description {
+    font-size: var(--text-base);
+    color: var(--color-text-secondary);
+    line-height: var(--leading-relaxed);
+    margin: 0;
+  }
+
   /* Creator link styles (used by creator page snippet) */
   :global(.content-detail__creator-link) {
     color: var(--color-text-secondary);
@@ -929,7 +1246,7 @@
     width: fit-content;
   }
 
-  /* Purchase Section */
+  /* Purchase Section (now a <section> — Codex-jo819 O2) */
   .content-detail__purchase {
     display: flex;
     flex-direction: column;
@@ -961,13 +1278,125 @@
     color: var(--color-text-secondary);
   }
 
+  /* Checkout error banner (Codex-8aibi) — dismiss button + optional escalation
+     helper after 3 consecutive failures. */
   .content-detail__purchase-error {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    background: var(--color-error-50);
+    border: var(--border-width) var(--border-style)
+      var(--color-error-200, var(--color-border));
+    border-radius: var(--radius-md);
+  }
+
+  .content-detail__purchase-error-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .content-detail__purchase-error-text {
     font-size: var(--text-sm);
     color: var(--color-error-600);
     margin: 0;
-    padding: var(--space-2) var(--space-3);
-    background: var(--color-error-50);
+  }
+
+  .content-detail__purchase-error-escalation {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    margin: 0;
+  }
+
+  .content-detail__purchase-error-escalation a {
+    color: var(--color-interactive);
+    text-decoration: underline;
+  }
+
+  .content-detail__purchase-error-escalation a:hover {
+    color: var(--color-interactive-hover);
+  }
+
+  .content-detail__purchase-error-escalation a:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  .content-detail__purchase-error-dismiss {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-6);
+    height: var(--space-6);
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: var(--transition-colors);
+  }
+
+  .content-detail__purchase-error-dismiss:hover {
+    color: var(--color-text);
+    background: var(--color-surface-secondary);
+  }
+
+  .content-detail__purchase-error-dismiss:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  /* Info banner (409 "already owned" happy-path — Codex-mmju5) */
+  .content-detail__purchase-info {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    background: var(--color-info-50, var(--color-surface-secondary));
+    border: var(--border-width) var(--border-style)
+      var(--color-info-200, var(--color-border));
     border-radius: var(--radius-md);
+    flex-wrap: wrap;
+  }
+
+  :global(.content-detail__purchase-info-icon) {
+    color: var(--color-info-600, var(--color-success-600));
+    flex-shrink: 0;
+  }
+
+  .content-detail__purchase-info-text {
+    flex: 1;
+    font-size: var(--text-sm);
+    color: var(--color-text);
+    margin: 0;
+  }
+
+  .content-detail__purchase-info-action {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--color-interactive);
+    text-decoration: none;
+    border-radius: var(--radius-sm);
+    transition: var(--transition-colors);
+  }
+
+  .content-detail__purchase-info-action:hover {
+    color: var(--color-interactive-hover);
+    background: var(--color-surface-secondary);
+  }
+
+  .content-detail__purchase-info-action:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   .content-detail__or-divider {
@@ -1005,11 +1434,17 @@
     cursor: not-allowed;
   }
 
+  :global(.content-detail__purchase-btn:focus-visible) {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
   .content-detail__purchase-btn--link {
     text-align: center;
   }
 
-  /* Benefits section */
+  /* Benefits section — heading promoted to <h2> so page heading order
+     stays unbroken (h1 title → h2 benefits/about/description). Codex-jo819 O6. */
   .content-detail__benefits {
     margin-top: var(--space-4);
     padding-top: var(--space-4);
@@ -1045,7 +1480,7 @@
     flex-shrink: 0;
   }
 
-  /* Description */
+  /* Description ("About") */
   .content-detail__description {
     margin-top: var(--space-2);
   }
@@ -1074,7 +1509,40 @@
 
   .content-detail__body--locked {
     position: relative;
-    min-height: var(--space-24);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  /*
+    Paywall teaser mask (Codex-79g3m). Shows the first ~400 chars of the
+    body fading into the lock CTA below. mask-image is Baseline-widely
+    available; -webkit- prefix kept for older Safari cohorts (Ref 02).
+  */
+  .content-detail__body-teaser {
+    font-size: var(--text-base);
+    color: var(--color-text-secondary);
+    line-height: var(--leading-relaxed);
+    max-height: calc(var(--space-24) + var(--space-16));
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 1) 40%,
+      rgba(0, 0, 0, 0) 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 1) 40%,
+      rgba(0, 0, 0, 0) 100%
+    );
+  }
+
+  .content-detail__body-teaser p {
+    margin: 0 0 var(--space-3);
+  }
+
+  .content-detail__body-teaser p:last-child {
+    margin-bottom: 0;
   }
 
   .content-detail__body-lock {
@@ -1101,43 +1569,6 @@
     margin: 0;
     max-width: 320px;
     line-height: var(--leading-relaxed);
-  }
-
-  /* Related Content Section */
-  .content-detail__related {
-    margin-top: var(--space-8);
-    padding-top: var(--space-6);
-    border-top: var(--border-width) var(--border-style) var(--color-border);
-    /* Related content is far below the fold — defer render/paint until
-       it scrolls near. Size hint reserves layout space so scrolling
-       doesn't jump when the browser starts painting. */
-    content-visibility: auto;
-    contain-intrinsic-size: auto 500px;
-  }
-
-  .content-detail__related-heading {
-    font-size: var(--text-lg);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    margin: 0 0 var(--space-4);
-  }
-
-  .content-detail__related-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: var(--space-4);
-  }
-
-  @media (--breakpoint-sm) {
-    .content-detail__related-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-
-  @media (--breakpoint-lg) {
-    .content-detail__related-grid {
-      grid-template-columns: repeat(4, 1fr);
-    }
   }
 
   /* Skeleton loading states (access check pending) */
@@ -1202,14 +1633,11 @@
     }
   }
 
-  /* Responsive */
+  /* Responsive — title size is fluid via clamp() above, so no breakpoint
+     override is needed here (Codex-27w37). */
   @media (--breakpoint-md) {
     .content-detail {
       padding: var(--space-6) var(--space-6) var(--space-10);
-    }
-
-    .content-detail__title {
-      font-size: var(--text-3xl);
     }
 
     :global(.content-detail__purchase-btn) {

@@ -11,7 +11,7 @@ export interface CachedBrandConfig {
 }
 
 /** Result type for cache operations - distinguishes hit/miss/error */
-export type CacheResult =
+type CacheResult =
   | { status: 'hit'; data: CachedBrandConfig }
   | { status: 'miss' }
   | { status: 'error'; error: string };
@@ -47,7 +47,7 @@ export async function getBrandConfigWithStatus(
  * Returns null if cache miss, KV undefined (local dev), or error.
  * @deprecated Use getBrandConfigWithStatus for better error handling
  */
-export async function getBrandConfig(
+async function getBrandConfig(
   platform: App.Platform | undefined,
   slug: string
 ): Promise<CachedBrandConfig | null> {

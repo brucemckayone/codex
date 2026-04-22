@@ -28,6 +28,7 @@
     pagination: {
       page: mediaQuery.current?.pagination?.page ?? urlPage,
       totalPages: mediaQuery.current?.pagination?.totalPages ?? 0,
+      total: mediaQuery.current?.pagination?.total ?? 0,
     },
     filters: {
       status: urlStatus ?? 'all',

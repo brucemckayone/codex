@@ -28,5 +28,6 @@ interface SearchFilter {
   debounceMs?: number;
 }
 
-export type FilterConfig = PillFilter | SelectFilter | SearchFilter;
+type FilterConfig = PillFilter | SelectFilter | SearchFilter;
+
 export { default as FilterBar } from './FilterBar.svelte';

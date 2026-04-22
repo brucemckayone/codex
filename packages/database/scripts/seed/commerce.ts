@@ -13,6 +13,12 @@ import {
   TIERS,
   USERS,
 } from './constants';
+import {
+  assertTestModeKey,
+  createOrFindStripeSubscription,
+  SYNTHETIC_STRIPE_CUSTOMER_ID,
+  SYNTHETIC_STRIPE_SUBSCRIPTION_ID,
+} from './stripe-subscription';
 
 const now = new Date();
 const purchasedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000); // 3 days ago
@@ -507,7 +513,19 @@ export async function seedCommerce(db: typeof DbClient) {
   // 2. Creates Products + Prices for subscription tiers
   // 3. Creates (or reuses) a Connect account with pre-filled activation
   const stripeKey = process.env.STRIPE_SECRET_KEY;
+
+  // Populated below if Stripe is available. Kept in outer scope so the
+  // subscription-insert section can look up the real price IDs to use
+  // when creating a real test-mode Stripe subscription.
+  let stripePriceIdsByTier: Map<
+    string,
+    { stripePriceMonthlyId: string; stripePriceAnnualId: string }
+  > | null = null;
+
   if (stripeKey) {
+    // Refuse to seed against a live Stripe account — the seed creates
+    // disposable customers and subscriptions that must never touch real data.
+    assertTestModeKey(stripeKey);
     const stripe = new Stripe(stripeKey);
 
     // Step 1: Clean up stale seed objects from previous runs
@@ -520,6 +538,13 @@ export async function seedCommerce(db: typeof DbClient) {
       { ...TIERS.betaStandard, organizationId: ORGS.beta.id },
       { ...TIERS.bonesSoulPath, organizationId: ORGS.bones.id },
     ];
+
+    // Capture the created Stripe price IDs per Codex tier id so we can
+    // reference them when creating real seed subscriptions below.
+    const createdTierPriceIds = new Map<
+      string,
+      { stripePriceMonthlyId: string; stripePriceAnnualId: string }
+    >();
 
     for (const tier of seedTiers) {
       const product = await stripe.products.create({
@@ -549,6 +574,11 @@ export async function seedCommerce(db: typeof DbClient) {
         }),
       ]);
 
+      createdTierPriceIds.set(tier.id, {
+        stripePriceMonthlyId: monthlyPrice.id,
+        stripePriceAnnualId: annualPrice.id,
+      });
+
       await db
         .update(schema.subscriptionTiers)
         .set({
@@ -562,6 +592,10 @@ export async function seedCommerce(db: typeof DbClient) {
     console.log(
       `  ✓ Created Stripe Products/Prices for ${seedTiers.length} tiers`
     );
+
+    // Expose the created price IDs to the subscription section below.
+    // Attaching to outer scope via a closure-friendly variable.
+    stripePriceIdsByTier = createdTierPriceIds;
   } else {
     console.log(
       '  ⚠ STRIPE_SECRET_KEY not set — tiers will have null Stripe IDs (checkout will 422)'
@@ -580,18 +614,68 @@ export async function seedCommerce(db: typeof DbClient) {
   const subPlatformFee = Math.round(subMonthly * 0.1);
   const subCreatorPayout = subMonthly - subPlatformFee;
 
+  // Default to synthetic IDs (used when STRIPE_SECRET_KEY is absent —
+  // preserves zero-config seed behaviour for fresh clones and CI).
+  let subStripeSubscriptionId: string = SYNTHETIC_STRIPE_SUBSCRIPTION_ID;
+  let subStripeCustomerId: string = SYNTHETIC_STRIPE_CUSTOMER_ID;
+  let subCurrentPeriodStart: Date = now;
+  let subCurrentPeriodEnd: Date = new Date(
+    Date.now() + 30 * 24 * 60 * 60 * 1000
+  ); // +30 days
+
+  if (stripeKey && stripePriceIdsByTier) {
+    const tierPrices = stripePriceIdsByTier.get(TIERS.alphaStandard.id);
+    if (tierPrices) {
+      const stripe = new Stripe(stripeKey);
+      try {
+        const result = await createOrFindStripeSubscription(stripe, {
+          user: {
+            id: USERS.viewer.id,
+            email: USERS.viewer.email,
+            name: USERS.viewer.name,
+          },
+          tier: {
+            id: TIERS.alphaStandard.id,
+            stripePriceMonthlyId: tierPrices.stripePriceMonthlyId,
+            stripePriceAnnualId: tierPrices.stripePriceAnnualId,
+          },
+          subscriptionSeedId: SUBSCRIPTIONS.viewerAlphaStandard.id,
+          billingInterval: 'month',
+        });
+        subStripeSubscriptionId = result.stripeSubscriptionId;
+        subStripeCustomerId = result.stripeCustomerId;
+        subCurrentPeriodStart = result.currentPeriodStart;
+        subCurrentPeriodEnd = result.currentPeriodEnd;
+        console.log(
+          `  ✓ Created real Stripe test-mode subscription for viewer@test.com (${subStripeSubscriptionId})`
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Seed failed while creating real Stripe subscription for viewer@test.com: ${message}`
+        );
+      }
+    }
+  } else if (!stripeKey) {
+    console.warn(
+      '  ⚠ STRIPE_SECRET_KEY not set — using synthetic Stripe IDs. ' +
+        'E2E tests requiring real cancel/resume flows will not run green. ' +
+        'Set STRIPE_SECRET_KEY (sk_test_*) to enable full fixture.'
+    );
+  }
+
   await db.insert(schema.subscriptions).values([
     {
       id: SUBSCRIPTIONS.viewerAlphaStandard.id,
       userId: USERS.viewer.id,
       organizationId: ORGS.alpha.id,
       tierId: TIERS.alphaStandard.id,
-      stripeSubscriptionId: 'sub_seed_viewer_alpha_standard',
-      stripeCustomerId: 'cus_seed_viewer',
+      stripeSubscriptionId: subStripeSubscriptionId,
+      stripeCustomerId: subStripeCustomerId,
       status: 'active',
       billingInterval: 'month',
-      currentPeriodStart: now,
-      currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // +30 days
+      currentPeriodStart: subCurrentPeriodStart,
+      currentPeriodEnd: subCurrentPeriodEnd,
       amountCents: subMonthly,
       platformFeeCents: subPlatformFee,
       organizationFeeCents: 0,
@@ -606,6 +690,8 @@ export async function seedCommerce(db: typeof DbClient) {
   // Pre-fills all onboarding requirements so the account is genuinely active in Stripe
   // (charges_enabled + payouts_enabled = true) — checkout with transfer_data works.
   if (stripeKey) {
+    // Re-assert test mode (cheap, defensive — key could have rotated mid-seed).
+    assertTestModeKey(stripeKey);
     const stripe = new Stripe(stripeKey);
 
     // Try to reuse an existing seed Connect account

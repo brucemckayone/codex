@@ -28,6 +28,7 @@
  * - Webhook handlers check-before-insert (same pattern as PurchaseService)
  */
 
+import type { VersionedCache } from '@codex/cache';
 import {
   BILLING_INTERVAL,
   CURRENCY,
@@ -57,6 +58,11 @@ import {
   TierNotFoundError,
 } from '../errors';
 import { calculateRevenueSplit } from './revenue-split';
+import {
+  type InvalidationReason,
+  invalidateForUser,
+  type WaitUntilFn,
+} from './subscription-invalidation';
 
 type Subscription = typeof subscriptions.$inferSelect;
 type SubscriptionTier = typeof subscriptionTiers.$inferSelect;
@@ -104,20 +110,122 @@ export interface WebhookEmailPayload {
 /**
  * Result returned by webhook handler methods.
  * Contains all side-effect data the handler needs (cache invalidation, email).
+ *
+ * `userId` + `orgId` feed the shared `invalidateForUser` helper so each
+ * subscription lifecycle event bumps both COLLECTION_USER_LIBRARY and,
+ * when an org is involved, COLLECTION_USER_SUBSCRIPTION. See
+ * docs/subscription-cache-audit/phase-1-p0.md for the gap matrix.
  */
 export interface WebhookHandlerResult {
   /** User ID for cache invalidation (COLLECTION_USER_LIBRARY) */
   userId?: string;
+  /**
+   * Organization ID for the per-org subscription cache bump
+   * (COLLECTION_USER_SUBSCRIPTION). Optional because a few events
+   * (e.g. malformed webhook with missing metadata) legitimately have
+   * no org context — the helper skips the subscription bump in that case.
+   */
+  orgId?: string;
   /** Composed email payload ready for sendEmailToWorker() */
   email?: WebhookEmailPayload;
 }
 
+/**
+ * Extended configuration for `SubscriptionService`.
+ *
+ * Adds optional `cache` + `waitUntil` injection so every public mutation
+ * method can internally call the shared `invalidateForUser` helper without
+ * route/webhook layers having to remember to do it themselves.
+ *
+ * When both are provided, mutations fire-and-forget a bump of the two
+ * per-user KV version keys (library + per-org subscription) on success.
+ * When either is absent, invalidation is a silent no-op — the service still
+ * works for callers (narrow unit tests, legacy harnesses) that don't need
+ * cache bumps. This mirrors the `revocation?: AccessRevocation` pattern on
+ * `ContentAccessService` in `@codex/access`.
+ */
+export interface SubscriptionServiceConfig extends ServiceConfig {
+  /**
+   * Optional versioned cache used to bump `COLLECTION_USER_LIBRARY` and
+   * `COLLECTION_USER_SUBSCRIPTION` version keys after successful mutations.
+   * Must be paired with `waitUntil`; providing only one is a wiring bug —
+   * the service gracefully degrades to no-op in that case rather than
+   * blocking on an unscheduled promise.
+   */
+  cache?: VersionedCache;
+  /**
+   * Optional `ExecutionContext.waitUntil` (or equivalent) used to schedule
+   * fire-and-forget KV writes after the response is returned.
+   */
+  waitUntil?: WaitUntilFn;
+}
+
 export class SubscriptionService extends BaseService {
   private readonly stripe: Stripe;
+  private readonly cache: VersionedCache | undefined;
+  private readonly waitUntil: WaitUntilFn | undefined;
 
-  constructor(config: ServiceConfig, stripe: Stripe) {
+  constructor(config: SubscriptionServiceConfig, stripe: Stripe) {
     super(config);
     this.stripe = stripe;
+    this.cache = config.cache;
+    this.waitUntil = config.waitUntil;
+  }
+
+  /**
+   * Internal orchestrator hook.
+   *
+   * Called at the end of every public mutation method (cancel, changeTier,
+   * reactivate) and the side-effecting webhook handlers (created, updated,
+   * deleted, payment_succeeded, payment_failed) to bump per-user KV version
+   * keys. Routes/webhooks no longer need to call `invalidateForUser`
+   * directly — the service owns invalidation so it can never be forgotten.
+   *
+   * Graceful degrade:
+   *   - No-op when `cache` or `waitUntil` weren't injected (e.g. unit tests
+   *     that construct the service without the orchestrator wiring). The
+   *     mutation still succeeds; only the cache bump is skipped.
+   *   - No-op when `userId` is missing. Webhook handlers legitimately
+   *     return results with no user context (e.g. malformed event) — we
+   *     don't want to fail the whole handler for a missing id.
+   *   - Fire-and-forget: `invalidateForUser` schedules both bumps on
+   *     `waitUntil` with `.catch` guards, so a KV outage can never surface
+   *     out of this method.
+   *
+   * Must only be called after a successful mutation — on failure, the
+   * caller throws and this method is never reached. See the orchestrator
+   * test (`subscription-service-orchestrator.test.ts`) for the
+   * ordering + failure-path contracts.
+   */
+  private invalidateIfConfigured(
+    userId: string | undefined,
+    orgId: string | undefined,
+    reason: InvalidationReason
+  ): void {
+    if (!this.cache || !this.waitUntil) return;
+    if (!userId) return;
+    try {
+      invalidateForUser(
+        this.cache,
+        this.waitUntil,
+        { userId, orgId, reason },
+        { logger: this.obs }
+      );
+    } catch (error) {
+      // Defensive: `invalidateForUser` validates userId and throws
+      // `ValidationError` on an empty string. We've already guarded above,
+      // but keeping this catch means a future helper change (or an
+      // unexpected mock harness behaviour) can never crash the mutation.
+      this.obs.warn(
+        'SubscriptionService.invalidateIfConfigured: invalidateForUser threw synchronously',
+        {
+          reason,
+          userId,
+          orgId,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+    }
   }
 
   // ─── Checkout ──────────────────────────────────────────────────────────────
@@ -389,7 +497,12 @@ export class SubscriptionService extends BaseService {
       webAppUrl
     );
 
-    return { userId, email: email ?? undefined };
+    // Orchestrator hook: bump per-user library + per-org subscription
+    // version keys. Runs AFTER the DB writes above succeeded; a thrown
+    // error earlier in this method would bypass this call entirely.
+    this.invalidateIfConfigured(userId, orgId, 'subscription_created');
+
+    return { userId, orgId, email: email ?? undefined };
   }
 
   /**
@@ -593,7 +706,16 @@ export class SubscriptionService extends BaseService {
       };
     }
 
-    return { userId: sub.userId, email };
+    // Orchestrator hook: renewal restores/continues access → bump both
+    // caches so the user's library + subscription badge reflect the
+    // current period end promptly.
+    this.invalidateIfConfigured(
+      sub.userId,
+      sub.organizationId,
+      'payment_succeeded'
+    );
+
+    return { userId: sub.userId, orgId: sub.organizationId, email };
   }
 
   /**
@@ -653,26 +775,163 @@ export class SubscriptionService extends BaseService {
       };
     }
 
-    // Look up userId from subscription record for cache invalidation
+    // Look up userId + orgId from subscription record for cache invalidation.
+    // Both caches (COLLECTION_USER_LIBRARY and per-org COLLECTION_USER_SUBSCRIPTION)
+    // need to flip to 'past_due' for cross-device staleness detection.
     let userId: string | undefined;
+    let orgId: string | undefined;
     if (stripeSubId) {
       const [sub] = await this.db
-        .select({ userId: subscriptions.userId })
+        .select({
+          userId: subscriptions.userId,
+          organizationId: subscriptions.organizationId,
+        })
         .from(subscriptions)
         .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
         .limit(1);
       userId = sub?.userId;
+      orgId = sub?.organizationId;
     }
 
-    return { userId, email };
+    // Orchestrator hook: payment failure flips status to past_due → bump
+    // both caches so the subscription badge + library access reflect it
+    // across devices. Skipped when userId lookup failed (unknown invoice).
+    this.invalidateIfConfigured(userId, orgId, 'payment_failed');
+
+    return { userId, orgId, email };
+  }
+
+  /**
+   * Handle customer.subscription.trial_will_end — Stripe fires this ~3 days
+   * before the trial ends. Access is NOT changing: the user is still inside
+   * the trial and remains entitled until Stripe flips them onto a paid
+   * period (handled by `invoice.payment_succeeded`) or cancels them via
+   * `customer.subscription.deleted`.
+   *
+   * Responsibilities:
+   *   - DB: no status change. Schema has no `trialEndingAt` column today
+   *     (tracking it is out of scope — see the Codex-lvxev follow-up bead
+   *     for template creation).
+   *   - Cache: NO invalidation — the user's library + subscription badge
+   *     stay unchanged, so there is nothing for other devices to re-fetch.
+   *     Deliberately does NOT call `invalidateIfConfigured`.
+   *   - Revocation: NOT written — access continues.
+   *   - Notification: returns a `trial-ending-soon` email payload; the
+   *     handler dispatches it via `sendEmailToWorker`. Template may not
+   *     exist yet — the notifications service logs a warning and skips
+   *     the send in that case, which is acceptable for this iteration.
+   *
+   * Returns `{ userId, orgId, trialEndAt, email }` on success. Returns
+   * `undefined` when metadata is missing — webhook handler treats this as
+   * a no-op and still returns 200 to Stripe.
+   */
+  async handleTrialWillEnd(
+    stripeSubscription: Stripe.Subscription,
+    webAppUrl?: string
+  ): Promise<(WebhookHandlerResult & { trialEndAt: Date }) | undefined> {
+    const stripeSubId = stripeSubscription.id;
+    const metadata = stripeSubscription.metadata ?? {};
+    const userId = metadata.codex_user_id;
+    const orgId = metadata.codex_organization_id;
+
+    if (!userId || !orgId) {
+      this.obs.warn('Subscription trial_will_end webhook missing metadata', {
+        stripeSubscriptionId: stripeSubId,
+        metadata,
+      });
+      return undefined;
+    }
+
+    // Stripe exposes the trial boundary as `trial_end` (unix seconds).
+    // Fall back to `current_period_end` on the item when `trial_end` is
+    // absent — some older test fixtures don't set it, but Stripe always
+    // does for a real trial_will_end event.
+    const trialEndUnix =
+      typeof stripeSubscription.trial_end === 'number'
+        ? stripeSubscription.trial_end
+        : (stripeSubscription.items.data[0]?.current_period_end ?? 0);
+    const trialEndAt = new Date(trialEndUnix * 1000);
+
+    this.obs.info('Subscription trial ending soon', {
+      stripeSubscriptionId: stripeSubId,
+      userId,
+      organizationId: orgId,
+      trialEndAt: trialEndAt.toISOString(),
+    });
+
+    // Build notification email. Looks up tier + user so the email can be
+    // personalised. Template `trial-ending-soon` may not exist yet — the
+    // notifications service will log a warning on missing templates and
+    // this handler still returns successfully.
+    const email = await this.buildTrialEndingSoonEmail(
+      userId,
+      stripeSubscription,
+      trialEndAt,
+      webAppUrl
+    );
+
+    // NO cache invalidation — access is unchanged. This is a deliberate
+    // product decision asserted by the orchestrator test.
+    return { userId, orgId, trialEndAt, email: email ?? undefined };
+  }
+
+  /**
+   * Build the trial-ending-soon email payload.
+   * Looks up user email/name and tier name from DB. Returns `null` when the
+   * user row is missing or has no email (e.g. test fixture gap) — the
+   * handler skips dispatch in that case.
+   */
+  private async buildTrialEndingSoonEmail(
+    userId: string,
+    stripeSubscription: Stripe.Subscription,
+    trialEndAt: Date,
+    webAppUrl?: string
+  ): Promise<WebhookEmailPayload | null> {
+    const [user] = await this.db
+      .select({ email: users.email, name: users.name })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    if (!user?.email) return null;
+
+    let planName = 'Subscription';
+    const tierId = stripeSubscription.metadata?.codex_tier_id;
+    if (tierId) {
+      const [tier] = await this.db
+        .select({ name: subscriptionTiers.name })
+        .from(subscriptionTiers)
+        .where(eq(subscriptionTiers.id, tierId))
+        .limit(1);
+      if (tier) planName = tier.name;
+    }
+
+    return {
+      to: user.email,
+      toName: user.name || undefined,
+      templateName: 'trial-ending-soon',
+      category: 'transactional',
+      userId,
+      data: {
+        userName: user.name || 'there',
+        planName,
+        trialEndDate: trialEndAt.toLocaleDateString('en-GB'),
+        manageUrl: `${webAppUrl || ''}/account/subscriptions`,
+      },
+    };
   }
 
   /**
    * Handle customer.subscription.updated — tier changes, status changes.
+   *
+   * Returns a `WebhookHandlerResult` carrying `{ userId, orgId }` so the
+   * webhook route can bump COLLECTION_USER_LIBRARY and
+   * COLLECTION_USER_SUBSCRIPTION. Returns `void` when the subscription
+   * row isn't found locally (early stripe event before our record exists).
    */
   async handleSubscriptionUpdated(
     stripeSubscription: Stripe.Subscription
-  ): Promise<void> {
+  ): Promise<WebhookHandlerResult | void> {
     const stripeSubId = stripeSubscription.id;
 
     const [sub] = await this.db
@@ -720,6 +979,17 @@ export class SubscriptionService extends BaseService {
       subscriptionId: sub.id,
       status,
     });
+
+    // Orchestrator hook: tier changes, status flips (active ↔ cancelling
+    // ↔ past_due) all affect library visibility + subscription badge —
+    // bump both per-user version keys.
+    this.invalidateIfConfigured(
+      sub.userId,
+      sub.organizationId,
+      'subscription_updated'
+    );
+
+    return { userId: sub.userId, orgId: sub.organizationId };
   }
 
   /**
@@ -781,7 +1051,166 @@ export class SubscriptionService extends BaseService {
         )
       : undefined;
 
-    return { userId: userId || undefined, email: email ?? undefined };
+    // Orchestrator hook: deletion is access-reducing — bump both caches
+    // so other devices flip off library entries + subscription badge
+    // within one visibility tick. Skipped when metadata missing userId.
+    this.invalidateIfConfigured(
+      userId || undefined,
+      orgId || undefined,
+      'subscription_deleted'
+    );
+
+    return {
+      userId: userId || undefined,
+      orgId: orgId || undefined,
+      email: email ?? undefined,
+    };
+  }
+
+  /**
+   * Handle customer.subscription.paused — Stripe billing pause.
+   *
+   * Access-reducing: the user loses access for the paused window. Unlike
+   * `handleSubscriptionDeleted`, this is NOT terminal — Stripe will fire
+   * `customer.subscription.resumed` (sibling bead Codex-rh0on) which flips
+   * the subscription back to ACTIVE.
+   *
+   * Responsibilities:
+   *   - DB: flip `subscriptions.status → 'paused'`. `cancelledAt` stays
+   *     NULL (the subscription is not terminated).
+   *   - Returns `{ userId, orgId }` extracted from Stripe metadata — same
+   *     shape as `handleSubscriptionDeleted` so the webhook can pipe it
+   *     into `revokeAccess(...)`.
+   *   - Cache: orchestrator hook bumps library + subscription caches
+   *     with `reason: 'subscription_paused'` (distinct from
+   *     `subscription_deleted` for observability clarity).
+   *
+   * Revocation write is OWNED by the webhook handler (same pattern as
+   * `handleSubscriptionDeleted`) — see `workers/ecom-api/src/handlers/
+   * subscription-webhook.ts`.
+   *
+   * Returns a `WebhookHandlerResult` always (not void) so the webhook can
+   * uniformly dispatch side-effects; ids are undefined when metadata
+   * is malformed.
+   */
+  async handleSubscriptionPaused(
+    stripeSubscription: Stripe.Subscription
+  ): Promise<WebhookHandlerResult> {
+    const stripeSubId = stripeSubscription.id;
+    const metadata = stripeSubscription.metadata ?? {};
+    const userId = metadata.codex_user_id;
+    const orgId = metadata.codex_organization_id;
+
+    await this.db
+      .update(subscriptions)
+      .set({
+        status: SUBSCRIPTION_STATUS.PAUSED,
+        updatedAt: new Date(),
+      })
+      .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
+
+    this.obs.info('Subscription paused from webhook', {
+      stripeSubscriptionId: stripeSubId,
+      userId,
+      organizationId: orgId,
+    });
+
+    // Orchestrator hook: pause is access-reducing — bump both caches
+    // so other devices drop library entries + subscription badge within
+    // one visibility tick. Skipped when metadata missing userId.
+    this.invalidateIfConfigured(
+      userId || undefined,
+      orgId || undefined,
+      'subscription_paused'
+    );
+
+    return {
+      userId: userId || undefined,
+      orgId: orgId || undefined,
+    };
+  }
+
+  /**
+   * Handle customer.subscription.resumed — Stripe billing resume.
+   *
+   * Access-RESTORING counterpart to `handleSubscriptionPaused` (sibling bead
+   * Codex-a0vk2). After a paused window the subscription flips back to
+   * active and the revocation key written at pause time is cleared by the
+   * webhook layer via `clearAccess`.
+   *
+   * Responsibilities:
+   *   - DB: flip `subscriptions.status` back to `'active'` (the expected
+   *     Stripe-reported status on resume). We trust the Stripe event's
+   *     status when it's one of our recognised enum values, otherwise
+   *     default to ACTIVE — this matches the behaviour of
+   *     `handleSubscriptionUpdated` for unexpected statuses.
+   *   - Returns `{ userId, orgId }` extracted from Stripe metadata — same
+   *     shape as sibling handlers so the webhook can pipe it into
+   *     `clearAccess(...)` uniformly.
+   *   - Cache: orchestrator hook bumps library + subscription caches
+   *     with `reason: 'subscription_resumed'` (distinct reason tag for
+   *     observability parity with `'subscription_paused'`).
+   *
+   * Revocation CLEAR is OWNED by the webhook handler (same pattern as
+   * `handleInvoicePaymentSucceeded`'s clear path) — see
+   * `workers/ecom-api/src/handlers/subscription-webhook.ts`.
+   *
+   * Returns a `WebhookHandlerResult` always (not void) so the webhook can
+   * uniformly dispatch side-effects; ids are undefined when metadata is
+   * malformed — in that case `clearAccess` is naturally gated off and
+   * degrades to a no-op.
+   */
+  async handleSubscriptionResumed(
+    stripeSubscription: Stripe.Subscription
+  ): Promise<WebhookHandlerResult> {
+    const stripeSubId = stripeSubscription.id;
+    const metadata = stripeSubscription.metadata ?? {};
+    const userId = metadata.codex_user_id;
+    const orgId = metadata.codex_organization_id;
+
+    // Trust Stripe's reported status on resume only when it maps cleanly
+    // onto our internal enum values ('active', 'past_due', 'paused',
+    // 'incomplete'). Stripe's own status strings (e.g. 'canceled',
+    // 'trialing', 'incomplete_expired', 'unpaid') do not overlap our
+    // internal enum — default to ACTIVE in that case since resume's
+    // expected outcome is 'active'.
+    const stripeStatus = stripeSubscription.status;
+    const nextStatus: (typeof SUBSCRIPTION_STATUS)[keyof typeof SUBSCRIPTION_STATUS] =
+      stripeStatus === SUBSCRIPTION_STATUS.ACTIVE ||
+      stripeStatus === SUBSCRIPTION_STATUS.PAST_DUE ||
+      stripeStatus === SUBSCRIPTION_STATUS.INCOMPLETE ||
+      stripeStatus === SUBSCRIPTION_STATUS.PAUSED
+        ? stripeStatus
+        : SUBSCRIPTION_STATUS.ACTIVE;
+
+    await this.db
+      .update(subscriptions)
+      .set({
+        status: nextStatus,
+        updatedAt: new Date(),
+      })
+      .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
+
+    this.obs.info('Subscription resumed from webhook', {
+      stripeSubscriptionId: stripeSubId,
+      userId,
+      organizationId: orgId,
+      status: nextStatus,
+    });
+
+    // Orchestrator hook: resume is access-RESTORING — bump both caches so
+    // other devices flip library entries + subscription badge back on
+    // within one visibility tick. Skipped when metadata missing userId.
+    this.invalidateIfConfigured(
+      userId || undefined,
+      orgId || undefined,
+      'subscription_resumed'
+    );
+
+    return {
+      userId: userId || undefined,
+      orgId: orgId || undefined,
+    };
   }
 
   /**
@@ -842,7 +1271,7 @@ export class SubscriptionService extends BaseService {
     orgId: string,
     newTierId: string,
     billingInterval: 'month' | 'year'
-  ): Promise<void> {
+  ): Promise<{ userId: string; orgId: string; subscription: Subscription }> {
     try {
       const sub = await this.getSubscriptionOrThrow(userId, orgId);
 
@@ -932,6 +1361,20 @@ export class SubscriptionService extends BaseService {
         newTierId,
         billingInterval,
       });
+
+      // Orchestrator hook: tier change affects both library (new tier
+      // may unlock/lock content) and subscription badge. Bump both
+      // per-user version keys. Runs AFTER Stripe.subscriptions.update
+      // succeeded; the local DB update is best-effort (BUG-020 — the
+      // webhook reconciles) so we invalidate unconditionally on Stripe
+      // success, mirroring the previous route-level behaviour.
+      this.invalidateIfConfigured(userId, orgId, 'change_tier');
+
+      // Return { userId, orgId, subscription } so the route handler can
+      // feed invalidateForUser without round-tripping the DB. The
+      // subscription reflects the in-memory view prior to the Stripe update
+      // — callers that need the post-update DB state should re-fetch.
+      return { userId, orgId, subscription: sub };
     } catch (error) {
       this.handleError(error, 'changeTier');
     }
@@ -945,7 +1388,7 @@ export class SubscriptionService extends BaseService {
     userId: string,
     orgId: string,
     reason?: string
-  ): Promise<void> {
+  ): Promise<{ userId: string; orgId: string; subscription: Subscription }> {
     try {
       const sub = await this.getSubscriptionOrThrow(userId, orgId);
 
@@ -966,8 +1409,119 @@ export class SubscriptionService extends BaseService {
         subscriptionId: sub.id,
         organizationId: orgId,
       });
+
+      // Orchestrator hook: cancel flips status → CANCELLING. Library +
+      // subscription badge must reflect it on every device within one
+      // visibility tick.
+      this.invalidateIfConfigured(userId, orgId, 'cancel');
+
+      // Return { userId, orgId, subscription } so the route handler can feed
+      // invalidateForUser (library + per-org subscription caches).
+      return { userId, orgId, subscription: sub };
     } catch (error) {
       this.handleError(error, 'cancelSubscription');
+    }
+  }
+
+  /**
+   * Resume a user-initiated PAUSED subscription.
+   *
+   * Access-RESTORING counterpart to a user pausing via Stripe's billing
+   * portal. Unlike `handleSubscriptionResumed` (the webhook-driven path that
+   * reacts to `customer.subscription.resumed` fired by Stripe), this method
+   * is the user-initiated flow: the client clicks "Resume plan" on the
+   * pricing page / SubscribeButton, we call Stripe's `subscriptions.resume`
+   * API, and flip the local DB row back to 'active'.
+   *
+   * Parallel to `reactivateSubscription` (which handles the
+   * `cancelling → active` path). This method handles only the
+   * `paused → active` path — which is distinct because:
+   *   - `paused` subscriptions are NOT returned by `getSubscriptionOrThrow`
+   *     (its whitelist excludes PAUSED). We query directly and throw
+   *     `SubscriptionNotFoundError` on miss so the behaviour matches
+   *     reactivate's "must be in the expected state" contract.
+   *   - Stripe's resume API uses a dedicated method, not
+   *     `subscriptions.update(cancel_at_period_end: false)`.
+   *
+   * On success:
+   *   - Stripe call with `billing_cycle_anchor: 'unchanged'` keeps the
+   *     existing cycle so the user isn't silently re-billed.
+   *   - DB: `status` flipped to 'active', `updatedAt` bumped.
+   *   - Orchestrator hook fires with reason `'subscription_resumed'` —
+   *     same reason as the webhook handler so observability groups
+   *     webhook-driven + user-initiated resumes under one tag.
+   *
+   * Revocation CLEAR is owned by the route layer (mirrors reactivate —
+   * see `workers/ecom-api/src/routes/subscriptions.ts`).
+   *
+   * Idempotency: Stripe resume is idempotent on the subscription id (a
+   * second call on an already-active sub is a no-op upstream), so an
+   * idempotency key is defensive rather than strictly required. We pass
+   * one anyway per `packages/subscription/CLAUDE.md`.
+   */
+  async resumeSubscription(
+    userId: string,
+    organizationId: string
+  ): Promise<{ userId: string; orgId: string; subscription: Subscription }> {
+    try {
+      const [sub] = await this.db
+        .select()
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.userId, userId),
+            eq(subscriptions.organizationId, organizationId),
+            eq(subscriptions.status, SUBSCRIPTION_STATUS.PAUSED)
+          )
+        )
+        .limit(1);
+
+      if (!sub) {
+        // Same error as reactivate's "not cancelling" miss — a sub must be
+        // PAUSED to be resumable. Scoping (userId + organizationId) means
+        // a cross-user attempt lands here too: correct (no information
+        // disclosure) and matches the behaviour of `getSubscriptionOrThrow`.
+        throw new SubscriptionNotFoundError({
+          userId,
+          organizationId,
+          expectedStatus: SUBSCRIPTION_STATUS.PAUSED,
+        });
+      }
+
+      await this.stripe.subscriptions.resume(
+        sub.stripeSubscriptionId,
+        { billing_cycle_anchor: 'unchanged' },
+        { idempotencyKey: `resume_${sub.stripeSubscriptionId}` }
+      );
+
+      await this.db
+        .update(subscriptions)
+        .set({
+          status: SUBSCRIPTION_STATUS.ACTIVE,
+          updatedAt: new Date(),
+        })
+        .where(eq(subscriptions.id, sub.id));
+
+      this.obs.info('Subscription resumed by user', {
+        subscriptionId: sub.id,
+        organizationId,
+      });
+
+      // Orchestrator hook: resume is access-RESTORING — bump both caches
+      // so other devices drop the PAUSED badge and re-show library items
+      // immediately. Same reason tag as the webhook-driven resume so
+      // observability groups them together. Clearing the KV revocation
+      // key is still owned by the route (parallel to reactivate —
+      // see routes/subscriptions.ts clearAccessRevocation).
+      this.invalidateIfConfigured(
+        userId,
+        organizationId,
+        'subscription_resumed'
+      );
+
+      return { userId, orgId: organizationId, subscription: sub };
+    } catch (error) {
+      this.handleError(error, 'resumeSubscription');
     }
   }
 
@@ -975,7 +1529,10 @@ export class SubscriptionService extends BaseService {
    * Reactivate a subscription that was set to cancel_at_period_end.
    * Only works if still within the active period.
    */
-  async reactivateSubscription(userId: string, orgId: string): Promise<void> {
+  async reactivateSubscription(
+    userId: string,
+    orgId: string
+  ): Promise<{ userId: string; orgId: string; subscription: Subscription }> {
     try {
       const sub = await this.getSubscriptionOrThrow(userId, orgId);
 
@@ -1002,6 +1559,16 @@ export class SubscriptionService extends BaseService {
         subscriptionId: sub.id,
         organizationId: orgId,
       });
+
+      // Orchestrator hook: reactivation restores access — bump both
+      // caches so other devices drop the CANCELLING badge immediately.
+      // Clearing the KV revocation key is a separate concern still
+      // owned by the route (see routes/subscriptions.ts clearAccessRevocation).
+      this.invalidateIfConfigured(userId, orgId, 'reactivate');
+
+      // Return { userId, orgId, subscription } so the route handler can feed
+      // invalidateForUser (library + per-org subscription caches).
+      return { userId, orgId, subscription: sub };
     } catch (error) {
       this.handleError(error, 'reactivateSubscription');
     }

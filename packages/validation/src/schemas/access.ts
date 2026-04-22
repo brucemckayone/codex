@@ -12,7 +12,7 @@ import { paginationSchema } from '../shared/pagination-schema';
  * Design principles:
  * - Pure validation (no DB dependency)
  * - Clear error messages for API responses
- * - Sensible defaults (1 hour expiry, page 1, limit 20)
+ * - Sensible defaults (10 minute expiry, page 1, limit 20)
  * - Bounds checking (expiry: 5 minutes to 2 hours, page max 1000)
  * - Imperative error message pattern: "Must be..."
  */
@@ -25,7 +25,10 @@ export const getStreamingUrlSchema = z.object({
     .min(300, 'Must be at least 5 minutes (300 seconds)')
     .max(7200, 'Must be 2 hours or less (7200 seconds)')
     .optional()
-    .default(3600), // 1 hour default
+    .default(600), // 10 min default — mirrors DEFAULT_STREAMING_URL_TTL_SECONDS
+  // in @codex/access/ContentAccessService. Bounds post-revocation exposure:
+  // presigned URLs cannot be invalidated once issued, so this is the maximum
+  // window during which a cancelled/revoked user can still stream.
 });
 
 export const savePlaybackProgressSchema = z.object({

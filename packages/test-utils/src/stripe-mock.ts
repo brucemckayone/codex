@@ -131,6 +131,15 @@ export function createMockStripe(): Stripe {
             cancel_at_period_end: params.cancel_at_period_end ?? false,
           })
         ),
+      // Stripe v19 exposes `subscriptions.resume(id, params?, options?)`
+      // for resuming a PAUSED subscription. The mock returns a freshly
+      // active subscription so the service's downstream DB flip matches
+      // a realistic response shape (status='active'). See
+      // SubscriptionResumeParams in stripe-node types.
+      resume: vi.fn().mockImplementation((_subId: string) => ({
+        ...createDefaultStripeSubscription({ id: _subId }),
+        status: 'active',
+      })),
     },
 
     transfers: {

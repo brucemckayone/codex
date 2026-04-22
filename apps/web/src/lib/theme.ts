@@ -18,7 +18,7 @@ export function getTheme(): Theme {
 }
 
 /** Apply a theme to the DOM and persist it. */
-export function setTheme(theme: Theme): void {
+function setTheme(theme: Theme): void {
   document.documentElement.setAttribute('data-theme', theme);
   document.documentElement.classList.remove('light', 'dark');
   document.documentElement.classList.add(theme);

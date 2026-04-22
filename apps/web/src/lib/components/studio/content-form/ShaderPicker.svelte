@@ -8,6 +8,8 @@
   @prop {(preset: string | null) => void} onchange - Callback when selection changes
 -->
 <script lang="ts">
+  import ShaderPreview from './ShaderPreview.svelte';
+
   interface Props {
     value: string | null;
     onchange: (preset: string | null) => void;
@@ -54,23 +56,36 @@
   }
 </script>
 
-<div class="shader-picker" role="radiogroup" aria-label="Shader preset">
-  {#each PRESETS as preset (preset.id)}
-    <button
-      type="button"
-      class="preset-card"
-      class:selected={isSelected(preset.id)}
-      role="radio"
-      aria-checked={isSelected(preset.id)}
-      onclick={() => handleSelect(preset.id)}
-    >
-      <span class="preset-name">{preset.label}</span>
-      <span class="preset-description">{preset.description}</span>
-    </button>
-  {/each}
+<div class="shader-picker-wrap">
+  <ShaderPreview preset={value} />
+
+  <div class="shader-picker" role="radiogroup" aria-label="Shader preset">
+    {#each PRESETS as preset (preset.id)}
+      <button
+        type="button"
+        class="preset-card"
+        class:selected={isSelected(preset.id)}
+        role="radio"
+        aria-checked={isSelected(preset.id)}
+        onclick={() => handleSelect(preset.id)}
+      >
+        <span class="preset-name">{preset.label}</span>
+        <span class="preset-description">{preset.description}</span>
+      </button>
+    {/each}
+  </div>
 </div>
 
 <style>
+  /* Container stacks the live preview above the preset grid so the creator
+     sees exactly what they'll get before committing. Gap keeps the preview
+     visually separated without a rule or surface change. */
+  .shader-picker-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
   .shader-picker {
     display: grid;
     grid-template-columns: repeat(3, 1fr);

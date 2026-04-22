@@ -3155,6 +3155,62 @@ export const pricing_all_tier_content = (params) => `Access to all ${params.tier
 
 
 /**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_plan_ends_on = (params) => `Plan ends ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_payment_failed = () => `Payment failed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_plan_paused = () => `Plan paused`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_reactivate_plan = () => `Reactivate plan`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_update_payment = () => `Update payment`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_resume_plan = () => `Resume plan`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_manage_plan = () => `Manage plan`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -3520,6 +3576,30 @@ export const library_time_remaining = (params) => `${params.time} left`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const library_resume = () => `Resume`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_access_ends_on = (params) => `Ends ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_access_subscription_ended = () => `Subscription ended — reactivate`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_access_payment_failed = () => `Payment failed — update payment`
 
 
 /**

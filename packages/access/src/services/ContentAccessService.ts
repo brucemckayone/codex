@@ -1,4 +1,4 @@
-import type { R2Bucket } from '@cloudflare/workers-types';
+import type { KVNamespace, R2Bucket } from '@cloudflare/workers-types';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
 import {
   CONTENT_ACCESS_TYPE,
@@ -26,6 +26,7 @@ import {
 import { createStripeClient, PurchaseService } from '@codex/purchase';
 import {
   BaseService,
+  ForbiddenError,
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
@@ -54,6 +55,29 @@ import {
   MediaNotReadyForStreamingError,
   R2SigningError,
 } from '../errors';
+import { AccessRevocation } from './access-revocation';
+
+/**
+ * Default TTL (in seconds) for presigned streaming URLs.
+ *
+ * Bounds how long a signed R2 URL remains valid after issuance, which is
+ * the maximum window during which a revoked user (cancelled subscription,
+ * failed payment, refund) can still stream content with a URL minted before
+ * revocation. Cryptographic presigned URLs cannot be invalidated once issued,
+ * so this TTL is the primary exposure-after-revocation control.
+ *
+ * 600s (10 min) balances:
+ *   - Short enough that revocation takes effect within one client refresh cycle.
+ *   - Long enough to cover a typical HLS segment fetch window without the
+ *     client re-requesting a new URL mid-stream (HLS.js re-fetches the
+ *     master playlist URL on manifest refresh, not per-segment).
+ *
+ * Callers may override by passing `input.expirySeconds` — bounded by the
+ * Zod schema (`getStreamingUrlSchema`) to [300, 7200].
+ *
+ * See docs/subscription-cache-audit/phase-2-followup.md — Phase 3.
+ */
+export const DEFAULT_STREAMING_URL_TTL_SECONDS = 600;
 
 /**
  * Interface for R2 signing functionality.
@@ -123,6 +147,16 @@ interface UserLibraryResponse {
 export interface ContentAccessServiceConfig extends ServiceConfig {
   r2: R2Signer;
   purchaseService: PurchaseService;
+  /**
+   * Optional access revocation helper — when provided, `savePlaybackProgress`
+   * (and, in a follow-up, `getStreamingUrl`) short-circuits on a revocation
+   * key hit before performing any DB work.
+   *
+   * Injected by the service registry when `CACHE_KV` is bound. Omitted in
+   * environments without KV (narrow unit tests, legacy factory callers);
+   * in those paths the DB-level access check still runs.
+   */
+  revocation?: AccessRevocation;
 }
 
 /**
@@ -148,11 +182,173 @@ export interface ContentAccessServiceConfig extends ServiceConfig {
 export class ContentAccessService extends BaseService {
   private readonly r2: R2Signer;
   private readonly purchaseService: PurchaseService;
+  private readonly revocation: AccessRevocation | undefined;
 
   constructor(config: ContentAccessServiceConfig) {
     super(config);
     this.r2 = config.r2;
     this.purchaseService = config.purchaseService;
+    this.revocation = config.revocation;
+  }
+
+  /**
+   * Check whether a user currently has access to a piece of content.
+   *
+   * This is the boolean equivalent of the access-decision logic embedded in
+   * `getStreamingUrl`'s transaction — factored out so the progress save path
+   * (and future callers) can gate writes without duplicating the rules. It
+   * deliberately does NOT throw `AccessDeniedError` and does NOT generate
+   * signed URLs; it only answers "does this (userId, contentId) pair pass
+   * the current access rules?".
+   *
+   * Not run inside a transaction — progress saves don't require a snapshot
+   * across the access read + the videoPlayback upsert. A race where access
+   * is revoked between this check and the upsert is acceptable (the next
+   * heartbeat will be blocked) and bounded by the short KV TTL on the
+   * revocation key.
+   *
+   * Returns `false` for:
+   *   - Content not found / unpublished / soft-deleted (treated as no access)
+   *   - Team-only content when user lacks a management role
+   *   - Followers-only content when user is neither follower nor management.
+   *     Note: an active subscription does NOT grant follower-only access on
+   *     its own — a subscriber who wants to see follower content must also
+   *     explicitly follow the org (the follow action is free, so this is a
+   *     low-friction ask rather than a paywall).
+   *   - Subscribers-only content when user has neither an active subscription
+   *     meeting the minimum tier, a purchase, nor management
+   *   - Paid content when user has neither purchased nor (via tier) subscribed
+   *     nor holds a management role
+   *
+   * Returns `true` for free content the user can see, and for any of the
+   * above paths when satisfied.
+   */
+  async hasContentAccess(userId: string, contentId: string): Promise<boolean> {
+    const contentRecord = await this.db.query.content.findFirst({
+      where: and(
+        eq(content.id, contentId),
+        eq(content.status, CONTENT_STATUS.PUBLISHED),
+        isNull(content.deletedAt)
+      ),
+      columns: {
+        id: true,
+        organizationId: true,
+        accessType: true,
+        priceCents: true,
+        minimumTierId: true,
+      },
+    });
+
+    if (!contentRecord) {
+      // Missing/unpublished content → treat as no access. Don't leak the
+      // distinction between "doesn't exist" and "you can't see it" at this
+      // layer — the caller translates the boolean.
+      return false;
+    }
+
+    const orgId = contentRecord.organizationId;
+
+    // Inline reusable helpers — mirror the branches in getStreamingUrl.
+    const MANAGEMENT_ROLES: string[] = [
+      ORGANIZATION_ROLES.OWNER,
+      ORGANIZATION_ROLES.ADMIN,
+      ORGANIZATION_ROLES.CREATOR,
+    ];
+
+    const hasManagementMembership = async (
+      organizationId: string
+    ): Promise<boolean> => {
+      const row = await this.db.query.organizationMemberships.findFirst({
+        where: and(
+          eq(organizationMemberships.organizationId, organizationId),
+          eq(organizationMemberships.userId, userId),
+          eq(organizationMemberships.status, 'active'),
+          inArray(organizationMemberships.role, MANAGEMENT_ROLES)
+        ),
+        columns: { id: true },
+      });
+      return !!row;
+    };
+
+    const hasFollower = async (organizationId: string): Promise<boolean> => {
+      const row = await this.db.query.organizationFollowers.findFirst({
+        where: and(
+          eq(organizationFollowers.organizationId, organizationId),
+          eq(organizationFollowers.userId, userId)
+        ),
+        columns: { id: true },
+      });
+      return !!row;
+    };
+
+    const hasSubscriptionAccess = async (
+      organizationId: string,
+      minimumTierId: string | null
+    ): Promise<boolean> => {
+      const userSub = await this.db.query.subscriptions.findFirst({
+        where: and(
+          eq(subscriptions.userId, userId),
+          eq(subscriptions.organizationId, organizationId),
+          inArray(subscriptions.status, [
+            SUBSCRIPTION_STATUS.ACTIVE,
+            SUBSCRIPTION_STATUS.CANCELLING,
+          ]),
+          gt(subscriptions.currentPeriodEnd, new Date())
+        ),
+        with: { tier: true },
+      });
+      if (!userSub) return false;
+      if (!minimumTierId) return true;
+      const contentTier = await this.db.query.subscriptionTiers.findFirst({
+        where: eq(subscriptionTiers.id, minimumTierId),
+        columns: { sortOrder: true },
+      });
+      if (!contentTier) return false;
+      return userSub.tier.sortOrder >= contentTier.sortOrder;
+    };
+
+    // Branch on accessType — mirrors the decision tree in getStreamingUrl.
+    if (contentRecord.accessType === CONTENT_ACCESS_TYPE.TEAM) {
+      if (!orgId) return false;
+      return hasManagementMembership(orgId);
+    }
+
+    if (contentRecord.accessType === CONTENT_ACCESS_TYPE.FOLLOWERS) {
+      if (!orgId) return false;
+      if (await hasFollower(orgId)) return true;
+      // Subscription does NOT satisfy follower-only access on its own — the
+      // creator is rewarding the follow action specifically, and following
+      // is free. Subscribers who want follower content must also follow.
+      return hasManagementMembership(orgId);
+    }
+
+    if (contentRecord.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS) {
+      if (!orgId) return false;
+      if (await hasSubscriptionAccess(orgId, contentRecord.minimumTierId)) {
+        return true;
+      }
+      if (await this.purchaseService.verifyPurchase(contentId, userId)) {
+        return true;
+      }
+      return hasManagementMembership(orgId);
+    }
+
+    // Paid content (priceCents > 0) — check purchase, optional tier, membership.
+    if (contentRecord.priceCents && contentRecord.priceCents > 0) {
+      if (await this.purchaseService.verifyPurchase(contentId, userId)) {
+        return true;
+      }
+      if (orgId && contentRecord.minimumTierId) {
+        if (await hasSubscriptionAccess(orgId, contentRecord.minimumTierId)) {
+          return true;
+        }
+      }
+      if (!orgId) return false;
+      return hasManagementMembership(orgId);
+    }
+
+    // Free content with no price — access granted.
+    return true;
   }
 
   /**
@@ -181,18 +377,74 @@ export class ContentAccessService extends BaseService {
     userId: string,
     input: GetStreamingUrlInput
   ): Promise<{
-    streamingUrl: string;
+    streamingUrl: string | null;
     waveformUrl: string | null;
     expiresAt: Date;
-    contentType: 'video' | 'audio';
+    contentType: 'video' | 'audio' | 'written';
   }> {
+    // Resolve the TTL once. The Zod schema already applies a default when
+    // input flows through `procedure()`, but programmatic callers that
+    // construct `GetStreamingUrlInput` directly may omit `expirySeconds`;
+    // fall back to the module-level constant so the safe default is
+    // enforced at the service boundary regardless of entry path.
+    const expirySeconds =
+      input.expirySeconds ?? DEFAULT_STREAMING_URL_TTL_SECONDS;
+
     this.obs.info('Getting streaming URL', {
       userId,
       contentId: input.contentId,
-      expirySeconds: input.expirySeconds,
+      expirySeconds,
     });
 
     try {
+      // ── Access revocation short-circuit ─────────────────────────────
+      // KV revocation check runs BEFORE the DB transaction. A warm KV read
+      // (~0.5ms) is dramatically cheaper than opening a read-only transaction
+      // and issuing the access-decision queries, so any revocation hit
+      // rejects without touching the DB. Mirrors the sibling gate in
+      // `savePlaybackProgress` (see Phase 4.1 of
+      // docs/subscription-cache-audit/phase-2-followup.md).
+      //
+      // This runs only when `this.revocation` is wired (i.e. CACHE_KV is
+      // bound). Standalone factory callers that omit the KV binding skip
+      // this check silently — the DB-level access decision still catches
+      // unauthorized access inside the transaction below.
+      if (this.revocation) {
+        const contentRow = await this.db.query.content.findFirst({
+          where: and(
+            eq(content.id, input.contentId),
+            isNull(content.deletedAt)
+          ),
+          columns: { organizationId: true },
+        });
+
+        // Personal content (no organizationId) can't be revoked at the org
+        // scope — fall through to the transaction below. The content row
+        // may also be missing entirely (not found / deleted); let the
+        // transaction surface `ContentNotFoundError` with consistent
+        // context rather than duplicating the 404 path here.
+        const orgId = contentRow?.organizationId ?? null;
+        if (orgId) {
+          const revocation = await this.revocation.isRevoked(userId, orgId);
+          if (revocation) {
+            this.obs.warn('getStreamingUrl blocked — access revoked', {
+              userId,
+              contentId: input.contentId,
+              organizationId: orgId,
+              reason: revocation.reason,
+              securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+              severity: LOG_SEVERITY.MEDIUM,
+              eventType: LOG_EVENTS.ACCESS_CONTROL,
+            });
+            throw new AccessDeniedError(userId, input.contentId, {
+              message: 'Access revoked',
+              reason: revocation.reason,
+              organizationId: orgId,
+            });
+          }
+        }
+      }
+
       // Step 1 & 2: Verify access and fetch content/media data within transaction
       // Transaction ensures consistent snapshot for access verification
       const { r2Key, mediaType, waveformKey } = await this.db.transaction(
@@ -218,15 +470,11 @@ export class ContentAccessService extends BaseService {
             throw new ContentNotFoundError(input.contentId);
           }
 
-          if (!contentRecord.mediaItem) {
-            this.obs.warn('Content has no associated media item', {
-              contentId: input.contentId,
-              userId,
-            });
-            throw new ContentNotFoundError(input.contentId, {
-              reason: 'no_media_item',
-            });
-          }
+          // NOTE: Media item existence is NOT checked here. Written content
+          // (articles) has no media item but still requires the same access
+          // verification below so the body can be unlocked on the page.
+          // Media-specific validation (status=ready, HLS key, mediaType)
+          // only runs after the access check passes AND a media item exists.
 
           // ── Reusable helper: check active subscription access ──────
           // Returns true if user has an active subscription to the org
@@ -360,7 +608,13 @@ export class ContentAccessService extends BaseService {
               membershipRole: membership.role,
             });
           }
-          // (b) Followers-only: require follower, subscriber, or management role
+          // (b) Followers-only: require follower or management role.
+          // Subscription alone does NOT grant follower-only access — the
+          // creator is rewarding the (free) follow action, and subscribers
+          // must follow separately to see this content. Keeps the two
+          // relationships independent: paying doesn't auto-subscribe the
+          // user to the org's follower feed, and a follower doesn't have
+          // to pay to see follower-tagged posts.
           else if (contentRecord.accessType === 'followers') {
             if (!contentRecord.organizationId) {
               throw new AccessDeniedError(userId, input.contentId, {
@@ -380,14 +634,6 @@ export class ContentAccessService extends BaseService {
                 organizationId: orgId,
               });
               granted = true;
-            }
-
-            // Fallback: active subscription (subscribers implicitly follow)
-            if (!granted) {
-              const hasSub = await checkSubscriptionAccess(orgId, null);
-              if (hasSub) {
-                granted = true;
-              }
             }
 
             // Fallback: management membership (team implicitly has access)
@@ -584,6 +830,17 @@ export class ContentAccessService extends BaseService {
             });
           }
 
+          // Access check passed. If content has no media item, it's a
+          // written article — return a null-URL response so the caller
+          // knows access is granted but there's nothing to stream.
+          if (!contentRecord.mediaItem) {
+            return {
+              r2Key: null,
+              mediaType: 'written' as const,
+              waveformKey: null,
+            };
+          }
+
           // Verify media is ready for streaming (status='ready' with transcoding outputs)
           const mediaStatus = contentRecord.mediaItem.status;
           if (mediaStatus !== MEDIA_STATUS.READY) {
@@ -645,19 +902,34 @@ export class ContentAccessService extends BaseService {
         }
       );
 
+      // Written content: access granted, no stream to sign.
+      if (mediaType === 'written' || r2Key === null) {
+        const expiresAt = new Date(Date.now() + expirySeconds * 1000);
+        this.obs.info('Access granted for written content (no stream)', {
+          userId,
+          contentId: input.contentId,
+        });
+        return {
+          streamingUrl: null,
+          waveformUrl: null,
+          expiresAt,
+          contentType: 'written' as const,
+        };
+      }
+
       // Step 3: Generate signed R2 URL (OUTSIDE transaction - external API call)
       try {
         const streamingUrl = await this.r2.generateSignedUrl(
           r2Key,
-          input.expirySeconds
+          expirySeconds
         );
 
         const waveformUrl =
           mediaType === 'audio' && waveformKey
-            ? await this.r2.generateSignedUrl(waveformKey, input.expirySeconds)
+            ? await this.r2.generateSignedUrl(waveformKey, expirySeconds)
             : null;
 
-        const expiresAt = new Date(Date.now() + input.expirySeconds * 1000);
+        const expiresAt = new Date(Date.now() + expirySeconds * 1000);
 
         this.obs.info('Streaming URL generated successfully', {
           userId,
@@ -692,13 +964,76 @@ export class ContentAccessService extends BaseService {
   /**
    * Save playback progress (upsert pattern)
    *
+   * Access gate (MANDATORY — see docs/subscription-cache-audit/phase-2-followup.md Phase 4.1):
+   *   1. Resolve content's organizationId.
+   *   2. If `AccessRevocation.isRevoked(userId, orgId)` returns a revocation,
+   *      throw `ForbiddenError('Access revoked', { reason })`. This closes
+   *      the window where a cancelled/refunded user continues to POST
+   *      heartbeats and accidentally restores "continue watching" entries
+   *      after their subscription ends.
+   *   3. If `hasContentAccess(userId, contentId)` is false, throw
+   *      `ForbiddenError('No active access for this content')`.
+   *   4. Only then run the upsert.
+   *
+   * The two checks are independent — either can reject. Revocation is
+   * checked first because it's a cheap KV read and catches the common case
+   * (webhook just fired, DB subscription row may still look ACTIVE for up
+   * to 30s of replication lag) without any DB round-trip.
+   *
    * @param userId - Authenticated user ID
    * @param input - Content ID, position, duration, completed flag
+   * @throws {ForbiddenError} Access revoked, or user lacks access to content
    */
   async savePlaybackProgress(
     userId: string,
     input: SavePlaybackProgressInput
   ): Promise<void> {
+    // ── Access gate ────────────────────────────────────────────────────
+    // (1) KV revocation check — if revocation helper is wired, fetch the
+    // content's orgId and check the block list before doing any DB writes.
+    // The orgId lookup uses `this.db` (the per-request client) and reads
+    // only the two columns the check needs.
+    if (this.revocation) {
+      const contentRow = await this.db.query.content.findFirst({
+        where: and(eq(content.id, input.contentId), isNull(content.deletedAt)),
+        columns: { organizationId: true },
+      });
+
+      // Personal content (no organizationId) can't be revoked at the org
+      // scope; fall through to the DB-level access check below.
+      const orgId = contentRow?.organizationId ?? null;
+      if (orgId) {
+        const revocation = await this.revocation.isRevoked(userId, orgId);
+        if (revocation) {
+          this.obs.warn('savePlaybackProgress blocked — access revoked', {
+            userId,
+            contentId: input.contentId,
+            organizationId: orgId,
+            reason: revocation.reason,
+          });
+          throw new ForbiddenError('Access revoked', {
+            reason: revocation.reason,
+            contentId: input.contentId,
+            organizationId: orgId,
+          });
+        }
+      }
+    }
+
+    // (2) DB-level access check — covers cancelled subscriptions, expired
+    // periods, content the user never had access to in the first place,
+    // and any path the revocation list doesn't cover (e.g. personal content).
+    const hasAccess = await this.hasContentAccess(userId, input.contentId);
+    if (!hasAccess) {
+      this.obs.warn('savePlaybackProgress blocked — no active access', {
+        userId,
+        contentId: input.contentId,
+      });
+      throw new ForbiddenError('No active access for this content', {
+        contentId: input.contentId,
+      });
+    }
+
     // Auto-complete if watched >= completion threshold
     const completionThreshold =
       input.durationSeconds * VIDEO_PROGRESS.COMPLETION_THRESHOLD;
@@ -819,34 +1154,18 @@ export class ContentAccessService extends BaseService {
       input.accessType === 'purchased' || input.accessType === 'subscription'
         ? []
         : await this.db.query.organizationMemberships.findMany({
-            where: and(...membershipConditions),
+            where: and(
+              ...membershipConditions,
+              inArray(organizationMemberships.role, MANAGEMENT_ROLES)
+            ),
             columns: { organizationId: true, role: true },
           });
-    const memberOrgIds = activeMemberships.map((m) => m.organizationId);
 
-    // Partition memberships: management roles see all org content
-    const managementOrgIds = activeMemberships
-      .filter((m) => MANAGEMENT_ROLES.includes(m.role))
-      .map((m) => m.organizationId);
-
-    // ── Step 1c: Resolve followed org IDs ────────────────────────────
-    const followerConditions = [eq(organizationFollowers.userId, userId)];
-    if (input.organizationId) {
-      followerConditions.push(
-        eq(organizationFollowers.organizationId, input.organizationId)
-      );
-    }
-
-    const activeFollows =
-      input.accessType === 'purchased' || input.accessType === 'subscription'
-        ? []
-        : await this.db.query.organizationFollowers.findMany({
-            where: and(...followerConditions),
-            columns: { organizationId: true },
-          });
-    const followedOrgIds = activeFollows
-      .map((f) => f.organizationId)
-      .filter((id) => !managementOrgIds.includes(id));
+    // Only management roles (owner/admin/creator) populate the library's
+    // "membership" bucket. Regular 'member' / 'subscriber' roles are handled
+    // by the subscription query (if subscribed) — they don't pull content
+    // into library just for existing.
+    const managementOrgIds = activeMemberships.map((m) => m.organizationId);
 
     // ── Step 1b: Resolve active subscriptions with tier info ─────────
     const activeSubscriptions =
@@ -1033,42 +1352,27 @@ export class ContentAccessService extends BaseService {
       return { items, count: countResult[0]?.count ?? 0 };
     };
 
-    // ── Step 4: Query membership + follower items ──────────────────────
+    // ── Step 4: Query membership items ─────────────────────────────────
+    // Library membership = content the user has via a MANAGEMENT relationship
+    // with an org (owner/admin/creator). Free + follower content from orgs the
+    // user merely follows is publicly browseable and does not belong in
+    // "my library" — followers haven't acquired anything, they're just opted-in
+    // to see it on the org's pages. Including it here would pollute every
+    // subscriber's/follower's library with the full free catalogue.
     const queryMembership = async () => {
       if (
         input.accessType === 'purchased' ||
         input.accessType === 'subscription' ||
-        (memberOrgIds.length === 0 && followedOrgIds.length === 0)
+        managementOrgIds.length === 0
       ) {
         return { items: [] as UserLibraryItem[], count: 0 };
       }
 
-      // Build role-aware content filter:
-      // - Management roles (owner/admin/creator) see ALL content from their orgs
-      // - Followers see 'free' + 'followers' content from followed orgs
-      const membershipContentFilter = (() => {
-        const parts: ReturnType<typeof and>[] = [];
-
-        if (managementOrgIds.length > 0) {
-          // Management roles: all content from these orgs
-          parts.push(inArray(content.organizationId, managementOrgIds));
-        }
-
-        if (followedOrgIds.length > 0) {
-          // Followers: see free + followers content from followed orgs
-          parts.push(
-            and(
-              inArray(content.organizationId, followedOrgIds),
-              inArray(content.accessType, [
-                CONTENT_ACCESS_TYPE.FREE,
-                CONTENT_ACCESS_TYPE.FOLLOWERS,
-              ])
-            )
-          );
-        }
-
-        return parts.length === 1 ? parts[0]! : or(...parts)!;
-      })();
+      // Management roles see ALL content from orgs they manage.
+      const membershipContentFilter = inArray(
+        content.organizationId,
+        managementOrgIds
+      );
 
       const conditions = [
         membershipContentFilter,
@@ -1204,9 +1508,8 @@ export class ContentAccessService extends BaseService {
         or(...subConditions)!,
         // Exclude content the user already purchased (prevents duplicates)
         sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} = ${PURCHASE_STATUS.COMPLETED})`,
-        // Exclude content from management orgs (owner/admin/creator see all via membership query).
-        // Followed orgs are NOT excluded — the follower query only returns free + followers content,
-        // so there's no overlap with subscribers content here.
+        // Exclude content from management orgs (owner/admin/creator see
+        // all their org's content via the membership query).
         ...(managementOrgIds.length > 0
           ? [
               sql`${content.organizationId} NOT IN (${sql.join(
@@ -1378,6 +1681,8 @@ export class ContentAccessService extends BaseService {
 export interface ContentAccessEnv {
   /** R2 bucket binding from Cloudflare Workers */
   MEDIA_BUCKET?: R2Bucket;
+  /** KV namespace for access revocation block list (optional) */
+  CACHE_KV?: KVNamespace;
   /** Environment name (development, staging, production) */
   ENVIRONMENT?: string;
   /** Cloudflare Account ID for R2 endpoint */
@@ -1471,11 +1776,16 @@ export function createContentAccessService(env: ContentAccessEnv): {
   const environment = env.ENVIRONMENT ?? 'development';
   const stripe = createStripeClient(env.STRIPE_SECRET_KEY || '');
   const purchaseService = new PurchaseService({ db, environment }, stripe);
+  const revocation = env.CACHE_KV
+    ? new AccessRevocation(env.CACHE_KV)
+    : undefined;
+
   const service = new ContentAccessService({
     db,
     environment,
     r2,
     purchaseService,
+    revocation,
   });
 
   // Return service with cleanup function

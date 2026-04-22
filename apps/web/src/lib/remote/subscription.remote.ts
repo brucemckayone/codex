@@ -197,6 +197,26 @@ export const reactivateSubscription = command(
   }
 );
 
+const resumeCommandSchema = z.object({
+  organizationId: z.string().uuid(),
+});
+
+/**
+ * Resume a PAUSED subscription (user-initiated).
+ *
+ * Parallel to `reactivateSubscription` but for the `paused → active`
+ * transition. The backend calls Stripe's `subscriptions.resume` API and
+ * flips the local DB row back to 'active'. See bead Codex-7h4vo.
+ */
+export const resumeSubscription = command(
+  resumeCommandSchema,
+  async (input) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.subscription.resume(input);
+  }
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Admin: Tier CRUD Commands
 // ─────────────────────────────────────────────────────────────────────────────

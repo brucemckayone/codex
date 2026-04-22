@@ -160,7 +160,7 @@
         void invalidateCollection('library');
       }
       if (staleKeys.some((k) => k.includes(':subscription'))) {
-        void loadSubscriptionFromServer(data.org.id);
+        void loadSubscriptionFromServer(data.org.id, data.org.slug);
       }
       updateStoredVersions(versions ?? {});
     });
@@ -240,7 +240,7 @@
     // cancellation, tier change), so we don't need a belt-and-suspenders
     // fetch on every mount.
     if (data.user && !subscriptionCollection?.state.has(data.org.id)) {
-      void loadSubscriptionFromServer(data.org.id);
+      void loadSubscriptionFromServer(data.org.id, data.org.slug);
     }
 
     // Activate progress sync on org subdomain — content is watched here,
@@ -478,6 +478,12 @@
     margin-left: var(--space-16);
     view-transition-name: page-content;
     background: color-mix(in srgb, var(--color-background) 80%, transparent);
+    /* Lift org-main above .org-footer's backdrop-filter stacking context so
+       fixed-positioned descendants (audio mini-player) can paint over the
+       footer when they overlap. Without this, the footer's stacking context
+       traps the fixed child regardless of its internal z-index. */
+    position: relative;
+    z-index: 1;
   }
 
   .org-main--studio {

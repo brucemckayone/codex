@@ -7,7 +7,7 @@
  */
 
 /** A single framebuffer object with its backing texture. */
-export interface FBO {
+interface FBO {
   fbo: WebGLFramebuffer;
   tex: WebGLTexture;
   w: number;
@@ -22,7 +22,7 @@ export interface DoubleFBO {
 }
 
 /** Compile a GLSL shader. Returns null on failure (logs error). */
-export function compileShader(
+function compileShader(
   gl: WebGL2RenderingContext,
   type: number,
   src: string
@@ -148,11 +148,7 @@ export function createFBOWithFormat(
 }
 
 /** Create a single RGBA16F FBO at the given resolution. */
-export function createFBO(
-  gl: WebGL2RenderingContext,
-  w: number,
-  h: number
-): FBO {
+function createFBO(gl: WebGL2RenderingContext, w: number, h: number): FBO {
   return createFBOWithFormat(gl, w, h, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT);
 }
 

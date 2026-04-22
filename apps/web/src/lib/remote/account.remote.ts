@@ -293,7 +293,7 @@ export const getProfile = query(async () => {
  * {/await}
  * ```
  */
-export const getNotificationPreferences = query(async () => {
+const getNotificationPreferences = query(async () => {
   const { platform, cookies } = getRequestEvent();
   const api = createServerApi(platform, cookies);
 

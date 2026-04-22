@@ -129,7 +129,12 @@ export function procedure<
       // ====================================================================
       // Step 2: Create Service Registry (after org context is resolved)
       // ====================================================================
-      const registryResult = createServiceRegistry(c.env, obs, organizationId);
+      const registryResult = createServiceRegistry(
+        c.env,
+        obs,
+        organizationId,
+        c.executionCtx
+      );
       registry = registryResult.registry;
       cleanup = registryResult.cleanup;
 

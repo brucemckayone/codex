@@ -1,30 +1,38 @@
 <!--
   @component StudioMediaPage
 
-  Shared media management page for both personal Creator Studio and
-  Org Studio. Displays an upload zone and a grid of existing media items
-  with pagination. Supports edit metadata and delete actions with
-  server-side filtering by media type and status.
+  Shared media library page for both personal Creator Studio and Org
+  Studio. Composes the editorial command bar, optional feature slab,
+  media-tile grid with inline upload ghosts, and pagination. Upload
+  surface is a viewport-wide drop overlay + floating queue dock (see
+  MediaUpload.svelte).
 -->
 <script lang="ts">
   import { goto, invalidateAll } from '$app/navigation';
   import { page } from '$app/state';
-  import MediaUpload from '$lib/components/studio/MediaUpload.svelte';
-  import MediaGrid from '$lib/components/studio/MediaGrid.svelte';
+  import MediaUpload, { type UploadItem } from '$lib/components/studio/MediaUpload.svelte';
+  import MediaLibraryCommandBar from '$lib/components/studio/media-library/MediaLibraryCommandBar.svelte';
+  import MediaFeatureSlab from '$lib/components/studio/media-library/MediaFeatureSlab.svelte';
+  import MediaTileGrid, { type UploadGhost } from '$lib/components/studio/media-library/MediaTileGrid.svelte';
   import EditMediaDialog from '$lib/components/studio/EditMediaDialog.svelte';
   import { Pagination } from '$lib/components/ui/Pagination';
   import * as Dialog from '$lib/components/ui/Dialog';
+  import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
+  import { FilmIcon, SearchXIcon } from '$lib/components/ui/Icon';
   import { deleteMedia, updateMedia } from '$lib/remote/media.remote';
   import { logger } from '$lib/observability';
   import type { MediaItemWithRelations } from '$lib/types';
   import * as m from '$paraglide/messages';
-  import { Button, PageHeader } from '$lib/components/ui';
+  import { Button } from '$lib/components/ui';
+
+  type MediaType = 'all' | 'video' | 'audio';
+  type StatusFilter = 'all' | 'ready' | 'transcoding' | 'failed';
 
   interface Props {
     /** Page data containing mediaItems, pagination, and filters */
     data: {
       mediaItems: MediaItemWithRelations[];
-      pagination: { page: number; totalPages: number };
+      pagination: { page: number; totalPages: number; total?: number };
       filters: { status: string; mediaType: string };
     };
     /** Studio name shown in the browser tab (e.g., "My Studio" or org name) */
@@ -35,45 +43,89 @@
 
   const { data, studioName, class: className }: Props = $props();
 
-  // Delete state
+  // ── Upload surface wiring ─────────────────────────────────────────────
+  let uploadQueue: UploadItem[] = $state([]);
+  let triggerPicker: (() => void) | null = $state(null);
+
+  // Turn UploadItem[] into UploadGhost[] for the grid
+  const ghostItems = $derived<UploadGhost[]>(
+    uploadQueue
+      .filter((u) => u.status === 'uploading' || u.status === 'completing' || u.status === 'error')
+      .map((u, i) => ({
+        key: `${u.file.name}-${i}-${u.id ?? 'pending'}`,
+        name: u.file.name,
+        mediaType: u.file.type.startsWith('video/') ? 'video' : 'audio',
+        progress: u.progress,
+        status: u.status,
+      }))
+  );
+
+  function openPicker() {
+    triggerPicker?.();
+  }
+
+  // ── Delete state ──────────────────────────────────────────────────────
   let showDeleteConfirm = $state(false);
   let deleteTargetId: string | null = $state(null);
   let isDeleting = $state(false);
 
-  // Edit state
+  // ── Edit state ────────────────────────────────────────────────────────
   let showEditDialog = $state(false);
   let editTarget = $state<MediaItemWithRelations | null>(null);
 
+  // ── Pagination derivations ────────────────────────────────────────────
   const currentPage = $derived(data.pagination.page);
   const totalPages = $derived(data.pagination.totalPages);
+  const totalItems = $derived(
+    data.pagination.total ?? data.mediaItems.length
+  );
 
-  const paginationBaseUrl = $derived.by(() => {
-    const params = new URLSearchParams();
-    if (data.filters.status !== 'all') params.set('status', data.filters.status);
-    if (data.filters.mediaType !== 'all') params.set('mediaType', data.filters.mediaType);
-    const qs = params.toString();
-    return `/studio/media${qs ? `?${qs}` : ''}`;
+  // ── URL-driven filter/search state ────────────────────────────────────
+  const activeMediaType = $derived(
+    (data.filters.mediaType === 'all' ? 'all' : data.filters.mediaType) as MediaType
+  );
+  const activeStatus = $derived(
+    (data.filters.status === 'all' ? 'all' : data.filters.status) as StatusFilter
+  );
+  const activeSearch = $derived(page.url.searchParams.get('q') ?? '');
+
+  let searchValue = $state(activeSearch);
+  // keep local input in sync if URL changes externally (filter click, nav)
+  $effect(() => {
+    searchValue = activeSearch;
   });
 
-  const activeMediaType = $derived(data.filters.mediaType);
-  const activeStatus = $derived(data.filters.status);
+  let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+  function handleSearchInput(e: Event) {
+    const value = (e.target as HTMLInputElement).value;
+    searchValue = value;
+    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => {
+      const params = new URLSearchParams(page.url.searchParams);
+      if (value.trim()) {
+        params.set('q', value);
+      } else {
+        params.delete('q');
+      }
+      params.delete('page');
+      const qs = params.toString();
+      void goto(`/studio/media${qs ? `?${qs}` : ''}`, { keepFocus: true, noScroll: true });
+    }, 200);
+  }
 
-  const mediaTypeOptions = [
-    { value: 'all', label: m.media_filter_all_types() },
-    { value: 'video', label: m.media_type_video() },
-    { value: 'audio', label: m.media_type_audio() },
-  ];
-
-  const statusOptions = [
-    { value: 'all', label: m.media_filter_all_status() },
-    { value: 'ready', label: m.media_status_ready() },
-    { value: 'transcoding', label: m.media_status_processing() },
-    { value: 'failed', label: m.media_status_failed() },
-  ];
-
-  function setFilter(key: string, value: string) {
+  function handleSearchClear() {
+    searchValue = '';
     const params = new URLSearchParams(page.url.searchParams);
-    if (value === 'all') {
+    params.delete('q');
+    params.delete('page');
+    const qs = params.toString();
+    void goto(`/studio/media${qs ? `?${qs}` : ''}`, { keepFocus: true, noScroll: true });
+  }
+
+  // ── Filter application ────────────────────────────────────────────────
+  function setUrlParam(key: string, value: string, allSentinel = 'all') {
+    const params = new URLSearchParams(page.url.searchParams);
+    if (value === allSentinel) {
       params.delete(key);
     } else {
       params.set(key, value);
@@ -83,6 +135,55 @@
     void goto(`/studio/media${qs ? `?${qs}` : ''}`, { invalidateAll: true });
   }
 
+  function handleMediaTypeChange(value: MediaType) {
+    setUrlParam('mediaType', value);
+  }
+
+  function handleStatusChange(value: StatusFilter) {
+    setUrlParam('status', value);
+  }
+
+  // ── Pagination base URL (carries filters + search) ────────────────────
+  const paginationBaseUrl = $derived.by(() => {
+    const params = new URLSearchParams();
+    if (data.filters.status !== 'all') params.set('status', data.filters.status);
+    if (data.filters.mediaType !== 'all') params.set('mediaType', data.filters.mediaType);
+    if (activeSearch) params.set('q', activeSearch);
+    const qs = params.toString();
+    return `/studio/media${qs ? `?${qs}` : ''}`;
+  });
+
+  // ── Client-side search (filters current page items by title) ──────────
+  const filteredItems = $derived.by(() => {
+    if (!activeSearch.trim()) return data.mediaItems;
+    const needle = activeSearch.toLowerCase();
+    return data.mediaItems.filter((item) =>
+      item.title.toLowerCase().includes(needle)
+    );
+  });
+
+  // ── Feature slab visibility ───────────────────────────────────────────
+  // Only on page 1, no filters, no search — and only when the newest item
+  // is `ready` (so the hero tile shows a real "done" piece, not a spinner).
+  const featureMedia = $derived.by(() => {
+    if (currentPage !== 1) return null;
+    if (activeMediaType !== 'all' || activeStatus !== 'all') return null;
+    if (activeSearch.trim()) return null;
+    if (filteredItems.length === 0) return null;
+    const candidate = filteredItems[0];
+    return candidate.status === 'ready' ? candidate : null;
+  });
+
+  const gridItems = $derived.by(() =>
+    featureMedia
+      ? filteredItems.filter((i) => i.id !== featureMedia.id)
+      : filteredItems
+  );
+
+  // Ordinal base: if the slab took ordinal 01, the grid starts at 02.
+  const gridStartOrdinal = $derived(featureMedia ? 2 : 1);
+
+  // ── Event handlers ────────────────────────────────────────────────────
   function handleUploadComplete() {
     void invalidateAll();
   }
@@ -113,7 +214,9 @@
       deleteTargetId = null;
       void invalidateAll();
     } catch (error) {
-      logger.error('Failed to delete media', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to delete media', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     } finally {
       isDeleting = false;
     }
@@ -125,6 +228,11 @@
       deleteTargetId = null;
     }
   }
+
+  // TODO i18n — studio_media_search_empty_title / _description
+  const searchEmptyTitle = 'No matches';
+  const searchEmptyDescription =
+    'Try a different search term or clear the search to see everything.';
 </script>
 
 <svelte:head>
@@ -132,50 +240,50 @@
 </svelte:head>
 
 <div class="media-page {className ?? ''}">
-  <PageHeader title={m.media_title()} description={m.media_subtitle()} />
+  <MediaLibraryCommandBar
+    total={totalItems}
+    mediaType={activeMediaType}
+    status={activeStatus}
+    searchValue={searchValue}
+    onUploadClick={openPicker}
+    onSearchInput={handleSearchInput}
+    onSearchClear={handleSearchClear}
+    onMediaTypeChange={handleMediaTypeChange}
+    onStatusChange={handleStatusChange}
+  />
 
-  <section class="upload-section">
-    <MediaUpload onUploadComplete={handleUploadComplete} />
-  </section>
+  <!-- Library body — feature slab (page 1 only), grid, pagination -->
+  <div
+    class="library-body"
+    role="status"
+    aria-live="polite"
+    aria-busy={!data}
+  >
+    {#if data.mediaItems.length === 0 && ghostItems.length === 0}
+      <EmptyState
+        title={m.media_empty()}
+        description={m.media_empty_description()}
+        icon={FilmIcon}
+      />
+    {:else if filteredItems.length === 0 && ghostItems.length === 0}
+      <EmptyState
+        title={searchEmptyTitle}
+        description={searchEmptyDescription}
+        icon={SearchXIcon}
+      />
+    {:else}
+      {#if featureMedia}
+        <MediaFeatureSlab
+          media={featureMedia}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+        />
+      {/if}
 
-  <section class="filters-section">
-    <div class="filters-row">
-      <div class="filter-group">
-        {#each mediaTypeOptions as option (option.value)}
-          <button
-            class="filter-btn"
-            class:filter-btn--active={activeMediaType === option.value}
-            aria-pressed={activeMediaType === option.value}
-            onclick={() => setFilter('mediaType', option.value)}
-            type="button"
-          >
-            {option.label}
-          </button>
-        {/each}
-      </div>
-
-      <div class="filter-group">
-        {#each statusOptions as option (option.value)}
-          <button
-            class="filter-btn"
-            class:filter-btn--active={activeStatus === option.value}
-            aria-pressed={activeStatus === option.value}
-            onclick={() => setFilter('status', option.value)}
-            type="button"
-          >
-            {option.label}
-          </button>
-        {/each}
-      </div>
-    </div>
-  </section>
-
-  <!-- Live-region wraps the grid + pagination so SPA-mode route loads announce
-       when content refreshes after a filter change (studio runs ssr=false). -->
-  <div class="media-status-region" role="status" aria-live="polite" aria-busy={!data}>
-    <section class="media-section">
-      <MediaGrid
-        items={data.mediaItems}
+      <MediaTileGrid
+        items={gridItems}
+        ghosts={ghostItems}
+        startOrdinal={gridStartOrdinal}
         onEdit={handleEdit}
         onDelete={handleDelete}
       />
@@ -190,9 +298,17 @@
           />
         </div>
       {/if}
-    </section>
+    {/if}
   </div>
 </div>
+
+<!-- Upload surface (drop overlay + floating dock). Logic is self-contained;
+     parent reads queue as ghosts and owns the picker trigger. -->
+<MediaUpload
+  onUploadComplete={handleUploadComplete}
+  bind:uploadingItems={uploadQueue}
+  bind:triggerPicker
+/>
 
 <!-- Edit Media Dialog -->
 <EditMediaDialog
@@ -229,78 +345,14 @@
   .media-page {
     display: flex;
     flex-direction: column;
-    gap: var(--space-6);
-    max-width: 1200px;
+    gap: var(--space-5);
   }
 
-  .filters-section {
+  .library-body {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  .filters-row {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-
-  @media (--breakpoint-sm) {
-    .filters-row {
-      flex-direction: row;
-      gap: var(--space-4);
-    }
-  }
-
-  .filter-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-  }
-
-  .filter-btn {
-    padding: var(--space-1) var(--space-3);
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-full);
-    background-color: var(--color-surface);
-    color: var(--color-text-secondary);
-    cursor: pointer;
-    transition: var(--transition-colors);
-    white-space: nowrap;
-  }
-
-  .filter-btn:hover {
-    border-color: var(--color-border-hover);
-    color: var(--color-text);
-  }
-
-  .filter-btn--active {
-    background-color: var(--color-interactive);
-    border-color: var(--color-interactive);
-    color: var(--color-text-inverse);
-  }
-
-  .filter-btn--active:hover {
-    background-color: var(--color-interactive-hover);
-    border-color: var(--color-interactive-hover);
-    color: var(--color-text-inverse);
-  }
-
-  .filter-btn:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--border-width-thick);
-  }
-
-  .media-status-region {
-    display: contents;
-  }
-
-  .media-section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
+    gap: var(--space-5);
+    padding: 0 var(--space-1);
   }
 
   .pagination-container {
@@ -315,5 +367,4 @@
     margin: 0;
     line-height: var(--leading-relaxed);
   }
-
 </style>

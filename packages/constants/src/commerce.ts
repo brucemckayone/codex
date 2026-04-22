@@ -5,6 +5,9 @@ export const STRIPE_EVENTS = {
   SUBSCRIPTION_CREATED: 'customer.subscription.created',
   SUBSCRIPTION_UPDATED: 'customer.subscription.updated',
   SUBSCRIPTION_DELETED: 'customer.subscription.deleted',
+  SUBSCRIPTION_PAUSED: 'customer.subscription.paused',
+  SUBSCRIPTION_RESUMED: 'customer.subscription.resumed',
+  SUBSCRIPTION_TRIAL_WILL_END: 'customer.subscription.trial_will_end',
   // Invoices (subscription renewals)
   INVOICE_PAYMENT_SUCCEEDED: 'invoice.payment_succeeded',
   INVOICE_PAYMENT_FAILED: 'invoice.payment_failed',
@@ -13,6 +16,9 @@ export const STRIPE_EVENTS = {
   ACCOUNT_DEAUTHORIZED: 'account.application.deauthorized',
   // Refunds
   CHARGE_REFUNDED: 'charge.refunded',
+  // Disputes (treated as refunds for access purposes — purchase.disputedAt
+  // is set and contentAccess is soft-deleted via processDispute)
+  CHARGE_DISPUTE_CREATED: 'charge.dispute.created',
 } as const;
 
 export const PURCHASE_STATUS = {
@@ -28,6 +34,7 @@ export const SUBSCRIPTION_STATUS = {
   CANCELLING: 'cancelling',
   CANCELLED: 'cancelled',
   INCOMPLETE: 'incomplete',
+  PAUSED: 'paused',
 } as const;
 
 export const BILLING_INTERVAL = {

@@ -41,12 +41,22 @@ export {
   R2SigningError,
 } from './errors';
 export type {
+  Revocation,
+  RevocationReason,
+} from './services/access-revocation';
+export {
+  AccessRevocation,
+  REVOCATION_KEY_PREFIX,
+  REVOCATION_TTL_SECONDS,
+} from './services/access-revocation';
+export type {
   ContentAccessEnv,
   ContentAccessServiceConfig,
 } from './services/ContentAccessService';
 export {
   ContentAccessService,
   createContentAccessService,
+  DEFAULT_STREAMING_URL_TTL_SECONDS,
 } from './services/ContentAccessService';
 export type {
   PlaybackProgressResponse,

@@ -30,6 +30,7 @@
     "format": "biome format --write ."
   },
   "dependencies": {
+    "@codex/cache": "workspace:*",
     "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
     "@codex/service-errors": "workspace:*",

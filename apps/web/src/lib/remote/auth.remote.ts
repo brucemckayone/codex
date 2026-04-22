@@ -226,4 +226,3 @@ export const getSession = query(async () => {
     return { user: null, session: null };
   }
 });
-

@@ -13,13 +13,13 @@
  * - CSS Color Level 4 spec
  */
 
-export interface OklchColor {
+interface OklchColor {
   l: number; // Lightness: 0 (black) to 1 (white)
   c: number; // Chroma: 0 (gray) to ~0.4 (most saturated)
   h: number; // Hue: 0 to 360 degrees
 }
 
-export interface SrgbColor {
+interface SrgbColor {
   r: number; // 0-255
   g: number;
   b: number;
@@ -101,7 +101,7 @@ function linearSrgbToOklab(
 }
 
 /** Convert sRGB (0-255) to OKLCH. */
-export function srgbToOklch(r: number, g: number, b: number): OklchColor {
+function srgbToOklch(r: number, g: number, b: number): OklchColor {
   const lr = gammaToLinear(r / 255);
   const lg = gammaToLinear(g / 255);
   const lb = gammaToLinear(b / 255);
@@ -117,7 +117,7 @@ export function srgbToOklch(r: number, g: number, b: number): OklchColor {
 // ── Hex conversion ────────────────────────────────────────────────────────
 
 /** Parse a hex color string to sRGB. Accepts #RGB, #RRGGBB. */
-export function hexToSrgb(hex: string): SrgbColor | null {
+function hexToSrgb(hex: string): SrgbColor | null {
   const clean = hex.replace(/^#/, '');
   if (clean.length === 3) {
     return {

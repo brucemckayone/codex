@@ -26,6 +26,7 @@
     line-height: var(--leading-relaxed);
     color: var(--color-text-secondary);
     max-width: 72ch;
+    margin-inline: auto;
     word-break: break-word;
     overflow-wrap: break-word;
   }

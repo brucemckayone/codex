@@ -20,6 +20,11 @@
   import type Hls from 'hls.js';
   import type { AccessState } from './access-state';
 
+  /* `createHlsPlayer` returns `{ hls, cleanup }` — `hls` is the HLS.js
+     instance (null on Safari native HLS), `cleanup` detaches native-path
+     listeners. Always call both on teardown: `cleanup()` unconditionally,
+     then `hls?.destroy()` when the HLS.js branch was taken. */
+
   const PREVIEW_TIME_LIMIT = 30;
 
   interface Props {
@@ -36,10 +41,37 @@
 
   let videoEl: HTMLVideoElement | undefined = $state();
   let hlsInstance: Hls | null = null;
+  let hlsCleanup: (() => void) | null = null;
   let loading = $state(true);
   let errorMessage = $state('');
   let previewEnded = $state(false);
   let showCta = $derived(previewEnded || accessState.status === 'locked');
+
+  // Reactive video state mirrors DOM so template reads flip when the user
+  // pauses/mutes/enters fullscreen via any path (button OR native controls).
+  // Mirrors the VideoPlayer pattern (ref 03 §"Reactive state driven by DOM events").
+  let isPaused = $state(true);
+  let isMuted = $state(false);
+  let isFullscreen = $state(false);
+
+  // Short-lived "Preview ready" announcement that fades back to idle so
+  // screen readers hear the transition without parking "ready" in the
+  // live region forever.
+  let readyAnnounced = $state(false);
+  let readyAnnounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Derived text for the polite live region. The error branch uses a
+  // separate `role="alert"` node (assertive) so we emit empty text here
+  // while an error is active to avoid double announcements.
+  const loadingStatusText = $derived(
+    errorMessage
+      ? ''
+      : loading
+        ? m.preview_player_loading()
+        : readyAnnounced
+          ? m.preview_player_ready()
+          : ''
+  );
 
   const loginUrl = $derived(`/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
@@ -49,6 +81,14 @@
 
   function handleCanPlay() {
     loading = false;
+    // Announce "Preview ready" politely then clear so the live region goes
+    // idle. 1200ms is long enough for VoiceOver/NVDA to speak the phrase
+    // and short enough that a second canplay (seek) can re-announce.
+    if (readyAnnounceTimer) clearTimeout(readyAnnounceTimer);
+    readyAnnounced = true;
+    readyAnnounceTimer = setTimeout(() => {
+      readyAnnounced = false;
+    }, 1200);
   }
 
   function handleError() {
@@ -56,6 +96,22 @@
       errorMessage = m.preview_player_load_error();
     }
     loading = false;
+  }
+
+  function handlePlay() {
+    isPaused = false;
+  }
+
+  function handlePause() {
+    isPaused = true;
+  }
+
+  function handleVolumeChange() {
+    if (videoEl) isMuted = videoEl.muted;
+  }
+
+  function handleFullscreenChange() {
+    isFullscreen = !!document.fullscreenElement;
   }
 
   function handleTimeUpdate() {
@@ -77,7 +133,7 @@
     errorMessage = '';
 
     try {
-      hlsInstance = await createHlsPlayer({
+      const handle = await createHlsPlayer({
         media: videoEl,
         src: previewUrl,
         onError: (msg) => {
@@ -85,6 +141,20 @@
           loading = false;
         },
       });
+      hlsInstance = handle.hls;
+      hlsCleanup = handle.cleanup;
+
+      // Seed reactive state from initial DOM values — covers autoplay
+      // (starts playing) and any muted/fullscreen state set by the browser.
+      isPaused = videoEl.paused;
+      isMuted = videoEl.muted;
+
+      // Subscribe to DOM events so template reads of isPaused/isMuted/isFullscreen
+      // stay in sync when the user interacts with native controls OR our buttons.
+      videoEl.addEventListener('play', handlePlay);
+      videoEl.addEventListener('pause', handlePause);
+      videoEl.addEventListener('volumechange', handleVolumeChange);
+      document.addEventListener('fullscreenchange', handleFullscreenChange);
 
       // Attempt muted autoplay if requested — silently ignore browser blocks
       if (autoplay && videoEl) {
@@ -103,6 +173,22 @@
   });
 
   onDestroy(() => {
+    if (readyAnnounceTimer) {
+      clearTimeout(readyAnnounceTimer);
+      readyAnnounceTimer = null;
+    }
+    if (videoEl) {
+      videoEl.removeEventListener('play', handlePlay);
+      videoEl.removeEventListener('pause', handlePause);
+      videoEl.removeEventListener('volumechange', handleVolumeChange);
+    }
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    }
+    if (hlsCleanup) {
+      hlsCleanup();
+      hlsCleanup = null;
+    }
     if (hlsInstance) {
       hlsInstance.destroy();
       hlsInstance = null;
@@ -111,9 +197,17 @@
 </script>
 
 <div class="preview-player">
+  <!-- Polite live region announces loading/ready transitions to screen readers.
+       `aria-atomic` ensures the whole text is re-announced when it changes.
+       The container is visually hidden (sr-only-style); the error branch below
+       uses a separate role="alert" so assertive errors don't share this region. -->
+  <div class="preview-player__status" role="status" aria-live="polite" aria-atomic="true">
+    {loadingStatusText}
+  </div>
+
   {#if loading}
     <div class="preview-player__loading">
-      <div class="preview-player__spinner" aria-label={m.common_loading()}></div>
+      <div class="preview-player__spinner" aria-hidden="true"></div>
     </div>
   {/if}
 
@@ -129,6 +223,7 @@
         preload="metadata"
         poster={poster}
         muted={autoplay}
+        aria-label="Preview: first 30 seconds"
         oncanplay={handleCanPlay}
         onerror={handleError}
         ontimeupdate={handleTimeUpdate}
@@ -145,9 +240,9 @@
               if (videoEl.paused) videoEl.play();
               else videoEl.pause();
             }}
-            aria-label={videoEl?.paused ? m.player_play() : m.player_pause()}
+            aria-label={isPaused ? m.player_play() : m.player_pause()}
           >
-            {#if videoEl?.paused}
+            {#if isPaused}
               <PlayIcon size={20} fill="currentColor" stroke="none" />
             {:else}
               <PauseIcon size={20} fill="currentColor" stroke="none" />
@@ -159,9 +254,9 @@
             onclick={() => {
               if (videoEl) videoEl.muted = !videoEl.muted;
             }}
-            aria-label={videoEl?.muted ? m.player_unmute() : m.player_mute()}
+            aria-label={isMuted ? m.player_unmute() : m.player_mute()}
           >
-            {#if videoEl?.muted}
+            {#if isMuted}
               <VolumeXIcon size={20} />
             {:else}
               <Volume2Icon size={20} />
@@ -172,13 +267,14 @@
             class="preview-player__control-btn"
             onclick={() => {
               const container = videoEl?.closest('.preview-player');
-              if (document.fullscreenElement) {
+              if (isFullscreen) {
                 document.exitFullscreen();
               } else {
                 container?.requestFullscreen();
               }
             }}
             aria-label={m.player_fullscreen()}
+            aria-pressed={isFullscreen}
           >
             <MaximizeIcon size={20} />
           </button>
@@ -247,6 +343,21 @@
     background-color: var(--color-surface-tertiary);
     border-radius: var(--radius-md);
     overflow: hidden;
+  }
+
+  /* Status landmark — visually hidden, drives polite SR announcements for
+     loading → ready transitions. Error branch uses a separate role="alert"
+     so assertive errors don't park in the polite region. */
+  .preview-player__status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
   }
 
   /* Loading */
