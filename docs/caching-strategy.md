@@ -162,10 +162,37 @@ Check on `visibilitychange`, diff against stored manifest, invalidate only what 
 | Key | Client manifest? | Bumped when |
 |---|---|---|
 | `cache:version:{userId}` | ✅ Yes | Profile updated, prefs changed |
-| `cache:version:user:{userId}:library` | ✅ Yes | Purchase completed (cross-device library staleness) |
+| `cache:version:user:{userId}:library` | ✅ Yes | Purchase completed; subscription lifecycle event; **content mutation (update/publish/unpublish/delete); membership role change; follow/unfollow** |
+| `cache:version:user:{userId}:subscription:{orgId}` | ✅ Yes | Subscription checkout / tier change / cancel / reactivate / webhook events |
 | `cache:version:{orgId}` | ✅ Yes | Org settings/branding changed |
 | `cache:version:content:published` | ❌ Server KV only | Any content published/unpublished/updated |
 | `cache:version:org:{orgId}:content` | ❌ Server KV only | Content in this org changed |
+
+### Content mutation fanout (Codex-c01do)
+
+Content-scoped mutations (`update`, `publish`, `unpublish`, `delete`) fan
+per-user library version bumps in addition to the catalogue version bumps.
+The fanout set is the union of:
+
+- Completed purchasers of the content (from `purchases`)
+- Active/cancelling subscribers to the owning org (from `subscriptions`)
+- Management members (owner/admin/creator) of the owning org
+- Optionally — followers of the org when `includeFollowers: true` is passed
+
+A safety cap (`DEFAULT_MAX_LIBRARY_FANOUT = 500`) skips the per-user fanout
+for unbounded audiences (popular follower-gated content) and logs a warning
+— the platform layout's `visibilitychange → invalidate('cache:versions')`
+loop catches up on the user's next focus event.
+
+Membership (`inviteMember`, `updateMemberRole`, `removeMember`) and follower
+(`followOrganization`, `unfollowOrganization`) mutations bump the single
+affected user's library version — no fanout query needed because the target
+user id is already known.
+
+Implementation: `packages/content/src/services/content-invalidation.ts`
+(entry points: `invalidateContentAccess`, `invalidateOrgMembership`).
+Wired into content-api routes (`workers/content-api/src/routes/content.ts`)
+and organization-api routes (`workers/organization-api/src/routes/{members,followers}.ts`).
 
 **Why content keys are server-only:** Content availability is "server-authoritative always" — SSR renders the correct published list on every page load. There's no localStorage-backed `contentCollection` to invalidate. Bumping the key on the server means the next SSR request gets a fresh DB fetch instead of a stale KV list.
 

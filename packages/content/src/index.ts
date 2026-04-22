@@ -60,8 +60,18 @@
 // Services
 // ============================================================================
 
+export type {
+  ContentInvalidationReason,
+  InvalidateContentAccessArgs,
+  InvalidateOrgMembershipArgs,
+  InvalidationLogger,
+  WaitUntilFn,
+} from './services';
 export {
   ContentService,
+  DEFAULT_MAX_LIBRARY_FANOUT,
+  invalidateContentAccess,
+  invalidateOrgMembership,
   MediaItemService,
 } from './services';
 

@@ -18,8 +18,8 @@
 
 import { CacheType, VersionedCache } from '@codex/cache';
 import { AUTH_ROLES } from '@codex/constants';
-import { createDbClient, eq, schema } from '@codex/database';
 import type {
+  ContentInvalidationReason,
   ContentResponse,
   CreateContentResponse,
   DeleteContentResponse,
@@ -32,8 +32,10 @@ import {
   checkContentSlugSchema,
   contentQuerySchema,
   createContentSchema,
+  invalidateContentAccess,
   updateContentSchema,
 } from '@codex/content';
+import { createDbClient, eq, schema } from '@codex/database';
 import {
   MAX_IMAGE_SIZE_BYTES,
   SUPPORTED_IMAGE_MIME_TYPES,
@@ -89,6 +91,58 @@ function bumpOrgContentVersion(
       })(),
     ]).catch((err: unknown) => {
       obs?.warn('Cache invalidation failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    })
+  );
+}
+
+/**
+ * Fan per-user library cache invalidation after a content mutation.
+ *
+ * Codex-c01do — content mutations (update-access-config, unpublish, delete,
+ * publish) previously bumped ONLY catalogue version keys. The per-user
+ * library cache (`COLLECTION_USER_LIBRARY`) was untouched, so library UI
+ * showed stale accessType flags until the next visibility-change staleness
+ * roundtrip. Access decisions at click time are always live (server-side)
+ * — this is UX drift, not a security bug — but per feedback_dont_defer_cache_issues
+ * we close the gap proactively.
+ *
+ * Fire-and-forget: the whole block is wrapped in `waitUntil` so the route
+ * response is never blocked on KV writes.
+ */
+function fanContentInvalidation(
+  env: HonoEnv['Bindings'],
+  executionCtx: ExecutionContext,
+  contentId: string,
+  organizationId: string | null | undefined,
+  reason: ContentInvalidationReason,
+  obs?: Logger,
+  options: { includeFollowers?: boolean } = {}
+): void {
+  if (!env.CACHE_KV) return;
+  const cache = new VersionedCache({ kv: env.CACHE_KV });
+  const db = createDbClient(env);
+  const waitUntil = executionCtx.waitUntil.bind(executionCtx);
+
+  // Wrap the whole fanout in waitUntil so the DB `resolveAffectedUsers`
+  // query does not block the response. The helper internally hands each
+  // per-user KV bump to waitUntil as well.
+  executionCtx.waitUntil(
+    invalidateContentAccess({
+      db,
+      cache,
+      waitUntil,
+      contentId,
+      organizationId: organizationId ?? null,
+      reason,
+      logger: obs,
+      includeFollowers: options.includeFollowers ?? false,
+    }).catch((err: unknown) => {
+      obs?.warn('content-invalidation: fanout failed', {
+        contentId,
+        organizationId,
+        reason,
         error: err instanceof Error ? err.message : String(err),
       });
     })
@@ -197,11 +251,22 @@ app.patch(
       body: updateContentSchema,
     },
     handler: async (ctx): Promise<UpdateContentResponse['data']> => {
-      return await ctx.services.content.update(
+      const result = await ctx.services.content.update(
         ctx.input.params.id,
         ctx.input.body,
         ctx.user.id
       );
+      // Fan per-user library invalidation (Codex-c01do). Covers access-config
+      // edits — the most common cause of stale accessType flags in library UI.
+      fanContentInvalidation(
+        ctx.env,
+        ctx.executionCtx,
+        result.id,
+        result.organizationId,
+        'content_updated',
+        ctx.obs
+      );
+      return result;
     },
   })
 );
@@ -254,6 +319,16 @@ app.post(
         result.organizationId,
         ctx.obs
       );
+      // Fan per-user library invalidation (Codex-c01do). A publish adds the
+      // item to subscribers'/members' libraries — they need a fresh view.
+      fanContentInvalidation(
+        ctx.env,
+        ctx.executionCtx,
+        result.id,
+        result.organizationId,
+        'content_published',
+        ctx.obs
+      );
 
       // TODO: Send new-content-published email to subscribers
       // Requires a subscriber query (users with contentAccess in this org).
@@ -291,6 +366,16 @@ app.post(
         result.organizationId,
         ctx.obs
       );
+      // Fan per-user library invalidation (Codex-c01do). Unpublish must
+      // remove the item from subscribers'/members' libraries.
+      fanContentInvalidation(
+        ctx.env,
+        ctx.executionCtx,
+        result.id,
+        result.organizationId,
+        'content_unpublished',
+        ctx.obs
+      );
       return result;
     },
   })
@@ -314,19 +399,34 @@ app.delete(
     input: { params: createIdParamsSchema() },
     successStatus: 204,
     handler: async (ctx): Promise<DeleteContentResponse> => {
-      // Read org before delete so we can bump its version
+      // Read org BEFORE delete so we can (a) bump its version and (b) fan
+      // per-user library invalidation while the row is still readable.
+      // Note: the per-user fanout query in `invalidateContentAccess` runs
+      // against the content-id — we want to resolve affected users using the
+      // pre-delete state (purchases, subscribers, members) which survives
+      // the soft-delete unchanged. It's safe to call after delete because
+      // we key by contentId and purchases/subscriptions/memberships don't
+      // soft-delete alongside content.
       let organizationId: string | undefined;
+      const contentId = ctx.input.params.id;
       try {
-        const content = await ctx.services.content.get(
-          ctx.input.params.id,
-          ctx.user.id
-        );
+        const content = await ctx.services.content.get(contentId, ctx.user.id);
         organizationId = content?.organizationId ?? undefined;
       } catch {
         // Pre-fetch for cache invalidation is non-critical
       }
-      await ctx.services.content.delete(ctx.input.params.id, ctx.user.id);
+      await ctx.services.content.delete(contentId, ctx.user.id);
       bumpOrgContentVersion(ctx.env, ctx.executionCtx, organizationId, ctx.obs);
+      // Fan per-user library invalidation (Codex-c01do). Soft-delete must
+      // remove the item from everyone's library UI immediately.
+      fanContentInvalidation(
+        ctx.env,
+        ctx.executionCtx,
+        contentId,
+        organizationId ?? null,
+        'content_deleted',
+        ctx.obs
+      );
       return null;
     },
   })
