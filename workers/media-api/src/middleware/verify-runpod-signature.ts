@@ -124,7 +124,7 @@ async function verifySignature(
   return timingSafeEqual(signatureBytes, expectedBytes);
 }
 
-export interface VerifyRunpodSignatureOptions {
+interface VerifyRunpodSignatureOptions {
   /**
    * Whether to validate timestamp for replay protection
    * Default: true

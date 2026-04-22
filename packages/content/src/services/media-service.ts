@@ -46,7 +46,7 @@ import type {
   PaginationParams,
 } from '../types';
 
-export interface MediaItemServiceConfig extends ServiceConfig {
+interface MediaItemServiceConfig extends ServiceConfig {
   /** R2Service with signing config for presigned upload URLs. Optional in dev. */
   r2?: R2Service;
 }

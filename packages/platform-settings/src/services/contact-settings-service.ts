@@ -15,7 +15,7 @@ import { SettingsUpsertError } from '../errors';
 /**
  * Configuration for ContactSettingsService
  */
-export interface ContactSettingsConfig {
+interface ContactSettingsConfig {
   /** Database connection (supports both HTTP and WebSocket clients) */
   db: typeof dbHttp | typeof dbWs;
   /** Runtime environment */

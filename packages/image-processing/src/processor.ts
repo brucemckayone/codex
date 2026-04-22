@@ -1,6 +1,6 @@
 import { SafePhotonImage } from './photon-wrapper';
 
-export interface ImageVariants {
+interface ImageVariants {
   sm: Uint8Array;
   md: Uint8Array;
   lg: Uint8Array;

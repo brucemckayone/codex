@@ -73,21 +73,21 @@ export function classifyStripeKey(
   return 'unknown';
 }
 
-export interface SeedStripeUser {
+interface SeedStripeUser {
   /** Codex user id (stable across seeds) — used for idempotency + metadata tag. */
   id: string;
   email: string;
   name: string;
 }
 
-export interface SeedStripeTier {
+interface SeedStripeTier {
   /** Codex tier id — used for idempotency + metadata tag. */
   id: string;
   stripePriceMonthlyId: string;
   stripePriceAnnualId: string;
 }
 
-export interface SeedSubscriptionResult {
+interface SeedSubscriptionResult {
   stripeCustomerId: string;
   stripeSubscriptionId: string;
   currentPeriodStart: Date;

@@ -30,7 +30,7 @@ export function escapeHtml(str: string): string {
  */
 const TOKEN_PATTERN = /\{\{(\w+)\}\}/g;
 
-export interface RenderOptions {
+interface RenderOptions {
   /** Template string with {{token}} placeholders */
   template: string;
   /** Data to inject (values will be HTML-escaped) */
@@ -43,7 +43,7 @@ export interface RenderOptions {
   stripTags?: boolean;
 }
 
-export interface RenderResult {
+interface RenderResult {
   /** Rendered content */
   content: string;
   /** Tokens that were in template but missing from data */
@@ -145,7 +145,7 @@ export function renderEmailTemplate(options: {
  * Token registry - defines allowed tokens per template type.
  * Token names MUST match the Zod schema field names in @codex/validation.
  */
-export const TEMPLATE_TOKENS: Record<string, string[]> = {
+const TEMPLATE_TOKENS: Record<string, string[]> = {
   // Brand tokens (available to all templates)
   _brand: [
     'platformName',

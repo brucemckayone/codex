@@ -144,7 +144,7 @@ export interface WebhookHandlerResult {
  * cache bumps. This mirrors the `revocation?: AccessRevocation` pattern on
  * `ContentAccessService` in `@codex/access`.
  */
-export interface SubscriptionServiceConfig extends ServiceConfig {
+interface SubscriptionServiceConfig extends ServiceConfig {
   /**
    * Optional versioned cache used to bump `COLLECTION_USER_LIBRARY` and
    * `COLLECTION_USER_SUBSCRIPTION` version keys after successful mutations.

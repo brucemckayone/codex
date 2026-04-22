@@ -28,12 +28,12 @@ import { validateTemplateData } from '../validation/template-validation';
 import { BrandingCache } from './branding-cache';
 import { NotificationPreferencesService } from './notification-preferences-service';
 
-export interface RetryConfig {
+interface RetryConfig {
   maxRetries: number;
   initialBackoffMs: number;
 }
 
-export const DEFAULT_RETRY_CONFIG: RetryConfig = {
+const DEFAULT_RETRY_CONFIG: RetryConfig = {
   maxRetries: 2,
   initialBackoffMs: 1000,
 };

@@ -33,7 +33,7 @@ export interface ImageProcessingResult {
   mimeType: string;
 }
 
-export interface ImageProcessingServiceConfig extends ServiceConfig {
+interface ImageProcessingServiceConfig extends ServiceConfig {
   r2Service: R2Service;
   r2PublicUrlBase: string;
   orphanedFileService?: OrphanedFileService;

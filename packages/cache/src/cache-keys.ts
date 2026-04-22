@@ -8,7 +8,7 @@
 /**
  * Default prefix for all cache keys
  */
-export const CACHE_PREFIX = 'cache';
+const CACHE_PREFIX = 'cache';
 
 /**
  * Cache type identifiers for different data categories

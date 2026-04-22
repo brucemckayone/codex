@@ -15,7 +15,7 @@ import { SettingsUpsertError } from '../errors';
 /**
  * Configuration for FeatureSettingsService
  */
-export interface FeatureSettingsConfig {
+interface FeatureSettingsConfig {
   /** Database connection (supports both HTTP and WebSocket clients) */
   db: typeof dbHttp | typeof dbWs;
   /** Runtime environment */
