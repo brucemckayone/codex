@@ -89,15 +89,13 @@ We use Svelte 5's native `mount`/`unmount` API instead of `@testing-library/svel
 Use `mount` from Svelte and helper functions from `$tests/utils/component-test-utils.svelte.ts`:
 
 ```typescript
-import { mount, unmount, textSnippet, htmlSnippet } from '$tests/utils/component-test-utils.svelte';
+import { mount, unmount, textSnippet } from '$tests/utils/component-test-utils.svelte';
 
 // For components that accept children snippets:
 const component = mount(MyComponent, {
   target: document.body,
   props: {
     children: textSnippet('Some text'),
-    // or for HTML content:
-    content: htmlSnippet('<strong>Bold</strong>')
   }
 });
 ```
@@ -123,7 +121,6 @@ const mySnippet = createRawSnippet(() => ({
 
 The utilities provide helpers:
 - `textSnippet(text)` - Creates a snippet that renders text in a `<span>`
-- `htmlSnippet(html)` - Creates a snippet that renders raw HTML
 
 ### Mock Data
 Use factories from `src/tests/factories` to generate consistent mock data.

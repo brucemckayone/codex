@@ -37,25 +37,6 @@ export function textSnippet(text: string) {
 }
 
 /**
- * Create a raw HTML snippet for component testing.
- * Use with caution - HTML is not escaped.
- *
- * @param html - The HTML string to render
- * @returns A Snippet that renders the HTML directly
- */
-export function htmlSnippet(html: string) {
-  return createRawSnippet(() => ({
-    render: () => html,
-  }));
-}
-
-/**
- * Wait for a specific duration (promisified)
- */
-export const wait = (ms: number) =>
-  new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
  * Query helpers for common DOM operations in tests.
  * These provide a simpler API than raw querySelector.
  */
