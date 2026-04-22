@@ -130,28 +130,6 @@ function hashCode(str: string): number {
 // ── SVG Placeholder Generators ───────────────────────────────────────────
 
 /**
- * Generate a visible SVG thumbnail with a colored background and title text.
- * Returns a Buffer suitable for R2 upload with content-type image/svg+xml.
- */
-export function generateThumbnailSvg(
-  title: string,
-  bgColor = '#1e293b',
-  accentColor = '#60a5fa',
-  width = 800,
-  height = 450
-): Buffer {
-  // Truncate long titles
-  const label = title.length > 30 ? `${title.slice(0, 27)}...` : title;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-  <rect width="${width}" height="${height}" fill="${bgColor}"/>
-  <rect x="0" y="${height - 4}" width="${width}" height="4" fill="${accentColor}"/>
-  <text x="${width / 2}" y="${height / 2 - 10}" text-anchor="middle" font-family="system-ui,sans-serif" font-size="28" font-weight="600" fill="white">${escapeXml(label)}</text>
-  <text x="${width / 2}" y="${height / 2 + 24}" text-anchor="middle" font-family="system-ui,sans-serif" font-size="14" fill="${accentColor}">CODEX</text>
-</svg>`;
-  return Buffer.from(svg, 'utf-8');
-}
-
-/**
  * Generate a visible SVG avatar with initials on a colored circle.
  */
 export function generateAvatarSvg(
@@ -209,12 +187,6 @@ export const PLACEHOLDER_JPEG = Buffer.from(
   'base64'
 );
 
-// Minimal valid WebP: 1x1 pixel (~60 bytes) — used for HLS thumbnail fallback
-export const PLACEHOLDER_WEBP = Buffer.from(
-  'UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA',
-  'base64'
-);
-
 // ── HLS Playlist Generators ──────────────────────────────────────────────
 
 export function generateMasterPlaylist(
@@ -268,42 +240,6 @@ export const VIDEO_VARIANTS = [
 ] as const;
 
 // ── Article Body ─────────────────────────────────────────────────────────
-
-/** Legacy markdown body — kept for backwards compatibility with old content */
-export const ARTICLE_BODY = `# Getting Started with Modern Web Development
-
-The web development landscape has evolved dramatically. This guide covers the essential tools and patterns you need to build production-grade applications in 2026.
-
-## The Modern Stack
-
-Today's web applications are built on a foundation of **TypeScript**, **component frameworks**, and **edge computing**. Here's what you need to know:
-
-### TypeScript First
-
-TypeScript has become the default for serious web development. The type safety catches entire categories of bugs at compile time, and the DX improvements (autocomplete, refactoring, documentation) make it worth the setup cost for any project beyond a prototype.
-
-### Component Frameworks
-
-Svelte 5 introduced runes — a reactivity system that's both simpler and more powerful than previous approaches. Combined with SvelteKit's file-based routing and server-side rendering, you get a framework that handles the full spectrum from static sites to complex applications.
-
-### Edge Computing
-
-Cloudflare Workers run your code at the edge — physically closer to your users than any traditional server setup. Combined with R2 for storage and KV for caching, you can build globally distributed applications without managing infrastructure.
-
-## Building Your First Project
-
-Start with the basics: create a SvelteKit project, add TypeScript, and deploy to Cloudflare Pages. From there, add features incrementally:
-
-1. **Authentication** — session-based auth with HttpOnly cookies
-2. **Database** — PostgreSQL via Neon's serverless driver
-3. **Storage** — R2 for media files, KV for session cache
-4. **Payments** — Stripe Checkout for purchases
-
-Each layer builds on the previous one. Don't try to implement everything at once.
-
-## What's Next
-
-In upcoming tutorials, we'll dive deep into each of these topics with hands-on projects. Subscribe to stay updated.`;
 
 /**
  * TipTap JSON document for the article body.
