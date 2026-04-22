@@ -1447,7 +1447,7 @@ export const org_followers_count = (params) => `${params.count} followers`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const followers_only_cta_title = () => `Followers Only`
+export const followers_only_cta_title = () => `Follow to unlock`
 
 
 /**
@@ -1455,7 +1455,7 @@ export const followers_only_cta_title = () => `Followers Only`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const followers_only_cta_description = () => `Follow this organisation to access this content`
+export const followers_only_cta_description = () => `This piece is free for followers. Follow to read the full article and get more like it in your feed.`
 
 
 /**
