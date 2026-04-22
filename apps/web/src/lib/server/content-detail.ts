@@ -34,6 +34,14 @@ interface AccessAndProgress {
   streamingUrl: string | null;
   waveformUrl: string | null;
   /**
+   * HLS quality variants that finished transcoding for this media item
+   * (e.g. `['1080p', '720p', '480p', '360p']`). Null when the stream
+   * response did not include the field (written content, pre-transcode
+   * media, legacy items without `ready_variants` populated, or denial).
+   * Drives the manual quality picker in `VideoPlayer`.
+   */
+  readyVariants: string[] | null;
+  /**
    * ISO 8601 timestamp when the signed streaming/waveform URL expires.
    * Null when the access branch doesn't produce a stream (access denied or
    * call failed). Threaded into the player so it can pre-emptively refresh
@@ -169,6 +177,11 @@ export async function loadAccessAndProgress(
   // `expiresAt` comes back as an ISO 8601 string from the access worker
   // (JSON-encoded Date). Preserve the string as-is for stable wire format.
   const expiresAt = (streamResult as StreamResult | null)?.expiresAt ?? null;
+  // `readyVariants` is optional on the wire — absent for written content,
+  // pre-transcode, or legacy items without `ready_variants` populated.
+  // Normalise to null so downstream components can branch on truthiness.
+  const readyVariants =
+    (streamResult as StreamResult | null)?.readyVariants ?? null;
   const revocationReason = accessGranted
     ? null
     : extractRevocationReason(streamError);
@@ -184,6 +197,7 @@ export async function loadAccessAndProgress(
     hasAccess,
     streamingUrl,
     waveformUrl,
+    readyVariants,
     expiresAt,
     revocationReason,
     progress,

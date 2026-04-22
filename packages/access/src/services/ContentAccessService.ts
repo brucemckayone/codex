@@ -381,6 +381,12 @@ export class ContentAccessService extends BaseService {
     waveformUrl: string | null;
     expiresAt: Date;
     contentType: 'video' | 'audio' | 'written';
+    /**
+     * HLS variants ready to stream (e.g. `['1080p', '720p', '480p', '360p']`).
+     * Surfaced so the player can render a manual quality picker; omitted
+     * when the media item has no recorded variants, or for written content.
+     */
+    readyVariants?: string[];
   }> {
     // Resolve the TTL once. The Zod schema already applies a default when
     // input flows through `procedure()`, but programmatic callers that
@@ -447,460 +453,477 @@ export class ContentAccessService extends BaseService {
 
       // Step 1 & 2: Verify access and fetch content/media data within transaction
       // Transaction ensures consistent snapshot for access verification
-      const { r2Key, mediaType, waveformKey } = await this.db.transaction(
-        async (tx) => {
-          // Get content with media details (any organization)
-          const contentRecord = await tx.query.content.findFirst({
-            where: and(
-              eq(content.id, input.contentId),
-              eq(content.status, CONTENT_STATUS.PUBLISHED),
-              isNull(content.deletedAt)
-            ),
-            with: {
-              mediaItem: true, // Includes r2_key, content_type, duration
-            },
-          });
-
-          if (!contentRecord) {
-            this.obs.warn('Content not found or not accessible', {
-              contentId: input.contentId,
-              userId,
-            });
-
-            throw new ContentNotFoundError(input.contentId);
-          }
-
-          // NOTE: Media item existence is NOT checked here. Written content
-          // (articles) has no media item but still requires the same access
-          // verification below so the body can be unlocked on the page.
-          // Media-specific validation (status=ready, HLS key, mediaType)
-          // only runs after the access check passes AND a media item exists.
-
-          // ── Reusable helper: check active subscription access ──────
-          // Returns true if user has an active subscription to the org
-          // that meets the content's minimum tier requirement.
-          // When minimumTierId is null, any active subscription grants access.
-          const checkSubscriptionAccess = async (
-            orgId: string,
-            minimumTierId: string | null
-          ): Promise<boolean> => {
-            const userSub = await tx.query.subscriptions.findFirst({
+      const { r2Key, mediaType, waveformKey, readyVariants } =
+        await this.db.transaction(
+          async (tx) => {
+            // Get content with media details (any organization)
+            const contentRecord = await tx.query.content.findFirst({
               where: and(
-                eq(subscriptions.userId, userId),
-                eq(subscriptions.organizationId, orgId),
-                inArray(subscriptions.status, [
-                  SUBSCRIPTION_STATUS.ACTIVE,
-                  SUBSCRIPTION_STATUS.CANCELLING,
-                ]),
-                gt(subscriptions.currentPeriodEnd, new Date())
+                eq(content.id, input.contentId),
+                eq(content.status, CONTENT_STATUS.PUBLISHED),
+                isNull(content.deletedAt)
               ),
-              with: { tier: true },
+              with: {
+                mediaItem: true, // Includes r2_key, content_type, duration
+              },
             });
 
-            if (!userSub) return false;
-
-            // No minimum tier set — any active subscription grants access
-            if (!minimumTierId) {
-              this.obs.info('Access granted via subscription (any tier)', {
-                userId,
+            if (!contentRecord) {
+              this.obs.warn('Content not found or not accessible', {
                 contentId: input.contentId,
-                subscriptionTier: userSub.tier.name,
-              });
-              return true;
-            }
-
-            // Minimum tier set — compare sortOrder
-            const contentTier = await tx.query.subscriptionTiers.findFirst({
-              where: eq(subscriptionTiers.id, minimumTierId),
-            });
-
-            if (
-              contentTier &&
-              userSub.tier.sortOrder >= contentTier.sortOrder
-            ) {
-              this.obs.info('Access granted via subscription', {
                 userId,
-                contentId: input.contentId,
-                subscriptionTier: userSub.tier.name,
-                contentMinTier: contentTier.name,
               });
-              return true;
+
+              throw new ContentNotFoundError(input.contentId);
             }
 
-            return false;
-          };
+            // NOTE: Media item existence is NOT checked here. Written content
+            // (articles) has no media item but still requires the same access
+            // verification below so the body can be unlocked on the page.
+            // Media-specific validation (status=ready, HLS key, mediaType)
+            // only runs after the access check passes AND a media item exists.
 
-          // ── Reusable helper: check org membership ──────────────────
-          const checkOrgMembership = async (orgId: string) => {
-            return tx.query.organizationMemberships.findFirst({
-              where: and(
-                eq(organizationMemberships.organizationId, orgId),
-                eq(organizationMemberships.userId, userId),
-                eq(organizationMemberships.status, 'active')
-              ),
-            });
-          };
-
-          // ── Reusable helper: check management membership ────────────
-          // Only owner/admin/creator roles bypass payment requirements.
-          // Regular 'member' and 'subscriber' roles must purchase or
-          // subscribe to access paid/subscriber content.
-          const MANAGEMENT_ROLES: string[] = [
-            ORGANIZATION_ROLES.OWNER,
-            ORGANIZATION_ROLES.ADMIN,
-            ORGANIZATION_ROLES.CREATOR,
-          ];
-
-          const checkManagementMembership = async (orgId: string) => {
-            return tx.query.organizationMemberships.findFirst({
-              where: and(
-                eq(organizationMemberships.organizationId, orgId),
-                eq(organizationMemberships.userId, userId),
-                eq(organizationMemberships.status, 'active'),
-                inArray(organizationMemberships.role, MANAGEMENT_ROLES)
-              ),
-            });
-          };
-
-          // ── Reusable helper: check follower relationship ────────────
-          const checkFollower = async (orgId: string) => {
-            return tx.query.organizationFollowers.findFirst({
-              where: and(
-                eq(organizationFollowers.organizationId, orgId),
-                eq(organizationFollowers.userId, userId)
-              ),
-            });
-          };
-
-          // ── Access decision: branch on accessType ──────────────────
-
-          // (a) Team-only: require management role (owner/admin/creator)
-          if (contentRecord.accessType === 'team') {
-            if (!contentRecord.organizationId) {
-              throw new AccessDeniedError(userId, input.contentId, {
-                reason: 'team_only_requires_org',
+            // ── Reusable helper: check active subscription access ──────
+            // Returns true if user has an active subscription to the org
+            // that meets the content's minimum tier requirement.
+            // When minimumTierId is null, any active subscription grants access.
+            const checkSubscriptionAccess = async (
+              orgId: string,
+              minimumTierId: string | null
+            ): Promise<boolean> => {
+              const userSub = await tx.query.subscriptions.findFirst({
+                where: and(
+                  eq(subscriptions.userId, userId),
+                  eq(subscriptions.organizationId, orgId),
+                  inArray(subscriptions.status, [
+                    SUBSCRIPTION_STATUS.ACTIVE,
+                    SUBSCRIPTION_STATUS.CANCELLING,
+                  ]),
+                  gt(subscriptions.currentPeriodEnd, new Date())
+                ),
+                with: { tier: true },
               });
+
+              if (!userSub) return false;
+
+              // No minimum tier set — any active subscription grants access
+              if (!minimumTierId) {
+                this.obs.info('Access granted via subscription (any tier)', {
+                  userId,
+                  contentId: input.contentId,
+                  subscriptionTier: userSub.tier.name,
+                });
+                return true;
+              }
+
+              // Minimum tier set — compare sortOrder
+              const contentTier = await tx.query.subscriptionTiers.findFirst({
+                where: eq(subscriptionTiers.id, minimumTierId),
+              });
+
+              if (
+                contentTier &&
+                userSub.tier.sortOrder >= contentTier.sortOrder
+              ) {
+                this.obs.info('Access granted via subscription', {
+                  userId,
+                  contentId: input.contentId,
+                  subscriptionTier: userSub.tier.name,
+                  contentMinTier: contentTier.name,
+                });
+                return true;
+              }
+
+              return false;
+            };
+
+            // ── Reusable helper: check org membership ──────────────────
+            const checkOrgMembership = async (orgId: string) => {
+              return tx.query.organizationMemberships.findFirst({
+                where: and(
+                  eq(organizationMemberships.organizationId, orgId),
+                  eq(organizationMemberships.userId, userId),
+                  eq(organizationMemberships.status, 'active')
+                ),
+              });
+            };
+
+            // ── Reusable helper: check management membership ────────────
+            // Only owner/admin/creator roles bypass payment requirements.
+            // Regular 'member' and 'subscriber' roles must purchase or
+            // subscribe to access paid/subscriber content.
+            const MANAGEMENT_ROLES: string[] = [
+              ORGANIZATION_ROLES.OWNER,
+              ORGANIZATION_ROLES.ADMIN,
+              ORGANIZATION_ROLES.CREATOR,
+            ];
+
+            const checkManagementMembership = async (orgId: string) => {
+              return tx.query.organizationMemberships.findFirst({
+                where: and(
+                  eq(organizationMemberships.organizationId, orgId),
+                  eq(organizationMemberships.userId, userId),
+                  eq(organizationMemberships.status, 'active'),
+                  inArray(organizationMemberships.role, MANAGEMENT_ROLES)
+                ),
+              });
+            };
+
+            // ── Reusable helper: check follower relationship ────────────
+            const checkFollower = async (orgId: string) => {
+              return tx.query.organizationFollowers.findFirst({
+                where: and(
+                  eq(organizationFollowers.organizationId, orgId),
+                  eq(organizationFollowers.userId, userId)
+                ),
+              });
+            };
+
+            // ── Access decision: branch on accessType ──────────────────
+
+            // (a) Team-only: require management role (owner/admin/creator)
+            if (contentRecord.accessType === 'team') {
+              if (!contentRecord.organizationId) {
+                throw new AccessDeniedError(userId, input.contentId, {
+                  reason: 'team_only_requires_org',
+                });
+              }
+
+              const membership = await checkManagementMembership(
+                contentRecord.organizationId
+              );
+
+              if (!membership) {
+                this.obs.warn('Access denied - team-only content', {
+                  userId,
+                  contentId: input.contentId,
+                  organizationId: contentRecord.organizationId,
+                  securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+                  severity: LOG_SEVERITY.MEDIUM,
+                  eventType: LOG_EVENTS.ACCESS_CONTROL,
+                });
+                throw new AccessDeniedError(userId, input.contentId, {
+                  organizationId: contentRecord.organizationId,
+                  reason: 'team_only',
+                });
+              }
+
+              this.obs.info(
+                'Access granted via management role (team content)',
+                {
+                  userId,
+                  contentId: input.contentId,
+                  organizationId: contentRecord.organizationId,
+                  membershipRole: membership.role,
+                }
+              );
             }
+            // (b) Followers-only: require follower or management role.
+            // Subscription alone does NOT grant follower-only access — the
+            // creator is rewarding the (free) follow action, and subscribers
+            // must follow separately to see this content. Keeps the two
+            // relationships independent: paying doesn't auto-subscribe the
+            // user to the org's follower feed, and a follower doesn't have
+            // to pay to see follower-tagged posts.
+            else if (contentRecord.accessType === 'followers') {
+              if (!contentRecord.organizationId) {
+                throw new AccessDeniedError(userId, input.contentId, {
+                  reason: 'followers_only_requires_org',
+                });
+              }
 
-            const membership = await checkManagementMembership(
-              contentRecord.organizationId
-            );
+              let granted = false;
+              const orgId = contentRecord.organizationId;
 
-            if (!membership) {
-              this.obs.warn('Access denied - team-only content', {
-                userId,
-                contentId: input.contentId,
-                organizationId: contentRecord.organizationId,
-                securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
-                severity: LOG_SEVERITY.MEDIUM,
-                eventType: LOG_EVENTS.ACCESS_CONTROL,
-              });
-              throw new AccessDeniedError(userId, input.contentId, {
-                organizationId: contentRecord.organizationId,
-                reason: 'team_only',
-              });
-            }
-
-            this.obs.info('Access granted via management role (team content)', {
-              userId,
-              contentId: input.contentId,
-              organizationId: contentRecord.organizationId,
-              membershipRole: membership.role,
-            });
-          }
-          // (b) Followers-only: require follower or management role.
-          // Subscription alone does NOT grant follower-only access — the
-          // creator is rewarding the (free) follow action, and subscribers
-          // must follow separately to see this content. Keeps the two
-          // relationships independent: paying doesn't auto-subscribe the
-          // user to the org's follower feed, and a follower doesn't have
-          // to pay to see follower-tagged posts.
-          else if (contentRecord.accessType === 'followers') {
-            if (!contentRecord.organizationId) {
-              throw new AccessDeniedError(userId, input.contentId, {
-                reason: 'followers_only_requires_org',
-              });
-            }
-
-            let granted = false;
-            const orgId = contentRecord.organizationId;
-
-            // Primary check: is user a follower?
-            const follower = await checkFollower(orgId);
-            if (follower) {
-              this.obs.info('Access granted via follower (followers content)', {
-                userId,
-                contentId: input.contentId,
-                organizationId: orgId,
-              });
-              granted = true;
-            }
-
-            // Fallback: management membership (team implicitly has access)
-            if (!granted) {
-              const membership = await checkManagementMembership(orgId);
-              if (membership) {
+              // Primary check: is user a follower?
+              const follower = await checkFollower(orgId);
+              if (follower) {
                 this.obs.info(
-                  'Access granted via management role (followers content)',
+                  'Access granted via follower (followers content)',
                   {
                     userId,
                     contentId: input.contentId,
                     organizationId: orgId,
-                    membershipRole: membership.role,
                   }
                 );
                 granted = true;
               }
+
+              // Fallback: management membership (team implicitly has access)
+              if (!granted) {
+                const membership = await checkManagementMembership(orgId);
+                if (membership) {
+                  this.obs.info(
+                    'Access granted via management role (followers content)',
+                    {
+                      userId,
+                      contentId: input.contentId,
+                      organizationId: orgId,
+                      membershipRole: membership.role,
+                    }
+                  );
+                  granted = true;
+                }
+              }
+
+              if (!granted) {
+                this.obs.warn('Access denied - followers-only content', {
+                  userId,
+                  contentId: input.contentId,
+                  organizationId: orgId,
+                  securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+                  severity: LOG_SEVERITY.MEDIUM,
+                  eventType: LOG_EVENTS.ACCESS_CONTROL,
+                });
+                throw new AccessDeniedError(userId, input.contentId, {
+                  organizationId: orgId,
+                  reason: 'followers_only',
+                });
+              }
             }
+            // (c) Subscribers-only: require active subscription (with optional tier check)
+            else if (contentRecord.accessType === 'subscribers') {
+              if (!contentRecord.organizationId) {
+                throw new AccessDeniedError(userId, input.contentId, {
+                  reason: 'subscribers_only_requires_org',
+                });
+              }
 
-            if (!granted) {
-              this.obs.warn('Access denied - followers-only content', {
-                userId,
-                contentId: input.contentId,
-                organizationId: orgId,
-                securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
-                severity: LOG_SEVERITY.MEDIUM,
-                eventType: LOG_EVENTS.ACCESS_CONTROL,
-              });
-              throw new AccessDeniedError(userId, input.contentId, {
-                organizationId: orgId,
-                reason: 'followers_only',
-              });
+              let granted = false;
+
+              // Primary check: active subscription to the org
+              const hasSubAccess = await checkSubscriptionAccess(
+                contentRecord.organizationId,
+                contentRecord.minimumTierId
+              );
+
+              if (hasSubAccess) {
+                granted = true;
+              }
+
+              // Fallback: individual purchase (user may have bought it separately)
+              if (!granted) {
+                const hasPurchased = await this.purchaseService.verifyPurchase(
+                  input.contentId,
+                  userId
+                );
+                if (hasPurchased) {
+                  this.obs.info(
+                    'Access granted via purchase (subscriber content)',
+                    {
+                      userId,
+                      contentId: input.contentId,
+                    }
+                  );
+                  granted = true;
+                }
+              }
+
+              // Fallback: management membership (owner/admin/creator only)
+              // Regular 'member' and 'subscriber' roles must subscribe or purchase
+              if (!granted) {
+                const membership = await checkManagementMembership(
+                  contentRecord.organizationId
+                );
+                if (membership) {
+                  this.obs.info(
+                    'Access granted via management membership (subscriber content)',
+                    {
+                      userId,
+                      contentId: input.contentId,
+                      organizationId: contentRecord.organizationId,
+                      membershipRole: membership.role,
+                    }
+                  );
+                  granted = true;
+                }
+              }
+
+              if (!granted) {
+                this.obs.warn('Access denied - subscriber-only content', {
+                  userId,
+                  contentId: input.contentId,
+                  organizationId: contentRecord.organizationId,
+                  minimumTierId: contentRecord.minimumTierId,
+                  securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+                  severity: LOG_SEVERITY.MEDIUM,
+                  eventType: LOG_EVENTS.ACCESS_CONTROL,
+                });
+                throw new AccessDeniedError(userId, input.contentId, {
+                  organizationId: contentRecord.organizationId,
+                  reason: 'subscribers_only',
+                });
+              }
             }
-          }
-          // (c) Subscribers-only: require active subscription (with optional tier check)
-          else if (contentRecord.accessType === 'subscribers') {
-            if (!contentRecord.organizationId) {
-              throw new AccessDeniedError(userId, input.contentId, {
-                reason: 'subscribers_only_requires_org',
-              });
-            }
-
-            let granted = false;
-
-            // Primary check: active subscription to the org
-            const hasSubAccess = await checkSubscriptionAccess(
-              contentRecord.organizationId,
-              contentRecord.minimumTierId
-            );
-
-            if (hasSubAccess) {
-              granted = true;
-            }
-
-            // Fallback: individual purchase (user may have bought it separately)
-            if (!granted) {
+            // (c) Paid content: check purchase, then subscription, then membership
+            else if (contentRecord.priceCents && contentRecord.priceCents > 0) {
+              // Paid content - check purchase via PurchaseService
               const hasPurchased = await this.purchaseService.verifyPurchase(
                 input.contentId,
                 userId
               );
+
               if (hasPurchased) {
-                this.obs.info(
-                  'Access granted via purchase (subscriber content)',
-                  {
-                    userId,
-                    contentId: input.contentId,
-                  }
-                );
-                granted = true;
-              }
-            }
-
-            // Fallback: management membership (owner/admin/creator only)
-            // Regular 'member' and 'subscriber' roles must subscribe or purchase
-            if (!granted) {
-              const membership = await checkManagementMembership(
-                contentRecord.organizationId
-              );
-              if (membership) {
-                this.obs.info(
-                  'Access granted via management membership (subscriber content)',
-                  {
-                    userId,
-                    contentId: input.contentId,
-                    organizationId: contentRecord.organizationId,
-                    membershipRole: membership.role,
-                  }
-                );
-                granted = true;
-              }
-            }
-
-            if (!granted) {
-              this.obs.warn('Access denied - subscriber-only content', {
-                userId,
-                contentId: input.contentId,
-                organizationId: contentRecord.organizationId,
-                minimumTierId: contentRecord.minimumTierId,
-                securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
-                severity: LOG_SEVERITY.MEDIUM,
-                eventType: LOG_EVENTS.ACCESS_CONTROL,
-              });
-              throw new AccessDeniedError(userId, input.contentId, {
-                organizationId: contentRecord.organizationId,
-                reason: 'subscribers_only',
-              });
-            }
-          }
-          // (c) Paid content: check purchase, then subscription, then membership
-          else if (contentRecord.priceCents && contentRecord.priceCents > 0) {
-            // Paid content - check purchase via PurchaseService
-            const hasPurchased = await this.purchaseService.verifyPurchase(
-              input.contentId,
-              userId
-            );
-
-            if (hasPurchased) {
-              this.obs.info('Access granted via purchase', {
-                userId,
-                contentId: input.contentId,
-              });
-            } else {
-              // No purchase — check subscription tier access ONLY if content
-              // is also subscriber-gated (has minimumTierId). Pure paid content
-              // (accessType='paid', no minimumTierId) requires a purchase.
-              let hasSubscriptionAccess = false;
-
-              if (contentRecord.organizationId && contentRecord.minimumTierId) {
-                hasSubscriptionAccess = await checkSubscriptionAccess(
-                  contentRecord.organizationId,
-                  contentRecord.minimumTierId
-                );
-              }
-
-              if (!hasSubscriptionAccess) {
-                // No subscription access — fall back to org membership check
-                const contentOrgId = contentRecord.organizationId;
-
-                if (!contentOrgId) {
-                  // Personal content with no org - requires purchase
-                  this.obs.warn(
-                    'Access denied - paid personal content requires purchase',
-                    {
-                      userId,
-                      contentId: input.contentId,
-                      priceCents: contentRecord.priceCents,
-                      securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
-                      severity: LOG_SEVERITY.MEDIUM,
-                      eventType: LOG_EVENTS.ACCESS_CONTROL,
-                    }
-                  );
-                  throw new AccessDeniedError(userId, input.contentId, {
-                    priceCents: contentRecord.priceCents,
-                  });
-                }
-
-                // Check if user is a management member (owner/admin/creator)
-                // Regular 'member' and 'subscriber' roles must purchase or subscribe
-                const membership =
-                  await checkManagementMembership(contentOrgId);
-
-                if (!membership) {
-                  this.obs.warn(
-                    'Access denied - no purchase and not management member',
-                    {
-                      userId,
-                      contentId: input.contentId,
-                      organizationId: contentOrgId,
-                      priceCents: contentRecord.priceCents,
-                      securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
-                      severity: LOG_SEVERITY.MEDIUM,
-                      eventType: LOG_EVENTS.ACCESS_CONTROL,
-                    }
-                  );
-                  throw new AccessDeniedError(userId, input.contentId, {
-                    priceCents: contentRecord.priceCents,
-                    organizationId: contentOrgId,
-                  });
-                }
-
-                this.obs.info('Access granted via management membership', {
+                this.obs.info('Access granted via purchase', {
                   userId,
                   contentId: input.contentId,
-                  organizationId: contentOrgId,
-                  membershipRole: membership.role,
                 });
-              } // end if (!hasSubscriptionAccess)
+              } else {
+                // No purchase — check subscription tier access ONLY if content
+                // is also subscriber-gated (has minimumTierId). Pure paid content
+                // (accessType='paid', no minimumTierId) requires a purchase.
+                let hasSubscriptionAccess = false;
+
+                if (
+                  contentRecord.organizationId &&
+                  contentRecord.minimumTierId
+                ) {
+                  hasSubscriptionAccess = await checkSubscriptionAccess(
+                    contentRecord.organizationId,
+                    contentRecord.minimumTierId
+                  );
+                }
+
+                if (!hasSubscriptionAccess) {
+                  // No subscription access — fall back to org membership check
+                  const contentOrgId = contentRecord.organizationId;
+
+                  if (!contentOrgId) {
+                    // Personal content with no org - requires purchase
+                    this.obs.warn(
+                      'Access denied - paid personal content requires purchase',
+                      {
+                        userId,
+                        contentId: input.contentId,
+                        priceCents: contentRecord.priceCents,
+                        securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+                        severity: LOG_SEVERITY.MEDIUM,
+                        eventType: LOG_EVENTS.ACCESS_CONTROL,
+                      }
+                    );
+                    throw new AccessDeniedError(userId, input.contentId, {
+                      priceCents: contentRecord.priceCents,
+                    });
+                  }
+
+                  // Check if user is a management member (owner/admin/creator)
+                  // Regular 'member' and 'subscriber' roles must purchase or subscribe
+                  const membership =
+                    await checkManagementMembership(contentOrgId);
+
+                  if (!membership) {
+                    this.obs.warn(
+                      'Access denied - no purchase and not management member',
+                      {
+                        userId,
+                        contentId: input.contentId,
+                        organizationId: contentOrgId,
+                        priceCents: contentRecord.priceCents,
+                        securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+                        severity: LOG_SEVERITY.MEDIUM,
+                        eventType: LOG_EVENTS.ACCESS_CONTROL,
+                      }
+                    );
+                    throw new AccessDeniedError(userId, input.contentId, {
+                      priceCents: contentRecord.priceCents,
+                      organizationId: contentOrgId,
+                    });
+                  }
+
+                  this.obs.info('Access granted via management membership', {
+                    userId,
+                    contentId: input.contentId,
+                    organizationId: contentOrgId,
+                    membershipRole: membership.role,
+                  });
+                } // end if (!hasSubscriptionAccess)
+              }
             }
-          }
-          // (d) Free content: grant access
-          else {
-            this.obs.info('Free content - access granted', {
-              contentId: input.contentId,
-            });
-          }
+            // (d) Free content: grant access
+            else {
+              this.obs.info('Free content - access granted', {
+                contentId: input.contentId,
+              });
+            }
 
-          // Access check passed. If content has no media item, it's a
-          // written article — return a null-URL response so the caller
-          // knows access is granted but there's nothing to stream.
-          if (!contentRecord.mediaItem) {
-            return {
-              r2Key: null,
-              mediaType: 'written' as const,
-              waveformKey: null,
-            };
-          }
+            // Access check passed. If content has no media item, it's a
+            // written article — return a null-URL response so the caller
+            // knows access is granted but there's nothing to stream.
+            if (!contentRecord.mediaItem) {
+              return {
+                r2Key: null,
+                mediaType: 'written' as const,
+                waveformKey: null,
+                readyVariants: null,
+              };
+            }
 
-          // Verify media is ready for streaming (status='ready' with transcoding outputs)
-          const mediaStatus = contentRecord.mediaItem.status;
-          if (mediaStatus !== MEDIA_STATUS.READY) {
-            this.obs.warn('Media not ready for streaming', {
-              contentId: input.contentId,
-              mediaItemId: contentRecord.mediaItem.id,
-              status: mediaStatus,
-            });
-            throw new MediaNotReadyForStreamingError(
-              contentRecord.mediaItem.id,
-              mediaStatus
-            );
-          }
+            // Verify media is ready for streaming (status='ready' with transcoding outputs)
+            const mediaStatus = contentRecord.mediaItem.status;
+            if (mediaStatus !== MEDIA_STATUS.READY) {
+              this.obs.warn('Media not ready for streaming', {
+                contentId: input.contentId,
+                mediaItemId: contentRecord.mediaItem.id,
+                status: mediaStatus,
+              });
+              throw new MediaNotReadyForStreamingError(
+                contentRecord.mediaItem.id,
+                mediaStatus
+              );
+            }
 
-          // Extract HLS master playlist key for streaming
-          // Database constraint ensures this exists when status='ready'
-          const r2Key = contentRecord.mediaItem.hlsMasterPlaylistKey;
+            // Extract HLS master playlist key for streaming
+            // Database constraint ensures this exists when status='ready'
+            const r2Key = contentRecord.mediaItem.hlsMasterPlaylistKey;
 
-          if (!r2Key) {
-            // This should never happen due to database constraint, but defensive check
-            this.obs.error('Media marked ready but missing HLS key', {
-              contentId: input.contentId,
-              mediaItemId: contentRecord.mediaItem.id,
-            });
-            throw new R2SigningError(
-              'missing_hls_key',
-              new Error(
-                'Media marked as ready but HLS master playlist key is missing'
+            if (!r2Key) {
+              // This should never happen due to database constraint, but defensive check
+              this.obs.error('Media marked ready but missing HLS key', {
+                contentId: input.contentId,
+                mediaItemId: contentRecord.mediaItem.id,
+              });
+              throw new R2SigningError(
+                'missing_hls_key',
+                new Error(
+                  'Media marked as ready but HLS master playlist key is missing'
+                )
+              );
+            }
+
+            // Validate media type (defense-in-depth)
+            const mediaType = contentRecord.mediaItem.mediaType;
+
+            if (
+              !([MEDIA_TYPES.VIDEO, MEDIA_TYPES.AUDIO] as string[]).includes(
+                mediaType
               )
-            );
+            ) {
+              this.obs.error('Invalid media type', {
+                mediaType,
+                contentId: input.contentId,
+                mediaItemId: contentRecord.mediaItem.id,
+              });
+              throw new InvalidContentTypeError(input.contentId, mediaType);
+            }
+
+            // Return data for R2 signing (outside transaction).
+            // `readyVariants` is surfaced so the client can render a manual
+            // quality picker over HLS.js adaptive selection. Falls through as
+            // null when the media item has no recorded variants (e.g. during a
+            // partial transcode; the HLS master still works, we just can't
+            // enumerate the rungs).
+            return {
+              r2Key,
+              mediaType: mediaType as 'video' | 'audio',
+              waveformKey: contentRecord.mediaItem.waveformKey,
+              readyVariants: contentRecord.mediaItem.readyVariants ?? null,
+            };
+          },
+          {
+            isolationLevel: 'read committed', // Consistent snapshot for access verification
+            accessMode: 'read only', // All operations are reads
           }
-
-          // Validate media type (defense-in-depth)
-          const mediaType = contentRecord.mediaItem.mediaType;
-
-          if (
-            !([MEDIA_TYPES.VIDEO, MEDIA_TYPES.AUDIO] as string[]).includes(
-              mediaType
-            )
-          ) {
-            this.obs.error('Invalid media type', {
-              mediaType,
-              contentId: input.contentId,
-              mediaItemId: contentRecord.mediaItem.id,
-            });
-            throw new InvalidContentTypeError(input.contentId, mediaType);
-          }
-
-          // Return data for R2 signing (outside transaction)
-          return {
-            r2Key,
-            mediaType: mediaType as 'video' | 'audio',
-            waveformKey: contentRecord.mediaItem.waveformKey,
-          };
-        },
-        {
-          isolationLevel: 'read committed', // Consistent snapshot for access verification
-          accessMode: 'read only', // All operations are reads
-        }
-      );
+        );
 
       // Written content: access granted, no stream to sign.
       if (mediaType === 'written' || r2Key === null) {
@@ -944,6 +967,10 @@ export class ContentAccessService extends BaseService {
           waveformUrl,
           expiresAt,
           contentType: mediaType,
+          // `readyVariants` may be null on legacy / partially-transcoded items —
+          // convert to `undefined` so the HTTP layer can drop it from the JSON
+          // envelope via its optional() schema instead of emitting null.
+          readyVariants: readyVariants ?? undefined,
         };
       } catch (err) {
         this.obs.error('Failed to generate signed R2 URL', {

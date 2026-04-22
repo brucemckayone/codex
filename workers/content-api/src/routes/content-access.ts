@@ -53,6 +53,7 @@ app.get(
         waveformUrl: result.waveformUrl,
         expiresAt: result.expiresAt.toISOString(),
         contentType: result.contentType,
+        readyVariants: result.readyVariants,
       };
     },
   })

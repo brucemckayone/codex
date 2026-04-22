@@ -67,6 +67,7 @@
     hasAccess: data.hasAccess === true,
     streamingUrl: null as string | null,
     waveformUrl: null as string | null,
+    readyVariants: null as string[] | null,
     streamingExpiresAt: null as string | null,
     revocationReason: null as AccessRevocationReason | null,
     progress: null as {
@@ -91,6 +92,7 @@
             accessState.hasAccess = result.hasAccess;
             accessState.streamingUrl = result.streamingUrl;
             accessState.waveformUrl = result.waveformUrl ?? null;
+            accessState.readyVariants = result.readyVariants ?? null;
             accessState.streamingExpiresAt = result.expiresAt ?? null;
             accessState.revocationReason =
               (result as { revocationReason?: AccessRevocationReason | null })
@@ -105,6 +107,7 @@
         accessState.hasAccess = data.hasAccess === true;
         accessState.streamingUrl = null;
         accessState.waveformUrl = null;
+        accessState.readyVariants = null;
         accessState.streamingExpiresAt = null;
         accessState.revocationReason = null;
         accessState.progress = null;
@@ -148,6 +151,7 @@
   accessLoading={accessState.loading}
   streamingUrl={accessState.streamingUrl}
   waveformUrl={accessState.waveformUrl}
+  readyVariants={accessState.readyVariants}
   streamingExpiresAt={accessState.streamingExpiresAt}
   revocationReason={accessState.revocationReason}
   onaccessrestored={() => {

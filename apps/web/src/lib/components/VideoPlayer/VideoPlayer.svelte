@@ -30,7 +30,13 @@
   import { createHlsPlayer } from './hls';
   import { createProgressTracker } from './progress.svelte.ts';
   import { loadPlayerPreferences, savePlayerPreferences } from './preferences';
-  import { AlertCircleIcon, CinemaIcon, PlayIcon } from '$lib/components/ui/Icon';
+  import { AlertCircleIcon, CinemaIcon, PlayIcon, SettingsIcon } from '$lib/components/ui/Icon';
+  import {
+    DropdownMenu,
+    DropdownMenuTrigger,
+    DropdownMenuContent,
+    DropdownMenuItem,
+  } from '$lib/components/ui/DropdownMenu';
   import { refreshStreamingUrl } from '$lib/remote/library.remote';
   import './styles.css';
 
@@ -65,6 +71,18 @@
      * player still recovers reactively via the 403 / MEDIA_ERR_NETWORK path.
      */
     expiresAt?: string | null;
+    /**
+     * HLS quality variants the transcoder produced for this media item
+     * (e.g. `['1080p', '720p', '480p', '360p']`). When non-empty, the player
+     * surfaces a manual quality picker that overrides HLS.js's default
+     * adaptive bitrate behaviour. When null/empty, the menu stays hidden
+     * and HLS.js continues to pick the level automatically.
+     *
+     * Note: this is a label-level signal — the actual variant URLs live
+     * inside the HLS master manifest. We map label → HLS.js level index via
+     * `hls.levels[i].height` at runtime.
+     */
+    readyVariants?: string[] | null;
   }
 
   const {
@@ -78,6 +96,7 @@
     oncinemachange,
     class: className,
     expiresAt,
+    readyVariants = null,
   }: Props = $props();
 
   let videoEl: HTMLVideoElement | undefined = $state();
@@ -158,6 +177,124 @@
   );
 
   let isFullscreen = $state(false);
+
+  /**
+   * Quality menu state.
+   *
+   * `manualLevel` is the user's explicit selection:
+   *   -1 = Auto (HLS.js picks via adaptive bitrate)
+   *    n = `hls.levels[n]` — a specific variant the user pinned.
+   *
+   * `autoLevel` is the level HLS.js *actually* picked when running in auto
+   * mode, exposed via the LEVEL_SWITCHED event. We display it in parens on
+   * the trigger (e.g. "Auto (720p)") so the user can see what they're
+   * getting without opening the menu.
+   *
+   * `levelLabels` is a parallel array to `hls.levels[]` mapping each index
+   * to a variant label pulled from `readyVariants`. Computed once on
+   * MANIFEST_PARSED and stable for the lifetime of the HLS instance — the
+   * master playlist doesn't change without a full rebuild.
+   */
+  let manualLevel = $state(-1);
+  let autoLevel = $state<number>(-1);
+  let levelLabels = $state<string[]>([]);
+  let qualityMenuOpen = $state(false);
+
+  /**
+   * Normalise `readyVariants` once per prop change. The menu renders the
+   * variants in a stable highest-to-lowest order: 1080p → 360p, then
+   * `source` last (fallback / passthrough encode — usually largest file,
+   * but not always highest *effective* resolution since it mirrors the
+   * original upload).
+   */
+  const RESOLUTION_ORDER: Record<string, number> = {
+    '1080p': 1080,
+    '720p': 720,
+    '480p': 480,
+    '360p': 360,
+  };
+
+  const sortedVariants = $derived.by<string[]>(() => {
+    if (!readyVariants || readyVariants.length === 0) return [];
+    return [...readyVariants]
+      .filter((v) => v !== 'audio') // audio-only rung is irrelevant to the quality picker
+      .sort((a, b) => {
+        // 'source' always last — see comment above.
+        if (a === 'source') return 1;
+        if (b === 'source') return -1;
+        return (RESOLUTION_ORDER[b] ?? 0) - (RESOLUTION_ORDER[a] ?? 0);
+      });
+  });
+
+  /**
+   * Map a variant label (e.g. "720p") to an HLS.js `levels[]` index by
+   * matching `levels[i].height` to the label's numeric component. Returns
+   * `null` if no match — the menu falls back to disabling the item so the
+   * user sees it but can't select a non-existent level.
+   *
+   * `source` is mapped to the highest level by height, as a heuristic —
+   * the transcoder tags the original-upload variant `source` without a
+   * canonical height, so we stand in the top level.
+   */
+  function variantToLevelIndex(
+    variant: string,
+    levels: { height: number }[]
+  ): number | null {
+    if (variant === 'source') {
+      if (levels.length === 0) return null;
+      let best = 0;
+      for (let i = 1; i < levels.length; i++) {
+        if (levels[i].height > levels[best].height) best = i;
+      }
+      return best;
+    }
+    const height = RESOLUTION_ORDER[variant];
+    if (!height) return null;
+    const idx = levels.findIndex((l) => l.height === height);
+    return idx === -1 ? null : idx;
+  }
+
+  /**
+   * Human label for a given level index. Prefers the matching entry in
+   * `levelLabels` (populated on MANIFEST_PARSED) — falls back to the raw
+   * pixel height so the UI isn't blank while the map is still being built.
+   */
+  function labelForLevel(idx: number): string {
+    if (idx < 0) return 'Auto';
+    const label = levelLabels[idx];
+    if (label) return label;
+    const h = hlsInstance?.levels?.[idx]?.height;
+    return h ? `${h}p` : 'Auto';
+  }
+
+  /**
+   * Trigger label: "Auto (720p)" when running auto + HLS.js has picked a
+   * level, "Auto" when auto with no pick yet, and the label alone when the
+   * user has manually pinned a quality.
+   */
+  const qualityTriggerLabel = $derived.by<string>(() => {
+    if (manualLevel === -1) {
+      const auto = autoLevel >= 0 ? labelForLevel(autoLevel) : null;
+      return auto ? `Auto (${auto})` : 'Auto';
+    }
+    return labelForLevel(manualLevel);
+  });
+
+  const showQualityMenu = $derived(sortedVariants.length > 0);
+
+  /**
+   * Commit the user's choice to HLS.js. Per HLS.js docs: `nextLevel = -1`
+   * restores adaptive bitrate; `nextLevel = n` pins the next fragment load
+   * to levels[n]. Using `nextLevel` (not `currentLevel`) avoids flushing
+   * the already-buffered segments — the switch lands on the next fetch.
+   */
+  function selectQuality(level: number) {
+    manualLevel = level;
+    if (hlsInstance) {
+      hlsInstance.nextLevel = level;
+    }
+    qualityMenuOpen = false;
+  }
 
   function toggleCinemaMode() {
     oncinemachange?.(!cinemaMode);
@@ -365,6 +502,45 @@
     lastInitialisedSrc = null;
   }
 
+  /**
+   * Wire up HLS.js events that drive the quality picker.
+   *
+   * We need two signals:
+   *   1. MANIFEST_PARSED — all levels are known; build the level→label map
+   *      from `hls.levels[*].height` so the trigger can display "720p"
+   *      instead of raw pixel heights. Re-apply any user-pinned `manualLevel`
+   *      here too, because a rebuild (post-URL-expiry, Retry) resets HLS.js
+   *      back to auto and would quietly lose the user's choice otherwise.
+   *   2. LEVEL_SWITCHED — HLS.js has committed to a new level. While the
+   *      user is in auto mode, this is the rung they're actually getting.
+   *
+   * No-op on the Safari native path where `hlsInstance` is null — native
+   * HLS doesn't expose per-level control, so there's no menu to drive.
+   */
+  async function attachQualityListeners() {
+    if (!hlsInstance) {
+      levelLabels = [];
+      return;
+    }
+    const { default: HlsJs } = await import('hls.js');
+    if (!hlsInstance) return; // instance may have been torn down while awaiting
+
+    hlsInstance.on(HlsJs.Events.MANIFEST_PARSED, () => {
+      if (!hlsInstance) return;
+      levelLabels = hlsInstance.levels.map((l) => `${l.height}p`);
+      // Re-apply user's pinned choice after a rebuild. hls.ts restarts from
+      // `startLevel: -1` (auto), so this recreates the intent the user had
+      // before the URL expired / retry fired.
+      if (manualLevel !== -1 && manualLevel < hlsInstance.levels.length) {
+        hlsInstance.nextLevel = manualLevel;
+      }
+    });
+
+    hlsInstance.on(HlsJs.Events.LEVEL_SWITCHED, (_e, data) => {
+      autoLevel = data.level;
+    });
+  }
+
   async function initPlayer() {
     if (!videoEl) return;
 
@@ -399,6 +575,7 @@
       });
       hlsInstance = handle.hls;
       hlsCleanup = handle.cleanup;
+      void attachQualityListeners();
 
       // Set initial progress (resume position)
       if (initialProgress > 0) {
@@ -514,6 +691,7 @@
       });
       hlsInstance = handle.hls;
       hlsCleanup = handle.cleanup;
+      void attachQualityListeners();
       if (lastCurrentTime > 0) {
         const resumeAt = lastCurrentTime;
         if (videoEl.readyState >= 1) {
@@ -592,6 +770,7 @@
       });
       hlsInstance = handle.hls;
       hlsCleanup = handle.cleanup;
+      void attachQualityListeners();
       scheduleRefresh();
     } catch {
       // Refresh endpoint itself unreachable — fall back to the original
@@ -914,6 +1093,48 @@
               >
                 <span aria-hidden="true" class="video-player-captions-label">CC</span>
               </button>
+            {/if}
+            {#if showQualityMenu}
+              <span class="video-player-pill-divider"></span>
+              <DropdownMenu
+                bind:open={qualityMenuOpen}
+                positioning={{ placement: 'top-end', gutter: 8 }}
+              >
+                <DropdownMenuTrigger
+                  class="video-player-quality-btn"
+                  aria-label="Video quality"
+                  title="Video quality"
+                >
+                  <SettingsIcon size={18} />
+                  <span class="video-player-quality-label">{qualityTriggerLabel}</span>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent class="video-player-quality-menu">
+                  <DropdownMenuItem
+                    class={manualLevel === -1
+                      ? 'video-player-quality-item video-player-quality-item--active'
+                      : 'video-player-quality-item'}
+                    onclick={() => selectQuality(-1)}
+                  >
+                    <span class="video-player-quality-item-label">Auto</span>
+                    {#if autoLevel >= 0 && manualLevel === -1}
+                      <span class="video-player-quality-item-sub">{labelForLevel(autoLevel)}</span>
+                    {/if}
+                  </DropdownMenuItem>
+                  {#each sortedVariants as variant (variant)}
+                    {@const idx = variantToLevelIndex(variant, hlsInstance?.levels ?? [])}
+                    {#if idx !== null}
+                      <DropdownMenuItem
+                        class={manualLevel === idx
+                          ? 'video-player-quality-item video-player-quality-item--active'
+                          : 'video-player-quality-item'}
+                        onclick={() => selectQuality(idx)}
+                      >
+                        <span class="video-player-quality-item-label">{variant}</span>
+                      </DropdownMenuItem>
+                    {/if}
+                  {/each}
+                </DropdownMenuContent>
+              </DropdownMenu>
             {/if}
             <span class="video-player-pill-divider"></span>
             <button

@@ -5,6 +5,7 @@ import {
   uuidSchema,
 } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
+import { hlsVariantSchema } from './transcoding';
 
 /**
  * Validation schemas for content access endpoints
@@ -41,6 +42,31 @@ export const savePlaybackProgressSchema = z.object({
 export const getPlaybackProgressSchema = z.object({
   contentId: uuidSchema,
 });
+
+/**
+ * Response schema for GET /api/access/content/:id/stream.
+ *
+ * Mirrors `StreamingUrlResponse` in `@codex/access/types.ts`. Kept here as a
+ * Zod schema so route handlers and clients can validate the wire shape
+ * without duplicating the variant enum — `readyVariants` reuses
+ * `hlsVariantSchema` from the transcoding schema.
+ *
+ * `readyVariants` is optional: absent when the media item has no transcoding
+ * outputs yet (pre-transcode fallback) or for non-media (written) content.
+ * When present, clients can surface a manual quality picker over HLS.js's
+ * default auto-adaptive behaviour.
+ */
+export const streamingUrlResponseSchema = z.object({
+  streamingUrl: z.string().nullable(),
+  waveformUrl: z.string().nullable(),
+  expiresAt: z.string(),
+  contentType: z.string(),
+  readyVariants: z.array(hlsVariantSchema).optional(),
+});
+
+export type StreamingUrlResponseSchema = z.infer<
+  typeof streamingUrlResponseSchema
+>;
 
 export const listUserLibrarySchema = paginationSchema.extend({
   organizationId: uuidSchema.optional(),

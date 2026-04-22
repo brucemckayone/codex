@@ -20,6 +20,15 @@ export interface StreamingUrlResponse {
   waveformUrl: string | null;
   expiresAt: string; // ISO 8601 timestamp
   contentType: string;
+  /**
+   * HLS quality variants that finished transcoding for this media item
+   * (e.g. `['1080p', '720p', '480p', '360p']`). Omitted when the media has
+   * no transcoding output (pre-transcode, or written content). The client
+   * uses this to render a manual quality picker over HLS.js's adaptive
+   * bitrate default — the actual variant URLs stay inside the HLS master
+   * playlist, so this array is purely a menu-population signal.
+   */
+  readyVariants?: string[];
 }
 
 /**

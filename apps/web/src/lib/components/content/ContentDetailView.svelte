@@ -98,6 +98,13 @@
     streamingUrl: string | null;
     waveformUrl?: string | null;
     /**
+     * HLS quality variants that finished transcoding for this content's
+     * media item (e.g. `['1080p', '720p', '480p', '360p']`). Null when the
+     * stream has no variant manifest (written content, pre-transcode, legacy
+     * items). Forwarded to `VideoPlayer` to populate its quality menu.
+     */
+    readyVariants?: string[] | null;
+    /**
      * ISO 8601 expiry of the signed streaming URL. Forwarded through to the
      * player so it can pre-emptively refresh before the URL dies (Codex-1ywzr).
      * The component itself doesn't consume it — we just forward it to children
@@ -144,6 +151,7 @@
     hasAccess,
     streamingUrl,
     waveformUrl,
+    readyVariants = null,
     streamingExpiresAt,
     progress,
     isAuthenticated,
@@ -539,6 +547,7 @@
           poster={thumbnailUrl}
           captions={content.mediaItem?.captions ?? []}
           expiresAt={streamingExpiresAt ?? null}
+          readyVariants={readyVariants ?? null}
           {cinemaMode}
           oncinemachange={(v) => (cinemaMode = v)}
         />
