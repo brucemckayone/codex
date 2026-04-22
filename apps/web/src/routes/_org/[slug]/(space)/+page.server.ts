@@ -30,6 +30,13 @@ const MAX_CATALOGUE_ITEMS = 50;
 const CATEGORY_MIN_ITEMS = 3;
 const MAX_CATEGORY_SECTIONS = 4;
 
+// Bento "Discover Mix" section — optional second grid beat between
+// Audio wall and Articles. Off by default so the landing page ships
+// without the extra density; flip to true once the layout has been
+// evaluated against real org content.
+const DISCOVER_MIX_ENABLED = false;
+const DISCOVER_MIX_ITEMS = 6;
+
 /**
  * Moves the first creator-flagged item in `items` to index 0. If no item is
  * flagged, the array is returned unchanged (the server fetch is already
@@ -112,6 +119,52 @@ function buildSections(all: ContentItem[]): FeedSection[] {
       title,
       items: promoteFeatured(items),
     });
+  }
+
+  // ── Discover Mix — optional cross-type bento grid ───────────────────
+  // Picks up to DISCOVER_MIX_ITEMS items from the catalogue and arranges
+  // them in a varied tile grid. Unlike the type-sections above, items may
+  // re-appear from Videos/Audio/Articles — the mix is a curated remix
+  // that emphasises BREADTH, not exclusivity. Skips the Spotlight item
+  // because surfacing the hero twice would feel redundant. Gated so V1
+  // can ship without the extra density — flip DISCOVER_MIX_ENABLED once
+  // the section's information density is validated in real orgs.
+  if (DISCOVER_MIX_ENABLED && remaining.length >= DISCOVER_MIX_ITEMS) {
+    // Bias towards type variety: walk the catalogue, preferring tiles
+    // whose type hasn't yet been placed (up to 2 per type) before filling
+    // remaining slots in natural order.
+    const picks: ContentItem[] = [];
+    const typeCount = { video: 0, audio: 0, written: 0 } as Record<
+      string,
+      number
+    >;
+    // First pass: take up to 2 of each type in newest-first order.
+    for (const item of remaining) {
+      if (picks.length >= DISCOVER_MIX_ITEMS) break;
+      const t = item.contentType ?? 'video';
+      if ((typeCount[t] ?? 0) >= 2) continue;
+      picks.push(item);
+      typeCount[t] = (typeCount[t] ?? 0) + 1;
+    }
+    // Second pass: fill any remaining slots without a type cap.
+    if (picks.length < DISCOVER_MIX_ITEMS) {
+      const pickedIds = new Set(picks.map((p) => p.id));
+      for (const item of remaining) {
+        if (picks.length >= DISCOVER_MIX_ITEMS) break;
+        if (pickedIds.has(item.id)) continue;
+        picks.push(item);
+      }
+    }
+
+    if (picks.length >= DISCOVER_MIX_ITEMS) {
+      sections.push({
+        id: 'discover-mix',
+        layout: 'bento',
+        eyebrow: 'A taste',
+        title: 'Discover',
+        items: picks,
+      });
+    }
   }
 
   // ── Free samples — only if org has both free and non-free content ───

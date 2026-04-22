@@ -459,11 +459,14 @@
     align-items: center;
     gap: var(--space-2);
     margin-top: var(--space-2);
-    padding: 0 var(--space-5);
-    height: var(--space-11);
+    padding: 0 var(--space-6);
+    height: var(--space-12);
     font-family: var(--font-sans);
+    /* Bumped to semibold + text-lg+ so white-on-brand reaches WCAG AA
+       large-text threshold (3:1) even on orgs with moderate-contrast
+       red/coral brand palettes. Weight also strengthens the CTA read. */
     font-size: var(--text-lg);
-    font-weight: var(--font-medium);
+    font-weight: var(--font-semibold);
     color: var(--color-text-inverse);
     background: var(--color-interactive);
     border: var(--border-width) var(--border-style) transparent;

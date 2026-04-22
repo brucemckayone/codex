@@ -17,6 +17,7 @@
   import Spotlight from '$lib/components/content/Spotlight.svelte';
   import AudioWall from '$lib/components/content/AudioWall.svelte';
   import ArticleEditorial from '$lib/components/content/ArticleEditorial.svelte';
+  import DiscoverMix from '$lib/components/content/DiscoverMix.svelte';
   import SubscribeCTA from '$lib/components/subscription/SubscribeCTA.svelte';
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
@@ -545,6 +546,9 @@
         {:else if section.layout === 'editorial'}
           <!-- Articles — 60/40 split: lead article + vertical list -->
           <ArticleEditorial items={section.items} {access} />
+        {:else if section.layout === 'bento'}
+          <!-- Discover Mix — varied-tile grid with 1 hero + 4 minor + 1 wide -->
+          <DiscoverMix items={section.items} {access} />
         {:else if section.layout === 'carousel' && section.items.length === 2}
           <!-- Exactly 2 carousel items fill the row as a grid (no chrome) -->
           <div class="feed-pair">
