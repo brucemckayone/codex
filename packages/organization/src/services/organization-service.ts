@@ -197,14 +197,7 @@ export class OrganizationService extends BaseService {
 
     try {
       return await this.db.transaction(async (tx) => {
-        // Verify organization exists
-        const existing = await tx.query.organizations.findFirst({
-          where: and(eq(organizations.id, id), whereNotDeleted(organizations)),
-        });
-
-        if (!existing) {
-          throw new OrganizationNotFoundError(id);
-        }
+        await this.findOrgByIdOrThrow(tx, id);
 
         // Update organization
         const [updated] = await tx
@@ -247,13 +240,7 @@ export class OrganizationService extends BaseService {
   async delete(id: string): Promise<void> {
     try {
       await this.db.transaction(async (tx) => {
-        const existing = await tx.query.organizations.findFirst({
-          where: and(eq(organizations.id, id), whereNotDeleted(organizations)),
-        });
-
-        if (!existing) {
-          throw new OrganizationNotFoundError(id);
-        }
+        await this.findOrgByIdOrThrow(tx, id);
 
         await tx
           .update(organizations)
@@ -420,34 +407,14 @@ export class OrganizationService extends BaseService {
     const { limit: queryLimit, offset } = withPagination({ page, limit });
 
     try {
-      const org = await this.db.query.organizations.findFirst({
-        where: and(
-          eq(organizations.slug, slug.toLowerCase()),
-          whereNotDeleted(organizations)
-        ),
-        columns: { id: true },
-      });
-
-      if (!org) {
-        throw new OrganizationNotFoundError(slug);
-      }
+      const org = await this.findOrgIdBySlugOrThrow(slug);
 
       // Run count + members queries concurrently (both depend on org.id but not each other)
       const [countResult, members] = await Promise.all([
         this.db
           .select({ totalCount: count() })
           .from(organizationMemberships)
-          .where(
-            and(
-              eq(organizationMemberships.organizationId, org.id),
-              eq(organizationMemberships.status, 'active'),
-              inArray(organizationMemberships.role, [
-                'owner',
-                'admin',
-                'creator',
-              ])
-            )
-          ),
+          .where(this.activeCreatorWhere(org.id)),
         this.db
           .select({
             userId: users.id,
@@ -472,17 +439,7 @@ export class OrganizationService extends BaseService {
               isNull(content.deletedAt)
             )
           )
-          .where(
-            and(
-              eq(organizationMemberships.organizationId, org.id),
-              eq(organizationMemberships.status, 'active'),
-              inArray(organizationMemberships.role, [
-                'owner',
-                'admin',
-                'creator',
-              ])
-            )
-          )
+          .where(this.activeCreatorWhere(org.id))
           .groupBy(
             users.id,
             organizationMemberships.id,
@@ -938,16 +895,11 @@ export class OrganizationService extends BaseService {
   }> {
     try {
       return await this.db.transaction(async (tx) => {
-        const membership = await tx.query.organizationMemberships.findFirst({
-          where: and(
-            eq(organizationMemberships.organizationId, organizationId),
-            eq(organizationMemberships.userId, userId)
-          ),
-        });
-
-        if (!membership) {
-          throw new MemberNotFoundError(userId);
-        }
+        const membership = await this.findMembershipOrThrow(
+          tx,
+          organizationId,
+          userId
+        );
 
         // Safety: If demoting from owner, check there's at least one other active owner
         if (membership.role === 'owner' && role !== 'owner') {
@@ -998,16 +950,11 @@ export class OrganizationService extends BaseService {
   async removeMember(organizationId: string, userId: string): Promise<void> {
     try {
       return await this.db.transaction(async (tx) => {
-        const membership = await tx.query.organizationMemberships.findFirst({
-          where: and(
-            eq(organizationMemberships.organizationId, organizationId),
-            eq(organizationMemberships.userId, userId)
-          ),
-        });
-
-        if (!membership) {
-          throw new MemberNotFoundError(userId);
-        }
+        const membership = await this.findMembershipOrThrow(
+          tx,
+          organizationId,
+          userId
+        );
 
         // Safety: Cannot remove the last owner
         if (membership.role === 'owner') {
@@ -1055,17 +1002,7 @@ export class OrganizationService extends BaseService {
     const { limit: queryLimit, offset } = withPagination({ page, limit });
 
     try {
-      const org = await this.db.query.organizations.findFirst({
-        where: and(
-          eq(organizations.slug, slug.toLowerCase()),
-          whereNotDeleted(organizations)
-        ),
-        columns: { id: true },
-      });
-
-      if (!org) {
-        throw new OrganizationNotFoundError(slug);
-      }
+      const org = await this.findOrgIdBySlugOrThrow(slug);
 
       // Build conditions for filtering
       const conditions = [
@@ -1136,17 +1073,7 @@ export class OrganizationService extends BaseService {
    */
   async getPublicStats(slug: string): Promise<OrganizationPublicStatsResponse> {
     try {
-      const org = await this.db.query.organizations.findFirst({
-        where: and(
-          eq(organizations.slug, slug.toLowerCase()),
-          whereNotDeleted(organizations)
-        ),
-        columns: { id: true },
-      });
-
-      if (!org) {
-        throw new OrganizationNotFoundError(slug);
-      }
+      const org = await this.findOrgIdBySlugOrThrow(slug);
 
       const publishedContentFilter = and(
         eq(content.organizationId, org.id),
@@ -1182,17 +1109,7 @@ export class OrganizationService extends BaseService {
           this.db
             .select({ total: count() })
             .from(organizationMemberships)
-            .where(
-              and(
-                eq(organizationMemberships.organizationId, org.id),
-                eq(organizationMemberships.status, 'active'),
-                inArray(organizationMemberships.role, [
-                  'owner',
-                  'admin',
-                  'creator',
-                ])
-              )
-            ),
+            .where(this.activeCreatorWhere(org.id)),
 
           // Top distinct categories (non-null, limit 5)
           this.db
@@ -1251,6 +1168,80 @@ export class OrganizationService extends BaseService {
     if (totalOwners <= 1) {
       throw new LastOwnerError();
     }
+  }
+
+  /**
+   * Find a non-deleted org by id inside a transaction.
+   * Throws OrganizationNotFoundError if the org is missing or soft-deleted.
+   */
+  private async findOrgByIdOrThrow(
+    tx: Parameters<Parameters<typeof this.db.transaction>[0]>[0],
+    id: string
+  ): Promise<void> {
+    const existing = await tx.query.organizations.findFirst({
+      where: and(eq(organizations.id, id), whereNotDeleted(organizations)),
+      columns: { id: true },
+    });
+
+    if (!existing) {
+      throw new OrganizationNotFoundError(id);
+    }
+  }
+
+  /**
+   * Resolve a non-deleted org's id by slug (case-insensitive).
+   * Used by public profile queries — scope-free because slugs are public.
+   */
+  private async findOrgIdBySlugOrThrow(slug: string): Promise<{ id: string }> {
+    const org = await this.db.query.organizations.findFirst({
+      where: and(
+        eq(organizations.slug, slug.toLowerCase()),
+        whereNotDeleted(organizations)
+      ),
+      columns: { id: true },
+    });
+
+    if (!org) {
+      throw new OrganizationNotFoundError(slug);
+    }
+
+    return org;
+  }
+
+  /**
+   * SQL where-clause for active "creator" memberships (owner/admin/creator roles).
+   * Shared by public profile stats and creator listings.
+   */
+  private activeCreatorWhere(orgId: string) {
+    return and(
+      eq(organizationMemberships.organizationId, orgId),
+      eq(organizationMemberships.status, 'active'),
+      inArray(organizationMemberships.role, ['owner', 'admin', 'creator'])
+    );
+  }
+
+  /**
+   * Find a membership inside a transaction.
+   * Throws MemberNotFoundError if the user is not in the org.
+   * Caller is responsible for last-owner safety checks (different rules per operation).
+   */
+  private async findMembershipOrThrow(
+    tx: Parameters<Parameters<typeof this.db.transaction>[0]>[0],
+    organizationId: string,
+    userId: string
+  ) {
+    const membership = await tx.query.organizationMemberships.findFirst({
+      where: and(
+        eq(organizationMemberships.organizationId, organizationId),
+        eq(organizationMemberships.userId, userId)
+      ),
+    });
+
+    if (!membership) {
+      throw new MemberNotFoundError(userId);
+    }
+
+    return membership;
   }
 
   // ══════════════════════════════════════════════════════════════════════
