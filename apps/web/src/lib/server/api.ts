@@ -91,7 +91,6 @@ import type {
   UserOrgSubscription,
 } from '../types';
 import { ApiError } from './errors';
-export type { OrgMemberItem };
 
 /**
  * Resolve API URL for a worker
@@ -1623,8 +1622,3 @@ export function createServerApi(
     },
   };
 }
-
-/**
- * Type of the server API client
- */
-export type ServerApi = ReturnType<typeof createServerApi>;

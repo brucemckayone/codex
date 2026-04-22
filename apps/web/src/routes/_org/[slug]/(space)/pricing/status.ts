@@ -13,6 +13,4 @@ export {
   getCurrentTierCta,
   getEffectiveStatus,
   type SubscriptionStatus,
-  type SubscriptionStatusInput,
-  type TierCtaDescriptor,
 } from '$lib/subscription/status';

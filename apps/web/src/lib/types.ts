@@ -9,11 +9,8 @@
 // Re-export commonly used types for convenience
 export type {
   CheckoutResponse,
-  OrganizationWithRole,
-  ProgressData,
   SessionData,
   UserData,
-  UserProfile,
 } from '@codex/shared-types';
 
 import type {
@@ -175,7 +172,7 @@ export interface SubscriberItem {
 }
 
 // Re-export for convenience
-export type { Subscription, SubscriptionTier } from '@codex/database/schema';
+export type { SubscriptionTier } from '@codex/database/schema';
 
 // ─── Organization Member Types ────────────────────────────────────────────
 

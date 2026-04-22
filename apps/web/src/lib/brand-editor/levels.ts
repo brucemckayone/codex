@@ -101,7 +101,7 @@ export const LEVELS: Record<LevelId, LevelMeta> = {
 };
 
 /** Level 1 categories shown on the home screen (in display order). */
-export const HOME_CATEGORIES: LevelId[] = [
+const HOME_CATEGORIES: LevelId[] = [
   'header-layout',
   'colors',
   'typography',
