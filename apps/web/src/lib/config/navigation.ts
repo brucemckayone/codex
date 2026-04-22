@@ -75,13 +75,6 @@ export const SIDEBAR_PERSONAL_LINKS: SidebarLink[] = [
   { href: '/studio/settings', label: 'Settings', icon: 'settings' },
 ];
 
-/** Studio settings sub-navigation (General, Branding, Email Templates) */
-export const SETTINGS_NAV: NavLink[] = [
-  { href: '/studio/settings', label: 'General' },
-  { href: '/studio/settings/branding', label: 'Branding' },
-  { href: '/studio/settings/email-templates', label: 'Email Templates' },
-];
-
 /** Account settings sub-navigation */
 export const ACCOUNT_NAV: NavLink[] = [
   { href: '/account', label: 'Profile' },

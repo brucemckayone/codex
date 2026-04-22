@@ -6,9 +6,6 @@
 
 import { RESERVED_SUBDOMAINS } from '$lib/constants';
 
-// Re-export for potential legacy usage (or update callsites to use constants directly)
-export { RESERVED_SUBDOMAINS };
-
 /**
  * Extract subdomain from hostname
  *

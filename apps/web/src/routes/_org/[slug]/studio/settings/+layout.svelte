@@ -12,7 +12,6 @@
   import type { Snippet } from 'svelte';
   import { navigating, page } from '$app/state';
   import * as m from '$paraglide/messages';
-  import { SETTINGS_NAV } from '$lib/config/navigation';
   import type { LayoutData } from './$types';
 
   const { data, children }: { data: LayoutData; children: Snippet } = $props();
