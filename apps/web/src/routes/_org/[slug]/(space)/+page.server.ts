@@ -86,32 +86,50 @@ function buildSections(all: ContentItem[]): FeedSection[] {
   }
 
   // ── Videos / Audio / Articles — each media type owns its layout ─────
+  // Rich layouts (audio mosaic, article editorial) need a minimum item
+  // count to look balanced. Below that threshold we gracefully fall
+  // back to the carousel — a single audio tile in a 4-col mosaic reads
+  // as a bug, not a design decision.
+  const MOSAIC_MIN = 3;
+  const EDITORIAL_MIN = 3;
   const byType = [
     {
       id: 'videos' as const,
-      layout: 'carousel' as const,
+      preferredLayout: 'carousel' as const,
+      minForPreferred: 0,
       eyebrow: 'Watch',
       title: 'Videos',
       match: 'video' as const,
     },
     {
       id: 'audio' as const,
-      layout: 'mosaic' as const,
+      preferredLayout: 'mosaic' as const,
+      minForPreferred: MOSAIC_MIN,
       eyebrow: 'Listen',
       title: 'Audio',
       match: 'audio' as const,
     },
     {
       id: 'articles' as const,
-      layout: 'editorial' as const,
+      preferredLayout: 'editorial' as const,
+      minForPreferred: EDITORIAL_MIN,
       eyebrow: 'Read',
       title: 'Articles',
       match: 'written' as const,
     },
   ];
-  for (const { id, layout, eyebrow, title, match } of byType) {
+  for (const {
+    id,
+    preferredLayout,
+    minForPreferred,
+    eyebrow,
+    title,
+    match,
+  } of byType) {
     const items = remaining.filter((i) => i.contentType === match);
     if (items.length === 0) continue;
+    const layout =
+      items.length >= minForPreferred ? preferredLayout : 'carousel';
     sections.push({
       id,
       layout,
