@@ -490,6 +490,103 @@ describe('Content Schemas', () => {
       expect('mediaItemId' in update).toBe(false);
     });
   });
+
+  describe('minimumTierId access-mode coupling', () => {
+    // Covers the six access modes confirmed with product:
+    //   free, followers, team → tier must be absent
+    //   subscribers           → tier required
+    //   paid                  → tier optional (null = purchasable, non-null = hybrid)
+    const tierUuid = '123e4567-e89b-12d3-a456-426614174000';
+    const orgUuid = '223e4567-e89b-12d3-a456-426614174000';
+    const mediaUuid = '323e4567-e89b-12d3-a456-426614174000';
+
+    const baseVideo = {
+      title: 'T',
+      slug: 'test',
+      contentType: 'video' as const,
+      mediaItemId: mediaUuid,
+      organizationId: orgUuid,
+    };
+
+    it('accepts paid content without a tier (purchasable mode)', () => {
+      expect(() =>
+        createContentSchema.parse({
+          ...baseVideo,
+          accessType: 'paid',
+          priceCents: 1000,
+        })
+      ).not.toThrow();
+    });
+
+    it('accepts paid content with a tier (hybrid mode)', () => {
+      expect(() =>
+        createContentSchema.parse({
+          ...baseVideo,
+          accessType: 'paid',
+          priceCents: 1000,
+          minimumTierId: tierUuid,
+        })
+      ).not.toThrow();
+    });
+
+    it('accepts subscribers content with a tier', () => {
+      expect(() =>
+        createContentSchema.parse({
+          ...baseVideo,
+          accessType: 'subscribers',
+          minimumTierId: tierUuid,
+        })
+      ).not.toThrow();
+    });
+
+    it('rejects subscribers content without a tier', () => {
+      expect(() =>
+        createContentSchema.parse({
+          ...baseVideo,
+          accessType: 'subscribers',
+        })
+      ).toThrow(/minimum subscription tier/i);
+    });
+
+    it.each([
+      ['free', { accessType: 'free' as const }],
+      ['followers', { accessType: 'followers' as const }],
+      ['team', { accessType: 'team' as const }],
+    ])('rejects %s content with a tier set', (_mode, accessTypeFields) => {
+      expect(() =>
+        createContentSchema.parse({
+          ...baseVideo,
+          ...accessTypeFields,
+          minimumTierId: tierUuid,
+        })
+      ).toThrow(/only valid for subscriber-gated or paid-hybrid/i);
+    });
+
+    it('allows partial update with only accessType (tier invariant deferred to service layer)', () => {
+      expect(() =>
+        updateContentSchema.parse({ accessType: 'free' })
+      ).not.toThrow();
+    });
+
+    it('rejects partial update that sets tier on a non-eligible access type', () => {
+      expect(() =>
+        updateContentSchema.parse({
+          accessType: 'free',
+          minimumTierId: tierUuid,
+        })
+      ).toThrow(/only valid for subscriber-gated or paid-hybrid/i);
+    });
+
+    it('allows partial update that sets tier alongside paid access type', () => {
+      expect(() =>
+        updateContentSchema.parse({
+          accessType: 'paid',
+          priceCents: 500,
+          minimumTierId: tierUuid,
+        })
+      ).not.toThrow();
+    });
+  });
 });
 
 describe('Query Schemas', () => {

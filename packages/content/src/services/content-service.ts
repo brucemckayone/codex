@@ -182,6 +182,15 @@ export class ContentService extends BaseService {
             thumbnailUrl: validated.thumbnailUrl || null,
             accessType: validated.accessType || CONTENT_ACCESS_TYPE.FREE,
             priceCents: validated.priceCents ?? null,
+            // Tier is only meaningful for 'subscribers' (required) and 'paid'
+            // (optional, hybrid). Clamp to null for the other access modes so
+            // we never persist a nonsensical (accessType, minimumTierId) pair.
+            minimumTierId:
+              (validated.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS ||
+                validated.accessType === CONTENT_ACCESS_TYPE.PAID) &&
+              validated.minimumTierId
+                ? validated.minimumTierId
+                : null,
             status: CONTENT_STATUS.DRAFT, // Always start as draft
             viewCount: 0,
             purchaseCount: 0,
@@ -295,12 +304,25 @@ export class ContentService extends BaseService {
         const bodyFields =
           _rawBody !== undefined ? this.parseContentBody(_rawBody) : {};
 
+        // Normalize (accessType, minimumTierId) so we can never persist a
+        // nonsensical combination via update. If the caller is switching the
+        // access mode to one that doesn't support a tier, clear the column
+        // explicitly — otherwise a previously-set tier silently lingers in
+        // the DB and the access service continues to honour it (e.g. paid
+        // content still granting subscribers access via the hybrid branch).
+        const accessTypeUpdating = restValidated.accessType;
+        const clearTier =
+          accessTypeUpdating !== undefined &&
+          accessTypeUpdating !== CONTENT_ACCESS_TYPE.SUBSCRIBERS &&
+          accessTypeUpdating !== CONTENT_ACCESS_TYPE.PAID;
+
         // Update content
         const [updated] = await tx
           .update(content)
           .set({
             ...restValidated,
             ...bodyFields,
+            ...(clearTier ? { minimumTierId: null } : {}),
             updatedAt: new Date(),
           })
           .where(and(eq(content.id, id), withCreatorScope(content, creatorId)))
@@ -861,8 +883,21 @@ export class ContentService extends BaseService {
       const totalCount = Number(countResult[0]?.total ?? 0);
       const totalPages = Math.ceil(totalCount / limit);
 
+      // Strip body columns for any non-free content. The public endpoint is
+      // unauthenticated and KV-cached, so it must never return the text of
+      // gated articles (followers / subscribers / team / paid). Metadata —
+      // title, description, thumbnail, accessType, minimumTierId, priceCents,
+      // creator, org, mediaItem — stays so cards and the detail page shell
+      // still render. Authorized callers fetch full rows through the
+      // authenticated `/api/content` endpoint (creator-scoped).
+      const sanitizedItems = items.map((item) =>
+        item.accessType === CONTENT_ACCESS_TYPE.FREE
+          ? item
+          : { ...item, contentBody: null, contentBodyJson: null }
+      );
+
       return {
-        items,
+        items: sanitizedItems,
         pagination: {
           page: params.page,
           limit,

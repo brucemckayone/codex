@@ -422,15 +422,50 @@ export const createContentSchema = baseContentSchema
       message: 'Team-only content requires an organisation',
       path: ['organizationId'],
     }
+  )
+  .refine(
+    (data) => {
+      // `minimumTierId` is only meaningful for 'subscribers' (required, gates
+      // access) and 'paid' (optional, hybrid mode — subscribers at this tier
+      // get it included alongside one-time purchases). For every other access
+      // type the tier is nonsensical and must be absent.
+      const tierAllowed =
+        data.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS ||
+        data.accessType === CONTENT_ACCESS_TYPE.PAID;
+      return tierAllowed || !data.minimumTierId;
+    },
+    {
+      message:
+        'Subscription tier is only valid for subscriber-gated or paid-hybrid content',
+      path: ['minimumTierId'],
+    }
   );
 
 export type CreateContentInput = z.infer<typeof createContentSchema>;
 
 /**
  * Update Content Input
- * All fields optional (partial update)
+ * All fields optional (partial update). Cross-field invariants are checked
+ * only when both fields are present in the partial payload — the remaining
+ * "did the admin leave a tier set when switching to an incompatible mode?"
+ * case is handled defensively in ContentService.update() (see content-service.ts).
  */
-export const updateContentSchema = baseContentSchema.partial();
+export const updateContentSchema = baseContentSchema.partial().refine(
+  (data) => {
+    // Only evaluate when the caller sent both fields. If accessType is absent,
+    // the DB value stands and we can't reason about the combination here.
+    if (data.accessType === undefined || !data.minimumTierId) return true;
+    return (
+      data.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS ||
+      data.accessType === CONTENT_ACCESS_TYPE.PAID
+    );
+  },
+  {
+    message:
+      'Subscription tier is only valid for subscriber-gated or paid-hybrid content',
+    path: ['minimumTierId'],
+  }
+);
 
 export type UpdateContentInput = z.infer<typeof updateContentSchema>;
 
