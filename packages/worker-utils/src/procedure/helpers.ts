@@ -177,22 +177,255 @@ export interface OrganizationMembership {
 }
 
 // ============================================================================
-// Policy Enforcement
+// Policy Enforcement — Per-Phase Helpers
 // ============================================================================
 
+type UserLike = { id: string; role?: string } | undefined;
+
 /**
- * Enforce security policy inline (throws errors instead of returning Response)
+ * Authenticate a worker-to-worker request via HMAC-SHA256.
  *
- * This function validates:
- * - IP whitelist
- * - Authentication (none, optional, required, worker, platform_owner)
- * - Role-based access control
- * - Organization membership
- * - Organization management privileges
+ * @throws UnauthorizedError when the secret is missing or the middleware rejects
+ */
+async function authenticateWorker(c: Context<HonoEnv>): Promise<void> {
+  if (c.get('workerAuth')) return;
+
+  const secret = c.env.WORKER_SHARED_SECRET;
+  if (!secret) {
+    throw new UnauthorizedError('Worker authentication not configured');
+  }
+
+  const { workerAuth } = await import('@codex/security');
+
+  let authFailed = false;
+  let authError: string | undefined;
+
+  await new Promise<void>((resolve) => {
+    const middleware = workerAuth({ secret });
+    middleware(c, async () => {
+      resolve();
+    })
+      .then((response) => {
+        if (!response) {
+          resolve();
+          return;
+        }
+        authFailed = true;
+        response
+          .json()
+          .then((body) => {
+            authError = (body as { error?: string }).error;
+            resolve();
+          })
+          .catch(() => resolve());
+      })
+      .catch(() => {
+        authFailed = true;
+        resolve();
+      });
+  });
+
+  if (authFailed) {
+    throw new UnauthorizedError(authError || 'Worker authentication failed');
+  }
+}
+
+/**
+ * Run session middleware inline, populating `c.get('user')` when successful.
+ * Does nothing if a user is already present in context.
  *
- * @throws UnauthorizedError for authentication failures
- * @throws ForbiddenError for authorization failures
- * @throws ValidationError for missing required context
+ * @throws UnauthorizedError when authentication is required but fails
+ */
+async function authenticateSession(
+  c: Context<HonoEnv>,
+  required: boolean
+): Promise<void> {
+  if (c.get('user')) return;
+
+  const sessionMiddleware = createSessionMiddleware({ required });
+
+  let authFailed = false;
+
+  await new Promise<void>((resolve) => {
+    sessionMiddleware(c, async () => {
+      resolve();
+    })
+      .then((response) => {
+        if (response) authFailed = true;
+        resolve();
+      })
+      .catch(() => {
+        authFailed = true;
+        resolve();
+      });
+  });
+
+  if (authFailed) {
+    throw new UnauthorizedError('Authentication required');
+  }
+}
+
+/**
+ * For platform owners without an org in context, look up their org from
+ * membership and store it. Idempotent when organizationId is already set.
+ */
+async function resolvePlatformOwnerOrganization(
+  c: Context<HonoEnv>,
+  user: NonNullable<UserLike>,
+  obs?: ObservabilityClient
+): Promise<void> {
+  if (c.get('organizationId')) return;
+
+  const { createDbClient, schema } = await import('@codex/database');
+  const { eq } = await import('drizzle-orm');
+
+  const db = createDbClient(c.env);
+  const membership = await db.query.organizationMemberships.findFirst({
+    where: eq(schema.organizationMemberships.userId, user.id),
+    columns: { organizationId: true },
+  });
+
+  if (!membership) return;
+
+  c.set('organizationId', membership.organizationId);
+  c.set('organizationRole', AUTH_ROLES.PLATFORM_OWNER);
+  obs?.info('Platform owner organization resolved from membership', {
+    organizationId: membership.organizationId,
+    userId: user.id,
+  });
+}
+
+/**
+ * @throws ForbiddenError when the user's role is not in the allowed list
+ */
+function enforceRole(
+  user: NonNullable<UserLike>,
+  allowedRoles: string[]
+): void {
+  if (allowedRoles.length === 0) return;
+  if (!user.role || !allowedRoles.includes(user.role)) {
+    throw new ForbiddenError('Insufficient permissions');
+  }
+}
+
+/**
+ * Resolve an organization ID from (in order): URL param, subdomain, query param.
+ *
+ * Returns the resolved org ID and whether the platform-owner bypass applies
+ * (only when the URL param carries a valid UUID and the user is a platform owner).
+ */
+async function resolveOrganizationId(
+  c: Context<HonoEnv>,
+  user: NonNullable<UserLike>,
+  obs?: ObservabilityClient
+): Promise<{ organizationId: string | null; skipMembershipCheck: boolean }> {
+  const params = c.req.param();
+  const idParam = params.id || params.orgId || params.organizationId;
+
+  if (idParam && uuidSchema.safeParse(idParam).success) {
+    const isPlatformOwner = user.role === AUTH_ROLES.PLATFORM_OWNER;
+    if (isPlatformOwner) {
+      obs?.info('Platform owner accessing org via param', {
+        organizationId: idParam,
+        userId: user.id,
+      });
+    }
+    return {
+      organizationId: idParam,
+      skipMembershipCheck: isPlatformOwner,
+    };
+  }
+
+  const { extractOrganizationFromSubdomain } = await import('./org-helpers');
+  const hostname = c.req.header('host') || '';
+  const subdomainOrg = await extractOrganizationFromSubdomain(
+    hostname,
+    c.env,
+    obs
+  );
+  if (subdomainOrg) {
+    return { organizationId: subdomainOrg, skipMembershipCheck: false };
+  }
+
+  const queryOrgId = c.req.query('organizationId');
+  if (queryOrgId && uuidSchema.safeParse(queryOrgId).success) {
+    obs?.info('Organization resolved from query parameter', {
+      organizationId: queryOrgId,
+      userId: user.id,
+    });
+    return { organizationId: queryOrgId, skipMembershipCheck: false };
+  }
+
+  return { organizationId: null, skipMembershipCheck: false };
+}
+
+/**
+ * Enforce org membership (and optionally management) for a resolved org ID.
+ * Sets `organizationId`, `organizationRole`, and `organizationMembership` in context.
+ *
+ * @throws ForbiddenError when user is not a member, or lacks management when required
+ */
+async function enforceOrganizationAccess(
+  c: Context<HonoEnv>,
+  user: NonNullable<UserLike>,
+  organizationId: string,
+  opts: { requireManagement: boolean; skipMembershipCheck: boolean },
+  obs?: ObservabilityClient
+): Promise<void> {
+  if (opts.skipMembershipCheck) {
+    c.set('organizationRole', AUTH_ROLES.PLATFORM_OWNER);
+    c.set('organizationId', organizationId);
+    return;
+  }
+
+  const { checkOrganizationMembership } = await import('./org-helpers');
+  const membership = await checkOrganizationMembership(
+    organizationId,
+    user.id,
+    c.env,
+    obs
+  );
+
+  if (!membership) {
+    throw new ForbiddenError('You are not a member of this organization', {
+      organizationId,
+      userId: user.id,
+    });
+  }
+
+  if (
+    opts.requireManagement &&
+    membership.role !== 'owner' &&
+    membership.role !== 'admin'
+  ) {
+    throw new ForbiddenError('Organization management access required', {
+      organizationId,
+      userRole: membership.role,
+      required: ['owner', 'admin'],
+    });
+  }
+
+  c.set('organizationRole', membership.role);
+  c.set('organizationMembership', membership);
+  c.set('organizationId', organizationId);
+}
+
+/**
+ * Enforce security policy inline (throws errors instead of returning Response).
+ *
+ * This is the orchestrator — each phase is delegated to a per-concern helper
+ * so that individual branches are testable and readable. Execution order:
+ *
+ *   1. IP whitelist
+ *   2. `auth: 'none'`            → short-circuit return
+ *   3. `auth: 'worker'`          → HMAC via workerAuth, return
+ *   4. Session auth              → required|optional|platform_owner
+ *   5. `auth: 'optional'`        → short-circuit return
+ *   6. Platform-owner role gate + auto-resolve org
+ *   7. Role-based access control
+ *   8. Organization membership (+management)
+ *
+ * @throws UnauthorizedError | ForbiddenError | ValidationError
  */
 export async function enforcePolicyInline(
   c: Context<HonoEnv>,
@@ -208,280 +441,62 @@ export async function enforcePolicyInline(
     allowedIPs: policy.allowedIPs ?? [],
   };
 
-  // ========================================================================
-  // IP Whitelist Check
-  // ========================================================================
   if (mergedPolicy.allowedIPs.length > 0) {
-    const clientIP = getClientIP(c);
-    enforceIPWhitelist(clientIP, mergedPolicy.allowedIPs);
+    enforceIPWhitelist(getClientIP(c), mergedPolicy.allowedIPs);
   }
 
-  // ========================================================================
-  // Auth: none - Skip auth checks
-  // ========================================================================
-  if (mergedPolicy.auth === 'none') {
-    return;
-  }
+  if (mergedPolicy.auth === 'none') return;
 
-  // ========================================================================
-  // Auth: worker - Check worker auth flag or apply workerAuth inline
-  // ========================================================================
   if (mergedPolicy.auth === 'worker') {
-    // If workerAuth flag is already set (by earlier middleware), we're authenticated
-    if (c.get('workerAuth')) {
-      return;
-    }
-
-    // Apply workerAuth middleware inline
-    // Requires WORKER_SHARED_SECRET in environment
-    const secret = c.env.WORKER_SHARED_SECRET;
-    if (!secret) {
-      throw new UnauthorizedError('Worker authentication not configured');
-    }
-
-    // Import workerAuth dynamically to avoid circular deps
-    const { workerAuth } = await import('@codex/security');
-
-    // Execute workerAuth middleware inline
-    let authFailed = false;
-    let authError: string | undefined;
-
-    await new Promise<void>((resolve) => {
-      const middleware = workerAuth({ secret });
-      middleware(c, async () => {
-        // workerAuth succeeded - flag should now be set
-        resolve();
-      })
-        .then((response) => {
-          // If middleware returned a Response (401/403), auth failed
-          if (response) {
-            authFailed = true;
-            response
-              .json()
-              .then((body) => {
-                authError = (body as { error?: string }).error;
-                resolve();
-              })
-              .catch(() => resolve());
-          } else {
-            resolve();
-          }
-        })
-        .catch(() => {
-          authFailed = true;
-          resolve();
-        });
-    });
-
-    if (authFailed) {
-      throw new UnauthorizedError(authError || 'Worker authentication failed');
-    }
-
+    await authenticateWorker(c);
     return;
   }
 
-  // ========================================================================
-  // Auth: required/optional/platform_owner - Validate session
-  // ========================================================================
-  let user = c.get('user');
+  const requiresSession =
+    mergedPolicy.auth === 'required' ||
+    mergedPolicy.auth === AUTH_ROLES.PLATFORM_OWNER;
+  await authenticateSession(c, requiresSession);
 
-  if (!user) {
-    // Run session middleware inline
-    const sessionMiddleware = createSessionMiddleware({
-      required:
-        mergedPolicy.auth === 'required' ||
-        mergedPolicy.auth === AUTH_ROLES.PLATFORM_OWNER,
-    });
+  if (mergedPolicy.auth === 'optional') return;
 
-    // Execute middleware and check result
-    // Session middleware returns a Response (401) when auth fails, not an error
-    let authFailed = false;
-
-    await new Promise<void>((resolve) => {
-      sessionMiddleware(c, async () => {
-        // Session validated successfully, user is in context
-        user = c.get('user');
-        resolve();
-      })
-        .then((response) => {
-          // If middleware returned a Response (401), auth failed
-          if (response) {
-            authFailed = true;
-          }
-          resolve();
-        })
-        .catch(() => {
-          // If middleware threw, auth failed
-          authFailed = true;
-          resolve();
-        });
-    });
-
-    // Re-get user after middleware execution
-    user = c.get('user');
-
-    if (authFailed) {
-      throw new UnauthorizedError('Authentication required');
-    }
-  }
-
-  // ========================================================================
-  // Auth: optional - Proceed with or without user
-  // ========================================================================
-  if (mergedPolicy.auth === 'optional') {
-    return;
-  }
-
-  // ========================================================================
-  // Auth: required/platform_owner - Must have user
-  // ========================================================================
+  const user = c.get('user') as UserLike;
   if (!user) {
     throw new UnauthorizedError('Authentication required');
   }
 
-  // ========================================================================
-  // Platform Owner Check
-  // ========================================================================
   if (mergedPolicy.auth === AUTH_ROLES.PLATFORM_OWNER) {
     if (user.role !== AUTH_ROLES.PLATFORM_OWNER) {
       throw new ForbiddenError('Platform owner access required');
     }
-
-    // For platform owners, automatically look up their organization
-    // This enables admin-api routes that don't have :id param
-    if (!c.get('organizationId')) {
-      const { createDbClient, schema } = await import('@codex/database');
-      const { eq } = await import('drizzle-orm');
-
-      const db = createDbClient(c.env);
-      const membership = await db.query.organizationMemberships.findFirst({
-        where: eq(schema.organizationMemberships.userId, user.id),
-        columns: { organizationId: true },
-      });
-
-      if (membership) {
-        c.set('organizationId', membership.organizationId);
-        c.set('organizationRole', AUTH_ROLES.PLATFORM_OWNER);
-        obs?.info('Platform owner organization resolved from membership', {
-          organizationId: membership.organizationId,
-          userId: user.id,
-        });
-      }
-    }
+    await resolvePlatformOwnerOrganization(c, user, obs);
   }
 
-  // ========================================================================
-  // Role-Based Access Control
-  // ========================================================================
-  if (mergedPolicy.roles.length > 0) {
-    const userRoles = user.role ? [user.role] : [];
-    const hasRequiredRole = mergedPolicy.roles.some((role) =>
-      userRoles.includes(role)
-    );
+  enforceRole(user, mergedPolicy.roles);
 
-    if (!hasRequiredRole) {
-      throw new ForbiddenError('Insufficient permissions');
-    }
+  const needsOrg =
+    mergedPolicy.requireOrgMembership || mergedPolicy.requireOrgManagement;
+  if (!needsOrg) return;
+
+  const { organizationId, skipMembershipCheck } = await resolveOrganizationId(
+    c,
+    user,
+    obs
+  );
+  if (!organizationId) {
+    throw new ValidationError('Organization context required', {
+      code: 'ORG_CONTEXT_REQUIRED',
+      message: 'Organization context could not be determined from subdomain',
+    });
   }
 
-  // ========================================================================
-  // Organization Membership Check
-  // ========================================================================
-  if (mergedPolicy.requireOrgMembership || mergedPolicy.requireOrgManagement) {
-    // Import inline to avoid circular deps
-    const { checkOrganizationMembership, extractOrganizationFromSubdomain } =
-      await import('./org-helpers');
-
-    let organizationId: string | null = null;
-    let skipMembershipCheck = false;
-
-    // Check if org ID is provided via URL param (e.g., :id, :orgId, or :organizationId in path)
-    const params = c.req.param();
-    const idParam = params.id || params.orgId || params.organizationId;
-
-    if (idParam && uuidSchema.safeParse(idParam).success) {
-      organizationId = idParam;
-
-      // Platform owners bypass membership check (superadmin access to any org)
-      if (user?.role === AUTH_ROLES.PLATFORM_OWNER) {
-        skipMembershipCheck = true;
-        obs?.info('Platform owner accessing org via param', {
-          organizationId,
-          userId: user.id,
-        });
-      }
-      // Regular users: org ID resolved from URL param, membership check runs below
-    }
-
-    // Fall back to subdomain extraction for regular users
-    if (!organizationId) {
-      const hostname = c.req.header('host') || '';
-      organizationId = await extractOrganizationFromSubdomain(
-        hostname,
-        c.env,
-        obs
-      );
-    }
-
-    // Fall back to organizationId query parameter (used by SSR server-to-worker calls
-    // where the request goes to localhost and subdomain extraction is unavailable).
-    // This is safe because the membership check below still validates the user's access.
-    if (!organizationId) {
-      const queryOrgId = c.req.query('organizationId');
-      if (queryOrgId && uuidSchema.safeParse(queryOrgId).success) {
-        organizationId = queryOrgId;
-        obs?.info('Organization resolved from query parameter', {
-          organizationId,
-          userId: user.id,
-        });
-      }
-    }
-
-    if (!organizationId) {
-      throw new ValidationError('Organization context required', {
-        code: 'ORG_CONTEXT_REQUIRED',
-        message: 'Organization context could not be determined from subdomain',
-      });
-    }
-
-    // Skip membership check for platform owners using param-based access
-    if (!skipMembershipCheck) {
-      const membership = await checkOrganizationMembership(
-        organizationId,
-        user.id,
-        c.env,
-        obs
-      );
-
-      if (!membership) {
-        throw new ForbiddenError('You are not a member of this organization', {
-          organizationId,
-          userId: user.id,
-        });
-      }
-
-      // Check management access if required
-      if (mergedPolicy.requireOrgManagement) {
-        if (membership.role !== 'owner' && membership.role !== 'admin') {
-          throw new ForbiddenError('Organization management access required', {
-            organizationId,
-            userRole: membership.role,
-            required: ['owner', 'admin'],
-          });
-        }
-      }
-
-      // Store membership context
-      c.set('organizationRole', membership.role);
-      c.set('organizationMembership', membership);
-    } else {
-      // Platform owner - set role as 'platform_owner' for context
-      c.set('organizationRole', AUTH_ROLES.PLATFORM_OWNER);
-    }
-
-    // Store organization context for downstream handlers
-    c.set('organizationId', organizationId);
-  }
-
-  // All checks passed
+  await enforceOrganizationAccess(
+    c,
+    user,
+    organizationId,
+    {
+      requireManagement: mergedPolicy.requireOrgManagement,
+      skipMembershipCheck,
+    },
+    obs
+  );
 }
