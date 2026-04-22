@@ -10,7 +10,8 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
-import { content, organizations } from './content';
+import { content } from './content';
+import { organizations } from './organizations';
 import { users } from './users';
 
 /**
@@ -279,6 +280,15 @@ export const purchases = pgTable(
     refundReason: text('refund_reason'),
     refundAmountCents: integer('refund_amount_cents'),
     stripeRefundId: varchar('stripe_refund_id', { length: 255 }),
+
+    // Dispute tracking (charge.dispute.created). Disputes don't mutate
+    // `status` (still 'completed' or 'refunded'), but `disputedAt` flips
+    // the purchase into a disputed state for reporting and also triggers
+    // a contentAccess soft-delete — the same access-reducing effect as
+    // a refund. `disputeReason` mirrors the Stripe dispute `reason` enum.
+    disputedAt: timestamp('disputed_at', { withTimezone: true }),
+    disputeReason: text('dispute_reason'),
+    stripeDisputeId: varchar('stripe_dispute_id', { length: 255 }),
 
     // Timestamps
     createdAt: timestamp('created_at', { withTimezone: true })

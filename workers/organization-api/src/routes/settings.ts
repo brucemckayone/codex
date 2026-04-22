@@ -19,6 +19,9 @@
 import { VersionedCache } from '@codex/cache';
 import { BRAND_COLORS, CACHE_TTL } from '@codex/constants';
 import { createDbClient, eq, schema } from '@codex/database';
+
+type BrandingRow = typeof schema.brandingSettings.$inferSelect;
+
 import { InternalServiceError } from '@codex/service-errors';
 import type {
   AllSettingsResponse,
@@ -57,6 +60,40 @@ import { z } from 'zod';
  * 2. Performance: runs in background (waitUntil), removing DB fetch from request path
  * 3. Error reporting: Logs errors properly
  */
+/**
+ * Pure branding-response builder. Prefers `branding` fields, falls back to
+ * `orgLogoUrl` for logo, then to null / sensible defaults for everything
+ * else. Keeping this pure makes `updateBrandCache` straight-line code.
+ */
+function buildBrandingResponse(
+  branding: BrandingRow | null | undefined,
+  orgLogoUrl: string | null
+): BrandingSettingsResponse {
+  return {
+    logoUrl: branding?.logoUrl ?? orgLogoUrl ?? null,
+    primaryColorHex: branding?.primaryColorHex ?? BRAND_COLORS.DEFAULT_BLUE,
+    secondaryColorHex: branding?.secondaryColorHex ?? null,
+    accentColorHex: branding?.accentColorHex ?? null,
+    backgroundColorHex: branding?.backgroundColorHex ?? null,
+    fontBody: branding?.fontBody ?? null,
+    fontHeading: branding?.fontHeading ?? null,
+    radiusValue: Number(branding?.radiusValue ?? 0.5),
+    densityValue: Number(branding?.densityValue ?? 1),
+    introVideoMediaItemId: branding?.introVideoMediaItemId ?? null,
+    introVideoUrl: branding?.introVideoUrl ?? null,
+    tokenOverrides: branding?.tokenOverrides ?? null,
+    darkModeOverrides: branding?.darkModeOverrides ?? null,
+    textColorHex: branding?.textColorHex ?? null,
+    shadowScale: branding?.shadowScale ?? null,
+    shadowColor: branding?.shadowColor ?? null,
+    textScale: branding?.textScale ?? null,
+    headingWeight: branding?.headingWeight ?? null,
+    bodyWeight: branding?.bodyWeight ?? null,
+    heroLayout: branding?.heroLayout ?? 'default',
+    pricingFaq: branding?.pricingFaq ?? null,
+  };
+}
+
 export async function updateBrandCache(
   env: Bindings,
   organizationId: string,
@@ -85,33 +122,10 @@ export async function updateBrandCache(
 
     if (settings?.organization) {
       slug = settings.organization.slug;
-
-      // Prefer branding settings, fallback to organization defaults
-      branding = {
-        logoUrl:
-          settings.branding?.logoUrl ?? settings.organization.logoUrl ?? null,
-        primaryColorHex:
-          settings.branding?.primaryColorHex ?? BRAND_COLORS.DEFAULT_BLUE,
-        secondaryColorHex: settings.branding?.secondaryColorHex ?? null,
-        accentColorHex: settings.branding?.accentColorHex ?? null,
-        backgroundColorHex: settings.branding?.backgroundColorHex ?? null,
-        fontBody: settings.branding?.fontBody ?? null,
-        fontHeading: settings.branding?.fontHeading ?? null,
-        radiusValue: Number(settings.branding?.radiusValue ?? 0.5),
-        densityValue: Number(settings.branding?.densityValue ?? 1),
-        introVideoMediaItemId: settings.branding?.introVideoMediaItemId ?? null,
-        introVideoUrl: settings.branding?.introVideoUrl ?? null,
-        tokenOverrides: settings.branding?.tokenOverrides ?? null,
-        darkModeOverrides: settings.branding?.darkModeOverrides ?? null,
-        textColorHex: settings.branding?.textColorHex ?? null,
-        shadowScale: settings.branding?.shadowScale ?? null,
-        shadowColor: settings.branding?.shadowColor ?? null,
-        textScale: settings.branding?.textScale ?? null,
-        headingWeight: settings.branding?.headingWeight ?? null,
-        bodyWeight: settings.branding?.bodyWeight ?? null,
-        heroLayout: settings.branding?.heroLayout ?? 'default',
-        pricingFaq: settings.branding?.pricingFaq ?? null,
-      };
+      branding = buildBrandingResponse(
+        settings.branding,
+        settings.organization.logoUrl
+      );
     } else {
       // Fallback: Settings not created yet, fetch org directly
       const org = await db.query.organizations.findFirst({
@@ -130,29 +144,7 @@ export async function updateBrandCache(
       }
 
       slug = org.slug;
-      branding = {
-        logoUrl: org.logoUrl ?? null,
-        primaryColorHex: BRAND_COLORS.DEFAULT_BLUE,
-        secondaryColorHex: null,
-        accentColorHex: null,
-        backgroundColorHex: null,
-        fontBody: null,
-        fontHeading: null,
-        radiusValue: 0.5,
-        densityValue: 1,
-        introVideoMediaItemId: null,
-        introVideoUrl: null,
-        tokenOverrides: null,
-        darkModeOverrides: null,
-        textColorHex: null,
-        shadowScale: null,
-        shadowColor: null,
-        textScale: null,
-        headingWeight: null,
-        bodyWeight: null,
-        heroLayout: 'default',
-        pricingFaq: null,
-      };
+      branding = buildBrandingResponse(null, org.logoUrl);
     }
 
     const cacheData = {

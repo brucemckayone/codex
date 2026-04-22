@@ -2,7 +2,7 @@
   import { createCheckbox } from '@melt-ui/svelte';
   import { untrack } from 'svelte';
   import type { HTMLInputAttributes } from 'svelte/elements';
-  import { Label } from '../index';
+  import { Label } from '../Label';
   import { CheckIcon } from '$lib/components/ui/Icon';
 
   interface Props extends Omit<HTMLInputAttributes, 'type' | 'checked'> {

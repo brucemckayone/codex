@@ -1,0 +1,64 @@
+{
+  "$schema": "https://docs.fallow.tools/schema/fallow.schema.json",
+  "entry": [
+    "vite.config.ts",
+    "vitest.config.ts",
+    "**/vite.config.ts",
+    "**/vite.config.*.ts",
+    "**/vitest.config.ts",
+    "**/vitest.config.*.ts",
+    "config/vite/**/*.ts",
+    "config/vitest/**/*.ts",
+    "apps/web/svelte.config.js",
+    "apps/web/playwright.config.ts",
+    "apps/web/.storybook/**/*.ts",
+    "apps/web/src/tests/setup.ts",
+    "apps/web/e2e/**/*.spec.ts"
+  ],
+  "ignoreDependencies": ["vite-plugin-dts"],
+  "dynamicallyLoaded": [
+    "**/*.stories.svelte",
+    "**/*.stories.ts",
+    "**/*.stories.js",
+    "apps/web/src/paraglide/**",
+    "apps/web/src/routes/**/+page.server.ts",
+    "apps/web/src/routes/**/+page.ts",
+    "apps/web/src/routes/**/+page.svelte",
+    "apps/web/src/routes/**/+layout.server.ts",
+    "apps/web/src/routes/**/+layout.ts",
+    "apps/web/src/routes/**/+layout.svelte",
+    "apps/web/src/routes/**/+server.ts",
+    "apps/web/src/routes/**/+error.svelte",
+    "apps/web/src/hooks.ts",
+    "apps/web/src/hooks.server.ts",
+    "apps/web/src/hooks.client.ts",
+    "apps/web/src/app.html"
+  ],
+  "ignorePatterns": [
+    "test-media/**",
+    ".claude/worktrees/**",
+    "**/worker-configuration.d.ts",
+    "**/.vite-temp/**",
+    "docs/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/.svelte-kit/**",
+    "apps/web/src/paraglide/**"
+  ],
+  "duplicates": {
+    "enabled": true,
+    "mode": "mild",
+    "minTokens": 50,
+    "minLines": 5,
+    "ignore": [
+      "**/*.test.ts",
+      "**/*.spec.ts",
+      "**/__tests__/**",
+      "**/e2e/**",
+      "**/*.d.ts"
+    ]
+  },
+  "rules": {
+    "duplicate-exports": "off"
+  }
+}

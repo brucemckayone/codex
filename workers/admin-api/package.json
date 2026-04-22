@@ -25,9 +25,7 @@
     "@codex/validation": "workspace:*",
     "@codex/worker-utils": "workspace:*",
     "drizzle-orm": "0.44.7",
-    "hono": "^4.6.20",
-    "vite-plugin-dts": "^4.5.4",
-    "zod": "^4.3.5"
+    "vite-plugin-dts": "^4.5.4"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.10.0",

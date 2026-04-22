@@ -305,6 +305,7 @@ export function createTestContent(overrides: Partial<Content> = {}): Content {
     accessType: CONTENT_ACCESS_TYPE.FREE,
     priceCents: 0,
     minimumTierId: null,
+    featured: false,
     status: CONTENT_STATUS.DRAFT,
     publishedAt: null,
     viewCount: 0,

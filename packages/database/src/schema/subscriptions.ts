@@ -12,7 +12,7 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
-import { organizations } from './content';
+import { organizations } from './organizations';
 import { users } from './users';
 
 /**
@@ -86,6 +86,7 @@ export const subscriptionTiers = pgTable(
  *
  * Status flow: incomplete → active → cancelling → cancelled
  *              active → past_due → active (on retry success) or cancelled
+ *              active → paused → active (on resume) — Stripe billing pause
  */
 export const subscriptions = pgTable(
   'subscriptions',
@@ -160,7 +161,7 @@ export const subscriptions = pgTable(
     // CHECK constraints
     check(
       'check_subscription_status',
-      sql`${table.status} IN ('active', 'past_due', 'cancelling', 'cancelled', 'incomplete')`
+      sql`${table.status} IN ('active', 'past_due', 'cancelling', 'cancelled', 'incomplete', 'paused')`
     ),
     check(
       'check_billing_interval',

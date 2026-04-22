@@ -43,7 +43,6 @@
     "@tanstack/query-core": "^5.90.20",
     "@tanstack/query-db-collection": "^1.0.22",
     "@tanstack/svelte-db": "^0.1.68",
-    "happy-dom": "^20.8.9",
     "isomorphic-dompurify": "^2.35.0",
     "hls.js": "^1.6.15",
     "media-chrome": "^4.17.2",

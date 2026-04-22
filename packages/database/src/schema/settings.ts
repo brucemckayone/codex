@@ -8,7 +8,8 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
-import { mediaItems, organizations } from './content';
+import { mediaItems } from './content';
+import { organizations } from './organizations';
 
 /**
  * Hub table - exists primarily for CASCADE DELETE coordination

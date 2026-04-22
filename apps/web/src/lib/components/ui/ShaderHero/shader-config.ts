@@ -867,462 +867,416 @@ export function getShaderConfig(
   const rv = (key: string, def: number) =>
     num(style ? readBrandVar(style, key) : null, def);
 
-  switch (resolvedPreset) {
-    case 'suture':
-      return {
-        ...base,
-        preset: 'suture',
-        curl: rv('shader-curl', DEFAULTS.curl),
-        dissipation: rv('shader-dissipation', DEFAULTS.dissipation),
-        advection: rv('shader-advection', DEFAULTS.advection),
-        force: rv('shader-force', DEFAULTS.force),
-      };
-    case 'ether':
-      return {
-        ...base,
-        preset: 'ether',
-        rotationSpeed: rv('shader-rotation-speed', DEFAULTS.rotationSpeed),
-        complexity: Math.round(rv('shader-complexity', DEFAULTS.complexity)),
-        zoom: rv('shader-zoom', DEFAULTS.zoom),
-        glow: rv('shader-glow', DEFAULTS.glow),
-        scale: rv('shader-scale', DEFAULTS.scale),
-        aberration: rv('shader-aberration', DEFAULTS.aberration),
-      };
-    case 'warp': {
-      const invertRaw = style ? readBrandVar(style, 'shader-invert') : null;
-      return {
-        ...base,
-        preset: 'warp',
-        warpStrength: rv('shader-warp-strength', DEFAULTS.warpStrength),
-        lightAngle: rv('shader-light-angle', DEFAULTS.lightAngle),
-        speed: rv('shader-speed', DEFAULTS.speed),
-        detail: Math.round(rv('shader-detail', DEFAULTS.detail)),
-        contrast: rv('shader-contrast', DEFAULTS.contrast),
-        invert:
-          invertRaw != null
-            ? invertRaw !== '0' && invertRaw !== 'false'
-            : DEFAULTS.invert,
-      };
-    }
-    case 'ripple':
-      return {
-        ...base,
-        preset: 'ripple',
-        waveSpeed: rv('shader-wave-speed', DEFAULTS.waveSpeed),
-        damping: rv('shader-damping', DEFAULTS.damping),
-        rippleSize: rv('shader-ripple-size', DEFAULTS.rippleSize),
-        refraction: rv('shader-refraction', DEFAULTS.refraction),
-      };
-    case 'pulse': {
-      const pulseColorRaw = style
-        ? readBrandVar(style, 'shader-pulse-color')
-        : null;
-      return {
-        ...base,
-        preset: 'pulse',
-        damping: rv('shader-pulse-damping', DEFAULTS.pulseDamping),
-        waveScale: rv('shader-wave-scale', DEFAULTS.waveScale),
-        camHeight: rv('shader-cam-height', DEFAULTS.camHeight),
-        camTarget: rv('shader-cam-target', DEFAULTS.camTarget),
-        specular: rv('shader-specular', DEFAULTS.specular),
-        impulseSize: rv('shader-impulse-size', DEFAULTS.impulseSize),
-        pulseColor: pulseColorRaw
-          ? hexToRgb(pulseColorRaw)
-          : DEFAULTS.pulseColor,
-      };
-    }
-    case 'ink':
-      return {
-        ...base,
-        preset: 'ink',
-        diffusion: rv('shader-ink-diffusion', DEFAULTS.inkDiffusion),
-        advection: rv('shader-ink-advection', DEFAULTS.inkAdvection),
-        dropSize: rv('shader-ink-drop-size', DEFAULTS.inkDropSize),
-        evaporation: rv('shader-ink-evaporation', DEFAULTS.inkEvaporation),
-        curl: rv('shader-ink-curl', DEFAULTS.inkCurl),
-      };
-    case 'topo':
-      return {
-        ...base,
-        preset: 'topo',
-        lineCount: Math.round(
-          rv('shader-topo-line-count', DEFAULTS.topoLineCount)
-        ),
-        lineWidth: rv('shader-topo-line-width', DEFAULTS.topoLineWidth),
-        speed: rv('shader-topo-speed', DEFAULTS.topoSpeed),
-        scale: rv('shader-topo-scale', DEFAULTS.topoScale),
-        elevation: rv('shader-topo-elevation', DEFAULTS.topoElevation),
-        octaves: Math.round(rv('shader-topo-octaves', DEFAULTS.topoOctaves)),
-      };
-    case 'nebula':
-      return {
-        ...base,
-        preset: 'nebula',
-        density: rv('shader-nebula-density', DEFAULTS.nebulaDensity),
-        speed: rv('shader-nebula-speed', DEFAULTS.nebulaSpeed),
-        scale: rv('shader-nebula-scale', DEFAULTS.nebulaScale),
-        depth: Math.round(rv('shader-nebula-depth', DEFAULTS.nebulaDepth)),
-        wind: rv('shader-nebula-wind', DEFAULTS.nebulaWind),
-        stars: rv('shader-nebula-stars', DEFAULTS.nebulaStars),
-      };
-    case 'turing':
-      return {
-        ...base,
-        preset: 'turing',
-        feed: rv('shader-turing-feed', DEFAULTS.turingFeed),
-        kill: rv('shader-turing-kill', DEFAULTS.turingKill),
-        da: rv('shader-turing-da', DEFAULTS.turingDa),
-        db: rv('shader-turing-db', DEFAULTS.turingDb),
-        speed: Math.round(rv('shader-turing-speed', DEFAULTS.turingSpeed)),
-      };
-    case 'silk':
-      return {
-        ...base,
-        preset: 'silk',
-        foldScale: rv('shader-silk-fold-scale', DEFAULTS.silkFoldScale),
-        foldDepth: rv('shader-silk-fold-depth', DEFAULTS.silkFoldDepth),
-        speed: rv('shader-silk-speed', DEFAULTS.silkSpeed),
-        softness: rv('shader-silk-softness', DEFAULTS.silkSoftness),
-        sheen: rv('shader-silk-sheen', DEFAULTS.silkSheen),
-        lining: rv('shader-silk-lining', DEFAULTS.silkLining),
-      };
-    case 'glass':
-      return {
-        ...base,
-        preset: 'glass',
-        cellSize: rv('shader-glass-cell-size', DEFAULTS.glassCellSize),
-        border: rv('shader-glass-border', DEFAULTS.glassBorder),
-        drift: rv('shader-glass-drift', DEFAULTS.glassDrift),
-        glow: rv('shader-glass-glow', DEFAULTS.glassGlow),
-        light: rv('shader-glass-light', DEFAULTS.glassLight),
-      };
-    case 'film':
-      return {
-        ...base,
-        preset: 'film',
-        filmScale: rv('shader-film-scale', DEFAULTS.filmScale),
-        filmSpeed: rv('shader-film-speed', DEFAULTS.filmSpeed),
-        bands: rv('shader-film-bands', DEFAULTS.filmBands),
-        shift: rv('shader-film-shift', DEFAULTS.filmShift),
-        ripple: rv('shader-film-ripple', DEFAULTS.filmRipple),
-      };
-    case 'flux':
-      return {
-        ...base,
-        preset: 'flux',
-        poles: Math.round(rv('shader-flux-poles', DEFAULTS.fluxPoles)),
-        lineDensity: rv('shader-flux-line-density', DEFAULTS.fluxLineDensity),
-        lineWidth: rv('shader-flux-line-width', DEFAULTS.fluxLineWidth),
-        strength: rv('shader-flux-strength', DEFAULTS.fluxStrength),
-        speed: rv('shader-flux-speed', DEFAULTS.fluxSpeed),
-      };
-    case 'lava':
-      return {
-        ...base,
-        preset: 'lava',
-        crackScale: rv('shader-lava-crack-scale', DEFAULTS.lavaCrackScale),
-        crackWidth: rv('shader-lava-crack-width', DEFAULTS.lavaCrackWidth),
-        glow: rv('shader-lava-glow', DEFAULTS.lavaGlow),
-        speed: rv('shader-lava-speed', DEFAULTS.lavaSpeed),
-        crust: rv('shader-lava-crust', DEFAULTS.lavaCrust),
-        heat: rv('shader-lava-heat', DEFAULTS.lavaHeat),
-      };
-    case 'caustic':
-      return {
-        ...base,
-        preset: 'caustic',
-        scale: rv('shader-caustic-scale', DEFAULTS.causticScale),
-        speed: rv('shader-caustic-speed', DEFAULTS.causticSpeed),
-        iterations: Math.round(
-          rv('shader-caustic-iterations', DEFAULTS.causticIterations)
-        ),
-        brightness: rv('shader-caustic-brightness', DEFAULTS.causticBrightness),
-        ripple: rv('shader-caustic-ripple', DEFAULTS.causticRipple),
-      };
-    case 'physarum':
-      return {
-        ...base,
-        preset: 'physarum',
-        diffusion: rv('shader-physarum-diffusion', DEFAULTS.physarumDiffusion),
-        decay: rv('shader-physarum-decay', DEFAULTS.physarumDecay),
-        deposit: rv('shader-physarum-deposit', DEFAULTS.physarumDeposit),
-        sensor: rv('shader-physarum-sensor', DEFAULTS.physarumSensor),
-        turn: rv('shader-physarum-turn', DEFAULTS.physarumTurn),
-      };
-    case 'rain':
-      return {
-        ...base,
-        preset: 'rain',
-        density: rv('shader-rain-density', DEFAULTS.rainDensity),
-        speed: rv('shader-rain-speed', DEFAULTS.rainSpeed),
-        size: rv('shader-rain-size', DEFAULTS.rainSize),
-        refraction: rv('shader-rain-refraction', DEFAULTS.rainRefraction),
-        blur: rv('shader-rain-blur', DEFAULTS.rainBlur),
-      };
-    case 'frost':
-      return {
-        ...base,
-        preset: 'frost',
-        growth: rv('shader-frost-growth', DEFAULTS.frostGrowth),
-        branch: rv('shader-frost-branch', DEFAULTS.frostBranch),
-        symmetry: Math.round(
-          rv('shader-frost-symmetry', DEFAULTS.frostSymmetry)
-        ),
-        melt: rv('shader-frost-melt', DEFAULTS.frostMelt),
-        glow: rv('shader-frost-glow', DEFAULTS.frostGlow),
-      };
-    case 'glow':
-      return {
-        ...base,
-        preset: 'glow',
-        count: Math.round(rv('shader-glow-count', DEFAULTS.glowCount)),
-        pulse: rv('shader-glow-pulse', DEFAULTS.glowPulse),
-        size: rv('shader-glow-size', DEFAULTS.glowSize),
-        drift: rv('shader-glow-drift', DEFAULTS.glowDrift),
-        trail: rv('shader-glow-trail', DEFAULTS.glowTrail),
-        depth: Math.round(rv('shader-glow-depth', DEFAULTS.glowDepth)),
-      };
-    case 'life':
-      return {
-        ...base,
-        preset: 'life',
-        inner: rv('shader-life-inner', DEFAULTS.lifeInner),
-        outer: rv('shader-life-outer', DEFAULTS.lifeOuter),
-        birth: rv('shader-life-birth', DEFAULTS.lifeBirth),
-        death: rv('shader-life-death', DEFAULTS.lifeDeath),
-        speed: Math.round(rv('shader-life-speed', DEFAULTS.lifeSpeed)),
-      };
-    case 'mycelium':
-      return {
-        ...base,
-        preset: 'mycelium',
-        growth: rv('shader-mycelium-growth', DEFAULTS.myceliumGrowth),
-        branch: rv('shader-mycelium-branch', DEFAULTS.myceliumBranch),
-        spread: rv('shader-mycelium-spread', DEFAULTS.myceliumSpread),
-        pulse: rv('shader-mycelium-pulse', DEFAULTS.myceliumPulse),
-        thickness: rv('shader-mycelium-thickness', DEFAULTS.myceliumThickness),
-      };
-    case 'aurora':
-      return {
-        ...base,
-        preset: 'aurora',
-        layers: Math.round(rv('shader-aurora-layers', DEFAULTS.auroraLayers)),
-        speed: rv('shader-aurora-speed', DEFAULTS.auroraSpeed),
-        height: rv('shader-aurora-height', DEFAULTS.auroraHeight),
-        spread: rv('shader-aurora-spread', DEFAULTS.auroraSpread),
-        shimmer: rv('shader-aurora-shimmer', DEFAULTS.auroraShimmer),
-      };
-    case 'tendrils':
-      return {
-        ...base,
-        preset: 'tendrils',
-        scale: rv('shader-tendrils-scale', DEFAULTS.tendrilsScale),
-        speed: rv('shader-tendrils-speed', DEFAULTS.tendrilsSpeed),
-        steps: Math.round(rv('shader-tendrils-steps', DEFAULTS.tendrilsSteps)),
-        curl: rv('shader-tendrils-curl', DEFAULTS.tendrilsCurl),
-        fade: rv('shader-tendrils-fade', DEFAULTS.tendrilsFade),
-      };
-    case 'pollen':
-      return {
-        ...base,
-        preset: 'pollen',
-        density: rv('shader-pollen-density', DEFAULTS.pollenDensity),
-        size: rv('shader-pollen-size', DEFAULTS.pollenSize),
-        fibres: Math.round(rv('shader-pollen-fibres', DEFAULTS.pollenFibres)),
-        drift: rv('shader-pollen-drift', DEFAULTS.pollenDrift),
-        depth: Math.round(rv('shader-pollen-depth', DEFAULTS.pollenDepth)),
-        bokeh: rv('shader-pollen-bokeh', DEFAULTS.pollenBokeh),
-      };
-    case 'growth':
-      return {
-        ...base,
-        preset: 'growth',
-        speed: rv('shader-growth-speed', DEFAULTS.growthSpeed),
-        noise: rv('shader-growth-noise', DEFAULTS.growthNoise),
-        scale: rv('shader-growth-scale', DEFAULTS.growthScale),
-        width: rv('shader-growth-width', DEFAULTS.growthWidth),
-        glow: rv('shader-growth-glow', DEFAULTS.growthGlow),
-      };
-    case 'geode':
-      return {
-        ...base,
-        preset: 'geode',
-        bands: Math.round(rv('shader-geode-bands', DEFAULTS.geodeBands)),
-        warp: rv('shader-geode-warp', DEFAULTS.geodeWarp),
-        cavity: rv('shader-geode-cavity', DEFAULTS.geodeCavity),
-        speed: rv('shader-geode-speed', DEFAULTS.geodeSpeed),
-        sparkle: rv('shader-geode-sparkle', DEFAULTS.geodeSparkle),
-      };
-    case 'lenia':
-      return {
-        ...base,
-        preset: 'lenia',
-        radius: rv('shader-lenia-radius', DEFAULTS.leniaRadius),
-        growth: rv('shader-lenia-growth', DEFAULTS.leniaGrowth),
-        width: rv('shader-lenia-width', DEFAULTS.leniaWidth),
-        speed: Math.round(rv('shader-lenia-speed', DEFAULTS.leniaSpeed)),
-        dt: rv('shader-lenia-dt', DEFAULTS.leniaDt),
-      };
-    case 'ocean':
-      return {
-        ...base,
-        preset: 'ocean',
-        causticScale: rv(
-          'shader-ocean-caustic-scale',
-          DEFAULTS.oceanCausticScale
-        ),
-        sandScale: rv('shader-ocean-sand-scale', DEFAULTS.oceanSandScale),
-        speed: rv('shader-ocean-speed', DEFAULTS.oceanSpeed),
-        shadow: rv('shader-ocean-shadow', DEFAULTS.oceanShadow),
-        ripple: rv('shader-ocean-ripple', DEFAULTS.oceanRipple),
-      };
-    case 'bismuth':
-      return {
-        ...base,
-        preset: 'bismuth',
-        terraces: Math.round(
-          rv('shader-bismuth-terraces', DEFAULTS.bismuthTerraces)
-        ),
-        warp: rv('shader-bismuth-warp', DEFAULTS.bismuthWarp),
-        iridescence: rv(
-          'shader-bismuth-iridescence',
-          DEFAULTS.bismuthIridescence
-        ),
-        speed: rv('shader-bismuth-speed', DEFAULTS.bismuthSpeed),
-        edge: rv('shader-bismuth-edge', DEFAULTS.bismuthEdge),
-      };
-    case 'pearl':
-      return {
-        ...base,
-        preset: 'pearl',
-        displacement: rv(
-          'shader-pearl-displacement',
-          DEFAULTS.pearlDisplacement
-        ),
-        speed: rv('shader-pearl-speed', DEFAULTS.pearlSpeed),
-        fresnel: rv('shader-pearl-fresnel', DEFAULTS.pearlFresnel),
-        specular: rv('shader-pearl-specular', DEFAULTS.pearlSpecular),
-      };
-    case 'vortex':
-      return {
-        ...base,
-        preset: 'vortex',
-        speed: rv('shader-vortex-speed', DEFAULTS.vortexSpeed),
-        density: Math.round(
-          rv('shader-vortex-density', DEFAULTS.vortexDensity)
-        ),
-        twist: rv('shader-vortex-twist', DEFAULTS.vortexTwist),
-        rings: rv('shader-vortex-rings', DEFAULTS.vortexRings),
-        spiral: rv('shader-vortex-spiral', DEFAULTS.vortexSpiral),
-      };
-    case 'gyroid':
-      return {
-        ...base,
-        preset: 'gyroid',
-        scale1: rv('shader-gyroid-scale1', DEFAULTS.gyroidScale1),
-        scale2: rv('shader-gyroid-scale2', DEFAULTS.gyroidScale2),
-        speed: rv('shader-gyroid-speed', DEFAULTS.gyroidSpeed),
-        density: rv('shader-gyroid-density', DEFAULTS.gyroidDensity),
-        thickness: rv('shader-gyroid-thickness', DEFAULTS.gyroidThickness),
-      };
-    case 'waves':
-      return {
-        ...base,
-        preset: 'waves',
-        height: rv('shader-waves-height', DEFAULTS.wavesHeight),
-        speed: rv('shader-waves-speed', DEFAULTS.wavesSpeed),
-        chop: rv('shader-waves-chop', DEFAULTS.wavesChop),
-        foam: rv('shader-waves-foam', DEFAULTS.wavesFoam),
-        depth: rv('shader-waves-depth', DEFAULTS.wavesDepth),
-      };
-    case 'clouds':
-      return {
-        ...base,
-        preset: 'clouds',
-        cover: rv('shader-clouds-cover', DEFAULTS.cloudsCover),
-        speed: rv('shader-clouds-speed', DEFAULTS.cloudsSpeed),
-        scale: rv('shader-clouds-scale', DEFAULTS.cloudsScale),
-        dark: rv('shader-clouds-dark', DEFAULTS.cloudsDark),
-        light: rv('shader-clouds-light', DEFAULTS.cloudsLight),
-      };
-    case 'fracture':
-      return {
-        ...base,
-        preset: 'fracture',
-        cuts: Math.round(rv('shader-fracture-cuts', DEFAULTS.fractureCuts)),
-        speed: rv('shader-fracture-speed', DEFAULTS.fractureSpeed),
-        border: rv('shader-fracture-border', DEFAULTS.fractureBorder),
-        shadow: rv('shader-fracture-shadow', DEFAULTS.fractureShadow),
-        fill: rv('shader-fracture-fill', DEFAULTS.fractureFill),
-      };
-    case 'julia':
-      return {
-        ...base,
-        preset: 'julia',
-        zoom: rv('shader-julia-zoom', DEFAULTS.juliaZoom),
-        speed: rv('shader-julia-speed', DEFAULTS.juliaSpeed),
-        iterations: Math.round(
-          rv('shader-julia-iterations', DEFAULTS.juliaIterations)
-        ),
-        radius: rv('shader-julia-radius', DEFAULTS.juliaRadius),
-        saturation: rv('shader-julia-saturation', DEFAULTS.juliaSaturation),
-      };
-    case 'vapor':
-      return {
-        ...base,
-        preset: 'vapor',
-        density: rv('shader-vapor-density', DEFAULTS.vaporDensity),
-        speed: rv('shader-vapor-speed', DEFAULTS.vaporSpeed),
-        scale: rv('shader-vapor-scale', DEFAULTS.vaporScale),
-        warmth: rv('shader-vapor-warmth', DEFAULTS.vaporWarmth),
-        glow: rv('shader-vapor-glow', DEFAULTS.vaporGlow),
-      };
-    case 'tunnel':
-      return {
-        ...base,
-        preset: 'tunnel',
-        speed: rv('shader-tunnel-speed', DEFAULTS.tunnelSpeed),
-        fractal: Math.round(
-          rv('shader-tunnel-fractal', DEFAULTS.tunnelFractal)
-        ),
-        radius: rv('shader-tunnel-radius', DEFAULTS.tunnelRadius),
-        brightness: rv('shader-tunnel-brightness', DEFAULTS.tunnelBrightness),
-        twist: rv('shader-tunnel-twist', DEFAULTS.tunnelTwist),
-      };
-    case 'spore':
-      return {
-        ...base,
-        preset: 'spore',
-        sensorAngle: rv('shader-spore-sensor-angle', DEFAULTS.sporeSensorAngle),
-        sensorOffset: rv(
-          'shader-spore-sensor-offset',
-          DEFAULTS.sporeSensorOffset
-        ),
-        stepSize: rv('shader-spore-step-size', DEFAULTS.sporeStepSize),
-        rotation: rv('shader-spore-rotation', DEFAULTS.sporeRotation),
-        decay: rv('shader-spore-decay', DEFAULTS.sporeDecay),
-      };
-    case 'flow':
-      return {
-        ...base,
-        preset: 'flow',
-        curl: rv('shader-flow-curl', DEFAULTS.flowCurl),
-        advection: rv('shader-flow-advection', DEFAULTS.flowAdvection),
-        smoothing: rv('shader-flow-smoothing', DEFAULTS.flowSmoothing),
-        contrast: rv('shader-flow-contrast', DEFAULTS.flowContrast),
-        fieldSpeed: rv('shader-flow-field-speed', DEFAULTS.flowFieldSpeed),
-      };
-    case 'plasma':
-      return {
-        ...base,
-        preset: 'plasma',
-        speed: rv('shader-plasma-speed', DEFAULTS.plasmaSpeed),
-        bands: rv('shader-plasma-bands', DEFAULTS.plasmaBands),
-        pressure: rv('shader-plasma-pressure', DEFAULTS.plasmaPressure),
-        turn: rv('shader-plasma-turn', DEFAULTS.plasmaTurn),
-        diffusion: rv('shader-plasma-diffusion', DEFAULTS.plasmaDiffusion),
-      };
-    default:
-      return { ...base, preset: 'none' };
-  }
+  const builder = PRESET_BUILDERS[resolvedPreset];
+  return builder ? builder(base, rv, style) : { ...base, preset: 'none' };
 }
+
+/**
+ * Per-preset builders. Each takes the shared `base` config plus helpers
+ * and returns the preset-specific `ShaderConfig` variant. Keyed table
+ * replaces a 40-case switch; TypeScript's `Record<ShaderPresetId, ...>`
+ * enforces exhaustiveness so any new preset added to `ShaderPresetId`
+ * must be wired up here.
+ */
+type PresetBuilder = (
+  base: ShaderConfigBase,
+  rv: (key: string, def: number) => number,
+  style: CSSStyleDeclaration | null
+) => ShaderConfig;
+
+const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
+  suture: (base, rv) => ({
+    ...base,
+    preset: 'suture',
+    curl: rv('shader-curl', DEFAULTS.curl),
+    dissipation: rv('shader-dissipation', DEFAULTS.dissipation),
+    advection: rv('shader-advection', DEFAULTS.advection),
+    force: rv('shader-force', DEFAULTS.force),
+  }),
+  ether: (base, rv) => ({
+    ...base,
+    preset: 'ether',
+    rotationSpeed: rv('shader-rotation-speed', DEFAULTS.rotationSpeed),
+    complexity: Math.round(rv('shader-complexity', DEFAULTS.complexity)),
+    zoom: rv('shader-zoom', DEFAULTS.zoom),
+    glow: rv('shader-glow', DEFAULTS.glow),
+    scale: rv('shader-scale', DEFAULTS.scale),
+    aberration: rv('shader-aberration', DEFAULTS.aberration),
+  }),
+  warp: (base, rv, style) => {
+    const invertRaw = style ? readBrandVar(style, 'shader-invert') : null;
+    return {
+      ...base,
+      preset: 'warp',
+      warpStrength: rv('shader-warp-strength', DEFAULTS.warpStrength),
+      lightAngle: rv('shader-light-angle', DEFAULTS.lightAngle),
+      speed: rv('shader-speed', DEFAULTS.speed),
+      detail: Math.round(rv('shader-detail', DEFAULTS.detail)),
+      contrast: rv('shader-contrast', DEFAULTS.contrast),
+      invert:
+        invertRaw != null
+          ? invertRaw !== '0' && invertRaw !== 'false'
+          : DEFAULTS.invert,
+    };
+  },
+  ripple: (base, rv) => ({
+    ...base,
+    preset: 'ripple',
+    waveSpeed: rv('shader-wave-speed', DEFAULTS.waveSpeed),
+    damping: rv('shader-damping', DEFAULTS.damping),
+    rippleSize: rv('shader-ripple-size', DEFAULTS.rippleSize),
+    refraction: rv('shader-refraction', DEFAULTS.refraction),
+  }),
+  pulse: (base, rv, style) => {
+    const pulseColorRaw = style
+      ? readBrandVar(style, 'shader-pulse-color')
+      : null;
+    return {
+      ...base,
+      preset: 'pulse',
+      damping: rv('shader-pulse-damping', DEFAULTS.pulseDamping),
+      waveScale: rv('shader-wave-scale', DEFAULTS.waveScale),
+      camHeight: rv('shader-cam-height', DEFAULTS.camHeight),
+      camTarget: rv('shader-cam-target', DEFAULTS.camTarget),
+      specular: rv('shader-specular', DEFAULTS.specular),
+      impulseSize: rv('shader-impulse-size', DEFAULTS.impulseSize),
+      pulseColor: pulseColorRaw ? hexToRgb(pulseColorRaw) : DEFAULTS.pulseColor,
+    };
+  },
+  ink: (base, rv) => ({
+    ...base,
+    preset: 'ink',
+    diffusion: rv('shader-ink-diffusion', DEFAULTS.inkDiffusion),
+    advection: rv('shader-ink-advection', DEFAULTS.inkAdvection),
+    dropSize: rv('shader-ink-drop-size', DEFAULTS.inkDropSize),
+    evaporation: rv('shader-ink-evaporation', DEFAULTS.inkEvaporation),
+    curl: rv('shader-ink-curl', DEFAULTS.inkCurl),
+  }),
+  topo: (base, rv) => ({
+    ...base,
+    preset: 'topo',
+    lineCount: Math.round(rv('shader-topo-line-count', DEFAULTS.topoLineCount)),
+    lineWidth: rv('shader-topo-line-width', DEFAULTS.topoLineWidth),
+    speed: rv('shader-topo-speed', DEFAULTS.topoSpeed),
+    scale: rv('shader-topo-scale', DEFAULTS.topoScale),
+    elevation: rv('shader-topo-elevation', DEFAULTS.topoElevation),
+    octaves: Math.round(rv('shader-topo-octaves', DEFAULTS.topoOctaves)),
+  }),
+  nebula: (base, rv) => ({
+    ...base,
+    preset: 'nebula',
+    density: rv('shader-nebula-density', DEFAULTS.nebulaDensity),
+    speed: rv('shader-nebula-speed', DEFAULTS.nebulaSpeed),
+    scale: rv('shader-nebula-scale', DEFAULTS.nebulaScale),
+    depth: Math.round(rv('shader-nebula-depth', DEFAULTS.nebulaDepth)),
+    wind: rv('shader-nebula-wind', DEFAULTS.nebulaWind),
+    stars: rv('shader-nebula-stars', DEFAULTS.nebulaStars),
+  }),
+  turing: (base, rv) => ({
+    ...base,
+    preset: 'turing',
+    feed: rv('shader-turing-feed', DEFAULTS.turingFeed),
+    kill: rv('shader-turing-kill', DEFAULTS.turingKill),
+    da: rv('shader-turing-da', DEFAULTS.turingDa),
+    db: rv('shader-turing-db', DEFAULTS.turingDb),
+    speed: Math.round(rv('shader-turing-speed', DEFAULTS.turingSpeed)),
+  }),
+  silk: (base, rv) => ({
+    ...base,
+    preset: 'silk',
+    foldScale: rv('shader-silk-fold-scale', DEFAULTS.silkFoldScale),
+    foldDepth: rv('shader-silk-fold-depth', DEFAULTS.silkFoldDepth),
+    speed: rv('shader-silk-speed', DEFAULTS.silkSpeed),
+    softness: rv('shader-silk-softness', DEFAULTS.silkSoftness),
+    sheen: rv('shader-silk-sheen', DEFAULTS.silkSheen),
+    lining: rv('shader-silk-lining', DEFAULTS.silkLining),
+  }),
+  glass: (base, rv) => ({
+    ...base,
+    preset: 'glass',
+    cellSize: rv('shader-glass-cell-size', DEFAULTS.glassCellSize),
+    border: rv('shader-glass-border', DEFAULTS.glassBorder),
+    drift: rv('shader-glass-drift', DEFAULTS.glassDrift),
+    glow: rv('shader-glass-glow', DEFAULTS.glassGlow),
+    light: rv('shader-glass-light', DEFAULTS.glassLight),
+  }),
+  film: (base, rv) => ({
+    ...base,
+    preset: 'film',
+    filmScale: rv('shader-film-scale', DEFAULTS.filmScale),
+    filmSpeed: rv('shader-film-speed', DEFAULTS.filmSpeed),
+    bands: rv('shader-film-bands', DEFAULTS.filmBands),
+    shift: rv('shader-film-shift', DEFAULTS.filmShift),
+    ripple: rv('shader-film-ripple', DEFAULTS.filmRipple),
+  }),
+  flux: (base, rv) => ({
+    ...base,
+    preset: 'flux',
+    poles: Math.round(rv('shader-flux-poles', DEFAULTS.fluxPoles)),
+    lineDensity: rv('shader-flux-line-density', DEFAULTS.fluxLineDensity),
+    lineWidth: rv('shader-flux-line-width', DEFAULTS.fluxLineWidth),
+    strength: rv('shader-flux-strength', DEFAULTS.fluxStrength),
+    speed: rv('shader-flux-speed', DEFAULTS.fluxSpeed),
+  }),
+  lava: (base, rv) => ({
+    ...base,
+    preset: 'lava',
+    crackScale: rv('shader-lava-crack-scale', DEFAULTS.lavaCrackScale),
+    crackWidth: rv('shader-lava-crack-width', DEFAULTS.lavaCrackWidth),
+    glow: rv('shader-lava-glow', DEFAULTS.lavaGlow),
+    speed: rv('shader-lava-speed', DEFAULTS.lavaSpeed),
+    crust: rv('shader-lava-crust', DEFAULTS.lavaCrust),
+    heat: rv('shader-lava-heat', DEFAULTS.lavaHeat),
+  }),
+  caustic: (base, rv) => ({
+    ...base,
+    preset: 'caustic',
+    scale: rv('shader-caustic-scale', DEFAULTS.causticScale),
+    speed: rv('shader-caustic-speed', DEFAULTS.causticSpeed),
+    iterations: Math.round(
+      rv('shader-caustic-iterations', DEFAULTS.causticIterations)
+    ),
+    brightness: rv('shader-caustic-brightness', DEFAULTS.causticBrightness),
+    ripple: rv('shader-caustic-ripple', DEFAULTS.causticRipple),
+  }),
+  physarum: (base, rv) => ({
+    ...base,
+    preset: 'physarum',
+    diffusion: rv('shader-physarum-diffusion', DEFAULTS.physarumDiffusion),
+    decay: rv('shader-physarum-decay', DEFAULTS.physarumDecay),
+    deposit: rv('shader-physarum-deposit', DEFAULTS.physarumDeposit),
+    sensor: rv('shader-physarum-sensor', DEFAULTS.physarumSensor),
+    turn: rv('shader-physarum-turn', DEFAULTS.physarumTurn),
+  }),
+  rain: (base, rv) => ({
+    ...base,
+    preset: 'rain',
+    density: rv('shader-rain-density', DEFAULTS.rainDensity),
+    speed: rv('shader-rain-speed', DEFAULTS.rainSpeed),
+    size: rv('shader-rain-size', DEFAULTS.rainSize),
+    refraction: rv('shader-rain-refraction', DEFAULTS.rainRefraction),
+    blur: rv('shader-rain-blur', DEFAULTS.rainBlur),
+  }),
+  frost: (base, rv) => ({
+    ...base,
+    preset: 'frost',
+    growth: rv('shader-frost-growth', DEFAULTS.frostGrowth),
+    branch: rv('shader-frost-branch', DEFAULTS.frostBranch),
+    symmetry: Math.round(rv('shader-frost-symmetry', DEFAULTS.frostSymmetry)),
+    melt: rv('shader-frost-melt', DEFAULTS.frostMelt),
+    glow: rv('shader-frost-glow', DEFAULTS.frostGlow),
+  }),
+  glow: (base, rv) => ({
+    ...base,
+    preset: 'glow',
+    count: Math.round(rv('shader-glow-count', DEFAULTS.glowCount)),
+    pulse: rv('shader-glow-pulse', DEFAULTS.glowPulse),
+    size: rv('shader-glow-size', DEFAULTS.glowSize),
+    drift: rv('shader-glow-drift', DEFAULTS.glowDrift),
+    trail: rv('shader-glow-trail', DEFAULTS.glowTrail),
+    depth: Math.round(rv('shader-glow-depth', DEFAULTS.glowDepth)),
+  }),
+  life: (base, rv) => ({
+    ...base,
+    preset: 'life',
+    inner: rv('shader-life-inner', DEFAULTS.lifeInner),
+    outer: rv('shader-life-outer', DEFAULTS.lifeOuter),
+    birth: rv('shader-life-birth', DEFAULTS.lifeBirth),
+    death: rv('shader-life-death', DEFAULTS.lifeDeath),
+    speed: Math.round(rv('shader-life-speed', DEFAULTS.lifeSpeed)),
+  }),
+  mycelium: (base, rv) => ({
+    ...base,
+    preset: 'mycelium',
+    growth: rv('shader-mycelium-growth', DEFAULTS.myceliumGrowth),
+    branch: rv('shader-mycelium-branch', DEFAULTS.myceliumBranch),
+    spread: rv('shader-mycelium-spread', DEFAULTS.myceliumSpread),
+    pulse: rv('shader-mycelium-pulse', DEFAULTS.myceliumPulse),
+    thickness: rv('shader-mycelium-thickness', DEFAULTS.myceliumThickness),
+  }),
+  aurora: (base, rv) => ({
+    ...base,
+    preset: 'aurora',
+    layers: Math.round(rv('shader-aurora-layers', DEFAULTS.auroraLayers)),
+    speed: rv('shader-aurora-speed', DEFAULTS.auroraSpeed),
+    height: rv('shader-aurora-height', DEFAULTS.auroraHeight),
+    spread: rv('shader-aurora-spread', DEFAULTS.auroraSpread),
+    shimmer: rv('shader-aurora-shimmer', DEFAULTS.auroraShimmer),
+  }),
+  tendrils: (base, rv) => ({
+    ...base,
+    preset: 'tendrils',
+    scale: rv('shader-tendrils-scale', DEFAULTS.tendrilsScale),
+    speed: rv('shader-tendrils-speed', DEFAULTS.tendrilsSpeed),
+    steps: Math.round(rv('shader-tendrils-steps', DEFAULTS.tendrilsSteps)),
+    curl: rv('shader-tendrils-curl', DEFAULTS.tendrilsCurl),
+    fade: rv('shader-tendrils-fade', DEFAULTS.tendrilsFade),
+  }),
+  pollen: (base, rv) => ({
+    ...base,
+    preset: 'pollen',
+    density: rv('shader-pollen-density', DEFAULTS.pollenDensity),
+    size: rv('shader-pollen-size', DEFAULTS.pollenSize),
+    fibres: Math.round(rv('shader-pollen-fibres', DEFAULTS.pollenFibres)),
+    drift: rv('shader-pollen-drift', DEFAULTS.pollenDrift),
+    depth: Math.round(rv('shader-pollen-depth', DEFAULTS.pollenDepth)),
+    bokeh: rv('shader-pollen-bokeh', DEFAULTS.pollenBokeh),
+  }),
+  growth: (base, rv) => ({
+    ...base,
+    preset: 'growth',
+    speed: rv('shader-growth-speed', DEFAULTS.growthSpeed),
+    noise: rv('shader-growth-noise', DEFAULTS.growthNoise),
+    scale: rv('shader-growth-scale', DEFAULTS.growthScale),
+    width: rv('shader-growth-width', DEFAULTS.growthWidth),
+    glow: rv('shader-growth-glow', DEFAULTS.growthGlow),
+  }),
+  geode: (base, rv) => ({
+    ...base,
+    preset: 'geode',
+    bands: Math.round(rv('shader-geode-bands', DEFAULTS.geodeBands)),
+    warp: rv('shader-geode-warp', DEFAULTS.geodeWarp),
+    cavity: rv('shader-geode-cavity', DEFAULTS.geodeCavity),
+    speed: rv('shader-geode-speed', DEFAULTS.geodeSpeed),
+    sparkle: rv('shader-geode-sparkle', DEFAULTS.geodeSparkle),
+  }),
+  lenia: (base, rv) => ({
+    ...base,
+    preset: 'lenia',
+    radius: rv('shader-lenia-radius', DEFAULTS.leniaRadius),
+    growth: rv('shader-lenia-growth', DEFAULTS.leniaGrowth),
+    width: rv('shader-lenia-width', DEFAULTS.leniaWidth),
+    speed: Math.round(rv('shader-lenia-speed', DEFAULTS.leniaSpeed)),
+    dt: rv('shader-lenia-dt', DEFAULTS.leniaDt),
+  }),
+  ocean: (base, rv) => ({
+    ...base,
+    preset: 'ocean',
+    causticScale: rv('shader-ocean-caustic-scale', DEFAULTS.oceanCausticScale),
+    sandScale: rv('shader-ocean-sand-scale', DEFAULTS.oceanSandScale),
+    speed: rv('shader-ocean-speed', DEFAULTS.oceanSpeed),
+    shadow: rv('shader-ocean-shadow', DEFAULTS.oceanShadow),
+    ripple: rv('shader-ocean-ripple', DEFAULTS.oceanRipple),
+  }),
+  bismuth: (base, rv) => ({
+    ...base,
+    preset: 'bismuth',
+    terraces: Math.round(
+      rv('shader-bismuth-terraces', DEFAULTS.bismuthTerraces)
+    ),
+    warp: rv('shader-bismuth-warp', DEFAULTS.bismuthWarp),
+    iridescence: rv('shader-bismuth-iridescence', DEFAULTS.bismuthIridescence),
+    speed: rv('shader-bismuth-speed', DEFAULTS.bismuthSpeed),
+    edge: rv('shader-bismuth-edge', DEFAULTS.bismuthEdge),
+  }),
+  pearl: (base, rv) => ({
+    ...base,
+    preset: 'pearl',
+    displacement: rv('shader-pearl-displacement', DEFAULTS.pearlDisplacement),
+    speed: rv('shader-pearl-speed', DEFAULTS.pearlSpeed),
+    fresnel: rv('shader-pearl-fresnel', DEFAULTS.pearlFresnel),
+    specular: rv('shader-pearl-specular', DEFAULTS.pearlSpecular),
+  }),
+  vortex: (base, rv) => ({
+    ...base,
+    preset: 'vortex',
+    speed: rv('shader-vortex-speed', DEFAULTS.vortexSpeed),
+    density: Math.round(rv('shader-vortex-density', DEFAULTS.vortexDensity)),
+    twist: rv('shader-vortex-twist', DEFAULTS.vortexTwist),
+    rings: rv('shader-vortex-rings', DEFAULTS.vortexRings),
+    spiral: rv('shader-vortex-spiral', DEFAULTS.vortexSpiral),
+  }),
+  gyroid: (base, rv) => ({
+    ...base,
+    preset: 'gyroid',
+    scale1: rv('shader-gyroid-scale1', DEFAULTS.gyroidScale1),
+    scale2: rv('shader-gyroid-scale2', DEFAULTS.gyroidScale2),
+    speed: rv('shader-gyroid-speed', DEFAULTS.gyroidSpeed),
+    density: rv('shader-gyroid-density', DEFAULTS.gyroidDensity),
+    thickness: rv('shader-gyroid-thickness', DEFAULTS.gyroidThickness),
+  }),
+  waves: (base, rv) => ({
+    ...base,
+    preset: 'waves',
+    height: rv('shader-waves-height', DEFAULTS.wavesHeight),
+    speed: rv('shader-waves-speed', DEFAULTS.wavesSpeed),
+    chop: rv('shader-waves-chop', DEFAULTS.wavesChop),
+    foam: rv('shader-waves-foam', DEFAULTS.wavesFoam),
+    depth: rv('shader-waves-depth', DEFAULTS.wavesDepth),
+  }),
+  clouds: (base, rv) => ({
+    ...base,
+    preset: 'clouds',
+    cover: rv('shader-clouds-cover', DEFAULTS.cloudsCover),
+    speed: rv('shader-clouds-speed', DEFAULTS.cloudsSpeed),
+    scale: rv('shader-clouds-scale', DEFAULTS.cloudsScale),
+    dark: rv('shader-clouds-dark', DEFAULTS.cloudsDark),
+    light: rv('shader-clouds-light', DEFAULTS.cloudsLight),
+  }),
+  fracture: (base, rv) => ({
+    ...base,
+    preset: 'fracture',
+    cuts: Math.round(rv('shader-fracture-cuts', DEFAULTS.fractureCuts)),
+    speed: rv('shader-fracture-speed', DEFAULTS.fractureSpeed),
+    border: rv('shader-fracture-border', DEFAULTS.fractureBorder),
+    shadow: rv('shader-fracture-shadow', DEFAULTS.fractureShadow),
+    fill: rv('shader-fracture-fill', DEFAULTS.fractureFill),
+  }),
+  julia: (base, rv) => ({
+    ...base,
+    preset: 'julia',
+    zoom: rv('shader-julia-zoom', DEFAULTS.juliaZoom),
+    speed: rv('shader-julia-speed', DEFAULTS.juliaSpeed),
+    iterations: Math.round(
+      rv('shader-julia-iterations', DEFAULTS.juliaIterations)
+    ),
+    radius: rv('shader-julia-radius', DEFAULTS.juliaRadius),
+    saturation: rv('shader-julia-saturation', DEFAULTS.juliaSaturation),
+  }),
+  vapor: (base, rv) => ({
+    ...base,
+    preset: 'vapor',
+    density: rv('shader-vapor-density', DEFAULTS.vaporDensity),
+    speed: rv('shader-vapor-speed', DEFAULTS.vaporSpeed),
+    scale: rv('shader-vapor-scale', DEFAULTS.vaporScale),
+    warmth: rv('shader-vapor-warmth', DEFAULTS.vaporWarmth),
+    glow: rv('shader-vapor-glow', DEFAULTS.vaporGlow),
+  }),
+  tunnel: (base, rv) => ({
+    ...base,
+    preset: 'tunnel',
+    speed: rv('shader-tunnel-speed', DEFAULTS.tunnelSpeed),
+    fractal: Math.round(rv('shader-tunnel-fractal', DEFAULTS.tunnelFractal)),
+    radius: rv('shader-tunnel-radius', DEFAULTS.tunnelRadius),
+    brightness: rv('shader-tunnel-brightness', DEFAULTS.tunnelBrightness),
+    twist: rv('shader-tunnel-twist', DEFAULTS.tunnelTwist),
+  }),
+  spore: (base, rv) => ({
+    ...base,
+    preset: 'spore',
+    sensorAngle: rv('shader-spore-sensor-angle', DEFAULTS.sporeSensorAngle),
+    sensorOffset: rv('shader-spore-sensor-offset', DEFAULTS.sporeSensorOffset),
+    stepSize: rv('shader-spore-step-size', DEFAULTS.sporeStepSize),
+    rotation: rv('shader-spore-rotation', DEFAULTS.sporeRotation),
+    decay: rv('shader-spore-decay', DEFAULTS.sporeDecay),
+  }),
+  flow: (base, rv) => ({
+    ...base,
+    preset: 'flow',
+    curl: rv('shader-flow-curl', DEFAULTS.flowCurl),
+    advection: rv('shader-flow-advection', DEFAULTS.flowAdvection),
+    smoothing: rv('shader-flow-smoothing', DEFAULTS.flowSmoothing),
+    contrast: rv('shader-flow-contrast', DEFAULTS.flowContrast),
+    fieldSpeed: rv('shader-flow-field-speed', DEFAULTS.flowFieldSpeed),
+  }),
+  plasma: (base, rv) => ({
+    ...base,
+    preset: 'plasma',
+    speed: rv('shader-plasma-speed', DEFAULTS.plasmaSpeed),
+    bands: rv('shader-plasma-bands', DEFAULTS.plasmaBands),
+    pressure: rv('shader-plasma-pressure', DEFAULTS.plasmaPressure),
+    turn: rv('shader-plasma-turn', DEFAULTS.plasmaTurn),
+    diffusion: rv('shader-plasma-diffusion', DEFAULTS.plasmaDiffusion),
+  }),
+  none: (base) => ({ ...base, preset: 'none' }),
+};

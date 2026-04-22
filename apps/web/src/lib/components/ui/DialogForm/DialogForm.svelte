@@ -19,7 +19,8 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import * as Dialog from '$lib/components/ui/Dialog';
-  import { Alert, Button } from '$lib/components/ui';
+  import Alert from '../Alert/Alert.svelte';
+  import { Button } from '../Button';
   import * as m from '$paraglide/messages';
 
   interface Props {

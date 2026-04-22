@@ -26,8 +26,7 @@
     "@codex/worker-utils": "workspace:*",
     "better-auth": "^1.4.11",
     "hono": "^4.6.20",
-    "vite-plugin-dts": "^4.5.4",
-    "zod": "^4.3.5"
+    "vite-plugin-dts": "^4.5.4"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.10.0",

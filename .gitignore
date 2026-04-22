@@ -108,5 +108,9 @@ skills-lock.json
 .windsurf/
 .zencoder/
 
+# Fallow incremental cache (per-workspace)
+.fallow/
+**/.fallow/
+
 # Local-only shader verification scripts
 apps/web/.*-shot.mjs

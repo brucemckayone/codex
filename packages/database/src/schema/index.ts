@@ -9,6 +9,7 @@ export * from './content';
 export * from './ecommerce';
 export * from './followers';
 export * from './notifications';
+export * from './organizations';
 export * from './playback';
 export * from './settings';
 export * from './storage';

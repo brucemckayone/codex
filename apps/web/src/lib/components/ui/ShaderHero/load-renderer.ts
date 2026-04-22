@@ -7,235 +7,99 @@
 import type { ShaderRenderer } from './renderer-types';
 import type { ShaderPresetId } from './shader-config';
 
+type RendererLoader = () => Promise<ShaderRenderer | null>;
+
+// Each entry is its own dynamic-import arrow, preserving per-preset code-splitting
+// (Vite creates a separate chunk per import() site).
+const RENDERER_LOADERS: Record<ShaderPresetId, RendererLoader> = {
+  suture: async () =>
+    (await import('./renderers/suture-renderer')).createSutureRenderer(),
+  ether: async () =>
+    (await import('./renderers/ether-renderer')).createEtherRenderer(),
+  warp: async () =>
+    (await import('./renderers/warp-renderer')).createWarpRenderer(),
+  ripple: async () =>
+    (await import('./renderers/ripple-renderer')).createRippleRenderer(),
+  pulse: async () =>
+    (await import('./renderers/pulse-renderer')).createPulseRenderer(),
+  ink: async () =>
+    (await import('./renderers/ink-renderer')).createInkRenderer(),
+  topo: async () =>
+    (await import('./renderers/topo-renderer')).createTopoRenderer(),
+  nebula: async () =>
+    (await import('./renderers/nebula-renderer')).createNebulaRenderer(),
+  turing: async () =>
+    (await import('./renderers/turing-renderer')).createTuringRenderer(),
+  silk: async () =>
+    (await import('./renderers/silk-renderer')).createSilkRenderer(),
+  glass: async () =>
+    (await import('./renderers/glass-renderer')).createGlassRenderer(),
+  film: async () =>
+    (await import('./renderers/film-renderer')).createFilmRenderer(),
+  flux: async () =>
+    (await import('./renderers/flux-renderer')).createFluxRenderer(),
+  lava: async () =>
+    (await import('./renderers/lava-renderer')).createLavaRenderer(),
+  caustic: async () =>
+    (await import('./renderers/caustic-renderer')).createCausticRenderer(),
+  physarum: async () =>
+    (await import('./renderers/physarum-renderer')).createPhysarumRenderer(),
+  rain: async () =>
+    (await import('./renderers/rain-renderer')).createRainRenderer(),
+  frost: async () =>
+    (await import('./renderers/frost-renderer')).createFrostRenderer(),
+  glow: async () =>
+    (await import('./renderers/glow-renderer')).createGlowRenderer(),
+  life: async () =>
+    (await import('./renderers/life-renderer')).createLifeRenderer(),
+  mycelium: async () =>
+    (await import('./renderers/mycelium-renderer')).createMyceliumRenderer(),
+  aurora: async () =>
+    (await import('./renderers/aurora-renderer')).createAuroraRenderer(),
+  tendrils: async () =>
+    (await import('./renderers/tendrils-renderer')).createTendrilsRenderer(),
+  pollen: async () =>
+    (await import('./renderers/pollen-renderer')).createPollenRenderer(),
+  growth: async () =>
+    (await import('./renderers/growth-renderer')).createGrowthRenderer(),
+  geode: async () =>
+    (await import('./renderers/geode-renderer')).createGeodeRenderer(),
+  lenia: async () =>
+    (await import('./renderers/lenia-renderer')).createLeniaRenderer(),
+  ocean: async () =>
+    (await import('./renderers/ocean-renderer')).createOceanRenderer(),
+  bismuth: async () =>
+    (await import('./renderers/bismuth-renderer')).createBismuthRenderer(),
+  pearl: async () =>
+    (await import('./renderers/pearl-renderer')).createPearlRenderer(),
+  vortex: async () =>
+    (await import('./renderers/vortex-renderer')).createVortexRenderer(),
+  gyroid: async () =>
+    (await import('./renderers/gyroid-renderer')).createGyroidRenderer(),
+  waves: async () =>
+    (await import('./renderers/waves-renderer')).createWavesRenderer(),
+  clouds: async () =>
+    (await import('./renderers/clouds-renderer')).createCloudsRenderer(),
+  fracture: async () =>
+    (await import('./renderers/fracture-renderer')).createFractureRenderer(),
+  julia: async () =>
+    (await import('./renderers/julia-renderer')).createJuliaRenderer(),
+  vapor: async () =>
+    (await import('./renderers/vapor-renderer')).createVaporRenderer(),
+  tunnel: async () =>
+    (await import('./renderers/tunnel-renderer')).createTunnelRenderer(),
+  plasma: async () =>
+    (await import('./renderers/plasma-renderer')).createPlasmaRenderer(),
+  flow: async () =>
+    (await import('./renderers/flow-renderer')).createFlowRenderer(),
+  spore: async () =>
+    (await import('./renderers/spore-renderer')).createSporeRenderer(),
+  none: async () => null,
+};
+
 export async function loadRenderer(
   preset: ShaderPresetId
 ): Promise<ShaderRenderer | null> {
-  switch (preset) {
-    case 'suture': {
-      const { createSutureRenderer } = await import(
-        './renderers/suture-renderer'
-      );
-      return createSutureRenderer();
-    }
-    case 'ether': {
-      const { createEtherRenderer } = await import(
-        './renderers/ether-renderer'
-      );
-      return createEtherRenderer();
-    }
-    case 'warp': {
-      const { createWarpRenderer } = await import('./renderers/warp-renderer');
-      return createWarpRenderer();
-    }
-    case 'ripple': {
-      const { createRippleRenderer } = await import(
-        './renderers/ripple-renderer'
-      );
-      return createRippleRenderer();
-    }
-    case 'pulse': {
-      const { createPulseRenderer } = await import(
-        './renderers/pulse-renderer'
-      );
-      return createPulseRenderer();
-    }
-    case 'ink': {
-      const { createInkRenderer } = await import('./renderers/ink-renderer');
-      return createInkRenderer();
-    }
-    case 'topo': {
-      const { createTopoRenderer } = await import('./renderers/topo-renderer');
-      return createTopoRenderer();
-    }
-    case 'nebula': {
-      const { createNebulaRenderer } = await import(
-        './renderers/nebula-renderer'
-      );
-      return createNebulaRenderer();
-    }
-    case 'turing': {
-      const { createTuringRenderer } = await import(
-        './renderers/turing-renderer'
-      );
-      return createTuringRenderer();
-    }
-    case 'silk': {
-      const { createSilkRenderer } = await import('./renderers/silk-renderer');
-      return createSilkRenderer();
-    }
-    case 'glass': {
-      const { createGlassRenderer } = await import(
-        './renderers/glass-renderer'
-      );
-      return createGlassRenderer();
-    }
-    case 'film': {
-      const { createFilmRenderer } = await import('./renderers/film-renderer');
-      return createFilmRenderer();
-    }
-    case 'flux': {
-      const { createFluxRenderer } = await import('./renderers/flux-renderer');
-      return createFluxRenderer();
-    }
-    case 'lava': {
-      const { createLavaRenderer } = await import('./renderers/lava-renderer');
-      return createLavaRenderer();
-    }
-    case 'caustic': {
-      const { createCausticRenderer } = await import(
-        './renderers/caustic-renderer'
-      );
-      return createCausticRenderer();
-    }
-    case 'physarum': {
-      const { createPhysarumRenderer } = await import(
-        './renderers/physarum-renderer'
-      );
-      return createPhysarumRenderer();
-    }
-    case 'rain': {
-      const { createRainRenderer } = await import('./renderers/rain-renderer');
-      return createRainRenderer();
-    }
-    case 'frost': {
-      const { createFrostRenderer } = await import(
-        './renderers/frost-renderer'
-      );
-      return createFrostRenderer();
-    }
-    case 'glow': {
-      const { createGlowRenderer } = await import('./renderers/glow-renderer');
-      return createGlowRenderer();
-    }
-    case 'life': {
-      const { createLifeRenderer } = await import('./renderers/life-renderer');
-      return createLifeRenderer();
-    }
-    case 'mycelium': {
-      const { createMyceliumRenderer } = await import(
-        './renderers/mycelium-renderer'
-      );
-      return createMyceliumRenderer();
-    }
-    case 'aurora': {
-      const { createAuroraRenderer } = await import(
-        './renderers/aurora-renderer'
-      );
-      return createAuroraRenderer();
-    }
-    case 'tendrils': {
-      const { createTendrilsRenderer } = await import(
-        './renderers/tendrils-renderer'
-      );
-      return createTendrilsRenderer();
-    }
-    case 'pollen': {
-      const { createPollenRenderer } = await import(
-        './renderers/pollen-renderer'
-      );
-      return createPollenRenderer();
-    }
-    case 'growth': {
-      const { createGrowthRenderer } = await import(
-        './renderers/growth-renderer'
-      );
-      return createGrowthRenderer();
-    }
-    case 'geode': {
-      const { createGeodeRenderer } = await import(
-        './renderers/geode-renderer'
-      );
-      return createGeodeRenderer();
-    }
-    case 'lenia': {
-      const { createLeniaRenderer } = await import(
-        './renderers/lenia-renderer'
-      );
-      return createLeniaRenderer();
-    }
-    case 'ocean': {
-      const { createOceanRenderer } = await import(
-        './renderers/ocean-renderer'
-      );
-      return createOceanRenderer();
-    }
-    case 'bismuth': {
-      const { createBismuthRenderer } = await import(
-        './renderers/bismuth-renderer'
-      );
-      return createBismuthRenderer();
-    }
-    case 'pearl': {
-      const { createPearlRenderer } = await import(
-        './renderers/pearl-renderer'
-      );
-      return createPearlRenderer();
-    }
-    case 'vortex': {
-      const { createVortexRenderer } = await import(
-        './renderers/vortex-renderer'
-      );
-      return createVortexRenderer();
-    }
-    case 'gyroid': {
-      const { createGyroidRenderer } = await import(
-        './renderers/gyroid-renderer'
-      );
-      return createGyroidRenderer();
-    }
-    case 'waves': {
-      const { createWavesRenderer } = await import(
-        './renderers/waves-renderer'
-      );
-      return createWavesRenderer();
-    }
-    case 'clouds': {
-      const { createCloudsRenderer } = await import(
-        './renderers/clouds-renderer'
-      );
-      return createCloudsRenderer();
-    }
-    case 'fracture': {
-      const { createFractureRenderer } = await import(
-        './renderers/fracture-renderer'
-      );
-      return createFractureRenderer();
-    }
-    case 'julia': {
-      const { createJuliaRenderer } = await import(
-        './renderers/julia-renderer'
-      );
-      return createJuliaRenderer();
-    }
-    case 'vapor': {
-      const { createVaporRenderer } = await import(
-        './renderers/vapor-renderer'
-      );
-      return createVaporRenderer();
-    }
-    case 'tunnel': {
-      const { createTunnelRenderer } = await import(
-        './renderers/tunnel-renderer'
-      );
-      return createTunnelRenderer();
-    }
-    case 'plasma': {
-      const { createPlasmaRenderer } = await import(
-        './renderers/plasma-renderer'
-      );
-      return createPlasmaRenderer();
-    }
-    case 'flow': {
-      const { createFlowRenderer } = await import('./renderers/flow-renderer');
-      return createFlowRenderer();
-    }
-    case 'spore': {
-      const { createSporeRenderer } = await import(
-        './renderers/spore-renderer'
-      );
-      return createSporeRenderer();
-    }
-    default:
-      return null;
-  }
+  const loader = RENDERER_LOADERS[preset];
+  return loader ? loader() : null;
 }

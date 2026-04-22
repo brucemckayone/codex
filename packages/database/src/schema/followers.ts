@@ -7,7 +7,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { organizations } from './content';
+import { organizations } from './organizations';
 import { users } from './users';
 
 /**

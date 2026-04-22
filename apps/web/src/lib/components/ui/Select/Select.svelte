@@ -22,7 +22,7 @@
   import { createSelect } from '@melt-ui/svelte';
   import { untrack } from 'svelte';
   import { fly } from 'svelte/transition';
-  import { Label } from '../index';
+  import { Label } from '../Label';
   import { ChevronDownIcon, CheckIcon } from '$lib/components/ui/Icon';
 
   interface Option {

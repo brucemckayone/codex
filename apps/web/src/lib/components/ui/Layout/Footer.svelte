@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { PageContainer } from '../index';
+  import PageContainer from './PageContainer.svelte';
   import * as m from '$paraglide/messages';
 </script>
 
