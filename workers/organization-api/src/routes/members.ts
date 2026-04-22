@@ -13,7 +13,7 @@
  * - DELETE /:userId         - Remove member
  */
 
-import { VersionedCache } from '@codex/cache';
+import { CacheType, VersionedCache } from '@codex/cache';
 import { createDbClient, eq, schema } from '@codex/database';
 import type { HonoEnv } from '@codex/shared-types';
 import {
@@ -79,6 +79,29 @@ function deleteMembershipCache(ctx: CacheCtx, orgId: string, userId: string) {
     .CACHE_KV as import('@cloudflare/workers-types').KVNamespace;
   ctx.executionCtx.waitUntil(
     kv.delete(memberCacheKey(orgId, userId)).catch(() => {})
+  );
+}
+
+/**
+ * Bump one user's library KV version key (Codex-c01do).
+ *
+ * Membership mutations (invite/update-role/remove) can change what a user
+ * sees in their library:
+ *   - owner/admin/creator role grants `team` content access
+ *   - role changes can grant/revoke management-content access
+ *   - removing a member revokes all management-conditional content
+ *
+ * Fires once per affected user, fire-and-forget via waitUntil. Mirrors
+ * the shape of `invalidateOrgMembership()` in `@codex/content` without
+ * pulling the content package as a dep of organization-api.
+ */
+function bumpUserLibrary(ctx: CacheCtx, userId: string): void {
+  if (!ctx.env.CACHE_KV || !userId) return;
+  const cache = new VersionedCache({
+    kv: ctx.env.CACHE_KV as import('@cloudflare/workers-types').KVNamespace,
+  });
+  ctx.executionCtx.waitUntil(
+    cache.invalidate(CacheType.COLLECTION_USER_LIBRARY(userId)).catch(() => {})
   );
 }
 
@@ -175,6 +198,9 @@ app.post(
         ctx.input.body.role
       );
       invalidateOrgSlugCache(ctx);
+      // Invalidate invited user's library cache (Codex-c01do) — gaining a
+      // management role unlocks team-only content in their library UI.
+      bumpUserLibrary(ctx, result.userId);
 
       // Send invitation email (fire-and-forget)
       sendEmailToWorker(ctx.env, ctx.executionCtx, {
@@ -224,6 +250,9 @@ app.patch(
         ctx.input.body.role
       );
       invalidateOrgSlugCache(ctx);
+      // Invalidate the role-target user's library cache (Codex-c01do) — role
+      // changes toggle management-content access.
+      bumpUserLibrary(ctx, ctx.input.params.userId);
       return result;
     },
   })
@@ -251,6 +280,9 @@ app.delete(
       );
       deleteMembershipCache(ctx, ctx.input.params.id, ctx.input.params.userId);
       invalidateOrgSlugCache(ctx);
+      // Invalidate the removed user's library cache (Codex-c01do) — they
+      // lose all management-conditional content access.
+      bumpUserLibrary(ctx, ctx.input.params.userId);
       return null;
     },
   })
