@@ -48,7 +48,17 @@
     publishedAt?: string | Date | null;
     viewCount?: number | null;
     tags?: string[] | null;
-    mediaItem?: { durationSeconds?: number | null } | null;
+    mediaItem?: {
+      durationSeconds?: number | null;
+      /**
+       * Resolved CDN URL for the 30-second HLS preview clip. The public
+       * content API surfaces this on `mediaItem` (see PublicContentItem in
+       * `@codex/content`). Used to power hover/focus preview playback on
+       * video content — lazy-attached on first hover to avoid burning
+       * bandwidth on every landing-page visit.
+       */
+      hlsPreviewUrl?: string | null;
+    } | null;
     creator?: {
       username?: string | null;
       displayName?: string | null;
@@ -132,6 +142,48 @@
   const hasImage = $derived(
     !!thumbnail && !failedThumbnails.has(thumbnail)
   );
+
+  // ── Preview media on hover/focus ───────────────────────────────
+  // Only video content with a resolved preview URL is eligible. Audio and
+  // written content types fall back to thumbnail-only — audio gets a
+  // `:hover` brightness nudge via CSS (see `.spotlight__image-still`
+  // brightness filter below); written is static.
+  //
+  // The `<video>` element is kept in the DOM but with NO `src` attribute
+  // until the user actually hovers/focuses — this avoids burning bandwidth
+  // on every page render. After the first attach, the source persists so
+  // subsequent hovers don't re-download.
+  //
+  // Reduced-motion users get no hover preview and no cross-fade; the
+  // `@media (prefers-reduced-motion: reduce)` block below kills both.
+  const previewUrl = $derived(item.mediaItem?.hlsPreviewUrl ?? null);
+  const canPreview = $derived(contentType === 'video' && !!previewUrl);
+  let previewAttached = $state(false);
+  let previewActive = $state(false);
+  let previewEl = $state<HTMLVideoElement | null>(null);
+
+  function handlePreviewEnter() {
+    if (!canPreview) return;
+    previewAttached = true;
+    previewActive = true;
+    // `play()` queues until `canplay`. Ignore the promise rejection —
+    // autoplay policies can block muted playback on some platforms, and
+    // when that happens the still stays visible (the cross-fade is gated
+    // on `data-visible=true` but opacity only lifts when `previewActive`
+    // is set — which we already set above).
+    queueMicrotask(() => {
+      previewEl?.play().catch(() => {});
+    });
+  }
+
+  function handlePreviewLeave() {
+    if (!canPreview) return;
+    previewActive = false;
+    // Pause (don't unload) so returning to the card snaps back quickly.
+    // The browser keeps the buffered preview in memory while the card
+    // is still mounted.
+    previewEl?.pause();
+  }
 </script>
 
 <section
@@ -141,7 +193,13 @@
   data-has-image={hasImage}
 >
   <div class="spotlight__container">
-    <article class="spotlight__card">
+    <article
+      class="spotlight__card"
+      onpointerenter={handlePreviewEnter}
+      onpointerleave={handlePreviewLeave}
+      onfocusin={handlePreviewEnter}
+      onfocusout={handlePreviewLeave}
+    >
       <!-- Brand gradient backdrop fills the card. Positioned absolutely
            below the content layer. The card's border-radius clips the
            gradient so it appears naturally framed. Cheap CSS replacement
@@ -155,7 +213,13 @@
       <!-- Content layer — always above the shader/veil -->
       <div class="spotlight__content">
         {#if hasImage && thumbnail}
-          <a class="spotlight__image" {href} tabindex="-1" aria-hidden="true">
+          <a
+            class="spotlight__image"
+            {href}
+            tabindex="-1"
+            aria-hidden="true"
+            data-preview-active={previewActive}
+          >
             <img
               class="spotlight__image-still"
               src={thumbnail}
@@ -168,6 +232,26 @@
                 if (thumbnail) failedThumbnails.add(thumbnail);
               }}
             />
+
+            {#if canPreview}
+              <!-- Lazy-attached preview video. Element stays mounted so the
+                   cross-fade has a target, but `src` only sets once the
+                   user hovers — avoids prefetching ~2MB of HLS for every
+                   landing-page visit. The `preload="none"` + no-src-pre-hover
+                   combo keeps the idle network silent. -->
+              <video
+                bind:this={previewEl}
+                class="spotlight__preview-video"
+                src={previewAttached ? (previewUrl ?? undefined) : undefined}
+                loop
+                muted
+                playsinline
+                preload="none"
+                aria-hidden="true"
+                tabindex="-1"
+                data-visible={previewActive}
+              ></video>
+            {/if}
           </a>
         {/if}
 
@@ -405,7 +489,9 @@
     height: 100%;
     object-fit: cover;
     object-position: center;
-    transition: transform var(--duration-slower) var(--ease-smooth);
+    transition:
+      transform var(--duration-slower) var(--ease-smooth),
+      filter var(--duration-default) var(--ease-default);
     position: absolute;
     inset: 0;
     z-index: 1;
@@ -413,6 +499,36 @@
 
   .spotlight__card:hover .spotlight__image-still {
     transform: scale(var(--card-image-hover-scale, 1.05));
+  }
+
+  /* Audio hover — brighten the thumbnail subtly as a feedback cue (there's
+     no preview playback for audio; the still just warms up). Matches the
+     ContentCard audio row hover treatment. */
+  .spotlight[data-content-type='audio'] .spotlight__card:hover
+    .spotlight__image-still {
+    filter: brightness(1.08);
+  }
+
+  /* ── Preview video (hover/focus only, video contentType) ───────
+     Crossfades over the still once `data-visible=true` lands. Stays
+     mounted and `preload=none` so first-frame decode cost happens at
+     hover time, not page load. The reduced-motion block below kills
+     the fade entirely. */
+  .spotlight__preview-video {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-slow) var(--ease-smooth);
+  }
+
+  .spotlight__preview-video[data-visible='true'] {
+    opacity: 1;
   }
 
   /* ── Body column (glass panel, md+) ────────────────────────────
@@ -686,8 +802,16 @@
   @media (prefers-reduced-motion: reduce) {
     .spotlight__card,
     .spotlight__image-still,
+    .spotlight__preview-video,
     .spotlight__cta {
       transition: none;
+    }
+
+    /* Respect reduced-motion — no hover preview, no cross-fade.
+       The video element stays in the DOM (so its bind:this still
+       lands) but the opacity rule above never lifts. */
+    .spotlight__preview-video[data-visible='true'] {
+      opacity: 0;
     }
   }
 </style>
