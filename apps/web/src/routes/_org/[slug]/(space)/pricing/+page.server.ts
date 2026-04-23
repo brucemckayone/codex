@@ -19,8 +19,14 @@ export const load: PageServerLoad = async ({
 }) => {
   const { org } = await parent();
 
+  // REVALIDATE variant forces browsers to revalidate on every request so a
+  // user who signs in (or subscribes) doesn't see the anonymous tier list
+  // cached from an earlier logged-out visit (which would hide their current
+  // subscription state in the payload).
   setHeaders(
-    locals.user ? CACHE_HEADERS.PRIVATE : CACHE_HEADERS.DYNAMIC_PUBLIC
+    locals.user
+      ? CACHE_HEADERS.PRIVATE
+      : CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE
   );
 
   const api = createServerApi(platform, cookies);

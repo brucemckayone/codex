@@ -19,7 +19,10 @@ export const load: PageServerLoad = async ({
   cookies,
   setHeaders,
 }) => {
-  setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
+  // Payload includes `user: locals.user` (see return below), so the response
+  // varies by auth. REVALIDATE lets the CDN serve the shared anonymous version
+  // while forcing the browser to revalidate once the user signs in.
+  setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE);
 
   // Strip leading @ from username (URL convention: /@alex-creator)
   const username = params.username.replace(/^@/, '');

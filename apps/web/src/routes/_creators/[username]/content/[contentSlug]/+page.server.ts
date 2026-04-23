@@ -78,9 +78,13 @@ export const load: PageServerLoad = async ({
     error(404, 'Content not found');
   }
 
-  // Set cache headers based on auth state
+  // Set cache headers based on auth state. REVALIDATE variant forces browsers
+  // to revalidate on every request so a buyer returning from Stripe doesn't
+  // see the anonymous response cached earlier.
   setHeaders(
-    locals.user ? CACHE_HEADERS.PRIVATE : CACHE_HEADERS.DYNAMIC_PUBLIC
+    locals.user
+      ? CACHE_HEADERS.PRIVATE
+      : CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE
   );
 
   // Body gating: only render the body once access is confirmed. Free content

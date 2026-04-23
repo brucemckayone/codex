@@ -33,9 +33,13 @@ export const load: PageServerLoad = async ({
   const { org } = parentData;
   const { contentSlug } = params;
 
-  // Public visitors get CDN caching; authenticated responses vary by access state
+  // Public visitors get CDN caching; authenticated responses vary by access state.
+  // REVALIDATE variant forces browsers to revalidate on every request so a buyer
+  // returning from Stripe doesn't see the anonymous response cached earlier.
   setHeaders(
-    locals.user ? CACHE_HEADERS.PRIVATE : CACHE_HEADERS.DYNAMIC_PUBLIC
+    locals.user
+      ? CACHE_HEADERS.PRIVATE
+      : CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE
   );
 
   // Fetch content via public endpoint with org.id + slug — 1 API call.

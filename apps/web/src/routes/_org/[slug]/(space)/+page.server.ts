@@ -78,7 +78,11 @@ function buildSections(all: ContentItem[]): FeedSection[] {
   // carousel so we don't visually force a grid that can't breathe.
   const featured = remaining.filter((i) => i.featured);
   const featuredInSection =
-    featured.length > 0 ? (featured.length <= 2 ? featured.slice(0, 2) : featured) : [];
+    featured.length > 0
+      ? featured.length <= 2
+        ? featured.slice(0, 2)
+        : featured
+      : [];
   if (featured.length > 0) {
     const useSpread = featured.length <= 2;
     sections.push({
@@ -252,8 +256,13 @@ export const load: PageServerLoad = async ({
 
   const { org } = await parent();
 
+  // REVALIDATE variant forces browsers to revalidate on every request so a
+  // user who signs in (or buys/subscribes) doesn't get served the anonymous
+  // response cached during an earlier logged-out visit to the same URL.
   setHeaders(
-    locals.user ? CACHE_HEADERS.PRIVATE : CACHE_HEADERS.DYNAMIC_PUBLIC
+    locals.user
+      ? CACHE_HEADERS.PRIVATE
+      : CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE
   );
 
   // Single catalogue fetch — slice in memory for every section below.

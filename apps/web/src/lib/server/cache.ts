@@ -41,6 +41,21 @@ export const CACHE_HEADERS = {
     'Cache-Control':
       'public, max-age=300, s-maxage=300, stale-while-revalidate=3600',
   },
+  /**
+   * Dynamic page whose response varies by auth state (e.g. same URL shows
+   * purchase CTA for anonymous vs stream button for buyer). `max-age=0` forces
+   * the browser to revalidate on every request — so once the user's session
+   * cookie exists, the next navigation gets a fresh auth-aware response
+   * instead of the anonymous response the browser cached during the logged-out
+   * visit. `s-maxage=300` preserves the CDN win for anonymous visitors.
+   *
+   * Use this (not DYNAMIC_PUBLIC) any time the server load branches on
+   * `locals.user` or returns auth-dependent data in the payload.
+   */
+  DYNAMIC_PUBLIC_REVALIDATE: {
+    'Cache-Control':
+      'public, max-age=0, s-maxage=300, stale-while-revalidate=3600',
+  },
   /** Authenticated/private: no caching */
   PRIVATE: {
     'Cache-Control': 'private, no-cache',
