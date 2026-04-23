@@ -209,10 +209,34 @@
     isArticle ? (creator?.displayName ?? creator?.username ?? '') : ''
   );
   const showArticleMeta = $derived(isArticle && (!!articleByline || !!articleReadTime));
-  // `ARTICLE · Category` head-line — small-caps, tertiary text, no pill
-  // (design neutrality — R12). Category is optional.
-  const articleKindLabel = $derived(
-    isArticle ? (category ? `ARTICLE \u00B7 ${category}` : 'ARTICLE') : ''
+
+  // ── Media-type kind-line ─────────────────────────────────────────────
+  // `TYPE · Category` small-caps head-line shown above the title on every
+  // non-compact, non-resume, non-audio-row, non-featured card. Generalises
+  // the article-only treatment so audio and video cards carry the same
+  // typographic signal (parity). Palette stays neutral — no coloured pill,
+  // no per-type accent colour (R12 neutrality; see
+  // feedback_neutral_card_palette.md).
+  const kindTypeLabel = $derived.by(() => {
+    if (contentType === 'audio') return 'AUDIO';
+    if (contentType === 'video') return 'VIDEO';
+    if (contentType === 'article') return 'ARTICLE';
+    return '';
+  });
+  const kindLabel = $derived(
+    kindTypeLabel ? (category ? `${kindTypeLabel} \u00B7 ${category}` : kindTypeLabel) : ''
+  );
+  // Featured variant already carries full metadata in its overlay body
+  // (description + creator), so suppressing the kind-line avoids visual
+  // duplication against the eyebrow-style hierarchy already in play.
+  // Audio-row has its own `.cc__audio-meta` treatment. Compact + resume
+  // deliberately strip non-essential copy.
+  const showKindLine = $derived(
+    !!kindTypeLabel &&
+      variant !== 'compact' &&
+      variant !== 'resume' &&
+      variant !== 'featured' &&
+      !isAudioRow
   );
 
   // ── Access-state decoration (Codex-k7ppt) ─────────────────────────────
@@ -287,7 +311,11 @@
           {#if contentType === 'video'}
             <PlayIcon size={32} />
           {:else if contentType === 'audio'}
-            <MusicIcon size={32} />
+            <!-- Audio fallback when the real thumbnail fails to load.
+                 A prominent waveform stands in for missing album art so
+                 audio cards ALWAYS carry an audio signature — either the
+                 real thumbnail, or this waveform tile. -->
+            <AudioWaveform {id} variant="thumb" class="cc__thumb-waveform" />
           {:else}
             <FileTextIcon size={32} />
           {/if}
@@ -297,7 +325,8 @@
           {#if contentType === 'video'}
             <PlayIcon size={32} />
           {:else if contentType === 'audio'}
-            <MusicIcon size={32} />
+            <!-- Audio with no thumbnail — see the fallback comment above. -->
+            <AudioWaveform {id} variant="thumb" class="cc__thumb-waveform" />
           {:else}
             <FileTextIcon size={32} />
           {/if}
@@ -364,12 +393,23 @@
 
     <!-- Body -->
     <div class="cc__body">
-      {#if isArticle && variant !== 'compact' && variant !== 'resume'}
-        <!-- Article head-line — `ARTICLE · Category`. Small-caps text,
-             no coloured pill (R12 neutrality). Replaces the generic
-             eyebrow so articles carry a consistent editorial signal
-             everywhere they appear. -->
-        <p class="cc__kind">{articleKindLabel}</p>
+      {#if showKindLine}
+        <!-- Media-type head-line — `AUDIO · Category` / `VIDEO · Category`
+             / `ARTICLE · Category`. Small-caps text with a small leading
+             icon inheriting currentColor; no coloured pill (R12 neutrality).
+             Replaces the generic eyebrow so every catalogue card carries
+             a consistent type signal — structural aspect ratio + this
+             typographic label — regardless of whether a category is set. -->
+        <p class="cc__kind">
+          {#if contentType === 'audio'}
+            <MusicIcon size={12} class="cc__kind-icon" />
+          {:else if contentType === 'video'}
+            <PlayIcon size={12} class="cc__kind-icon" />
+          {:else if contentType === 'article'}
+            <FileTextIcon size={12} class="cc__kind-icon" />
+          {/if}
+          <span>{kindLabel}</span>
+        </p>
       {:else if category && variant !== 'compact' && variant !== 'resume'}
         <p class="cc__eyebrow">{category}</p>
       {/if}
@@ -588,13 +628,18 @@
   }
 
   /*
-    Article kind-line — `ARTICLE · Category` small-caps head-line shown
-    above the title on every article card. Matches `.cc__eyebrow` but
-    prefixes the fixed `ARTICLE` token so the kind is legible even when
-    no category is set (design neutrality — no coloured pill per R12).
+    Media-type kind-line — `AUDIO · Category` / `VIDEO · Category` /
+    `ARTICLE · Category` small-caps head-line shown above the title on
+    catalogue cards. Matches `.cc__eyebrow` typography but prefixes the
+    fixed media-type token so the kind is legible even when no category
+    is set (design neutrality — no coloured pill per R12). The leading
+    icon inherits `currentColor` so it shares the tertiary text tone.
   */
   .cc__kind {
     margin: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
     font-family: var(--font-body);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
@@ -602,6 +647,10 @@
     letter-spacing: var(--tracking-wider);
     color: var(--color-text-tertiary);
     line-height: var(--leading-tight);
+  }
+
+  :global(.cc__kind-icon) {
+    flex-shrink: 0;
   }
 
   /* PriceBadge position */
@@ -1042,11 +1091,15 @@
     aspect-ratio: 1 / 1;
   }
 
-  /* Scale up the music icon so it fills the square like album art */
-  .cc[data-content-type='audio'] .cc__placeholder :global(svg) {
-    width: var(--space-12);
-    height: var(--space-12);
-    opacity: var(--opacity-40);
+  /*
+    Audio placeholder — when no real thumbnail exists, we render an
+    `AudioWaveform variant="thumb"` that fills the 1:1 tile. The waveform
+    component handles its own sizing + opacity via its scoped styles, so
+    we only need to ensure it stretches to the placeholder bounds.
+  */
+  .cc[data-content-type='audio'] .cc__placeholder :global(.cc__thumb-waveform) {
+    width: 100%;
+    height: 100%;
   }
 
   /* ── ARTICLE: 3:2 editorial crop ──────────────────────────── */
@@ -1176,8 +1229,12 @@
     display: grid;
     grid-template-columns: auto 1fr;
     align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2);
+    /* Bumped from space-3 to space-4 — gives the larger album art + title
+       cluster real breathing room instead of feeling crammed. */
+    gap: var(--space-4);
+    /* Row padding bumped from space-2 to space-3 — the row is no longer
+       compact, so the outer cushion needs to match the taller album art. */
+    padding: var(--space-3);
     /* Transparent until hover — matches the card-transparency rule. */
     background: transparent;
     border-color: transparent;
@@ -1194,12 +1251,14 @@
     box-shadow: var(--shadow-sm);
   }
 
-  /* Album art — square, fixed width. ~80px baseline, ~96px at container
-     widths that can spare it (we adjust via @container below). */
+  /* Album art — square, fixed width. Bumped from space-20 (~80px) to
+     space-24 + space-4 (~112px) so the row reads as music-app generous
+     instead of compact-list terse. Composed from tokens so it scales
+     with org density. */
   .cc--audio-row .cc__thumb {
-    width: var(--space-20);
-    min-width: var(--space-20);
-    height: var(--space-20);
+    width: calc(var(--space-24) + var(--space-4));
+    min-width: calc(var(--space-24) + var(--space-4));
+    height: calc(var(--space-24) + var(--space-4));
     aspect-ratio: 1 / 1;
     border-radius: var(--radius-md);
     flex-shrink: 0;
@@ -1207,14 +1266,18 @@
 
   .cc--audio-row .cc__body {
     padding: 0;
-    gap: var(--space-1);
+    /* Bumped from space-1 to space-2 — the title is now one step larger,
+       so the meta/waveform need proportionally more separation. */
+    gap: var(--space-2);
     min-width: 0;
   }
 
   /* Two-line clamp keeps long track titles readable without blowing up
-     the row height. Single-line felt too terse during review. */
+     the row height. Single-line felt too terse during review. Bumped
+     one step (base → lg) so the title reads as the primary thing in
+     the row, not peer to the meta line. */
   .cc--audio-row .cc__title {
-    font-size: var(--text-base);
+    font-size: var(--text-lg);
     font-weight: var(--font-semibold);
     -webkit-line-clamp: 2;
   }
@@ -1225,25 +1288,55 @@
     display: none;
   }
 
-  /* Hide the eyebrow in compact row contexts — the album-art thumbnail
-     is already sized small; adding a category line above the title
-     would fight the row rhythm. */
+  /* Hide the kind-line and eyebrow in the row layout — the album-art +
+     waveform thumbnail already signal "this is audio" structurally, and
+     an extra `AUDIO · Category` head-line above the title fights the
+     playlist-row rhythm. Category is still available via the meta line. */
+  .cc--audio-row .cc__kind,
   .cc--audio-row .cc__eyebrow {
     display: none;
   }
 
   /* Waveform strip — brand-tinted via `color:` (AudioWaveform uses
-     currentColor). Thin and understated; never dominant. */
+     currentColor). Slightly taller (space-5 → space-6) to match the
+     beefier row height so it doesn't look hair-thin next to the 112px
+     album art. */
   :global(.cc--audio-row .cc__waveform) {
     width: 100%;
     /* Fixed height keeps layout stable during SSR/client hydration and
        sidesteps any aspect-ratio maths in the SVG itself. */
-    height: var(--space-5);
+    height: var(--space-6);
     color: color-mix(
       in srgb,
       var(--color-interactive) 60%,
       var(--color-player-text-secondary, var(--color-text-secondary))
     );
+  }
+
+  /* Thumbnail-fallback waveform — stands in for missing album art. Uses
+     a subtle brand tint over the secondary surface so the tile still
+     reads as part of the row palette without being identical to the
+     inline strip below the title. */
+  :global(.cc__thumb-waveform) {
+    color: color-mix(
+      in srgb,
+      var(--color-interactive) 45%,
+      var(--color-text-secondary)
+    );
+  }
+
+  /* Audio thumbnail placeholder — when the fallback waveform renders, we
+     want a subtle tinted backdrop (not the flat surface-secondary that
+     articles use) so the tile feels like a deliberate audio tile, not a
+     missing image. Slightly deeper on hover to echo the row lift. */
+  .cc[data-content-type='audio'] .cc__placeholder {
+    background: color-mix(in srgb, var(--color-interactive) 6%, var(--color-surface-secondary));
+    transition: background-color var(--duration-slow) var(--ease-smooth);
+  }
+
+  .cc--audio-row:hover .cc__placeholder,
+  .cc--audio-row:focus-within:has(:focus-visible) .cc__placeholder {
+    background: color-mix(in srgb, var(--color-interactive) 10%, var(--color-surface-secondary));
   }
 
   /* Creator · duration meta line. Small, tertiary text; matches the
@@ -1253,7 +1346,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-1);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--color-text-secondary);
     line-height: var(--leading-tight);
     /* Avoid wrapping mid-separator — meta reads as one unit. */
@@ -1282,6 +1375,27 @@
      list item, not a hero. */
   .cc--audio-row:hover .cc__image {
     transform: none;
+  }
+
+  /* ── Hover animation: inline waveform bars shimmer ───────────────
+     On hover / focus-within of the audio row, the inline waveform strip
+     animates: each bar scales up slightly on the Y-axis with a staggered
+     transition-delay so the wave reads as a single left-to-right pulse
+     rather than a hard flash. Gated by `no-preference` — the default bar
+     state is scaleY(1) so reduced-motion users see a static waveform.
+     Motion tokens inherited from `.waveform__bar` (--duration-slow +
+     --ease-smooth) keep this collapse to 0.01ms automatically under
+     prefers-reduced-motion: reduce.
+
+     The thumb-fallback waveform lives inside `.cc__placeholder`, which
+     is outside the cc__waveform scope, so we target the specific class
+     (.cc__waveform) to avoid pulsing the thumbnail bars — the thumbnail
+     carries the signature; the inline strip carries the motion. */
+  @media (prefers-reduced-motion: no-preference) {
+    .cc--audio-row:hover :global(.cc__waveform .waveform__bar),
+    .cc--audio-row:focus-within:has(:focus-visible) :global(.cc__waveform .waveform__bar) {
+      --_bar-hover-scale: 1.35;
+    }
   }
 
   /* Reduced motion: keep the hover affordance but drop the translate. */
