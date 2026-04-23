@@ -28,11 +28,7 @@
   );
 </script>
 
-<a
-  class="contrib"
-  {href}
-  aria-label="See content by {name}"
->
+<a class="contrib" {href}>
   <figure class="contrib__frame">
     {#if avatarUrl}
       <img
