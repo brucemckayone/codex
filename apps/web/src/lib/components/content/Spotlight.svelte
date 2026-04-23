@@ -612,12 +612,20 @@
   .spotlight__title {
     margin: 0;
     font-family: var(--font-heading, var(--font-sans));
-    /* Cinematic scale — fluid between mobile (2.5rem) and desktop (5rem).
-       Uses viewport-responsive `vw` so the title feels like a cover line,
-       not a card headline. */
-    font-size: clamp(2.5rem, 6vw, 5rem);
+    /* Cinematic scale — fluid between mobile (2rem) and desktop (3.5rem).
+       Scaled down from the original 6vw/5rem spec because the title lives
+       in the 40% body column on desktop (≈500px wide); 5rem on a single
+       unbreakable word (org-generated test slugs like "geargaegaerg")
+       overflowed the column. Still reads as a cover line, not a card. */
+    font-size: clamp(2rem, 3.2vw, 3.5rem);
     font-weight: var(--font-semibold);
     line-height: var(--leading-tight);
+    /* Force long unbreakable words (test data + real-world long titles)
+       to wrap mid-word rather than overflow the column. `overflow-wrap`
+       is the modern spelling; `word-break: break-word` is legacy Safari. */
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    hyphens: auto;
     /* Fixed white — shader backdrop + dark veil make this a promotional
        light-on-dark poster where the title MUST stay white regardless of
        org brand. Can't rely on `--color-player-text` here because
