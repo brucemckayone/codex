@@ -1532,8 +1532,21 @@ export class ContentAccessService extends BaseService {
       });
 
       const conditions = [
-        // Content must be subscriber-gated and published
-        eq(content.accessType, CONTENT_ACCESS_TYPE.SUBSCRIBERS),
+        // Content a subscription grants access to — either explicitly tagged
+        // `accessType='subscribers'`, or tier-gated paid content
+        // (`accessType='paid'` with a `minimumTierId` set). This mirrors the
+        // streaming-access rule in getStreamingUrl() so anything a subscriber
+        // can actually stream shows in their library. Paid content WITHOUT a
+        // minimumTierId is still gated behind purchase — it never appears
+        // here. Per-org tier-sortOrder check below (subConditions) decides
+        // whether this user's tier is high enough for any given item.
+        or(
+          eq(content.accessType, CONTENT_ACCESS_TYPE.SUBSCRIBERS),
+          and(
+            eq(content.accessType, CONTENT_ACCESS_TYPE.PAID),
+            sql`${content.minimumTierId} IS NOT NULL`
+          )
+        )!,
         eq(content.status, CONTENT_STATUS.PUBLISHED),
         isNull(content.deletedAt),
         // Must belong to one of the user's subscribed orgs (with tier check)
