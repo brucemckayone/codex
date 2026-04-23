@@ -172,6 +172,22 @@ Dependency chain: `v4wao` + `ac2o8` blocked by `oqv3r` (skill patch + preset dat
 |---|---|---|---|
 | `Codex-688ax` | P3 | Skill: add cross-reference rule — every `--brand-*` read by `org-brand.css` must be bound by `+layout.svelte` | `references/01-tokens.md` + `references/10-brand-editor.md` |
 
+### From iter-024 (preset coherence + upload flow audit)
+
+| Bead | Priority | Title | Root file(s) |
+|---|---|---|---|
+| `Codex-06ygy` | **P0** | **SECURITY: Logo upload bypasses SVG sanitization — stored XSS vector** | `multipart-procedure.ts:282-309` + `settings.ts:282-314` + `branding-settings-service.ts:254-310` |
+| `Codex-ne00j` | P1 | Logo 'Remove' button is dead — `updateBrandingCommand` omits `logoUrl` | `BrandEditorLogo.svelte:64` + `branding.remote.ts:158-208` |
+| `Codex-631mn` | P1 | Intro video invisible until cache flush — lazy auto-finalize only runs via polling | `branding-settings-service.ts:453-457,556-574` |
+| `Codex-uw05n` | P2 | Logo cache invalidation is fire-and-forget (ja9zp-class race) | `settings.ts:309` |
+| `Codex-57d8a` | P2 | SidebarRail blank gap when `logoUrl` is null — no placeholder | `SidebarRail.svelte:79-81` |
+| `Codex-mo3ib` | P3 | Deleted intro video HLS never cleaned from R2 | `branding-settings-service.ts:593-633` |
+| `Codex-dnjrn` | P3 | Onyx preset coherence — Luxury with 1.01 hover but 0.7 iridescence | `presets.ts:599` |
+
+**Massive iter-024 — 1 P0 (first of the loop), 2 P1s, 2 P2s, 2 P3s**. Reset pause counter to 0/3.
+
+Dependency: `uw05n` linked to `ja9zp` (same fix pattern — slug invalidation out of `waitUntil`).
+
 **Iter-023 sibling hunt proved `lqvyy` is isolated, not a pattern**: tokenOverrides FOUC is already tracked in `wcwpw`; `heroLayout`/intro-video/dark-logo are N/A (concept doesn't exist); player tokens are theme-agnostic by design. Zero new bug beads needed. See iter-023 audit for the full falsification.
 
 **Artifact**: `docs/brand-editor-investigation/lqvyy-patch.md` (520 lines) — PR-ready patch spec for `lqvyy`. Unified diff, unit test scaffolding, Playwright e2e spec, pre-PR checklist, rollout plan. Can be applied in one pass when authorized.
@@ -274,3 +290,4 @@ User confirmed 2026-04-23 that none of these six unknowns warrant investigation.
 | 021 | 2026-04-23 | G (hero visibility audit, sonnet), H (zero-consumer classification, **haiku**) | 9225y, peqvl, rwci4 | **Zero P1 findings — first convergence iteration.** Hero visibility chain is CLEAN end-to-end (5 keys, zero orphans). Verification step caught haiku mis-classifying 2 "DEAD" tokens that are actually live in production (pricing + VideoPlayer). `wcwpw`'s scope narrowed — hero-hide is SSR-rendered via `$derived.by()`, not `$effect`; FOUC only applies to CSS-var injection path. Minor noise bug: `injectBrandVars` writes useless `--color-hero-hide-*` CSS vars. Loop is now self-correcting prior-iteration artifacts. |
 | 022 | 2026-04-23 | I (darkOverrides render trace, sonnet), J (wwedk schema + UX design, sonnet) | lqvyy + design doc | **Bombshell P1**: `darkModeOverrides` is NEVER rendered for non-editor visitors — feature is half-shipped, every org with dark colors set is showing LIGHT palette to dark-mode users. Fix is ~30 lines (add `$derived` + `style:--brand-*-dark` bindings in `+layout.svelte`). Design doc for `wwedk` written (459 lines) — recommends parallel `darkTokenOverrides` column. User scope expansion + new P1 resets convergence counter to 0/3. Reference 10 was FINALLY opened by an agent and correctly predicted the bug via its §10 gotcha list. |
 | 023 | 2026-04-23 | K (sibling bug hunt, sonnet), L (lqvyy patch spec, sonnet) | 688ax + patch doc | **Zero new bugs — `lqvyy` proven isolated.** Agent K's sibling hunt falsified the iceberg hypothesis: 7 candidates checked, none were new bugs (5 N/A by design, 2 already in `wcwpw`). Agent L produced 520-line PR-ready patch spec with diff, unit tests, Playwright e2e, checklist — ready to apply in one pass. Filed `Codex-688ax` as a skill-patch task (queued after lqvyy lands). Pause counter back to 1/3. |
+| 024 | 2026-04-23 | M (preset coherence, **haiku**), N (upload flow mapping, sonnet) | 06ygy (P0) + ne00j + 631mn + uw05n + 57d8a + mo3ib + dnjrn | **MASSIVE iteration — first P0 of the loop**. Agent N mapped logo + intro video upload flows and found SVG sanitization completely absent in the logo upload path (explicit CLAUDE.md rule violation, stored XSS vector). Also found: dead Remove button (schema omits logoUrl), intro video invisible until cache flush, cache race (ja9zp-class), missing logo placeholder, orphaned R2 HLS segments. Agent M confirmed 26/27 presets coherent; 1 P3 mild mismatch (Onyx luxury). Pause counter RESET to 0/3 — investigation terrain not exhausted after all. |
