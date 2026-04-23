@@ -207,11 +207,15 @@ function applyPreset(preset: BrandPreset): void {
   // Dark overrides (presets can bundle dark theme colours)
   state.pending.darkOverrides = values.darkOverrides ?? null;
 
-  // Token overrides (presets can bundle hero, player, glass, card tokens etc.)
-  // Clear existing overrides first for a clean slate, then apply preset's tokens
-  state.pending.tokenOverrides = preset.tokenOverrides
-    ? { ...preset.tokenOverrides }
-    : {};
+  // Token overrides: MERGE preset keys over existing user fine-tunes.
+  // Preset keys win on conflict (the preset author chose that value).
+  // Keys the preset doesn't touch (e.g. shadow-scale, body-weight, hero-hide-*)
+  // are preserved so fine-tune configuration survives preset browsing
+  // (fix for Codex-oqv3r — previously wholesale-replaced, wiping ~30 keys).
+  state.pending.tokenOverrides = {
+    ...(state.pending.tokenOverrides ?? {}),
+    ...(preset.tokenOverrides ?? {}),
+  };
 
   // Hero layout (presets can set the hero layout variant)
   if (preset.heroLayout) {
