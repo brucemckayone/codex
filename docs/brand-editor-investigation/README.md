@@ -147,7 +147,19 @@ Dependency chain: `9u8wg` blocks `z91af` (close-restore becomes dead code after 
 
 Dependency chain: `v4wao` + `ac2o8` blocked by `oqv3r` (skill patch + preset data fix both only make sense under merge semantics).
 
-**Artifact**: `docs/brand-editor-investigation/token-registry.json` (2016 lines, 168 tokens) — machine-readable registry produced by iter-020 Agent E (haiku). Query by category to find org-brandable tokens, fine-tune keys, zero-consumer tokens.
+**Artifact**: `docs/brand-editor-investigation/token-registry.json` (2016 lines, 168 tokens) — machine-readable registry produced by iter-020 Agent E (haiku). Query by category to find org-brandable tokens, fine-tune keys, zero-consumer tokens. **Note**: iter-021 verification found 6 tokens misclassified in this file — see `Codex-9225y`.
+
+### From iter-021 (hero visibility + zero-consumer verification)
+
+| Bead | Priority | Title | Root file(s) |
+|---|---|---|---|
+| `Codex-9225y` | P3 | Correct `token-registry.json` — 6 tokens misclassified as zero-consumer (all LIVE-DIRECT) | `docs/brand-editor-investigation/token-registry.json` |
+| `Codex-peqvl` | P3 | Refine `Codex-wcwpw` scope — hero-hide-* is SSR-rendered, NOT part of FOUC | `apps/web/src/routes/_org/[slug]/+layout.svelte:72-89` |
+| `Codex-rwci4` | P3 | `injectBrandVars` writes `--color-hero-hide-*` with no consumers (noise) | `apps/web/src/lib/brand-editor/css-injection.ts:466-473` |
+
+Key finding (non-bug): **Hero visibility flags are fully CORRECT** end-to-end (5 keys, 5 SSR attrs, 5 CSS consumers, zero orphans). No bugs to file from that slice of the audit.
+
+**Convergence signal**: iter-021 produced zero P1 findings — first iteration in the loop to do so. This is pause-condition count 1 of 3 per /design-system §7.
 
 ---
 
@@ -208,3 +220,4 @@ Completed: ~~Light/dark sync~~ (iter-019); ~~Cross-org brand injection~~ (iter-0
 | 018 | 2026-04-23 | A (token three-way diff, sonnet), B (font persistence trace, sonnet) | ja9zp, 7afgp, g49b4, mdg94, fopbo, ag8l8 | Fonts ARE saved to DB — bug is waitUntil race on slug-keyed CACHE_KV invalidation, compounded by missing client-side invalidate('cache:org-versions') |
 | 019 | 2026-04-23 | C (light/dark sync, sonnet), D (cross-org brand injection, sonnet) | 9u8wg, micw3, z91af, wcwpw, zv85e | Light/dark sync is THREE stacked bugs (editor writes global `<html data-theme>`, ThemeToggle has no external subscription, close() clobbers sidebar toggle). Sub-orgs are FLAT — no hierarchy, no brand inheritance. New FOUC bug: shader/hero tokenOverrides arrive post-hydration. Both agents proposed new skill references (`11-theming.md` + `11-multi-tenancy.md`) — deferred until bugs land so refs reflect reality. |
 | 020 | 2026-04-23 | E (token registry JSON, **haiku**), F (preset round-trip audit, sonnet) | oqv3r, v4wao, ac2o8 | P1 preset bug: `applyPreset` wholesale-replaces `state.pending.tokenOverrides`, silently wiping ~30 fine-tune keys every time a user browses presets. One-line fix (merge instead of replace). Produced `token-registry.json` — 168 tokens, machine-readable. Pattern-level anti-pattern surfaced: "partial Record update should merge, not replace" — candidate for skill reference 10. Haiku nailed the enumeration task for ~1/3 the token cost of sonnet. |
+| 021 | 2026-04-23 | G (hero visibility audit, sonnet), H (zero-consumer classification, **haiku**) | 9225y, peqvl, rwci4 | **Zero P1 findings — first convergence iteration.** Hero visibility chain is CLEAN end-to-end (5 keys, zero orphans). Verification step caught haiku mis-classifying 2 "DEAD" tokens that are actually live in production (pricing + VideoPlayer). `wcwpw`'s scope narrowed — hero-hide is SSR-rendered via `$derived.by()`, not `$effect`; FOUC only applies to CSS-var injection path. Minor noise bug: `injectBrandVars` writes useless `--color-hero-hide-*` CSS vars. Loop is now self-correcting prior-iteration artifacts. |
