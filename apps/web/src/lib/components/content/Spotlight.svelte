@@ -35,6 +35,19 @@
     description?: string | null;
     thumbnailUrl?: string | null;
     contentType?: 'video' | 'audio' | 'written' | null;
+    /**
+     * Publication metadata — all optional so callers that haven't wired
+     * the full content payload still render the core layout. Each row
+     * guards on its own field, no placeholders appear for missing data.
+     *
+     * `publishedAt` / `viewCount` / `tags` come straight from the Content
+     * schema (see `packages/database/src/schema/content.ts`). They arrive
+     * as string (SSR JSON serialise) or Date (runtime) — the derivations
+     * below handle both.
+     */
+    publishedAt?: string | Date | null;
+    viewCount?: number | null;
+    tags?: string[] | null;
     mediaItem?: { durationSeconds?: number | null } | null;
     creator?: {
       username?: string | null;
@@ -67,6 +80,47 @@
       : contentType === 'written'
         ? 'Read now'
         : 'Watch now'
+  );
+
+  // ── Publication metadata ──────────────────────────────────────
+  // Each derivation returns `null` when its source field is missing —
+  // the template guards with `{#if}` so no placeholder appears for
+  // absent data. Dates are serialised as strings through SSR; normalise
+  // via `new Date()` before passing to the formatter.
+  const publishedLabel = $derived.by(() => {
+    if (!item.publishedAt) return null;
+    const date = item.publishedAt instanceof Date
+      ? item.publishedAt
+      : new Date(item.publishedAt);
+    if (Number.isNaN(date.getTime())) return null;
+    return new Intl.DateTimeFormat('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    }).format(date);
+  });
+
+  // Only surface view counts > 0 — a zero-view anchor piece reads as
+  // noise on a fresh post. Compact notation (`1.2K`, `3.4M`) keeps the
+  // meta row tight.
+  const viewsLabel = $derived.by(() => {
+    const count = item.viewCount;
+    if (typeof count !== 'number' || count <= 0) return null;
+    const formatted = new Intl.NumberFormat('en-GB', {
+      notation: 'compact',
+    }).format(count);
+    return `${formatted} views`;
+  });
+
+  // Cap tag strip at 3 so it complements rather than dominates. Filter
+  // defensively — the DB column is `jsonb`, so malformed rows could in
+  // theory surface null / non-string entries.
+  const topTags = $derived(
+    Array.isArray(item.tags)
+      ? item.tags
+          .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+          .slice(0, 3)
+      : []
   );
 
   // Track which thumbnails failed to load (by URL). Derive `hasImage` so
@@ -129,28 +183,46 @@
               <p class="spotlight__description">{description}</p>
             {/if}
 
-            <div class="spotlight__meta">
-              {#if creatorName}
-                <div class="spotlight__creator">
-                  <Avatar class="spotlight__avatar">
-                    <AvatarImage
-                      src={item.creator?.avatar ?? undefined}
-                      alt={creatorName}
-                    />
-                    <AvatarFallback>
-                      {creatorName.charAt(0).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span class="spotlight__creator-name">{creatorName}</span>
-                </div>
-              {/if}
+            {#if topTags.length > 0}
+              <ul class="spotlight__tags" aria-label="Tags">
+                {#each topTags as tag (tag)}
+                  <li class="spotlight__chip spotlight__chip--tag">{tag}</li>
+                {/each}
+              </ul>
+            {/if}
 
-              {#if durationSeconds}
-                <span class="spotlight__chip">
-                  {formatDurationHuman(durationSeconds)}
-                </span>
-              {/if}
-            </div>
+            {#if creatorName || publishedLabel || durationSeconds || viewsLabel}
+              <div class="spotlight__meta">
+                {#if creatorName}
+                  <div class="spotlight__creator">
+                    <Avatar class="spotlight__avatar">
+                      <AvatarImage
+                        src={item.creator?.avatar ?? undefined}
+                        alt={creatorName}
+                      />
+                      <AvatarFallback>
+                        {creatorName.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span class="spotlight__creator-name">{creatorName}</span>
+                  </div>
+                {/if}
+
+                {#if publishedLabel}
+                  <span class="spotlight__meta-item">{publishedLabel}</span>
+                {/if}
+
+                {#if durationSeconds}
+                  <span class="spotlight__chip">
+                    {formatDurationHuman(durationSeconds)}
+                  </span>
+                {/if}
+
+                {#if viewsLabel}
+                  <span class="spotlight__meta-item">{viewsLabel}</span>
+                {/if}
+              </div>
+            {/if}
 
             <a class="spotlight__cta" {href}>
               {#if contentType === 'audio'}
@@ -478,7 +550,18 @@
     overflow: hidden;
   }
 
-  /* ── Meta (creator + duration) ─────────────────────────────── */
+  /* ── Tags ──────────────────────────────────────────────────── */
+
+  .spotlight__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  /* ── Meta (creator + date + duration + views) ──────────────── */
 
   .spotlight__meta {
     display: flex;
@@ -506,6 +589,15 @@
     color: hsl(0 0% 100% / 0.85);
   }
 
+  /* Non-chip meta rows (date, views) — lighter weight than the duration
+     pill so the eye lands on the duration when it's present. */
+  .spotlight__meta-item {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    font-variant-numeric: tabular-nums;
+    color: hsl(0 0% 100% / 0.65);
+  }
+
   .spotlight__chip {
     display: inline-flex;
     align-items: center;
@@ -522,6 +614,15 @@
     border: var(--border-width) var(--border-style)
       hsl(0 0% 100% / 0.2);
     border-radius: var(--radius-full);
+  }
+
+  /* Tag chips — nudge the casing + tracking so the strip reads as a
+     metadata row, not a button group. Same chip chrome as the duration
+     pill so the meta level reads as a consistent rail. */
+  .spotlight__chip--tag {
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wider);
+    font-size: calc(var(--text-xs) * 0.9);
   }
 
   /* ── CTA (anchor styled as primary button) ─────────────────── */
