@@ -166,6 +166,18 @@ Dependency chain: `v4wao` + `ac2o8` blocked by `oqv3r` (skill patch + preset dat
 |---|---|---|---|
 | `Codex-lqvyy` | **P1** | **`darkModeOverrides` NEVER rendered for non-editor visitors** — half-shipped feature; dark colors invisible to regular users | `apps/web/src/routes/_org/[slug]/+layout.svelte` — missing `$derived` + `style:--brand-color-dark` bindings |
 
+### From iter-023 (sibling hunt + lqvyy PR sketch)
+
+| Bead | Priority | Title | Root file(s) |
+|---|---|---|---|
+| `Codex-688ax` | P3 | Skill: add cross-reference rule — every `--brand-*` read by `org-brand.css` must be bound by `+layout.svelte` | `references/01-tokens.md` + `references/10-brand-editor.md` |
+
+**Iter-023 sibling hunt proved `lqvyy` is isolated, not a pattern**: tokenOverrides FOUC is already tracked in `wcwpw`; `heroLayout`/intro-video/dark-logo are N/A (concept doesn't exist); player tokens are theme-agnostic by design. Zero new bug beads needed. See iter-023 audit for the full falsification.
+
+**Artifact**: `docs/brand-editor-investigation/lqvyy-patch.md` (520 lines) — PR-ready patch spec for `lqvyy`. Unified diff, unit test scaffolding, Playwright e2e spec, pre-PR checklist, rollout plan. Can be applied in one pass when authorized.
+
+**Convergence signal**: iter-023 produced zero new P1/P2 bugs — pause counter **1/3** (reset after iter-022's user-expansion finding).
+
 **Bombshell finding**: Agent I traced `darkModeOverrides` end-to-end and found the render path terminates at the editor's `$effect`. Every org that's set dark colors is showing LIGHT primary colors to dark-mode visitors. The feature works in editor preview (via `injectBrandVars`) but fails silently for production visitors.
 
 **Fix is ~30 lines**: add `$derived.by()` parse + 4 `style:--brand-*-dark` bindings on `.org-layout`, mirroring the existing `brandPrimary`/`brandSecondary`/etc. pattern. Because `$derived` runs in SSR, dark colors arrive with initial HTML — no FOUC.
@@ -247,3 +259,4 @@ Completed: ~~Light/dark sync~~ (iter-019); ~~Cross-org brand injection~~ (iter-0
 | 020 | 2026-04-23 | E (token registry JSON, **haiku**), F (preset round-trip audit, sonnet) | oqv3r, v4wao, ac2o8 | P1 preset bug: `applyPreset` wholesale-replaces `state.pending.tokenOverrides`, silently wiping ~30 fine-tune keys every time a user browses presets. One-line fix (merge instead of replace). Produced `token-registry.json` — 168 tokens, machine-readable. Pattern-level anti-pattern surfaced: "partial Record update should merge, not replace" — candidate for skill reference 10. Haiku nailed the enumeration task for ~1/3 the token cost of sonnet. |
 | 021 | 2026-04-23 | G (hero visibility audit, sonnet), H (zero-consumer classification, **haiku**) | 9225y, peqvl, rwci4 | **Zero P1 findings — first convergence iteration.** Hero visibility chain is CLEAN end-to-end (5 keys, zero orphans). Verification step caught haiku mis-classifying 2 "DEAD" tokens that are actually live in production (pricing + VideoPlayer). `wcwpw`'s scope narrowed — hero-hide is SSR-rendered via `$derived.by()`, not `$effect`; FOUC only applies to CSS-var injection path. Minor noise bug: `injectBrandVars` writes useless `--color-hero-hide-*` CSS vars. Loop is now self-correcting prior-iteration artifacts. |
 | 022 | 2026-04-23 | I (darkOverrides render trace, sonnet), J (wwedk schema + UX design, sonnet) | lqvyy + design doc | **Bombshell P1**: `darkModeOverrides` is NEVER rendered for non-editor visitors — feature is half-shipped, every org with dark colors set is showing LIGHT palette to dark-mode users. Fix is ~30 lines (add `$derived` + `style:--brand-*-dark` bindings in `+layout.svelte`). Design doc for `wwedk` written (459 lines) — recommends parallel `darkTokenOverrides` column. User scope expansion + new P1 resets convergence counter to 0/3. Reference 10 was FINALLY opened by an agent and correctly predicted the bug via its §10 gotcha list. |
+| 023 | 2026-04-23 | K (sibling bug hunt, sonnet), L (lqvyy patch spec, sonnet) | 688ax + patch doc | **Zero new bugs — `lqvyy` proven isolated.** Agent K's sibling hunt falsified the iceberg hypothesis: 7 candidates checked, none were new bugs (5 N/A by design, 2 already in `wcwpw`). Agent L produced 520-line PR-ready patch spec with diff, unit tests, Playwright e2e, checklist — ready to apply in one pass. Filed `Codex-688ax` as a skill-patch task (queued after lqvyy lands). Pause counter back to 1/3. |
