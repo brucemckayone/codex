@@ -13,7 +13,7 @@
 -->
 <script lang="ts">
   import { page } from '$app/state';
-  import { goto } from '$app/navigation';
+  import { goto, invalidate } from '$app/navigation';
   import { brandEditor } from '$lib/brand-editor';
   import { updateBrandingCommand } from '$lib/remote/branding.remote';
   import { toast } from '$lib/components/ui/Toast/toast-store';
@@ -68,6 +68,15 @@
           | 'magazine' | 'asymmetric' | 'portrait' | 'gallery' | 'stacked',
       });
       brandEditor.markSaved();
+      // Codex-7afgp: trigger the org layout's server load to re-run so
+      // the new branding is visible WITHOUT a manual page reload. The
+      // layout registers `depends('cache:org-versions')`; this invalidate
+      // call tells SvelteKit to re-run the load function. Paired with
+      // Codex-ja9zp (slug CACHE_KV invalidation now synchronous), the
+      // layout sees fresh branding on the next render.
+      await invalidate('cache:org-versions').catch(() => {
+        /* non-critical — save still succeeded, worst case user reloads */
+      });
       toast.success('Brand settings saved');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save brand settings');

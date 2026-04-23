@@ -167,38 +167,52 @@ export async function updateBrandCache(
  * Invalidate brand cache and bump org version for client staleness detection.
  * Also invalidates the slug-keyed VersionedCache for the public org info endpoint.
  * Extracts duplicated cache invalidation logic used by branding mutation handlers.
+ *
+ * Codex-ja9zp: the SLUG-keyed CACHE_KV invalidation runs INLINE (awaited)
+ * because that is the key the org layout reads via `/public/:slug/info`.
+ * If it stayed in waitUntil, a user reloading fast enough after save would
+ * hit the stale pre-save cached branding (the race that made font/color
+ * changes appear to "not persist"). BRAND_KV warm + orgId-version bump
+ * stay fire-and-forget via waitUntil — they are belt-and-suspenders for
+ * other consumers and not on the reload-critical path.
+ *
+ * Caller contract: awaited. Every call site is inside an async procedure
+ * handler, so `await invalidateBrandAndCache(...)` blocks the response
+ * by ~5–50ms (one DB lookup + one KV write). Acceptable for correctness.
  */
-function invalidateBrandAndCache(
+async function invalidateBrandAndCache(
   ctx: {
     env: Bindings;
     executionCtx: { waitUntil(promise: Promise<unknown>): void };
   },
   orgId: string,
   obs?: Logger
-) {
+): Promise<void> {
+  // 1. Synchronous: invalidate the slug-keyed public info cache.
+  //    This is the cache that `/public/:slug/info` reads on reload.
+  if (ctx.env.CACHE_KV) {
+    try {
+      const db = createDbClient(ctx.env);
+      const org = await db.query.organizations.findFirst({
+        where: eq(schema.organizations.id, orgId),
+        columns: { slug: true },
+      });
+      if (org?.slug) {
+        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        await cache.invalidate(org.slug);
+      }
+    } catch {
+      // Non-critical — slug cache expires via TTL if the await path fails.
+    }
+  }
+
+  // 2. Fire-and-forget: warm BRAND_KV + bump orgId version.
+  //    These are not on the reload-critical path; clients that care about
+  //    the orgId-keyed version detect staleness via client-side polling.
   const tasks: Promise<unknown>[] = [updateBrandCache(ctx.env, orgId, obs)];
   if (ctx.env.CACHE_KV) {
     const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
-    // Invalidate org version (for client staleness detection)
     tasks.push(cache.invalidate(orgId));
-    // Invalidate the slug-keyed public info cache.
-    // Resolve the slug from DB — fire-and-forget, non-critical.
-    tasks.push(
-      (async () => {
-        try {
-          const db = createDbClient(ctx.env);
-          const org = await db.query.organizations.findFirst({
-            where: eq(schema.organizations.id, orgId),
-            columns: { slug: true },
-          });
-          if (org?.slug) {
-            await cache.invalidate(org.slug);
-          }
-        } catch {
-          // Non-critical — slug cache expires via TTL
-        }
-      })()
-    );
   }
   ctx.executionCtx.waitUntil(Promise.all(tasks));
 }
@@ -257,7 +271,7 @@ app.put(
     handler: async (ctx): Promise<BrandingSettingsResponse> => {
       const result = await ctx.services.settings.updateBranding(ctx.input.body);
 
-      invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
+      await invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
 
       return result;
     },
@@ -306,7 +320,7 @@ app.post(
         size: logoFile.size,
       });
 
-      invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
+      await invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
 
       return result;
     },
@@ -329,7 +343,7 @@ app.delete(
       }
       const result = await ctx.services.settings.deleteLogo();
 
-      invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
+      await invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
 
       return result;
     },
@@ -359,7 +373,7 @@ app.post(
         ctx.user.id
       );
 
-      invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
+      await invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
 
       return result;
     },
@@ -393,7 +407,7 @@ app.delete(
     handler: async (ctx): Promise<BrandingSettingsResponse> => {
       const result = await ctx.services.settings.deleteIntroVideo();
 
-      invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
+      await invalidateBrandAndCache(ctx, ctx.input.params.id, ctx.obs);
 
       return result;
     },
