@@ -35,7 +35,7 @@
   import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
   import { Skeleton } from '../Skeleton';
   import { PriceBadge } from '../PriceBadge';
-  import { PlayIcon, MusicIcon, FileTextIcon } from '$lib/components/ui/Icon';
+  import { PlayIcon, MusicIcon, FileTextIcon, ArrowRightIcon } from '$lib/components/ui/Icon';
   import { extractPlainText } from '@codex/validation';
   import AudioWaveform from './AudioWaveform.svelte';
 
@@ -164,6 +164,27 @@
   const isCompleted = $derived(progress?.completed ?? false);
 
   const resumeTime = $derived(formatDuration(progress?.positionSeconds ?? 0));
+
+  // Resume-variant per-type copy. Video keeps the classic "Resume from X:XX"
+  // timecode. Audio reads as "Listen from X:XX" — same timecode shape but
+  // the verb carries audio context. Articles are scroll-based, not
+  // time-based, so the label shows the percent complete instead.
+  const resumeFromText = $derived.by(() => {
+    if (contentType === 'article') {
+      return m.library_resume_read_from({
+        percent: String(progressPercent),
+      });
+    }
+    if (contentType === 'audio') {
+      return m.library_resume_listen_from({ time: resumeTime });
+    }
+    return m.library_resume_from({ time: resumeTime });
+  });
+  const resumePillText = $derived.by(() => {
+    if (contentType === 'article') return m.library_resume_reading();
+    if (contentType === 'audio') return m.library_resume_listening();
+    return m.library_resume();
+  });
 
   // Audio-row layout: horizontal ("music playlist row") treatment. Only
   // activates when the caller explicitly opts in via `layout='row'` AND
@@ -478,10 +499,16 @@
            in case future variants want it back. -->
 
       {#if showResumeInfo}
-        <p class="cc__resume-text">{m.library_resume_from({ time: resumeTime })}</p>
+        <p class="cc__resume-text">{resumeFromText}</p>
         <span class="cc__resume-pill">
-          <PlayIcon size={14} />
-          {m.library_resume()}
+          {#if contentType === 'article'}
+            <ArrowRightIcon size={14} />
+          {:else if contentType === 'audio'}
+            <MusicIcon size={14} />
+          {:else}
+            <PlayIcon size={14} />
+          {/if}
+          {resumePillText}
         </span>
       {/if}
 
@@ -1129,6 +1156,15 @@
   /* When no real image — hide the thumb and let text take over. */
   .cc[data-content-type='article'] .cc__thumb:has(.cc__placeholder:not(.hidden)) {
     display: none;
+  }
+
+  /* Resume variant keeps the thumb frame even without an image so the
+     Continue-reading card has visual rhythm matching the audio/video
+     neighbours in the row. Overrides the article "hide the thumb when
+     text-led" rule only for the resume surface. */
+  .cc[data-variant='resume'][data-content-type='article']
+    .cc__thumb:has(.cc__placeholder:not(.hidden)) {
+    display: block;
   }
 
   /* Scale up the article icon — symmetry with audio */

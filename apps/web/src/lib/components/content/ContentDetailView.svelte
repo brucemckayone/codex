@@ -48,6 +48,7 @@
   import { followOrganization } from '$lib/remote/org.remote';
   import { MediaLiveRegion } from '$lib/components/media-a11y';
   import { extractPlainText } from '@codex/validation';
+  import { updateLocalProgress } from '$lib/collections/progress';
   import type { ContentWithRelations } from '$lib/types';
 
   /**
@@ -403,6 +404,112 @@
         (mod) => { AudioPlayer = mod.AudioPlayer; }
       );
     }
+  });
+
+  // ── Article reading progress ────────────────────────────────────
+  // Written content has no media element, so we synthesise a progress
+  // signal from scroll depth over the article body: positionSeconds =
+  // scrollRatio * estimatedReadSeconds. The estimated read time comes
+  // from the pre-computed `durationSeconds` on the media item when
+  // set (editor-authored), falling back to a 250 wpm word-count pass
+  // on the extracted plaintext body. Writes land in the shared
+  // progressCollection via `updateLocalProgress`, matching the video
+  // / audio path — so Continue Watching picks articles up the same
+  // way the other content types do.
+  //
+  // Throttling: scroll fires at up to 60Hz, so we gate save() behind
+  // a `requestAnimationFrame` latch (one save per animation frame at
+  // most) AND a 1000ms minimum floor between saves. The `scrollend`
+  // event would be nicer but Safari still lacks support (2026-04);
+  // the rAF + floor pattern gives a similar calm signal on all
+  // browsers. Reduced motion doesn't need special handling — we're
+  // not animating anything, just listening to native scroll.
+  let articleBodyEl = $state<HTMLDivElement | undefined>();
+  const isArticleContent = $derived(content.contentType === 'written');
+
+  /** Word-count-based read-time fallback — 250 wpm is the standard
+   *  reading-ease value used across Codex (see `formatReadTime` in
+   *  ContentCard). Matches the card's display so Continue Watching
+   *  percent reads the same value the original card showed. */
+  const estimatedReadSeconds = $derived.by<number>(() => {
+    if (!isArticleContent) return 0;
+    // Prefer editor-authored duration when present
+    const authored = content.mediaItem?.durationSeconds ?? null;
+    if (authored && authored > 0) return Math.round(authored);
+    // Fallback: 250 wpm over the body plaintext
+    const plain = extractPlainText(contentBodyHtml);
+    if (!plain) return 0;
+    const words = plain.split(/\s+/).filter(Boolean).length;
+    const seconds = Math.max(60, Math.round((words / 250) * 60));
+    return seconds;
+  });
+
+  $effect(() => {
+    if (!browser) return;
+    if (!isArticleContent || !hasAccess) return;
+    if (!articleBodyEl) return;
+    if (estimatedReadSeconds <= 0) return;
+
+    const bodyEl = articleBodyEl;
+    const contentId = content.id;
+    const dur = estimatedReadSeconds;
+    const MIN_SAVE_INTERVAL_MS = 1000;
+
+    let rafId = 0;
+    let lastSaveAt = 0;
+
+    function computeScrollRatio(): number {
+      // Ratio of the article body already scrolled past. Uses the
+      // element's bounding rect relative to the viewport: when the
+      // top is still below the viewport, ratio = 0; when the bottom
+      // is above the viewport, ratio = 1; in between, linear.
+      const rect = bodyEl.getBoundingClientRect();
+      const viewport = window.innerHeight || document.documentElement.clientHeight;
+      const bodyHeight = rect.height;
+      // Distance already scrolled past the top of the article body,
+      // clamped to [0, bodyHeight - viewport].
+      const scrolledPast = Math.max(0, -rect.top);
+      const scrollable = Math.max(1, bodyHeight - viewport);
+      const ratio = scrolledPast / scrollable;
+      return Math.min(1, Math.max(0, ratio));
+    }
+
+    function save(): void {
+      const ratio = computeScrollRatio();
+      const positionSeconds = Math.round(ratio * dur);
+      updateLocalProgress(contentId, positionSeconds, dur);
+      lastSaveAt = Date.now();
+    }
+
+    function handleScroll(): void {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        const now = Date.now();
+        if (now - lastSaveAt < MIN_SAVE_INTERVAL_MS) return;
+        save();
+      });
+    }
+
+    function handleVisibilityChange(): void {
+      if (document.visibilityState === 'hidden') save();
+    }
+
+    // Initial save so the progress entry exists (starts at 0 unless
+    // the user entered via an anchor that auto-scrolled mid-body).
+    save();
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (rafId) cancelAnimationFrame(rafId);
+      // Final save on teardown — matches VideoPlayer's tracker.detach()
+      // final save pattern.
+      save();
+    };
   });
 
   // ── SEO ─────────────────────────────────────────────────────────
@@ -929,7 +1036,7 @@
 
     {#if contentBodyHtml}
       {#if hasAccess}
-        <div class="content-detail__body">
+        <div class="content-detail__body" bind:this={articleBodyEl}>
           <ProseContent html={contentBodyHtml} />
         </div>
       {:else if accessLoading}

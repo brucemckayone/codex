@@ -3,6 +3,7 @@ export { default as AlertCircleIcon } from './AlertCircleIcon.svelte';
 export { default as AlertTriangleIcon } from './AlertTriangleIcon.svelte';
 // Navigation
 export { default as ArrowLeftIcon } from './ArrowLeftIcon.svelte';
+export { default as ArrowRightIcon } from './ArrowRightIcon.svelte';
 // Misc
 export { default as CalendarIcon } from './CalendarIcon.svelte';
 export { default as CheckCircleIcon } from './CheckCircleIcon.svelte';
@@ -44,6 +45,7 @@ export { default as LogInIcon } from './LogInIcon.svelte';
 export { default as MaximizeIcon } from './MaximizeIcon.svelte';
 export { default as MenuIcon } from './MenuIcon.svelte';
 export { default as MicIcon } from './MicIcon.svelte';
+export { default as MinusCircleIcon } from './MinusCircleIcon.svelte';
 export { default as MinusIcon } from './MinusIcon.svelte';
 export { default as MoonIcon } from './MoonIcon.svelte';
 export { default as MoreHorizontalIcon } from './MoreHorizontalIcon.svelte';

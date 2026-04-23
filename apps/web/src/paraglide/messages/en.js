@@ -3567,6 +3567,22 @@ export const library_resume_from = (params) => `Resume from ${params.time}`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const library_resume_listen_from = (params) => `Listen from ${params.time}`
+
+
+/**
+ * @param {{ percent: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_resume_read_from = (params) => `Read from ${params.percent}%`
+
+
+/**
+ * @param {{ time: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const library_time_remaining = (params) => `${params.time} left`
 
 
@@ -3576,6 +3592,22 @@ export const library_time_remaining = (params) => `${params.time} left`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const library_resume = () => `Resume`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_resume_listening = () => `Continue listening`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_resume_reading = () => `Continue reading`
 
 
 /**
