@@ -1,9 +1,11 @@
 <script lang="ts">
   import { brandEditor } from '$lib/brand-editor';
-  import { uploadLogoForm } from '$lib/remote/branding.remote';
+  import { deleteLogo, uploadLogoForm } from '$lib/remote/branding.remote';
   import Button from '$lib/components/ui/Button/Button.svelte';
 
   let fileInput: HTMLInputElement;
+  let deleting = $state(false);
+  let deleteError = $state<string | null>(null);
 
   const logoUrl = $derived(brandEditor.pending?.logoUrl ?? null);
   const uploading = $derived(uploadLogoForm.pending > 0);
@@ -13,6 +15,25 @@
     if (!input.files?.length) return;
     // Programmatically submit the hidden form
     input.form?.requestSubmit();
+  }
+
+  async function handleRemove() {
+    if (!brandEditor.orgId || deleting) return;
+    deleting = true;
+    deleteError = null;
+    try {
+      // Call the server delete FIRST so the R2 object and DB column are
+      // actually cleared. Only mutate editor state after success —
+      // previously this only cleared editor state (Codex-ne00j); save
+      // payload schema had no `logoUrl` field, so the DB was untouched
+      // and the logo reappeared on reload.
+      await deleteLogo(brandEditor.orgId);
+      brandEditor.updateField('logoUrl', null);
+    } catch (err) {
+      deleteError = err instanceof Error ? err.message : 'Failed to remove logo';
+    } finally {
+      deleting = false;
+    }
   }
 
   // Handle upload success — update store with new logo URL
@@ -61,14 +82,23 @@
       </Button>
     </form>
     {#if logoUrl}
-      <Button variant="ghost" size="sm" onclick={() => brandEditor.updateField('logoUrl', null)} disabled={uploading}>
-        Remove
+      <Button
+        variant="ghost"
+        size="sm"
+        onclick={handleRemove}
+        disabled={uploading || deleting}
+        loading={deleting}
+      >
+        {deleting ? 'Removing…' : 'Remove'}
       </Button>
     {/if}
   </div>
 
   {#if uploadLogoForm.result?.error}
     <p class="logo-level__error">{uploadLogoForm.result.error}</p>
+  {/if}
+  {#if deleteError}
+    <p class="logo-level__error">{deleteError}</p>
   {/if}
 
   <p class="logo-level__hint">
