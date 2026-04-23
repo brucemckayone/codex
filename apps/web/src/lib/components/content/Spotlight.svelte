@@ -20,7 +20,7 @@
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
   import type { ShaderPresetId } from '$lib/components/ui/ShaderHero/shader-config';
   import { buildContentUrl } from '$lib/utils/subdomain';
-  import { getThumbnailUrl, getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
+  import { getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
   import { formatDurationHuman } from '$lib/utils/format';
   import { extractPlainText } from '@codex/validation';
 
@@ -47,7 +47,7 @@
 
   const titleId = $derived(`spotlight-${item.id}`);
   const href = $derived(buildContentUrl(page.url, { id: item.id, slug: item.slug }));
-  const thumbnail = $derived(getThumbnailUrl(item.thumbnailUrl ?? undefined));
+  const thumbnail = $derived(item.thumbnailUrl ?? null);
   const description = $derived(
     item.description ? extractPlainText(item.description) : ''
   );
@@ -142,15 +142,15 @@
           {/if}
 
           <div class="spotlight__meta">
-            {#if item.creator}
+            {#if creatorName}
               <div class="spotlight__creator">
                 <Avatar class="spotlight__avatar">
                   <AvatarImage
-                    src={item.creator.avatar ?? undefined}
+                    src={item.creator?.avatar ?? undefined}
                     alt={creatorName}
                   />
                   <AvatarFallback>
-                    {creatorName.charAt(0).toUpperCase() || '?'}
+                    {creatorName.charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
                 <span class="spotlight__creator-name">{creatorName}</span>
@@ -267,22 +267,39 @@
        legibility via a light backdrop-blur, not a saturation cut. */
   }
 
-  /* Veil — sits between shader and content. Kept LIGHT so the shader
-     remains the dominant visual note on the card. Just enough blur to
-     keep text legible and enough tinted gradient (bottom-right darker)
-     to give the CTA zone contrast. */
+  /* Veil — sits between shader and content. The card uses a dedicated
+     LIGHT-ON-DARK treatment (text in `--color-text-inverse`), so the veil
+     establishes a consistent dark floor behind the copy regardless of
+     which shader preset the org picked. A radial darken on the right
+     (where copy lives) guarantees legibility; the left stays brighter to
+     let the shader breathe around the thumbnail. */
   .spotlight__card-veil {
     position: absolute;
     inset: 0;
     z-index: 1;
     pointer-events: none;
-    background: linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--color-background) 8%, transparent) 0%,
-      color-mix(in srgb, var(--color-background) 28%, transparent) 100%
-    );
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--color-neutral-900) 10%, transparent) 0%,
+        color-mix(in srgb, var(--color-neutral-900) 55%, transparent) 65%,
+        color-mix(in srgb, var(--color-neutral-900) 65%, transparent) 100%
+      );
     backdrop-filter: blur(var(--blur-sm));
     -webkit-backdrop-filter: blur(var(--blur-sm));
+  }
+
+  /* On narrow viewports the grid collapses to 1 col (image stacked above
+     body); the right-biased veil would leave the image bottom dim. Fall
+     back to a vertical darken that suits the stacked layout. */
+  @media (--below-md) {
+    .spotlight__card-veil {
+      background: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--color-neutral-900) 25%, transparent) 0%,
+        color-mix(in srgb, var(--color-neutral-900) 60%, transparent) 100%
+      );
+    }
   }
 
   /* Content sits above shader + veil */
@@ -351,10 +368,13 @@
     margin: 0;
     font-family: var(--font-body, var(--font-sans));
     font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
+    font-weight: var(--font-bold);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
-    color: var(--color-interactive);
+    /* Bright brand tint on dark veil reads as a promotional flag.
+       color-mix with white lifts it above the shader in case brand
+       is too dark. */
+    color: color-mix(in srgb, var(--color-interactive) 65%, white 35%);
     line-height: var(--leading-tight);
   }
 
@@ -364,14 +384,13 @@
     font-size: var(--text-3xl);
     font-weight: var(--font-semibold);
     line-height: var(--leading-tight);
-    color: var(--color-text);
+    /* Fixed light text — the shader behind the card can be any colour,
+       so we lean on the veil to supply the dark floor. */
+    color: var(--color-text-inverse, white);
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    /* Subtle text shadow so titles stay legible over any shader colour.
-       Kept tight so it doesn't feel like a drop-shadow era. */
-    text-shadow: 0 1px 2px color-mix(in srgb, var(--color-neutral-900) 20%, transparent);
   }
 
   @media (--breakpoint-md) {
@@ -387,7 +406,8 @@
   }
 
   .spotlight__title-link:hover {
-    color: var(--color-interactive);
+    /* Lift the brand tint on hover — soft, not a flash. */
+    color: color-mix(in srgb, var(--color-interactive) 45%, white 55%);
   }
 
   .spotlight__title-link:focus-visible {
@@ -400,7 +420,10 @@
     margin: 0;
     font-size: var(--text-base);
     line-height: var(--leading-relaxed);
-    color: var(--color-text-secondary);
+    /* Fixed light text at 78% opacity so it sits a step below the title
+       without losing legibility. Paired with the veil's 55–65% darken on
+       the right, meets WCAG AA (4.5:1) against the darkest shader. */
+    color: color-mix(in srgb, white 78%, transparent);
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
@@ -432,7 +455,8 @@
   .spotlight__creator-name {
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-text-secondary);
+    /* Fixed light on the dark card. */
+    color: color-mix(in srgb, white 85%, transparent);
   }
 
   .spotlight__chip {
@@ -442,12 +466,14 @@
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
     font-variant-numeric: tabular-nums;
-    color: var(--color-text-secondary);
-    background: color-mix(in srgb, var(--color-surface-card) 70%, transparent);
+    /* Light text + translucent dark pill — reads clearly on any shader
+       without fighting the brand palette. */
+    color: color-mix(in srgb, white 88%, transparent);
+    background: color-mix(in srgb, var(--color-neutral-900) 30%, transparent);
     backdrop-filter: blur(var(--blur-sm));
     -webkit-backdrop-filter: blur(var(--blur-sm));
     border: var(--border-width) var(--border-style)
-      color-mix(in srgb, var(--color-border) 50%, transparent);
+      color-mix(in srgb, white 18%, transparent);
     border-radius: var(--radius-full);
   }
 

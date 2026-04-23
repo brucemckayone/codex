@@ -131,7 +131,9 @@
     overflow: hidden;
     isolation: isolate;
     text-align: center;
-    color: var(--color-text);
+    /* Banner is a dedicated light-on-dark context — text colours in this
+       section always resolve against a dark veil regardless of page theme. */
+    color: var(--color-text-inverse, white);
   }
 
   /* ── Backdrop ───────────────────────────────────────────────
@@ -144,14 +146,21 @@
     pointer-events: none;
   }
 
+  /* The veil DARKENS the shader (not brightens it). Shaders can be any
+     colour — bright yellows, pastels, high-saturation pinks — so anchoring
+     on `--color-neutral-900` gives a consistent legibility floor for the
+     light text that sits above. A radial gradient puts the darkest spot
+     behind the CTA column, letting edges fade back into the shader. */
   .subscribe-cta__veil {
     position: absolute;
     inset: 0;
-    background: linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--color-background) 20%, transparent) 0%,
-      color-mix(in srgb, var(--color-background) 45%, transparent) 100%
-    );
+    background:
+      radial-gradient(
+        ellipse 60% 80% at 50% 50%,
+        color-mix(in srgb, var(--color-neutral-900) 72%, transparent) 0%,
+        color-mix(in srgb, var(--color-neutral-900) 55%, transparent) 60%,
+        color-mix(in srgb, var(--color-neutral-900) 30%, transparent) 100%
+      );
     backdrop-filter: blur(var(--blur-md, 12px));
     -webkit-backdrop-filter: blur(var(--blur-md, 12px));
   }
@@ -173,10 +182,12 @@
     margin: 0;
     font-family: var(--font-body, var(--font-sans));
     font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
+    font-weight: var(--font-bold);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
-    color: var(--color-interactive);
+    /* Lift the brand colour above the dark veil — mixing with white keeps
+       the brand tint but guarantees legibility on any org palette. */
+    color: color-mix(in srgb, var(--color-interactive) 55%, white 45%);
     line-height: var(--leading-tight);
   }
 
@@ -187,17 +198,15 @@
     font-weight: var(--font-semibold);
     line-height: var(--leading-tight);
     letter-spacing: var(--tracking-tighter);
-    color: var(--color-text);
-    /* Subtle shadow keeps headline legible over shader colour swings. */
-    text-shadow: 0 1px 2px
-      color-mix(in srgb, var(--color-neutral-900) 18%, transparent);
+    color: var(--color-text-inverse, white);
   }
 
   .subscribe-cta__tagline {
     margin: 0;
     font-size: var(--text-base);
     line-height: var(--leading-relaxed);
-    color: var(--color-text-secondary);
+    /* Soft-white tagline for a clear hierarchy below the crisp title. */
+    color: color-mix(in srgb, white 82%, transparent);
     max-width: 42ch;
   }
 
@@ -213,7 +222,7 @@
     justify-content: center;
     gap: var(--space-4);
     font-size: var(--text-sm);
-    color: var(--color-text);
+    color: color-mix(in srgb, white 88%, transparent);
   }
 
   .subscribe-cta__bullet {
@@ -225,7 +234,8 @@
   .subscribe-cta__bullet-dot {
     width: var(--space-1-5, 6px);
     height: var(--space-1-5, 6px);
-    background: var(--color-interactive);
+    /* Lift the brand dot above the dark veil — same treatment as eyebrow. */
+    background: color-mix(in srgb, var(--color-interactive) 55%, white 45%);
     border-radius: var(--radius-full);
     flex-shrink: 0;
   }
@@ -245,7 +255,7 @@
   .subscribe-cta__meta {
     margin: 0;
     font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
+    color: color-mix(in srgb, white 68%, transparent);
     letter-spacing: var(--tracking-wide);
   }
 
