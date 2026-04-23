@@ -573,7 +573,13 @@
     transform: scale(var(--card-image-hover-scale, 1.05));
   }
 
-  .hidden {
+  /* `.hidden` on a placeholder must win over the default `display: flex`
+     below. Original codebase relied on source-order specificity which
+     broke once we started rendering full-size content in the placeholder
+     — the `.cc__placeholder { display: flex }` below took precedence and
+     the hidden placeholder leaked into the layout. Using an attribute
+     fallback keeps the specificity match explicit. */
+  .cc__placeholder.hidden {
     display: none;
   }
 

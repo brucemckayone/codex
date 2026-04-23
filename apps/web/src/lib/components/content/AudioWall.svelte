@@ -151,9 +151,13 @@
     display: grid;
     grid-template-columns: auto 1fr;
     align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2);
-    min-height: calc(var(--space-20) + var(--space-4));
+    /* Gap + padding bumped in lockstep with the audio-row refinement so
+       the overflow affordance keeps reading as "just another row". */
+    gap: var(--space-4);
+    padding: var(--space-3);
+    /* Matches the new album-art size + padding total:
+       112 (thumb) + 12×2 (padding) + border slack = ~140 */
+    min-height: calc(var(--space-24) + var(--space-4) + var(--space-6));
     font-family: var(--font-sans);
     color: var(--color-text-secondary);
     background: transparent;
@@ -188,9 +192,10 @@
     align-items: center;
     justify-content: center;
     /* Matches the album-art size of the surrounding audio rows so the
-       affordance reads as one of them. */
-    width: var(--space-20);
-    height: var(--space-20);
+       affordance reads as one of them. 112px — composed from space-24
+       + space-4 — in lockstep with `.cc--audio-row .cc__thumb`. */
+    width: calc(var(--space-24) + var(--space-4));
+    height: calc(var(--space-24) + var(--space-4));
     color: var(--color-text-secondary);
     background: color-mix(in srgb, var(--color-text) 8%, transparent);
     border-radius: var(--radius-md);
