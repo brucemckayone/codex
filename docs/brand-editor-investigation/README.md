@@ -158,7 +158,21 @@ Dependency chain: `v4wao` + `ac2o8` blocked by `oqv3r` (skill patch + preset dat
 | `Codex-rwci4` | P3 | `injectBrandVars` writes `--color-hero-hide-*` with no consumers (noise) | `apps/web/src/lib/brand-editor/css-injection.ts:466-473` |
 | `Codex-wwedk` | P2 | **FEATURE**: Per-theme shader + full tokenOverrides (extend darkOverrides beyond just colors) | `apps/web/src/lib/brand-editor/brand-editor-store.svelte.ts` + schema + UX |
 
-`Codex-wwedk` is a **user-directed feature request raised mid-iter-021**, not a bug. Blocked by `Codex-9u8wg` (editor scope-to-`[data-editing-theme]`) — the dark-mode preview infrastructure must exist before per-theme shaders can be previewed correctly.
+`Codex-wwedk` is a **user-directed feature request raised mid-iter-021**, not a bug. Blocked by `Codex-9u8wg` (editor scope-to-`[data-editing-theme]`) + `Codex-lqvyy` (base dark-render-path missing — see iter-022 below). Design doc written: `docs/brand-editor-investigation/per-theme-tokens-design.md` (iter-022 Agent J, recommends **Option B** — parallel `darkTokenOverrides` column).
+
+### From iter-022 (darkOverrides render trace + wwedk design)
+
+| Bead | Priority | Title | Root file(s) |
+|---|---|---|---|
+| `Codex-lqvyy` | **P1** | **`darkModeOverrides` NEVER rendered for non-editor visitors** — half-shipped feature; dark colors invisible to regular users | `apps/web/src/routes/_org/[slug]/+layout.svelte` — missing `$derived` + `style:--brand-color-dark` bindings |
+
+**Bombshell finding**: Agent I traced `darkModeOverrides` end-to-end and found the render path terminates at the editor's `$effect`. Every org that's set dark colors is showing LIGHT primary colors to dark-mode visitors. The feature works in editor preview (via `injectBrandVars`) but fails silently for production visitors.
+
+**Fix is ~30 lines**: add `$derived.by()` parse + 4 `style:--brand-*-dark` bindings on `.org-layout`, mirroring the existing `brandPrimary`/`brandSecondary`/etc. pattern. Because `$derived` runs in SSR, dark colors arrive with initial HTML — no FOUC.
+
+**Artifact**: `docs/brand-editor-investigation/per-theme-tokens-design.md` (459 lines) — Agent J's design proposal for `wwedk`. Evaluates 3 schema options (unified widening / parallel column / dual-keyed suffix). Recommends **Option B** (parallel `darkTokenOverrides` column) for type safety + additive migration + clean future expansion.
+
+**Convergence counter reset** (per user scope expansion + lqvyy finding): iter-022 produced 1 P1 + a major design artifact. Pause counter is back to 0/3.
 
 Key finding (non-bug): **Hero visibility flags are fully CORRECT** end-to-end (5 keys, 5 SSR attrs, 5 CSS consumers, zero orphans). No bugs to file from that slice of the audit.
 
@@ -232,3 +246,4 @@ Completed: ~~Light/dark sync~~ (iter-019); ~~Cross-org brand injection~~ (iter-0
 | 019 | 2026-04-23 | C (light/dark sync, sonnet), D (cross-org brand injection, sonnet) | 9u8wg, micw3, z91af, wcwpw, zv85e | Light/dark sync is THREE stacked bugs (editor writes global `<html data-theme>`, ThemeToggle has no external subscription, close() clobbers sidebar toggle). Sub-orgs are FLAT — no hierarchy, no brand inheritance. New FOUC bug: shader/hero tokenOverrides arrive post-hydration. Both agents proposed new skill references (`11-theming.md` + `11-multi-tenancy.md`) — deferred until bugs land so refs reflect reality. |
 | 020 | 2026-04-23 | E (token registry JSON, **haiku**), F (preset round-trip audit, sonnet) | oqv3r, v4wao, ac2o8 | P1 preset bug: `applyPreset` wholesale-replaces `state.pending.tokenOverrides`, silently wiping ~30 fine-tune keys every time a user browses presets. One-line fix (merge instead of replace). Produced `token-registry.json` — 168 tokens, machine-readable. Pattern-level anti-pattern surfaced: "partial Record update should merge, not replace" — candidate for skill reference 10. Haiku nailed the enumeration task for ~1/3 the token cost of sonnet. |
 | 021 | 2026-04-23 | G (hero visibility audit, sonnet), H (zero-consumer classification, **haiku**) | 9225y, peqvl, rwci4 | **Zero P1 findings — first convergence iteration.** Hero visibility chain is CLEAN end-to-end (5 keys, zero orphans). Verification step caught haiku mis-classifying 2 "DEAD" tokens that are actually live in production (pricing + VideoPlayer). `wcwpw`'s scope narrowed — hero-hide is SSR-rendered via `$derived.by()`, not `$effect`; FOUC only applies to CSS-var injection path. Minor noise bug: `injectBrandVars` writes useless `--color-hero-hide-*` CSS vars. Loop is now self-correcting prior-iteration artifacts. |
+| 022 | 2026-04-23 | I (darkOverrides render trace, sonnet), J (wwedk schema + UX design, sonnet) | lqvyy + design doc | **Bombshell P1**: `darkModeOverrides` is NEVER rendered for non-editor visitors — feature is half-shipped, every org with dark colors set is showing LIGHT palette to dark-mode users. Fix is ~30 lines (add `$derived` + `style:--brand-*-dark` bindings in `+layout.svelte`). Design doc for `wwedk` written (459 lines) — recommends parallel `darkTokenOverrides` column. User scope expansion + new P1 resets convergence counter to 0/3. Reference 10 was FINALLY opened by an agent and correctly predicted the bug via its §10 gotcha list. |
