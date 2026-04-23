@@ -21,7 +21,7 @@
   import { MobileBottomNav, MobileBottomSheet } from '$lib/components/layout/MobileNav';
   import CommandPaletteSearch from '$lib/components/search/CommandPaletteSearch.svelte';
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
-  import { brandEditor, injectTokenOverrides, clearTokenOverrides } from '$lib/brand-editor';
+  import { brandEditor, injectTokenOverrides, clearTokenOverrides, parseDarkColorOverrides } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
   import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection, loadSubscriptionFromServer, subscriptionCollection } from '$lib/collections';
@@ -52,6 +52,22 @@
   const brandSecondary = $derived(data.org?.brandColors?.secondary ?? undefined);
   const brandAccent = $derived(data.org?.brandColors?.accent ?? undefined);
   const brandBackground = $derived(data.org?.brandColors?.background ?? undefined);
+
+  // Dark-mode color overrides — parsed once from the JSON string stored in
+  // branding_settings.dark_mode_overrides (Partial<ThemeColors> shape).
+  // SSR-rendered so dark-mode visitors receive the correct override values
+  // on first paint with no client-side JS required (fix for Codex-lqvyy).
+  // Malformed JSON or missing fields silently return null/undefined — the
+  // CSS fallback chain `var(--brand-color-dark, var(--brand-color, ...))`
+  // handles per-field absence.
+  const darkColorOverrides = $derived(
+    parseDarkColorOverrides(data.org?.brandFineTune?.darkModeOverrides)
+  );
+  const brandPrimaryDark = $derived(darkColorOverrides?.primaryColor ?? undefined);
+  const brandSecondaryDark = $derived(darkColorOverrides?.secondaryColor ?? undefined);
+  const brandAccentDark = $derived(darkColorOverrides?.accentColor ?? undefined);
+  const brandBackgroundDark = $derived(darkColorOverrides?.backgroundColor ?? undefined);
+
   const brandFontBody = $derived(data.org?.brandFonts?.body ?? undefined);
   const brandFontHeading = $derived(data.org?.brandFonts?.heading ?? undefined);
   const brandRadius = $derived.by(() => {
@@ -371,6 +387,10 @@
   style:--brand-secondary={brandSecondary}
   style:--brand-accent={brandAccent}
   style:--brand-bg={brandBackground}
+  style:--brand-color-dark={brandPrimaryDark}
+  style:--brand-secondary-dark={brandSecondaryDark}
+  style:--brand-accent-dark={brandAccentDark}
+  style:--brand-bg-dark={brandBackgroundDark}
   style:--brand-density={brandDensity}
   style:--brand-radius={brandRadius}
   style:--brand-font-body={brandFontBody ? `'${brandFontBody}', var(--font-sans)` : undefined}

@@ -16,6 +16,10 @@ export {
 export { LEVELS } from './levels';
 // Brand Editor - Palette Generator (internal use only; import directly from ./palette-generator)
 
+// Brand Editor - Dark-mode override parser (SSR-safe, used by _org/[slug]/+layout.svelte)
+export { parseDarkColorOverrides } from './parse-dark-overrides';
+export type { DarkColorOverrides } from './parse-dark-overrides';
+
 export type { PresetCategory } from './presets';
 // Brand Editor - Presets
 export { BRAND_PRESETS } from './presets';
