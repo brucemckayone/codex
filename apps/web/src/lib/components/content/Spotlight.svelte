@@ -1,16 +1,22 @@
 <!--
   @component Spotlight
 
-  Hero-sized anchor section that features one content item. The atmospheric
-  backdrop sits INSIDE the content card — the card itself is a brand-tinted
-  gradient surface, with a soft legibility veil and the content (image, copy,
-  CTA) layered on top.
+  Cinematic feature spread — the first anchor beat on the org landing page.
+  A single content item presented at near-full-viewport scale, with an
+  asymmetric 60/40 split: image column on the left, glass-panel body column
+  on the right (md+). Below `--breakpoint-md` the layout collapses to a
+  stacked image-on-top presentation.
 
-  Used once per org landing page as the first anchor beat below the main
-  hero. Originally ran a full ShaderHero WebGL canvas here (see git history),
-  but three concurrent shaders on the landing page (Hero + Spotlight + CTA)
-  were burning GPU fill-rate; the hero keeps the shader for brand identity
-  and this card plus SubscribeCTA share the cheaper BrandGradientBackdrop.
+  Originally ran a full ShaderHero WebGL canvas here, then a single
+  BrandGradientBackdrop atmospheric card; now evolved into a cinematic
+  split-screen feature spread that reads more like an editorial cover than
+  a product card. The `BrandGradientBackdrop` is retained as the atmospheric
+  backdrop — it fills the full card, and both columns layer on top.
+
+  Fixed-white text is used for the body column because it sits on a dark
+  glass veil where `--color-player-*` tokens cannot be trusted (orgs can
+  rebind them to brand colours via the brand editor, collapsing legibility).
+  See `feedback_player_tokens_for_dark_overlays.md` for the full rationale.
 -->
 <script lang="ts">
   import { page } from '$app/state';
@@ -97,6 +103,7 @@
         {#if hasImage && thumbnail}
           <a class="spotlight__image" {href} tabindex="-1" aria-hidden="true">
             <img
+              class="spotlight__image-still"
               src={thumbnail}
               srcset={getThumbnailSrcset(thumbnail)}
               sizes={DEFAULT_SIZES}
@@ -111,49 +118,51 @@
         {/if}
 
         <div class="spotlight__body">
-          <p class="spotlight__eyebrow">Editor&rsquo;s pick</p>
+          <div class="spotlight__body-inner">
+            <p class="spotlight__eyebrow">Editor&rsquo;s pick</p>
 
-          <h2 class="spotlight__title" id={titleId}>
-            <a class="spotlight__title-link" {href}>{item.title}</a>
-          </h2>
+            <h2 class="spotlight__title" id={titleId}>
+              <a class="spotlight__title-link" {href}>{item.title}</a>
+            </h2>
 
-          {#if description}
-            <p class="spotlight__description">{description}</p>
-          {/if}
-
-          <div class="spotlight__meta">
-            {#if creatorName}
-              <div class="spotlight__creator">
-                <Avatar class="spotlight__avatar">
-                  <AvatarImage
-                    src={item.creator?.avatar ?? undefined}
-                    alt={creatorName}
-                  />
-                  <AvatarFallback>
-                    {creatorName.charAt(0).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-                <span class="spotlight__creator-name">{creatorName}</span>
-              </div>
+            {#if description}
+              <p class="spotlight__description">{description}</p>
             {/if}
 
-            {#if durationSeconds}
-              <span class="spotlight__chip">
-                {formatDurationHuman(durationSeconds)}
-              </span>
-            {/if}
+            <div class="spotlight__meta">
+              {#if creatorName}
+                <div class="spotlight__creator">
+                  <Avatar class="spotlight__avatar">
+                    <AvatarImage
+                      src={item.creator?.avatar ?? undefined}
+                      alt={creatorName}
+                    />
+                    <AvatarFallback>
+                      {creatorName.charAt(0).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span class="spotlight__creator-name">{creatorName}</span>
+                </div>
+              {/if}
+
+              {#if durationSeconds}
+                <span class="spotlight__chip">
+                  {formatDurationHuman(durationSeconds)}
+                </span>
+              {/if}
+            </div>
+
+            <a class="spotlight__cta" {href}>
+              {#if contentType === 'audio'}
+                <MusicIcon size={20} />
+              {:else if contentType === 'written'}
+                <FileTextIcon size={20} />
+              {:else}
+                <PlayIcon size={20} />
+              {/if}
+              <span>{ctaLabel}</span>
+            </a>
           </div>
-
-          <a class="spotlight__cta" {href}>
-            {#if contentType === 'audio'}
-              <MusicIcon size={20} />
-            {:else if contentType === 'written'}
-              <FileTextIcon size={20} />
-            {:else}
-              <PlayIcon size={20} />
-            {/if}
-            <span>{ctaLabel}</span>
-          </a>
         </div>
       </div>
     </article>
@@ -176,19 +185,19 @@
   }
 
   /* ── Card ─────────────────────────────────────────────────────
-     The card IS the shader surface. Everything else (thumbnail,
-     body, CTA) layers on top. overflow:hidden + border-radius
-     clips the shader to the card's shape. isolation:isolate
-     creates a stacking context so z-index is local to the card.
+     Cinematic min-height — `min(80vh, 720px)` keeps the spread
+     viewport-responsive but caps it at 720px on tall displays so
+     it doesn't swallow the rest of the page on ultrawides.
+     Stacked layout below md (image on top, body below). 60/40
+     split above md via `3fr 2fr` — the 3fr image column gives the
+     thumbnail its full cinema rectangle.
      ───────────────────────────────────────────────────────────── */
   .spotlight__card {
     position: relative;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-5);
     max-width: calc(var(--space-24) * 10);
     margin-inline: auto;
-    padding: var(--space-6);
     /* Fixed-alpha white border at 10% — matches SubscribeCTA's panel so
        the two promotional surfaces read as a pair. Using `--color-border`
        would drift with theme + org brand; using `--color-player-border`
@@ -198,7 +207,7 @@
     box-shadow: var(--shadow-xl);
     overflow: hidden;
     isolation: isolate;
-    min-height: calc(var(--space-24) * 4);
+    min-height: min(80vh, 720px);
     transition:
       transform var(--duration-slow) var(--ease-smooth),
       box-shadow var(--duration-slow) var(--ease-smooth),
@@ -207,10 +216,10 @@
 
   @media (--breakpoint-md) {
     .spotlight__card {
-      grid-template-columns: 1.1fr 1fr;
-      gap: var(--space-8);
-      padding: var(--space-8);
-      min-height: calc(var(--space-24) * 5);
+      /* 60/40 split — image claims the larger rectangle, body column
+         the tighter reading space. `minmax(0, ...)` on both tracks
+         prevents long titles from blowing out the body column. */
+      grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
     }
 
     /* When the content item has no usable thumbnail, drop the image
@@ -218,13 +227,6 @@
        unobstructed. Avoids an awkward empty frame. */
     .spotlight[data-has-image='false'] .spotlight__card {
       grid-template-columns: minmax(0, 1fr);
-    }
-
-    .spotlight[data-has-image='false'] .spotlight__body {
-      max-width: 60ch;
-      margin-inline: auto;
-      text-align: center;
-      align-items: center;
     }
   }
 
@@ -247,42 +249,37 @@
   }
 
   /* Veil — sits between shader and content. The card uses a dedicated
-     LIGHT-ON-DARK treatment (text in `--color-player-text`), so the veil
-     establishes a consistent dark floor behind the copy regardless of
-     which shader preset the org picked. A right-biased darken lives
-     behind the copy column; the left stays brighter (and the transition
-     pushed further out) to let the shader breathe around the thumbnail.
-     Pairs visually with SubscribeCTA — both use the same dark-floor
-     treatment so the two promotional surfaces read as siblings.
-     `hsl(0 0% 0% / α)` matches the token pattern in player.css —
-     expressing "neutral dark overlay at specific alpha" without inventing
-     a new token family. */
+     LIGHT-ON-DARK treatment (fixed white text), so the veil establishes
+     a consistent dark floor behind the copy regardless of which shader
+     preset the org picked. `hsl(0 0% 0% / α)` matches the token pattern
+     in player.css — expressing "neutral dark overlay at specific alpha"
+     without inventing a new token family. */
   .spotlight__card-veil {
     position: absolute;
     inset: 0;
     z-index: 1;
     pointer-events: none;
-    background:
-      linear-gradient(
-        90deg,
-        hsl(0 0% 0% / 0.05) 0%,
-        hsl(0 0% 0% / 0.20) 35%,
-        hsl(0 0% 0% / 0.60) 70%,
-        hsl(0 0% 0% / 0.70) 100%
-      );
+    /* Narrow-viewport default — vertical darken, matches the stacked layout */
+    background: linear-gradient(
+      180deg,
+      hsl(0 0% 0% / 0.25) 0%,
+      hsl(0 0% 0% / 0.60) 100%
+    );
     backdrop-filter: blur(var(--blur-sm));
     -webkit-backdrop-filter: blur(var(--blur-sm));
   }
 
-  /* On narrow viewports the grid collapses to 1 col (image stacked above
-     body); the right-biased veil would leave the image bottom dim. Fall
-     back to a vertical darken that suits the stacked layout. */
-  @media (--below-md) {
+  @media (--breakpoint-md) {
+    /* Split-screen veil — keeps the image column relatively clear so the
+       photograph breathes, then darkens sharply into the right column
+       where the glass panel lives. The glass panel's own backdrop blur
+       stacks with this for the rich "dark-cinema" look. */
     .spotlight__card-veil {
       background: linear-gradient(
-        180deg,
-        hsl(0 0% 0% / 0.25) 0%,
-        hsl(0 0% 0% / 0.60) 100%
+        90deg,
+        hsl(0 0% 0% / 0.15) 0%,
+        hsl(0 0% 0% / 0.25) 55%,
+        hsl(0 0% 0% / 0.55) 100%
       );
     }
   }
@@ -294,62 +291,119 @@
     display: grid;
     grid-template-columns: subgrid;
     grid-column: 1 / -1;
-    gap: inherit;
-    align-items: center;
+    gap: 0;
+    align-items: stretch;
   }
 
-  /* ── Image ─────────────────────────────────────────────────── */
-
+  /* ── Image column ──────────────────────────────────────────────
+     Fills the column — no aspect-ratio lock, no border-radius on
+     stacked (md-below) view, so the image meets the card edge.
+     On md+ it takes the full cinema rectangle on the left.
+     ────────────────────────────────────────────────────────────── */
   .spotlight__image {
     position: relative;
-    aspect-ratio: 16 / 9;
     overflow: hidden;
-    border-radius: var(--radius-lg);
-    /* No solid background — the shader behind the card shows through.
-       A thin border (player-border: light-on-dark at ~20% alpha) keeps
-       the frame visible without walling off the surface. The stacked
-       outer drop (lifts the frame off the card) + inset well (recesses
-       the image into the frame) reads as a framed photograph, not a
-       hole cut into the card. Both shadow layers come from the token
-       family — no raw values. */
     background: transparent;
-    border: var(--border-width) var(--border-style) hsl(0 0% 100% / 0.2);
     display: block;
     text-decoration: none;
-    box-shadow:
-      var(--shadow-lg),
-      var(--shadow-inner);
+    /* Default (stacked) — reserve some vertical space but let the body
+       decide the final height. Acceptable because the card's min-height
+       pushes the image past this minimum. */
+    min-height: calc(var(--space-24) * 4);
   }
 
-  .spotlight__image img {
+  @media (--breakpoint-md) {
+    .spotlight__image {
+      min-height: 0;
+      height: 100%;
+    }
+  }
+
+  /* Audio spotlight keeps a square feeling within the cinema rectangle —
+     letterbox the 1:1 thumbnail with `object-fit: contain` on audio
+     (album art is rarely croppable). */
+  .spotlight[data-content-type='audio'] .spotlight__image-still {
+    object-fit: contain;
+    object-position: center;
+    background: hsl(0 0% 0% / 0.35);
+  }
+
+  .spotlight__image-still {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    object-position: center;
     transition: transform var(--duration-slower) var(--ease-smooth);
-    position: relative;
+    position: absolute;
+    inset: 0;
     z-index: 1;
   }
 
-
-  .spotlight__card:hover .spotlight__image img {
+  .spotlight__card:hover .spotlight__image-still {
     transform: scale(var(--card-image-hover-scale, 1.05));
   }
 
-  /* Audio spotlight uses 1:1 album-art framing, mirroring ContentCard */
-  .spotlight[data-content-type='audio'] .spotlight__image {
-    aspect-ratio: 1 / 1;
-    max-width: calc(var(--space-24) * 5);
-    margin-inline: auto;
+  /* ── Body column (glass panel, md+) ────────────────────────────
+     Below md it's a plain column on top of the dark veil — no glass
+     framing needed, since the card already reads as the panel.
+     At md+ it becomes a glass-veil inset block, letting the image
+     column breathe at its full cinema rectangle.
+     ────────────────────────────────────────────────────────────── */
+  .spotlight__body {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    padding: var(--space-8) var(--space-6);
   }
 
-  /* ── Body / typography ─────────────────────────────────────── */
+  @media (--breakpoint-md) {
+    .spotlight__body {
+      padding: var(--space-6);
+    }
 
-  .spotlight__body {
+    /* Glass panel — only painted on md+ where the split-screen reveals
+       the atmospheric backdrop behind it. The inset margin pulls the
+       panel away from the card edge so the gradient peeks around it,
+       reinforcing the "feature spread" feel. */
+    .spotlight__body::before {
+      content: '';
+      position: absolute;
+      inset: var(--space-4);
+      background: hsl(0 0% 0% / 0.35);
+      backdrop-filter: blur(var(--blur-xl));
+      -webkit-backdrop-filter: blur(var(--blur-xl));
+      border: var(--border-width) var(--border-style) hsl(0 0% 100% / 0.08);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .spotlight__body-inner {
+      position: relative;
+      z-index: 1;
+      padding: var(--space-6);
+    }
+  }
+
+  .spotlight[data-has-image='false'] .spotlight__body {
+    max-width: 60ch;
+    margin-inline: auto;
+    text-align: center;
+  }
+
+  .spotlight[data-has-image='false'] .spotlight__body-inner {
+    align-items: center;
+  }
+
+  .spotlight__body-inner {
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
     justify-content: center;
     min-width: 0;
+    width: 100%;
   }
 
   .spotlight__eyebrow {
@@ -370,7 +424,10 @@
   .spotlight__title {
     margin: 0;
     font-family: var(--font-heading, var(--font-sans));
-    font-size: var(--text-3xl);
+    /* Cinematic scale — fluid between mobile (2.5rem) and desktop (5rem).
+       Uses viewport-responsive `vw` so the title feels like a cover line,
+       not a card headline. */
+    font-size: clamp(2.5rem, 6vw, 5rem);
     font-weight: var(--font-semibold);
     line-height: var(--leading-tight);
     /* Fixed white — shader backdrop + dark veil make this a promotional
@@ -386,12 +443,6 @@
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
-  }
-
-  @media (--breakpoint-md) {
-    .spotlight__title {
-      font-size: var(--text-4xl);
-    }
   }
 
   .spotlight__title-link {
@@ -415,7 +466,7 @@
 
   .spotlight__description {
     margin: 0;
-    font-size: var(--text-base);
+    font-size: var(--text-lg);
     line-height: var(--leading-relaxed);
     /* Secondary white at 80% alpha — same reason as the title: fixed
        neutral because the org-overridable player-text family can collapse
@@ -464,7 +515,7 @@
     font-variant-numeric: tabular-nums;
     /* White chip chrome — explicit fixed values because the player-*
        tokens are org-overridable (see title comment above). */
-    color: hsl(0 0% 100% / 0.9);
+    color: hsl(0 0% 100%);
     background: hsl(0 0% 100% / 0.1);
     backdrop-filter: blur(var(--blur-sm));
     -webkit-backdrop-filter: blur(var(--blur-sm));
@@ -533,7 +584,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     .spotlight__card,
-    .spotlight__image img,
+    .spotlight__image-still,
     .spotlight__cta {
       transition: none;
     }
