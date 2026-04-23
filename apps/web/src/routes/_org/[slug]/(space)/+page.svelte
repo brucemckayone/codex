@@ -691,13 +691,34 @@
     color: var(--brand-hero-text, white);
   }
 
-  /* Brand-tinted gradient — darkens the bottom 50% where text lives.
-     Dark base (30% brand, 70% black) at the bottom guarantees white-text
-     contrast regardless of brand hue. Fades to transparent by 50% height
-     so the title above stays clear for mix-blend-mode: difference to
-     composite against the shader canvas. */
+  /* Fallback legibility gradient — guarantees white-text contrast when
+     the shader canvas is inactive (org has no preset configured, or the
+     preset is 'none'). Sits ABOVE the shader (z-index 1) and BELOW the
+     text content/title (hero__content at z-index 3), so:
+       - When shader is active: the gradient adds a subtle bottom-weighted
+         darken over the shader; title's mix-blend-mode still composites
+         against the combined canvas+gradient layer, producing readable
+         output regardless of shader colour.
+       - When shader is inactive: the gradient is the only dark floor the
+         text has, and the 55% black stop clears WCAG 3:1 for large text.
+     Top 35% is fully transparent so any shader visible up there breathes.
+     Uses `hsl(0 0% 0% / α)` direct (same pattern as player.css) — semantic
+     surface tokens flip to light in dark-theme orgs, which would invert
+     the intended darkening effect. */
   .hero::after {
-    display: none;
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      transparent 35%,
+      hsl(0 0% 0% / 0.12) 55%,
+      hsl(0 0% 0% / 0.38) 80%,
+      hsl(0 0% 0% / 0.55) 100%
+    );
   }
 
   .hero__content {

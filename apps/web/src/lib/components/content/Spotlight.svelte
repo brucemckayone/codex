@@ -268,11 +268,13 @@
   }
 
   /* Veil — sits between shader and content. The card uses a dedicated
-     LIGHT-ON-DARK treatment (text in `--color-text-inverse`), so the veil
+     LIGHT-ON-DARK treatment (text in `--color-player-text`), so the veil
      establishes a consistent dark floor behind the copy regardless of
-     which shader preset the org picked. A radial darken on the right
-     (where copy lives) guarantees legibility; the left stays brighter to
-     let the shader breathe around the thumbnail. */
+     which shader preset the org picked. A right-biased darken lives
+     behind the copy column; the left stays brighter to let the shader
+     breathe around the thumbnail. `hsl(0 0% 0% / α)` matches the token
+     pattern in player.css — expressing "neutral dark overlay at specific
+     alpha" without inventing a new token family. */
   .spotlight__card-veil {
     position: absolute;
     inset: 0;
@@ -281,9 +283,9 @@
     background:
       linear-gradient(
         90deg,
-        color-mix(in srgb, var(--color-neutral-900) 10%, transparent) 0%,
-        color-mix(in srgb, var(--color-neutral-900) 55%, transparent) 65%,
-        color-mix(in srgb, var(--color-neutral-900) 65%, transparent) 100%
+        hsl(0 0% 0% / 0.10) 0%,
+        hsl(0 0% 0% / 0.55) 65%,
+        hsl(0 0% 0% / 0.65) 100%
       );
     backdrop-filter: blur(var(--blur-sm));
     -webkit-backdrop-filter: blur(var(--blur-sm));
@@ -296,8 +298,8 @@
     .spotlight__card-veil {
       background: linear-gradient(
         180deg,
-        color-mix(in srgb, var(--color-neutral-900) 25%, transparent) 0%,
-        color-mix(in srgb, var(--color-neutral-900) 60%, transparent) 100%
+        hsl(0 0% 0% / 0.25) 0%,
+        hsl(0 0% 0% / 0.60) 100%
       );
     }
   }
@@ -321,16 +323,15 @@
     overflow: hidden;
     border-radius: var(--radius-lg);
     /* No solid background — the shader behind the card shows through.
-       A thin border keeps the frame visible without walling off the surface. */
+       A thin border (player-border: light-on-dark at ~20% alpha) keeps
+       the frame visible without walling off the surface. */
     background: transparent;
-    border: var(--border-width) var(--border-style)
-      color-mix(in srgb, var(--color-text-inverse) 14%, transparent);
+    border: var(--border-width) var(--border-style) var(--color-player-border);
     display: block;
     text-decoration: none;
     box-shadow:
       var(--shadow-lg),
-      inset 0 0 0 var(--border-width)
-        color-mix(in srgb, var(--color-neutral-900) 8%, transparent);
+      inset 0 0 0 var(--border-width) hsl(0 0% 0% / 0.08);
   }
 
   .spotlight__image img {
@@ -371,10 +372,11 @@
     font-weight: var(--font-bold);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
-    /* Bright brand tint on dark veil reads as a promotional flag.
-       color-mix with white lifts it above the shader in case brand
-       is too dark. */
-    color: color-mix(in srgb, var(--color-interactive) 65%, white 35%);
+    /* Brand tint on dark veil reads as a promotional flag. Mix with the
+       player-text token (always white at :root, org-overridable) so the
+       tint stays readable on dark-brand orgs where --color-text-inverse
+       would have flipped to dark. */
+    color: color-mix(in srgb, var(--color-interactive) 65%, var(--color-player-text) 35%);
     line-height: var(--leading-tight);
   }
 
@@ -384,9 +386,10 @@
     font-size: var(--text-3xl);
     font-weight: var(--font-semibold);
     line-height: var(--leading-tight);
-    /* Fixed light text — the shader behind the card can be any colour,
-       so we lean on the veil to supply the dark floor. */
-    color: var(--color-text-inverse, white);
+    /* Fixed light text — the shader behind the card can be any colour and
+       the org theme may be dark, so we lean on `--color-player-text`
+       (always-light inverse chrome token) and the veil to supply contrast. */
+    color: var(--color-player-text);
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
@@ -407,7 +410,7 @@
 
   .spotlight__title-link:hover {
     /* Lift the brand tint on hover — soft, not a flash. */
-    color: color-mix(in srgb, var(--color-interactive) 45%, white 55%);
+    color: color-mix(in srgb, var(--color-interactive) 45%, var(--color-player-text) 55%);
   }
 
   .spotlight__title-link:focus-visible {
@@ -420,10 +423,10 @@
     margin: 0;
     font-size: var(--text-base);
     line-height: var(--leading-relaxed);
-    /* Fixed light text at 78% opacity so it sits a step below the title
-       without losing legibility. Paired with the veil's 55–65% darken on
-       the right, meets WCAG AA (4.5:1) against the darkest shader. */
-    color: color-mix(in srgb, white 78%, transparent);
+    /* Secondary light text — player-text-secondary is pre-tuned to the
+       right opacity step below the crisp title. Paired with the veil's
+       55–65% darken on the right, meets WCAG AA against any shader. */
+    color: var(--color-player-text-secondary);
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
@@ -455,8 +458,7 @@
   .spotlight__creator-name {
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    /* Fixed light on the dark card. */
-    color: color-mix(in srgb, white 85%, transparent);
+    color: var(--color-player-text-secondary);
   }
 
   .spotlight__chip {
@@ -466,14 +468,14 @@
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
     font-variant-numeric: tabular-nums;
-    /* Light text + translucent dark pill — reads clearly on any shader
-       without fighting the brand palette. */
-    color: color-mix(in srgb, white 88%, transparent);
-    background: color-mix(in srgb, var(--color-neutral-900) 30%, transparent);
+    /* Light text + translucent dark pill — player-surface tokens give
+       consistent chrome regardless of shader or theme. */
+    color: var(--color-player-text);
+    background: var(--color-player-surface);
     backdrop-filter: blur(var(--blur-sm));
     -webkit-backdrop-filter: blur(var(--blur-sm));
     border: var(--border-width) var(--border-style)
-      color-mix(in srgb, white 18%, transparent);
+      var(--color-player-border);
     border-radius: var(--radius-full);
   }
 
@@ -488,12 +490,13 @@
     padding: 0 var(--space-6);
     height: var(--space-12);
     font-family: var(--font-sans);
-    /* Bumped to semibold + text-lg+ so white-on-brand reaches WCAG AA
-       large-text threshold (3:1) even on orgs with moderate-contrast
-       red/coral brand palettes. Weight also strengthens the CTA read. */
+    /* Bumped to semibold + text-lg so text-on-brand reaches WCAG AA
+       large-text threshold (3:1). `--color-text-on-brand` is the
+       luminance-clamped token that auto-inverts against --brand-color —
+       it already accounts for dark vs light brand palettes. */
     font-size: var(--text-lg);
     font-weight: var(--font-semibold);
-    color: var(--color-text-inverse);
+    color: var(--color-text-on-brand);
     background: var(--color-interactive);
     border: var(--border-width) var(--border-style) transparent;
     border-radius: var(--radius-md);
