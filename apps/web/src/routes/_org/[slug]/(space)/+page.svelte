@@ -98,20 +98,24 @@
   // to the lightweight primitive shape SubscribeCTA expects. This is the
   // "honest fallback" path — if the org has no gated content, the strip
   // hides gracefully (the component checks `previewContent?.length > 0`).
-  const subscribePreview = $derived(
-    data.allContent
-      .filter(
-        (c) =>
-          c.accessType === 'subscribers' || c.accessType === 'followers'
-      )
-      .slice(0, 5)
-      .map((c) => ({
-        id: c.id,
-        title: c.title,
-        thumbnail: c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null,
-        href: buildContentUrl(page.url, c),
-      }))
+  const subscribeGatedContent = $derived(
+    data.allContent.filter(
+      (c) => c.accessType === 'subscribers' || c.accessType === 'followers'
+    )
   );
+
+  const subscribePreview = $derived(
+    subscribeGatedContent.slice(0, 5).map((c) => ({
+      id: c.id,
+      title: c.title,
+      thumbnail: c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null,
+      href: buildContentUrl(page.url, c),
+    }))
+  );
+
+  // Total gated items — SubscribeCTA uses this to render "+N more" when
+  // the full catalogue exceeds the visible 5 tiles.
+  const subscribePreviewTotal = $derived(subscribeGatedContent.length);
 
   // Canonical URL is the org's own subdomain origin. Prevents SEO
   // duplicate-content issues if the platform ever links to the same org
@@ -620,6 +624,7 @@
           orgName={orgDisplayName}
           isAuthenticated={!!user}
           previewContent={previewProp}
+          totalPreviewCount={subscribePreviewTotal}
         />
       {:then pricing}
         <SubscribeCTA
@@ -631,6 +636,7 @@
           annualPriceCents={pricing?.annualPriceCents}
           currency={pricing?.currency}
           previewContent={previewProp}
+          totalPreviewCount={subscribePreviewTotal}
         />
       {:catch}
         <!-- Pricing fetch failed — render without price, log nothing
@@ -640,6 +646,7 @@
           orgName={orgDisplayName}
           isAuthenticated={!!user}
           previewContent={previewProp}
+          totalPreviewCount={subscribePreviewTotal}
         />
       {/await}
     {/if}

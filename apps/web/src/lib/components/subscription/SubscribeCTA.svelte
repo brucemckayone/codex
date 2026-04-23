@@ -7,14 +7,14 @@
   wrong-state flash because SubscribeButton hydrates from the localStorage-
   backed `subscriptionCollection` on mount.
 
-  The banner renders the same WebGL shader as the org hero (ShaderHero reads
-  preset + config from the parent `.org-layout`'s CSS custom properties, so
-  no prop plumbing is needed). Briefly swapped to a CSS gradient in V2 to
-  dodge "3 concurrent shaders" GPU pressure, but the gradient vanished on
-  dark brand colours (of-blood-and-bones reported aurora as "non-existent").
-  ShaderHero's IntersectionObserver pauses rendering when the CTA is
-  off-screen, so we're only running 2 shaders simultaneously in practice.
-  The radial veil keeps body text legible over bright preset colours.
+  The banner uses a layered CSS mesh-gradient backdrop built from the org's
+  brand palette (primary / secondary / accent tokens). Each glow layer is
+  mixed with WHITE rather than TRANSPARENT so dark brand colours still read
+  as distinct glows against the brand-tinted base — the earlier V2 gradient
+  used `color-mix(brand, transparent)` which collapsed to darkness on dark
+  brands like of-blood-and-bones. The shader approach works but runs a
+  second WebGL canvas which caused visible perf cost in the header, so we
+  stay CSS-only here.
 
   V2 overhaul (Agent SC, Phase 3):
     - Replaces 3-bullet row with a 3-col value-prop grid (icon + heading + desc)
@@ -27,7 +27,6 @@
 -->
 <script lang="ts">
   import SubscribeButton from '$lib/components/subscription/SubscribeButton.svelte';
-  import ShaderHero from '$lib/components/ui/ShaderHero/ShaderHero.svelte';
   import {
     Avatar,
     AvatarImage,
@@ -104,6 +103,13 @@
      * 16:9 tiles. Absent / empty = strip hidden.
      */
     previewContent?: PreviewItem[];
+    /**
+     * Total number of member-only items across the catalogue, used to
+     * render a "+N more" tile at the end of the preview row so the three
+     * or five visible tiles don't imply that's all there is. When omitted
+     * or <= previewContent.length, no "+N more" is shown.
+     */
+    totalPreviewCount?: number;
     /** Secondary microcopy under the CTA — used when no price is passed. */
     meta?: string;
     /** Destination for unauthenticated users clicking the CTA. */
@@ -142,6 +148,7 @@
     memberCount,
     memberAvatars,
     previewContent,
+    totalPreviewCount,
     meta = 'Cancel anytime',
     subscribeHref = '/pricing',
   }: Props = $props();
@@ -209,6 +216,16 @@
       : null
   );
 
+  // ── Derived: "+N more" count ──────────────────────────────────────
+  // Show a trailing "+N more" tile only when the caller told us the
+  // total exceeds what's visible. Without this, three tiles implies
+  // "three items total" which is misleading on catalogue-rich orgs.
+  const previewMoreCount = $derived.by(() => {
+    if (!displayedPreview || totalPreviewCount == null) return 0;
+    const remaining = totalPreviewCount - displayedPreview.length;
+    return remaining > 0 ? remaining : 0;
+  });
+
   // Show the price row only when there's something to render — otherwise
   // fall back to the legacy meta microcopy so the CTA isn't orphaned.
   const showPriceRow = $derived(priceLabel != null);
@@ -218,11 +235,11 @@
 <section class="subscribe-cta" aria-labelledby="subscribe-cta-title">
   <div class="subscribe-cta__panel">
     <div class="subscribe-cta__backdrop" aria-hidden="true">
-      <!-- Same WebGL shader as the org hero. Reads preset + config from the
-           parent `.org-layout`'s CSS custom properties (no prop plumbing).
-           IntersectionObserver pauses the canvas when the CTA is off-screen,
-           so we're not burning GPU cycles before the user scrolls here. -->
-      <ShaderHero class="subscribe-cta__shader" />
+      <!-- Mesh-gradient aurora: 3 radial glows (primary, secondary, accent)
+           over a brand-tinted base. Each glow is mixed with white so dark
+           brand colours still register as glows. The layer drifts slowly
+           on a 24s cycle for a subtle "living" feel without being hypnotic. -->
+      <div class="subscribe-cta__aurora"></div>
       <div class="subscribe-cta__veil"></div>
     </div>
 
@@ -363,6 +380,27 @@
                 </svelte:element>
               </li>
             {/each}
+            {#if previewMoreCount > 0}
+              <!-- Trailing "+N more" tile — signals the catalogue is larger
+                   than the visible 3–5 items and gives a keyboard-reachable
+                   target into the pricing/explore page. -->
+              <li class="subscribe-cta__preview-item">
+                <a
+                  href={subscribeHref}
+                  class="subscribe-cta__preview-tile subscribe-cta__preview-tile--more"
+                  aria-label={`${previewMoreCount} more member-only items`}
+                >
+                  <span
+                    class="subscribe-cta__preview-thumb subscribe-cta__preview-thumb--more"
+                  >
+                    <span class="subscribe-cta__preview-more-count"
+                      >+{previewMoreCount}</span
+                    >
+                  </span>
+                  <span class="subscribe-cta__preview-title">See all</span>
+                </a>
+              </li>
+            {/if}
           </ul>
         </div>
       {/if}
@@ -435,37 +473,118 @@
   }
 
   /* ── Backdrop ───────────────────────────────────────────────
-     Shader + veil. Fills the panel so the rounded corners clip the
-     canvas naturally. Always renders so anon + signed-in users get
-     the same mood on first paint (SubscribeButton handles the state
-     logic). */
+     Base + aurora + veil. The backdrop carries the deep brand-tinted base
+     layer so even if the aurora animation is reduced-motion-paused, we
+     still have a rich brand-coloured surface. */
   .subscribe-cta__backdrop {
     position: absolute;
     inset: 0;
     z-index: 0;
     pointer-events: none;
+    overflow: hidden;
+    /* Base: a brand-primary linear gradient from lighter to deeper, diagonal.
+       Uses OKLCH color-mix so lightness changes feel perceptually uniform
+       across the palette. Fallback to --color-interactive for surfaces that
+       render outside .org-layout (shouldn't happen here but safe). */
+    background: linear-gradient(
+      135deg,
+      color-mix(
+        in oklch,
+        var(--color-brand-primary, var(--color-interactive)) 88%,
+        black 12%
+      )
+        0%,
+      color-mix(
+        in oklch,
+        var(--color-brand-primary, var(--color-interactive)) 78%,
+        black 22%
+      )
+        100%
+    );
   }
 
-  /* The veil DARKENS the shader (not brightens it). Shaders can be any
-     colour — bright yellows, pastels, high-saturation pinks — so the dark
-     floor gives a consistent legibility surface for the light text that
-     sits above. A radial gradient puts the darkest spot behind the CTA
-     column, letting edges fade back into the shader. Uses `hsl(0 0% 0% / α)`
-     directly (same pattern as player.css) so the veil stays dark in both
-     light- and dark-theme orgs — semantic surface tokens flip with theme
-     and would LIGHTEN the shader on dark themes, inverting the intent. */
+  /* ── Aurora layer ───────────────────────────────────────────
+     Three soft radial glows (primary, secondary, accent) composited
+     with a heavy blur for a mesh-gradient feel. Mixed with WHITE so
+     dark brand colours (e.g. of-blood-and-bones' dark brown) still
+     register as distinct glows against the base. Slow drift keeps
+     the surface alive without being hypnotic. */
+  .subscribe-cta__aurora {
+    position: absolute;
+    /* Oversize so the blur doesn't show hard edges near the panel corners. */
+    inset: -15%;
+    background:
+      radial-gradient(
+        ellipse 55% 75% at 22% 25%,
+        color-mix(
+          in oklch,
+          var(--color-brand-primary, var(--color-interactive)) 55%,
+          hsl(0 0% 100%) 45%
+        )
+          0%,
+        transparent 62%
+      ),
+      radial-gradient(
+        ellipse 50% 65% at 82% 78%,
+        color-mix(
+          in oklch,
+          var(--color-brand-secondary, var(--color-interactive)) 50%,
+          hsl(0 0% 100%) 45%
+        )
+          0%,
+        transparent 60%
+      ),
+      radial-gradient(
+        ellipse 35% 45% at 62% 18%,
+        color-mix(
+          in oklch,
+          var(--color-brand-accent, var(--color-interactive)) 48%,
+          hsl(0 0% 100%) 45%
+        )
+          0%,
+        transparent 65%
+      );
+    filter: blur(var(--blur-2xl));
+    opacity: 0.9;
+    will-change: transform;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .subscribe-cta__aurora {
+      animation: subscribe-aurora-drift 24s var(--ease-smooth) infinite
+        alternate;
+    }
+  }
+
+  @keyframes subscribe-aurora-drift {
+    0% {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    33% {
+      transform: translate3d(-2%, 2%, 0) scale(1.04);
+    }
+    66% {
+      transform: translate3d(2%, -2%, 0) scale(1.06);
+    }
+    100% {
+      transform: translate3d(-1%, -1%, 0) scale(1.02);
+    }
+  }
+
+  /* ── Veil ───────────────────────────────────────────────────
+     Soft radial darkener centred behind the CTA column. Keeps body
+     text legible on orgs with lighter brand colours (primary = pastel
+     would wash out white text otherwise). Gentle — the aurora should
+     still read through. */
   .subscribe-cta__veil {
     position: absolute;
     inset: 0;
-    background:
-      radial-gradient(
-        ellipse 60% 80% at 50% 50%,
-        hsl(0 0% 0% / 0.55) 0%,
-        hsl(0 0% 0% / 0.38) 60%,
-        hsl(0 0% 0% / 0.15) 100%
-      );
-    backdrop-filter: blur(var(--blur-md));
-    -webkit-backdrop-filter: blur(var(--blur-md));
+    background: radial-gradient(
+      ellipse 55% 75% at 50% 50%,
+      hsl(0 0% 0% / 0.35) 0%,
+      hsl(0 0% 0% / 0.22) 55%,
+      hsl(0 0% 0% / 0.08) 100%
+    );
   }
 
   /* ── Body ───────────────────────────────────────────────────
@@ -816,6 +935,33 @@
     text-align: center;
   }
 
+  /* ── "+N more" tile ────────────────────────────────────────
+     Variant of the preview tile that signals "catalogue is larger than
+     the visible row." Tinted from brand so it reads as a first-class
+     CTA affordance rather than a placeholder. */
+  .subscribe-cta__preview-thumb--more {
+    display: grid;
+    place-items: center;
+    background: color-mix(
+      in oklch,
+      var(--color-brand-primary, var(--color-interactive)) 35%,
+      hsl(0 0% 100% / 0.1)
+    );
+    border-color: color-mix(
+      in oklch,
+      var(--color-brand-primary, var(--color-interactive)) 45%,
+      hsl(0 0% 100% / 0.2)
+    );
+  }
+
+  .subscribe-cta__preview-more-count {
+    font-family: var(--font-heading, var(--font-sans));
+    font-size: var(--text-xl);
+    font-weight: var(--font-semibold);
+    color: hsl(0 0% 100%);
+    letter-spacing: var(--tracking-tight);
+  }
+
   /* ── Reveal motion ─────────────────────────────────────────── */
 
   @media (prefers-reduced-motion: no-preference) {
@@ -915,10 +1061,13 @@
       gap: var(--space-3);
     }
 
-    /* Mobile value-prop redesign: horizontal row (icon left, text right).
-       Replaces the vertical icon+heading+description stack that took ~100px
-       per cell. New row is ~56px — cuts the section height by roughly half
-       while keeping all copy intact. */
+    /* Mobile value-prop redesign: 2-col grid (icon left, heading+description
+       stacked right). CSS grid is used instead of flex row because the 3
+       siblings (icon, heading, description) would otherwise flow horizontally
+       and the heading would wrap as a squeezed middle column.
+       Column 1: icon (auto-sized, spans both rows).
+       Column 2: heading (row 1), description (row 2).
+       Result: each cell is ~56–72px tall with clean typographic hierarchy. */
     .subscribe-cta__props {
       gap: var(--space-3);
       margin-top: var(--space-2);
@@ -926,26 +1075,34 @@
     }
 
     .subscribe-cta__prop {
-      flex-direction: row;
-      align-items: flex-start;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      grid-template-rows: auto auto;
+      column-gap: var(--space-3);
+      row-gap: var(--space-0-5);
+      align-items: start;
       text-align: left;
-      gap: var(--space-3);
       padding-inline: 0;
     }
 
     .subscribe-cta__prop-icon {
+      grid-column: 1;
+      grid-row: 1 / span 2;
+      align-self: start;
       flex-shrink: 0;
       width: var(--space-9);
       height: var(--space-9);
     }
 
     .subscribe-cta__prop-heading {
-      display: block;
+      grid-column: 2;
+      grid-row: 1;
       font-size: var(--text-sm);
     }
 
     .subscribe-cta__prop-description {
-      display: block;
+      grid-column: 2;
+      grid-row: 2;
       max-width: none;
       font-size: var(--text-xs);
     }
