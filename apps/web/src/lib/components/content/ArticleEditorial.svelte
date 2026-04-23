@@ -3,17 +3,22 @@
 
   Editorial layout for the Articles section of the org landing page.
   Lead article on the left (60% on desktop) renders as an inline spread
-  — 3:2 crop, full body, excerpt, byline, CTA chip — while up to 4
-  secondary articles stack on the right (40%) as compact list rows.
-  Mobile stacks the lead above the list.
+  — 3:2 crop, full body, excerpt, byline, CTA — while up to 4 secondary
+  articles stack on the right (40%) as purpose-built rows.
 
-  Secondary rows use ContentCard variant='list' so the existing article
-  content-type styling (left accent stripe, text-first treatment) carries
-  through without reinventing a new card primitive.
+  Secondary rows use a dedicated `.article-row` primitive (not the shared
+  ContentCard list variant) so the sidebar shows the signals that make an
+  article card usable: excerpt, byline, read-time, and a clear affordance
+  that the row is clickable. ContentCard's list variant suppresses the
+  description by design (see showDescription derivation), which left the
+  sidebar feeling like a table of contents rather than a reading list.
+
+  Mobile: lead stacks above rows; rows switch to a horizontal layout with
+  the thumbnail on the left and copy on the right, matching the reading-
+  list pattern common in content apps.
 -->
 <script lang="ts">
   import { page } from '$app/state';
-  import { ContentCard } from '$lib/components/ui/ContentCard';
   import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
   import { FileTextIcon } from '$lib/components/ui/Icon';
   import { buildContentUrl } from '$lib/utils/subdomain';
@@ -46,7 +51,7 @@
 
   const LIST_CAP = 4;
 
-  const { items, access }: Props = $props();
+  const { items, access: _access }: Props = $props();
 
   const lead = $derived(items[0]);
   const list = $derived(items.slice(1, 1 + LIST_CAP));
@@ -61,6 +66,22 @@
     lead?.description ? extractPlainText(lead.description) : ''
   );
   const leadDuration = $derived(lead?.mediaItem?.durationSeconds ?? null);
+
+  function rowThumb(item: ArticleItem): string | null {
+    return item.mediaItem?.thumbnailUrl ?? item.thumbnailUrl ?? null;
+  }
+
+  function rowExcerpt(item: ArticleItem): string {
+    if (!item.description) return '';
+    const plain = extractPlainText(item.description);
+    // Trim to ~160 chars so the 2-line clamp lands consistently regardless
+    // of sentence breaks; the clamp handles final ellipsis.
+    return plain.length > 160 ? plain.slice(0, 157).trimEnd() + '…' : plain;
+  }
+
+  function rowDuration(item: ArticleItem): number | null {
+    return item.mediaItem?.durationSeconds ?? null;
+  }
 </script>
 
 {#if lead}
@@ -82,7 +103,6 @@
               <FileTextIcon size={48} />
             </div>
           {/if}
-          <span class="article-lead__type-badge">Read</span>
         </figure>
 
         <div class="article-lead__body">
@@ -125,31 +145,69 @@
     </article>
 
     {#if list.length > 0}
-      <div class="article-list" aria-label="More articles">
+      <ol class="article-list" aria-label="More articles">
         {#each list as item (item.id)}
-          <ContentCard
-            variant="list"
-            id={item.id}
-            title={item.title}
-            thumbnail={item.mediaItem?.thumbnailUrl ?? item.thumbnailUrl ?? null}
-            description={item.description}
-            contentType="article"
-            duration={item.mediaItem?.durationSeconds ?? null}
-            creator={item.creator?.name
-              ? { username: item.creator.name, displayName: item.creator.name }
-              : undefined}
-            href={buildContentUrl(page.url, item)}
-            price={item.priceCents != null
-              ? { amount: item.priceCents, currency: 'GBP' }
-              : null}
-            contentAccessType={item.accessType}
-            included={access.isIncluded(item)}
-            isFollower={access.isFollowing}
-            tierName={access.getTierName(item)}
-            category={item.category ?? null}
-          />
+          {@const excerpt = rowExcerpt(item)}
+          {@const thumb = rowThumb(item)}
+          {@const duration = rowDuration(item)}
+          <li class="article-row">
+            <a class="article-row__link" href={buildContentUrl(page.url, item)}>
+              <figure class="article-row__frame">
+                {#if thumb}
+                  <img
+                    src={thumb}
+                    srcset={getThumbnailSrcset(thumb)}
+                    sizes="120px"
+                    alt=""
+                    class="article-row__img"
+                    loading="lazy"
+                  />
+                {:else}
+                  <div class="article-row__placeholder" aria-hidden="true">
+                    <FileTextIcon size={24} />
+                  </div>
+                {/if}
+              </figure>
+
+              <div class="article-row__body">
+                <div class="article-row__head">
+                  <FileTextIcon size={12} class="article-row__kind-icon" />
+                  <span class="article-row__kind">Article</span>
+                  {#if item.category}
+                    <span class="article-row__sep" aria-hidden="true">·</span>
+                    <span class="article-row__category">{item.category}</span>
+                  {/if}
+                </div>
+
+                <h4 class="article-row__title">{item.title}</h4>
+
+                {#if excerpt}
+                  <p class="article-row__excerpt">{excerpt}</p>
+                {/if}
+
+                <div class="article-row__meta">
+                  {#if item.creator?.name}
+                    <span class="article-row__author">{item.creator.name}</span>
+                  {/if}
+                  {#if duration}
+                    {#if item.creator?.name}
+                      <span class="article-row__sep" aria-hidden="true">·</span>
+                    {/if}
+                    <span
+                      class="article-row__read-time"
+                      aria-label="Reading time {formatDurationHuman(duration)}"
+                    >
+                      {formatDurationHuman(duration)} read
+                    </span>
+                  {/if}
+                </div>
+              </div>
+
+              <span class="article-row__chevron" aria-hidden="true">→</span>
+            </a>
+          </li>
         {/each}
-      </div>
+      </ol>
     {/if}
   </div>
 {/if}
@@ -341,52 +399,214 @@
     transform: translateX(var(--space-1));
   }
 
-  /* ── Secondary list ────────────────────────────────────────── */
+  /* ── Secondary list — purpose-built article rows ────────────
+     Each row is transparent by default (so the section doesn't read as a
+     wall of cards), with a subtle fill on hover / focus-visible. Rows
+     include excerpt, byline, and read-time so the sidebar is actually
+     useful as a "more reading" surface. */
 
   .article-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
+    gap: 0;
   }
 
-  /* Tighten list-variant ContentCards inside the editorial sidebar —
-     the default list thumb width (180px) is fine on its own, but here
-     each row needs to fit in the ~40% sidebar without crowding the copy. */
-  .article-list :global(.cc[data-variant='list']) {
-    padding: var(--space-2);
+  .article-row {
+    min-width: 0;
+    border-bottom: var(--border-width) var(--border-style)
+      color-mix(in srgb, var(--color-border) 40%, transparent);
   }
 
-  .article-list :global(.cc[data-variant='list'] .cc__thumb) {
-    width: calc(var(--space-20) + var(--space-2));
-    min-width: calc(var(--space-20) + var(--space-2));
+  .article-row:last-child {
+    border-bottom: none;
   }
 
-  .article-list :global(.cc[data-variant='list'] .cc__body) {
-    padding: var(--space-2) var(--space-3);
+  .article-row__link {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-4) var(--space-3);
+    color: inherit;
+    text-decoration: none;
+    border-radius: var(--radius-md);
+    transition:
+      background-color var(--duration-fast) var(--ease-default),
+      transform var(--duration-fast) var(--ease-default);
   }
 
-  .article-list :global(.cc[data-variant='list'] .cc__title) {
+  .article-row__link:hover,
+  .article-row__link:focus-visible {
+    background: color-mix(in srgb, var(--color-text) 4%, transparent);
+  }
+
+  .article-row__link:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: calc(-1 * var(--border-width-thick));
+  }
+
+  .article-row__frame {
+    position: relative;
+    margin: 0;
+    width: calc(var(--space-16) + var(--space-4));
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+    border-radius: var(--radius-md);
+    background: var(--color-surface-secondary);
+    flex-shrink: 0;
+  }
+
+  .article-row__img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform var(--duration-normal) var(--ease-smooth);
+  }
+
+  .article-row__link:hover .article-row__img {
+    transform: scale(1.04);
+  }
+
+  .article-row__placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    color: var(--color-text-tertiary);
+  }
+
+  .article-row__body {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .article-row__head {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wider);
+    color: var(--color-text-tertiary);
+  }
+
+  :global(.article-row__kind-icon) {
+    margin-right: var(--space-0-5);
+    color: var(--color-text-tertiary);
+  }
+
+  .article-row__category {
+    text-transform: none;
+    letter-spacing: var(--tracking-normal);
+    font-weight: var(--font-medium);
+  }
+
+  .article-row__sep {
+    opacity: var(--opacity-50);
+  }
+
+  .article-row__title {
+    margin: 0;
+    font-family: var(--font-heading, var(--font-sans));
     font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    line-height: var(--leading-tight);
+    color: var(--color-text);
+    display: -webkit-box;
     -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    transition: color var(--duration-fast) var(--ease-default);
   }
 
-  .article-list :global(.cc[data-variant='list'] .cc__description) {
-    display: none;
+  .article-row__link:hover .article-row__title {
+    color: var(--color-interactive);
+  }
+
+  .article-row__excerpt {
+    margin: 0;
+    font-size: var(--text-sm);
+    line-height: var(--leading-relaxed);
+    color: var(--color-text-secondary);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .article-row__meta {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    margin-top: var(--space-0-5);
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
+  }
+
+  .article-row__author {
+    font-weight: var(--font-medium);
+    color: var(--color-text-secondary);
+  }
+
+  .article-row__chevron {
+    align-self: center;
+    font-size: var(--text-lg);
+    color: var(--color-text-tertiary);
+    opacity: 0;
+    transform: translateX(calc(-1 * var(--space-1)));
+    transition:
+      opacity var(--duration-fast) var(--ease-default),
+      transform var(--duration-normal) var(--ease-out),
+      color var(--duration-fast) var(--ease-default);
+  }
+
+  .article-row__link:hover .article-row__chevron,
+  .article-row__link:focus-visible .article-row__chevron {
+    opacity: 1;
+    transform: translateX(0);
+    color: var(--color-interactive);
+  }
+
+  /* ── Mobile refinement ─────────────────────────────────────
+     Below `md`, the editorial stacks lead above rows. Rows keep the
+     horizontal thumb + body layout (better at mobile widths than the
+     previous vertical collapse that orphaned thumbs above titles). */
+  @media (--below-md) {
+    .article-row__link {
+      padding: var(--space-3) var(--space-2);
+      gap: var(--space-3);
+    }
+
+    .article-row__frame {
+      width: calc(var(--space-14));
+    }
+
+    .article-row__chevron {
+      display: none;
+    }
   }
 
   /* Stagger reveal on enter */
   @media (prefers-reduced-motion: no-preference) {
     .article-lead,
-    .article-list :global(.cc) {
+    .article-list .article-row {
       opacity: 0;
       transform: translateY(var(--space-3));
       animation: article-in var(--duration-slower) var(--ease-out) forwards;
     }
 
-    .article-list :global(.cc:nth-child(1)) { animation-delay: 80ms; }
-    .article-list :global(.cc:nth-child(2)) { animation-delay: 160ms; }
-    .article-list :global(.cc:nth-child(3)) { animation-delay: 240ms; }
-    .article-list :global(.cc:nth-child(4)) { animation-delay: 320ms; }
+    .article-list .article-row:nth-child(1) { animation-delay: 80ms; }
+    .article-list .article-row:nth-child(2) { animation-delay: 160ms; }
+    .article-list .article-row:nth-child(3) { animation-delay: 240ms; }
+    .article-list .article-row:nth-child(4) { animation-delay: 320ms; }
   }
 
   @keyframes article-in {
