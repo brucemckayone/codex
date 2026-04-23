@@ -188,6 +188,18 @@ Dependency chain: `v4wao` + `ac2o8` blocked by `oqv3r` (skill patch + preset dat
 
 Dependency: `uw05n` linked to `ja9zp` (same fix pattern — slug invalidation out of `waitUntil`).
 
+### From iter-025 (06ygy patch spec + sibling upload audit)
+
+| Bead | Priority | Title | Root file(s) |
+|---|---|---|---|
+| `Codex-7m2kd` | P3 | Promote R15 hard rule — SVG upload handlers MUST sanitize before R2 write | `references/02-css-architecture.md` §2 (hard rules table) |
+
+**Artifact**: `docs/brand-editor-investigation/06ygy-patch.md` (469 lines) — PR-ready patch for the P0. Diff + unit tests + integration test + checklist. Also folds in a bonus P2 cache-control fix: SVG logos should have 1-hour cache (matches `ImageProcessingService`), not the current 1-year that prevents re-uploads propagating.
+
+**Isolation confirmed**: Agent P audited ALL upload endpoints. Only logo upload accepts SVG. Content thumbnail, avatar, and media uploads use `SUPPORTED_IMAGE_MIME_TYPES` (PNG/JPEG/WEBP/GIF only — verified at `image.ts:20-25`). The P0 is a single-endpoint gap, not a systemic pattern.
+
+**Pause counter**: 1/3 after iter-025 (1 P3 only — no new P1/P0 findings; the P0 from iter-024 is already tracked).
+
 **Iter-023 sibling hunt proved `lqvyy` is isolated, not a pattern**: tokenOverrides FOUC is already tracked in `wcwpw`; `heroLayout`/intro-video/dark-logo are N/A (concept doesn't exist); player tokens are theme-agnostic by design. Zero new bug beads needed. See iter-023 audit for the full falsification.
 
 **Artifact**: `docs/brand-editor-investigation/lqvyy-patch.md` (520 lines) — PR-ready patch spec for `lqvyy`. Unified diff, unit test scaffolding, Playwright e2e spec, pre-PR checklist, rollout plan. Can be applied in one pass when authorized.
@@ -291,3 +303,4 @@ User confirmed 2026-04-23 that none of these six unknowns warrant investigation.
 | 022 | 2026-04-23 | I (darkOverrides render trace, sonnet), J (wwedk schema + UX design, sonnet) | lqvyy + design doc | **Bombshell P1**: `darkModeOverrides` is NEVER rendered for non-editor visitors — feature is half-shipped, every org with dark colors set is showing LIGHT palette to dark-mode users. Fix is ~30 lines (add `$derived` + `style:--brand-*-dark` bindings in `+layout.svelte`). Design doc for `wwedk` written (459 lines) — recommends parallel `darkTokenOverrides` column. User scope expansion + new P1 resets convergence counter to 0/3. Reference 10 was FINALLY opened by an agent and correctly predicted the bug via its §10 gotcha list. |
 | 023 | 2026-04-23 | K (sibling bug hunt, sonnet), L (lqvyy patch spec, sonnet) | 688ax + patch doc | **Zero new bugs — `lqvyy` proven isolated.** Agent K's sibling hunt falsified the iceberg hypothesis: 7 candidates checked, none were new bugs (5 N/A by design, 2 already in `wcwpw`). Agent L produced 520-line PR-ready patch spec with diff, unit tests, Playwright e2e, checklist — ready to apply in one pass. Filed `Codex-688ax` as a skill-patch task (queued after lqvyy lands). Pause counter back to 1/3. |
 | 024 | 2026-04-23 | M (preset coherence, **haiku**), N (upload flow mapping, sonnet) | 06ygy (P0) + ne00j + 631mn + uw05n + 57d8a + mo3ib + dnjrn | **MASSIVE iteration — first P0 of the loop**. Agent N mapped logo + intro video upload flows and found SVG sanitization completely absent in the logo upload path (explicit CLAUDE.md rule violation, stored XSS vector). Also found: dead Remove button (schema omits logoUrl), intro video invisible until cache flush, cache race (ja9zp-class), missing logo placeholder, orphaned R2 HLS segments. Agent M confirmed 26/27 presets coherent; 1 P3 mild mismatch (Onyx luxury). Pause counter RESET to 0/3 — investigation terrain not exhausted after all. |
+| 025 | 2026-04-23 | O (06ygy patch spec, sonnet), P (sibling upload audit, **haiku**) | 7m2kd + patch doc | **06ygy isolation confirmed + PR-ready patch written**. Agent P checked all upload endpoints; only logo upload accepts SVG (by structural design — `SUPPORTED_IMAGE_MIME_TYPES` excludes SVG). Agent O produced 469-line patch spec including a bonus cache-control fix (SVG logos at fixed key should have 1h cache, not 1y, per `ImageProcessingService` pattern). Filed `Codex-7m2kd` to promote R15 hard rule post-fix. Pause counter: 1/3. |
