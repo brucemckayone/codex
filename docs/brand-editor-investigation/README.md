@@ -156,26 +156,37 @@ Dependency chain: `v4wao` + `ac2o8` blocked by `oqv3r` (skill patch + preset dat
 | `Codex-9225y` | P3 | Correct `token-registry.json` — 6 tokens misclassified as zero-consumer (all LIVE-DIRECT) | `docs/brand-editor-investigation/token-registry.json` |
 | `Codex-peqvl` | P3 | Refine `Codex-wcwpw` scope — hero-hide-* is SSR-rendered, NOT part of FOUC | `apps/web/src/routes/_org/[slug]/+layout.svelte:72-89` |
 | `Codex-rwci4` | P3 | `injectBrandVars` writes `--color-hero-hide-*` with no consumers (noise) | `apps/web/src/lib/brand-editor/css-injection.ts:466-473` |
+| `Codex-wwedk` | P2 | **FEATURE**: Per-theme shader + full tokenOverrides (extend darkOverrides beyond just colors) | `apps/web/src/lib/brand-editor/brand-editor-store.svelte.ts` + schema + UX |
+
+`Codex-wwedk` is a **user-directed feature request raised mid-iter-021**, not a bug. Blocked by `Codex-9u8wg` (editor scope-to-`[data-editing-theme]`) — the dark-mode preview infrastructure must exist before per-theme shaders can be previewed correctly.
 
 Key finding (non-bug): **Hero visibility flags are fully CORRECT** end-to-end (5 keys, 5 SSR attrs, 5 CSS consumers, zero orphans). No bugs to file from that slice of the audit.
 
-**Convergence signal**: iter-021 produced zero P1 findings — first iteration in the loop to do so. This is pause-condition count 1 of 3 per /design-system §7.
+**Convergence signal** (pre-user-expansion): iter-021's original scope produced zero P1 findings — pause-condition count 1/3. The `wwedk` feature request **resets the convergence counter** — iter-022 is now committed to new investigation regardless of other slice findings.
 
 ---
 
-## 4. Investigation queue (iter-021+)
+## 4. Investigation queue (iter-022+)
 
 Each bullet is a candidate agent task for a future loop fire. Pick two per iteration to match the 2-concurrent-agent limit.
 
-Completed: ~~Light/dark sync~~ (iter-019); ~~Cross-org brand injection~~ (iter-019); ~~Token registry JSON~~ (iter-020 — `token-registry.json`); ~~Preset round-trip~~ (iter-020 — yielded oqv3r).
+Completed: ~~Light/dark sync~~ (iter-019); ~~Cross-org brand injection~~ (iter-019); ~~Token registry JSON~~ (iter-020); ~~Preset round-trip~~ (iter-020); ~~Hero visibility audit~~ (iter-021 — chain confirmed clean); ~~Zero-consumer token classification~~ (iter-021 — all 6 live).
 
-1. **Hero layout visibility flags audit**
-   - `hero-hide-*` tokenOverrides map to `data-hero-hide-*` attributes. Confirm every visibility toggle has a matching DOM attribute consumer in `_org/[slug]/+layout.svelte`.
-   - Overlaps with `wcwpw` (FOUC) — if we fix FOUC by server-rendering hide flags, the audit becomes easier.
+### PRIORITY: User-directed scope expansion (2026-04-23)
 
-2. **darkOverrides chain**
+0. **Per-theme shader + full tokenOverrides design** ← `Codex-wwedk` (P2 feature)
+   - Colors are per-theme via `darkOverrides`; shaders and all other tokenOverrides are single-valued across themes.
+   - User requests: independently configurable shader per theme, plus ability to vary other fine-tune keys by theme.
+   - Agent task: propose schema (option A/B/C outlined in bead), UX flow (which fine-tunes make sense per-theme vs shared), CSS consumption pattern (gate via `[data-theme='dark'] [data-org-brand]`), migration path.
+   - Depends on `Codex-9u8wg` landing (editor preview scoped to `[data-editing-theme]` — needed infrastructure).
+   - Use sonnet (schema + UX design, high synthesis).
+
+### Standard queue
+
+2. **darkOverrides chain (prerequisite for `wwedk`)**
    - `darkModeOverrides` is a JSON string of `Partial<ThemeColors>`. Trace how it's consumed at SSR layout level, not just editor preview.
    - Interaction with `z91af` fix — if we stop `<html data-theme>` mutation from editor, does dark-mode preview of custom override still work?
+   - This trace is also now a prerequisite for `wwedk` (per-theme shader) — the schema/UX proposal needs to be informed by how dark colors actually flow end-to-end.
 
 3. **Subscription to localStorage across tabs**
    - If user has the app open in two tabs on the same org and toggles theme in tab A, does tab B update? (Depends on if ThemeToggle gets a `storage` event listener after `micw3` fix.)
