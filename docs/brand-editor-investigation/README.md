@@ -137,34 +137,47 @@ Dependency chain: `ja9zp` blocks `7afgp`; `g49b4` blocks `mdg94`.
 
 Dependency chain: `9u8wg` blocks `z91af` (close-restore becomes dead code after editor stops touching `<html>`); `zv85e` blocked by all four bugs (reference should reflect landed reality, not intent).
 
+### From iter-020 (preset semantics + token registry)
+
+| Bead | Priority | Title | Root file(s) |
+|---|---|---|---|
+| `Codex-oqv3r` | P1 | `applyPreset` wipes user fine-tunes — preset browsing destroys ~30 fine-tune keys silently | `apps/web/src/lib/brand-editor/brand-editor-store.svelte.ts:210-214` |
+| `Codex-v4wao` | P3 | Add "partial Record update" anti-pattern to `/design-system` reference 10 | `references/10-brand-editor.md` |
+| `Codex-ac2o8` | P3 | Minimal-style presets should set `shader-preset: 'none'` for explicit clearing | `apps/web/src/lib/brand-editor/presets.ts` |
+
+Dependency chain: `v4wao` + `ac2o8` blocked by `oqv3r` (skill patch + preset data fix both only make sense under merge semantics).
+
+**Artifact**: `docs/brand-editor-investigation/token-registry.json` (2016 lines, 168 tokens) — machine-readable registry produced by iter-020 Agent E (haiku). Query by category to find org-brandable tokens, fine-tune keys, zero-consumer tokens.
+
 ---
 
-## 4. Investigation queue (iter-020+)
+## 4. Investigation queue (iter-021+)
 
 Each bullet is a candidate agent task for a future loop fire. Pick two per iteration to match the 2-concurrent-agent limit.
 
-Completed in iter-019: ~~Light/dark sync~~ (yielded 9u8wg, micw3, z91af); ~~Cross-org brand injection~~ (yielded wcwpw; sub-org hierarchy confirmed absent).
+Completed: ~~Light/dark sync~~ (iter-019); ~~Cross-org brand injection~~ (iter-019); ~~Token registry JSON~~ (iter-020 — `token-registry.json`); ~~Preset round-trip~~ (iter-020 — yielded oqv3r).
 
-1. **Token coverage formalized as JSON** — cross-reference `apps/web/src/lib/styles/tokens/*.css` + `lib/theme/tokens/org-brand.css` against editor controls
-   - Agent A (iter-018) produced a three-way diff; formalize it as a JSON file at `docs/brand-editor-investigation/token-registry.json` with columns: `defined, editable, persisted, consumed`.
-   - Use that JSON to generate a dashboard and keep it in sync.
-
-2. **Hero layout visibility flags audit**
+1. **Hero layout visibility flags audit**
    - `hero-hide-*` tokenOverrides map to `data-hero-hide-*` attributes. Confirm every visibility toggle has a matching DOM attribute consumer in `_org/[slug]/+layout.svelte`.
    - Overlaps with `wcwpw` (FOUC) — if we fix FOUC by server-rendering hide flags, the audit becomes easier.
 
-3. **Preset → tokenOverrides round-trip**
-   - When a user applies a preset from `brand-editor/presets.ts`, does it populate every relevant tokenOverride key? Or only a subset, leaving non-preset keys at their old values (sticky overrides)?
-
-4. **darkOverrides chain**
+2. **darkOverrides chain**
    - `darkModeOverrides` is a JSON string of `Partial<ThemeColors>`. Trace how it's consumed at SSR layout level, not just editor preview.
    - Interaction with `z91af` fix — if we stop `<html data-theme>` mutation from editor, does dark-mode preview of custom override still work?
 
-5. **Brand editor preset fairness + fine-tune order audit**
-   - If a user applies Preset A (which sets heading-color=X), then applies Preset B (which doesn't touch heading-color), does heading-color stick at X or revert? `applyPreset` at `brand-editor-store.svelte.ts:212-214` clears `tokenOverrides` wholesale, which may wipe user-selected fine-tunes inadvertently.
-
-6. **Subscription to localStorage across tabs**
+3. **Subscription to localStorage across tabs**
    - If user has the app open in two tabs on the same org and toggles theme in tab A, does tab B update? (Depends on if ThemeToggle gets a `storage` event listener after `micw3` fix.)
+
+4. **Zero-consumer token audit** — from `token-registry.json`, iter-020 Agent E flagged 6 tokens with no `var()` consumers (`--color-brand-primary-hover`, `--color-interactive-hover`, etc.). Agent E believed these are used implicitly via OKLCH relative-color syntax. Verify by grepping the computed-color chain and either confirm they're live or remove them.
+
+5. **Dark-mode editor preview under fix `9u8wg`**
+   - Once `9u8wg` lands (editor scopes preview to `.org-layout[data-editing-theme]`), audit every place `[data-theme='dark']` is used and ensure parallel `[data-editing-theme='dark']` rules exist. Miss = dark preview silently does nothing.
+
+6. **Preset category coherence audit**
+   - The 27 presets are categorized as Professional/Creative/Bold/Minimal/Organic/Tech/Luxury/Playful/Atmospheric. Audit: do the `tokenOverrides` in each preset match their category intent? E.g., Minimal presets should not bundle aggressive shaders; Bold presets should have strong `heading-color` overrides. Surface presets whose values disagree with their label.
+
+7. **Intro video + logo upload flows**
+   - Iter-018/019/020 focused on tokens. There are two binary uploads in the brand editor (logo + intro video) that have their own pipelines. Map them as a follow-up (multipart upload → R2 → DB URL → render) for completeness.
 
 ---
 
@@ -194,3 +207,4 @@ Completed in iter-019: ~~Light/dark sync~~ (yielded 9u8wg, micw3, z91af); ~~Cros
 |---|---|---|---|---|
 | 018 | 2026-04-23 | A (token three-way diff, sonnet), B (font persistence trace, sonnet) | ja9zp, 7afgp, g49b4, mdg94, fopbo, ag8l8 | Fonts ARE saved to DB — bug is waitUntil race on slug-keyed CACHE_KV invalidation, compounded by missing client-side invalidate('cache:org-versions') |
 | 019 | 2026-04-23 | C (light/dark sync, sonnet), D (cross-org brand injection, sonnet) | 9u8wg, micw3, z91af, wcwpw, zv85e | Light/dark sync is THREE stacked bugs (editor writes global `<html data-theme>`, ThemeToggle has no external subscription, close() clobbers sidebar toggle). Sub-orgs are FLAT — no hierarchy, no brand inheritance. New FOUC bug: shader/hero tokenOverrides arrive post-hydration. Both agents proposed new skill references (`11-theming.md` + `11-multi-tenancy.md`) — deferred until bugs land so refs reflect reality. |
+| 020 | 2026-04-23 | E (token registry JSON, **haiku**), F (preset round-trip audit, sonnet) | oqv3r, v4wao, ac2o8 | P1 preset bug: `applyPreset` wholesale-replaces `state.pending.tokenOverrides`, silently wiping ~30 fine-tune keys every time a user browses presets. One-line fix (merge instead of replace). Produced `token-registry.json` — 168 tokens, machine-readable. Pattern-level anti-pattern surfaced: "partial Record update should merge, not replace" — candidate for skill reference 10. Haiku nailed the enumeration task for ~1/3 the token cost of sonnet. |

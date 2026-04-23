@@ -1,0 +1,2016 @@
+{
+  "generatedAt": "2026-04-23",
+  "iteration": "020",
+  "summary": {
+    "totalTokens": 118,
+    "tokensByCategory": {
+      "brand-color-input": 8,
+      "brand-color-derived": 19,
+      "brand-typography-input": 2,
+      "brand-geometry-input": 2,
+      "brand-shadow-input": 2,
+      "brand-fine-tune": 11,
+      "brand-shader-presets": 1,
+      "brand-player-chrome": 9,
+      "brand-glass": 1,
+      "brand-card-interaction": 2,
+      "brand-hero-visibility": 1,
+      "system-semantic-colors": 51,
+      "system-spacing": 24,
+      "system-typography": 12,
+      "system-motion": 10,
+      "system-borders": 6,
+      "system-shadows": 8,
+      "system-opacity": 11,
+      "system-z-index": 9,
+      "system-radius": 8,
+      "system-materials": 8,
+      "system-layout": 8,
+      "system-breakpoints": 5
+    }
+  },
+  "tokens": [
+    {
+      "name": "--brand-color",
+      "category": "brand-color-input",
+      "definedIn": ["apps/web/src/lib/brand-editor/css-injection.ts:325-326"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorColors.svelte (primary color picker)"],
+      "persistedAs": "branding_settings.primary_color_hex",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 20, "context": "--color-brand-primary derivation"},
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 26, "context": "--color-interactive derivation"},
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 32, "context": "--color-focus derivation"},
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 37, "context": "--color-text-on-brand derivation"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": true
+    },
+    {
+      "name": "--brand-secondary",
+      "category": "brand-color-input",
+      "definedIn": ["apps/web/src/lib/brand-editor/css-injection.ts:329-330"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorColors.svelte (secondary color picker)"],
+      "persistedAs": "branding_settings.secondary_color_hex",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 46, "context": "--color-brand-secondary palette"},
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 231, "context": "dark mode secondary override"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "nullable": true
+    },
+    {
+      "name": "--brand-accent",
+      "category": "brand-color-input",
+      "definedIn": ["apps/web/src/lib/brand-editor/css-injection.ts:333-334"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorColors.svelte (accent color picker)"],
+      "persistedAs": "branding_settings.accent_color_hex",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 51, "context": "--color-brand-accent palette"},
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 232, "context": "dark mode accent override"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "nullable": true
+    },
+    {
+      "name": "--brand-bg",
+      "category": "brand-color-input",
+      "definedIn": ["apps/web/src/lib/brand-editor/css-injection.ts:337-338"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorColors.svelte (background color picker)"],
+      "persistedAs": "branding_settings.background_color_hex",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 183, "context": "[data-org-bg] surface derivation"},
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 190, "context": "[data-org-bg] text derivation"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "nullable": true
+    },
+    {
+      "name": "--brand-radius",
+      "category": "brand-geometry-input",
+      "definedIn": ["apps/web/src/lib/brand-editor/css-injection.ts:341-342"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorShape.svelte (radius slider)"],
+      "persistedAs": "branding_settings.radius_value",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/radius.css", "line": 4, "context": "--radius-base fallback"},
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 56, "context": "--brand-radius-base re-declaration"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "valueFormat": "rem (0-2)"
+    },
+    {
+      "name": "--brand-density",
+      "category": "brand-geometry-input",
+      "definedIn": ["apps/web/src/lib/brand-editor/css-injection.ts:345-346"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorShape.svelte (density slider)"],
+      "persistedAs": "branding_settings.density_value",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/spacing.css", "line": 4, "context": "--space-unit multiplier"},
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 69, "context": "--brand-density-scale re-declaration"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "valueFormat": "numeric (0.75-1.25)"
+    },
+    {
+      "name": "--brand-font-body",
+      "category": "brand-typography-input",
+      "definedIn": ["apps/web/src/lib/brand-editor/css-injection.ts:349-350"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorTypography.svelte (body font picker)"],
+      "persistedAs": "branding_settings.font_body",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/typography.css", "line": 4, "context": "--font-sans fallback chain"},
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 94, "context": "--font-body re-declaration"},
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 99, "context": "--font-sans re-declaration in [data-org-brand]"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "Google Font name"
+    },
+    {
+      "name": "--brand-font-heading",
+      "category": "brand-typography-input",
+      "definedIn": ["apps/web/src/lib/brand-editor/css-injection.ts:353-354"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorTypography.svelte (heading font picker)"],
+      "persistedAs": "branding_settings.font_heading",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 95, "context": "--font-heading re-declaration"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "Google Font name"
+    },
+    {
+      "name": "--color-brand-primary",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:20"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 22, "context": "hover state derivation"},
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 28, "context": "active state derivation"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "derivedFrom": "--brand-color via OKLCH relative color"
+    },
+    {
+      "name": "--color-brand-primary-hover",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:21"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "derivedFrom": "--brand-color lightness -0.08 OKLCH"
+    },
+    {
+      "name": "--color-brand-primary-active",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:22"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "derivedFrom": "--brand-color lightness -0.15 OKLCH"
+    },
+    {
+      "name": "--color-brand-primary-subtle",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:23"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "derivedFrom": "--brand-color at lightness 0.96, 20% chroma"
+    },
+    {
+      "name": "--color-interactive",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:26"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "derivedFrom": "--brand-color (alias)"
+    },
+    {
+      "name": "--color-interactive-hover",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:27"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "derivedFrom": "--brand-color lightness -0.08 OKLCH"
+    },
+    {
+      "name": "--color-interactive-active",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:28"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "derivedFrom": "--brand-color lightness -0.15 OKLCH"
+    },
+    {
+      "name": "--color-interactive-subtle",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:29"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "derivedFrom": "--brand-color at lightness 0.97, 15% chroma"
+    },
+    {
+      "name": "--color-focus",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:32"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "derivedFrom": "--brand-color (alias)"
+    },
+    {
+      "name": "--color-focus-ring",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:33"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "derivedFrom": "--brand-color lightness +0.15, 50% chroma OKLCH"
+    },
+    {
+      "name": "--color-border-focus",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:34"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "derivedFrom": "--brand-color (alias)"
+    },
+    {
+      "name": "--color-text-on-brand",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:37"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "derivedFrom": "--brand-color lightness contrast formula OKLCH"
+    },
+    {
+      "name": "--color-brand-secondary",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:46"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "derivedFrom": "--brand-secondary input or --color-neutral-600 fallback"
+    },
+    {
+      "name": "--color-brand-secondary-hover",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:47"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "derivedFrom": "--brand-secondary lightness -0.08 OKLCH"
+    },
+    {
+      "name": "--color-brand-secondary-subtle",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:48"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "derivedFrom": "--brand-secondary at lightness 0.96, 20% chroma OKLCH"
+    },
+    {
+      "name": "--color-brand-accent",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:51"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "derivedFrom": "--brand-accent input or --color-warning fallback"
+    },
+    {
+      "name": "--color-brand-accent-hover",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:52"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "derivedFrom": "--brand-accent lightness -0.08 OKLCH"
+    },
+    {
+      "name": "--color-brand-accent-subtle",
+      "category": "brand-color-derived",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:53"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "derivedFrom": "--brand-accent at lightness 0.96, 20% chroma OKLCH"
+    },
+    {
+      "name": "--color-heading",
+      "category": "brand-fine-tune",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:133"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorFineTuneColors.svelte (heading color picker)"],
+      "persistedAs": "branding_settings.token_overrides['heading-color']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 166, "context": "h1-h6 color override in [data-org-brand]"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "hex color via tokenOverrides"
+    },
+    {
+      "name": "--brand-text-scale",
+      "category": "brand-fine-tune",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:106"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorFineTuneTypography.svelte (text scale slider)"],
+      "persistedAs": "branding_settings.token_overrides['text-scale']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 111, "context": "--text-xs *= text-scale"},
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 118, "context": "--text-4xl *= text-scale"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "numeric multiplier via tokenOverrides"
+    },
+    {
+      "name": "--brand-heading-weight",
+      "category": "brand-fine-tune",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:107"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorFineTuneTypography.svelte (heading weight)"],
+      "persistedAs": "branding_settings.token_overrides['heading-weight']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 161, "context": "--font-bold override"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "font-weight value via tokenOverrides"
+    },
+    {
+      "name": "--brand-body-weight",
+      "category": "brand-fine-tune",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:108"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorFineTuneTypography.svelte (body weight)"],
+      "persistedAs": "branding_settings.token_overrides['body-weight']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 162, "context": "--font-normal override"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "font-weight value via tokenOverrides"
+    },
+    {
+      "name": "--brand-shadow-scale",
+      "category": "brand-shadow-input",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:121"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorShadows.svelte (shadow scale slider)"],
+      "persistedAs": "branding_settings.token_overrides['shadow-scale']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 170, "context": ".content-card box-shadow"},
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 174, "context": ".content-card:hover box-shadow"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "numeric multiplier via tokenOverrides"
+    },
+    {
+      "name": "--brand-shadow-color",
+      "category": "brand-shadow-input",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:122"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorShadows.svelte (shadow color picker)"],
+      "persistedAs": "branding_settings.token_overrides['shadow-color']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 170, "context": "--shadow-color HSL base"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "HSL string via tokenOverrides"
+    },
+    {
+      "name": "--brand-glass-tint",
+      "category": "brand-glass",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:147"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorFineTuneColors.svelte (glass tint picker)"],
+      "persistedAs": "branding_settings.token_overrides['glass-tint']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/colors.css", "line": 57, "context": "--color-glass-tint fallback"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "hex color via tokenOverrides"
+    },
+    {
+      "name": "--card-hover-scale",
+      "category": "brand-card-interaction",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:153"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorFineTuneColors.svelte (card hover scale slider)"],
+      "persistedAs": "branding_settings.token_overrides['card-hover-scale']",
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "numeric via tokenOverrides"
+    },
+    {
+      "name": "--card-image-hover-scale",
+      "category": "brand-card-interaction",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:154"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorFineTuneColors.svelte (image hover scale slider)"],
+      "persistedAs": "branding_settings.token_overrides['card-image-hover-scale']",
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "numeric via tokenOverrides"
+    },
+    {
+      "name": "--brand-shader-preset",
+      "category": "brand-shader-presets",
+      "definedIn": ["apps/web/src/lib/brand-editor/css-injection.ts:61"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorHeroEffects.svelte (preset selector)"],
+      "persistedAs": "branding_settings.token_overrides['shader-preset']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/components/ui/ShaderHero/ShaderHero.svelte", "context": "WebGL renderer selector"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "preset name via tokenOverrides (ether|flow|ink|ripple|suture|...)"
+    },
+    {
+      "name": "--color-player-text",
+      "category": "brand-player-chrome",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:136"],
+      "editableIn": ["apps/web/src/lib/components/brand-editor/levels/BrandEditorFineTuneColors.svelte (player text color)"],
+      "persistedAs": "branding_settings.token_overrides['player-text']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/player.css", "line": 6, "context": "player chrome text"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "hex or hsl via tokenOverrides"
+    },
+    {
+      "name": "--color-player-text-secondary",
+      "category": "brand-player-chrome",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:137"],
+      "editableIn": null,
+      "persistedAs": "branding_settings.token_overrides['player-text-secondary']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/player.css", "line": 7, "context": "player secondary text"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "hsl via tokenOverrides"
+    },
+    {
+      "name": "--color-player-text-muted",
+      "category": "brand-player-chrome",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:138"],
+      "editableIn": null,
+      "persistedAs": "branding_settings.token_overrides['player-text-muted']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/player.css", "line": 8, "context": "player muted text"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "hsl via tokenOverrides"
+    },
+    {
+      "name": "--color-player-surface",
+      "category": "brand-player-chrome",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:139"],
+      "editableIn": null,
+      "persistedAs": "branding_settings.token_overrides['player-surface']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/player.css", "line": 9, "context": "player control background"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "hsl via tokenOverrides"
+    },
+    {
+      "name": "--color-player-surface-hover",
+      "category": "brand-player-chrome",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:140"],
+      "editableIn": null,
+      "persistedAs": "branding_settings.token_overrides['player-surface-hover']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/player.css", "line": 10, "context": "player control hover"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "hsl via tokenOverrides"
+    },
+    {
+      "name": "--color-player-surface-active",
+      "category": "brand-player-chrome",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:141"],
+      "editableIn": null,
+      "persistedAs": "branding_settings.token_overrides['player-surface-active']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/player.css", "line": 11, "context": "player control active"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "hsl via tokenOverrides"
+    },
+    {
+      "name": "--color-player-border",
+      "category": "brand-player-chrome",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:142"],
+      "editableIn": null,
+      "persistedAs": "branding_settings.token_overrides['player-border']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/player.css", "line": 12, "context": "player control border"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "hsl via tokenOverrides"
+    },
+    {
+      "name": "--color-player-overlay",
+      "category": "brand-player-chrome",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:143"],
+      "editableIn": null,
+      "persistedAs": "branding_settings.token_overrides['player-overlay']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/player.css", "line": 13, "context": "player overlay gradient"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "hsl via tokenOverrides"
+    },
+    {
+      "name": "--color-player-overlay-heavy",
+      "category": "brand-player-chrome",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:144"],
+      "editableIn": null,
+      "persistedAs": "branding_settings.token_overrides['player-overlay-heavy']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/player.css", "line": 14, "context": "player heavy overlay"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "hsl via tokenOverrides"
+    },
+    {
+      "name": "--text-transform-label",
+      "category": "brand-fine-tune",
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:150"],
+      "editableIn": null,
+      "persistedAs": "branding_settings.token_overrides['text-transform-label']",
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/typography.css", "line": 39, "context": "label text-transform fallback"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "nullable": true,
+      "valueFormat": "CSS text-transform value via tokenOverrides"
+    },
+    {
+      "name": "--color-primary-50",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:4"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 43, "context": "derived from brand primary"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-primary-100",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:5"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-primary-200",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:6"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-primary-300",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:7"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-primary-400",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:8"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 215, "context": "dark mode brand primary fallback"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-primary-500",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:9"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 20, "context": "platform fallback for brand primary"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": true,
+      "note": "Overridden by --brand-color in [data-org-brand]"
+    },
+    {
+      "name": "--color-primary-600",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:10"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 41, "context": "derived from brand primary"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-primary-700",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:11"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-primary-800",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:12"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-primary-900",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:13"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-neutral-50",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:16"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-neutral-100",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:17"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-neutral-200",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:18"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-neutral-300",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:19"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-neutral-400",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:20"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 231, "context": "dark mode brand secondary fallback"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-neutral-500",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:21"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-neutral-600",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:22"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 46, "context": "platform fallback for brand secondary"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-neutral-700",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:23"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-neutral-800",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:24"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-neutral-900",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:25"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-success",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:28"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-success-50",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:29"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-success-100",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:30"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-success-200",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:31"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-success-600",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:32"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-success-700",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:33"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-warning",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:35"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 51, "context": "platform fallback for brand accent"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-warning-50",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:36"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-warning-100",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:37"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-warning-200",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:38"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-warning-600",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:39"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-warning-700",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:40"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-error",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:42"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-error-50",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:43"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/shadows.css", "line": 28, "context": "--shadow-focus-ring-error"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-error-100",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:44"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-error-200",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:45"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-error-600",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:46"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-error-700",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:47"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-info",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:49"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-info-50",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:50"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-info-100",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:51"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-info-200",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:52"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-info-600",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:53"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-info-700",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:54"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--color-glass-tint",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:57"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 147, "context": "org brand override fallback"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": true
+    },
+    {
+      "name": "--color-glass-tint-dark",
+      "category": "system-semantic-colors",
+      "definedIn": ["apps/web/src/lib/styles/tokens/colors.css:58"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": true
+    },
+    {
+      "name": "--space-1",
+      "category": "system-spacing",
+      "definedIn": ["apps/web/src/lib/styles/tokens/spacing.css:8"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 72, "context": "density-scaled via --brand-density"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "note": "Multiplied by --brand-density in org scope"
+    },
+    {
+      "name": "--space-2",
+      "category": "system-spacing",
+      "definedIn": ["apps/web/src/lib/styles/tokens/spacing.css:10"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--space-3",
+      "category": "system-spacing",
+      "definedIn": ["apps/web/src/lib/styles/tokens/spacing.css:12"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--space-4",
+      "category": "system-spacing",
+      "definedIn": ["apps/web/src/lib/styles/tokens/spacing.css:14"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--space-5",
+      "category": "system-spacing",
+      "definedIn": ["apps/web/src/lib/styles/tokens/spacing.css:15"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--space-6",
+      "category": "system-spacing",
+      "definedIn": ["apps/web/src/lib/styles/tokens/spacing.css:17"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--space-8",
+      "category": "system-spacing",
+      "definedIn": ["apps/web/src/lib/styles/tokens/spacing.css:19"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--space-10",
+      "category": "system-spacing",
+      "definedIn": ["apps/web/src/lib/styles/tokens/spacing.css:20"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--space-12",
+      "category": "system-spacing",
+      "definedIn": ["apps/web/src/lib/styles/tokens/spacing.css:22"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--space-16",
+      "category": "system-spacing",
+      "definedIn": ["apps/web/src/lib/styles/tokens/spacing.css:23"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/layout.css", "line": 43, "context": "--app-sidebar-width"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--space-20",
+      "category": "system-spacing",
+      "definedIn": ["apps/web/src/lib/styles/tokens/spacing.css:24"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--space-24",
+      "category": "system-spacing",
+      "definedIn": ["apps/web/src/lib/styles/tokens/spacing.css:25"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/layout.css", "line": 53, "context": "--player-height-audio"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--font-sans",
+      "category": "system-typography",
+      "definedIn": ["apps/web/src/lib/styles/tokens/typography.css:4"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 99, "context": "org-scope re-declaration with brand font"},
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 102, "context": "html font-family"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "note": "Resolved via --brand-font-body in [data-org-brand]"
+    },
+    {
+      "name": "--font-heading",
+      "category": "system-typography",
+      "definedIn": ["apps/web/src/lib/styles/tokens/typography.css:5"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 95, "context": "heading font override"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--font-mono",
+      "category": "system-typography",
+      "definedIn": ["apps/web/src/lib/styles/tokens/typography.css:6"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--text-xs",
+      "category": "system-typography",
+      "definedIn": ["apps/web/src/lib/styles/tokens/typography.css:9"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 111, "context": "scaled by --text-scale"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--text-sm",
+      "category": "system-typography",
+      "definedIn": ["apps/web/src/lib/styles/tokens/typography.css:10"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 112, "context": "scaled by --text-scale"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--text-base",
+      "category": "system-typography",
+      "definedIn": ["apps/web/src/lib/styles/tokens/typography.css:11"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 113, "context": "scaled by --text-scale"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--text-lg",
+      "category": "system-typography",
+      "definedIn": ["apps/web/src/lib/styles/tokens/typography.css:12"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 114, "context": "scaled by --text-scale"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--text-xl",
+      "category": "system-typography",
+      "definedIn": ["apps/web/src/lib/styles/tokens/typography.css:13"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 115, "context": "scaled by --text-scale"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--text-2xl",
+      "category": "system-typography",
+      "definedIn": ["apps/web/src/lib/styles/tokens/typography.css:14"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 116, "context": "scaled by --text-scale"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--text-3xl",
+      "category": "system-typography",
+      "definedIn": ["apps/web/src/lib/styles/tokens/typography.css:15"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 117, "context": "scaled by --text-scale"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--text-4xl",
+      "category": "system-typography",
+      "definedIn": ["apps/web/src/lib/styles/tokens/typography.css:16"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 118, "context": "scaled by --text-scale"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--font-normal",
+      "category": "system-typography",
+      "definedIn": ["apps/web/src/lib/styles/tokens/typography.css:19"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 162, "context": "overridden by --body-weight in [data-org-brand]"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "note": "Overridden by --brand-body-weight via tokenOverrides"
+    },
+    {
+      "name": "--font-medium",
+      "category": "system-typography",
+      "definedIn": ["apps/web/src/lib/styles/tokens/typography.css:20"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--font-semibold",
+      "category": "system-typography",
+      "definedIn": ["apps/web/src/lib/styles/tokens/typography.css:21"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--font-bold",
+      "category": "system-typography",
+      "definedIn": ["apps/web/src/lib/styles/tokens/typography.css:22"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 161, "context": "overridden by --heading-weight in [data-org-brand]"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "note": "Overridden by --brand-heading-weight via tokenOverrides"
+    },
+    {
+      "name": "--duration-fast",
+      "category": "system-motion",
+      "definedIn": ["apps/web/src/lib/styles/tokens/motion.css:4"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/motion.css", "line": 21, "context": "--transition-colors"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--duration-normal",
+      "category": "system-motion",
+      "definedIn": ["apps/web/src/lib/styles/tokens/motion.css:5"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/motion.css", "line": 24, "context": "--transition-transform"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--duration-slow",
+      "category": "system-motion",
+      "definedIn": ["apps/web/src/lib/styles/tokens/motion.css:6"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--duration-slower",
+      "category": "system-motion",
+      "definedIn": ["apps/web/src/lib/styles/tokens/motion.css:7"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--duration-slowest",
+      "category": "system-motion",
+      "definedIn": ["apps/web/src/lib/styles/tokens/motion.css:11"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--ease-default",
+      "category": "system-motion",
+      "definedIn": ["apps/web/src/lib/styles/tokens/motion.css:14"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/motion.css", "line": 21, "context": "--transition-colors"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--transition-colors",
+      "category": "system-motion",
+      "definedIn": ["apps/web/src/lib/styles/tokens/motion.css:21"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--transition-transform",
+      "category": "system-motion",
+      "definedIn": ["apps/web/src/lib/styles/tokens/motion.css:24"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--transition-opacity",
+      "category": "system-motion",
+      "definedIn": ["apps/web/src/lib/styles/tokens/motion.css:25"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--transition-shadow",
+      "category": "system-motion",
+      "definedIn": ["apps/web/src/lib/styles/tokens/motion.css:26"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--border-width",
+      "category": "system-borders",
+      "definedIn": ["apps/web/src/lib/styles/tokens/borders.css:5"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/borders.css", "line": 14, "context": "--border-default"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--border-width-thick",
+      "category": "system-borders",
+      "definedIn": ["apps/web/src/lib/styles/tokens/borders.css:6"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/borders.css", "line": 15, "context": "--border-focus"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--border-style",
+      "category": "system-borders",
+      "definedIn": ["apps/web/src/lib/styles/tokens/borders.css:10"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/borders.css", "line": 14, "context": "--border-default"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--border-default",
+      "category": "system-borders",
+      "definedIn": ["apps/web/src/lib/styles/tokens/borders.css:14"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--border-focus",
+      "category": "system-borders",
+      "definedIn": ["apps/web/src/lib/styles/tokens/borders.css:15"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--shadow-xs",
+      "category": "system-shadows",
+      "definedIn": ["apps/web/src/lib/styles/tokens/shadows.css:6"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--shadow-sm",
+      "category": "system-shadows",
+      "definedIn": ["apps/web/src/lib/styles/tokens/shadows.css:8"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 171, "context": ".content-card base shadow"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": true
+    },
+    {
+      "name": "--shadow-md",
+      "category": "system-shadows",
+      "definedIn": ["apps/web/src/lib/styles/tokens/shadows.css:12"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--shadow-lg",
+      "category": "system-shadows",
+      "definedIn": ["apps/web/src/lib/styles/tokens/shadows.css:16"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 174, "context": ".content-card:hover shadow"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": true
+    },
+    {
+      "name": "--shadow-xl",
+      "category": "system-shadows",
+      "definedIn": ["apps/web/src/lib/styles/tokens/shadows.css:20"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--shadow-focus-ring",
+      "category": "system-shadows",
+      "definedIn": ["apps/web/src/lib/styles/tokens/shadows.css:27"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--opacity-50",
+      "category": "system-opacity",
+      "definedIn": ["apps/web/src/lib/styles/tokens/opacity.css:16"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/player.css", "line": 15, "context": "--color-player-gradient-bottom"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--opacity-60",
+      "category": "system-opacity",
+      "definedIn": ["apps/web/src/lib/styles/tokens/opacity.css:18"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/player.css", "line": 8, "context": "player text secondary"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--opacity-70",
+      "category": "system-opacity",
+      "definedIn": ["apps/web/src/lib/styles/tokens/opacity.css:18"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/opacity.css", "line": 38, "context": "--media-overlay-bottom-opacity"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--opacity-80",
+      "category": "system-opacity",
+      "definedIn": ["apps/web/src/lib/styles/tokens/opacity.css:19"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/opacity.css", "line": 29, "context": "--media-loading-spinner-fg"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--z-dropdown",
+      "category": "system-z-index",
+      "definedIn": ["apps/web/src/lib/styles/tokens/z-index.css:7"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--z-sticky",
+      "category": "system-z-index",
+      "definedIn": ["apps/web/src/lib/styles/tokens/z-index.css:8"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--z-fixed",
+      "category": "system-z-index",
+      "definedIn": ["apps/web/src/lib/styles/tokens/z-index.css:9"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--z-modal-backdrop",
+      "category": "system-z-index",
+      "definedIn": ["apps/web/src/lib/styles/tokens/z-index.css:10"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--z-modal",
+      "category": "system-z-index",
+      "definedIn": ["apps/web/src/lib/styles/tokens/z-index.css:11"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--z-popover",
+      "category": "system-z-index",
+      "definedIn": ["apps/web/src/lib/styles/tokens/z-index.css:12"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--z-tooltip",
+      "category": "system-z-index",
+      "definedIn": ["apps/web/src/lib/styles/tokens/z-index.css:13"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--z-toast",
+      "category": "system-z-index",
+      "definedIn": ["apps/web/src/lib/styles/tokens/z-index.css:14"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--radius-md",
+      "category": "system-radius",
+      "definedIn": ["apps/web/src/lib/styles/tokens/radius.css:9"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 60, "context": "--radius-base fallback in [data-org-brand]"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--radius-lg",
+      "category": "system-radius",
+      "definedIn": ["apps/web/src/lib/styles/tokens/radius.css:10"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 61, "context": "--radius-card in [data-org-brand]"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--radius-xl",
+      "category": "system-radius",
+      "definedIn": ["apps/web/src/lib/styles/tokens/radius.css:11"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/theme/tokens/org-brand.css", "line": 62, "context": "--radius-modal in [data-org-brand]"}
+      ],
+      "orgBrandable": true,
+      "darkModeAware": false
+    },
+    {
+      "name": "--blur-md",
+      "category": "system-materials",
+      "definedIn": ["apps/web/src/lib/styles/tokens/materials.css:13"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/materials.css", "line": 31, "context": ".glass backdrop-filter"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--material-glass",
+      "category": "system-materials",
+      "definedIn": ["apps/web/src/lib/styles/tokens/materials.css:4"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/materials.css", "line": 30, "context": ".glass background-color"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": true
+    },
+    {
+      "name": "--material-glass-border",
+      "category": "system-materials",
+      "definedIn": ["apps/web/src/lib/styles/tokens/materials.css:5"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/materials.css", "line": 33, "context": ".glass border-color"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": true
+    },
+    {
+      "name": "--color-overlay",
+      "category": "system-materials",
+      "definedIn": ["apps/web/src/lib/styles/tokens/materials.css:8"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": true
+    },
+    {
+      "name": "--color-overlay-light",
+      "category": "system-materials",
+      "definedIn": ["apps/web/src/lib/styles/tokens/materials.css:9"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": true
+    },
+    {
+      "name": "--blur-xl",
+      "category": "system-materials",
+      "definedIn": ["apps/web/src/lib/styles/tokens/materials.css:15"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--container-max",
+      "category": "system-layout",
+      "definedIn": ["apps/web/src/lib/styles/tokens/layout.css:33"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--app-sidebar-width",
+      "category": "system-layout",
+      "definedIn": ["apps/web/src/lib/styles/tokens/layout.css:43"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": true,
+      "darkModeAware": false,
+      "note": "Consumed by SidebarRail offset calculations"
+    },
+    {
+      "name": "--player-height-audio",
+      "category": "system-layout",
+      "definedIn": ["apps/web/src/lib/styles/tokens/layout.css:53"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/components/AudioPlayer/AudioPlayer.svelte", "context": "player skeleton height"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--breakpoint-md",
+      "category": "system-breakpoints",
+      "definedIn": ["apps/web/src/lib/styles/tokens/layout.css:15"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [
+        {"file": "apps/web/src/lib/styles/tokens/layout.css", "line": 56, "context": "@media (--below-md)"}
+      ],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--container-lg",
+      "category": "system-layout",
+      "definedIn": ["apps/web/src/lib/styles/tokens/layout.css:25"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--container-xl",
+      "category": "system-layout",
+      "definedIn": ["apps/web/src/lib/styles/tokens/layout.css:26"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    },
+    {
+      "name": "--container-2xl",
+      "category": "system-layout",
+      "definedIn": ["apps/web/src/lib/styles/tokens/layout.css:32"],
+      "editableIn": null,
+      "persistedAs": null,
+      "consumedBy": [],
+      "orgBrandable": false,
+      "darkModeAware": false
+    }
+  ],
+  "categories": {
+    "brand-color-input": "Core brand color inputs editable in BrandEditorColors (primary, secondary, accent, background)",
+    "brand-color-derived": "OKLCH-derived color palettes from brand inputs via org-brand.css relative color syntax",
+    "brand-typography-input": "Google Font family selections (body, heading) editable in BrandEditorTypography",
+    "brand-geometry-input": "Radius and density multipliers editable in BrandEditorShape",
+    "brand-shadow-input": "Shadow scale and color fine-tuning editable in BrandEditorShadows",
+    "brand-fine-tune": "Level 2 fine-tune tokens stored in tokenOverrides JSON (heading color, text scale, weights, glass tint, card scales)",
+    "brand-shader-presets": "WebGL shader preset selector stored in tokenOverrides",
+    "brand-player-chrome": "Player UI chrome colors overridable per-org via tokenOverrides",
+    "brand-glass": "Glass morphism tint override",
+    "brand-card-interaction": "Card hover/image scale multipliers for interaction polish",
+    "brand-hero-visibility": "Hero section visibility toggles (not enumerated here - see iter-021)",
+    "system-semantic-colors": "Platform default color palette (not editable per-org, fallbacks for brand derivation)",
+    "system-spacing": "Spacing scale multiplied by --brand-density in [data-org-brand]",
+    "system-typography": "Text size and weight tokens re-declared at org scope with brand overrides",
+    "system-motion": "Duration and easing tokens",
+    "system-borders": "Border width and style tokens",
+    "system-shadows": "Shadow elevation scale",
+    "system-opacity": "Opacity multiplier values",
+    "system-z-index": "Stacking context values",
+    "system-radius": "Border radius scale",
+    "system-materials": "Backdrop blur and material definitions",
+    "system-layout": "Layout dimensions, container widths, sidebar width",
+    "system-breakpoints": "Responsive breakpoint definitions (PostCSS custom media)"
+  },
+  "findings": {
+    "most_consumed_token": {
+      "name": "--brand-color",
+      "consumers": 4,
+      "explanation": "Primary input that drives OKLCH derivation of primary, interactive, focus, and text-on-brand palettes in org-brand.css"
+    },
+    "zero_consumers": [
+      {
+        "name": "--color-brand-primary-hover",
+        "reason": "Defined but not directly consumed; used via relative color math in hover states"
+      },
+      {
+        "name": "--color-brand-primary-active",
+        "reason": "Defined but not directly consumed; used via relative color math in active states"
+      },
+      {
+        "name": "--color-brand-primary-subtle",
+        "reason": "Defined for palette completeness but no current CSS rule consumes it"
+      },
+      {
+        "name": "--color-interactive-hover",
+        "reason": "Defined but not directly consumed"
+      },
+      {
+        "name": "--color-interactive-active",
+        "reason": "Defined but not directly consumed"
+      },
+      {
+        "name": "--color-interactive-subtle",
+        "reason": "Defined but not directly consumed"
+      }
+    ],
+    "conflicting_definitions": [
+      {
+        "token": "--color-brand-secondary-hover",
+        "locations": ["apps/web/src/lib/theme/tokens/org-brand.css:47"],
+        "note": "Single authoritative definition; secondary palette derived via OKLCH in [data-org-brand]"
+      }
+    ],
+    "critical_findings": [
+      "All --brand-* input tokens have single definitions in css-injection.ts and are mapped to CSS custom properties in org-brand.css",
+      "Fine-tune tokens (heading-color, text-scale, shadow-scale, etc.) are stored as tokenOverrides JSON in branding_settings.token_overrides, not as dedicated database columns",
+      "Spacing scale (--space-1 through --space-24) is universally org-brandable via --brand-density multiplier in [data-org-brand] scope",
+      "Typography sizes (--text-xs through --text-4xl) are re-declared and scaled by --text-scale in [data-org-brand]",
+      "Player chrome tokens are overridable per-org via tokenOverrides to support custom player UI across different org themes",
+      "Dark mode has separate input variables (--brand-color-dark, --brand-secondary-dark, etc.) that are optional; omission triggers auto-derivation from light values"
+    ]
+  }
+}
