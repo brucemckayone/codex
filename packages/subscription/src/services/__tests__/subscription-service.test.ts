@@ -227,6 +227,95 @@ describe('SubscriptionService', () => {
     });
   });
 
+  // ─── verifyCheckoutSession ────────────────────────────────────────
+  //
+  // Used by the /subscription/success page to gate the hand-off to /library
+  // on the webhook having landed. The mock Stripe client doesn't ship with a
+  // `checkout.sessions.retrieve` stub — these tests attach `vi.fn()`s
+  // per-case so we can assert against specific Stripe responses.
+
+  describe('verifyCheckoutSession', () => {
+    it('returns complete + subscription row when webhook has landed', async () => {
+      const { org, tier1 } = await createFullOrg('verify-complete');
+
+      // Seed the subscription row as if the webhook had already processed
+      // the event. verifyCheckoutSession matches on stripeSubscriptionId.
+      const stripeSubId = 'sub_verify_complete_123';
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          stripeSubscriptionId: stripeSubId,
+          status: 'active',
+        })
+      );
+
+      const { vi } = await import('vitest');
+      (
+        stripe.checkout.sessions as unknown as {
+          retrieve: ReturnType<typeof vi.fn>;
+        }
+      ).retrieve = vi.fn().mockResolvedValue({
+        id: 'cs_verify_1',
+        status: 'complete',
+        subscription: stripeSubId,
+        metadata: { codex_user_id: otherCreatorId },
+      });
+
+      const result = await service.verifyCheckoutSession(
+        'cs_verify_1',
+        otherCreatorId
+      );
+
+      expect(result.sessionStatus).toBe('complete');
+      expect(result.subscription).toBeDefined();
+      expect(result.subscription?.organizationId).toBe(org.id);
+      expect(result.subscription?.tierId).toBe(tier1.id);
+      expect(result.subscription?.tierName).toBe(tier1.name);
+    });
+
+    it('returns complete without subscription when DB row has not been written yet', async () => {
+      // Webhook race: Stripe says complete but our handleSubscriptionCreated
+      // hasn't run yet. Caller should poll via invalidate('subscription:verify').
+      const { vi } = await import('vitest');
+      (
+        stripe.checkout.sessions as unknown as {
+          retrieve: ReturnType<typeof vi.fn>;
+        }
+      ).retrieve = vi.fn().mockResolvedValue({
+        id: 'cs_verify_race',
+        status: 'complete',
+        subscription: 'sub_not_yet_in_db',
+        metadata: { codex_user_id: otherCreatorId },
+      });
+
+      const result = await service.verifyCheckoutSession(
+        'cs_verify_race',
+        otherCreatorId
+      );
+
+      expect(result.sessionStatus).toBe('complete');
+      expect(result.subscription).toBeUndefined();
+    });
+
+    it('throws ForbiddenError when session belongs to a different user', async () => {
+      const { ForbiddenError } = await import('../../errors');
+      const { vi } = await import('vitest');
+      (
+        stripe.checkout.sessions as unknown as {
+          retrieve: ReturnType<typeof vi.fn>;
+        }
+      ).retrieve = vi.fn().mockResolvedValue({
+        id: 'cs_verify_other',
+        status: 'complete',
+        subscription: 'sub_other',
+        metadata: { codex_user_id: 'some-other-user-id' },
+      });
+
+      await expect(
+        service.verifyCheckoutSession('cs_verify_other', otherCreatorId)
+      ).rejects.toThrow(ForbiddenError);
+    });
+  });
+
   // ─── handleSubscriptionCreated ────────────────────────────────────
 
   describe('handleSubscriptionCreated', () => {

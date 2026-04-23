@@ -53,6 +53,7 @@ import type Stripe from 'stripe';
 import {
   AlreadySubscribedError,
   ConnectAccountNotReadyError,
+  ForbiddenError,
   SubscriptionCheckoutError,
   SubscriptionNotFoundError,
   TierNotFoundError,
@@ -351,6 +352,118 @@ export class SubscriptionService extends BaseService {
       return { sessionUrl: session.url, sessionId: session.id };
     } catch (error) {
       this.handleError(error, 'createCheckoutSession');
+    }
+  }
+
+  // ─── Verification ──────────────────────────────────────────────────────────
+
+  /**
+   * Verify a Stripe subscription-mode checkout session.
+   *
+   * Retrieves the session from Stripe and, if complete, looks up the
+   * subscription row we've recorded for it. Used by the /subscription/success
+   * landing page to gate the "Go to Library" hand-off on the webhook having
+   * landed — otherwise the user can arrive at /library before
+   * `checkout.session.completed` has fired and see nothing.
+   *
+   * Mirrors `PurchaseService.verifyCheckoutSession`:
+   * - `session.status` → 'open' | 'complete' | 'expired'
+   * - Ownership enforced via `metadata.codex_user_id`
+   * - Returns a `subscription` object only when the row actually exists in
+   *   our DB (caller treats its absence as "still processing" and retries)
+   */
+  async verifyCheckoutSession(
+    sessionId: string,
+    userId: string
+  ): Promise<{
+    sessionStatus: 'complete' | 'expired' | 'open';
+    subscription?: {
+      id: string;
+      organizationId: string;
+      tierId: string;
+      tierName: string;
+      organizationName: string;
+      organizationSlug: string;
+      startedAt: string;
+    };
+  }> {
+    try {
+      const session = await this.stripe.checkout.sessions.retrieve(sessionId);
+
+      // Session metadata ownership check. Our checkout route writes
+      // codex_user_id into metadata at session creation (see
+      // createCheckoutSession() above) — that's our authoritative source.
+      if (session.metadata?.codex_user_id !== userId) {
+        throw new ForbiddenError(
+          'Checkout session does not belong to authenticated user',
+          { sessionId }
+        );
+      }
+
+      const result: {
+        sessionStatus: 'complete' | 'expired' | 'open';
+        subscription?: {
+          id: string;
+          organizationId: string;
+          tierId: string;
+          tierName: string;
+          organizationName: string;
+          organizationSlug: string;
+          startedAt: string;
+        };
+      } = {
+        sessionStatus:
+          (session.status as 'complete' | 'expired' | 'open') ?? 'open',
+      };
+
+      if (result.sessionStatus !== 'complete') return result;
+
+      const stripeSubId =
+        typeof session.subscription === 'string'
+          ? session.subscription
+          : session.subscription?.id;
+
+      if (!stripeSubId) return result;
+
+      // The subscription row is created by handleSubscriptionCreated() in
+      // response to the webhook. Callers poll this endpoint until the row
+      // appears, so an absent row here is expected, not an error.
+      const row = await this.db.query.subscriptions.findFirst({
+        where: eq(subscriptions.stripeSubscriptionId, stripeSubId),
+        with: {
+          tier: { columns: { name: true } },
+          organization: { columns: { name: true, slug: true } },
+        },
+      });
+
+      if (row) {
+        result.subscription = {
+          id: row.id,
+          organizationId: row.organizationId,
+          tierId: row.tierId,
+          tierName: row.tier.name,
+          organizationName: row.organization.name,
+          organizationSlug: row.organization.slug,
+          startedAt: row.createdAt.toISOString(),
+        };
+      }
+
+      return result;
+    } catch (error) {
+      if (error instanceof ForbiddenError) throw error;
+
+      if (
+        error instanceof Error &&
+        'type' in error &&
+        (error as { type?: string }).type === 'StripeInvalidRequestError'
+      ) {
+        throw new SubscriptionCheckoutError('Checkout session not found', {
+          stripeError: error.message,
+          sessionId,
+        });
+      }
+
+      this.handleError(error, 'verifyCheckoutSession');
     }
   }
 

@@ -1495,6 +1495,28 @@ export function createServerApi(
         ),
 
       /**
+       * Verify a Stripe subscription-mode Checkout session.
+       * Called by the /subscription/success page to poll until the webhook
+       * has written the subscription row. Mirrors `checkout.verify` above.
+       */
+      verify: (sessionId: string) =>
+        request<{
+          sessionStatus: 'complete' | 'expired' | 'open';
+          subscription?: {
+            id: string;
+            organizationId: string;
+            tierId: string;
+            tierName: string;
+            organizationName: string;
+            organizationSlug: string;
+            startedAt: string;
+          };
+        }>(
+          'ecom',
+          `/subscriptions/verify?session_id=${encodeURIComponent(sessionId)}`
+        ),
+
+      /**
        * Get user's current subscription for an org
        */
       getCurrent: (organizationId: string) =>

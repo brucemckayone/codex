@@ -24,6 +24,7 @@ import {
   listSubscribersQuerySchema,
   reactivateSubscriptionSchema,
   resumeSubscriptionSchema,
+  verifyCheckoutSessionSchema,
 } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
@@ -113,6 +114,27 @@ subscriptions.post(
         ctx.input.body.billingInterval,
         ctx.input.body.successUrl,
         ctx.input.body.cancelUrl
+      );
+    },
+  })
+);
+
+/**
+ * GET /subscriptions/verify
+ * Verify a Stripe subscription-mode Checkout session after the user returns
+ * from payment. Used by the /subscription/success page to poll until the
+ * webhook has written the subscription row, mirroring the purchase path at
+ * /checkout/verify.
+ */
+subscriptions.get(
+  '/verify',
+  procedure({
+    policy: { auth: 'required' },
+    input: { query: verifyCheckoutSessionSchema },
+    handler: async (ctx) => {
+      return await ctx.services.subscription.verifyCheckoutSession(
+        ctx.input.query.session_id,
+        ctx.user.id
       );
     },
   })

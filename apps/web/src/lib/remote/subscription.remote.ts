@@ -88,7 +88,14 @@ export const createSubscriptionCheckout = form(
         organizationId,
         tierId,
         billingInterval,
-        successUrl: successUrl || `${url.origin}/library?subscription=success`,
+        // Stripe expands `{CHECKOUT_SESSION_ID}` to the real session id on
+        // redirect. The /subscription/success page polls the verify endpoint
+        // until the `checkout.session.completed` webhook has landed, then
+        // hands the user off to /library — otherwise they'd land on /library
+        // before the subscription row exists and see an empty page.
+        successUrl:
+          successUrl ||
+          `${url.origin}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
         cancelUrl: cancelUrl || `${url.origin}/pricing`,
       });
 
@@ -134,7 +141,14 @@ export const createSubscriptionCheckoutSession = command(
       organizationId,
       tierId,
       billingInterval,
-      successUrl: successUrl || `${url.origin}/library?subscription=success`,
+      // Stripe expands `{CHECKOUT_SESSION_ID}` to the real session id on
+      // redirect. The /subscription/success page polls the verify endpoint
+      // until the `checkout.session.completed` webhook has landed, then
+      // hands the user off to /library — otherwise they'd land on /library
+      // before the subscription row exists and see an empty page.
+      successUrl:
+        successUrl ||
+        `${url.origin}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: cancelUrl || `${url.origin}/pricing`,
     });
 
