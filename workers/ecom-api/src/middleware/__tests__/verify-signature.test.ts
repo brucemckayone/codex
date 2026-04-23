@@ -28,7 +28,11 @@ vi.mock('@codex/purchase', () => ({
 
 import { MIME_TYPES, STRIPE_EVENTS } from '@codex/constants';
 import { createStripeClient, verifyWebhookSignature } from '@codex/purchase';
-import { verifyStripeSignature } from '../verify-signature';
+import {
+  _resetStripeClientCacheForTests,
+  verifyStripeSignature,
+  WEBHOOK_PATHS,
+} from '../verify-signature';
 
 // Mock observability client
 const createMockObs = () => ({
@@ -122,6 +126,7 @@ describe('verifyStripeSignature middleware', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetStripeClientCacheForTests();
     (verifyWebhookSignature as ReturnType<typeof vi.fn>).mockResolvedValue(
       mockEvent
     );
@@ -147,7 +152,10 @@ describe('verifyStripeSignature middleware', () => {
   });
 
   describe('missing webhook secret', () => {
-    it('should return 500 when webhook secret is not configured', async () => {
+    // 501 (Not Implemented), not 500, so Stripe stops retrying when a
+    // webhook endpoint exists but its secret is not configured. 5xx triggers
+    // an indefinite retry loop during any misconfiguration.
+    it('should return 501 when webhook secret is not configured', async () => {
       const envWithoutSecret = {
         ...validEnv,
         STRIPE_WEBHOOK_SECRET_BOOKING: undefined,
@@ -163,12 +171,12 @@ describe('verifyStripeSignature middleware', () => {
         },
       });
 
-      expect(res.status).toBe(500);
+      expect(res.status).toBe(501);
       const body = (await res.json()) as { error: string };
       expect(body.error).toBe('Webhook secret not configured');
     });
 
-    it('should return 500 when STRIPE_SECRET_KEY is not configured', async () => {
+    it('should return 501 when STRIPE_SECRET_KEY is not configured', async () => {
       const envWithoutKey = {
         ...validEnv,
         STRIPE_SECRET_KEY: undefined,
@@ -184,9 +192,29 @@ describe('verifyStripeSignature middleware', () => {
         },
       });
 
-      expect(res.status).toBe(500);
+      expect(res.status).toBe(501);
       const body = (await res.json()) as { error: string };
       expect(body.error).toBe('Stripe not configured');
+    });
+
+    it('should return 501 when path is not in the webhook lookup table', async () => {
+      // A path that previously would have matched via path.includes('/dev')
+      // substring (e.g. '/webhooks/stripe/unregistered') now returns
+      // undefined from the exact-path lookup and is rejected cleanly.
+      const app = createTestApp(validEnv);
+
+      const res = await app.request('/webhooks/stripe/unregistered', {
+        method: 'POST',
+        body: JSON.stringify({ test: true }),
+        headers: {
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
+          'stripe-signature': 't=123,v1=abc',
+        },
+      });
+
+      expect(res.status).toBe(501);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('Webhook secret not configured');
     });
   });
 
@@ -375,6 +403,45 @@ describe('verifyStripeSignature middleware', () => {
         'whsec_dispute_ghi',
         expect.anything()
       );
+    });
+
+    it('should use STRIPE_WEBHOOK_SECRET_BOOKING for /dev path (dev catch-all)', async () => {
+      const app = createTestApp(validEnv);
+      app.post('/webhooks/stripe/dev', (c) => c.json({ received: true }));
+
+      await app.request('/webhooks/stripe/dev', {
+        method: 'POST',
+        body: '{}',
+        headers: {
+          'Content-Type': MIME_TYPES.APPLICATION.JSON,
+          'stripe-signature': 't=1,v1=sig',
+        },
+      });
+
+      expect(verifyWebhookSignature).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        'whsec_booking_123',
+        expect.anything()
+      );
+    });
+  });
+
+  describe('webhook path lookup parity', () => {
+    // Regression fence for S48: if a new webhook route is registered in
+    // workers/ecom-api/src/index.ts without a matching lookup entry, this
+    // fails loudly rather than silently returning 501 at runtime.
+    it('should cover every registered Stripe webhook path', () => {
+      const expected = [
+        '/webhooks/stripe/payment',
+        '/webhooks/stripe/subscription',
+        '/webhooks/stripe/connect',
+        '/webhooks/stripe/customer',
+        '/webhooks/stripe/booking',
+        '/webhooks/stripe/dispute',
+        '/webhooks/stripe/dev',
+      ];
+      expect(WEBHOOK_PATHS.sort()).toEqual(expected.sort());
     });
   });
 

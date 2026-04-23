@@ -31,6 +31,7 @@ import checkout from './routes/checkout';
 import connect from './routes/connect';
 import purchases from './routes/purchases';
 import subscriptions from './routes/subscriptions';
+import { isDevEnvironment } from './utils/dev-env-guard';
 import { routeDevWebhook } from './utils/dev-webhook-router';
 import { createWebhookHandler } from './utils/webhook-handler';
 
@@ -218,7 +219,7 @@ app.post(
 app.post(
   '/webhooks/stripe/dev',
   (c, next) => {
-    if (c.env.ENVIRONMENT === 'production') {
+    if (!isDevEnvironment(c.env.ENVIRONMENT)) {
       return c.json(
         { error: { code: 'NOT_FOUND', message: 'Not found' } },
         404
