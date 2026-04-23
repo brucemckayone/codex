@@ -100,7 +100,61 @@ export class BrandingSettingsService extends BaseService {
       return { ...DEFAULT_BRANDING };
     }
 
+    // Codex-631mn: self-heal intro video URL on read. If a mediaItemId is
+    // linked but introVideoUrl is null, the user closed the editor before
+    // transcoding finished and no one polled getIntroVideoStatus to run
+    // the lazy finalize. Heal here so every org page load auto-recovers.
+    // No-op in the happy path (URL already set, or no mediaItemId).
+    if (row.introVideoMediaItemId && !row.introVideoUrl) {
+      const healed = await this.maybeHealIntroVideoUrl(
+        row.introVideoMediaItemId
+      );
+      if (healed) row.introVideoUrl = healed;
+    }
+
     return this.mapRow(row);
+  }
+
+  /**
+   * Check whether a linked intro video media item has finished transcoding
+   * and persist its HLS URL if so. Returns the new URL on success, null
+   * otherwise (still transcoding / missing hlsMasterPlaylistKey / no
+   * r2PublicUrlBase configured / media not found).
+   *
+   * Extracted from getIntroVideoStatus's inline auto-finalize block so
+   * get() can trigger the same healing path on any branding read.
+   */
+  private async maybeHealIntroVideoUrl(
+    mediaItemId: string
+  ): Promise<string | null> {
+    if (!this.r2PublicUrlBase) return null;
+
+    const mediaResult = await this.db
+      .select({
+        status: schema.mediaItems.status,
+        hlsMasterPlaylistKey: schema.mediaItems.hlsMasterPlaylistKey,
+      })
+      .from(schema.mediaItems)
+      .where(eq(schema.mediaItems.id, mediaItemId))
+      .limit(1);
+
+    const media = mediaResult[0];
+    if (!media || media.status !== 'ready' || !media.hlsMasterPlaylistKey) {
+      return null;
+    }
+
+    const introVideoUrl = `${this.r2PublicUrlBase}/${media.hlsMasterPlaylistKey}`;
+    await this.db
+      .update(schema.brandingSettings)
+      .set({ introVideoUrl, updatedAt: new Date() })
+      .where(eq(schema.brandingSettings.organizationId, this.organizationId));
+
+    this.obs.info('Intro video URL auto-finalized on read', {
+      organizationId: this.organizationId,
+      introVideoUrl,
+    });
+
+    return introVideoUrl;
   }
 
   /** Map a database row to the response shape */
@@ -215,7 +269,9 @@ export class BrandingSettingsService extends BaseService {
     const result = await this.db
       .insert(schema.brandingSettings)
       .values({
-        ...(updateValues as Partial<typeof schema.brandingSettings.$inferInsert>),
+        ...(updateValues as Partial<
+          typeof schema.brandingSettings.$inferInsert
+        >),
         organizationId: this.organizationId,
         // primaryColorHex is NOT NULL — fall back to default if not provided
         primaryColorHex:
