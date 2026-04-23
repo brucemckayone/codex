@@ -39,7 +39,24 @@ export const load: PageServerLoad = async ({
       .then((result) => result?.items ?? [])
       .catch(() => []),
 
-    // Org stats for content preview overlay
-    stats: api.org.getPublicStats(org.slug).catch(() => null),
+    // Org stats for content preview overlay. Categories are normalised to
+    // {name, count} so the template never faces the legacy string[] shape
+    // that some worker bundles may still return during the rollout window.
+    stats: api.org
+      .getPublicStats(org.slug)
+      .then((s) =>
+        s
+          ? {
+              ...s,
+              categories: (s.categories ?? []).map(
+                (c: unknown): { name: string; count: number } =>
+                  typeof c === 'string'
+                    ? { name: c, count: 0 }
+                    : (c as { name: string; count: number })
+              ),
+            }
+          : null
+      )
+      .catch(() => null),
   };
 };

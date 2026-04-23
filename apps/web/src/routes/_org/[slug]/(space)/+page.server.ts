@@ -268,6 +268,24 @@ export const load: PageServerLoad = async ({
 
   const statsResult = await statsPromise.catch(() => null);
 
+  // Category shape normaliser — defends against worker bundles running the
+  // previous `categories: string[]` contract (pre-refactor). Any running
+  // org-api instance that hasn't picked up the new service code will still
+  // return bare strings; coerce them to {name, count:0} so downstream
+  // templates keep a single shape to reason about. Safe to delete once all
+  // worker bundles are guaranteed to be on the new service.
+  const normalizedStats = statsResult
+    ? {
+        ...statsResult,
+        categories: (statsResult.categories ?? []).map(
+          (c: unknown): { name: string; count: number } =>
+            typeof c === 'string'
+              ? { name: c, count: 0 }
+              : (c as { name: string; count: number })
+        ),
+      }
+    : null;
+
   // Subscription pricing for the SubscribeCTA banner. Streamed (non-blocking)
   // so the landing page first paint isn't gated on the tiers query; the CTA
   // gracefully falls back to its "Cancel anytime" meta string while pricing
@@ -299,7 +317,7 @@ export const load: PageServerLoad = async ({
   return {
     sections,
     allContent,
-    stats: statsResult,
+    stats: normalizedStats,
     creators: creatorsPromise
       .then((r) => ({
         items: r?.items ?? [],
