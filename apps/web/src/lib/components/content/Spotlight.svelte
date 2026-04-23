@@ -210,8 +210,13 @@
     max-width: calc(var(--space-24) * 10);
     margin-inline: auto;
     padding: var(--space-6);
+    /* --color-player-border mixed at 50% alpha matches SubscribeCTA's
+       panel border — both are rounded light-on-dark promotional
+       surfaces so they share the same edge treatment. Using
+       `--color-border` (semantic/theme-adaptive) would diverge on
+       dark-theme orgs. */
     border: var(--border-width) var(--border-style)
-      color-mix(in srgb, var(--color-border) 50%, transparent);
+      color-mix(in srgb, var(--color-player-border) 50%, transparent);
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-xl);
     overflow: hidden;
