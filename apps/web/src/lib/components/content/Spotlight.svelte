@@ -1,24 +1,22 @@
 <!--
   @component Spotlight
 
-  Hero-sized anchor section that features one content item. The shader
-  backdrop sits INSIDE the content card — the card itself is the shader
-  surface, with a soft legibility veil and the content (image, copy, CTA)
-  layered on top. The section around the card keeps the page's natural
-  background so we never stack two WebGL contexts one over the other.
+  Hero-sized anchor section that features one content item. The atmospheric
+  backdrop sits INSIDE the content card — the card itself is a brand-tinted
+  gradient surface, with a soft legibility veil and the content (image, copy,
+  CTA) layered on top.
 
   Used once per org landing page as the first anchor beat below the main
-  hero. Reuses ShaderHero (which inherits the org's configured preset via
-  CSS custom properties) so per-card shader selection is free.
+  hero. Originally ran a full ShaderHero WebGL canvas here (see git history),
+  but three concurrent shaders on the landing page (Hero + Spotlight + CTA)
+  were burning GPU fill-rate; the hero keeps the shader for brand identity
+  and this card plus SubscribeCTA share the cheaper BrandGradientBackdrop.
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { browser } from '$app/environment';
   import { page } from '$app/state';
   import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
+  import { BrandGradientBackdrop } from '$lib/components/ui/BrandGradient';
   import { PlayIcon, MusicIcon, FileTextIcon } from '$lib/components/ui/Icon';
-  import { ShaderHero } from '$lib/components/ui/ShaderHero';
-  import type { ShaderPresetId } from '$lib/components/ui/ShaderHero/shader-config';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
   import { formatDurationHuman } from '$lib/utils/format';
@@ -74,27 +72,6 @@
   const hasImage = $derived(
     !!thumbnail && !failedThumbnails.has(thumbnail)
   );
-
-  /**
-   * Pick a shader preset for the card's backdrop. Prefer the org's own
-   * choice so the Spotlight feels continuous with the main hero; fall
-   * back to `ether` when the org hasn't configured one so the card still
-   * feels alive instead of collapsing to a flat pane.
-   */
-  const FALLBACK_PRESET: ShaderPresetId = 'ether';
-  let resolvedPreset = $state<ShaderPresetId>(FALLBACK_PRESET);
-
-  onMount(() => {
-    if (!browser) return;
-    const orgLayout = document.querySelector('.org-layout');
-    if (!orgLayout) return;
-    const orgPreset = getComputedStyle(orgLayout)
-      .getPropertyValue('--brand-shader-preset')
-      .trim();
-    if (orgPreset && orgPreset !== 'none') {
-      resolvedPreset = orgPreset as ShaderPresetId;
-    }
-  });
 </script>
 
 <section
@@ -105,12 +82,14 @@
 >
   <div class="spotlight__container">
     <article class="spotlight__card">
-      <!-- Shader fills the card. Positioned absolutely below the content
-           layer. The card's border-radius clips the canvas so the shader
-           appears naturally framed. -->
-      <div class="spotlight__card-shader" aria-hidden="true">
-        <ShaderHero preset={resolvedPreset} />
-      </div>
+      <!-- Brand gradient backdrop fills the card. Positioned absolutely
+           below the content layer. The card's border-radius clips the
+           gradient so it appears naturally framed. Cheap CSS replacement
+           for the earlier ShaderHero — see component docblock for why. -->
+      <BrandGradientBackdrop
+        variant="spotlight"
+        class="spotlight__card-shader"
+      />
       <div class="spotlight__card-veil" aria-hidden="true"></div>
 
       <!-- Content layer — always above the shader/veil -->
@@ -258,17 +237,13 @@
     border-color: color-mix(in srgb, var(--color-interactive) 32%, transparent);
   }
 
-  /* Shader fills the card behind everything */
-  .spotlight__card-shader {
-    position: absolute;
-    inset: 0;
+  /* Brand gradient backdrop sits behind veil + content. BrandGradientBackdrop
+     already supplies `position: absolute; inset: 0; pointer-events: none;
+     overflow: hidden`, so we only need to pin its stacking context inside
+     the card. Class is forwarded onto the component's root div, so we target
+     the forwarded class via :global() to reach it from this scoped style. */
+  :global(.spotlight__card-shader) {
     z-index: 0;
-    pointer-events: none;
-  }
-
-  .spotlight__card-shader :global(.shader-hero) {
-    /* No extra filter — let the shader breathe. The veil above it handles
-       legibility via a light backdrop-blur, not a saturation cut. */
   }
 
   /* Veil — sits between shader and content. The card uses a dedicated

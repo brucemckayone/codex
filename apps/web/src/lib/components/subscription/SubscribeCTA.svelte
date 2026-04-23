@@ -7,16 +7,16 @@
   wrong-state flash because SubscribeButton hydrates from the localStorage-
   backed `subscriptionCollection` on mount.
 
-  The banner has an optional ShaderHero backdrop (inherits the org preset if
-  set, falls back to `glow` for a soft decorative glow). The gradient veil
-  keeps text legible while letting the shader carry the mood.
+  The banner has an atmospheric CSS gradient backdrop (BrandGradientBackdrop,
+  aurora variant) that tints from the org's brand colour. Originally ran a
+  full ShaderHero WebGL canvas per-instance (see git history), but three
+  concurrent shaders on the landing page (Hero + Spotlight + CTA) burned
+  GPU fill-rate; hero keeps its shader, the two secondary surfaces share
+  the cheaper CSS replacement. The gradient veil keeps text legible.
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { browser } from '$app/environment';
   import SubscribeButton from '$lib/components/subscription/SubscribeButton.svelte';
-  import { ShaderHero } from '$lib/components/ui/ShaderHero';
-  import type { ShaderPresetId } from '$lib/components/ui/ShaderHero/shader-config';
+  import { BrandGradientBackdrop } from '$lib/components/ui/BrandGradient';
 
   interface Props {
     organizationId: string;
@@ -40,8 +40,6 @@
     'Support the creators directly',
   ];
 
-  const FALLBACK_PRESET: ShaderPresetId = 'glow';
-
   const {
     organizationId,
     orgName,
@@ -54,26 +52,18 @@
   }: Props = $props();
 
   const effectiveHeadline = $derived(headline ?? `Join ${orgName}`);
-
-  let resolvedPreset = $state<ShaderPresetId>(FALLBACK_PRESET);
-
-  onMount(() => {
-    if (!browser) return;
-    const orgLayout = document.querySelector('.org-layout');
-    if (!orgLayout) return;
-    const orgPreset = getComputedStyle(orgLayout)
-      .getPropertyValue('--brand-shader-preset')
-      .trim();
-    if (orgPreset && orgPreset !== 'none') {
-      resolvedPreset = orgPreset as ShaderPresetId;
-    }
-  });
 </script>
 
 <section class="subscribe-cta" aria-labelledby="subscribe-cta-title">
   <div class="subscribe-cta__panel">
     <div class="subscribe-cta__backdrop" aria-hidden="true">
-      <ShaderHero preset={resolvedPreset} />
+      <!-- Brand gradient aurora — cheap CSS replacement for the earlier
+           ShaderHero. See component docblock for why we swapped. The
+           forwarded class pins z-index inside the backdrop wrapper. -->
+      <BrandGradientBackdrop
+        variant="aurora"
+        class="subscribe-cta__gradient"
+      />
       <div class="subscribe-cta__veil"></div>
     </div>
 
