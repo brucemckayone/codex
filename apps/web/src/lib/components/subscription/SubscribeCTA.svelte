@@ -460,9 +460,9 @@
     background:
       radial-gradient(
         ellipse 60% 80% at 50% 50%,
-        hsl(0 0% 0% / 0.72) 0%,
-        hsl(0 0% 0% / 0.55) 60%,
-        hsl(0 0% 0% / 0.30) 100%
+        hsl(0 0% 0% / 0.55) 0%,
+        hsl(0 0% 0% / 0.38) 60%,
+        hsl(0 0% 0% / 0.15) 100%
       );
     backdrop-filter: blur(var(--blur-md));
     -webkit-backdrop-filter: blur(var(--blur-md));
@@ -814,9 +814,29 @@
       transform: translateY(var(--space-4));
       animation: subscribe-in var(--duration-slower) var(--ease-out) 100ms forwards;
     }
+
+    /* Staggered value-prop entrance — fires after the body reveal starts.
+       fill-mode: both keeps each prop hidden until its delay fires, then
+       holds the final state without JS. */
+    .subscribe-cta__prop {
+      opacity: 0;
+      transform: translateY(var(--space-3));
+      animation: subscribe-prop-in var(--duration-slower) var(--ease-out) both;
+    }
+
+    .subscribe-cta__prop:nth-child(1) { animation-delay: 200ms; }
+    .subscribe-cta__prop:nth-child(2) { animation-delay: 320ms; }
+    .subscribe-cta__prop:nth-child(3) { animation-delay: 440ms; }
   }
 
   @keyframes subscribe-in {
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes subscribe-prop-in {
     to {
       opacity: 1;
       transform: translateY(0);
@@ -868,7 +888,8 @@
   @media (--below-md) {
     .subscribe-cta {
       padding-block: var(--space-8);
-      padding-inline: var(--space-4);
+      /* Tighter outer gutter — panel shadow still has room to breathe. */
+      padding-inline: var(--space-2);
     }
 
     .subscribe-cta__panel {
@@ -883,12 +904,39 @@
     }
 
     .subscribe-cta__props {
-      gap: var(--space-5);
+      gap: var(--space-3);
       margin-top: var(--space-2);
+    }
+
+    /* Single-row horizontal scroll on mobile (mirrors desktop).
+       Hide the scrollbar for a cleaner look. */
+    .subscribe-cta__preview-list {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      justify-content: flex-start;
+      scrollbar-width: none;
+    }
+
+    .subscribe-cta__preview-list::-webkit-scrollbar {
+      display: none;
     }
 
     .subscribe-cta__preview-tile {
       width: calc(var(--space-24) * 1.3);
+    }
+
+    /* Full-width subscribe button — primary tap target should span the
+       container so it's easy to hit on narrow screens. */
+    .subscribe-cta__actions :global(.subscribe-button),
+    .subscribe-cta__actions :global(.subscribe-button__link) {
+      display: block;
+      width: 100%;
+    }
+
+    .subscribe-cta__actions :global(.button) {
+      width: 100%;
+      justify-content: center;
     }
   }
 </style>
