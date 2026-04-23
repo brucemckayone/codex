@@ -18,6 +18,7 @@
  */
 
 import { ContentService, MediaItemService } from '@codex/content';
+import * as schema from '@codex/database/schema';
 import { organizations } from '@codex/database/schema';
 import {
   createUniqueSlug,
@@ -27,6 +28,7 @@ import {
   teardownTestDatabase,
   withNeonTestBranch,
 } from '@codex/test-utils';
+import { eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
@@ -204,6 +206,79 @@ describe('PurchaseService Integration', () => {
             contentId: content.id,
             customerId: otherUserId,
           }),
+        })
+      );
+    });
+
+    // Regression: customer_email must be forwarded so Stripe pre-fills the
+    // checkout page and reuses the existing Customer object instead of
+    // creating a new one per purchase. Mirrors the equivalent subscription
+    // test in @codex/subscription.
+    it('forwards the buyer email to Stripe as customer_email', async () => {
+      // r2Key format: {creatorId}/{folder}/{mediaId}/{filename} — see
+      // packages/transcoding/src/paths.ts::parseR2Key. Let MediaItemService
+      // generate it instead of hardcoding a 2-part key that will fail the
+      // isValidR2Key defense-in-depth check.
+      const media = await mediaService.create(
+        {
+          title: 'Paid Video (email test)',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: `${userId}/hls/${media.id}/master.m3u8`,
+          thumbnailKey: `${userId}/thumbnails/${media.id}/auto.jpg`,
+          durationSeconds: 60,
+        },
+        userId
+      );
+
+      const paidContent = await contentService.create(
+        {
+          organizationId,
+          title: 'Premium Tutorial (email test)',
+          slug: createUniqueSlug('premium-tutorial-email'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 1999,
+        },
+        userId
+      );
+      await contentService.publish(paidContent.id, userId);
+
+      // Look up the buyer's email so the test asserts against the real value
+      // seedTestUsers wrote to the DB.
+      const [buyerRow] = await db
+        .select({ email: schema.users.email })
+        .from(schema.users)
+        .where(eq(schema.users.id, otherUserId))
+        .limit(1);
+      expect(buyerRow?.email).toBeTruthy();
+
+      vi.mocked(mockStripe.checkout.sessions.create).mockResolvedValue(
+        createMockCheckoutSession('cs_email_1', 'pi_email_1')
+      );
+
+      await purchaseService.createCheckoutSession(
+        {
+          contentId: paidContent.id,
+          successUrl: 'http://localhost:3000/success',
+          cancelUrl: 'http://localhost:3000/cancel',
+        },
+        otherUserId
+      );
+
+      expect(mockStripe.checkout.sessions.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customer_email: buyerRow!.email,
         })
       );
     });

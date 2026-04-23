@@ -32,6 +32,7 @@ import {
   contentAccess,
   purchases,
   stripeConnectAccounts,
+  users,
 } from '@codex/database/schema';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import type {
@@ -239,6 +240,17 @@ export class PurchaseService extends BaseService {
       // Convert TipTap JSON description to plain text for Stripe
       const plainDescription = extractPlainText(contentRecord.description);
 
+      // Look up the buyer's email so Stripe pre-fills the checkout page and
+      // reuses an existing Customer object instead of creating a new one on
+      // every purchase (mirrors the subscription path — see subscription-
+      // service.ts:createCheckoutSession). A missing user row falls through
+      // with no `customer_email` — Stripe will simply ask for one.
+      const [user] = await this.db
+        .select({ email: users.email })
+        .from(users)
+        .where(eq(users.id, customerId))
+        .limit(1);
+
       const session = await this.stripe.checkout.sessions.create({
         mode: 'payment',
         payment_method_types: ['card'],
@@ -273,6 +285,7 @@ export class PurchaseService extends BaseService {
           : {}),
         success_url: validated.successUrl,
         cancel_url: validated.cancelUrl,
+        ...(user?.email && { customer_email: user.email }),
         metadata: {
           contentId: validated.contentId,
           customerId,
