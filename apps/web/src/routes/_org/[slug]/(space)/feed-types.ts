@@ -38,6 +38,7 @@ export type FeedSection = {
   id:
     | 'spotlight'
     | 'featured'
+    | 'new-release'
     | 'videos'
     | 'audio'
     | 'articles'

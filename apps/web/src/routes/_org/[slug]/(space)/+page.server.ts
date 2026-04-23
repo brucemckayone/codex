@@ -74,6 +74,8 @@ function buildSections(all: ContentItem[]): FeedSection[] {
   // 1-2 items render as an editorial spread. 3+ items fall back to a
   // carousel so we don't visually force a grid that can't breathe.
   const featured = remaining.filter((i) => i.featured);
+  const featuredInSection =
+    featured.length > 0 ? (featured.length <= 2 ? featured.slice(0, 2) : featured) : [];
   if (featured.length > 0) {
     const useSpread = featured.length <= 2;
     sections.push({
@@ -81,7 +83,32 @@ function buildSections(all: ContentItem[]): FeedSection[] {
       layout: useSpread ? 'spread' : 'carousel',
       eyebrow: "Editor's picks",
       title: 'Featured',
-      items: useSpread ? featured.slice(0, 2) : featured,
+      items: featuredInSection,
+    });
+  }
+
+  // ── Recent releases — newest items across all types, mixed carousel ───
+  // `remaining` is already newest-first (server fetched with sort: 'newest').
+  // Exclude items already surfaced in the Editor's Picks section to avoid
+  // duplication. Cap at 8 items — enough to fill a carousel without
+  // overwhelming the page. Skip entirely below 3 items so low-content
+  // orgs don't get a visually sparse row — discovery happens elsewhere.
+  const NEW_RELEASE_MAX = 8;
+  const NEW_RELEASE_MIN = 3;
+  const featuredIds = new Set(featuredInSection.map((i) => i.id));
+  const newestSlice = remaining
+    .filter((i) => !featuredIds.has(i.id))
+    .slice(0, NEW_RELEASE_MAX);
+  if (newestSlice.length >= NEW_RELEASE_MIN) {
+    sections.push({
+      id: 'new-release',
+      layout: 'carousel',
+      eyebrow: 'New',
+      title: 'Recent releases',
+      // Mixed-type row — normalise thumb ratios so the carousel reads as
+      // one rhythm (same reasoning as Free samples / per-category rows).
+      mixedTypes: true,
+      items: newestSlice,
     });
   }
 
