@@ -110,7 +110,9 @@ READ PATH (on reload)
 
 ---
 
-## 3. Known bugs (iter-018 findings)
+## 3. Known bugs
+
+### From iter-018 (save/reload pipeline)
 
 | Bead | Priority | Title | Root file(s) |
 |---|---|---|---|
@@ -123,33 +125,46 @@ READ PATH (on reload)
 
 Dependency chain: `ja9zp` blocks `7afgp`; `g49b4` blocks `mdg94`.
 
+### From iter-019 (theming + cross-org delivery)
+
+| Bead | Priority | Title | Root file(s) |
+|---|---|---|---|
+| `Codex-9u8wg` | P1 | Brand editor theme preview writes global `<html data-theme>` — leaks into user preference | `apps/web/src/lib/brand-editor/brand-editor-store.svelte.ts:222-230` |
+| `Codex-micw3` | P1 | `ThemeToggle` has no reactive subscription to external `data-theme` — icon goes stale | `apps/web/src/lib/components/ui/ThemeToggle/ThemeToggle.svelte:16-24` |
+| `Codex-z91af` | P1 | `close()` restores captured `originalTheme` — clobbers in-session sidebar toggle | `apps/web/src/lib/brand-editor/brand-editor-store.svelte.ts:113-157` |
+| `Codex-wcwpw` | P2 | `tokenOverrides` FOUC — shader preset + hero visibility flags absent on first paint | `apps/web/src/routes/_org/[slug]/+layout.svelte:116-132` |
+| `Codex-zv85e` | P3 | Draft `11-theming.md` + `11-multi-tenancy.md` skill references after bugs land | — (docs) |
+
+Dependency chain: `9u8wg` blocks `z91af` (close-restore becomes dead code after editor stops touching `<html>`); `zv85e` blocked by all four bugs (reference should reflect landed reality, not intent).
+
 ---
 
-## 4. Investigation queue (iter-019+)
+## 4. Investigation queue (iter-020+)
 
 Each bullet is a candidate agent task for a future loop fire. Pick two per iteration to match the 2-concurrent-agent limit.
 
-1. **Light/dark sync between brand editor toggle + org sidebar toggle** (user-reported, highest remaining)
-   - Find every writer of `data-theme`, `color-scheme`, `prefers-color-scheme` override. Identify the source of truth. Prove divergence.
-   - Expected: editor has a local draft theme state; sidebar mutates a cookie or user preference. Saving doesn't reconcile.
+Completed in iter-019: ~~Light/dark sync~~ (yielded 9u8wg, micw3, z91af); ~~Cross-org brand injection~~ (yielded wcwpw; sub-org hierarchy confirmed absent).
 
-2. **Cross-org brand injection on subdomains**
-   - Map how `hooks.server.ts` reroute + `_org/[slug]/+layout.server.ts` resolves per-subdomain branding.
-   - Are there parent/child orgs with inherited branding? If not currently, what would it take to add?
-   - Does SSR-emitted `--brand-*` match CSR after hydration?
-
-3. **Token coverage audit** — cross-reference `apps/web/src/lib/styles/tokens/*.css` + `lib/theme/tokens/org-brand.css` against editor controls
+1. **Token coverage formalized as JSON** — cross-reference `apps/web/src/lib/styles/tokens/*.css` + `lib/theme/tokens/org-brand.css` against editor controls
    - Agent A (iter-018) produced a three-way diff; formalize it as a JSON file at `docs/brand-editor-investigation/token-registry.json` with columns: `defined, editable, persisted, consumed`.
    - Use that JSON to generate a dashboard and keep it in sync.
 
-4. **Hero layout visibility flags audit**
+2. **Hero layout visibility flags audit**
    - `hero-hide-*` tokenOverrides map to `data-hero-hide-*` attributes. Confirm every visibility toggle has a matching DOM attribute consumer in `_org/[slug]/+layout.svelte`.
+   - Overlaps with `wcwpw` (FOUC) — if we fix FOUC by server-rendering hide flags, the audit becomes easier.
 
-5. **Preset → tokenOverrides round-trip**
+3. **Preset → tokenOverrides round-trip**
    - When a user applies a preset from `brand-editor/presets.ts`, does it populate every relevant tokenOverride key? Or only a subset, leaving non-preset keys at their old values (sticky overrides)?
 
-6. **darkOverrides chain**
-   - `darkModeOverrides` is a JSON string of `Partial<ThemeColors>`. Trace how it's consumed — does the CSS `:root[data-theme='dark']` or `@media (prefers-color-scheme: dark)` read it?
+4. **darkOverrides chain**
+   - `darkModeOverrides` is a JSON string of `Partial<ThemeColors>`. Trace how it's consumed at SSR layout level, not just editor preview.
+   - Interaction with `z91af` fix — if we stop `<html data-theme>` mutation from editor, does dark-mode preview of custom override still work?
+
+5. **Brand editor preset fairness + fine-tune order audit**
+   - If a user applies Preset A (which sets heading-color=X), then applies Preset B (which doesn't touch heading-color), does heading-color stick at X or revert? `applyPreset` at `brand-editor-store.svelte.ts:212-214` clears `tokenOverrides` wholesale, which may wipe user-selected fine-tunes inadvertently.
+
+6. **Subscription to localStorage across tabs**
+   - If user has the app open in two tabs on the same org and toggles theme in tab A, does tab B update? (Depends on if ThemeToggle gets a `storage` event listener after `micw3` fix.)
 
 ---
 
@@ -178,3 +193,4 @@ Each bullet is a candidate agent task for a future loop fire. Pick two per itera
 | # | Date | Agents | Beads created | Key finding |
 |---|---|---|---|---|
 | 018 | 2026-04-23 | A (token three-way diff, sonnet), B (font persistence trace, sonnet) | ja9zp, 7afgp, g49b4, mdg94, fopbo, ag8l8 | Fonts ARE saved to DB — bug is waitUntil race on slug-keyed CACHE_KV invalidation, compounded by missing client-side invalidate('cache:org-versions') |
+| 019 | 2026-04-23 | C (light/dark sync, sonnet), D (cross-org brand injection, sonnet) | 9u8wg, micw3, z91af, wcwpw, zv85e | Light/dark sync is THREE stacked bugs (editor writes global `<html data-theme>`, ThemeToggle has no external subscription, close() clobbers sidebar toggle). Sub-orgs are FLAT — no hierarchy, no brand inheritance. New FOUC bug: shader/hero tokenOverrides arrive post-hydration. Both agents proposed new skill references (`11-theming.md` + `11-multi-tenancy.md`) — deferred until bugs land so refs reflect reality. |
