@@ -210,7 +210,12 @@
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 .dark [data-org-brand],
-[data-theme='dark'] [data-org-brand] {
+[data-theme='dark'] [data-org-brand],
+/* Brand editor scoped dark preview — data-editing-theme lives on .org-layout
+   so the editor can preview dark palette without mutating <html data-theme>
+   (Codex-9u8wg). The element has BOTH data-editing-theme and data-org-brand
+   so this selector uses compound attribute form (no descendant combinator). */
+[data-editing-theme='dark'][data-org-brand] {
   /* Dark primary: use explicit dark override if set, otherwise auto-derive from light */
   --color-brand-primary: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
   --color-interactive: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
@@ -239,7 +244,8 @@
 }
 
 .dark [data-org-bg],
-[data-theme='dark'] [data-org-bg] {
+[data-theme='dark'] [data-org-bg],
+[data-editing-theme='dark'][data-org-bg] {
   --color-background: var(--brand-bg-dark, var(--brand-bg, #1a1a2e));
   --color-surface: var(--brand-bg-dark, var(--brand-bg, #1a1a2e));
   --color-surface-secondary: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.04) calc(c * 0.5) h);

@@ -35,7 +35,9 @@ const state = $state<{
   saved: BrandEditorState | null;
   pending: BrandEditorState | null;
   level: LevelId;
-  originalTheme: string | null;
+  // Scoped preview context — 'which palette am I editing'. Applied as
+  // data-editing-theme on .org-layout; independent of the user's global
+  // theme preference (Codex-9u8wg + Codex-z91af).
   editingTheme: 'light' | 'dark';
 }>({
   panel: 'closed',
@@ -43,7 +45,6 @@ const state = $state<{
   saved: null,
   pending: null,
   level: 'home',
-  originalTheme: null,
   editingTheme: 'light',
 });
 
@@ -109,10 +110,15 @@ function open(orgId: string, saved: BrandEditorState): void {
   state.saved = structuredClone(saved);
   state.level = 'home';
 
-  // Capture current theme for restoration on close
+  // Seed editingTheme from the user's current theme preference so the
+  // editor opens viewing the palette they're actually in. Falls back
+  // to 'light' when the attribute is absent (e.g., SSR bootstrap).
   if (browser) {
-    state.originalTheme =
-      document.documentElement.getAttribute('data-theme') ?? 'light';
+    const docTheme = document.documentElement.getAttribute('data-theme');
+    state.editingTheme = docTheme === 'dark' ? 'dark' : 'light';
+    // Apply the scoped preview attribute so the dark palette renders
+    // on .org-layout without touching <html data-theme> (Codex-9u8wg).
+    setThemePreview(state.editingTheme);
   }
 
   // Try to restore pending state from sessionStorage (crash recovery)
@@ -152,8 +158,13 @@ function open(orgId: string, saved: BrandEditorState): void {
 }
 
 function close(): void {
-  if (browser && state.originalTheme) {
-    document.documentElement.setAttribute('data-theme', state.originalTheme);
+  // Scoped preview lived on .org-layout[data-editing-theme] — drop it
+  // on close so the layout falls back cleanly to the user's global theme
+  // preference (Codex-z91af: no more stale originalTheme restore).
+  if (browser) {
+    document
+      .querySelector('.org-layout')
+      ?.removeAttribute('data-editing-theme');
   }
   clearBrandVars();
   clearStorage();
@@ -162,7 +173,7 @@ function close(): void {
   state.saved = null;
   state.orgId = null;
   state.level = 'home';
-  state.originalTheme = null;
+  state.editingTheme = 'light';
 }
 
 function minimize(): void {
@@ -225,7 +236,14 @@ function applyPreset(preset: BrandPreset): void {
 
 function setThemePreview(theme: 'light' | 'dark'): void {
   if (!browser) return;
-  document.documentElement.setAttribute('data-theme', theme);
+  // Scope preview to .org-layout, NOT <html>. Writing to the global
+  // data-theme attribute would leak into the user's persisted theme
+  // preference via localStorage/cookie round-trips (see Codex-9u8wg).
+  // CSS consumers in org-brand.css match [data-editing-theme='dark']
+  // [data-org-brand] alongside the existing [data-theme='dark'] rule.
+  document
+    .querySelector('.org-layout')
+    ?.setAttribute('data-editing-theme', theme);
 }
 
 function setEditingTheme(theme: 'light' | 'dark'): void {
