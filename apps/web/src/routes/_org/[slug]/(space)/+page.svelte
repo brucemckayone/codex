@@ -485,10 +485,14 @@
     </article>
   {/snippet}
 
-  <!-- Snippet: compact ContentCard for grid + non-hero carousel tiles -->
-  {#snippet gridCard(c, variant)}
+  <!-- Snippet: compact ContentCard for grid + non-hero carousel tiles.
+       The optional `normalizeRatio` argument forces every card in a row
+       to 16:9 so mixed-type carousels (Free samples, per-category) read
+       as one rhythm instead of a jagged mix of per-type ratios. -->
+  {#snippet gridCard(c, variant, normalizeRatio = false)}
     <ContentCard
       {variant}
+      {normalizeRatio}
       id={c.id}
       title={c.title}
       thumbnail={c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null}
@@ -553,7 +557,7 @@
           <!-- Exactly 2 carousel items fill the row as a grid (no chrome) -->
           <div class="feed-pair">
             {#each section.items as item (item.id)}
-              {@render gridCard(item, 'grid')}
+              {@render gridCard(item, 'grid', section.mixedTypes ?? false)}
             {/each}
           </div>
         {:else}
@@ -565,7 +569,7 @@
             ariaLabel={section.title}
           >
             {#snippet renderItem(c)}
-              {@render gridCard(c, 'grid')}
+              {@render gridCard(c, 'grid', section.mixedTypes ?? false)}
             {/snippet}
           </Carousel>
         {/if}
@@ -601,7 +605,10 @@
       </header>
       <div class="content-grid">
         {#each data.allContent as item (item.id)}
-          {@render gridCard(item, 'grid')}
+          <!-- The full catalogue is inherently mixed-type; normalise thumb
+               ratios so the grid reads as one rhythm (same reasoning as
+               Free samples / per-category carousels). -->
+          {@render gridCard(item, 'grid', true)}
         {/each}
       </div>
     </section>

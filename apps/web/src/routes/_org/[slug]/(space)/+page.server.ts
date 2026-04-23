@@ -195,6 +195,10 @@ function buildSections(all: ContentItem[]): FeedSection[] {
         layout: 'carousel',
         eyebrow: 'Try',
         title: 'Free samples',
+        // Free samples mix all content types — force uniform thumb ratio
+        // so the row reads as one rhythm instead of a jagged mix of
+        // 1:1 audio next to 16:9 video next to 3:2 article tiles.
+        mixedTypes: true,
         items: promoteFeatured(free),
       });
     }
@@ -213,6 +217,10 @@ function buildSections(all: ContentItem[]): FeedSection[] {
     .sort((a, b) => b[1].length - a[1].length)
     .slice(0, MAX_CATEGORY_SECTIONS);
   for (const [category, items] of categoryEntries) {
+    // Per-category rows pull across content types too — normalise ratios
+    // so the visual rhythm survives a mixed row (same reasoning as Free).
+    const hasMixedTypes =
+      new Set(items.map((i) => i.contentType).filter(Boolean)).size > 1;
     sections.push({
       id: `category:${category}`,
       layout: 'carousel',
@@ -222,6 +230,7 @@ function buildSections(all: ContentItem[]): FeedSection[] {
       title: category.charAt(0).toUpperCase() + category.slice(1),
       viewAllHref: `/explore?category=${encodeURIComponent(category)}`,
       viewAllLabel: 'View all',
+      mixedTypes: hasMixedTypes,
       items: promoteFeatured(items),
     });
   }

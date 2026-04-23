@@ -53,6 +53,15 @@ export type FeedSection = {
   /** Optional "View all →" link. */
   viewAllHref?: string;
   viewAllLabel?: string;
+  /**
+   * Marks sections whose items span multiple content types (Free samples,
+   * per-category). When true, the renderer normalises thumb aspect ratios
+   * (typically to 16:9) so the row reads as a single rhythm instead of a
+   * mix of 1:1 audio next to 16:9 video next to 3:2 article. Pure-type
+   * sections (Videos / Audio / Articles) leave this undefined and keep
+   * their natural per-type ratios.
+   */
+  mixedTypes?: boolean;
   /** Section contents. Spotlight uses `items[0]` as the hero. */
   items: ContentItem[];
 };

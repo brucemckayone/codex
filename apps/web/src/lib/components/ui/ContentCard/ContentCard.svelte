@@ -118,6 +118,14 @@
     accessStatePeriodEnd?: string | null;
     /** Destination for the reactivate/update-payment affordance. Defaults to /account/subscriptions. */
     accessStateActionHref?: string;
+    /**
+     * Forces the thumbnail to a single uniform aspect ratio, overriding the
+     * per-content-type defaults (audio 1:1, article 3:2, video 16:9). Set
+     * true on mixed-type carousels (Free samples, per-category) so a row of
+     * cards reads as one rhythm instead of a jagged mix of tile shapes.
+     * Pure-type sections leave this undefined and keep natural ratios.
+     */
+    normalizeRatio?: boolean;
   }
 
   const {
@@ -144,6 +152,7 @@
     accessState = 'active',
     accessStatePeriodEnd = null,
     accessStateActionHref = '/account/subscriptions',
+    normalizeRatio = false,
     class: className,
     ...rest
   }: Props = $props();
@@ -241,6 +250,7 @@
   data-variant={variant}
   data-layout={layout !== 'default' ? layout : undefined}
   data-content-type={contentType || undefined}
+  data-normalize-ratio={normalizeRatio || undefined}
   data-access-state={accessState !== 'active' ? accessState : undefined}
   aria-labelledby={!loading ? titleId : undefined}
   {...rest}
@@ -1082,6 +1092,25 @@
   .cc[data-variant='list'][data-content-type='article'] .cc__thumb,
   .cc[data-variant='featured'][data-content-type='article'] .cc__thumb {
     aspect-ratio: auto;
+    display: block;
+  }
+
+  /* ── NORMALIZE RATIO: mixed-type carousel override ──────────
+     When a carousel contains items of mixed content types (Free samples,
+     per-category), the per-type thumb ratios (audio 1:1, article 3:2,
+     video 16:9) create a jagged row. Callers set `normalizeRatio={true}`
+     to force every card in the row to 16:9. Wins over per-type rules
+     because it uses a more specific selector (includes data-normalize).
+     Only applies to the grid variant — list/featured/compact have their
+     own aspect handling and shouldn't need to be normalized. */
+  .cc[data-normalize-ratio][data-variant='grid'] .cc__thumb {
+    aspect-ratio: 16 / 9;
+  }
+
+  /* Article thumbs normally disappear when there's no real image; but in
+     a normalized mixed row we keep the frame so the rhythm holds. Fill
+     with the surface token + the article icon sits centered. */
+  .cc[data-normalize-ratio][data-content-type='article'] .cc__thumb:has(.cc__placeholder:not(.hidden)) {
     display: block;
   }
 
