@@ -26,6 +26,7 @@
   import { formatDurationHuman } from '$lib/utils/format';
   import { extractPlainText } from '@codex/validation';
   import { hydrateIfNeeded, libraryCollection, useLiveQuery, type LibraryItem } from '$lib/collections';
+  import { filterLibraryItemsByOrg } from '$lib/library/filter-by-org';
   import { followingStore } from '$lib/client/following.svelte';
   import { followOrganization, unfollowOrganization } from '$lib/remote/org.remote';
   import { useAccessContext } from '$lib/utils/access-context.svelte';
@@ -149,11 +150,16 @@
     { ssrData: [] as LibraryItem[] }
   );
 
+  // Scope to this org by organizationId via the shared helper (prevents
+  // cross-org bleed; see $lib/library/filter-by-org.ts), then narrow to
+  // in-progress items only.
   const continueWatching = $derived(
-    ((libraryQuery.data ?? []) as LibraryItem[])
+    filterLibraryItemsByOrg(
+      (libraryQuery.data ?? []) as LibraryItem[],
+      data.org.id
+    )
       .filter(
         (item) =>
-          item.content?.organizationSlug === data.org.slug &&
           item.progress &&
           !item.progress.completed &&
           item.progress.positionSeconds > 0

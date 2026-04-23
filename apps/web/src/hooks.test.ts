@@ -42,8 +42,9 @@ describe('Reroute Logic', () => {
 
   it('rewrites org subdomain routes', () => {
     const event = createEvent('https://yoga-studio.revelations.studio/explore');
-    // Should map to /_org/[slug]/(space)/explore
-    expect(reroute(event)).toBe('/_org/yoga-studio/(space)/explore');
+    // Route group (space) is filesystem-only — SvelteKit route groups never
+    // appear in URLs, so the rerouted path must not include it.
+    expect(reroute(event)).toBe('/_org/yoga-studio/explore');
   });
 
   it('rewrites org studio routes', () => {

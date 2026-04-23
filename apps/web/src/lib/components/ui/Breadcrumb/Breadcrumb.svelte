@@ -57,6 +57,11 @@
     display: flex;
     align-items: center;
     gap: var(--space-1);
+    /* Reset any inherited margin. A global <li> rule was giving the first
+       item an 8px bottom margin, which the flex algorithm expanded into —
+       the container grew 8px taller, and items aligned to different
+       visual Y positions (first was margin-boxed, second wasn't). */
+    margin: 0;
   }
 
   :global(.breadcrumb__separator) {

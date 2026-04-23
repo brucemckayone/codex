@@ -76,12 +76,14 @@ describe('Notifications Page Load', () => {
   });
 
   it('loads notification preferences from API when authenticated', async () => {
+    // `createServerApi.request()` unwraps the `{ data: T }` envelope before
+    // returning, so the mocked API method resolves with the bare shape.
     const preferencesData = {
       emailMarketing: true,
       emailTransactional: true,
       emailDigest: false,
     };
-    mockGetNotificationPreferences.mockResolvedValue({ data: preferencesData });
+    mockGetNotificationPreferences.mockResolvedValue(preferencesData);
 
     const { load } = await import('../+page.server');
 
@@ -100,10 +102,10 @@ describe('Notifications Page Load', () => {
   it('loads notification preferences with defaults when API returns partial data', async () => {
     const partialData = {
       emailMarketing: true,
-      // emailTransactional missing
-      // emailDigest missing
+      // emailTransactional missing → DEFAULT true
+      // emailDigest missing → DEFAULT true
     };
-    mockGetNotificationPreferences.mockResolvedValue({ data: partialData });
+    mockGetNotificationPreferences.mockResolvedValue(partialData);
 
     const { load } = await import('../+page.server');
 
@@ -116,8 +118,8 @@ describe('Notifications Page Load', () => {
     expect(result).toEqual({
       preferences: {
         emailMarketing: true,
-        emailTransactional: true, // default
-        emailDigest: false, // default
+        emailTransactional: true, // default from DEFAULT_PREFERENCES
+        emailDigest: true, // default from DEFAULT_PREFERENCES
       },
     });
   });
@@ -135,9 +137,9 @@ describe('Notifications Page Load', () => {
 
     expect(result).toEqual({
       preferences: {
-        emailMarketing: false,
+        emailMarketing: true,
         emailTransactional: true,
-        emailDigest: false,
+        emailDigest: true,
       },
     });
   });
@@ -155,9 +157,9 @@ describe('Notifications Page Load', () => {
 
     expect(result).toEqual({
       preferences: {
-        emailMarketing: false,
+        emailMarketing: true,
         emailTransactional: true,
-        emailDigest: false,
+        emailDigest: true,
       },
     });
   });
@@ -168,7 +170,7 @@ describe('Notifications Page Load', () => {
       emailTransactional: null,
       emailDigest: null,
     };
-    mockGetNotificationPreferences.mockResolvedValue({ data: nullData });
+    mockGetNotificationPreferences.mockResolvedValue(nullData);
 
     const { load } = await import('../+page.server');
 
@@ -178,11 +180,12 @@ describe('Notifications Page Load', () => {
       cookies: mockCookies,
     } as unknown as Parameters<typeof load>[0]);
 
+    // null coalesces to DEFAULT_PREFERENCES (all true) via `?? DEFAULT.*`
     expect(result).toEqual({
       preferences: {
-        emailMarketing: false, // null coalesces to false
-        emailTransactional: true, // null coalesces to true
-        emailDigest: false, // null coalesces to false
+        emailMarketing: true,
+        emailTransactional: true,
+        emailDigest: true,
       },
     });
   });

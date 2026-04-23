@@ -24,6 +24,7 @@ import {
   setupTestDatabase,
   teardownTestDatabase,
 } from '@codex/test-utils';
+import { getOriginalKey } from '@codex/transcoding';
 import type { CreateMediaItemInput } from '@codex/validation';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { MediaNotFoundError } from '../../errors';
@@ -58,7 +59,7 @@ describe('MediaItemService', () => {
         description: 'Test video description',
         mediaType: 'video',
         mimeType: 'video/mp4',
-        r2Key: 'originals/test-video.mp4',
+        r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'test-video.mp4'),
         fileSizeBytes: 1024 * 1024 * 10,
       };
 
@@ -77,7 +78,7 @@ describe('MediaItemService', () => {
         title: 'Test Audio',
         mediaType: 'audio',
         mimeType: 'audio/mpeg',
-        r2Key: 'originals/test-audio.mp3',
+        r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'test-audio.mp3'),
         fileSizeBytes: 1024 * 1024 * 5,
       };
 
@@ -92,7 +93,7 @@ describe('MediaItemService', () => {
         title: 'Test',
         mediaType: 'video',
         mimeType: 'video/mp4',
-        r2Key: 'originals/test.mp4',
+        r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'test.mp4'),
         fileSizeBytes: 1024,
       };
 
@@ -111,7 +112,7 @@ describe('MediaItemService', () => {
           title: 'Test Media',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/test.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'test.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -139,7 +140,11 @@ describe('MediaItemService', () => {
           title: 'Other Media',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/other.mp4',
+          r2Key: getOriginalKey(
+            otherCreatorId,
+            crypto.randomUUID(),
+            'other.mp4'
+          ),
           fileSizeBytes: 1024,
         },
         otherCreatorId
@@ -156,7 +161,7 @@ describe('MediaItemService', () => {
           title: 'To Delete',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/delete.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'delete.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -176,7 +181,7 @@ describe('MediaItemService', () => {
           title: 'Test',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/test.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'test.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -213,7 +218,11 @@ describe('MediaItemService', () => {
           title: 'Other',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/other.mp4',
+          r2Key: getOriginalKey(
+            otherCreatorId,
+            crypto.randomUUID(),
+            'other.mp4'
+          ),
           fileSizeBytes: 1024,
         },
         otherCreatorId
@@ -232,7 +241,7 @@ describe('MediaItemService', () => {
           title: 'Test',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/test.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'test.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -255,7 +264,7 @@ describe('MediaItemService', () => {
           title: 'Test',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/test.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'test.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -277,7 +286,7 @@ describe('MediaItemService', () => {
           title: 'Test',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/test.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'test.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -310,7 +319,7 @@ describe('MediaItemService', () => {
           title: 'Test',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/test.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'test.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -334,7 +343,7 @@ describe('MediaItemService', () => {
           title: 'Test Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/test.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'test.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -367,7 +376,7 @@ describe('MediaItemService', () => {
           title: 'To Delete',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/delete.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'delete.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -391,7 +400,11 @@ describe('MediaItemService', () => {
           title: 'Other',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/other.mp4',
+          r2Key: getOriginalKey(
+            otherCreatorId,
+            crypto.randomUUID(),
+            'other.mp4'
+          ),
           fileSizeBytes: 1024,
         },
         otherCreatorId
@@ -417,7 +430,11 @@ describe('MediaItemService', () => {
             title: `Media ${i}`,
             mediaType: i % 2 === 0 ? 'video' : 'audio',
             mimeType: i % 2 === 0 ? 'video/mp4' : 'audio/mpeg',
-            r2Key: `originals/media-${i}.mp4`,
+            r2Key: getOriginalKey(
+              creatorId,
+              crypto.randomUUID(),
+              `media-${i}.mp4`
+            ),
             fileSizeBytes: 1024 * (i + 1),
           },
           creatorId
@@ -483,7 +500,11 @@ describe('MediaItemService', () => {
           title: 'Other Media',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/other.mp4',
+          r2Key: getOriginalKey(
+            otherCreatorId,
+            crypto.randomUUID(),
+            'other.mp4'
+          ),
           fileSizeBytes: 1024,
         },
         otherCreatorId

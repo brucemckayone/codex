@@ -15,6 +15,7 @@
     useLiveQuery,
   } from '$lib/collections';
   import type { LibraryItem } from '$lib/collections';
+  import { filterLibraryItemsByOrg } from '$lib/library/filter-by-org';
   import { buildContentUrl, buildPlatformUrl } from '$lib/utils/subdomain';
   import LibraryPageView from '$lib/components/library/LibraryPageView.svelte';
   import * as m from '$paraglide/messages';
@@ -23,6 +24,7 @@
 
   const orgName = $derived(data.org?.name ?? 'Organization');
   const orgSlug = $derived(data.org?.slug);
+  const orgId = $derived(data.org?.id);
 
   // Build root domain library URL for the "view all" link
   const fullLibraryUrl = $derived(buildPlatformUrl(page.url, '/library'));
@@ -46,11 +48,11 @@
     { ssrData: [] as LibraryItem[] }
   );
 
-  // All items from collection, filtered to this org
+  // Filter by organizationId via the shared helper — legacy localStorage
+  // entries without organizationId are excluded to prevent cross-org bleed.
+  // See $lib/library/filter-by-org.ts for the contract + regression tests.
   const allItems = $derived(
-    ((libraryQuery.data ?? []) as LibraryItem[]).filter(
-      (item) => item.content?.organizationSlug === orgSlug
-    )
+    filterLibraryItemsByOrg((libraryQuery.data ?? []) as LibraryItem[], orgId)
   );
 
   // On mount: if collection is empty, fetch from server

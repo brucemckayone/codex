@@ -155,14 +155,18 @@
   }
 
   /* ── Breadcrumb ──────────────────────────────────────────────── */
+  /* Uses center alignment (not baseline) so the uppercase root — sitting
+     between baseline and cap-height only — visually aligns with the mixed-
+     case leaf's x-height and descenders. Both spans share --text-sm so
+     case/weight carry the hierarchy without reintroducing the optical drift. */
   .breadcrumb {
     display: inline-flex;
-    align-items: baseline;
+    align-items: center;
     gap: var(--space-2);
     text-decoration: none;
     color: var(--color-text);
     font-family: var(--font-heading);
-    font-size: var(--text-base);
+    font-size: var(--text-sm);
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-tight);
     min-width: 0;
@@ -180,7 +184,6 @@
   .breadcrumb-root {
     font-weight: var(--font-normal);
     color: var(--color-text-muted);
-    font-size: var(--text-sm);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
   }
@@ -188,6 +191,7 @@
   .breadcrumb-sep {
     color: var(--color-text-muted);
     font-weight: var(--font-normal);
+    line-height: 1;
   }
 
   .breadcrumb-leaf {

@@ -155,6 +155,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 2999,
         },
         userId
@@ -288,6 +289,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 1999,
         },
         userId
@@ -337,6 +339,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 4999,
         },
         userId
@@ -402,6 +405,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 2999,
         },
         userId
@@ -470,6 +474,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 1999,
         },
         userId
@@ -538,6 +543,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 999,
         },
         userId
@@ -596,6 +602,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 1499,
         },
         userId
@@ -650,6 +657,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 2499,
         },
         userId
@@ -696,6 +704,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 1999,
         },
         userId
@@ -758,6 +767,7 @@ describe('PurchaseService Integration', () => {
             contentType: 'video',
             mediaItemId: media.id,
             visibility: 'purchased_only',
+            accessType: 'paid',
             priceCents: 999 + i * 100,
           },
           userId
@@ -848,6 +858,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 1999,
         },
         userId
@@ -907,6 +918,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 2999,
         },
         userId
@@ -1137,6 +1149,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 1999,
         },
         userId
@@ -1199,6 +1212,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 999,
         },
         userId
@@ -1258,6 +1272,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 2999,
         },
         userId
@@ -1321,6 +1336,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 1499,
         },
         userId
@@ -1389,6 +1405,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 999,
         },
         userId
@@ -1470,6 +1487,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 1999,
         },
         userId
@@ -1550,6 +1568,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 999,
         },
         userId
@@ -1663,6 +1682,7 @@ describe('PurchaseService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 999,
         },
         verifyUserId

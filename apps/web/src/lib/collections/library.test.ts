@@ -15,9 +15,14 @@ const mockCollection = {
   delete: vi.fn(),
 };
 
-// Mock $app/environment so browser = true (enables libraryCollection creation)
+// Mock $app/environment so browser = true (enables libraryCollection creation).
+// Include `dev`, `building`, and `version` because sibling modules (e.g.
+// `$lib/observability` via collection dependencies) read them at module load.
 vi.mock('$app/environment', () => ({
   browser: true,
+  dev: false,
+  building: false,
+  version: 'test',
 }));
 
 // Mock TanStack DB before importing

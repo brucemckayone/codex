@@ -38,6 +38,7 @@ import {
   setupTestDatabase,
   teardownTestDatabase,
 } from '@codex/test-utils';
+import { getOriginalKey } from '@codex/transcoding';
 import { eq } from 'drizzle-orm';
 import {
   afterAll,
@@ -125,7 +126,7 @@ describe('ContentAccessService Integration', () => {
           title: 'Free Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/free-video.mp4',
+          r2Key: getOriginalKey(userId, crypto.randomUUID(), 'free-video.mp4'),
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -183,7 +184,11 @@ describe('ContentAccessService Integration', () => {
           title: 'Premium Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/premium-video.mp4',
+          r2Key: getOriginalKey(
+            userId,
+            crypto.randomUUID(),
+            'premium-video.mp4'
+          ),
           fileSizeBytes: 1024 * 1024 * 100,
         },
         userId
@@ -207,6 +212,7 @@ describe('ContentAccessService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 1999, // $19.99
           tags: [],
         },
@@ -245,7 +251,11 @@ describe('ContentAccessService Integration', () => {
           title: 'Exclusive Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/exclusive-video.mp4',
+          r2Key: getOriginalKey(
+            userId,
+            crypto.randomUUID(),
+            'exclusive-video.mp4'
+          ),
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -269,6 +279,7 @@ describe('ContentAccessService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 4999, // $49.99
           tags: [],
         },
@@ -306,7 +317,7 @@ describe('ContentAccessService Integration', () => {
           title: 'Org Premium Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/org-premium.mp4',
+          r2Key: getOriginalKey(userId, crypto.randomUUID(), 'org-premium.mp4'),
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -330,6 +341,7 @@ describe('ContentAccessService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 2999, // $29.99
           tags: [],
         },
@@ -372,7 +384,7 @@ describe('ContentAccessService Integration', () => {
           title: 'Draft Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/draft-video.mp4',
+          r2Key: getOriginalKey(userId, crypto.randomUUID(), 'draft-video.mp4'),
           fileSizeBytes: 1024,
         },
         userId
@@ -420,7 +432,11 @@ describe('ContentAccessService Integration', () => {
           title: 'Progress Test Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/progress-test.mp4',
+          r2Key: getOriginalKey(
+            userId,
+            crypto.randomUUID(),
+            'progress-test.mp4'
+          ),
           fileSizeBytes: 1024,
         },
         userId
@@ -477,7 +493,7 @@ describe('ContentAccessService Integration', () => {
           title: 'Upsert Test Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/upsert-test.mp4',
+          r2Key: getOriginalKey(userId, crypto.randomUUID(), 'upsert-test.mp4'),
           fileSizeBytes: 1024,
         },
         userId
@@ -538,7 +554,11 @@ describe('ContentAccessService Integration', () => {
           title: 'Completion Test Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/completion-test.mp4',
+          r2Key: getOriginalKey(
+            userId,
+            crypto.randomUUID(),
+            'completion-test.mp4'
+          ),
           fileSizeBytes: 1024,
         },
         userId
@@ -593,7 +613,7 @@ describe('ContentAccessService Integration', () => {
           title: 'No Progress Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/no-progress.mp4',
+          r2Key: getOriginalKey(userId, crypto.randomUUID(), 'no-progress.mp4'),
           fileSizeBytes: 1024,
         },
         userId
@@ -657,7 +677,11 @@ describe('ContentAccessService Integration', () => {
           title: 'Library Test Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/library-test.mp4',
+          r2Key: getOriginalKey(
+            userId,
+            crypto.randomUUID(),
+            'library-test.mp4'
+          ),
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -681,6 +705,7 @@ describe('ContentAccessService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 999,
           tags: [],
         },
@@ -723,6 +748,11 @@ describe('ContentAccessService Integration', () => {
       const item = result.items.find((i) => i.content.id === libraryContent.id);
       expect(item).toBeDefined();
       expect(item?.content.title).toBe('Library Test Content');
+      // Regression guard for cross-org library bleed (Codex-q3zuf): the
+      // server payload MUST include organizationId so the client can
+      // filter by org on subdomain library pages. organizationSlug alone
+      // was nullable and allowed null-org entries to slip through.
+      expect(item?.content.organizationId).toBe(organizationId);
       expect(item?.purchase.priceCents).toBe(999);
       expect(item?.progress?.positionSeconds).toBe(300);
       expect(item?.progress?.percentComplete).toBe(50);
@@ -738,7 +768,7 @@ describe('ContentAccessService Integration', () => {
           title: 'In Progress Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/in-progress.mp4',
+          r2Key: getOriginalKey(userId, crypto.randomUUID(), 'in-progress.mp4'),
           fileSizeBytes: 1024,
         },
         userId
@@ -762,6 +792,7 @@ describe('ContentAccessService Integration', () => {
           contentType: 'video',
           mediaItemId: media1.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 500,
           tags: [],
         },
@@ -812,7 +843,7 @@ describe('ContentAccessService Integration', () => {
             title: 'Exact 95% Test',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/exact-95.mp4',
+            r2Key: getOriginalKey(userId, crypto.randomUUID(), 'exact-95.mp4'),
             fileSizeBytes: 1024,
           },
           userId
@@ -867,7 +898,7 @@ describe('ContentAccessService Integration', () => {
             title: 'Below 95% Test',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/below-95.mp4',
+            r2Key: getOriginalKey(userId, crypto.randomUUID(), 'below-95.mp4'),
             fileSizeBytes: 1024,
           },
           userId
@@ -922,7 +953,11 @@ describe('ContentAccessService Integration', () => {
             title: 'Zero Duration Test',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/zero-duration.mp4',
+            r2Key: getOriginalKey(
+              userId,
+              crypto.randomUUID(),
+              'zero-duration.mp4'
+            ),
             fileSizeBytes: 1024,
           },
           userId
@@ -977,7 +1012,7 @@ describe('ContentAccessService Integration', () => {
             title: 'Position Overflow Test',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/overflow.mp4',
+            r2Key: getOriginalKey(userId, crypto.randomUUID(), 'overflow.mp4'),
             fileSizeBytes: 1024,
           },
           userId
@@ -1033,7 +1068,11 @@ describe('ContentAccessService Integration', () => {
             title: 'Long Video Test',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/long-video.mp4',
+            r2Key: getOriginalKey(
+              userId,
+              crypto.randomUUID(),
+              'long-video.mp4'
+            ),
             fileSizeBytes: 1024 * 1024 * 1024,
           },
           userId
@@ -1092,7 +1131,11 @@ describe('ContentAccessService Integration', () => {
             title: 'Special Chars Test',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/test-video_with-special-chars-2024.mp4',
+            r2Key: getOriginalKey(
+              userId,
+              crypto.randomUUID(),
+              'test-video_with-special-chars-2024.mp4'
+            ),
             fileSizeBytes: 1024,
           },
           userId
@@ -1141,7 +1184,11 @@ describe('ContentAccessService Integration', () => {
             title: 'Underscores and Hyphens Test',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/test_video-with-underscores_and-hyphens.mp4',
+            r2Key: getOriginalKey(
+              userId,
+              crypto.randomUUID(),
+              'test_video-with-underscores_and-hyphens.mp4'
+            ),
             fileSizeBytes: 1024,
           },
           userId
@@ -1190,7 +1237,11 @@ describe('ContentAccessService Integration', () => {
             title: 'Deep Path Test',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/2024/november/videos/test.mp4',
+            r2Key: getOriginalKey(
+              userId,
+              crypto.randomUUID(),
+              '2024/november/videos/test.mp4'
+            ),
             fileSizeBytes: 1024,
           },
           userId
@@ -1240,7 +1291,7 @@ describe('ContentAccessService Integration', () => {
             title: 'To Be Deleted',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/to-delete.mp4',
+            r2Key: getOriginalKey(userId, crypto.randomUUID(), 'to-delete.mp4'),
             fileSizeBytes: 1024,
           },
           userId
@@ -1293,7 +1344,7 @@ describe('ContentAccessService Integration', () => {
             title: 'Free Content Test',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/free.mp4',
+            r2Key: getOriginalKey(userId, crypto.randomUUID(), 'free.mp4'),
             fileSizeBytes: 1024,
           },
           userId
@@ -1349,7 +1400,7 @@ describe('ContentAccessService Integration', () => {
             title: 'Expensive Content',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/expensive.mp4',
+            r2Key: getOriginalKey(userId, crypto.randomUUID(), 'expensive.mp4'),
             fileSizeBytes: 1024,
           },
           userId
@@ -1373,6 +1424,7 @@ describe('ContentAccessService Integration', () => {
             contentType: 'video',
             mediaItemId: media.id,
             visibility: 'purchased_only',
+            accessType: 'paid',
             priceCents: 9999999, // $99,999.99 (max allowed is $100,000)
             tags: [],
           },
@@ -1459,7 +1511,11 @@ describe('ContentAccessService Integration', () => {
             title: 'Sub Access Video',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/sub-access.mp4',
+            r2Key: getOriginalKey(
+              userId,
+              crypto.randomUUID(),
+              'sub-access.mp4'
+            ),
             fileSizeBytes: 1024,
           },
           userId
@@ -1483,6 +1539,7 @@ describe('ContentAccessService Integration', () => {
             contentType: 'video',
             mediaItemId: media.id,
             visibility: 'purchased_only',
+            accessType: 'paid',
             priceCents: 999,
             tags: [],
           },
@@ -1515,7 +1572,11 @@ describe('ContentAccessService Integration', () => {
             title: `${accessType} Video`,
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: `originals/${slugSuffix}.mp4`,
+            r2Key: getOriginalKey(
+              userId,
+              crypto.randomUUID(),
+              `${slugSuffix}.mp4`
+            ),
             fileSizeBytes: 1024,
           },
           userId
@@ -1655,7 +1716,11 @@ describe('ContentAccessService Integration', () => {
             title: `${accessType} Video`,
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: `originals/${slugSuffix}.mp4`,
+            r2Key: getOriginalKey(
+              userId,
+              crypto.randomUUID(),
+              `${slugSuffix}.mp4`
+            ),
             fileSizeBytes: 1024,
           },
           userId
@@ -1772,7 +1837,11 @@ describe('ContentAccessService Integration', () => {
             title: 'Owner Bypass Video',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/owner-bypass.mp4',
+            r2Key: getOriginalKey(
+              userId,
+              crypto.randomUUID(),
+              'owner-bypass.mp4'
+            ),
             fileSizeBytes: 1024,
           },
           userId
@@ -1796,6 +1865,7 @@ describe('ContentAccessService Integration', () => {
             contentType: 'video',
             mediaItemId: media.id,
             visibility: 'purchased_only',
+            accessType: 'paid',
             priceCents: 4999,
             tags: [],
           },
@@ -1831,7 +1901,7 @@ describe('ContentAccessService Integration', () => {
             title: 'Sub Deny Video',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/sub-deny.mp4',
+            r2Key: getOriginalKey(userId, crypto.randomUUID(), 'sub-deny.mp4'),
             fileSizeBytes: 1024,
           },
           userId
@@ -1855,6 +1925,7 @@ describe('ContentAccessService Integration', () => {
             contentType: 'video',
             mediaItemId: media.id,
             visibility: 'purchased_only',
+            accessType: 'paid',
             priceCents: 2999,
             tags: [],
           },
@@ -1893,7 +1964,11 @@ describe('ContentAccessService Integration', () => {
             title: 'No Access Video',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/no-access-edge.mp4',
+            r2Key: getOriginalKey(
+              userId,
+              crypto.randomUUID(),
+              'no-access-edge.mp4'
+            ),
             fileSizeBytes: 1024,
           },
           userId
@@ -1917,6 +1992,7 @@ describe('ContentAccessService Integration', () => {
             contentType: 'video',
             mediaItemId: media.id,
             visibility: 'purchased_only',
+            accessType: 'paid',
             priceCents: 999,
             tags: [],
           },
@@ -2060,7 +2136,11 @@ describe('ContentAccessService Integration', () => {
             title: 'Concurrent Test',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/concurrent.mp4',
+            r2Key: getOriginalKey(
+              userId,
+              crypto.randomUUID(),
+              'concurrent.mp4'
+            ),
             fileSizeBytes: 1024,
           },
           userId
@@ -2132,7 +2212,11 @@ describe('ContentAccessService Integration', () => {
             title: 'Concurrent Streaming',
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: 'originals/concurrent-stream.mp4',
+            r2Key: getOriginalKey(
+              userId,
+              crypto.randomUUID(),
+              'concurrent-stream.mp4'
+            ),
             fileSizeBytes: 1024,
           },
           userId

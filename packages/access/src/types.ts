@@ -53,6 +53,7 @@ export interface UserLibraryResponse {
       thumbnailUrl: string | null;
       contentType: string;
       durationSeconds: number;
+      organizationId: string | null;
       organizationSlug: string | null;
     };
     /** Access type: 'purchased' = bought, 'membership' = org member access, 'subscription' = active subscription */

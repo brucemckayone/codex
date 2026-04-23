@@ -78,7 +78,23 @@ export function createAuthInstance(options: AuthConfigOptions) {
       storeSessionInDatabase: true,
       cookieCache: {
         enabled: true,
-        maxAge: 60 * 5, // 5 minutes (short-lived)
+        // 5 min — client-side signed cookie cache. Trade-off reviewed
+        // 2026-04-23 (Codex-5pbwc): shorter TTLs would reduce UI auth-state
+        // staleness but multiply /api/auth/session requests; longer TTLs
+        // push the revocation SLA. 5 min is acceptable because:
+        //   1. Sign-out propagates immediately on the same device —
+        //      BetterAuth calls `secondaryStorage.delete` which clears
+        //      both the cookie cache and the KV session entry.
+        //   2. Cross-device sign-out has no propagation path through
+        //      cookies — different cookie jars — so no TTL change fixes it.
+        //      The root layout's visibility-return re-check (Codex-b6emg)
+        //      handles cross-device UI state refresh within one foreground.
+        //   3. Access-control decisions (paid content streaming, admin
+        //      actions, revoked subscriptions) are re-evaluated at the
+        //      point of action against current DB state — not against
+        //      cached session data — so a stale 5-min cache cannot grant
+        //      authority the user no longer has.
+        maxAge: 60 * 5,
       },
       cookie: {
         name: COOKIES.SESSION_NAME,

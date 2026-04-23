@@ -26,6 +26,7 @@ import {
   teardownTestDatabase,
   withNeonTestBranch,
 } from '@codex/test-utils';
+import { getOriginalKey } from '@codex/transcoding';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ContentService, MediaItemService } from '../services';
 
@@ -75,7 +76,11 @@ describe('Integration Tests', () => {
           title: 'Company Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/company-video.mp4',
+          r2Key: getOriginalKey(
+            creatorId,
+            crypto.randomUUID(),
+            'company-video.mp4'
+          ),
           fileSizeBytes: 1024 * 1024 * 50,
         },
         creatorId
@@ -134,7 +139,7 @@ describe('Integration Tests', () => {
           title: 'Personal Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/personal.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'personal.mp4'),
           fileSizeBytes: 1024 * 1024,
         },
         creatorId
@@ -181,7 +186,7 @@ describe('Integration Tests', () => {
           title: 'Tutorial Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/tutorial.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'tutorial.mp4'),
           fileSizeBytes: 1024 * 1024 * 100,
         },
         creatorId
@@ -226,6 +231,7 @@ describe('Integration Tests', () => {
           contentType: 'video',
           mediaItemId: ready.id,
           visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 1999,
           tags: [],
         },
@@ -253,7 +259,11 @@ describe('Integration Tests', () => {
           title: 'Not Ready',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/not-ready.mp4',
+          r2Key: getOriginalKey(
+            creatorId,
+            crypto.randomUUID(),
+            'not-ready.mp4'
+          ),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -293,7 +303,7 @@ describe('Integration Tests', () => {
           title: 'Creator 1 Media',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/creator1.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'creator1.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -328,7 +338,11 @@ describe('Integration Tests', () => {
           title: 'Creator 2 Media',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/creator2.mp4',
+          r2Key: getOriginalKey(
+            otherCreatorId,
+            crypto.randomUUID(),
+            'creator2.mp4'
+          ),
           fileSizeBytes: 1024,
         },
         otherCreatorId
@@ -399,7 +413,7 @@ describe('Integration Tests', () => {
           title: 'Shared Media',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/shared.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'shared.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -460,7 +474,7 @@ describe('Integration Tests', () => {
           title: 'Media',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/test.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'test.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -518,7 +532,7 @@ describe('Integration Tests', () => {
           title: 'Unused Media',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/unused.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'unused.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -538,7 +552,7 @@ describe('Integration Tests', () => {
           title: 'Test Media',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/test.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'test.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -588,7 +602,7 @@ describe('Integration Tests', () => {
           title: 'Media',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/media.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'media.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -643,7 +657,7 @@ describe('Integration Tests', () => {
           title: 'Media',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/media.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'media.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -729,7 +743,7 @@ describe('Integration Tests', () => {
           title: 'Media',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/media.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'media.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -786,7 +800,7 @@ describe('Integration Tests', () => {
           title: 'Creator 1 Media',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/creator1.mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'creator1.mp4'),
           fileSizeBytes: 1024,
         },
         creatorId
@@ -822,7 +836,11 @@ describe('Integration Tests', () => {
           title: 'Creator 2 Media',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/creator2.mp4',
+          r2Key: getOriginalKey(
+            otherCreatorId,
+            crypto.randomUUID(),
+            'creator2.mp4'
+          ),
           fileSizeBytes: 1024,
         },
         otherCreatorId

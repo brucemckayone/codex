@@ -114,6 +114,7 @@ interface UserLibraryItem {
     thumbnailUrl: string | null;
     contentType: string;
     durationSeconds: number;
+    organizationId: string | null;
     organizationSlug: string | null;
   };
   /** How the user has access: 'purchased', 'membership', or 'subscription' */
@@ -1314,6 +1315,7 @@ export class ContentAccessService extends BaseService {
           contentType: content.contentType,
           mediaThumbnailKey: mediaItems.thumbnailKey,
           mediaDurationSeconds: mediaItems.durationSeconds,
+          orgId: content.organizationId,
           orgSlug: organizations.slug,
           purchasedAt: purchases.createdAt,
           amountPaidCents: purchases.amountPaidCents,
@@ -1366,6 +1368,7 @@ export class ContentAccessService extends BaseService {
             row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
           contentType: row.contentType ?? 'video',
           durationSeconds: row.mediaDurationSeconds ?? 0,
+          organizationId: row.orgId,
           organizationSlug: row.orgSlug ?? null,
         },
         accessType: 'purchased' as const,
@@ -1428,6 +1431,7 @@ export class ContentAccessService extends BaseService {
           contentType: content.contentType,
           mediaThumbnailKey: mediaItems.thumbnailKey,
           mediaDurationSeconds: mediaItems.durationSeconds,
+          orgId: content.organizationId,
           orgSlug: organizations.slug,
           contentCreatedAt: content.createdAt,
           progressPositionSeconds: videoPlayback.positionSeconds,
@@ -1477,6 +1481,7 @@ export class ContentAccessService extends BaseService {
             row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
           contentType: row.contentType ?? 'video',
           durationSeconds: row.mediaDurationSeconds ?? 0,
+          organizationId: row.orgId,
           organizationSlug: row.orgSlug ?? null,
         },
         accessType: 'membership' as const,
@@ -1566,6 +1571,7 @@ export class ContentAccessService extends BaseService {
           contentType: content.contentType,
           mediaThumbnailKey: mediaItems.thumbnailKey,
           mediaDurationSeconds: mediaItems.durationSeconds,
+          orgId: content.organizationId,
           orgSlug: organizations.slug,
           contentCreatedAt: content.createdAt,
           progressPositionSeconds: videoPlayback.positionSeconds,
@@ -1615,6 +1621,7 @@ export class ContentAccessService extends BaseService {
             row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
           contentType: row.contentType ?? 'video',
           durationSeconds: row.mediaDurationSeconds ?? 0,
+          organizationId: row.orgId,
           organizationSlug: row.orgSlug ?? null,
         },
         accessType: 'subscription' as const,
