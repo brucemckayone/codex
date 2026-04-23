@@ -65,14 +65,15 @@
         : 'Watch now'
   );
 
-  // Track whether we have a working image. Starts true if a thumbnail URL
-  // was provided; flips to false if <img> fires onerror (404s, CORS, etc.).
-  // When false, we drop the image frame entirely so the body takes full
-  // width and the shader gets the floor it deserves.
-  let hasImage = $state(!!thumbnail);
-  $effect(() => {
-    hasImage = !!thumbnail;
-  });
+  // Track which thumbnails failed to load (by URL). Derive `hasImage` so
+  // swapping `item.thumbnailUrl` (e.g. via prop change) automatically
+  // re-evaluates without an $effect writing back to $state (antipattern).
+  // Keyed on URL rather than a boolean so a later success-URL swap can
+  // still render without clearing the set.
+  const failedThumbnails = $state(new Set<string>());
+  const hasImage = $derived(
+    !!thumbnail && !failedThumbnails.has(thumbnail)
+  );
 
   /**
    * Pick a shader preset for the card's backdrop. Prefer the org's own
@@ -124,7 +125,7 @@
               loading="eager"
               decoding="async"
               onerror={() => {
-                hasImage = false;
+                if (thumbnail) failedThumbnails.add(thumbnail);
               }}
             />
           </a>
@@ -271,10 +272,13 @@
      LIGHT-ON-DARK treatment (text in `--color-player-text`), so the veil
      establishes a consistent dark floor behind the copy regardless of
      which shader preset the org picked. A right-biased darken lives
-     behind the copy column; the left stays brighter to let the shader
-     breathe around the thumbnail. `hsl(0 0% 0% / α)` matches the token
-     pattern in player.css — expressing "neutral dark overlay at specific
-     alpha" without inventing a new token family. */
+     behind the copy column; the left stays brighter (and the transition
+     pushed further out) to let the shader breathe around the thumbnail.
+     Pairs visually with SubscribeCTA — both use the same dark-floor
+     treatment so the two promotional surfaces read as siblings.
+     `hsl(0 0% 0% / α)` matches the token pattern in player.css —
+     expressing "neutral dark overlay at specific alpha" without inventing
+     a new token family. */
   .spotlight__card-veil {
     position: absolute;
     inset: 0;
@@ -283,9 +287,10 @@
     background:
       linear-gradient(
         90deg,
-        hsl(0 0% 0% / 0.10) 0%,
-        hsl(0 0% 0% / 0.55) 65%,
-        hsl(0 0% 0% / 0.65) 100%
+        hsl(0 0% 0% / 0.05) 0%,
+        hsl(0 0% 0% / 0.20) 35%,
+        hsl(0 0% 0% / 0.60) 70%,
+        hsl(0 0% 0% / 0.70) 100%
       );
     backdrop-filter: blur(var(--blur-sm));
     -webkit-backdrop-filter: blur(var(--blur-sm));
@@ -324,14 +329,18 @@
     border-radius: var(--radius-lg);
     /* No solid background — the shader behind the card shows through.
        A thin border (player-border: light-on-dark at ~20% alpha) keeps
-       the frame visible without walling off the surface. */
+       the frame visible without walling off the surface. The stacked
+       outer drop (lifts the frame off the card) + inset well (recesses
+       the image into the frame) reads as a framed photograph, not a
+       hole cut into the card. Both shadow layers come from the token
+       family — no raw values. */
     background: transparent;
     border: var(--border-width) var(--border-style) var(--color-player-border);
     display: block;
     text-decoration: none;
     box-shadow:
       var(--shadow-lg),
-      inset 0 0 0 var(--border-width) hsl(0 0% 0% / 0.08);
+      var(--shadow-inner);
   }
 
   .spotlight__image img {
