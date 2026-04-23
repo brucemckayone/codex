@@ -1,10 +1,18 @@
 # Brand Editor Investigation
 
-**Status**: active (iter-018 kickoff, 2026-04-23 — looped via /design-system cron every 20m)
+**Status**: investigation complete, implementation landed 2026-04-23. Cron `470ab382` stopped. 1 P0 + 9 P1 closed across 9 commits.
 **Driver**: User report: "font families are not saved — only show while editing, revert on reload"; two light/dark toggles out of sync; some fields don't work
 **Scope**: map the full brand pipeline, identify every gap between control → persistence → hydration → CSS consumer, fix the bugs
 
-This doc is the **persistent context store** for the investigation. Each iteration of the /design-system loop reads from here, adds findings, and updates the bead list. Do not duplicate this content elsewhere.
+This doc is the **persistent context store** for the investigation. Each iteration of the /design-system loop read from here, added findings, and updated the bead list.
+
+**→ For the implementation writeup, see [`implementation-summary.md`](./implementation-summary.md)** (per-bug writeups, commits, cross-cutting patterns, verification playbook, remaining P2/P3 work).
+
+**Ancillary docs** produced during the investigation:
+- [`token-registry.json`](./token-registry.json) — 168-token machine-readable registry (iter-020 Agent E)
+- [`per-theme-tokens-design.md`](./per-theme-tokens-design.md) — 459-line design doc for `Codex-wwedk` (iter-022 Agent J)
+- [`lqvyy-patch.md`](./lqvyy-patch.md) — PR-ready patch spec for `Codex-lqvyy` (iter-023 Agent L; applied in `af423e86`)
+- [`06ygy-patch.md`](./06ygy-patch.md) — PR-ready patch spec for `Codex-06ygy` P0 (iter-025 Agent O; applied in `cbd7dbf8`)
 
 ---
 
@@ -112,40 +120,42 @@ READ PATH (on reload)
 
 ## 3. Known bugs
 
+**Status legend**: ✅ = CLOSED · 🟡 = open · see [`implementation-summary.md`](./implementation-summary.md) for closed-bug writeups.
+
 ### From iter-018 (save/reload pipeline)
 
-| Bead | Priority | Title | Root file(s) |
-|---|---|---|---|
-| `Codex-ja9zp` | P1 | CACHE_KV slug invalidation race — stale font/color on reload | `workers/organization-api/src/routes/settings.ts:171-203` |
-| `Codex-7afgp` | P1 | No client `invalidate('cache:org-versions')` after save — layout doesn't refresh | `apps/web/src/lib/remote/branding.remote.ts:261-267` |
-| `Codex-g49b4` | P2 | 6 columns write-orphaned: `textColorHex`, `shadowScale`, `shadowColor`, `textScale`, `headingWeight`, `bodyWeight` | `apps/web/src/lib/components/brand-editor/BrandEditorMount.svelte:49-69` |
-| `Codex-mdg94` | P2 | Audit fine-tune panels — confirm values route to `tokenOverrides` | `apps/web/src/lib/components/brand-editor/levels/BrandEditor*FineTune*.svelte` |
-| `Codex-fopbo` | P3 | `BRAND_KV` vs `CACHE_KV` — document or consolidate | `workers/organization-api/src/routes/settings.ts:97-164` |
-| `Codex-ag8l8` | P3 | Font CSS value format inconsistency (live preview vs SSR) | `apps/web/src/lib/brand-editor/css-injection.ts:349-354` vs `_org/[slug]/+layout.svelte:376` |
+| Status | Bead | Priority | Title | Commit |
+|---|---|---|---|---|
+| ✅ | `Codex-ja9zp` | P1 | CACHE_KV slug invalidation race — stale font/color on reload | `0a29dc7e` |
+| ✅ | `Codex-7afgp` | P1 | No client `invalidate('cache:org-versions')` after save | `0a29dc7e` |
+| 🟡 | `Codex-g49b4` | P2 | 6 columns write-orphaned: `textColorHex`, `shadowScale`, `shadowColor`, `textScale`, `headingWeight`, `bodyWeight` | — |
+| 🟡 | `Codex-mdg94` | P2 | Audit fine-tune panels — confirm values route to `tokenOverrides` | — |
+| 🟡 | `Codex-fopbo` | P3 | `BRAND_KV` vs `CACHE_KV` — document or consolidate | — |
+| 🟡 | `Codex-ag8l8` | P3 | Font CSS value format inconsistency (live preview vs SSR) | — |
 
-Dependency chain: `ja9zp` blocks `7afgp`; `g49b4` blocks `mdg94`.
+Dependency chain: ~~`ja9zp` blocks `7afgp`~~ (both closed); `g49b4` blocks `mdg94`.
 
 ### From iter-019 (theming + cross-org delivery)
 
-| Bead | Priority | Title | Root file(s) |
-|---|---|---|---|
-| `Codex-9u8wg` | P1 | Brand editor theme preview writes global `<html data-theme>` — leaks into user preference | `apps/web/src/lib/brand-editor/brand-editor-store.svelte.ts:222-230` |
-| `Codex-micw3` | P1 | `ThemeToggle` has no reactive subscription to external `data-theme` — icon goes stale | `apps/web/src/lib/components/ui/ThemeToggle/ThemeToggle.svelte:16-24` |
-| `Codex-z91af` | P1 | `close()` restores captured `originalTheme` — clobbers in-session sidebar toggle | `apps/web/src/lib/brand-editor/brand-editor-store.svelte.ts:113-157` |
-| `Codex-wcwpw` | P2 | `tokenOverrides` FOUC — shader preset + hero visibility flags absent on first paint | `apps/web/src/routes/_org/[slug]/+layout.svelte:116-132` |
-| `Codex-zv85e` | P3 | Draft `11-theming.md` + `11-multi-tenancy.md` skill references after bugs land | — (docs) |
+| Status | Bead | Priority | Title | Commit |
+|---|---|---|---|---|
+| ✅ | `Codex-9u8wg` | P1 | Editor theme preview wrote global `<html data-theme>` — scoped to `.org-layout[data-editing-theme]` | `b5d43243` |
+| ✅ | `Codex-micw3` | P1 | `ThemeToggle` had no reactive subscription — converted to rune store | `de1907ad` |
+| ✅ | `Codex-z91af` | P1 | `close()` restored stale `originalTheme` — dead code after 9u8wg | `b5d43243` |
+| 🟡 | `Codex-wcwpw` | P2 | `tokenOverrides` FOUC — shader + CSS-var injection runs post-hydration (scope refined per `peqvl`) | — |
+| 🟡 | `Codex-zv85e` | P3 | Draft `11-theming.md` + `11-multi-tenancy.md` skill references | — |
 
-Dependency chain: `9u8wg` blocks `z91af` (close-restore becomes dead code after editor stops touching `<html>`); `zv85e` blocked by all four bugs (reference should reflect landed reality, not intent).
+Dependency chain: ~~`9u8wg` blocks `z91af`~~ (both closed); `zv85e` blocked by `wcwpw` (the last remaining theming bug).
 
 ### From iter-020 (preset semantics + token registry)
 
-| Bead | Priority | Title | Root file(s) |
-|---|---|---|---|
-| `Codex-oqv3r` | P1 | `applyPreset` wipes user fine-tunes — preset browsing destroys ~30 fine-tune keys silently | `apps/web/src/lib/brand-editor/brand-editor-store.svelte.ts:210-214` |
-| `Codex-v4wao` | P3 | Add "partial Record update" anti-pattern to `/design-system` reference 10 | `references/10-brand-editor.md` |
-| `Codex-ac2o8` | P3 | Minimal-style presets should set `shader-preset: 'none'` for explicit clearing | `apps/web/src/lib/brand-editor/presets.ts` |
+| Status | Bead | Priority | Title | Commit |
+|---|---|---|---|---|
+| ✅ | `Codex-oqv3r` | P1 | `applyPreset` wiped user fine-tunes — now merges with spread | `f69d5534` |
+| 🟡 | `Codex-v4wao` | P3 | R15 "partial Record update" anti-pattern (ready to apply — `oqv3r` landed) | — |
+| 🟡 | `Codex-ac2o8` | P3 | Minimal-style presets should set `shader-preset: 'none'` | — |
 
-Dependency chain: `v4wao` + `ac2o8` blocked by `oqv3r` (skill patch + preset data fix both only make sense under merge semantics).
+Dependency chain: ~~`v4wao` + `ac2o8` blocked by `oqv3r`~~ (unblocked — `oqv3r` landed).
 
 **Artifact**: `docs/brand-editor-investigation/token-registry.json` (2016 lines, 168 tokens) — machine-readable registry produced by iter-020 Agent E (haiku). Query by category to find org-brandable tokens, fine-tune keys, zero-consumer tokens. **Note**: iter-021 verification found 6 tokens misclassified in this file — see `Codex-9225y`.
 
@@ -162,9 +172,9 @@ Dependency chain: `v4wao` + `ac2o8` blocked by `oqv3r` (skill patch + preset dat
 
 ### From iter-022 (darkOverrides render trace + wwedk design)
 
-| Bead | Priority | Title | Root file(s) |
-|---|---|---|---|
-| `Codex-lqvyy` | **P1** | **`darkModeOverrides` NEVER rendered for non-editor visitors** — half-shipped feature; dark colors invisible to regular users | `apps/web/src/routes/_org/[slug]/+layout.svelte` — missing `$derived` + `style:--brand-color-dark` bindings |
+| Status | Bead | Priority | Title | Commit |
+|---|---|---|---|---|
+| ✅ | `Codex-lqvyy` | P1 | `darkModeOverrides` rendered for non-editor visitors (SSR `$derived` + `style:` bindings) | `af423e86` |
 
 ### From iter-023 (sibling hunt + lqvyy PR sketch)
 
@@ -174,19 +184,17 @@ Dependency chain: `v4wao` + `ac2o8` blocked by `oqv3r` (skill patch + preset dat
 
 ### From iter-024 (preset coherence + upload flow audit)
 
-| Bead | Priority | Title | Root file(s) |
-|---|---|---|---|
-| `Codex-06ygy` | **P0** | **SECURITY: Logo upload bypasses SVG sanitization — stored XSS vector** | `multipart-procedure.ts:282-309` + `settings.ts:282-314` + `branding-settings-service.ts:254-310` |
-| `Codex-ne00j` | P1 | Logo 'Remove' button is dead — `updateBrandingCommand` omits `logoUrl` | `BrandEditorLogo.svelte:64` + `branding.remote.ts:158-208` |
-| `Codex-631mn` | P1 | Intro video invisible until cache flush — lazy auto-finalize only runs via polling | `branding-settings-service.ts:453-457,556-574` |
-| `Codex-uw05n` | P2 | Logo cache invalidation is fire-and-forget (ja9zp-class race) | `settings.ts:309` |
-| `Codex-57d8a` | P2 | SidebarRail blank gap when `logoUrl` is null — no placeholder | `SidebarRail.svelte:79-81` |
-| `Codex-mo3ib` | P3 | Deleted intro video HLS never cleaned from R2 | `branding-settings-service.ts:593-633` |
-| `Codex-dnjrn` | P3 | Onyx preset coherence — Luxury with 1.01 hover but 0.7 iridescence | `presets.ts:599` |
+| Status | Bead | Priority | Title | Commit |
+|---|---|---|---|---|
+| ✅ | `Codex-06ygy` | **P0** | **SECURITY: Logo upload bypasses SVG sanitization — stored XSS** (sanitize + cache-control split) | `cbd7dbf8` |
+| ✅ | `Codex-ne00j` | P1 | Logo Remove button wired to `deleteLogo` server call | `de1907ad` |
+| ✅ | `Codex-631mn` | P1 | Intro video self-heals on branding read | `5548e091` |
+| 🟡 | `Codex-uw05n` | P2 | Logo upload cache fire-and-forget (same fix pattern as closed `ja9zp`) | — |
+| 🟡 | `Codex-57d8a` | P2 | SidebarRail logo placeholder when `logoUrl` null | — |
+| 🟡 | `Codex-mo3ib` | P3 | Orphaned intro video HLS segments never cleaned from R2 | — |
+| 🟡 | `Codex-dnjrn` | P3 | Onyx preset coherence (Luxury with 1.01 hover + 0.7 iridescence) | — |
 
-**Massive iter-024 — 1 P0 (first of the loop), 2 P1s, 2 P2s, 2 P3s**. Reset pause counter to 0/3.
-
-Dependency: `uw05n` linked to `ja9zp` (same fix pattern — slug invalidation out of `waitUntil`).
+Dependency: ~~`uw05n` linked to `ja9zp`~~ — `ja9zp` landed, so `uw05n` now has a canonical pattern to follow (see implementation-summary.md).
 
 ### From iter-025 (06ygy patch spec + sibling upload audit)
 
@@ -304,3 +312,4 @@ User confirmed 2026-04-23 that none of these six unknowns warrant investigation.
 | 023 | 2026-04-23 | K (sibling bug hunt, sonnet), L (lqvyy patch spec, sonnet) | 688ax + patch doc | **Zero new bugs — `lqvyy` proven isolated.** Agent K's sibling hunt falsified the iceberg hypothesis: 7 candidates checked, none were new bugs (5 N/A by design, 2 already in `wcwpw`). Agent L produced 520-line PR-ready patch spec with diff, unit tests, Playwright e2e, checklist — ready to apply in one pass. Filed `Codex-688ax` as a skill-patch task (queued after lqvyy lands). Pause counter back to 1/3. |
 | 024 | 2026-04-23 | M (preset coherence, **haiku**), N (upload flow mapping, sonnet) | 06ygy (P0) + ne00j + 631mn + uw05n + 57d8a + mo3ib + dnjrn | **MASSIVE iteration — first P0 of the loop**. Agent N mapped logo + intro video upload flows and found SVG sanitization completely absent in the logo upload path (explicit CLAUDE.md rule violation, stored XSS vector). Also found: dead Remove button (schema omits logoUrl), intro video invisible until cache flush, cache race (ja9zp-class), missing logo placeholder, orphaned R2 HLS segments. Agent M confirmed 26/27 presets coherent; 1 P3 mild mismatch (Onyx luxury). Pause counter RESET to 0/3 — investigation terrain not exhausted after all. |
 | 025 | 2026-04-23 | O (06ygy patch spec, sonnet), P (sibling upload audit, **haiku**) | 7m2kd + patch doc | **06ygy isolation confirmed + PR-ready patch written**. Agent P checked all upload endpoints; only logo upload accepts SVG (by structural design — `SUPPORTED_IMAGE_MIME_TYPES` excludes SVG). Agent O produced 469-line patch spec including a bonus cache-control fix (SVG logos at fixed key should have 1h cache, not 1y, per `ImageProcessingService` pattern). Filed `Codex-7m2kd` to promote R15 hard rule post-fix. Pause counter: 1/3. |
+| — | 2026-04-23 | **Implementation phase** (no agents — direct fixes) | 10 bugs closed | **Cron `470ab382` stopped.** 1 P0 + 9 P1s landed across 9 commits (`cbd7dbf8` → `5548e091`). Both user-reported bugs resolved (font persistence + light/dark sync). Test coverage added where risk warranted: 5 security tests for `06ygy`, 6 parser tests for `lqvyy`. Per-bug writeups + cross-cutting patterns at [`implementation-summary.md`](./implementation-summary.md). 18 beads remain open (all P2/P3 — features, tech debt, skill patches). |
