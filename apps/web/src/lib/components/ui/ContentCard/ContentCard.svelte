@@ -5,6 +5,11 @@
   sections, compact sidebars, and continue-watching carousels.
 
   @prop {'grid' | 'list' | 'featured' | 'compact' | 'resume'} variant - Layout variant
+  @prop {'default' | 'row'} layout - Layout mode override. 'row' is an
+        additive horizontal-row treatment currently used by `contentType='audio'`
+        cards to read as a music-app playlist row (album art left, title +
+        waveform strip + meta stacked right). Leaves other variants/content
+        types untouched so existing callers keep their vertical-tile look.
   @prop {string} id - Unique content identifier
   @prop {string} title - Content title
   @prop {string} thumbnail - Thumbnail image URL
@@ -32,9 +37,37 @@
   import { PriceBadge } from '../PriceBadge';
   import { PlayIcon, MusicIcon, FileTextIcon } from '$lib/components/ui/Icon';
   import { extractPlainText } from '@codex/validation';
+  import AudioWaveform from './AudioWaveform.svelte';
+
+  /**
+   * Format a duration (in seconds) as a human-readable reading-time label
+   * — `"5 min read"`, `"1 hr 10 min read"`, `"1 hr read"`. Returns an empty
+   * string for falsy input so callers can `{#if readTime}` guard.
+   *
+   * Local to ContentCard rather than shared from `$lib/utils/format`
+   * because `formatDurationHuman` returns terse `5m` / `1h 5m` forms that
+   * read as playback duration, not reading time. Article cards benefit
+   * from the verbose `min read` suffix — it signals intent.
+   */
+  function formatReadTime(seconds: number | null | undefined): string {
+    if (!seconds || seconds <= 0) return '';
+    const totalMinutes = Math.max(1, Math.round(seconds / 60));
+    if (totalMinutes < 60) return `${totalMinutes} min read`;
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    if (mins === 0) return `${hours} hr read`;
+    return `${hours} hr ${mins} min read`;
+  }
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
     variant?: 'grid' | 'list' | 'featured' | 'compact' | 'resume';
+    /**
+     * Additive layout mode. 'row' swaps the card to a horizontal treatment
+     * (album art on the left, title + waveform strip + meta stacked on the
+     * right). Currently only audio uses it — callers must opt in explicitly
+     * so existing grid/list/compact usages keep the vertical-tile shape.
+     */
+    layout?: 'default' | 'row';
     id: string;
     title: string;
     thumbnail?: string | null;
@@ -89,6 +122,7 @@
 
   const {
     variant = 'grid',
+    layout = 'default',
     id,
     title,
     thumbnail,
@@ -122,13 +156,55 @@
 
   const resumeTime = $derived(formatDuration(progress?.positionSeconds ?? 0));
 
-  const showCreator = $derived(variant === 'grid' || variant === 'featured');
-  const showDescription = $derived((variant === 'featured' || variant === 'grid') && !!description);
+  // Audio-row layout: horizontal ("music playlist row") treatment. Only
+  // activates when the caller explicitly opts in via `layout='row'` AND
+  // the content is audio, so grid/list/compact audio callers are unaffected.
+  const isAudioRow = $derived(layout === 'row' && contentType === 'audio');
+
+  const isArticle = $derived(contentType === 'article');
+
+  // Audio-row renders a compact creator · duration meta inline, so the
+  // stacked creator row/avatar is suppressed to avoid duplication. Articles
+  // render a compact text byline in the meta row, so we suppress the avatar
+  // row there too.
+  const showCreator = $derived(
+    (variant === 'grid' || variant === 'featured') && !isAudioRow && !isArticle
+  );
+  // Description lives under the title in vertical tiles. For audio-row the
+  // waveform + meta already fill that slot. Articles are text-led and
+  // always carry an excerpt regardless of variant so readers can judge
+  // each card before clicking.
+  const showDescription = $derived(
+    !!description && !isAudioRow && (variant === 'featured' || variant === 'grid' || isArticle)
+  );
   const showPriceBadge = $derived(
     variant !== 'compact' && variant !== 'resume' &&
     (price != null || purchased || included || contentAccessType != null)
   );
   const showResumeInfo = $derived(variant === 'resume');
+
+  // ── Article editorial treatment ──────────────────────────────────────
+  // Every article card — in every surface — carries the same triad:
+  //   • ARTICLE · Category head-line above the title
+  //   • plain-text excerpt (160-char cap, matches ArticleEditorial)
+  //   • byline (creator name) + read-time meta line
+  // Keeps parity with ArticleEditorial secondary rows while letting the
+  // shared card primitive express the same editorial intent.
+  const articleExcerpt = $derived.by(() => {
+    if (!isArticle || !description) return '';
+    const plain = extractPlainText(description);
+    return plain.length > 160 ? plain.slice(0, 157).trimEnd() + '…' : plain;
+  });
+  const articleReadTime = $derived(isArticle ? formatReadTime(duration) : '');
+  const articleByline = $derived(
+    isArticle ? (creator?.displayName ?? creator?.username ?? '') : ''
+  );
+  const showArticleMeta = $derived(isArticle && (!!articleByline || !!articleReadTime));
+  // `ARTICLE · Category` head-line — small-caps, tertiary text, no pill
+  // (design neutrality — R12). Category is optional.
+  const articleKindLabel = $derived(
+    isArticle ? (category ? `ARTICLE \u00B7 ${category}` : 'ARTICLE') : ''
+  );
 
   // ── Access-state decoration (Codex-k7ppt) ─────────────────────────────
   // Cancelling: card stays fully interactive; small corner badge.
@@ -161,7 +237,9 @@
   class="cc {className ?? ''}"
   class:cc--loading={loading}
   class:cc--access-dimmed={isDimmed}
+  class:cc--audio-row={isAudioRow}
   data-variant={variant}
+  data-layout={layout !== 'default' ? layout : undefined}
   data-content-type={contentType || undefined}
   data-access-state={accessState !== 'active' ? accessState : undefined}
   aria-labelledby={!loading ? titleId : undefined}
@@ -276,15 +354,60 @@
 
     <!-- Body -->
     <div class="cc__body">
-      {#if category && variant !== 'compact' && variant !== 'resume'}
+      {#if isArticle && variant !== 'compact' && variant !== 'resume'}
+        <!-- Article head-line — `ARTICLE · Category`. Small-caps text,
+             no coloured pill (R12 neutrality). Replaces the generic
+             eyebrow so articles carry a consistent editorial signal
+             everywhere they appear. -->
+        <p class="cc__kind">{articleKindLabel}</p>
+      {:else if category && variant !== 'compact' && variant !== 'resume'}
         <p class="cc__eyebrow">{category}</p>
       {/if}
       <h3 class="cc__title" id={titleId}>
         <a href={href}>{title}</a>
       </h3>
 
+      {#if isAudioRow}
+        <!-- Decorative waveform strip — signals "this is audio" at a glance.
+             Seeded by content id so each row looks distinct but is stable
+             across SSR/client hydration (AudioWaveform uses FNV-1a). -->
+        <AudioWaveform {id} class="cc__waveform" />
+
+        {#if creator?.displayName || creator?.username || duration}
+          <p class="cc__audio-meta">
+            {#if creator?.displayName || creator?.username}
+              <span class="cc__audio-meta-creator">
+                {creator.displayName ?? creator.username}
+              </span>
+            {/if}
+            {#if (creator?.displayName || creator?.username) && duration}
+              <span class="cc__audio-meta-sep" aria-hidden="true">·</span>
+            {/if}
+            {#if duration}
+              <span class="cc__audio-meta-duration">{formatDurationHuman(duration)}</span>
+            {/if}
+          </p>
+        {/if}
+      {/if}
+
       {#if showDescription}
-        <p class="cc__description">{extractPlainText(description)}</p>
+        <p class="cc__description">
+          {isArticle ? articleExcerpt : extractPlainText(description)}
+        </p>
+      {/if}
+
+      {#if showArticleMeta}
+        <p class="cc__article-meta">
+          {#if articleByline}
+            <span class="cc__article-byline">{articleByline}</span>
+          {/if}
+          {#if articleByline && articleReadTime}
+            <span class="cc__article-sep" aria-hidden="true">·</span>
+          {/if}
+          {#if articleReadTime}
+            <span class="cc__article-read-time">{articleReadTime}</span>
+          {/if}
+        </p>
       {/if}
 
       <!-- Body-level meta line was removed — duration already appears on
@@ -444,6 +567,23 @@
     magazine department label) and leaves the photograph clean.
   */
   .cc__eyebrow {
+    margin: 0;
+    font-family: var(--font-body);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wider);
+    color: var(--color-text-tertiary);
+    line-height: var(--leading-tight);
+  }
+
+  /*
+    Article kind-line — `ARTICLE · Category` small-caps head-line shown
+    above the title on every article card. Matches `.cc__eyebrow` but
+    prefixes the fixed `ARTICLE` token so the kind is legible even when
+    no category is set (design neutrality — no coloured pill per R12).
+  */
+  .cc__kind {
     margin: 0;
     font-family: var(--font-body);
     font-size: var(--text-xs);
@@ -863,6 +1003,12 @@
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
+
+    /* Articles get a slightly longer excerpt when the card is wide enough
+       — three lines fits without crowding the byline row underneath. */
+    .cc[data-content-type='article'] .cc__description {
+      -webkit-line-clamp: 3;
+    }
   }
 
   @container (min-width: 500px) {
@@ -911,10 +1057,20 @@
     opacity: var(--opacity-30);
   }
 
-  /* Text IS the content — description always visible in grid/featured */
+  /*
+    Articles are text-led. The excerpt is always visible — even at sizes
+    where the default grid card hides it — so readers can judge each
+    card before clicking. Two lines keeps the block from dominating the
+    card height; grid cards at ≥400px get three via the cascade below.
+  */
   .cc[data-content-type='article'] .cc__description {
     display: -webkit-box;
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: var(--text-sm);
+    line-height: var(--leading-relaxed);
+    color: var(--color-text-secondary);
   }
 
   /* Allow the headline to breathe — articles lead with their title */
@@ -927,5 +1083,183 @@
   .cc[data-variant='featured'][data-content-type='article'] .cc__thumb {
     aspect-ratio: auto;
     display: block;
+  }
+
+  /*
+    Article byline + read-time meta — compact text row with a tertiary
+    tone so it sits quietly under the excerpt without competing with the
+    title. Mirrors ArticleEditorial's sidebar rows so every article card
+    in the app carries the same editorial signals.
+  */
+  .cc__article-meta {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    margin: 0;
+    font-family: var(--font-body);
+    font-size: var(--text-xs);
+    line-height: var(--leading-tight);
+    color: var(--color-text-tertiary);
+  }
+
+  .cc__article-byline {
+    font-weight: var(--font-medium);
+    color: var(--color-text-secondary);
+  }
+
+  .cc__article-sep {
+    opacity: var(--opacity-50);
+  }
+
+  .cc__article-read-time {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /*
+    Non-featured article cards read as editorial tiles, not filled
+    rectangles — keeps a page of 20+ article cards from feeling like a
+    wall of SaaS panels. Background lifts on hover / focus-visible as a
+    soft touch of `--color-text` at 4% (matching the non-featured card
+    transparency rule set by the broader design-system feedback).
+    Featured variants are promotional surfaces and keep their filled
+    glass treatment.
+  */
+  .cc[data-content-type='article']:not([data-variant='featured']) {
+    background: transparent;
+    border-color: color-mix(in srgb, var(--color-border) 30%, transparent);
+  }
+
+  .cc[data-content-type='article']:not([data-variant='featured']):hover,
+  .cc[data-content-type='article']:not([data-variant='featured']):focus-within:has(:focus-visible) {
+    background: color-mix(in srgb, var(--color-text) 4%, transparent);
+    border-color: color-mix(in srgb, var(--color-border) 60%, transparent);
+  }
+
+  /* ═══════════════════════════════════════════
+     LAYOUT: AUDIO-ROW (opt-in via `layout='row'` + contentType='audio')
+     Horizontal "music playlist row" — album art on the left, title +
+     waveform + meta stacked on the right. Transparent by default so the
+     row sits lightly on section backgrounds; subtle fill appears on hover.
+     ═══════════════════════════════════════════ */
+
+  .cc--audio-row {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2);
+    /* Transparent until hover — matches the card-transparency rule. */
+    background: transparent;
+    border-color: transparent;
+    border-radius: var(--radius-lg);
+  }
+
+  .cc--audio-row:hover,
+  .cc--audio-row:focus-within:has(:focus-visible) {
+    background: color-mix(in srgb, var(--color-surface-card) 70%, transparent);
+    border-color: color-mix(in srgb, var(--color-border) 50%, transparent);
+    /* Lighter lift than the default card — this is a list item, not a tile.
+       No scale(): a playlist row should not bulge like a featured tile. */
+    transform: translateY(calc(-1 * var(--space-0-5)));
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* Album art — square, fixed width. ~80px baseline, ~96px at container
+     widths that can spare it (we adjust via @container below). */
+  .cc--audio-row .cc__thumb {
+    width: var(--space-20);
+    min-width: var(--space-20);
+    height: var(--space-20);
+    aspect-ratio: 1 / 1;
+    border-radius: var(--radius-md);
+    flex-shrink: 0;
+  }
+
+  .cc--audio-row .cc__body {
+    padding: 0;
+    gap: var(--space-1);
+    min-width: 0;
+  }
+
+  /* Two-line clamp keeps long track titles readable without blowing up
+     the row height. Single-line felt too terse during review. */
+  .cc--audio-row .cc__title {
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    -webkit-line-clamp: 2;
+  }
+
+  /* Hide the in-thumbnail duration in the row layout — we re-surface
+     it inside the waveform/meta cluster where it sits better typed. */
+  .cc--audio-row .cc__duration {
+    display: none;
+  }
+
+  /* Hide the eyebrow in compact row contexts — the album-art thumbnail
+     is already sized small; adding a category line above the title
+     would fight the row rhythm. */
+  .cc--audio-row .cc__eyebrow {
+    display: none;
+  }
+
+  /* Waveform strip — brand-tinted via `color:` (AudioWaveform uses
+     currentColor). Thin and understated; never dominant. */
+  :global(.cc--audio-row .cc__waveform) {
+    width: 100%;
+    /* Fixed height keeps layout stable during SSR/client hydration and
+       sidesteps any aspect-ratio maths in the SVG itself. */
+    height: var(--space-5);
+    color: color-mix(
+      in srgb,
+      var(--color-interactive) 60%,
+      var(--color-player-text-secondary, var(--color-text-secondary))
+    );
+  }
+
+  /* Creator · duration meta line. Small, tertiary text; matches the
+     visual weight of other meta rows in the card family. */
+  .cc--audio-row .cc__audio-meta {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    line-height: var(--leading-tight);
+    /* Avoid wrapping mid-separator — meta reads as one unit. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .cc--audio-row .cc__audio-meta-creator {
+    font-weight: var(--font-medium);
+    color: var(--color-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  .cc--audio-row .cc__audio-meta-sep {
+    color: var(--color-text-muted);
+  }
+
+  .cc--audio-row .cc__audio-meta-duration {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Don't let audio-row be zoomed/scaled like a featured tile — it's a
+     list item, not a hero. */
+  .cc--audio-row:hover .cc__image {
+    transform: none;
+  }
+
+  /* Reduced motion: keep the hover affordance but drop the translate. */
+  @media (prefers-reduced-motion: reduce) {
+    .cc--audio-row:hover,
+    .cc--audio-row:focus-within:has(:focus-visible) {
+      transform: none;
+    }
   }
 </style>

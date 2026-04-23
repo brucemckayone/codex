@@ -1,15 +1,15 @@
 <!--
   @component AudioWall
 
-  Mosaic grid of square audio cards — the landing page's "Listen" section
-  rendered as an album wall rather than a horizontal carousel. Each tile
-  is a ContentCard grid variant; ContentCard itself enforces 1:1 album-art
-  framing when `contentType='audio'`, so this component is purely a
-  responsive grid wrapper.
+  "Listen" section of the org landing page, rendered as a music-app style
+  playlist: a 2-column grid of horizontal audio rows on desktop (album art
+  left, title + waveform + meta right) and a single-column stack on mobile.
+  ContentCard renders the horizontal treatment when `layout='row'` and
+  `contentType='audio'` — this wrapper is purely a responsive grid host.
 
-  Caps the visible tiles at 8 (4×2 desktop, 2×4 mobile). When more exist,
-  renders a "View all →" anchor in the final tile slot so users can drill
-  in without the wall overflowing the viewport.
+  Caps the visible rows at 8 (4 rows × 2 columns desktop, 8 rows × 1 column
+  mobile). When more items exist, the final cell renders a "+N View all
+  audio" anchor so users can drill in without overflowing the viewport.
 -->
 <script lang="ts">
   import { page } from '$app/state';
@@ -54,6 +54,7 @@
   {#each visible as item (item.id)}
     <ContentCard
       variant="grid"
+      layout="row"
       id={item.id}
       title={item.title}
       thumbnail={item.mediaItem?.thumbnailUrl ?? item.thumbnailUrl ?? null}
@@ -80,24 +81,34 @@
       <span class="audio-wall__more-icon" aria-hidden="true">
         <MusicIcon size={28} />
       </span>
-      <span class="audio-wall__more-count">+{overflow}</span>
-      <span class="audio-wall__more-label">View all audio</span>
+      <span class="audio-wall__more-body">
+        <span class="audio-wall__more-count">+{overflow}</span>
+        <span class="audio-wall__more-label">View all audio</span>
+      </span>
     </a>
   {/if}
 </div>
 
 <style>
+  /*
+    Two-column grid of horizontal audio rows on desktop; stacks to a
+    single column on mobile. Rows live inside each column as ContentCard
+    (`layout='row'`) instances — the grid itself does not need row-
+    templating because each child is a self-contained row.
+  */
   .audio-wall {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-4);
+    grid-template-columns: minmax(0, 1fr);
+    /* Smaller column gap than the old mosaic — rows are themselves padded. */
+    gap: var(--space-2);
     padding-inline: var(--space-4);
   }
 
   @media (--breakpoint-md) {
     .audio-wall {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: var(--space-5);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      column-gap: var(--space-4);
+      row-gap: var(--space-2);
       padding-inline: 0;
     }
   }
@@ -130,39 +141,41 @@
     }
   }
 
-  /* Overflow tile — lives at the end of the mosaic when > 8 items exist.
-     Matches the aspect ratio and radius of the surrounding audio cards
-     (1:1 album) so the grid cell doesn't collapse against its neighbours. */
+  /*
+    Overflow affordance — lives at the end of the row grid. Shaped as a
+    horizontal pill to match the rhythm of the audio rows (album art on
+    the left, "+N View all" on the right) instead of a square tile.
+  */
   .audio-wall__more {
     position: relative;
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: auto 1fr;
     align-items: center;
-    justify-content: center;
-    gap: var(--space-2);
-    aspect-ratio: 1 / 1;
-    padding: var(--space-4);
+    gap: var(--space-3);
+    padding: var(--space-2);
+    min-height: calc(var(--space-20) + var(--space-4));
     font-family: var(--font-sans);
     color: var(--color-text-secondary);
-    background: var(--color-surface-secondary);
-    border: var(--border-width) var(--border-style)
-      color-mix(in srgb, var(--color-border) 60%, transparent);
-    border-radius: var(--radius-xl);
+    background: transparent;
+    border: var(--border-width) var(--border-style) transparent;
+    border-radius: var(--radius-lg);
     text-decoration: none;
-    text-align: center;
+    text-align: left;
     overflow: hidden;
     transition:
       transform var(--duration-slow) var(--ease-smooth),
       box-shadow var(--duration-slow) var(--ease-smooth),
       background-color var(--duration-fast) var(--ease-default),
+      border-color var(--duration-fast) var(--ease-default),
       color var(--duration-fast) var(--ease-default);
   }
 
   .audio-wall__more:hover {
-    background: color-mix(in srgb, var(--color-text) 6%, var(--color-surface-secondary));
+    background: color-mix(in srgb, var(--color-surface-card) 70%, transparent);
+    border-color: color-mix(in srgb, var(--color-border) 50%, transparent);
     color: var(--color-text);
     transform: translateY(calc(-1 * var(--space-0-5)));
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-sm);
   }
 
   .audio-wall__more:focus-visible {
@@ -174,15 +187,24 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: var(--space-12);
-    height: var(--space-12);
+    /* Matches the album-art size of the surrounding audio rows so the
+       affordance reads as one of them. */
+    width: var(--space-20);
+    height: var(--space-20);
     color: var(--color-text-secondary);
     background: color-mix(in srgb, var(--color-text) 8%, transparent);
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-md);
+  }
+
+  .audio-wall__more-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
   }
 
   .audio-wall__more-count {
-    font-size: var(--text-2xl);
+    font-size: var(--text-xl);
     font-weight: var(--font-semibold);
     line-height: var(--leading-tight);
     color: var(--color-text);
@@ -193,5 +215,12 @@
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
     letter-spacing: var(--tracking-normal);
+    color: var(--color-text-secondary);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .audio-wall__more:hover {
+      transform: none;
+    }
   }
 </style>
