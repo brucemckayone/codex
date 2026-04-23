@@ -24,6 +24,8 @@ export * from './factories';
 export * from './helpers';
 // Mock Factories (Observability, Context, DB, KV, R2)
 export * from './mocks';
+// Purchase Seeders (purchase + contentAccess atomic inserts)
+export * from './purchase-helpers';
 // Test Setup Helpers
 export * from './setup';
 // Stripe Mock (for subscription/purchase service testing)

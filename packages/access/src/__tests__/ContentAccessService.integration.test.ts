@@ -27,13 +27,17 @@ import {
   organizationFollowers,
   organizationMemberships,
   organizations,
-  purchases,
+  subscriptions,
+  subscriptionTiers,
 } from '@codex/database/schema';
 import { ObservabilityClient } from '@codex/observability';
 import type { PurchaseService } from '@codex/purchase';
 import {
+  createTestSubscriptionInput,
+  createTestTierInput,
   createUniqueSlug,
   type Database,
+  seedPurchaseWithAccess,
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
@@ -714,18 +718,18 @@ describe('ContentAccessService Integration', () => {
 
       await contentService.publish(libraryContent.id, userId);
 
-      // Simulate purchase by otherUser
-      await db.insert(purchases).values({
-        organizationId,
+      // Seed purchase + matching contentAccess row atomically.
+      await seedPurchaseWithAccess(db, {
         customerId: otherUserId,
         contentId: libraryContent.id,
-        status: 'completed',
+        organizationId,
         amountPaidCents: 999,
-        platformFeeCents: 100, // 10% platform fee
-        organizationFeeCents: 0, // 0% org fee
-        creatorPayoutCents: 899, // 90% creator payout
-        stripePaymentIntentId: `pi_test_${Date.now()}_${otherUserId}`,
       });
+
+      // Mirror the purchase at the mocked PurchaseService boundary so
+      // hasContentAccess() (which calls verifyPurchase, not the DB) sees
+      // the purchaser as having access for savePlaybackProgress.
+      mockPurchaseService.verifyPurchase.mockResolvedValue(true);
 
       // Add some progress
       await accessService.savePlaybackProgress(otherUserId, {
@@ -801,18 +805,17 @@ describe('ContentAccessService Integration', () => {
 
       await contentService.publish(content1.id, userId);
 
-      // Purchase and add partial progress
-      await db.insert(purchases).values({
-        organizationId,
+      // Seed purchase + matching contentAccess row atomically.
+      await seedPurchaseWithAccess(db, {
         customerId: testUserId,
         contentId: content1.id,
-        status: 'completed',
+        organizationId,
         amountPaidCents: 500,
-        platformFeeCents: 50, // 10% platform fee
-        organizationFeeCents: 0, // 0% org fee
-        creatorPayoutCents: 450, // 90% creator payout
-        stripePaymentIntentId: `pi_test_${Date.now()}_${testUserId}`,
       });
+
+      // Mirror the purchase at the mocked PurchaseService boundary so
+      // hasContentAccess() sees the purchaser as having access.
+      mockPurchaseService.verifyPurchase.mockResolvedValue(true);
 
       await accessService.savePlaybackProgress(testUserId, {
         contentId: content1.id,
@@ -832,6 +835,212 @@ describe('ContentAccessService Integration', () => {
       expect(
         result.items.every((item) => item.progress && !item.progress.completed)
       ).toBe(true);
+    });
+
+    // ── Subscription coverage ────────────────────────────────────────────
+    // The library `querySubscription` must surface everything a subscription
+    // grants the user access to — not only `accessType='subscribers'` items
+    // but also tier-gated paid content. Otherwise a subscriber can stream a
+    // paid piece (getStreamingUrl grants it) yet never see it in their
+    // library.
+    describe('Subscription library coverage', () => {
+      /** Seed an org, a tier, and an active subscriber. */
+      async function seedOrgWithTierAndSubscriber() {
+        const [creatorUserId, subscriberUserId] = await seedTestUsers(db, 2);
+
+        const [subOrg] = await db
+          .insert(organizations)
+          .values({
+            name: 'Sub Library Test Org',
+            slug: createUniqueSlug('sub-library-org'),
+          })
+          .returning();
+        if (!subOrg) throw new Error('Failed to create subscription org');
+
+        const [tier] = await db
+          .insert(subscriptionTiers)
+          .values(
+            createTestTierInput(subOrg.id, {
+              name: 'Library Test Tier',
+              sortOrder: 1,
+            })
+          )
+          .returning();
+        if (!tier) throw new Error('Failed to create tier');
+
+        await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(subscriberUserId, subOrg.id, tier.id)
+          );
+
+        return {
+          creatorUserId,
+          subscriberUserId,
+          orgId: subOrg.id,
+          tierId: tier.id,
+        };
+      }
+
+      /** Publish a content row and override accessType + minimumTierId. */
+      async function createSubscriberContent(
+        creator: string,
+        orgId: string,
+        opts: {
+          slugPrefix: string;
+          accessType: 'subscribers' | 'paid';
+          minimumTierId: string | null;
+          priceCents: number;
+        }
+      ) {
+        const media = await mediaService.create(
+          {
+            title: `${opts.slugPrefix} Video`,
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: getOriginalKey(
+              creator,
+              crypto.randomUUID(),
+              `${opts.slugPrefix}.mp4`
+            ),
+            fileSizeBytes: 1024,
+          },
+          creator
+        );
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: `hls/${opts.slugPrefix}/master.m3u8`,
+            thumbnailKey: `thumbnails/${opts.slugPrefix}.jpg`,
+            durationSeconds: 120,
+          },
+          creator
+        );
+        // contentService.create's Zod schema couples accessType + priceCents
+        // + visibility. We always insert as free to clear the schema (no
+        // price, public visibility) and then patch the row directly to the
+        // target accessType / priceCents / minimumTierId — mirroring the
+        // Team Access helper further down this file.
+        const item = await contentService.create(
+          {
+            organizationId: orgId,
+            title: `${opts.slugPrefix} Content`,
+            slug: createUniqueSlug(opts.slugPrefix),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'public',
+            priceCents: 0,
+            tags: [],
+          },
+          creator
+        );
+        await contentService.publish(item.id, creator);
+
+        await db
+          .update(content)
+          .set({
+            accessType: opts.accessType,
+            priceCents: opts.priceCents,
+            minimumTierId: opts.minimumTierId,
+          })
+          .where(eq(content.id, item.id));
+
+        return item;
+      }
+
+      it('includes accessType=subscribers content (regression)', async () => {
+        const { creatorUserId, subscriberUserId, orgId } =
+          await seedOrgWithTierAndSubscriber();
+
+        const item = await createSubscriberContent(creatorUserId, orgId, {
+          slugPrefix: 'sub-only',
+          accessType: 'subscribers',
+          minimumTierId: null,
+          priceCents: 0,
+        });
+
+        const result = await accessService.listUserLibrary(subscriberUserId, {
+          page: 1,
+          limit: 20,
+          filter: 'all',
+          sortBy: 'recent',
+        });
+
+        expect(result.items.some((i) => i.content.id === item.id)).toBe(true);
+      });
+
+      it('includes tier-gated paid content (accessType=paid + minimumTierId)', async () => {
+        const { creatorUserId, subscriberUserId, orgId, tierId } =
+          await seedOrgWithTierAndSubscriber();
+
+        const item = await createSubscriberContent(creatorUserId, orgId, {
+          slugPrefix: 'paid-tier-gated',
+          accessType: 'paid',
+          minimumTierId: tierId,
+          priceCents: 999,
+        });
+
+        const result = await accessService.listUserLibrary(subscriberUserId, {
+          page: 1,
+          limit: 20,
+          filter: 'all',
+          sortBy: 'recent',
+        });
+
+        expect(result.items.some((i) => i.content.id === item.id)).toBe(true);
+      });
+
+      it('excludes paid content WITHOUT a minimumTierId (purchase-only)', async () => {
+        const { creatorUserId, subscriberUserId, orgId } =
+          await seedOrgWithTierAndSubscriber();
+
+        const item = await createSubscriberContent(creatorUserId, orgId, {
+          slugPrefix: 'paid-no-tier',
+          accessType: 'paid',
+          minimumTierId: null,
+          priceCents: 999,
+        });
+
+        const result = await accessService.listUserLibrary(subscriberUserId, {
+          page: 1,
+          limit: 20,
+          filter: 'all',
+          sortBy: 'recent',
+        });
+
+        expect(result.items.some((i) => i.content.id === item.id)).toBe(false);
+      });
+
+      it('does not duplicate a purchased item that is also subscription-accessible', async () => {
+        const { creatorUserId, subscriberUserId, orgId, tierId } =
+          await seedOrgWithTierAndSubscriber();
+
+        const item = await createSubscriberContent(creatorUserId, orgId, {
+          slugPrefix: 'paid-dedup',
+          accessType: 'paid',
+          minimumTierId: tierId,
+          priceCents: 999,
+        });
+
+        // User both purchased AND subscribed.
+        await seedPurchaseWithAccess(db, {
+          customerId: subscriberUserId,
+          contentId: item.id,
+          organizationId: orgId,
+          amountPaidCents: 999,
+        });
+
+        const result = await accessService.listUserLibrary(subscriberUserId, {
+          page: 1,
+          limit: 20,
+          filter: 'all',
+          sortBy: 'recent',
+        });
+
+        const matches = result.items.filter((i) => i.content.id === item.id);
+        expect(matches).toHaveLength(1);
+        expect(matches[0].accessType).toBe('purchased');
+      });
     });
   });
 
@@ -1555,6 +1764,249 @@ describe('ContentAccessService Integration', () => {
             expirySeconds: 3600,
           })
         ).rejects.toThrow(AccessDeniedError);
+      });
+    });
+
+    describe('Hybrid Paid+Subscription Access (paid with minimumTierId)', () => {
+      /**
+       * Hybrid mode: accessType='paid' AND minimumTierId is set. The content
+       * is purchasable by anyone AND automatically granted to subscribers at
+       * tier >= minimumTier. This is the sixth legitimate access mode.
+       */
+      async function createHybridOrgWithTiers(slugSuffix: string) {
+        const [org] = await db
+          .insert(organizations)
+          .values({
+            name: `Hybrid Org ${slugSuffix}`,
+            slug: createUniqueSlug(`hybrid-org-${slugSuffix}`),
+          })
+          .returning();
+
+        if (!org) {
+          throw new Error('Failed to create hybrid test organization');
+        }
+
+        const [basicTier] = await db
+          .insert(subscriptionTiers)
+          .values(
+            createTestTierInput(org.id, {
+              name: 'Basic',
+              sortOrder: 1,
+              priceMonthly: 499,
+              priceAnnual: 4990,
+            })
+          )
+          .returning();
+
+        const [proTier] = await db
+          .insert(subscriptionTiers)
+          .values(
+            createTestTierInput(org.id, {
+              name: 'Pro',
+              sortOrder: 2,
+              priceMonthly: 999,
+              priceAnnual: 9990,
+            })
+          )
+          .returning();
+
+        if (!basicTier || !proTier) {
+          throw new Error('Failed to create hybrid test tiers');
+        }
+
+        return { org, basicTier, proTier };
+      }
+
+      async function createHybridContent(
+        orgId: string,
+        minimumTierId: string,
+        slugSuffix: string
+      ) {
+        const media = await mediaService.create(
+          {
+            title: `Hybrid Video ${slugSuffix}`,
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: getOriginalKey(
+              userId,
+              crypto.randomUUID(),
+              `${slugSuffix}.mp4`
+            ),
+            fileSizeBytes: 1024,
+          },
+          userId
+        );
+
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: `hls/${slugSuffix}/master.m3u8`,
+            thumbnailKey: `thumbnails/${slugSuffix}.jpg`,
+            durationSeconds: 120,
+          },
+          userId
+        );
+
+        const item = await contentService.create(
+          {
+            organizationId: orgId,
+            title: `Hybrid Content ${slugSuffix}`,
+            slug: createUniqueSlug(slugSuffix),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'purchased_only',
+            accessType: 'paid',
+            priceCents: 1999,
+            minimumTierId,
+            tags: [],
+          },
+          userId
+        );
+
+        await contentService.publish(item.id, userId);
+
+        return item;
+      }
+
+      it('should deny hybrid content to anonymous-equivalent user (no purchase, no subscription)', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const { org, proTier } = await createHybridOrgWithTiers('hybrid-anon');
+        const item = await createHybridContent(
+          org.id,
+          proTier.id,
+          'hybrid-anon'
+        );
+
+        const [freshUserId] = await seedTestUsers(db, 1);
+
+        await expect(
+          accessService.getStreamingUrl(freshUserId, {
+            contentId: item.id,
+            expirySeconds: 3600,
+          })
+        ).rejects.toThrow(AccessDeniedError);
+      });
+
+      it('should grant hybrid content to subscriber at minimum tier (subscription path)', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const { org, proTier } =
+          await createHybridOrgWithTiers('hybrid-at-tier');
+        const item = await createHybridContent(
+          org.id,
+          proTier.id,
+          'hybrid-at-tier'
+        );
+
+        const [subUserId] = await seedTestUsers(db, 1);
+
+        // Active subscription AT the minimum tier (proTier)
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(subUserId, org.id, proTier.id, {
+            status: 'active',
+          })
+        );
+
+        const result = await accessService.getStreamingUrl(subUserId, {
+          contentId: item.id,
+          expirySeconds: 3600,
+        });
+
+        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+        expect(result.contentType).toBe('video');
+      });
+
+      it('should grant hybrid content to subscriber above minimum tier (subscription path)', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const { org, basicTier, proTier } =
+          await createHybridOrgWithTiers('hybrid-above-tier');
+        // Content requires Basic (sortOrder=1) as minimum; user subscribes
+        // to Pro (sortOrder=2), which is above and should grant access.
+        const item = await createHybridContent(
+          org.id,
+          basicTier.id,
+          'hybrid-above-tier'
+        );
+
+        const [subUserId] = await seedTestUsers(db, 1);
+
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(subUserId, org.id, proTier.id, {
+            status: 'active',
+          })
+        );
+
+        const result = await accessService.getStreamingUrl(subUserId, {
+          contentId: item.id,
+          expirySeconds: 3600,
+        });
+
+        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+      });
+
+      it('should deny hybrid content to subscriber below minimum tier (no purchase)', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const { org, basicTier, proTier } =
+          await createHybridOrgWithTiers('hybrid-below-tier');
+        // Content requires Pro (sortOrder=2) as minimum; user subscribes
+        // to Basic (sortOrder=1), which is below — denial, must purchase.
+        const item = await createHybridContent(
+          org.id,
+          proTier.id,
+          'hybrid-below-tier'
+        );
+
+        const [subUserId] = await seedTestUsers(db, 1);
+
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(subUserId, org.id, basicTier.id, {
+            status: 'active',
+          })
+        );
+
+        await expect(
+          accessService.getStreamingUrl(subUserId, {
+            contentId: item.id,
+            expirySeconds: 3600,
+          })
+        ).rejects.toThrow(AccessDeniedError);
+      });
+
+      it('should grant hybrid content to user with existing purchase (purchase path)', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+
+        const { org, proTier } =
+          await createHybridOrgWithTiers('hybrid-purchase');
+        const item = await createHybridContent(
+          org.id,
+          proTier.id,
+          'hybrid-purchase'
+        );
+
+        const [purchaserUserId] = await seedTestUsers(db, 1);
+
+        // No subscription — user bought it outright. PurchaseService is the
+        // authority for purchase state in this suite.
+        mockPurchaseService.verifyPurchase.mockResolvedValue(true);
+
+        const result = await accessService.getStreamingUrl(purchaserUserId, {
+          contentId: item.id,
+          expirySeconds: 3600,
+        });
+
+        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+        expect(result.contentType).toBe('video');
+        expect(mockPurchaseService.verifyPurchase).toHaveBeenCalledWith(
+          item.id,
+          purchaserUserId
+        );
       });
     });
 
