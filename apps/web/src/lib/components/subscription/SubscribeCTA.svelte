@@ -7,12 +7,14 @@
   wrong-state flash because SubscribeButton hydrates from the localStorage-
   backed `subscriptionCollection` on mount.
 
-  The banner has an atmospheric CSS gradient backdrop (BrandGradientBackdrop,
-  aurora variant) that tints from the org's brand colour. Originally ran a
-  full ShaderHero WebGL canvas per-instance (see git history), but three
-  concurrent shaders on the landing page (Hero + Spotlight + CTA) burned
-  GPU fill-rate; hero keeps its shader, the two secondary surfaces share
-  the cheaper CSS replacement. The gradient veil keeps text legible.
+  The banner renders the same WebGL shader as the org hero (ShaderHero reads
+  preset + config from the parent `.org-layout`'s CSS custom properties, so
+  no prop plumbing is needed). Briefly swapped to a CSS gradient in V2 to
+  dodge "3 concurrent shaders" GPU pressure, but the gradient vanished on
+  dark brand colours (of-blood-and-bones reported aurora as "non-existent").
+  ShaderHero's IntersectionObserver pauses rendering when the CTA is
+  off-screen, so we're only running 2 shaders simultaneously in practice.
+  The radial veil keeps body text legible over bright preset colours.
 
   V2 overhaul (Agent SC, Phase 3):
     - Replaces 3-bullet row with a 3-col value-prop grid (icon + heading + desc)
@@ -25,7 +27,7 @@
 -->
 <script lang="ts">
   import SubscribeButton from '$lib/components/subscription/SubscribeButton.svelte';
-  import { BrandGradientBackdrop } from '$lib/components/ui/BrandGradient';
+  import ShaderHero from '$lib/components/ui/ShaderHero/ShaderHero.svelte';
   import {
     Avatar,
     AvatarImage,
@@ -216,13 +218,11 @@
 <section class="subscribe-cta" aria-labelledby="subscribe-cta-title">
   <div class="subscribe-cta__panel">
     <div class="subscribe-cta__backdrop" aria-hidden="true">
-      <!-- Brand gradient aurora — cheap CSS replacement for the earlier
-           ShaderHero. See component docblock for why we swapped. The
-           forwarded class pins z-index inside the backdrop wrapper. -->
-      <BrandGradientBackdrop
-        variant="aurora"
-        class="subscribe-cta__gradient"
-      />
+      <!-- Same WebGL shader as the org hero. Reads preset + config from the
+           parent `.org-layout`'s CSS custom properties (no prop plumbing).
+           IntersectionObserver pauses the canvas when the CTA is off-screen,
+           so we're not burning GPU cycles before the user scrolls here. -->
+      <ShaderHero class="subscribe-cta__shader" />
       <div class="subscribe-cta__veil"></div>
     </div>
 
@@ -481,8 +481,10 @@
     align-items: center;
     gap: var(--space-4);
     width: 100%;
-    max-width: calc(var(--space-24) * 8);
+    max-width: min(calc(var(--space-24) * 8), 100%);
     margin-inline: auto;
+    /* Prevent any flex child from pushing the body wider than the panel. */
+    min-width: 0;
   }
 
   .subscribe-cta__eyebrow {
@@ -502,12 +504,16 @@
   .subscribe-cta__title {
     margin: 0;
     font-family: var(--font-heading, var(--font-sans));
-    font-size: clamp(var(--text-3xl), 4vw, var(--text-4xl));
+    font-size: clamp(var(--text-2xl), 6vw, var(--text-4xl));
     font-weight: var(--font-semibold);
     line-height: var(--leading-tight);
     letter-spacing: var(--tracking-tighter);
     /* Fixed white — see rationale on .subscribe-cta above. */
     color: hsl(0 0% 100%);
+    /* Balance wrap + break overlong org names so they never push panel width. */
+    text-wrap: balance;
+    overflow-wrap: anywhere;
+    max-width: 100%;
   }
 
   .subscribe-cta__tagline {
@@ -516,7 +522,11 @@
     line-height: var(--leading-relaxed);
     /* 80% white — secondary hierarchy below the crisp title. */
     color: hsl(0 0% 100% / 0.8);
-    max-width: 42ch;
+    /* Cap at 42ch OR container width (whichever is smaller) — prevents
+       horizontal overflow on narrow mobile viewports where 42ch (~336px
+       at base font-size) exceeds available panel width. */
+    max-width: min(42ch, 100%);
+    text-wrap: balance;
   }
 
   /* ── Social proof ───────────────────────────────────────────
@@ -888,12 +898,14 @@
   @media (--below-md) {
     .subscribe-cta {
       padding-block: var(--space-8);
-      /* Tighter outer gutter — panel shadow still has room to breathe. */
-      padding-inline: var(--space-2);
+      /* Safe outer gutter — the panel is a distinct surface so we need
+         clear visual separation from the viewport edge. --space-4 (16px)
+         pairs with the --space-5 panel inner padding for a balanced frame. */
+      padding-inline: var(--space-4);
     }
 
     .subscribe-cta__panel {
-      padding-block: calc(var(--space-12) + var(--space-2));
+      padding-block: var(--space-10);
       padding-inline: var(--space-5);
     }
 
@@ -903,9 +915,39 @@
       gap: var(--space-3);
     }
 
+    /* Mobile value-prop redesign: horizontal row (icon left, text right).
+       Replaces the vertical icon+heading+description stack that took ~100px
+       per cell. New row is ~56px — cuts the section height by roughly half
+       while keeping all copy intact. */
     .subscribe-cta__props {
       gap: var(--space-3);
       margin-top: var(--space-2);
+      max-width: 100%;
+    }
+
+    .subscribe-cta__prop {
+      flex-direction: row;
+      align-items: flex-start;
+      text-align: left;
+      gap: var(--space-3);
+      padding-inline: 0;
+    }
+
+    .subscribe-cta__prop-icon {
+      flex-shrink: 0;
+      width: var(--space-9);
+      height: var(--space-9);
+    }
+
+    .subscribe-cta__prop-heading {
+      display: block;
+      font-size: var(--text-sm);
+    }
+
+    .subscribe-cta__prop-description {
+      display: block;
+      max-width: none;
+      font-size: var(--text-xs);
     }
 
     /* Single-row horizontal scroll on mobile (mirrors desktop).
@@ -916,6 +958,9 @@
       -webkit-overflow-scrolling: touch;
       justify-content: flex-start;
       scrollbar-width: none;
+      /* Bleed slightly past the panel padding so scroll reveals more tiles. */
+      margin-inline: calc(-1 * var(--space-3));
+      padding-inline: var(--space-3);
     }
 
     .subscribe-cta__preview-list::-webkit-scrollbar {
