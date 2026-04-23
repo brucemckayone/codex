@@ -208,13 +208,19 @@ export class BrandingSettingsService extends BaseService {
       return this.get();
     }
 
-    // Upsert branding settings
+    // Upsert branding settings.
+    // updateValues must be spread into BOTH .values() and the conflict set —
+    // the set clause only fires on UPDATE (existing row), so fields like
+    // fontBody that aren't in .values() would be silently dropped on INSERT.
     const result = await this.db
       .insert(schema.brandingSettings)
       .values({
+        ...(updateValues as Partial<typeof schema.brandingSettings.$inferInsert>),
         organizationId: this.organizationId,
+        // primaryColorHex is NOT NULL — fall back to default if not provided
         primaryColorHex:
-          input.primaryColorHex ?? DEFAULT_BRANDING.primaryColorHex,
+          (updateValues.primaryColorHex as string | undefined) ??
+          DEFAULT_BRANDING.primaryColorHex,
       })
       .onConflictDoUpdate({
         target: schema.brandingSettings.organizationId,
@@ -239,10 +245,10 @@ export class BrandingSettingsService extends BaseService {
 
   /**
    * Upload a new logo.
-   * File validation (MIME type, size, magic numbers, SVG sanitization) handled
-   * by @codex/validation validateLogoUpload() before calling this method.
+   * MIME type and size validated by the multipart handler. SVG content
+   * sanitization is performed by this method (see inline comment below).
    *
-   * @param validatedFile - Validated file data from validateLogoUpload()
+   * @param validatedFile - Validated file data from multipart handler
    * @returns Updated branding settings with new logo URL
    */
   async uploadLogo(
@@ -254,7 +260,19 @@ export class BrandingSettingsService extends BaseService {
       );
     }
 
-    const { buffer, mimeType } = validatedFile;
+    let { buffer } = validatedFile;
+    const { mimeType } = validatedFile;
+
+    // SVG sanitization — strip <script>, on-*, javascript:, foreignObject, etc.
+    // Required per packages/image-processing/CLAUDE.md: "MUST sanitize ALL SVG
+    // uploads with sanitizeSvgContent() — unsanitized SVGs are XSS vectors"
+    // Pattern mirrors ImageProcessingService.processOrgLogo() (service.ts:360-366).
+    if (mimeType === 'image/svg+xml') {
+      const { sanitizeSvgContent } = await import('@codex/validation');
+      const svgText = new TextDecoder().decode(new Uint8Array(buffer));
+      const sanitized = await sanitizeSvgContent(svgText);
+      buffer = new TextEncoder().encode(sanitized).buffer as ArrayBuffer;
+    }
 
     // Generate R2 path for logo
     const extension = this.getExtensionFromMimeType(mimeType);
@@ -269,10 +287,16 @@ export class BrandingSettingsService extends BaseService {
 
     const oldLogoPath = currentResult[0]?.logoR2Path;
 
-    // Step 1: Upload new logo to R2 first
+    // Step 1: Upload new logo to R2 first.
+    // SVG uses 1-hour cache (fixed filename, must propagate updates).
+    // Raster uses 1-year immutable cache (mime-distinct keys prevent stale reads).
+    const cacheControl =
+      mimeType === 'image/svg+xml'
+        ? 'public, max-age=3600' // 1 hour — SVG
+        : 'public, max-age=31536000'; // 1 year — raster
     await this.r2.put(r2Path, buffer, undefined, {
       contentType: mimeType,
-      cacheControl: 'public, max-age=31536000', // 1 year cache
+      cacheControl,
     });
 
     // Build public URL

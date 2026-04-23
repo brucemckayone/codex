@@ -31,6 +31,24 @@ import {
 import { InvalidFileTypeError } from '../errors';
 import { BrandingSettingsService } from '../services/branding-settings-service';
 
+// Mock sanitizeSvgContent — replace the real DOMPurify-backed implementation
+// with a deterministic stub. The job of these tests is to verify that
+// uploadLogo CALLS sanitizeSvgContent when MIME is SVG; DOMPurify itself
+// is tested in packages/validation/src/__tests__/svg-sanitization.test.ts.
+vi.mock('@codex/validation', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@codex/validation')>();
+  return {
+    ...actual,
+    sanitizeSvgContent: vi.fn(async (svgText: string): Promise<string> => {
+      // Simulate stripping <script>...</script> and event handler attributes.
+      // Matches the observable behaviour of DOMPurify for the tests below.
+      return svgText
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+        .replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, '');
+    }),
+  };
+});
+
 /**
  * Helper to create valid image file data for testing
  * Uses real PNG/JPEG magic numbers for content validation
@@ -354,6 +372,140 @@ describe('BrandingSettingsService', () => {
         expect.anything(),
         undefined,
         expect.anything()
+      );
+    });
+
+    // ── SVG sanitization (Codex-06ygy) ──────────────────────────────────────
+    // Security: SVG uploads must be sanitized before hitting R2.
+    // Unsanitized SVGs are stored XSS vectors when loaded via <object>,
+    // <iframe>, direct URL, or inline rendering.
+
+    it('strips <script> tags from SVG uploads (XSS prevention)', async () => {
+      const mockR2 = createMockR2();
+      const service = createService(mockR2);
+
+      const malicious =
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
+        '<script>alert(document.cookie)</script>' +
+        '<circle cx="50" cy="50" r="40" fill="red"/>' +
+        '</svg>';
+      const maliciousBuffer = new TextEncoder().encode(malicious).buffer;
+
+      await service.uploadLogo({
+        buffer: maliciousBuffer,
+        mimeType: MIME_TYPES.IMAGE.SVG,
+        size: maliciousBuffer.byteLength,
+      });
+
+      // Capture the buffer that was actually written to R2
+      expect(mockR2.put).toHaveBeenCalled();
+      const [, writtenBuffer] = mockR2.put.mock.calls[0];
+      const writtenSvg = new TextDecoder().decode(
+        new Uint8Array(writtenBuffer as ArrayBuffer)
+      );
+
+      // Script must be stripped
+      expect(writtenSvg).not.toContain('<script>');
+      expect(writtenSvg).not.toContain('alert(');
+      // Legitimate content preserved
+      expect(writtenSvg).toContain('<circle');
+    });
+
+    it('strips event handler attributes (onload, onclick) from SVG uploads', async () => {
+      const mockR2 = createMockR2();
+      const service = createService(mockR2);
+
+      const malicious =
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" onload="alert(1)">' +
+        '<circle cx="50" cy="50" r="40" onclick="alert(2)"/>' +
+        '</svg>';
+      const buffer = new TextEncoder().encode(malicious).buffer;
+
+      await service.uploadLogo({
+        buffer,
+        mimeType: MIME_TYPES.IMAGE.SVG,
+        size: buffer.byteLength,
+      });
+
+      const [, writtenBuffer] = mockR2.put.mock.calls[0];
+      const writtenSvg = new TextDecoder().decode(
+        new Uint8Array(writtenBuffer as ArrayBuffer)
+      );
+
+      expect(writtenSvg).not.toMatch(/on\w+\s*=/i);
+    });
+
+    it('preserves legitimate SVG content through sanitization', async () => {
+      const mockR2 = createMockR2();
+      const service = createService(mockR2);
+
+      const cleanSvg =
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">' +
+        '<path d="M12 2L2 7l10 5 10-5-10-5z" fill="currentColor"/>' +
+        '</svg>';
+      const buffer = new TextEncoder().encode(cleanSvg).buffer;
+
+      await service.uploadLogo({
+        buffer,
+        mimeType: MIME_TYPES.IMAGE.SVG,
+        size: buffer.byteLength,
+      });
+
+      const [, writtenBuffer] = mockR2.put.mock.calls[0];
+      const writtenSvg = new TextDecoder().decode(
+        new Uint8Array(writtenBuffer as ArrayBuffer)
+      );
+
+      // Structural elements preserved
+      expect(writtenSvg).toContain('<svg');
+      expect(writtenSvg).toContain('<path');
+      expect(writtenSvg).toContain('viewBox="0 0 24 24"');
+      expect(writtenSvg).toContain('M12 2L2 7l10 5 10-5-10-5z');
+    });
+
+    it('uses 1-hour cache-control for SVG (not 1-year)', async () => {
+      // SVGs are stored at a fixed key (logos/{orgId}/logo.svg); a 1-year
+      // cache would trap re-uploads behind CDN for a year. Match ImageProcessingService.
+      const mockR2 = createMockR2();
+      const service = createService(mockR2);
+
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>';
+      const buffer = new TextEncoder().encode(svg).buffer;
+
+      await service.uploadLogo({
+        buffer,
+        mimeType: MIME_TYPES.IMAGE.SVG,
+        size: buffer.byteLength,
+      });
+
+      expect(mockR2.put).toHaveBeenCalledWith(
+        expect.stringContaining('.svg'),
+        expect.anything(),
+        undefined,
+        expect.objectContaining({
+          contentType: MIME_TYPES.IMAGE.SVG,
+          cacheControl: 'public, max-age=3600',
+        })
+      );
+    });
+
+    it('keeps 1-year cache-control for raster (regression guard)', async () => {
+      const mockR2 = createMockR2();
+      const service = createService(mockR2);
+
+      await service.uploadLogo({
+        buffer: createValidImageBuffer(MIME_TYPES.IMAGE.PNG, 100),
+        mimeType: MIME_TYPES.IMAGE.PNG,
+        size: 100,
+      });
+
+      expect(mockR2.put).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        undefined,
+        expect.objectContaining({
+          cacheControl: 'public, max-age=31536000',
+        })
       );
     });
   });
