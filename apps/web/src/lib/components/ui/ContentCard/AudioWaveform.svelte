@@ -151,9 +151,10 @@
   }
 
   /* Individual bars carry a private hover-scale hook (`--_bar-hover-scale`)
-     so the parent (ContentCard audio-row) can animate them on :hover /
-     :focus-within via CSS with a staggered transition-delay. Default is 1
-     (no scale), reduced-motion collapses to 1 via the motion tokens. */
+     so the parent (ContentCard audio-row OR the thumb-fallback) can animate
+     them on :hover / :focus-within via CSS with a staggered transition-
+     delay. Default is 1 (no scale), reduced-motion collapses to 1 via the
+     motion tokens. Bars stay completely static at rest — no idle motion. */
   .waveform__bar {
     transform-origin: center;
     transform: scaleY(var(--_bar-hover-scale, 1));

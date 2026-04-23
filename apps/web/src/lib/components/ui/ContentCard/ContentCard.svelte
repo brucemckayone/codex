@@ -312,10 +312,18 @@
             <PlayIcon size={32} />
           {:else if contentType === 'audio'}
             <!-- Audio fallback when the real thumbnail fails to load.
-                 A prominent waveform stands in for missing album art so
-                 audio cards ALWAYS carry an audio signature — either the
-                 real thumbnail, or this waveform tile. -->
-            <AudioWaveform {id} variant="thumb" class="cc__thumb-waveform" />
+                 On audio-row cards the inline waveform strip under the title
+                 already carries the audio signature, so a second waveform in
+                 the album-art tile is redundant — fall back to the neutral
+                 music-note icon instead (matches the pattern for other
+                 variants' audio cards without thumbs). Standalone grid/
+                 featured audio cards keep the prominent waveform tile as
+                 their identity signal. -->
+            {#if isAudioRow}
+              <MusicIcon size={32} />
+            {:else}
+              <AudioWaveform {id} variant="thumb" class="cc__thumb-waveform" />
+            {/if}
           {:else}
             <FileTextIcon size={32} />
           {/if}
@@ -326,7 +334,11 @@
             <PlayIcon size={32} />
           {:else if contentType === 'audio'}
             <!-- Audio with no thumbnail — see the fallback comment above. -->
-            <AudioWaveform {id} variant="thumb" class="cc__thumb-waveform" />
+            {#if isAudioRow}
+              <MusicIcon size={32} />
+            {:else}
+              <AudioWaveform {id} variant="thumb" class="cc__thumb-waveform" />
+            {/if}
           {:else}
             <FileTextIcon size={32} />
           {/if}
@@ -1391,16 +1403,26 @@
      state is scaleY(1) so reduced-motion users see a static waveform.
      Motion tokens inherited from `.waveform__bar` (--duration-slow +
      --ease-smooth) keep this collapse to 0.01ms automatically under
-     prefers-reduced-motion: reduce.
-
-     The thumb-fallback waveform lives inside `.cc__placeholder`, which
-     is outside the cc__waveform scope, so we target the specific class
-     (.cc__waveform) to avoid pulsing the thumbnail bars — the thumbnail
-     carries the signature; the inline strip carries the motion. */
+     prefers-reduced-motion: reduce. */
   @media (prefers-reduced-motion: no-preference) {
     .cc--audio-row:hover :global(.cc__waveform .waveform__bar),
     .cc--audio-row:focus-within:has(:focus-visible) :global(.cc__waveform .waveform__bar) {
       --_bar-hover-scale: 1.35;
+    }
+  }
+
+  /* ── Hover animation: thumbnail-fallback waveform bars pulse ────────
+     The waveform thumbnail (standalone audio cards with no album art)
+     is static at rest. On card hover / focus-within the bars pick up
+     the same staggered scaleY pulse as the inline strip, so the identity
+     signal gains a small interactive signature. Smaller peak scale than
+     the inline strip (1.18 vs 1.35) — the thumbnail is larger and more
+     visible, so less amplitude is needed to read as motion. Gated by
+     `no-preference` so reduced-motion users see no hover animation. */
+  @media (prefers-reduced-motion: no-preference) {
+    .cc[data-content-type='audio']:hover :global(.cc__thumb-waveform .waveform__bar),
+    .cc[data-content-type='audio']:focus-within:has(:focus-visible) :global(.cc__thumb-waveform .waveform__bar) {
+      --_bar-hover-scale: 1.18;
     }
   }
 
