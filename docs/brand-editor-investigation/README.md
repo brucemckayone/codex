@@ -192,11 +192,25 @@ Key finding (non-bug): **Hero visibility flags are fully CORRECT** end-to-end (5
 
 ---
 
-## 4. Investigation queue (iter-022+)
+## 4. Investigation queue (iter-024+)
 
 Each bullet is a candidate agent task for a future loop fire. Pick two per iteration to match the 2-concurrent-agent limit.
 
-Completed: ~~Light/dark sync~~ (iter-019); ~~Cross-org brand injection~~ (iter-019); ~~Token registry JSON~~ (iter-020); ~~Preset round-trip~~ (iter-020); ~~Hero visibility audit~~ (iter-021 — chain confirmed clean); ~~Zero-consumer token classification~~ (iter-021 — all 6 live).
+Completed: ~~Light/dark sync~~ (iter-019); ~~Cross-org brand injection~~ (iter-019); ~~Token registry JSON~~ (iter-020); ~~Preset round-trip~~ (iter-020); ~~Hero visibility audit~~ (iter-021 — chain confirmed clean); ~~Zero-consumer token classification~~ (iter-021 — all 6 live); ~~darkOverrides render trace~~ (iter-022 — yielded lqvyy); ~~wwedk schema design~~ (iter-022 — design doc written); ~~Sibling bug hunt~~ (iter-023 — lqvyy proven isolated); ~~lqvyy PR sketch~~ (iter-023 — patch doc written).
+
+### Scope decisions (2026-04-23)
+
+**EXPLICITLY OUT OF SCOPE — do not investigate in future fires:**
+- Custom font upload flow (beyond Google Fonts)
+- User-level theme preferences (global model confirmed; no user overrides)
+- Brand editor accessibility audit (prior iter-04/iter-09 findings sufficient)
+- Mobile-specific brand render paths
+- Email template theming
+- Print styles (`@media print`) and org branding
+
+User confirmed 2026-04-23 that none of these six unknowns warrant investigation. If a future agent proposes them, decline and cite this note.
+
+**In-scope remaining** (standard queue only — no new terrain):
 
 ### PRIORITY: User-directed scope expansion (2026-04-23)
 
