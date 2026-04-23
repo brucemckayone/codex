@@ -83,6 +83,7 @@
   const orgDescription = $derived(data.org?.description ?? '');
   const logoUrl = $derived(data.org?.logoUrl ?? '');
   const stats = $derived(data.stats);
+  const feedCategories = $derived(data.feedCategories ?? []);
   const user = $derived(data.user);
   const introVideoUrl = $derived(data.org?.introVideoUrl ?? null);
 
@@ -290,7 +291,7 @@
       {/if}
 
       <!-- Content type + category pills -->
-      {#if stats?.content?.total > 0 || (stats?.categories?.length ?? 0) > 0}
+      {#if stats?.content?.total > 0 || feedCategories.length > 0}
         <div class="hero__pills">
           {#if stats?.content?.video > 0}
             <span class="hero__pill">{m.org_hero_video_count({ count: String(stats.content.video) })}</span>
@@ -301,10 +302,10 @@
           {#if stats?.content?.written > 0}
             <span class="hero__pill">{m.org_hero_written_count({ count: String(stats.content.written) })}</span>
           {/if}
-          {#if (stats?.categories?.length ?? 0) > 0}
+          {#if feedCategories.length > 0}
             <span class="hero__pills-sep"></span>
           {/if}
-          {#each stats?.categories ?? [] as category}
+          {#each feedCategories as category}
             <a href="/explore?category={encodeURIComponent(category.name)}" class="hero__pill hero__pill--category">
               {category.name}
             </a>
@@ -409,10 +410,11 @@
     Category pills — a sticky quick-nav bar at the top of the feed.
     Sticks to viewport top when scrolled past, so category navigation
     is always reachable. Full-bleed bar with a frosted backdrop so
-    feed content reads cleanly underneath while it's stuck. Uses the
-    `stats.categories` list already fetched for the hero pills.
+    feed content reads cleanly underneath while it's stuck. Driven by
+    `feedCategories` (derived from allContent) so counts always reflect
+    what's loaded on this page.
   -->
-  {#if (stats?.categories?.length ?? 0) > 0}
+  {#if feedCategories.length > 0}
     <!-- 1px sentinel sits above the sticky bar; when it scrolls out of
          the viewport we know the bar has reached top: 0. -->
     <div class="category-bar__sentinel" bind:this={categorySentinelEl} aria-hidden="true"></div>
@@ -438,7 +440,7 @@
           >
             <span class="category-pills__label">All</span>
           </a>
-          {#each stats?.categories ?? [] as category}
+          {#each feedCategories as category}
             {@const isActive = activeCategory === category.name}
             <a
               href="/explore?category={encodeURIComponent(category.name)}"
@@ -1301,24 +1303,24 @@
     flex: 0 0 auto;
     display: inline-flex;
     align-items: baseline;
-    gap: var(--space-1-5);
-    padding: var(--space-2) var(--space-4);
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-3);
     border: var(--border-width) var(--border-style)
       color-mix(in srgb, var(--color-border) 55%, transparent);
     border-radius: var(--radius-full);
-    background: color-mix(in srgb, var(--color-surface-card) 60%, transparent);
+    background: color-mix(in srgb, var(--color-surface-card) 40%, transparent);
     font-family: var(--font-body);
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
     font-weight: var(--font-medium);
     letter-spacing: 0.01em;
+    line-height: 1.4;
     color: var(--color-text-primary);
     text-decoration: none;
     white-space: nowrap;
     transition:
       background-color var(--duration-fast) var(--ease-default),
       border-color var(--duration-fast) var(--ease-default),
-      color var(--duration-fast) var(--ease-default),
-      transform var(--duration-fast) var(--ease-default);
+      color var(--duration-fast) var(--ease-default);
   }
 
   .category-pills__pill:hover {

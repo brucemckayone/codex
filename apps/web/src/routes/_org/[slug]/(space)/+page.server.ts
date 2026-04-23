@@ -268,23 +268,22 @@ export const load: PageServerLoad = async ({
 
   const statsResult = await statsPromise.catch(() => null);
 
-  // Category shape normaliser — defends against worker bundles running the
-  // previous `categories: string[]` contract (pre-refactor). Any running
-  // org-api instance that hasn't picked up the new service code will still
-  // return bare strings; coerce them to {name, count:0} so downstream
-  // templates keep a single shape to reason about. Safe to delete once all
-  // worker bundles are guaranteed to be on the new service.
-  const normalizedStats = statsResult
-    ? {
-        ...statsResult,
-        categories: (statsResult.categories ?? []).map(
-          (c: unknown): { name: string; count: number } =>
-            typeof c === 'string'
-              ? { name: c, count: 0 }
-              : (c as { name: string; count: number })
-        ),
-      }
-    : null;
+  // Categories for the hero pill row + sticky pill bar. Derived from
+  // `allContent` (already on this request) rather than `stats.categories`
+  // so counts reflect exactly what's loaded on the page and the pill bar
+  // stays healthy regardless of whether the org-api worker has picked up
+  // the aggregated-count service contract. Sorted by count DESC so the
+  // most-stocked categories lead the row.
+  const feedCategories = (() => {
+    const counts = new Map<string, number>();
+    for (const item of allContent) {
+      if (!item.category) continue;
+      counts.set(item.category, (counts.get(item.category) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+  })();
 
   // Subscription pricing for the SubscribeCTA banner. Streamed (non-blocking)
   // so the landing page first paint isn't gated on the tiers query; the CTA
@@ -317,7 +316,8 @@ export const load: PageServerLoad = async ({
   return {
     sections,
     allContent,
-    stats: normalizedStats,
+    stats: statsResult,
+    feedCategories,
     creators: creatorsPromise
       .then((r) => ({
         items: r?.items ?? [],
