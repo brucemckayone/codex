@@ -44,6 +44,10 @@
   let categoryBarStuck = $state(false);
   let categorySentinelEl: HTMLDivElement | undefined = $state();
 
+  // URL-driven active category so the pill bar reflects which filter the
+  // user is about to land on. When absent, the "All" pill is active.
+  const activeCategory = $derived(page.url.searchParams.get('category'));
+
   $effect(() => {
     if (!categorySentinelEl) return;
     const observer = new IntersectionObserver(
@@ -301,8 +305,8 @@
             <span class="hero__pills-sep"></span>
           {/if}
           {#each stats?.categories ?? [] as category}
-            <a href="/explore?category={encodeURIComponent(category)}" class="hero__pill hero__pill--category">
-              {category}
+            <a href="/explore?category={encodeURIComponent(category.name)}" class="hero__pill hero__pill--category">
+              {category.name}
             </a>
           {/each}
         </div>
@@ -426,13 +430,26 @@
              announce as links inside a navigation landmark, which is
              correct semantics without the conflict. -->
         <div class="category-pills__row">
-          <a href="/explore" class="category-pills__pill category-pills__pill--all">All</a>
+          <a
+            href="/explore"
+            class="category-pills__pill category-pills__pill--all"
+            class:category-pills__pill--active={activeCategory === null}
+            aria-current={activeCategory === null ? 'page' : undefined}
+          >
+            <span class="category-pills__label">All</span>
+          </a>
           {#each stats?.categories ?? [] as category}
+            {@const isActive = activeCategory === category.name}
             <a
-              href="/explore?category={encodeURIComponent(category)}"
+              href="/explore?category={encodeURIComponent(category.name)}"
               class="category-pills__pill"
+              class:category-pills__pill--active={isActive}
+              aria-current={isActive ? 'page' : undefined}
             >
-              {category.charAt(0).toUpperCase() + category.slice(1)}
+              <span class="category-pills__label">{category.name.charAt(0).toUpperCase() + category.name.slice(1)}</span>
+              <span class="category-pills__count" aria-label="{category.count} {category.count === 1 ? 'item' : 'items'}">
+                {category.count}
+              </span>
             </a>
           {/each}
         </div>
@@ -1283,23 +1300,25 @@
   .category-pills__pill {
     flex: 0 0 auto;
     display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    padding: var(--space-1) var(--space-3);
+    align-items: baseline;
+    gap: var(--space-1-5);
+    padding: var(--space-2) var(--space-4);
     border: var(--border-width) var(--border-style)
       color-mix(in srgb, var(--color-border) 55%, transparent);
     border-radius: var(--radius-full);
-    background: color-mix(in srgb, var(--color-surface-card) 35%, transparent);
+    background: color-mix(in srgb, var(--color-surface-card) 60%, transparent);
     font-family: var(--font-body);
-    font-size: var(--text-base);
+    font-size: var(--text-sm);
     font-weight: var(--font-medium);
+    letter-spacing: 0.01em;
     color: var(--color-text-primary);
     text-decoration: none;
     white-space: nowrap;
     transition:
       background-color var(--duration-fast) var(--ease-default),
       border-color var(--duration-fast) var(--ease-default),
-      color var(--duration-fast) var(--ease-default);
+      color var(--duration-fast) var(--ease-default),
+      transform var(--duration-fast) var(--ease-default);
   }
 
   .category-pills__pill:hover {
@@ -1312,10 +1331,37 @@
     outline-offset: var(--space-0-5);
   }
 
-  /* "All" pill sits first as the neutral/default state. Keeps the
-     same chrome as category pills — being first in the row is enough
-     visual prominence without a brand tint that could read as an
-     "active" state (which we don't track on the landing page). */
+  /* Active pill reflects the /explore filter the user is about to land on
+     (or the "All" pill when no ?category param is present). Inverted
+     surface gives the row a clear anchor without depending on brand tint. */
+  .category-pills__pill--active {
+    background: var(--color-text-primary);
+    border-color: var(--color-text-primary);
+    color: var(--color-background);
+  }
+
+  .category-pills__pill--active:hover {
+    background: var(--color-text-primary);
+    border-color: var(--color-text-primary);
+  }
+
+  .category-pills__label {
+    /* Capitalized on the server; label is intentionally a bare span so
+       baseline alignment with the count stays predictable. */
+    display: inline;
+  }
+
+  .category-pills__count {
+    font-weight: var(--font-normal);
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in oklch, currentColor 60%, transparent);
+  }
+
+  .category-pills__pill--active .category-pills__count {
+    /* On the inverted active pill, currentColor is already --color-background,
+       so mixing with transparent lightens it into a muted chip. */
+    color: color-mix(in oklch, currentColor 70%, transparent);
+  }
 
   @media (--below-md) {
     .category-bar__inner {
@@ -1679,6 +1725,13 @@
 
     .feed-section {
       padding: var(--space-5) var(--space-4);
+    }
+
+    /* Align bookend sections (Continue Watching, Contributors) with the
+       feed's 16px inline gutter so every row on the page shares one
+       vertical edge on mobile. Matches explore/creators/library pages. */
+    .section {
+      padding: var(--space-8) var(--space-4);
     }
   }
 

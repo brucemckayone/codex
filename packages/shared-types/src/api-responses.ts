@@ -261,7 +261,7 @@ export interface OrganizationPublicStatsResponse {
   totalDurationSeconds: number;
   creators: number;
   totalViews: number;
-  categories: string[];
+  categories: { name: string; count: number }[];
 }
 
 /**

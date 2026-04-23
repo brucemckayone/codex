@@ -3,8 +3,12 @@
  *
  * Single-fetch architecture: one `getPublicContent` call (limit 50) returns
  * the whole recent catalogue; we slice it in-memory into typed `sections`
- * (Spotlight / Editor's Picks / Videos / Audio / Articles / Free / per-Category)
- * plus a flat `allContent` array that feeds the bottom full-catalogue grid.
+ * (Spotlight / Editor's Picks / Videos / Audio / Articles / Free) plus a
+ * flat `allContent` array that feeds the bottom full-catalogue grid.
+ *
+ * Category discovery lives in the sticky pill bar at the top of the feed —
+ * clicking any pill navigates to /explore?category=X for the dedicated
+ * filtered view. No per-category carousels are rendered inline.
  *
  * Each section carries an explicit `layout` tag (`spotlight | spread |
  * carousel | mosaic | editorial | bento`) so the renderer dispatches on
@@ -28,8 +32,6 @@ import type { ContentItem, FeedSection } from './feed-types';
 // /explore's paginated grid. Revisit if orgs complain about catalogue
 // truncation at the bottom grid.
 const MAX_CATALOGUE_ITEMS = 50;
-const CATEGORY_MIN_ITEMS = 3;
-const MAX_CATEGORY_SECTIONS = 4;
 
 // Bento "Discover Mix" section — optional second grid beat between
 // Audio wall and Articles. Off by default so the landing page ships
@@ -230,37 +232,6 @@ function buildSections(all: ContentItem[]): FeedSection[] {
         items: promoteFeatured(free),
       });
     }
-  }
-
-  // ── Per-category rows (≥ CATEGORY_MIN_ITEMS items each, top N) ──────
-  const byCategory = new Map<string, ContentItem[]>();
-  for (const item of remaining) {
-    if (!item.category) continue;
-    const bucket = byCategory.get(item.category) ?? [];
-    bucket.push(item);
-    byCategory.set(item.category, bucket);
-  }
-  const categoryEntries = [...byCategory.entries()]
-    .filter(([, items]) => items.length >= CATEGORY_MIN_ITEMS)
-    .sort((a, b) => b[1].length - a[1].length)
-    .slice(0, MAX_CATEGORY_SECTIONS);
-  for (const [category, items] of categoryEntries) {
-    // Per-category rows pull across content types too — normalise ratios
-    // so the visual rhythm survives a mixed row (same reasoning as Free).
-    const hasMixedTypes =
-      new Set(items.map((i) => i.contentType).filter(Boolean)).size > 1;
-    sections.push({
-      id: `category:${category}`,
-      layout: 'carousel',
-      eyebrow: 'Browse',
-      // Title-case the display label but keep the raw value for the URL
-      // so category filters still match the stored DB value.
-      title: category.charAt(0).toUpperCase() + category.slice(1),
-      viewAllHref: `/explore?category=${encodeURIComponent(category)}`,
-      viewAllLabel: 'View all',
-      mixedTypes: hasMixedTypes,
-      items: promoteFeatured(items),
-    });
   }
 
   return sections;

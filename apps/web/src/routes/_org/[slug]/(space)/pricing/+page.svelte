@@ -888,7 +888,7 @@
               {#if (stats?.categories?.length ?? 0) > 1}
                 <ul class="preview__categories" aria-label="Topics">
                   {#each stats.categories.slice(0, 6) as cat}
-                    <li>{cat}</li>
+                    <li>{cat.name}</li>
                   {/each}
                 </ul>
               {/if}

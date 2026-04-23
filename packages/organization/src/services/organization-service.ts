@@ -1111,14 +1111,19 @@ export class OrganizationService extends BaseService {
             .from(organizationMemberships)
             .where(this.activeCreatorWhere(org.id)),
 
-          // Top distinct categories (non-null, limit 5)
+          // Categories with item counts (non-null, ordered by popularity, capped)
           this.db
-            .selectDistinct({ category: content.category })
+            .select({
+              category: content.category,
+              count: sql<number>`count(*)::int`.as('count'),
+            })
             .from(content)
             .where(
               and(publishedContentFilter, sql`${content.category} is not null`)
             )
-            .limit(5),
+            .groupBy(content.category)
+            .orderBy(sql`count(*) desc`)
+            .limit(20),
         ]);
 
       const stats = contentStats[0];
@@ -1134,8 +1139,8 @@ export class OrganizationService extends BaseService {
         creators: Number(creatorCount[0]?.total ?? 0),
         totalViews: Number(stats?.totalViews ?? 0),
         categories: categoryResult
-          .map((r) => r.category)
-          .filter((c): c is string => c !== null),
+          .filter((r): r is { category: string; count: number } => r.category !== null)
+          .map((r) => ({ name: r.category, count: Number(r.count) })),
       };
     } catch (error) {
       if (error instanceof OrganizationNotFoundError) {

@@ -20,7 +20,7 @@ export type ContentItem = NonNullable<
  *
  *   spotlight  — one hero-sized item on an animated shader backdrop (anchor)
  *   spread     — 2-up editorial spread (Editor's Picks)
- *   carousel   — horizontally-scrolling row (videos, per-category, free)
+ *   carousel   — horizontally-scrolling row (videos, free samples)
  *   mosaic     — static grid of square tiles (audio wall)
  *   editorial  — 60/40 split: lead article spread + vertical list (articles)
  *   bento      — varied-tile grid with 2 hero + 4 minor items (Discover Mix)
@@ -43,8 +43,7 @@ export type FeedSection = {
     | 'audio'
     | 'articles'
     | 'free'
-    | 'discover-mix'
-    | `category:${string}`;
+    | 'discover-mix';
   /** Layout dispatch tag — renderer picks the component from this. */
   layout: FeedLayout;
   /** Small-caps label above the section title. */
@@ -55,8 +54,8 @@ export type FeedSection = {
   viewAllHref?: string;
   viewAllLabel?: string;
   /**
-   * Marks sections whose items span multiple content types (Free samples,
-   * per-category). When true, the renderer normalises thumb aspect ratios
+   * Marks sections whose items span multiple content types (Free samples).
+   * When true, the renderer normalises thumb aspect ratios
    * (typically to 16:9) so the row reads as a single rhythm instead of a
    * mix of 1:1 audio next to 16:9 video next to 3:2 article. Pure-type
    * sections (Videos / Audio / Articles) leave this undefined and keep
