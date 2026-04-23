@@ -93,6 +93,26 @@
       null
   );
 
+  // Preview strip for the SubscribeCTA — member-only items ("You'll unlock:").
+  // Filter allContent to subscriber/follower-gated items, cap at 5, and map
+  // to the lightweight primitive shape SubscribeCTA expects. This is the
+  // "honest fallback" path — if the org has no gated content, the strip
+  // hides gracefully (the component checks `previewContent?.length > 0`).
+  const subscribePreview = $derived(
+    data.allContent
+      .filter(
+        (c) =>
+          c.accessType === 'subscribers' || c.accessType === 'followers'
+      )
+      .slice(0, 5)
+      .map((c) => ({
+        id: c.id,
+        title: c.title,
+        thumbnail: c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null,
+        href: buildContentUrl(page.url, c),
+      }))
+  );
+
   // Canonical URL is the org's own subdomain origin. Prevents SEO
   // duplicate-content issues if the platform ever links to the same org
   // via a different path shape.
@@ -578,13 +598,50 @@
 
     <!-- Subscribe CTA — anchor beat inserted once, right after the section
          chosen by `subscribeAnchorId` (typically Articles). Falls back if
-         the org has no articles section so the banner still appears. -->
+         the org has no articles section so the banner still appears.
+
+         Pricing is streamed (subscriptionPricing promise): the banner
+         renders immediately with the value-prop grid + proof strip + CTA
+         + fallback "Cancel anytime" microcopy. When pricing resolves the
+         banner re-renders with "From £X/mo" swapped in. No skeleton is
+         needed — the price row is additive; its absence is a valid state.
+         previewContent + memberCount props are wired even when undefined,
+         so SubscribeCTA's internal guards decide whether to render each row. -->
     {#if section.id === subscribeAnchorId && data.org?.id}
-      <SubscribeCTA
-        organizationId={data.org.id}
-        orgName={data.org.name ?? 'us'}
-        isAuthenticated={!!user}
-      />
+      {@const orgId = data.org.id}
+      {@const orgDisplayName = data.org.name ?? 'us'}
+      {@const previewProp =
+        subscribePreview.length > 0 ? subscribePreview : undefined}
+      {#await data.subscriptionPricing}
+        <!-- Pending: banner without pricing. Reads as the legacy CTA
+             with the new grid/proof/preview — price swaps in on resolve. -->
+        <SubscribeCTA
+          organizationId={orgId}
+          orgName={orgDisplayName}
+          isAuthenticated={!!user}
+          previewContent={previewProp}
+        />
+      {:then pricing}
+        <SubscribeCTA
+          organizationId={orgId}
+          orgName={orgDisplayName}
+          isAuthenticated={!!user}
+          startingPriceCents={pricing?.startingPriceCents}
+          monthlyPriceCents={pricing?.monthlyPriceCents}
+          annualPriceCents={pricing?.annualPriceCents}
+          currency={pricing?.currency}
+          previewContent={previewProp}
+        />
+      {:catch}
+        <!-- Pricing fetch failed — render without price, log nothing
+             (the error is non-critical to the banner). -->
+        <SubscribeCTA
+          organizationId={orgId}
+          orgName={orgDisplayName}
+          isAuthenticated={!!user}
+          previewContent={previewProp}
+        />
+      {/await}
     {/if}
   {/each}
 

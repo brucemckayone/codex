@@ -18,6 +18,7 @@
 
 import { getPublicContent } from '$lib/remote/content.remote';
 import { getPublicCreators, getPublicStats } from '$lib/remote/org.remote';
+import { listTiers } from '$lib/remote/subscription.remote';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
 import type { ContentItem, FeedSection } from './feed-types';
@@ -296,6 +297,34 @@ export const load: PageServerLoad = async ({
 
   const statsResult = await statsPromise.catch(() => null);
 
+  // Subscription pricing for the SubscribeCTA banner. Streamed (non-blocking)
+  // so the landing page first paint isn't gated on the tiers query; the CTA
+  // gracefully falls back to its "Cancel anytime" meta string while pricing
+  // resolves. Returns the cheapest monthly price + whether an annual tier
+  // offers a meaningful discount; the banner derives the save % itself.
+  const tiersPromise = listTiers(org.id)
+    .then((tiers) => {
+      if (!tiers || tiers.length === 0) return null;
+      // Pick the cheapest monthly price as the "From" anchor. Every tier
+      // has a priceMonthly (the server-side schema enforces it), so a
+      // reduce() gets the minimum in one pass.
+      const cheapestMonthly = tiers.reduce(
+        (min, t) => (t.priceMonthly < min ? t.priceMonthly : min),
+        tiers[0].priceMonthly
+      );
+      // Pair it with the matching tier's annual price so the save-teaser
+      // compares apples-to-apples (same tier, two intervals).
+      const cheapestTier =
+        tiers.find((t) => t.priceMonthly === cheapestMonthly) ?? tiers[0];
+      return {
+        startingPriceCents: cheapestMonthly,
+        monthlyPriceCents: cheapestTier.priceMonthly,
+        annualPriceCents: cheapestTier.priceAnnual,
+        currency: 'GBP',
+      };
+    })
+    .catch(() => null);
+
   return {
     sections,
     allContent,
@@ -306,5 +335,6 @@ export const load: PageServerLoad = async ({
         total: r?.pagination?.total ?? 0,
       }))
       .catch(() => ({ items: [], total: 0 })),
+    subscriptionPricing: tiersPromise,
   };
 };
