@@ -210,13 +210,11 @@
     max-width: calc(var(--space-24) * 10);
     margin-inline: auto;
     padding: var(--space-6);
-    /* --color-player-border mixed at 50% alpha matches SubscribeCTA's
-       panel border — both are rounded light-on-dark promotional
-       surfaces so they share the same edge treatment. Using
-       `--color-border` (semantic/theme-adaptive) would diverge on
-       dark-theme orgs. */
-    border: var(--border-width) var(--border-style)
-      color-mix(in srgb, var(--color-player-border) 50%, transparent);
+    /* Fixed-alpha white border at 10% — matches SubscribeCTA's panel so
+       the two promotional surfaces read as a pair. Using `--color-border`
+       would drift with theme + org brand; using `--color-player-border`
+       would drift with org `--brand-player-border` overrides. */
+    border: var(--border-width) var(--border-style) hsl(0 0% 100% / 0.1);
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-xl);
     overflow: hidden;
@@ -340,7 +338,7 @@
        hole cut into the card. Both shadow layers come from the token
        family — no raw values. */
     background: transparent;
-    border: var(--border-width) var(--border-style) var(--color-player-border);
+    border: var(--border-width) var(--border-style) hsl(0 0% 100% / 0.2);
     display: block;
     text-decoration: none;
     box-shadow:
@@ -386,11 +384,11 @@
     font-weight: var(--font-bold);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
-    /* Brand tint on dark veil reads as a promotional flag. Mix with the
-       player-text token (always white at :root, org-overridable) so the
-       tint stays readable on dark-brand orgs where --color-text-inverse
-       would have flipped to dark. */
-    color: color-mix(in srgb, var(--color-interactive) 65%, var(--color-player-text) 35%);
+    /* Brand tint lifted against fixed white — can't mix against
+       `--color-player-text` because orgs can rebind that token to a
+       brand colour via `--brand-player-text`, collapsing the mix to a
+       single hue that may match the shader behind the card. */
+    color: color-mix(in srgb, var(--color-interactive) 65%, hsl(0 0% 100%) 35%);
     line-height: var(--leading-tight);
   }
 
@@ -400,10 +398,15 @@
     font-size: var(--text-3xl);
     font-weight: var(--font-semibold);
     line-height: var(--leading-tight);
-    /* Fixed light text — the shader behind the card can be any colour and
-       the org theme may be dark, so we lean on `--color-player-text`
-       (always-light inverse chrome token) and the veil to supply contrast. */
-    color: var(--color-player-text);
+    /* Fixed white — shader backdrop + dark veil make this a promotional
+       light-on-dark poster where the title MUST stay white regardless of
+       org brand. Can't rely on `--color-player-text` here because
+       org-brand.css lets orgs rebind it via `--brand-player-text`
+       (of-blood-and-bones sets it to their brand red, which matches the
+       shader and renders the title invisible). Same reasoning as the
+       `hsl(0 0% 0% / α)` veil — an explicit neutral is the right tool
+       when the cascade can't guarantee legibility. */
+    color: hsl(0 0% 100%);
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
@@ -423,8 +426,10 @@
   }
 
   .spotlight__title-link:hover {
-    /* Lift the brand tint on hover — soft, not a flash. */
-    color: color-mix(in srgb, var(--color-interactive) 45%, var(--color-player-text) 55%);
+    /* Lift the brand tint on hover — soft, not a flash. Mix against fixed
+       white for the same reason as the eyebrow (player-text is
+       org-overridable). */
+    color: color-mix(in srgb, var(--color-interactive) 45%, hsl(0 0% 100%) 55%);
   }
 
   .spotlight__title-link:focus-visible {
@@ -437,10 +442,10 @@
     margin: 0;
     font-size: var(--text-base);
     line-height: var(--leading-relaxed);
-    /* Secondary light text — player-text-secondary is pre-tuned to the
-       right opacity step below the crisp title. Paired with the veil's
-       55–65% darken on the right, meets WCAG AA against any shader. */
-    color: var(--color-player-text-secondary);
+    /* Secondary white at 80% alpha — same reason as the title: fixed
+       neutral because the org-overridable player-text family can collapse
+       to brand colours that don't contrast against the shader. */
+    color: hsl(0 0% 100% / 0.8);
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
@@ -472,7 +477,7 @@
   .spotlight__creator-name {
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-player-text-secondary);
+    color: hsl(0 0% 100% / 0.85);
   }
 
   .spotlight__chip {
@@ -482,14 +487,14 @@
     font-size: var(--text-xs);
     font-weight: var(--font-medium);
     font-variant-numeric: tabular-nums;
-    /* Light text + translucent dark pill — player-surface tokens give
-       consistent chrome regardless of shader or theme. */
-    color: var(--color-player-text);
-    background: var(--color-player-surface);
+    /* White chip chrome — explicit fixed values because the player-*
+       tokens are org-overridable (see title comment above). */
+    color: hsl(0 0% 100% / 0.9);
+    background: hsl(0 0% 100% / 0.1);
     backdrop-filter: blur(var(--blur-sm));
     -webkit-backdrop-filter: blur(var(--blur-sm));
     border: var(--border-width) var(--border-style)
-      var(--color-player-border);
+      hsl(0 0% 100% / 0.2);
     border-radius: var(--radius-full);
   }
 

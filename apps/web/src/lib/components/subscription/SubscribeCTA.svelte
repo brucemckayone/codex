@@ -138,13 +138,14 @@
     padding-inline: var(--space-6);
     display: grid;
     place-items: center;
-    /* Banner is a dedicated light-on-dark context — it always has the dark
-       radial veil behind it, so text must lean on the `--color-player-*`
-       tokens, which are defined at :root as "inverse chrome" (always light
-       on dark) and remain org-brand overridable. Using `--color-text-inverse`
-       here would regress on dark-mode orgs (it flips to dark and vanishes
-       into the veil). */
-    color: var(--color-player-text);
+    /* Banner is a dedicated light-on-dark promotional poster — the dark
+       radial veil is always rendered behind the text, so text MUST be
+       white regardless of org branding. Can't use `--color-player-text`:
+       org-brand.css lets orgs rebind it via `--brand-player-text`
+       (of-blood-and-bones sets it to their brand red, which matches the
+       shader and renders the text invisible). Fixed `hsl(0 0% 100%)`
+       follows the same explicit-neutral pattern as the veil itself. */
+    color: hsl(0 0% 100%);
   }
 
   /* ── Panel ──────────────────────────────────────────────────
@@ -164,8 +165,7 @@
     overflow: hidden;
     isolation: isolate;
     text-align: center;
-    border: var(--border-width) var(--border-style)
-      color-mix(in srgb, var(--color-player-border) 50%, transparent);
+    border: var(--border-width) var(--border-style) hsl(0 0% 100% / 0.1);
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-xl);
     transition:
@@ -238,9 +238,10 @@
     font-weight: var(--font-bold);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
-    /* Lift the brand colour above the dark veil — mix with the player-text
-       token so the tint stays visible even on dark-brand orgs. */
-    color: color-mix(in srgb, var(--color-interactive) 55%, var(--color-player-text) 45%);
+    /* Lift the brand colour above the dark veil — mix with fixed white
+       so the tint survives orgs that rebind `--color-player-text` via
+       their branding. */
+    color: color-mix(in srgb, var(--color-interactive) 55%, hsl(0 0% 100%) 45%);
     line-height: var(--leading-tight);
   }
 
@@ -251,16 +252,16 @@
     font-weight: var(--font-semibold);
     line-height: var(--leading-tight);
     letter-spacing: var(--tracking-tighter);
-    color: var(--color-player-text);
+    /* Fixed white — see rationale on .subscribe-cta above. */
+    color: hsl(0 0% 100%);
   }
 
   .subscribe-cta__tagline {
     margin: 0;
     font-size: var(--text-base);
     line-height: var(--leading-relaxed);
-    /* Secondary light text — the player-text-secondary token is pre-tuned
-       to ~80% opacity white for a clear step below the crisp title. */
-    color: var(--color-player-text-secondary);
+    /* 80% white — secondary hierarchy below the crisp title. */
+    color: hsl(0 0% 100% / 0.8);
     max-width: 42ch;
   }
 
@@ -276,7 +277,7 @@
     justify-content: center;
     gap: var(--space-4);
     font-size: var(--text-sm);
-    color: var(--color-player-text-secondary);
+    color: hsl(0 0% 100% / 0.85);
   }
 
   .subscribe-cta__bullet {
@@ -288,8 +289,9 @@
   .subscribe-cta__bullet-dot {
     width: var(--space-1-5);
     height: var(--space-1-5);
-    /* Lift the brand dot above the dark veil — same treatment as eyebrow. */
-    background: color-mix(in srgb, var(--color-interactive) 55%, var(--color-player-text) 45%);
+    /* Lift the brand dot above the dark veil — mix with fixed white for
+       the same reason as the eyebrow. */
+    background: color-mix(in srgb, var(--color-interactive) 55%, hsl(0 0% 100%) 45%);
     border-radius: var(--radius-full);
     flex-shrink: 0;
   }
@@ -332,7 +334,7 @@
   .subscribe-cta__meta {
     margin: 0;
     font-size: var(--text-xs);
-    color: var(--color-player-text-muted);
+    color: hsl(0 0% 100% / 0.65);
     letter-spacing: var(--tracking-wide);
   }
 
