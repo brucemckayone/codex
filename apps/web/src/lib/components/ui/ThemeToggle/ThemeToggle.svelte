@@ -1,6 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { getTheme, toggleTheme, type Theme } from '$lib/theme';
+	import { themeState, toggleTheme } from '$lib/theme.svelte';
 	import { SunIcon, MoonIcon } from '$lib/components/ui/Icon';
 	import * as m from '$paraglide/messages';
 
@@ -13,14 +12,13 @@
 
 	const { showLabel = false, size = 20 }: Props = $props();
 
-	let theme = $state<Theme>('light');
-
-	onMount(() => {
-		theme = getTheme();
-	});
+	// Subscribe to the shared theme state (Codex-micw3) — every instance of
+	// this component (sidebar, studio, mobile nav, mobile bottom sheet) stays
+	// in sync when any one of them fires toggleTheme().
+	const theme = $derived(themeState.theme);
 
 	function handleToggle() {
-		theme = toggleTheme();
+		toggleTheme();
 	}
 
 	const label = $derived(
