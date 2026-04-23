@@ -71,51 +71,61 @@
 </script>
 
 <section class="subscribe-cta" aria-labelledby="subscribe-cta-title">
-  <div class="subscribe-cta__backdrop" aria-hidden="true">
-    <ShaderHero preset={resolvedPreset} />
-    <div class="subscribe-cta__veil"></div>
-  </div>
-
-  <div class="subscribe-cta__body">
-    <p class="subscribe-cta__eyebrow">Membership</p>
-
-    <h2 class="subscribe-cta__title" id="subscribe-cta-title">
-      {effectiveHeadline}
-    </h2>
-
-    {#if tagline}
-      <p class="subscribe-cta__tagline">{tagline}</p>
-    {/if}
-
-    <ul class="subscribe-cta__bullets">
-      {#each bullets as bullet, i (i)}
-        <li class="subscribe-cta__bullet">
-          <span class="subscribe-cta__bullet-dot" aria-hidden="true"></span>
-          <span>{bullet}</span>
-        </li>
-      {/each}
-    </ul>
-
-    <div class="subscribe-cta__actions">
-      <SubscribeButton
-        {organizationId}
-        {isAuthenticated}
-        {subscribeHref}
-        size="lg"
-        showBadge={true}
-      />
+  <div class="subscribe-cta__panel">
+    <div class="subscribe-cta__backdrop" aria-hidden="true">
+      <ShaderHero preset={resolvedPreset} />
+      <div class="subscribe-cta__veil"></div>
     </div>
 
-    {#if meta}
-      <p class="subscribe-cta__meta">{meta}</p>
-    {/if}
+    <div class="subscribe-cta__body">
+      <p class="subscribe-cta__eyebrow">Membership</p>
+
+      <h2 class="subscribe-cta__title" id="subscribe-cta-title">
+        {effectiveHeadline}
+      </h2>
+
+      {#if tagline}
+        <p class="subscribe-cta__tagline">{tagline}</p>
+      {/if}
+
+      <ul class="subscribe-cta__bullets">
+        {#each bullets as bullet, i (i)}
+          <li class="subscribe-cta__bullet">
+            <span class="subscribe-cta__bullet-dot" aria-hidden="true"></span>
+            <span>{bullet}</span>
+          </li>
+        {/each}
+      </ul>
+
+      <div class="subscribe-cta__actions">
+        <!-- Brand-tinted glow anchors the primary CTA. Sits behind the
+             SubscribeButton with a radial gradient of --color-interactive at
+             low opacity so the button reads as the dominant focal point
+             without being caged in a hard ring. Decorative only. -->
+        <span class="subscribe-cta__cta-glow" aria-hidden="true"></span>
+        <SubscribeButton
+          {organizationId}
+          {isAuthenticated}
+          {subscribeHref}
+          size="lg"
+          showBadge={true}
+        />
+      </div>
+
+      {#if meta}
+        <p class="subscribe-cta__meta">{meta}</p>
+      {/if}
+    </div>
   </div>
 </section>
 
 <style>
   /* ── Section ────────────────────────────────────────────────
-     Full-bleed banner. Does not use the parent container's padding
-     so the shader reaches edge-to-edge. */
+     Outer full-bleed shell. Breaks out of the parent container so the
+     banner can host a rounded INNER panel that sits inside a gutter.
+     The panel (not the section) carries the shader, veil, shadow, and
+     rounded edges — this pairs visually with Spotlight which is itself
+     a rounded promotional card. */
   .subscribe-cta {
     position: relative;
     /* Escape the parent's max-width by breaking out to full viewport
@@ -124,13 +134,10 @@
        is centered with max-width. */
     width: 100vw;
     margin-inline: calc(50% - 50vw);
-    padding-block: calc(var(--space-16) + var(--space-4));
+    padding-block: var(--space-12);
     padding-inline: var(--space-6);
     display: grid;
     place-items: center;
-    overflow: hidden;
-    isolation: isolate;
-    text-align: center;
     /* Banner is a dedicated light-on-dark context — it always has the dark
        radial veil behind it, so text must lean on the `--color-player-*`
        tokens, which are defined at :root as "inverse chrome" (always light
@@ -140,13 +147,51 @@
     color: var(--color-player-text);
   }
 
+  /* ── Panel ──────────────────────────────────────────────────
+     Inner rounded promotional surface. Pairs with Spotlight's outer card:
+     same --radius-xl corners, same --shadow-xl depth, same hover lift,
+     same border family (player-border at ~50% alpha so the edge reads
+     without walling off the shader surface behind it). */
+  .subscribe-cta__panel {
+    position: relative;
+    width: 100%;
+    max-width: var(--container-max, 1280px);
+    margin-inline: auto;
+    padding-block: calc(var(--space-16) + var(--space-4));
+    padding-inline: var(--space-6);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    isolation: isolate;
+    text-align: center;
+    border: var(--border-width) var(--border-style)
+      color-mix(in srgb, var(--color-player-border) 50%, transparent);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-xl);
+    transition:
+      transform var(--duration-slow) var(--ease-smooth),
+      box-shadow var(--duration-slow) var(--ease-smooth),
+      border-color var(--duration-fast) var(--ease-default);
+  }
+
+  .subscribe-cta__panel:hover {
+    transform: translateY(calc(-1 * var(--space-1)));
+    box-shadow:
+      var(--shadow-xl),
+      0 0 0 var(--border-width-thick)
+        color-mix(in srgb, var(--color-interactive) 24%, transparent);
+    border-color: color-mix(in srgb, var(--color-interactive) 32%, transparent);
+  }
+
   /* ── Backdrop ───────────────────────────────────────────────
-     Shader + veil. Always renders so anon + signed-in users get the
-     same mood on first paint (SubscribeButton handles the state logic). */
+     Shader + veil. Fills the panel so the rounded corners clip the
+     canvas naturally. Always renders so anon + signed-in users get
+     the same mood on first paint (SubscribeButton handles the state
+     logic). */
   .subscribe-cta__backdrop {
     position: absolute;
     inset: 0;
-    z-index: -1;
+    z-index: 0;
     pointer-events: none;
   }
 
@@ -173,7 +218,8 @@
   }
 
   /* ── Body ───────────────────────────────────────────────────
-     Narrow column for readable centered copy. */
+     Narrow column for readable centered copy. Sits above the backdrop
+     inside the panel's stacking context. */
   .subscribe-cta__body {
     position: relative;
     z-index: 1;
@@ -249,15 +295,38 @@
   }
 
   /* ── Actions ────────────────────────────────────────────────
-     SubscribeButton renders its own styling; this just gives it
-     consistent spacing inside the banner. */
+     SubscribeButton renders its own styling; this wrapper positions
+     the brand glow behind it. */
   .subscribe-cta__actions {
+    position: relative;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     justify-content: center;
     gap: var(--space-3);
     margin-top: var(--space-3);
+  }
+
+  /* Brand-tinted glow sits DIRECTLY behind the SubscribeButton to anchor
+     the primary CTA. Radial gradient of --color-interactive (the org's
+     brand colour) at low opacity — subtle, not a dominant ring. The
+     gradient is sized wider than the button so the soft edge fades into
+     the veil rather than cutting off. Decorative only. */
+  .subscribe-cta__cta-glow {
+    position: absolute;
+    inset: 50% auto auto 50%;
+    width: calc(var(--space-24) * 4);
+    height: calc(var(--space-24) * 2);
+    transform: translate(-50%, -50%);
+    background: radial-gradient(
+      ellipse 60% 60% at 50% 50%,
+      color-mix(in srgb, var(--color-interactive) 25%, transparent) 0%,
+      color-mix(in srgb, var(--color-interactive) 12%, transparent) 55%,
+      transparent 100%
+    );
+    pointer-events: none;
+    z-index: -1;
+    filter: blur(var(--blur-md));
   }
 
   .subscribe-cta__meta {
@@ -281,6 +350,35 @@
     to {
       opacity: 1;
       transform: translateY(0);
+    }
+  }
+
+  /* Reduced motion: disable hover lift + transition. The panel stays
+     rooted and static, matching Spotlight's reduced-motion rule. */
+  @media (prefers-reduced-motion: reduce) {
+    .subscribe-cta__panel {
+      transition: none;
+    }
+
+    .subscribe-cta__panel:hover {
+      transform: none;
+    }
+  }
+
+  /* ── Mobile ─────────────────────────────────────────────────
+     Keep the rounded corners on narrow screens but reduce the inner
+     padding so the panel doesn't look over-stuffed. The outer section
+     already provides a small inline gutter — we only tweak the panel's
+     breathing room here, not its edge-to-edge reach. */
+  @media (--below-md) {
+    .subscribe-cta {
+      padding-block: var(--space-8);
+      padding-inline: var(--space-4);
+    }
+
+    .subscribe-cta__panel {
+      padding-block: calc(var(--space-12) + var(--space-2));
+      padding-inline: var(--space-5);
     }
   }
 </style>
