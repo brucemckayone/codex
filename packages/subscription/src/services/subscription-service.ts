@@ -59,6 +59,7 @@ import {
   TierNotFoundError,
 } from '../errors';
 import { calculateRevenueSplit } from './revenue-split';
+import { mapStripeSubscriptionStatus } from './stripe-status-mapper';
 import {
   type InvalidationReason,
   invalidateForUser,
@@ -1055,42 +1056,42 @@ export class SubscriptionService extends BaseService {
 
     if (!sub) return;
 
-    // Map Stripe status to our status
-    let status = sub.status;
-    if (stripeSubscription.status === 'active') {
-      status = stripeSubscription.cancel_at_period_end
-        ? SUBSCRIPTION_STATUS.CANCELLING
-        : SUBSCRIPTION_STATUS.ACTIVE;
-    } else if (stripeSubscription.status === 'past_due') {
-      status = SUBSCRIPTION_STATUS.PAST_DUE;
-    } else if (stripeSubscription.status === 'canceled') {
-      status = SUBSCRIPTION_STATUS.CANCELLED;
-    } else if (stripeSubscription.status === 'incomplete') {
-      status = SUBSCRIPTION_STATUS.INCOMPLETE;
-    }
-
-    // Detect tier change via metadata
-    const newTierId = stripeSubscription.metadata.codex_tier_id;
-
-    // v19+: period dates on subscription items
-    const updatedItem = stripeSubscription.items.data[0];
-    const updatedPeriodStart = updatedItem?.current_period_start ?? 0;
-    const updatedPeriodEnd = updatedItem?.current_period_end ?? 0;
+    // Shared mapper prevents field drift (V1/V2/V5 in the audit). Passing
+    // `sub.status` as the fallback preserves DB state if Stripe reports a
+    // status that doesn't map onto the Codex enum (e.g. 'trialing'). Cast
+    // is safe: status is constrained at insert by subscriptionStatusSchema.
+    const mapped = mapStripeSubscriptionStatus(
+      stripeSubscription,
+      sub.status as (typeof SUBSCRIPTION_STATUS)[keyof typeof SUBSCRIPTION_STATUS]
+    );
+    const newTierId = mapped.tierId;
 
     await this.db
       .update(subscriptions)
       .set({
-        status,
+        status: mapped.status,
+        cancelAtPeriodEnd: mapped.cancelAtPeriodEnd,
         ...(newTierId && newTierId !== sub.tierId && { tierId: newTierId }),
-        currentPeriodStart: new Date(updatedPeriodStart * 1000),
-        currentPeriodEnd: new Date(updatedPeriodEnd * 1000),
+        ...(mapped.billingInterval && {
+          billingInterval: mapped.billingInterval,
+        }),
+        ...(mapped.amountCents !== null && {
+          amountCents: mapped.amountCents,
+        }),
+        ...(mapped.currentPeriodStart && {
+          currentPeriodStart: mapped.currentPeriodStart,
+        }),
+        ...(mapped.currentPeriodEnd && {
+          currentPeriodEnd: mapped.currentPeriodEnd,
+        }),
         updatedAt: new Date(),
       })
       .where(eq(subscriptions.id, sub.id));
 
     this.obs.info('Subscription updated from webhook', {
       subscriptionId: sub.id,
-      status,
+      status: mapped.status,
+      cancelAtPeriodEnd: mapped.cancelAtPeriodEnd,
     });
 
     // Orchestrator hook: tier changes, status flips (active ↔ cancelling
@@ -1281,25 +1282,20 @@ export class SubscriptionService extends BaseService {
     const userId = metadata.codex_user_id;
     const orgId = metadata.codex_organization_id;
 
-    // Trust Stripe's reported status on resume only when it maps cleanly
-    // onto our internal enum values ('active', 'past_due', 'paused',
-    // 'incomplete'). Stripe's own status strings (e.g. 'canceled',
-    // 'trialing', 'incomplete_expired', 'unpaid') do not overlap our
-    // internal enum — default to ACTIVE in that case since resume's
-    // expected outcome is 'active'.
-    const stripeStatus = stripeSubscription.status;
-    const nextStatus: (typeof SUBSCRIPTION_STATUS)[keyof typeof SUBSCRIPTION_STATUS] =
-      stripeStatus === SUBSCRIPTION_STATUS.ACTIVE ||
-      stripeStatus === SUBSCRIPTION_STATUS.PAST_DUE ||
-      stripeStatus === SUBSCRIPTION_STATUS.INCOMPLETE ||
-      stripeStatus === SUBSCRIPTION_STATUS.PAUSED
-        ? stripeStatus
-        : SUBSCRIPTION_STATUS.ACTIVE;
+    // Use the shared mapper with ACTIVE as the fallback — resume's
+    // expected outcome is that the subscription is active, even if Stripe
+    // reports an unmapped status like 'trialing'.
+    const mapped = mapStripeSubscriptionStatus(
+      stripeSubscription,
+      SUBSCRIPTION_STATUS.ACTIVE
+    );
+    const nextStatus = mapped.status;
 
     await this.db
       .update(subscriptions)
       .set({
         status: nextStatus,
+        cancelAtPeriodEnd: mapped.cancelAtPeriodEnd,
         updatedAt: new Date(),
       })
       .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
