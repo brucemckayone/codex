@@ -30,7 +30,7 @@
   import type { Snippet } from 'svelte';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
-  import { ContentCard, SkeletonContentCard } from '$lib/components/ui/ContentCard';
+  import { ContentCard } from '$lib/components/ui/ContentCard';
   import { ShoppingBagIcon, SearchXIcon } from '$lib/components/ui/Icon';
   import LibraryFilters from './LibraryFilters.svelte';
   import ContinueWatching from './ContinueWatching.svelte';
@@ -180,7 +180,7 @@
   {:else if isLoading && items.length === 0}
     <div class="content-grid content-grid--compact">
       {#each Array(6) as _, i (i)}
-        <SkeletonContentCard />
+        <ContentCard id="" title="" loading={true} />
       {/each}
     </div>
   {:else if items.length === 0 && !hasActiveFilters}
