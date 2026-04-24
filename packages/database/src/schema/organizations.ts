@@ -8,6 +8,7 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
+import { users } from './users';
 
 /**
  * Organizations table
@@ -25,6 +26,20 @@ export const organizations = pgTable(
     // Branding
     logoUrl: text('logo_url'),
     websiteUrl: text('website_url'),
+
+    /**
+     * The canonical Connect account owner for this org. Resolves "which
+     * Connect account is the org's?" — previously answered by an arbitrary
+     * .limit(1) because the unique constraint on stripe_connect_accounts
+     * is (user_id, organization_id), meaning N users per org are allowed
+     * to have their own Connect account. When the org has multiple, the
+     * one owned by this user is the canonical routing target for tier
+     * operations and revenue transfers. NULL means the org has not yet
+     * onboarded a Connect account.
+     */
+    primaryConnectAccountUserId: text(
+      'primary_connect_account_user_id'
+    ).references(() => users.id, { onDelete: 'set null' }),
 
     // Timestamps
     createdAt: timestamp('created_at', { withTimezone: true })

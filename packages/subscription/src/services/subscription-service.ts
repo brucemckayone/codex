@@ -40,6 +40,7 @@ import {
   creatorOrganizationAgreements,
   organizationFollowers,
   organizationMemberships,
+  organizations,
   pendingPayouts,
   stripeConnectAccounts,
   subscriptions,
@@ -283,12 +284,11 @@ export class SubscriptionService extends BaseService {
         throw new AlreadySubscribedError(userId, orgId);
       }
 
-      // Validate Connect account
-      const [connectAccount] = await this.db
-        .select()
-        .from(stripeConnectAccounts)
-        .where(eq(stripeConnectAccounts.organizationId, orgId))
-        .limit(1);
+      // Validate Connect account — resolved through the canonical
+      // organizations.primary_connect_account_user_id so orgs with
+      // multiple Connect accounts (one per user) route to the same
+      // account for every tier op and revenue transfer.
+      const connectAccount = await this.resolvePrimaryConnect(orgId);
 
       if (!connectAccount?.chargesEnabled || !connectAccount?.payoutsEnabled) {
         throw new ConnectAccountNotReadyError(orgId);
@@ -2014,12 +2014,9 @@ export class SubscriptionService extends BaseService {
   ): Promise<void> {
     const transferGroup = `sub_${subscriptionId}`;
 
-    // Get org's Connect account
-    const [orgConnect] = await this.db
-      .select()
-      .from(stripeConnectAccounts)
-      .where(eq(stripeConnectAccounts.organizationId, orgId))
-      .limit(1);
+    // Get org's Connect account via the canonical primary user FK so
+    // transfers route to the same account checkout validated against.
+    const orgConnect = await this.resolvePrimaryConnect(orgId);
 
     // Transfer org fee
     if (orgConnect?.chargesEnabled && orgFeeCents > 0) {
@@ -2271,5 +2268,50 @@ export class SubscriptionService extends BaseService {
         });
       }
     }
+  }
+
+  /**
+   * Resolve the org's canonical Connect account by
+   * organizations.primary_connect_account_user_id, falling back to the
+   * oldest row keyed by organization when the column is not populated.
+   * Returns null when the org has no Connect account at all.
+   */
+  private async resolvePrimaryConnect(
+    orgId: string
+  ): Promise<typeof stripeConnectAccounts.$inferSelect | null> {
+    const [org] = await this.db
+      .select({
+        primaryConnectAccountUserId: organizations.primaryConnectAccountUserId,
+      })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1);
+
+    const primaryUserId = org?.primaryConnectAccountUserId ?? null;
+
+    if (primaryUserId) {
+      const [pinned] = await this.db
+        .select()
+        .from(stripeConnectAccounts)
+        .where(
+          and(
+            eq(stripeConnectAccounts.organizationId, orgId),
+            eq(stripeConnectAccounts.userId, primaryUserId)
+          )
+        )
+        .limit(1);
+      if (pinned) return pinned;
+    }
+
+    // Fallback for legacy orgs that haven't yet been backfilled — falls
+    // back to arbitrary .limit(1), which matches the pre-audit behaviour.
+    // Fresh orgs always populate primary_connect_account_user_id at
+    // onboarding so this branch shrinks to zero over time.
+    const [fallback] = await this.db
+      .select()
+      .from(stripeConnectAccounts)
+      .where(eq(stripeConnectAccounts.organizationId, orgId))
+      .limit(1);
+    return fallback ?? null;
   }
 }

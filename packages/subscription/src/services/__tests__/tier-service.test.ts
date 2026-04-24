@@ -200,6 +200,57 @@ describe('TierService', () => {
       expect(pricesCalls[0][0]).toMatchObject({ currency: 'gbp' });
       expect(pricesCalls[1][0]).toMatchObject({ currency: 'gbp' });
     });
+
+    it('should resolve Connect via organizations.primary_connect_account_user_id (T10/X8)', async () => {
+      // Two users in the same org, each with their own Connect account.
+      // The primary column pins the canonical owner so tier ops route
+      // there, not an arbitrary .limit(1) row. Exercise this by making
+      // the primary owner INACTIVE and a secondary user ACTIVE — the
+      // service should refuse (primary is not ready) rather than
+      // silently succeed against the secondary account.
+      const userIds = await seedTestUsers(db, 2);
+      const [primaryUser, secondaryUser] = userIds;
+
+      const [org] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('primary-connect'),
+            creatorId: primaryUser,
+          })
+        )
+        .returning();
+
+      // Primary owner: Connect NOT ready
+      await db.insert(stripeConnectAccounts).values(
+        createTestConnectAccountInput(org.id, primaryUser, {
+          chargesEnabled: false,
+          payoutsEnabled: false,
+          status: 'restricted',
+        })
+      );
+      // Secondary user: Connect IS ready
+      await db.insert(stripeConnectAccounts).values(
+        createTestConnectAccountInput(org.id, secondaryUser, {
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          status: 'active',
+        })
+      );
+      // Pin primary_connect_account_user_id to the non-ready user.
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: primaryUser })
+        .where(eq(organizations.id, org.id));
+
+      await expect(
+        service.createTier(org.id, {
+          name: 'Gated',
+          priceMonthly: 499,
+          priceAnnual: 4990,
+        })
+      ).rejects.toThrow(ConnectAccountNotReadyError);
+    });
   });
 
   // ─── updateTier ─────────────────────────────────────────────────────
