@@ -100,6 +100,7 @@ export function createTestOrganization(
     description: 'A test organization for automated testing',
     logoUrl: null,
     websiteUrl: null,
+    primaryConnectAccountUserId: null,
     createdAt: now,
     updatedAt: now,
     deletedAt: null,

@@ -48,6 +48,14 @@ vi.mock('@codex/database', () => ({
 
 vi.mock('@codex/subscription', () => ({
   SubscriptionService: vi.fn(),
+  // Dashboard sync-back path (Codex-s7h0y) instantiates TierService even
+  // on unrelated events. Provide a default stub so `new TierService(...)`
+  // doesn't throw; the apply* methods return null by default (non-sync-back
+  // events are not routed through them, so this is a safe no-op).
+  TierService: vi.fn().mockImplementation(() => ({
+    applyStripeProductUpdate: vi.fn().mockResolvedValue(null),
+    applyStripePriceCreated: vi.fn().mockResolvedValue(null),
+  })),
   // `invalidateForUser` is a named export from `@codex/subscription` that
   // both webhook handlers import. We spy on it to assert the contract.
   invalidateForUser: vi.fn(),

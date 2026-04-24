@@ -49,7 +49,7 @@ All webhooks bypass `procedure()`. Flow: `verifyStripeSignature()` (HMAC) → `c
 |---|---|---|---|
 | `/webhooks/stripe/booking` | `STRIPE_WEBHOOK_SECRET_BOOKING` | `handleCheckoutCompleted` | `checkout.session.completed` (payment mode) |
 | `/webhooks/stripe/payment` | `STRIPE_WEBHOOK_SECRET_PAYMENT` | `handlePaymentWebhook` | `payment_intent.*`, `charge.*` (incl. refunds) |
-| `/webhooks/stripe/subscription` | `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` | `handleSubscriptionWebhook` | `checkout.session.completed` (subscription mode), `customer.subscription.*`, `invoice.*` |
+| `/webhooks/stripe/subscription` | `STRIPE_WEBHOOK_SECRET_SUBSCRIPTION` | `handleSubscriptionWebhook` | `checkout.session.completed` (subscription mode), `customer.subscription.*`, `invoice.*`, `product.updated`, `price.created`, `price.updated` |
 | `/webhooks/stripe/connect` | `STRIPE_WEBHOOK_SECRET_CONNECT` | `handleConnectWebhook` | `account.*`, `capability.*`, `person.*` |
 | `/webhooks/stripe/customer` | `STRIPE_WEBHOOK_SECRET_CUSTOMER` | (logging stub) | `customer.*` |
 | `/webhooks/stripe/dispute` | `STRIPE_WEBHOOK_SECRET_DISPUTE` | (logging stub) | `charge.dispute.*`, `radar.early_fraud_warning.*` |
@@ -103,6 +103,17 @@ POST /subscriptions/checkout → validate tier + Connect account → Stripe Sess
 Stripe Dashboard refund → /webhooks/stripe/payment (charge.refunded)
   → processRefund (idempotent) → purchase.status=refunded + soft-delete contentAccess
 ```
+
+### Dashboard Tier-Edit Sync-Back Flow (Codex-kqmvd Q1)
+```
+Operator edits tier in Stripe Dashboard → /webhooks/stripe/subscription
+  → product.updated → TierService.applyStripeProductUpdate → mirror name/description
+  → price.created   → TierService.applyStripePriceCreated  → adopt as canonical + archive old
+  → price.updated   → obs.error (log-only: archive-without-replacement is drift)
+  → waitUntil(cache.invalidate(orgId))  → stales ORG_TIERS so storefronts refetch
+```
+
+Operator action: `product.updated`, `price.created`, and `price.updated` must be added to the `/webhooks/stripe/subscription` endpoint in Stripe Dashboard. Without these events, TierService has no signal and Dashboard edits stay desynced — detection AND sync-back both require the webhook delivery.
 
 ## Config Variables
 

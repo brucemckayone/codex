@@ -41,6 +41,13 @@ vi.mock('@codex/database', () => ({
 
 vi.mock('@codex/subscription', () => ({
   SubscriptionService: vi.fn(),
+  // Dashboard sync-back path (Codex-s7h0y) instantiates TierService even
+  // on unrelated events. Provide a default stub so `new TierService(...)`
+  // doesn't throw; revocation tests don't care about sync-back behaviour.
+  TierService: vi.fn().mockImplementation(() => ({
+    applyStripeProductUpdate: vi.fn().mockResolvedValue(null),
+    applyStripePriceCreated: vi.fn().mockResolvedValue(null),
+  })),
   // invalidateForUser is exercised in the sibling invalidation test; here we
   // only care that it doesn't throw synchronously in revocation scenarios.
   invalidateForUser: vi.fn(),

@@ -12,6 +12,7 @@
  * - DB cleanup always runs (finally block)
  */
 
+import type { KVNamespace } from '@cloudflare/workers-types';
 import { STRIPE_EVENTS } from '@codex/constants';
 import {
   createMockHonoContext,
@@ -31,6 +32,10 @@ vi.mock('@codex/database', () => ({
 
 vi.mock('@codex/subscription', () => ({
   SubscriptionService: vi.fn(),
+  // Dashboard sync-back path (Codex-s7h0y) goes through TierService.
+  // Mock the class so the handler's `new TierService(...)` returns our
+  // stub with controllable apply* method behaviour.
+  TierService: vi.fn(),
   // The handler also imports `invalidateForUser` — stub it so the module
   // mock is complete. Cache-invalidation contract is tested separately in
   // `subscription-webhook-invalidation.test.ts`.
@@ -45,7 +50,7 @@ vi.mock('@codex/worker-utils', () => ({
 }));
 
 import { createPerRequestDbClient } from '@codex/database';
-import { SubscriptionService } from '@codex/subscription';
+import { SubscriptionService, TierService } from '@codex/subscription';
 import { sendEmailToWorker } from '@codex/worker-utils';
 import { handleSubscriptionWebhook } from '../subscription-webhook';
 
@@ -85,6 +90,8 @@ describe('handleSubscriptionWebhook', () => {
   let mockHandleTrialWillEnd: ReturnType<typeof vi.fn>;
   let mockHandlePaused: ReturnType<typeof vi.fn>;
   let mockHandleResumed: ReturnType<typeof vi.fn>;
+  let mockApplyProductUpdate: ReturnType<typeof vi.fn>;
+  let mockApplyPriceCreated: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -97,6 +104,11 @@ describe('handleSubscriptionWebhook', () => {
     mockHandleTrialWillEnd = vi.fn().mockResolvedValue(undefined);
     mockHandlePaused = vi.fn().mockResolvedValue(undefined);
     mockHandleResumed = vi.fn().mockResolvedValue(undefined);
+    // Default the sync-back methods to null (no-match / no-op) so the
+    // happy-path non-drift events exercise the non-changed branch without
+    // surprising any unrelated test that fires a product/price event.
+    mockApplyProductUpdate = vi.fn().mockResolvedValue(null);
+    mockApplyPriceCreated = vi.fn().mockResolvedValue(null);
     mockCleanup = vi.fn();
     mockDb = { mock: 'database' };
 
@@ -126,6 +138,13 @@ describe('handleSubscriptionWebhook', () => {
       handleInvoicePaymentFailed: mockHandleInvoiceFailed,
       handleTrialWillEnd: mockHandleTrialWillEnd,
     }));
+
+    (TierService as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      () => ({
+        applyStripeProductUpdate: mockApplyProductUpdate,
+        applyStripePriceCreated: mockApplyPriceCreated,
+      })
+    );
   });
 
   function createEvent(
@@ -410,38 +429,94 @@ describe('handleSubscriptionWebhook', () => {
 
   // ─── Unhandled event types ──────────────────────────────────────────────────
 
-  // ─── Dashboard drift detection (product.updated / price.updated) ───────────
-  // Stripe Dashboard edits to Codex-managed tier Products/Prices don't sync
-  // back to the subscriptionTiers table today. The handler logs an obs.error
-  // so operators can reconcile manually. A Codex-managed tier is identified
-  // by metadata we set in TierService (codex_type='subscription_tier' on
-  // products, codex_organization_id on prices).
+  // ─── Dashboard sync-back (product.updated / price.created / price.updated) ─
+  // Q1 product decision (Codex-kqmvd epic): Stripe Dashboard edits to
+  // Codex-managed tier Products/Prices auto-propagate back to the
+  // subscriptionTiers table. Q1.1 (Codex-s7h0y) wires the sync-back via
+  // TierService.applyStripeProductUpdate + applyStripePriceCreated.
+  // A Codex-managed tier is identified by metadata we set in TierService
+  // (codex_type='subscription_tier' on products, codex_organization_id on
+  // prices). The price.updated arm remains detect-only (adoption happens
+  // on price.created — Dashboard amount-change workflow).
 
-  describe('product.updated (Dashboard drift detection)', () => {
-    it('should log obs.error when a Codex-managed tier Product is edited', async () => {
-      const event = createEvent(STRIPE_EVENTS.PRODUCT_UPDATED, {
+  describe('product.updated (Dashboard sync-back)', () => {
+    it('should mirror the edit to the tier and invalidate the org cache when changed', async () => {
+      mockApplyProductUpdate.mockResolvedValue({
+        tierId: 'tier-1',
+        organizationId: 'org-1',
+        changed: true,
+      });
+      const fakeKV = {
+        get: vi.fn(),
+        put: vi.fn(),
+        delete: vi.fn(),
+      } as unknown as KVNamespace;
+      const { context, mock } = createContext({ CACHE_KV: fakeKV });
+
+      const product = {
         id: 'prod_tier_123',
         name: 'Renamed in Dashboard',
+        description: 'New description',
         metadata: {
           codex_type: 'subscription_tier',
           codex_organization_id: 'org-1',
         },
-      });
-      const { context, mock } = createContext();
+      };
+      const event = createEvent(STRIPE_EVENTS.PRODUCT_UPDATED, product);
 
       await handleSubscriptionWebhook(event, mockStripe, context);
 
-      expect(mock._obs.error).toHaveBeenCalledWith(
-        'Codex-managed tier Product edited in Stripe Dashboard',
+      expect(mockApplyProductUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'prod_tier_123' })
+      );
+      expect(mock._obs.info).toHaveBeenCalledWith(
+        'Synced Stripe Dashboard product edit to tier',
         expect.objectContaining({
-          stripeProductId: 'prod_tier_123',
+          tierId: 'tier-1',
           organizationId: 'org-1',
-          productName: 'Renamed in Dashboard',
+          stripeProductId: 'prod_tier_123',
         })
       );
+      // Cache invalidation went through waitUntil (fire-and-forget).
+      expect(context.executionCtx.waitUntil).toHaveBeenCalledTimes(1);
     });
 
-    it('should silently ignore product.updated for non-Codex products', async () => {
+    it('should skip cache invalidation when sync-back reports no change (idempotent replay)', async () => {
+      mockApplyProductUpdate.mockResolvedValue({
+        tierId: 'tier-2',
+        organizationId: 'org-2',
+        changed: false,
+      });
+      const fakeKV = {
+        get: vi.fn(),
+        put: vi.fn(),
+        delete: vi.fn(),
+      } as unknown as KVNamespace;
+      const { context, mock } = createContext({ CACHE_KV: fakeKV });
+
+      const event = createEvent(STRIPE_EVENTS.PRODUCT_UPDATED, {
+        id: 'prod_tier_noop',
+        metadata: {
+          codex_type: 'subscription_tier',
+          codex_organization_id: 'org-2',
+        },
+      });
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mockApplyProductUpdate).toHaveBeenCalledOnce();
+      expect(mock._obs.info).not.toHaveBeenCalledWith(
+        'Synced Stripe Dashboard product edit to tier',
+        expect.anything()
+      );
+      expect(context.executionCtx.waitUntil).not.toHaveBeenCalled();
+    });
+
+    it('should pass non-Codex products through the service (which returns null)', async () => {
+      // applyStripeProductUpdate filters on metadata itself and returns
+      // null for non-Codex products. The handler only logs + invalidates
+      // on a `changed: true` result — null triggers neither.
+      mockApplyProductUpdate.mockResolvedValue(null);
       const event = createEvent(STRIPE_EVENTS.PRODUCT_UPDATED, {
         id: 'prod_external_456',
         metadata: { something: 'else' },
@@ -450,22 +525,97 @@ describe('handleSubscriptionWebhook', () => {
 
       await handleSubscriptionWebhook(event, mockStripe, context);
 
-      expect(mock._obs.error).not.toHaveBeenCalled();
+      expect(mockApplyProductUpdate).toHaveBeenCalledOnce();
+      expect(mock._obs.info).not.toHaveBeenCalledWith(
+        'Synced Stripe Dashboard product edit to tier',
+        expect.anything()
+      );
+      expect(context.executionCtx.waitUntil).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('price.created (Dashboard sync-back)', () => {
+    it('should adopt the new Price as canonical and invalidate the org cache', async () => {
+      mockApplyPriceCreated.mockResolvedValue({
+        tierId: 'tier-pc',
+        organizationId: 'org-pc',
+        changed: true,
+      });
+      const fakeKV = {
+        get: vi.fn(),
+        put: vi.fn(),
+        delete: vi.fn(),
+      } as unknown as KVNamespace;
+      const { context, mock } = createContext({ CACHE_KV: fakeKV });
+
+      const event = createEvent(STRIPE_EVENTS.PRICE_CREATED, {
+        id: 'price_new_15_00',
+        active: true,
+        unit_amount: 1500,
+        recurring: { interval: 'month' },
+        product: 'prod_tier_pc',
+        metadata: { codex_organization_id: 'org-pc', interval: 'month' },
+      });
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mockApplyPriceCreated).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'price_new_15_00' })
+      );
+      expect(mock._obs.info).toHaveBeenCalledWith(
+        'Adopted Stripe Dashboard-created Price as canonical',
+        expect.objectContaining({
+          tierId: 'tier-pc',
+          organizationId: 'org-pc',
+          stripePriceId: 'price_new_15_00',
+        })
+      );
+      expect(context.executionCtx.waitUntil).toHaveBeenCalledTimes(1);
     });
 
-    it('should silently ignore product.updated with no metadata', async () => {
-      const event = createEvent(STRIPE_EVENTS.PRODUCT_UPDATED, {
-        id: 'prod_bare',
+    it('should no-op when the service reports no change (replay on already-adopted price)', async () => {
+      mockApplyPriceCreated.mockResolvedValue({
+        tierId: 'tier-pc',
+        organizationId: 'org-pc',
+        changed: false,
+      });
+      const event = createEvent(STRIPE_EVENTS.PRICE_CREATED, {
+        id: 'price_replay',
+        active: true,
+        metadata: { codex_organization_id: 'org-pc' },
       });
       const { context, mock } = createContext();
 
       await handleSubscriptionWebhook(event, mockStripe, context);
 
-      expect(mock._obs.error).not.toHaveBeenCalled();
+      expect(mockApplyPriceCreated).toHaveBeenCalledOnce();
+      expect(mock._obs.info).not.toHaveBeenCalledWith(
+        'Adopted Stripe Dashboard-created Price as canonical',
+        expect.anything()
+      );
+      expect(context.executionCtx.waitUntil).not.toHaveBeenCalled();
+    });
+
+    it('should pass non-Codex prices through the service (which returns null)', async () => {
+      mockApplyPriceCreated.mockResolvedValue(null);
+      const event = createEvent(STRIPE_EVENTS.PRICE_CREATED, {
+        id: 'price_external',
+        active: true,
+        metadata: {},
+      });
+      const { context, mock } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mockApplyPriceCreated).toHaveBeenCalledOnce();
+      expect(mock._obs.info).not.toHaveBeenCalledWith(
+        'Adopted Stripe Dashboard-created Price as canonical',
+        expect.anything()
+      );
     });
   });
 
-  describe('price.updated (Dashboard drift detection)', () => {
+  describe('price.updated (Dashboard drift detection — log only)', () => {
     it('should log obs.error when a Codex-managed tier Price is edited', async () => {
       const event = createEvent(STRIPE_EVENTS.PRICE_UPDATED, {
         id: 'price_tier_abc',

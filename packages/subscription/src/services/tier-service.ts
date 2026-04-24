@@ -629,6 +629,196 @@ export class TierService extends BaseService {
   }
 
   /**
+   * Mirror a Stripe Dashboard `product.updated` event back into
+   * subscriptionTiers. Q1 product decision: Dashboard editing of
+   * Codex-managed tier products is in-bounds and auto-propagates.
+   *
+   * Only name + description mirror today (these are the Stripe Product
+   * fields Codex owns). Active/archived flag is deliberately NOT mirrored
+   * because `stripe.products.update({ active: false })` is how we
+   * soft-delete tiers — following that mirror would create a loop where
+   * a DB soft-delete archives the Stripe product, the webhook fires, and
+   * we try to re-soft-delete a row already marked deletedAt.
+   *
+   * Idempotent on replay: when the tier already matches the incoming
+   * product fields, returns `{ changed: false }` and writes nothing.
+   * Returns null when the event isn't for a Codex-managed tier or the
+   * tier no longer exists (deleted after the Dashboard edit was queued).
+   */
+  async applyStripeProductUpdate(product: Stripe.Product): Promise<{
+    tierId: string;
+    organizationId: string;
+    changed: boolean;
+  } | null> {
+    if (product.metadata?.codex_type !== 'subscription_tier') return null;
+    const orgId = product.metadata.codex_organization_id;
+    if (!orgId) return null;
+
+    try {
+      const [tier] = await this.db
+        .select()
+        .from(subscriptionTiers)
+        .where(
+          and(
+            eq(subscriptionTiers.stripeProductId, product.id),
+            eq(subscriptionTiers.organizationId, orgId),
+            isNull(subscriptionTiers.deletedAt)
+          )
+        )
+        .limit(1);
+
+      if (!tier) return null;
+
+      const newDescription = product.description ?? null;
+      const nameChanged = tier.name !== product.name;
+      const descriptionChanged = tier.description !== newDescription;
+
+      if (!nameChanged && !descriptionChanged) {
+        return { tierId: tier.id, organizationId: orgId, changed: false };
+      }
+
+      await this.db
+        .update(subscriptionTiers)
+        .set({
+          ...(nameChanged && { name: product.name }),
+          ...(descriptionChanged && { description: newDescription }),
+          updatedAt: new Date(),
+        })
+        .where(eq(subscriptionTiers.id, tier.id));
+
+      this.obs.info('Mirrored Stripe Dashboard product edit to tier', {
+        tierId: tier.id,
+        organizationId: orgId,
+        stripeProductId: product.id,
+        nameChanged,
+        descriptionChanged,
+      });
+
+      return { tierId: tier.id, organizationId: orgId, changed: true };
+    } catch (error) {
+      this.handleError(error, 'applyStripeProductUpdate');
+    }
+  }
+
+  /**
+   * Adopt a newly-created Stripe Price as the canonical price for a
+   * Codex-managed tier, archiving whichever price the tier previously
+   * referenced for the same billing interval.
+   *
+   * This mirrors Codex's own `updateTier` flow: Stripe Prices are
+   * immutable, so a Dashboard operator changing an amount creates a new
+   * Price. Without this handler, the new Price would sit orphaned in
+   * Stripe and future checkouts would continue to use the old amount.
+   *
+   * Requirements for adoption (all must hold, otherwise returns null):
+   * - event carries `codex_organization_id` in metadata
+   * - price is active (`active=true`) and has a recurring interval
+   * - the tier exists (non-deleted) and is owned by the same org
+   * - the tier's current price id for that interval is different from
+   *   the incoming price id (prevents replay from archiving a price the
+   *   tier already adopted)
+   *
+   * The old price is archived via `stripe.prices.update({ active: false })`
+   * after the DB commit. A failure to archive is logged but does not
+   * fail the webhook — Stripe is the source of truth, the tier is
+   * already updated, and the orphaned active-but-unreferenced price is
+   * operator-visible in Dashboard.
+   */
+  async applyStripePriceCreated(price: Stripe.Price): Promise<{
+    tierId: string;
+    organizationId: string;
+    changed: boolean;
+  } | null> {
+    const orgId = price.metadata?.codex_organization_id;
+    if (!orgId) return null;
+    if (!price.active) return null;
+
+    const interval = price.recurring?.interval;
+    if (interval !== 'month' && interval !== 'year') return null;
+
+    const productId =
+      typeof price.product === 'string' ? price.product : price.product?.id;
+    if (!productId) return null;
+
+    try {
+      const [tier] = await this.db
+        .select()
+        .from(subscriptionTiers)
+        .where(
+          and(
+            eq(subscriptionTiers.stripeProductId, productId),
+            eq(subscriptionTiers.organizationId, orgId),
+            isNull(subscriptionTiers.deletedAt)
+          )
+        )
+        .limit(1);
+
+      if (!tier) return null;
+
+      const isMonthly = interval === 'month';
+      const currentPriceId = isMonthly
+        ? tier.stripePriceMonthlyId
+        : tier.stripePriceAnnualId;
+
+      // Idempotency: replaying the same price.created event after the
+      // tier has already adopted the new price is a silent no-op.
+      if (currentPriceId === price.id) {
+        return { tierId: tier.id, organizationId: orgId, changed: false };
+      }
+
+      const newAmount = price.unit_amount ?? 0;
+
+      await this.db
+        .update(subscriptionTiers)
+        .set({
+          ...(isMonthly
+            ? { stripePriceMonthlyId: price.id, priceMonthly: newAmount }
+            : { stripePriceAnnualId: price.id, priceAnnual: newAmount }),
+          updatedAt: new Date(),
+        })
+        .where(eq(subscriptionTiers.id, tier.id));
+
+      this.obs.info(
+        'Adopted Stripe Dashboard-created Price as canonical for tier',
+        {
+          tierId: tier.id,
+          organizationId: orgId,
+          interval,
+          oldStripePriceId: currentPriceId,
+          newStripePriceId: price.id,
+          newAmount,
+        }
+      );
+
+      // Archive the old price in Stripe to match Codex-UI behaviour.
+      // Non-fatal on failure — the DB already has the new price; the
+      // stale active price in Stripe is a recoverable operator issue.
+      if (currentPriceId) {
+        try {
+          await this.stripe.prices.update(currentPriceId, { active: false });
+        } catch (cleanupError) {
+          this.obs.warn(
+            'Failed to archive superseded Stripe Price after Dashboard sync-back',
+            {
+              tierId: tier.id,
+              organizationId: orgId,
+              stalePriceId: currentPriceId,
+              error:
+                cleanupError instanceof Error
+                  ? cleanupError.message
+                  : String(cleanupError),
+            }
+          );
+        }
+      }
+
+      return { tierId: tier.id, organizationId: orgId, changed: true };
+    } catch (error) {
+      this.handleError(error, 'applyStripePriceCreated');
+    }
+  }
+
+  /**
    * Resolve a tier by id for an access-check or historic read path,
    * **including soft-deleted (archived) tiers**.
    *

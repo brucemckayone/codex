@@ -32,7 +32,7 @@ import { VersionedCache } from '@codex/cache';
 import { STRIPE_EVENTS } from '@codex/constants';
 import { createPerRequestDbClient } from '@codex/database';
 import type { WebhookHandlerResult } from '@codex/subscription';
-import { SubscriptionService } from '@codex/subscription';
+import { SubscriptionService, TierService } from '@codex/subscription';
 import { sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
@@ -194,6 +194,54 @@ export async function handleSubscriptionWebhook(
       },
       stripe
     );
+
+    // TierService is constructed lazily — only `product.updated` and
+    // `price.created` events use it for Dashboard sync-back. All other
+    // events fall through to SubscriptionService.
+    const tierService = new TierService(
+      { db, environment: c.env.ENVIRONMENT || 'development' },
+      stripe
+    );
+
+    /**
+     * Fire-and-forget org-level cache invalidation after a Stripe
+     * Dashboard sync-back write. Bumps the org's version key which
+     * stales `ORG_TIERS` + `ORG_CONFIG` + every other org-scoped cache
+     * in one KV write. No-op when CACHE_KV is absent or the sync-back
+     * reported `changed: false` (idempotent replay).
+     */
+    const invalidateOrgAfterSyncBack = (
+      result: {
+        tierId: string;
+        organizationId: string;
+        changed: boolean;
+      } | null
+    ): void => {
+      if (!cache || !result?.changed) return;
+      try {
+        c.executionCtx.waitUntil(
+          cache.invalidate(result.organizationId).catch((error) => {
+            obs?.warn(
+              'subscription-webhook: org cache invalidation failed after Dashboard sync-back',
+              {
+                organizationId: result.organizationId,
+                tierId: result.tierId,
+                error: error instanceof Error ? error.message : String(error),
+              }
+            );
+          })
+        );
+      } catch (error) {
+        obs?.warn(
+          'subscription-webhook: waitUntil threw synchronously (sync-back invalidate)',
+          {
+            organizationId: result.organizationId,
+            tierId: result.tierId,
+            error: error instanceof Error ? error.message : String(error),
+          }
+        );
+      }
+    };
 
     switch (event.type) {
       case STRIPE_EVENTS.CHECKOUT_COMPLETED: {
@@ -399,29 +447,56 @@ export async function handleSubscriptionWebhook(
       }
 
       case STRIPE_EVENTS.PRODUCT_UPDATED: {
-        // Stripe Dashboard edits to a Codex-managed tier Product do not
-        // propagate to subscriptionTiers.name/description today. Emit
-        // obs.error on detection so operators see the drift; the sync-back
-        // decision is Q1-gated (see docs/subscription-audit: open-question
-        // on whether Dashboard edits are in-bounds).
+        // Q1 product decision: Dashboard edits to Codex-managed tier
+        // Products auto-propagate back to subscriptionTiers. Mirrors
+        // name + description only (active flag is reserved for Codex's
+        // own soft-delete path — see TierService.applyStripeProductUpdate).
         const product = event.data.object as Stripe.Product;
-        if (product.metadata?.codex_type === 'subscription_tier') {
-          obs?.error('Codex-managed tier Product edited in Stripe Dashboard', {
+        const syncResult = await tierService.applyStripeProductUpdate(product);
+
+        if (syncResult?.changed) {
+          obs?.info('Synced Stripe Dashboard product edit to tier', {
+            tierId: syncResult.tierId,
+            organizationId: syncResult.organizationId,
             stripeProductId: product.id,
-            organizationId: product.metadata.codex_organization_id,
-            productName: product.name,
             eventId: event.id,
           });
+          invalidateOrgAfterSyncBack(syncResult);
+        }
+        break;
+      }
+
+      case STRIPE_EVENTS.PRICE_CREATED: {
+        // Q1 product decision (sync-back part b): when a Dashboard
+        // operator creates a new Price on a Codex-managed Product (the
+        // workflow for changing an amount, because Stripe Prices are
+        // immutable), adopt it as canonical for the tier+interval and
+        // archive whichever Price the tier previously referenced.
+        // See TierService.applyStripePriceCreated for the idempotency
+        // + metadata contract.
+        const price = event.data.object as Stripe.Price;
+        const syncResult = await tierService.applyStripePriceCreated(price);
+
+        if (syncResult?.changed) {
+          obs?.info('Adopted Stripe Dashboard-created Price as canonical', {
+            tierId: syncResult.tierId,
+            organizationId: syncResult.organizationId,
+            stripePriceId: price.id,
+            eventId: event.id,
+          });
+          invalidateOrgAfterSyncBack(syncResult);
         }
         break;
       }
 
       case STRIPE_EVENTS.PRICE_UPDATED: {
         // Stripe Prices are immutable (amount/currency/interval), so only
-        // metadata + nickname + active flip fire this event. TierService
-        // already creates a new Price on amount changes, so this webhook
-        // only detects OUT-OF-BAND edits. Codex-created Prices carry
-        // codex_organization_id in metadata; other orgs' prices pass through.
+        // metadata + nickname + active flip fire this event. Adoption of
+        // replacement Prices happens on PRICE_CREATED (Dashboard workflow
+        // for amount changes is "create new, archive old"). This arm is
+        // therefore detect-only: an archive-without-replacement (operator
+        // error) or a metadata/nickname edit is logged as obs.error so
+        // operators see the drift but no sync-back happens here.
         const price = event.data.object as Stripe.Price;
         if (price.metadata?.codex_organization_id) {
           obs?.error('Codex-managed tier Price edited in Stripe Dashboard', {

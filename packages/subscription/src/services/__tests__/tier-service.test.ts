@@ -802,6 +802,267 @@ describe('TierService', () => {
     });
   });
 
+  // ─── applyStripeProductUpdate (Q1 Dashboard sync-back) ──────────────────
+
+  describe('applyStripeProductUpdate', () => {
+    /** Helper: build a minimal Stripe.Product payload. */
+    function buildProduct(
+      overrides: Partial<{
+        id: string;
+        name: string;
+        description: string | null;
+        metadata: Record<string, string>;
+      }> = {}
+    ) {
+      return {
+        id: 'prod_stub',
+        name: 'Stubbed',
+        description: null,
+        metadata: {
+          codex_type: 'subscription_tier',
+          codex_organization_id: 'will-be-overridden',
+          ...(overrides.metadata ?? {}),
+        },
+        ...overrides,
+      } as unknown as import('stripe').default.Product;
+    }
+
+    it('should mirror name + description and return changed=true', async () => {
+      const org = await createOrgWithConnect('sync-prod-a');
+      const tier = await service.createTier(org.id, {
+        name: 'Pro',
+        description: 'Old description',
+        priceMonthly: 999,
+        priceAnnual: 9990,
+      });
+
+      const result = await service.applyStripeProductUpdate(
+        buildProduct({
+          id: tier.stripeProductId ?? 'missing-product-id',
+          name: 'Pro (renamed)',
+          description: 'Brand new description',
+          metadata: {
+            codex_type: 'subscription_tier',
+            codex_organization_id: org.id,
+          },
+        })
+      );
+
+      expect(result).toEqual({
+        tierId: tier.id,
+        organizationId: org.id,
+        changed: true,
+      });
+
+      const [row] = await db
+        .select({
+          name: subscriptionTiers.name,
+          description: subscriptionTiers.description,
+        })
+        .from(subscriptionTiers)
+        .where(eq(subscriptionTiers.id, tier.id));
+      expect(row.name).toBe('Pro (renamed)');
+      expect(row.description).toBe('Brand new description');
+    });
+
+    it('should return changed=false when name + description already match (idempotent replay)', async () => {
+      const org = await createOrgWithConnect('sync-prod-b');
+      const tier = await service.createTier(org.id, {
+        name: 'Basic',
+        description: 'Unchanged',
+        priceMonthly: 499,
+        priceAnnual: 4990,
+      });
+
+      const result = await service.applyStripeProductUpdate(
+        buildProduct({
+          id: tier.stripeProductId ?? 'missing-product-id',
+          name: 'Basic',
+          description: 'Unchanged',
+          metadata: {
+            codex_type: 'subscription_tier',
+            codex_organization_id: org.id,
+          },
+        })
+      );
+
+      expect(result).toEqual({
+        tierId: tier.id,
+        organizationId: org.id,
+        changed: false,
+      });
+    });
+
+    it('should return null for non-Codex products (metadata missing codex_type)', async () => {
+      const result = await service.applyStripeProductUpdate(
+        buildProduct({
+          id: 'prod_external',
+          metadata: { someone_elses: 'thing' },
+        })
+      );
+      expect(result).toBeNull();
+    });
+
+    it('should return null when the tier has been soft-deleted since the edit was queued', async () => {
+      const org = await createOrgWithConnect('sync-prod-c');
+      const tier = await service.createTier(org.id, {
+        name: 'Deprecated',
+        priceMonthly: 499,
+        priceAnnual: 4990,
+      });
+      await service.deleteTier(tier.id, org.id);
+
+      const result = await service.applyStripeProductUpdate(
+        buildProduct({
+          id: tier.stripeProductId ?? 'missing-product-id',
+          name: 'Too Late',
+          metadata: {
+            codex_type: 'subscription_tier',
+            codex_organization_id: org.id,
+          },
+        })
+      );
+      expect(result).toBeNull();
+    });
+  });
+
+  // ─── applyStripePriceCreated (Q1 Dashboard sync-back) ───────────────────
+
+  describe('applyStripePriceCreated', () => {
+    /** Helper: build a minimal Stripe.Price payload. */
+    function buildPrice(args: {
+      id: string;
+      product: string;
+      orgId: string;
+      interval: 'month' | 'year';
+      unitAmount?: number;
+      active?: boolean;
+    }) {
+      return {
+        id: args.id,
+        active: args.active ?? true,
+        unit_amount: args.unitAmount ?? 1999,
+        currency: 'gbp',
+        recurring: { interval: args.interval },
+        product: args.product,
+        metadata: {
+          codex_organization_id: args.orgId,
+          interval: args.interval,
+        },
+      } as unknown as import('stripe').default.Price;
+    }
+
+    it('should adopt the new Price for the monthly interval and archive the old Price in Stripe', async () => {
+      const org = await createOrgWithConnect('sync-price-month');
+      const tier = await service.createTier(org.id, {
+        name: 'Fan',
+        priceMonthly: 500,
+        priceAnnual: 5000,
+      });
+
+      const oldMonthlyId = tier.stripePriceMonthlyId ?? 'missing-old-id';
+      const pricesUpdate = stripe.prices.update as unknown as ReturnType<
+        typeof vi.fn
+      >;
+      pricesUpdate.mockClear();
+
+      const result = await service.applyStripePriceCreated(
+        buildPrice({
+          id: 'price_new_month_1500',
+          product: tier.stripeProductId ?? 'missing-product-id',
+          orgId: org.id,
+          interval: 'month',
+          unitAmount: 1500,
+        })
+      );
+
+      expect(result).toEqual({
+        tierId: tier.id,
+        organizationId: org.id,
+        changed: true,
+      });
+
+      const [row] = await db
+        .select({
+          priceMonthly: subscriptionTiers.priceMonthly,
+          priceAnnual: subscriptionTiers.priceAnnual,
+          stripePriceMonthlyId: subscriptionTiers.stripePriceMonthlyId,
+          stripePriceAnnualId: subscriptionTiers.stripePriceAnnualId,
+        })
+        .from(subscriptionTiers)
+        .where(eq(subscriptionTiers.id, tier.id));
+      expect(row.priceMonthly).toBe(1500);
+      expect(row.stripePriceMonthlyId).toBe('price_new_month_1500');
+      // Annual must remain untouched.
+      expect(row.priceAnnual).toBe(5000);
+      expect(row.stripePriceAnnualId).toBe(tier.stripePriceAnnualId);
+      // Old monthly price archived via Stripe API.
+      expect(pricesUpdate).toHaveBeenCalledWith(oldMonthlyId, {
+        active: false,
+      });
+    });
+
+    it('should return changed=false when the tier already references the incoming price (idempotent replay)', async () => {
+      const org = await createOrgWithConnect('sync-price-replay');
+      const tier = await service.createTier(org.id, {
+        name: 'Replay',
+        priceMonthly: 999,
+        priceAnnual: 9990,
+      });
+      const pricesUpdate = stripe.prices.update as unknown as ReturnType<
+        typeof vi.fn
+      >;
+      pricesUpdate.mockClear();
+
+      const result = await service.applyStripePriceCreated(
+        buildPrice({
+          id: tier.stripePriceMonthlyId ?? 'missing-monthly-id',
+          product: tier.stripeProductId ?? 'missing-product-id',
+          orgId: org.id,
+          interval: 'month',
+          unitAmount: 999,
+        })
+      );
+
+      expect(result?.changed).toBe(false);
+      // No Stripe archive call on a replay.
+      expect(pricesUpdate).not.toHaveBeenCalled();
+    });
+
+    it('should return null for non-Codex prices (metadata missing codex_organization_id)', async () => {
+      const result = await service.applyStripePriceCreated({
+        id: 'price_external',
+        active: true,
+        unit_amount: 1000,
+        currency: 'gbp',
+        recurring: { interval: 'month' },
+        product: 'prod_external',
+        metadata: {},
+      } as unknown as import('stripe').default.Price);
+      expect(result).toBeNull();
+    });
+
+    it('should return null for archived prices (active=false) — we never adopt a dead Price', async () => {
+      const org = await createOrgWithConnect('sync-price-archived');
+      const tier = await service.createTier(org.id, {
+        name: 'Guard',
+        priceMonthly: 499,
+        priceAnnual: 4990,
+      });
+
+      const result = await service.applyStripePriceCreated(
+        buildPrice({
+          id: 'price_dead',
+          product: tier.stripeProductId ?? 'missing-product-id',
+          orgId: org.id,
+          interval: 'month',
+          active: false,
+        })
+      );
+      expect(result).toBeNull();
+    });
+  });
+
   // ─── getTierForAccessCheck (archived-tier read path) ────────────────────
 
   describe('getTierForAccessCheck', () => {

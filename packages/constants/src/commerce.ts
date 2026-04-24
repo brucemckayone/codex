@@ -19,10 +19,14 @@ export const STRIPE_EVENTS = {
   // Disputes (treated as refunds for access purposes — purchase.disputedAt
   // is set and contentAccess is soft-deleted via processDispute)
   CHARGE_DISPUTE_CREATED: 'charge.dispute.created',
-  // Dashboard-drift detection: tier metadata edited outside Codex (e.g. in
-  // Stripe Dashboard) is logged as an obs.error so operators can reconcile.
-  // Sync-back behaviour depends on the operator policy.
+  // Dashboard-drift detection + sync-back: tier metadata edited outside
+  // Codex (e.g. in Stripe Dashboard) mirrors back into subscriptionTiers.
+  // product.updated → mirror name/description.
+  // price.created   → adopt as canonical for the tier+interval, archive old.
+  // price.updated   → log-only (archive-without-replacement is operator drift).
+  // Q1 product decision: Dashboard editing is in-bounds and auto-propagates.
   PRODUCT_UPDATED: 'product.updated',
+  PRICE_CREATED: 'price.created',
   PRICE_UPDATED: 'price.updated',
 } as const;
 
