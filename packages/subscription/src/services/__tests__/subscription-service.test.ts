@@ -20,6 +20,7 @@ import {
   stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
+  users,
 } from '@codex/database/schema';
 import {
   createMockStripe,
@@ -69,9 +70,38 @@ describe('SubscriptionService', () => {
     [creatorId, otherCreatorId, thirdUserId] = userIds;
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     stripe = createMockStripe();
+
+    // Codex-ssfes: SubscriptionService.createCheckoutSession now resolves a
+    // unified Stripe Customer via resolveOrCreateCustomer. createMockStripe
+    // doesn't ship with customers.list / customers.create stubs — attach
+    // defaults here so every test enters the create-branch deterministically
+    // unless it opts into the cache-hit / failure paths explicitly.
+    (stripe as unknown as { customers: unknown }).customers = {
+      list: vi.fn().mockResolvedValue({ data: [], has_more: false }),
+      create: vi.fn().mockImplementation((params: Record<string, unknown>) => ({
+        id: `cus_default_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        email: (params.email as string) ?? 'default@example.com',
+        created: Math.floor(Date.now() / 1000),
+        metadata: (params.metadata as Record<string, string>) ?? {},
+      })),
+    };
+
     service = new SubscriptionService({ db, environment: 'test' }, stripe);
+
+    // Clear any cached Customer id from previous tests so resolution is
+    // deterministic per-test.
+    const { inArray } = await import('drizzle-orm');
+    await db
+      .update(users)
+      .set({ stripeCustomerId: null })
+      .where(
+        inArray(
+          users.id,
+          [creatorId, otherCreatorId, thirdUserId].filter(Boolean)
+        )
+      );
   });
 
   afterAll(async () => {
@@ -151,6 +181,126 @@ describe('SubscriptionService', () => {
           }),
         })
       );
+    });
+
+    // Codex-ssfes: Checkout Session MUST be created with `customer: cus_...`,
+    // NOT `customer_email`. Stripe does not dedupe on email — it creates a
+    // fresh Customer per session. We explicitly reuse via
+    // resolveOrCreateCustomer (Codex-49gev) to guarantee one Stripe Customer
+    // per Codex user across every org.
+    it('forwards customer: cus_... resolved via resolveOrCreateCustomer (never customer_email)', async () => {
+      const { org, tier1 } = await createFullOrg('checkout-customer-id');
+      const createdCustomerId = `cus_resolved_${Date.now()}`;
+
+      // Override the default create mock so we assert against a known id.
+      vi.mocked(
+        (stripe.customers as unknown as { create: ReturnType<typeof vi.fn> })
+          .create
+      ).mockResolvedValueOnce({
+        id: createdCustomerId,
+        email: 'x@example.com',
+        created: Math.floor(Date.now() / 1000),
+        metadata: { codex_user_id: otherCreatorId },
+      });
+
+      await service.createCheckoutSession(
+        otherCreatorId,
+        org.id,
+        tier1.id,
+        'month',
+        'https://example.com/success',
+        'https://example.com/cancel'
+      );
+
+      const sessionArgs = vi
+        .mocked(stripe.checkout.sessions.create)
+        .mock.calls.at(-1)?.[0];
+      expect(sessionArgs).toBeDefined();
+      expect(sessionArgs).toMatchObject({ customer: createdCustomerId });
+      // Regression: customer_email must NOT appear on the payload.
+      expect(sessionArgs).not.toHaveProperty('customer_email');
+
+      // Customer id was persisted on users.stripe_customer_id — so the next
+      // checkout for this user (any org) skips Stripe entirely.
+      const { eq } = await import('drizzle-orm');
+      const [row] = await db
+        .select({ stripeCustomerId: users.stripeCustomerId })
+        .from(users)
+        .where(eq(users.id, otherCreatorId));
+      expect(row?.stripeCustomerId).toBe(createdCustomerId);
+    });
+
+    it('reuses the cached stripe_customer_id on a second checkout for the same user', async () => {
+      const { org, tier1 } = await createFullOrg('checkout-cache-hit');
+      const cachedId = `cus_cached_${Date.now()}`;
+
+      const { eq } = await import('drizzle-orm');
+      await db
+        .update(users)
+        .set({ stripeCustomerId: cachedId })
+        .where(eq(users.id, otherCreatorId));
+
+      const customersMock = stripe.customers as unknown as {
+        list: ReturnType<typeof vi.fn>;
+        create: ReturnType<typeof vi.fn>;
+      };
+      customersMock.list.mockClear();
+      customersMock.create.mockClear();
+
+      await service.createCheckoutSession(
+        otherCreatorId,
+        org.id,
+        tier1.id,
+        'month',
+        'https://example.com/success',
+        'https://example.com/cancel'
+      );
+
+      expect(stripe.checkout.sessions.create).toHaveBeenCalledWith(
+        expect.objectContaining({ customer: cachedId })
+      );
+      // Cache-hit path: no Stripe customer lookup or creation.
+      expect(customersMock.list).not.toHaveBeenCalled();
+      expect(customersMock.create).not.toHaveBeenCalled();
+    });
+
+    it('propagates PaymentProcessingError when Stripe customers.list fails during resolution', async () => {
+      const { PaymentProcessingError } = await import('@codex/purchase');
+      const { org, tier1 } = await createFullOrg('checkout-stripe-list-fail');
+
+      const stripeErr = Object.assign(new Error('Stripe unreachable'), {
+        type: 'StripeConnectionError',
+      });
+      vi.mocked(
+        (stripe.customers as unknown as { list: ReturnType<typeof vi.fn> }).list
+      ).mockRejectedValueOnce(stripeErr);
+
+      await expect(
+        service.createCheckoutSession(
+          otherCreatorId,
+          org.id,
+          tier1.id,
+          'month',
+          'https://example.com/success',
+          'https://example.com/cancel'
+        )
+      ).rejects.toThrow(PaymentProcessingError);
+    });
+
+    it('propagates NotFoundError when the Codex user does not exist', async () => {
+      const { NotFoundError } = await import('@codex/purchase');
+      const { org, tier1 } = await createFullOrg('checkout-missing-user');
+
+      await expect(
+        service.createCheckoutSession(
+          '00000000-0000-0000-0000-000000000000',
+          org.id,
+          tier1.id,
+          'month',
+          'https://example.com/success',
+          'https://example.com/cancel'
+        )
+      ).rejects.toThrow(NotFoundError);
     });
 
     it('should create annual checkout session', async () => {

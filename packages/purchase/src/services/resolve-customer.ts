@@ -22,7 +22,7 @@
  * @see Codex-ssfes (Q4.3 — swap checkout sessions to customer: <id>)
  */
 
-import type { Database } from '@codex/database';
+import type { Database, DatabaseWs } from '@codex/database';
 import { users } from '@codex/database/schema';
 import { and, eq, isNull } from 'drizzle-orm';
 import type Stripe from 'stripe';
@@ -33,7 +33,14 @@ import {
 } from '../errors';
 
 export interface ResolveCustomerDeps {
-  db: Database;
+  /**
+   * HTTP or WebSocket Drizzle client. Accepts the union so the helper can
+   * be called from any service in the Codex platform (purchase, subscription,
+   * ecom webhooks) without transport-specific re-wiring. The helper only
+   * uses `.query.users.findFirst` and `.update(...).set(...).returning()`
+   * which are present on both clients.
+   */
+  db: Database | DatabaseWs;
   stripe: Stripe;
 }
 
@@ -143,11 +150,14 @@ export async function resolveOrCreateCustomer(
   // another concurrent call persisted first, `returning` is empty and we
   // re-read to return their value — both callers converge on the same id
   // (Stripe's idempotency key guarantees they received the same Customer).
+  // Note: .returning() (no columns object) works across both the HTTP and
+  // WebSocket Drizzle clients; the column-selector overload is typed
+  // differently on each, which breaks the Database | DatabaseWs union.
   const persisted = await db
     .update(users)
     .set({ stripeCustomerId: resolvedCustomerId })
     .where(and(eq(users.id, userId), isNull(users.stripeCustomerId)))
-    .returning({ stripeCustomerId: users.stripeCustomerId });
+    .returning();
 
   if (persisted.length > 0) {
     return resolvedCustomerId;

@@ -30,7 +30,15 @@ import {
 } from '@codex/test-utils';
 import { eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import {
   AlreadyPurchasedError,
   ContentNotPurchasableError,
@@ -125,6 +133,36 @@ describe('PurchaseService Integration', () => {
     await teardownTestDatabase();
   });
 
+  // Codex-ssfes: createCheckoutSession + createPortalSession now resolve a
+  // Stripe Customer id via resolveOrCreateCustomer (Codex-49gev). Without
+  // default mocks here every single checkout test in this file would
+  // explode trying to read from Stripe. Tests that want to exercise the
+  // cache-hit / reuse-existing / failure branches override these defaults
+  // via .mockResolvedValueOnce / .mockRejectedValue locally.
+  beforeEach(async () => {
+    vi.mocked(
+      (mockStripe.customers as ReturnType<typeof vi.fn>).list
+    ).mockResolvedValue({ data: [], has_more: false });
+    vi.mocked(
+      (mockStripe.customers as ReturnType<typeof vi.fn>).create
+    ).mockImplementation((params: Record<string, unknown>) => ({
+      id: `cus_default_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      email: (params.email as string) ?? 'default@example.com',
+      created: Math.floor(Date.now() / 1000),
+      metadata: (params.metadata as Record<string, string>) ?? {},
+    }));
+    // Clear any Customer id persisted by a previous test so each test
+    // enters resolveOrCreateCustomer in a deterministic state.
+    await db
+      .update(schema.users)
+      .set({ stripeCustomerId: null })
+      .where(eq(schema.users.id, userId));
+    await db
+      .update(schema.users)
+      .set({ stripeCustomerId: null })
+      .where(eq(schema.users.id, otherUserId));
+  });
+
   describe('createCheckoutSession', () => {
     it('creates checkout session for valid paid content', async () => {
       // Create media and content
@@ -210,18 +248,15 @@ describe('PurchaseService Integration', () => {
       );
     });
 
-    // Regression: customer_email must be forwarded so Stripe pre-fills the
-    // checkout page and reuses the existing Customer object instead of
-    // creating a new one per purchase. Mirrors the equivalent subscription
-    // test in @codex/subscription.
-    it('forwards the buyer email to Stripe as customer_email', async () => {
-      // r2Key format: {creatorId}/{folder}/{mediaId}/{filename} — see
-      // packages/transcoding/src/paths.ts::parseR2Key. Let MediaItemService
-      // generate it instead of hardcoding a 2-part key that will fail the
-      // isValidR2Key defense-in-depth check.
+    // Regression (Codex-ssfes): Checkout Session must be created with
+    // `customer: cus_...` resolved via resolveOrCreateCustomer (Codex-49gev),
+    // NOT `customer_email`. Stripe does not dedupe on customer_email — it
+    // creates a fresh Customer per session — so passing `customer` is what
+    // gives us one Stripe Customer per Codex user across every org.
+    it('creates Checkout Session with customer: cus_... (no customer_email) when user has no cached stripe_customer_id', async () => {
       const media = await mediaService.create(
         {
-          title: 'Paid Video (email test)',
+          title: 'Paid Video (customer resolve test)',
           mediaType: 'video',
           mimeType: 'video/mp4',
           fileSizeBytes: 1024 * 1024,
@@ -242,8 +277,8 @@ describe('PurchaseService Integration', () => {
       const paidContent = await contentService.create(
         {
           organizationId,
-          title: 'Premium Tutorial (email test)',
-          slug: createUniqueSlug('premium-tutorial-email'),
+          title: 'Premium Tutorial (customer resolve test)',
+          slug: createUniqueSlug('premium-tutorial-resolve'),
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
@@ -254,17 +289,118 @@ describe('PurchaseService Integration', () => {
       );
       await contentService.publish(paidContent.id, userId);
 
-      // Look up the buyer's email so the test asserts against the real value
-      // seedTestUsers wrote to the DB.
-      const [buyerRow] = await db
-        .select({ email: schema.users.email })
-        .from(schema.users)
-        .where(eq(schema.users.id, otherUserId))
-        .limit(1);
-      expect(buyerRow?.email).toBeTruthy();
+      // Clear any cached Customer id from a prior test, then mock Stripe
+      // such that resolveOrCreateCustomer enters the create-new branch.
+      await db
+        .update(schema.users)
+        .set({ stripeCustomerId: null })
+        .where(eq(schema.users.id, otherUserId));
+
+      const createdCustomerId = `cus_created_${Date.now()}`;
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).list
+      ).mockResolvedValue({ data: [], has_more: false });
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).create
+      ).mockResolvedValue({
+        id: createdCustomerId,
+        email: 'x@example.com',
+        created: 1_900_000_000,
+        metadata: { codex_user_id: otherUserId },
+      });
 
       vi.mocked(mockStripe.checkout.sessions.create).mockResolvedValue(
-        createMockCheckoutSession('cs_email_1', 'pi_email_1')
+        createMockCheckoutSession('cs_resolve_1', 'pi_resolve_1')
+      );
+
+      await purchaseService.createCheckoutSession(
+        {
+          contentId: paidContent.id,
+          successUrl: 'http://localhost:3000/success',
+          cancelUrl: 'http://localhost:3000/cancel',
+        },
+        otherUserId
+      );
+
+      // Positive: customer is the resolved cus_... id.
+      expect(mockStripe.checkout.sessions.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customer: createdCustomerId,
+        })
+      );
+
+      // Regression: customer_email must NOT appear on the session payload.
+      const sessionArgs = vi
+        .mocked(mockStripe.checkout.sessions.create)
+        .mock.calls.at(-1)?.[0];
+      expect(sessionArgs).toBeDefined();
+      expect(sessionArgs).not.toHaveProperty('customer_email');
+
+      // Customer id was persisted to users.stripe_customer_id.
+      const [persisted] = await db
+        .select({ stripeCustomerId: schema.users.stripeCustomerId })
+        .from(schema.users)
+        .where(eq(schema.users.id, otherUserId));
+      expect(persisted?.stripeCustomerId).toBe(createdCustomerId);
+    });
+
+    // Positive: a second rapid checkout for the same user reuses the
+    // cached stripe_customer_id — NO call to customers.list or
+    // customers.create is made on the cache-hit path.
+    it('reuses cached stripe_customer_id on a second checkout for the same user', async () => {
+      const media = await mediaService.create(
+        {
+          title: 'Paid Video (cache hit test)',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: `${userId}/hls/${media.id}/master.m3u8`,
+          thumbnailKey: `${userId}/thumbnails/${media.id}/auto.jpg`,
+          durationSeconds: 60,
+        },
+        userId
+      );
+
+      const paidContent = await contentService.create(
+        {
+          organizationId,
+          title: 'Premium Tutorial (cache hit test)',
+          slug: createUniqueSlug('premium-tutorial-cache'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 1999,
+        },
+        userId
+      );
+      await contentService.publish(paidContent.id, userId);
+
+      // Pre-stamp a cached Customer id so resolveOrCreateCustomer takes the
+      // fast path and never hits Stripe.
+      const cachedCustomerId = `cus_cached_${Date.now()}`;
+      await db
+        .update(schema.users)
+        .set({ stripeCustomerId: cachedCustomerId })
+        .where(eq(schema.users.id, otherUserId));
+
+      // Reset mocks so we can assert neither list nor create is called.
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).list
+      ).mockClear();
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).create
+      ).mockClear();
+
+      vi.mocked(mockStripe.checkout.sessions.create).mockResolvedValue(
+        createMockCheckoutSession('cs_cache_hit', 'pi_cache_hit')
       );
 
       await purchaseService.createCheckoutSession(
@@ -277,10 +413,131 @@ describe('PurchaseService Integration', () => {
       );
 
       expect(mockStripe.checkout.sessions.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          customer_email: buyerRow!.email,
-        })
+        expect.objectContaining({ customer: cachedCustomerId })
       );
+      expect(mockStripe.customers.list).not.toHaveBeenCalled();
+      expect(mockStripe.customers.create).not.toHaveBeenCalled();
+    });
+
+    // Negative: Stripe list failure wraps as PaymentProcessingError and
+    // propagates out of createCheckoutSession — NOT swallowed by the outer
+    // try/catch.
+    it('propagates PaymentProcessingError when Stripe customers.list fails during resolution', async () => {
+      const media = await mediaService.create(
+        {
+          title: 'Paid Video (stripe fail test)',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: `${userId}/hls/${media.id}/master.m3u8`,
+          thumbnailKey: `${userId}/thumbnails/${media.id}/auto.jpg`,
+          durationSeconds: 60,
+        },
+        userId
+      );
+
+      const paidContent = await contentService.create(
+        {
+          organizationId,
+          title: 'Premium Tutorial (stripe fail test)',
+          slug: createUniqueSlug('premium-tutorial-fail'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 1999,
+        },
+        userId
+      );
+      await contentService.publish(paidContent.id, userId);
+
+      // Force NULL stripe_customer_id so resolveOrCreateCustomer calls list.
+      await db
+        .update(schema.users)
+        .set({ stripeCustomerId: null })
+        .where(eq(schema.users.id, otherUserId));
+
+      const stripeErr = Object.assign(new Error('Stripe API unreachable'), {
+        type: 'StripeConnectionError',
+      });
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).list
+      ).mockRejectedValue(stripeErr);
+
+      await expect(
+        purchaseService.createCheckoutSession(
+          {
+            contentId: paidContent.id,
+            successUrl: 'http://localhost:3000/success',
+            cancelUrl: 'http://localhost:3000/cancel',
+          },
+          otherUserId
+        )
+      ).rejects.toThrow(PaymentProcessingError);
+    });
+
+    // Negative: a missing / unknown Codex user must NOT silently fall
+    // through to a Stripe call — it's a caller bug, not a checkout failure.
+    it('throws NotFoundError when the Codex user does not exist', async () => {
+      const media = await mediaService.create(
+        {
+          title: 'Paid Video (missing user test)',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: `${userId}/hls/${media.id}/master.m3u8`,
+          thumbnailKey: `${userId}/thumbnails/${media.id}/auto.jpg`,
+          durationSeconds: 60,
+        },
+        userId
+      );
+
+      const paidContent = await contentService.create(
+        {
+          organizationId,
+          title: 'Premium Tutorial (missing user test)',
+          slug: createUniqueSlug('premium-tutorial-missing'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 1999,
+        },
+        userId
+      );
+      await contentService.publish(paidContent.id, userId);
+
+      const { NotFoundError } = await import('../errors');
+
+      await expect(
+        purchaseService.createCheckoutSession(
+          {
+            contentId: paidContent.id,
+            successUrl: 'http://localhost:3000/success',
+            cancelUrl: 'http://localhost:3000/cancel',
+          },
+          '00000000-0000-0000-0000-000000000000'
+        )
+      ).rejects.toThrow(NotFoundError);
+
+      // Stripe session.create must never fire when the user lookup fails.
+      // (No assertion on checkout.sessions.create here because prior tests
+      // may have called it; instead we assert above that NotFoundError is
+      // thrown — that branch returns before session.create is reached.)
     });
 
     it('throws ContentNotPurchasableError for free content', async () => {
@@ -1029,29 +1286,29 @@ describe('PurchaseService Integration', () => {
   });
 
   describe('createPortalSession', () => {
-    it('creates billing portal session for existing Stripe customer', async () => {
-      const portalUrl = 'https://billing.stripe.com/session/test_123';
+    // Codex-ssfes: the portal now delegates to resolveOrCreateCustomer so
+    // Customer resolution is identical to checkout. These tests assert the
+    // unified cus_... is forwarded to billingPortal.sessions.create.
 
-      // Mock Stripe customer list to return existing customer
-      vi.mocked(
-        (mockStripe.customers as ReturnType<typeof vi.fn>).list
-      ).mockResolvedValue({
-        data: [
-          {
-            id: 'cus_existing_123',
-            email: 'test@example.com',
-            metadata: { userId },
-          },
-        ],
-        has_more: false,
-      });
+    it('uses the cached stripe_customer_id when already persisted', async () => {
+      const cachedId = `cus_portal_cached_${Date.now()}`;
+      await db
+        .update(schema.users)
+        .set({ stripeCustomerId: cachedId })
+        .where(eq(schema.users.id, userId));
 
-      // Mock portal session creation
+      const portalUrl = 'https://billing.stripe.com/session/cached';
       vi.mocked(
         (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
-      ).mockResolvedValue({
-        url: portalUrl,
-      } as Stripe.BillingPortal.Session);
+      ).mockResolvedValue({ url: portalUrl } as Stripe.BillingPortal.Session);
+
+      // Clear defaults set by beforeEach so we can assert the cache-hit path.
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).list
+      ).mockClear();
+      vi.mocked(
+        (mockStripe.customers as ReturnType<typeof vi.fn>).create
+      ).mockClear();
 
       const result = await purchaseService.createPortalSession(
         'test@example.com',
@@ -1060,94 +1317,76 @@ describe('PurchaseService Integration', () => {
       );
 
       expect(result.url).toBe(portalUrl);
-
-      // Verify customer list was called
-      expect(
-        (mockStripe.customers as ReturnType<typeof vi.fn>).list
-      ).toHaveBeenCalledWith(
-        expect.objectContaining({
-          email: 'test@example.com',
-          limit: 1,
-        })
-      );
-
-      // Verify portal session was created
+      expect(mockStripe.customers.list).not.toHaveBeenCalled();
+      expect(mockStripe.customers.create).not.toHaveBeenCalled();
       expect(
         (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
       ).toHaveBeenCalledWith(
         expect.objectContaining({
-          customer: 'cus_existing_123',
+          customer: cachedId,
           return_url: 'http://localhost:3000/settings',
         })
       );
     });
 
-    it('creates new Stripe customer if none exists', async () => {
-      const portalUrl = 'https://billing.stripe.com/session/test_456';
-
-      // Mock Stripe customer list to return empty
-      vi.mocked(
-        (mockStripe.customers as ReturnType<typeof vi.fn>).list
-      ).mockResolvedValue({
-        data: [],
-        has_more: false,
-      });
-
-      // Mock customer creation
+    it('resolves and persists a Customer id when the user has none cached', async () => {
+      const createdId = `cus_portal_new_${Date.now()}`;
       vi.mocked(
         (mockStripe.customers as ReturnType<typeof vi.fn>).create
-      ).mockResolvedValue({
-        id: 'cus_new_789',
+      ).mockResolvedValueOnce({
+        id: createdId,
         email: 'newuser@example.com',
-        metadata: { userId: otherUserId },
+        created: Math.floor(Date.now() / 1000),
+        metadata: { codex_user_id: otherUserId },
       });
 
-      // Mock portal session creation
+      const portalUrl = 'https://billing.stripe.com/session/resolved';
       vi.mocked(
         (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
-      ).mockResolvedValue({
-        url: portalUrl,
-      } as Stripe.BillingPortal.Session);
+      ).mockResolvedValue({ url: portalUrl } as Stripe.BillingPortal.Session);
 
-      const result = await purchaseService.createPortalSession(
+      await purchaseService.createPortalSession(
         'newuser@example.com',
         otherUserId,
         'http://localhost:3000/settings'
       );
 
-      expect(result.url).toBe(portalUrl);
-
-      // Verify new customer was created
       expect(
         (mockStripe.customers as ReturnType<typeof vi.fn>).create
       ).toHaveBeenCalledWith(
         expect.objectContaining({
           email: 'newuser@example.com',
-          metadata: { userId: otherUserId },
+          metadata: expect.objectContaining({ codex_user_id: otherUserId }),
+        }),
+        expect.objectContaining({
+          idempotencyKey: `codex:resolve-customer:${otherUserId}`,
         })
       );
-
-      // Verify portal session was created with new customer ID
       expect(
         (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
       ).toHaveBeenCalledWith(
         expect.objectContaining({
-          customer: 'cus_new_789',
+          customer: createdId,
           return_url: 'http://localhost:3000/settings',
         })
       );
+
+      // Persisted on the user row so subsequent portal/checkout calls
+      // skip Stripe entirely.
+      const [row] = await db
+        .select({ stripeCustomerId: schema.users.stripeCustomerId })
+        .from(schema.users)
+        .where(eq(schema.users.id, otherUserId));
+      expect(row?.stripeCustomerId).toBe(createdId);
     });
 
-    it('throws PaymentProcessingError on Stripe API failure', async () => {
-      // Mock Stripe to throw error
-      const stripeError = new Error('Stripe API error') as Error & {
-        type: string;
-      };
-      stripeError.type = 'StripeAPIError';
-
+    it('throws PaymentProcessingError when Stripe resolution fails', async () => {
+      const stripeError = Object.assign(new Error('Stripe API error'), {
+        type: 'StripeAPIError',
+      });
       vi.mocked(
         (mockStripe.customers as ReturnType<typeof vi.fn>).list
-      ).mockRejectedValue(stripeError);
+      ).mockRejectedValueOnce(stripeError);
 
       await expect(
         purchaseService.createPortalSession(
@@ -1159,22 +1398,6 @@ describe('PurchaseService Integration', () => {
     });
 
     it('validates return URL with domain whitelist', async () => {
-      // Mock successful response
-      vi.mocked(
-        (mockStripe.customers as ReturnType<typeof vi.fn>).list
-      ).mockResolvedValue({
-        data: [],
-        has_more: false,
-      });
-
-      vi.mocked(
-        (mockStripe.customers as ReturnType<typeof vi.fn>).create
-      ).mockResolvedValue({
-        id: 'cus_new_789',
-        email: 'newuser@example.com',
-        metadata: { userId: otherUserId },
-      });
-
       vi.mocked(
         (mockStripe.billingPortal.sessions as ReturnType<typeof vi.fn>).create
       ).mockResolvedValue({

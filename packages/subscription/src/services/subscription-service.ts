@@ -47,9 +47,11 @@ import {
   subscriptionTiers,
   users,
 } from '@codex/database/schema';
+import { resolveOrCreateCustomer } from '@codex/purchase';
 import {
   BaseService,
   InternalServiceError,
+  NotFoundError,
   type ServiceConfig,
 } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
@@ -370,21 +372,39 @@ export class SubscriptionService extends BaseService {
         );
       }
 
-      // BUG-022: Look up user email so Stripe reuses an existing Customer object
-      // instead of creating a duplicate on every checkout.
+      // Q4 (Codex-pkqxd / Codex-ssfes): resolve the Codex user's unified
+      // Stripe Customer id so every checkout across every org routes to the
+      // SAME `cus_...` object. Previously BUG-022 claimed `customer_email`
+      // caused Stripe to reuse an existing Customer — that is NOT how Stripe
+      // behaves: `customer_email` creates a fresh Customer per session.
+      // Codex now explicitly reuses via resolveOrCreateCustomer, which
+      // reads users.stripe_customer_id, falls back to an email match
+      // against Stripe, then creates with a deterministic idempotency key
+      // and persists the id for every future session.
       const [user] = await this.db
         .select({ email: users.email })
         .from(users)
         .where(eq(users.id, userId))
         .limit(1);
 
+      if (!user?.email) {
+        throw new NotFoundError('User email not found for checkout', {
+          userId,
+        });
+      }
+
+      const stripeCustomerId = await resolveOrCreateCustomer(
+        { db: this.db, stripe: this.stripe },
+        { userId, email: user.email }
+      );
+
       // Create Stripe Checkout Session
       const session = await this.stripe.checkout.sessions.create({
         mode: 'subscription',
+        customer: stripeCustomerId,
         line_items: [{ price: stripePriceId, quantity: 1 }],
         success_url: successUrl,
         cancel_url: cancelUrl,
-        ...(user?.email && { customer_email: user.email }),
         metadata: {
           codex_user_id: userId,
           codex_organization_id: orgId,

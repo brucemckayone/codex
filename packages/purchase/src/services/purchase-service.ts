@@ -52,9 +52,11 @@ import {
   AlreadyPurchasedError,
   ContentNotPurchasableError,
   ForbiddenError,
+  NotFoundError,
   PaymentProcessingError,
   PurchaseNotFoundError,
 } from '../errors';
+import { resolveOrCreateCustomer } from './resolve-customer';
 
 /**
  * Type guard for Stripe errors
@@ -240,20 +242,37 @@ export class PurchaseService extends BaseService {
       // Convert TipTap JSON description to plain text for Stripe
       const plainDescription = extractPlainText(contentRecord.description);
 
-      // Look up the buyer's email so Stripe pre-fills the checkout page and
-      // reuses an existing Customer object instead of creating a new one on
-      // every purchase (mirrors the subscription path — see subscription-
-      // service.ts:createCheckoutSession). A missing user row falls through
-      // with no `customer_email` — Stripe will simply ask for one.
+      // Resolve the Codex user's unified Stripe Customer id so every
+      // checkout across every org routes to the SAME `cus_...` object
+      // (Codex-ssfes). `customer_email` used to be passed here, but Stripe
+      // does NOT dedupe on email — it creates a fresh Customer per session.
+      // resolveOrCreateCustomer (Codex-49gev) reads users.stripe_customer_id,
+      // falls back to email-match against Stripe, then creates with an
+      // idempotency key, persisting the id on first hit. A missing user row
+      // throws NotFoundError — let it propagate; a caller hitting checkout
+      // with an unknown customerId is a bug, not a payment failure.
       const [user] = await this.db
         .select({ email: users.email })
         .from(users)
         .where(eq(users.id, customerId))
         .limit(1);
 
+      if (!user?.email) {
+        throw new NotFoundError('User email not found for checkout', {
+          customerId,
+          contentId: validated.contentId,
+        });
+      }
+
+      const stripeCustomerId = await resolveOrCreateCustomer(
+        { db: this.db, stripe: this.stripe },
+        { userId: customerId, email: user.email }
+      );
+
       const session = await this.stripe.checkout.sessions.create({
         mode: 'payment',
         payment_method_types: ['card'],
+        customer: stripeCustomerId,
         line_items: [
           {
             price_data: {
@@ -285,7 +304,6 @@ export class PurchaseService extends BaseService {
           : {}),
         success_url: validated.successUrl,
         cancel_url: validated.cancelUrl,
-        ...(user?.email && { customer_email: user.email }),
         metadata: {
           contentId: validated.contentId,
           customerId,
@@ -309,7 +327,9 @@ export class PurchaseService extends BaseService {
     } catch (error) {
       if (
         error instanceof ContentNotPurchasableError ||
-        error instanceof AlreadyPurchasedError
+        error instanceof AlreadyPurchasedError ||
+        error instanceof NotFoundError ||
+        error instanceof PaymentProcessingError
       ) {
         throw error;
       }
@@ -1025,14 +1045,19 @@ export class PurchaseService extends BaseService {
   /**
    * Create Stripe Billing Portal session
    *
-   * Allows customers to manage their billing (view invoices, update payment methods).
-   * Looks up or creates a Stripe customer by email, then creates a portal session.
+   * Allows customers to manage their billing (view invoices, update payment
+   * methods). Delegates Customer resolution to `resolveOrCreateCustomer`
+   * (Codex-49gev) so portal sessions open the SAME `cus_...` the user's
+   * checkout sessions use — one Stripe Customer per Codex user across every
+   * org (Codex-pkqxd / Codex-ssfes).
    *
-   * @param email - Customer's email address
-   * @param userId - Codex user ID (stored in Stripe customer metadata)
+   * @param email - Customer's email address (still required for first-time
+   *   resolution when users.stripe_customer_id is NULL)
+   * @param userId - Codex user ID (used for lookup + idempotency key)
    * @param returnUrl - URL to redirect to after portal session
    * @returns Portal session URL
-   * @throws {PaymentProcessingError} If Stripe portal session creation fails
+   * @throws {NotFoundError} If the Codex user row is missing/soft-deleted.
+   * @throws {PaymentProcessingError} If Stripe portal session creation fails.
    */
   async createPortalSession(
     email: string,
@@ -1042,30 +1067,30 @@ export class PurchaseService extends BaseService {
     const validated = createPortalSessionSchema.parse({ returnUrl });
 
     try {
-      // Step 1: Look up existing Stripe customer by email
-      const customers = await this.stripe.customers.list({
-        email,
-        limit: 1,
-      });
+      // Step 1: Resolve the unified Customer id (cached on the user row,
+      // reused by every checkout + portal across every org). NotFoundError
+      // and PaymentProcessingError propagate untouched — the catch below
+      // only wraps raw Stripe errors from billingPortal.sessions.create.
+      const stripeCustomerId = await resolveOrCreateCustomer(
+        { db: this.db, stripe: this.stripe },
+        { userId, email }
+      );
 
-      let customer = customers.data[0];
-
-      // Step 2: If no customer found, create one
-      if (!customer) {
-        customer = await this.stripe.customers.create({
-          email,
-          metadata: { userId },
-        });
-      }
-
-      // Step 3: Create billing portal session
+      // Step 2: Create billing portal session
       const session = await this.stripe.billingPortal.sessions.create({
-        customer: customer.id,
+        customer: stripeCustomerId,
         return_url: validated.returnUrl,
       });
 
       return { url: session.url };
     } catch (error) {
+      if (
+        error instanceof NotFoundError ||
+        error instanceof PaymentProcessingError
+      ) {
+        throw error;
+      }
+
       if (isStripeError(error)) {
         throw new PaymentProcessingError(
           'Failed to create billing portal session',
