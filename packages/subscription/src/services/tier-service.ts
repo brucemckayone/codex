@@ -25,6 +25,7 @@
 
 import { CURRENCY } from '@codex/constants';
 import {
+  content,
   stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
@@ -33,6 +34,7 @@ import {
   BaseService,
   InternalServiceError,
   type ServiceConfig,
+  ValidationError,
 } from '@codex/service-errors';
 import type { CreateTierInput, UpdateTierInput } from '@codex/validation';
 import { and, eq, isNull, sql } from 'drizzle-orm';
@@ -422,6 +424,13 @@ export class TierService extends BaseService {
   /**
    * Soft-delete a tier. Fails if active subscribers exist.
    * Archives the Stripe Product.
+   *
+   * The FK content.minimum_tier_id → subscription_tiers.id is
+   * ON DELETE SET NULL, but soft deletes don't fire the trigger. Without
+   * sweeping the reference column explicitly, any content gated by the
+   * deleted tier becomes unreachable: listTiers no longer returns the
+   * tier, so nobody can subscribe to it, but access control still
+   * compares content.minimum_tier_id against a dangling row.
    */
   async deleteTier(tierId: string, orgId: string): Promise<void> {
     try {
@@ -442,22 +451,59 @@ export class TierService extends BaseService {
         throw new TierHasSubscribersError(tierId, subCount.count);
       }
 
-      // Soft delete — also clear isRecommended to avoid stale flags
-      await this.db
-        .update(subscriptionTiers)
-        .set({ deletedAt: new Date(), isActive: false, isRecommended: false })
-        .where(eq(subscriptionTiers.id, tierId));
+      // Tier soft-delete + content sweep must atomically succeed or fail.
+      // A partial state (tier gone, content still gated) is the exact bug
+      // this sweep is here to fix.
+      let affectedContentCount = 0;
+      await (this.db as typeof import('@codex/database').dbWs).transaction(
+        async (tx) => {
+          await tx
+            .update(subscriptionTiers)
+            .set({
+              deletedAt: new Date(),
+              isActive: false,
+              isRecommended: false,
+            })
+            .where(eq(subscriptionTiers.id, tierId));
 
-      // Archive Stripe Product
+          const cleared = await tx
+            .update(content)
+            .set({ minimumTierId: null })
+            .where(
+              and(
+                eq(content.minimumTierId, tierId),
+                eq(content.organizationId, orgId)
+              )
+            )
+            .returning({ id: content.id });
+          affectedContentCount = cleared.length;
+        }
+      );
+
+      // Archive Stripe Product after the DB transaction commits so a Stripe
+      // 500 doesn't leave us with an orphaned deletedAt in the DB (the
+      // service caller can retry the whole delete idempotently).
       if (existing.stripeProductId) {
         await this.stripe.products.update(existing.stripeProductId, {
           active: false,
         });
       }
 
+      if (affectedContentCount > 0) {
+        this.obs.warn(
+          'Cleared minimum_tier_id on content gated by deleted tier',
+          {
+            tierId,
+            organizationId: orgId,
+            affectedContentCount,
+          }
+        );
+      }
+
       this.obs.info('Subscription tier deleted', {
         tierId,
         organizationId: orgId,
+        affectedContentCount,
       });
     } catch (error) {
       this.handleError(error, 'deleteTier');
@@ -501,6 +547,13 @@ export class TierService extends BaseService {
   /**
    * Reorder tiers. Accepts ordered array of tier IDs.
    * New sortOrder is assigned by array index (1-based).
+   *
+   * The caller MUST supply every non-deleted tier for the org. A partial
+   * list leaves the omitted tiers with their old sortOrder, colliding
+   * with the freshly renumbered ones from position 1 upward — the UNIQUE
+   * constraint on (organizationId, sortOrder) can accept these because
+   * the two-phase temp-offset hop only resolves collisions among the
+   * tiers being renumbered.
    */
   async reorderTiers(orgId: string, tierIds: string[]): Promise<void> {
     try {
@@ -516,10 +569,30 @@ export class TierService extends BaseService {
         );
 
       const existingIds = new Set(tiers.map((t) => t.id));
+      const providedIds = new Set(tierIds);
+
+      if (providedIds.size !== tierIds.length) {
+        throw new ValidationError('Duplicate tier IDs in reorder payload', {
+          tierCount: tierIds.length,
+          uniqueCount: providedIds.size,
+        });
+      }
+
       for (const id of tierIds) {
         if (!existingIds.has(id)) {
           throw new TierNotFoundError(id, { organizationId: orgId });
         }
+      }
+
+      if (providedIds.size !== existingIds.size) {
+        throw new ValidationError(
+          'Reorder must include every tier in the organisation',
+          {
+            organizationId: orgId,
+            provided: providedIds.size,
+            expected: existingIds.size,
+          }
+        );
       }
 
       // Update sort orders in a single transaction.

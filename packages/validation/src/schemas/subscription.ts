@@ -90,7 +90,13 @@ export const updateTierSchema = baseTierSchema.partial().refine(
 );
 
 export const reorderTiersSchema = z.object({
-  tierIds: z.array(uuidSchema).min(1, 'At least one tier ID is required'),
+  // 50 is well above any realistic tier count (real orgs rarely exceed 5-10),
+  // bounding the two-phase reorder txn's write count. Organisations with more
+  // tiers should be handled via admin tooling, not this endpoint.
+  tierIds: z
+    .array(uuidSchema)
+    .min(1, 'At least one tier ID is required')
+    .max(50, 'Cannot reorder more than 50 tiers in one call'),
 });
 
 // ============================================================================

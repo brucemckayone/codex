@@ -9,14 +9,17 @@
  */
 
 import {
+  content,
   organizations,
   stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
+import { ValidationError } from '@codex/service-errors';
 import {
   createMockStripe,
   createTestConnectAccountInput,
+  createTestContentInput,
   createTestOrganizationInput,
   createTestSubscriptionInput,
   createUniqueSlug,
@@ -378,6 +381,91 @@ describe('TierService', () => {
         service.deleteTier('00000000-0000-0000-0000-000000000000', org.id)
       ).rejects.toThrow(TierNotFoundError);
     });
+
+    it('should clear content.minimum_tier_id on soft-delete (X1 regression)', async () => {
+      // FK content.minimum_tier_id -> subscription_tiers.id is ON DELETE SET
+      // NULL, but that never fires for soft-deletes (deletedAt). Without this
+      // sweep, deleting a tier would leave content silently unreachable.
+      const org = await createOrgWithConnect('delete-sweep');
+      const tier = await service.createTier(org.id, {
+        name: 'Gated',
+        priceMonthly: 499,
+        priceAnnual: 4990,
+      });
+
+      // Two content rows gated by this tier, plus one unrelated row.
+      const [gatedA] = await db
+        .insert(content)
+        .values(
+          createTestContentInput(creatorId, {
+            organizationId: org.id,
+            minimumTierId: tier.id,
+          })
+        )
+        .returning();
+      const [gatedB] = await db
+        .insert(content)
+        .values(
+          createTestContentInput(creatorId, {
+            organizationId: org.id,
+            minimumTierId: tier.id,
+          })
+        )
+        .returning();
+      const [ungated] = await db
+        .insert(content)
+        .values(
+          createTestContentInput(creatorId, {
+            organizationId: org.id,
+            minimumTierId: null,
+          })
+        )
+        .returning();
+
+      await service.deleteTier(tier.id, org.id);
+
+      const rows = await db
+        .select({ id: content.id, minimumTierId: content.minimumTierId })
+        .from(content)
+        .where(eq(content.organizationId, org.id));
+      const byId = new Map(rows.map((r) => [r.id, r.minimumTierId]));
+      expect(byId.get(gatedA.id)).toBeNull();
+      expect(byId.get(gatedB.id)).toBeNull();
+      expect(byId.get(ungated.id)).toBeNull();
+    });
+
+    it('should only clear minimum_tier_id for content within the same org (scoping)', async () => {
+      // A different org with its own tier accidentally sharing an id would
+      // still be scoped out by the WHERE organizationId clause.
+      const orgA = await createOrgWithConnect('delete-scope-a');
+      const orgB = await createOrgWithConnect('delete-scope-b');
+
+      const tierA = await service.createTier(orgA.id, {
+        name: 'A-gated',
+        priceMonthly: 499,
+        priceAnnual: 4990,
+      });
+
+      // Content in org B that shares minimumTierId = tierA.id (contrived,
+      // would not happen normally but guards against the sweep over-reaching).
+      const [orgBContent] = await db
+        .insert(content)
+        .values(
+          createTestContentInput(creatorId, {
+            organizationId: orgB.id,
+            minimumTierId: tierA.id,
+          })
+        )
+        .returning();
+
+      await service.deleteTier(tierA.id, orgA.id);
+
+      const [row] = await db
+        .select({ minimumTierId: content.minimumTierId })
+        .from(content)
+        .where(eq(content.id, orgBContent.id));
+      expect(row.minimumTierId).toBe(tierA.id);
+    });
   });
 
   // ─── listTiers ──────────────────────────────────────────────────────
@@ -614,6 +702,52 @@ describe('TierService', () => {
           '00000000-0000-0000-0000-000000000000',
         ])
       ).rejects.toThrow(TierNotFoundError);
+    });
+
+    it('should reject duplicate IDs in the reorder payload', async () => {
+      const org = await createOrgWithConnect('reorder-dupe');
+      const a = await service.createTier(org.id, {
+        name: 'A',
+        priceMonthly: 100,
+        priceAnnual: 1000,
+      });
+      const b = await service.createTier(org.id, {
+        name: 'B',
+        priceMonthly: 200,
+        priceAnnual: 2000,
+      });
+
+      await expect(
+        service.reorderTiers(org.id, [a.id, b.id, a.id])
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('should reject a subset of tiers (X5 regression)', async () => {
+      // If the caller omits a tier, the omitted tier keeps its old
+      // sortOrder, which collides with the newly renumbered ones (1..N).
+      // The two-phase temp-offset hop only avoids collisions among the
+      // tiers being moved, so the final state can contain duplicate
+      // sortOrder values that listTiers() returns in an unstable order.
+      const org = await createOrgWithConnect('reorder-subset');
+      const a = await service.createTier(org.id, {
+        name: 'A',
+        priceMonthly: 100,
+        priceAnnual: 1000,
+      });
+      const b = await service.createTier(org.id, {
+        name: 'B',
+        priceMonthly: 200,
+        priceAnnual: 2000,
+      });
+      await service.createTier(org.id, {
+        name: 'C',
+        priceMonthly: 300,
+        priceAnnual: 3000,
+      });
+
+      await expect(service.reorderTiers(org.id, [a.id, b.id])).rejects.toThrow(
+        ValidationError
+      );
     });
   });
 });
