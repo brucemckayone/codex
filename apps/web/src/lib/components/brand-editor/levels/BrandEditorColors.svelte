@@ -36,23 +36,28 @@
 <div class="colors-level">
   {#each SECTIONS as section (section.id)}
     {@const currentValue = getColor(section.field) ?? section.fallback}
+    {@const pickerId = `color-picker-${section.id}`}
+    {@const isExpanded = expanded === section.id}
     <section class="colors-level__section">
       <div class="colors-level__header-row">
         <button
           type="button"
           class="colors-level__header"
-          class:colors-level__header--expanded={expanded === section.id}
+          class:colors-level__header--expanded={isExpanded}
+          aria-expanded={isExpanded}
+          aria-controls={pickerId}
           onclick={() => toggle(section.id)}
         >
-          <span class="colors-level__swatch" style:background={currentValue}></span>
+          <span class="colors-level__swatch" style:background={currentValue} aria-hidden="true"></span>
           <span class="colors-level__label">{section.label}</span>
           <span class="colors-level__hex">{currentValue}</span>
-          <span class="colors-level__chevron" aria-hidden="true">{expanded === section.id ? '−' : '+'}</span>
+          <span class="colors-level__chevron" aria-hidden="true">{isExpanded ? '−' : '+'}</span>
         </button>
         {#if section.clearable && brandEditor.pending?.backgroundColor}
           <button
             type="button"
             class="colors-level__clear"
+            aria-label={`Clear ${section.label.toLowerCase()} color override`}
             onclick={() => brandEditor.updateField('backgroundColor', null)}
           >
             clear
@@ -60,8 +65,8 @@
         {/if}
       </div>
 
-      {#if expanded === section.id}
-        <div class="colors-level__picker">
+      {#if isExpanded}
+        <div id={pickerId} class="colors-level__picker">
           <OklchColorPicker
             value={currentValue}
             onchange={(hex) => updateColor(section.field, hex)}
