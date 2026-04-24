@@ -74,11 +74,32 @@ export async function loadLibraryFromServer(): Promise<void> {
     const existingKeys = new Set<string>();
     for (const key of libraryCollection.state.keys()) existingKeys.add(key);
 
-    // Upsert all fresh items
+    // Upsert all fresh items.
+    //
+    // TanStack DB's `update(key, callback)` signature expects the callback to
+    // MUTATE the draft — the callback's return value is discarded, and if the
+    // draft is never touched the update is a silent no-op (see
+    // `withChangeTracking` in @tanstack/db/collection/mutations.js).
+    //
+    // Previously this loop was `update(key, () => item)` which looked like it
+    // replaced the record but actually wrote nothing: the server's fresh
+    // accessType / purchase / progress never made it into localStorage, so
+    // items kept whatever stale shape they'd been inserted with, and the
+    // client-side `accessType === 'subscription'` filter on the library page
+    // saw the stale tag instead of the current one — e.g. a subscription item
+    // that had previously been inserted with a different tag stayed hidden
+    // under the Subscription tab forever.
+    //
+    // Copying each top-level field onto the draft records each as a change,
+    // which IS what TanStack DB's proxy tracks. `LibraryItem` has a stable
+    // shape (content / accessType / purchase / progress), so `Object.assign`
+    // is sufficient — no stale keys to prune.
     for (const item of freshItems) {
       const key = item.content.id;
       if (existingKeys.has(key)) {
-        libraryCollection.update(key, () => item);
+        libraryCollection.update(key, (draft) => {
+          Object.assign(draft, item);
+        });
       } else {
         libraryCollection.insert(item);
       }
