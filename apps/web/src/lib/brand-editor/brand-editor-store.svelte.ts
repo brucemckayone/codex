@@ -345,9 +345,6 @@ export const brandEditor = {
   get breadcrumbs() {
     return breadcrumbs;
   },
-  get originalTheme() {
-    return state.originalTheme;
-  },
   get editingTheme() {
     return state.editingTheme;
   },
