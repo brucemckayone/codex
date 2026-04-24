@@ -63,6 +63,11 @@
   let currentCancelAtPeriodEnd = $state(false);
   let currentPeriodEnd = $state<string | null>(null);
   let pricingLoading = $state(true);
+  // True while we don't yet know the user's subscription state because the
+  // API errored. Until this resolves false, the CTA is disabled and a retry
+  // alert is shown — previously the catch() swallowed the error and a
+  // subscribed user saw "Subscribe", clicked it, and hit AlreadySubscribedError.
+  let subscriptionLoadError = $state(false);
 
   // Reactivate / payment-update / resume flow state
   let reactivateLoading = $state(false);
@@ -96,12 +101,17 @@
         resolvedSubPromise = promise;
         Promise.resolve(promise).then((result) => {
           if (resolvedSubPromise !== promise) return;
-          const sub = result as {
-            tierId?: string;
-            status?: SubscriptionStatus | string;
-            cancelAtPeriodEnd?: boolean;
-            currentPeriodEnd?: string | Date;
-          } | null;
+          const envelope = result as {
+            data: {
+              tierId?: string;
+              status?: SubscriptionStatus | string;
+              cancelAtPeriodEnd?: boolean;
+              currentPeriodEnd?: string | Date;
+            } | null;
+            loadError: boolean;
+          };
+          subscriptionLoadError = envelope.loadError;
+          const sub = envelope.data;
           currentTierId = sub?.tierId ?? null;
           const rawStatus = (sub?.status as SubscriptionStatus | undefined) ?? null;
           currentStatus = rawStatus ?? (sub ? 'active' : null);
@@ -244,6 +254,14 @@
     if (!data.isAuthenticated) {
       const returnPath = `${page.url.pathname}?tierId=${encodeURIComponent(tier.id)}&billingInterval=${encodeURIComponent(billingInterval)}`;
       window.location.href = `/login?redirect=${encodeURIComponent(returnPath)}`;
+      return;
+    }
+
+    // Guard: if we never resolved the current-subscription state, we can't
+    // tell whether this user is already subscribed. Refuse the click rather
+    // than race into an AlreadySubscribedError on the checkout worker.
+    if (subscriptionLoadError) {
+      checkoutError = m.subscription_load_error();
       return;
     }
 

@@ -34,9 +34,15 @@ export const load: PageServerLoad = async ({
   return {
     // Existing
     tiers: api.tiers.list(org.id).catch(() => []),
+    // Tagged discriminator so a subscribed user doesn't see "Subscribe" CTA
+    // when getCurrent errors transiently — the UI renders a retry alert and
+    // disables the CTA until we actually know the state.
     currentSubscription: locals.user
-      ? api.subscription.getCurrent(org.id).catch(() => null)
-      : Promise.resolve(null),
+      ? api.subscription
+          .getCurrent(org.id)
+          .then((data) => ({ data, loadError: false as const }))
+          .catch(() => ({ data: null, loadError: true as const }))
+      : Promise.resolve({ data: null, loadError: false as const }),
     isAuthenticated: !!locals.user,
 
     // Content thumbnails for preview section (streamed)

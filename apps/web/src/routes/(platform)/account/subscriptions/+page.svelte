@@ -5,7 +5,8 @@
   Lists all active/cancelling subscriptions with cancel and org navigation.
 -->
 <script lang="ts">
-  import { invalidate } from '$app/navigation';
+  import { invalidate, invalidateAll } from '$app/navigation';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import * as m from '$paraglide/messages';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import * as Card from '$lib/components/ui/Card';
@@ -38,8 +39,11 @@
   let cancelReason = $state('');
   let cancelLoading = $state(false);
   let cancelError = $state('');
-  let reactivateLoading = $state<string | null>(null);
-  let reactivateError = $state('');
+  // Per-card state: multiple cards can reactivate in parallel, and an error
+  // on one must not render on the others. Single-slot $state<string | null>
+  // rendered the error on any card whose loading slot happened to be null.
+  const reactivatingIds = new SvelteSet<string>();
+  const reactivateErrors = new SvelteMap<string, string>();
 
   function statusVariant(status: string): 'success' | 'warning' | 'error' | 'neutral' {
     switch (status) {
@@ -110,8 +114,8 @@
   }
 
   async function handleReactivate(sub: UserOrgSubscription) {
-    reactivateLoading = sub.id;
-    reactivateError = '';
+    reactivatingIds.add(sub.id);
+    reactivateErrors.delete(sub.id);
 
     const existing = subscriptions.find(
       (s) => s.organizationId === sub.organizationId
@@ -138,9 +142,14 @@
         existing.status = previousStatus;
         existing.cancelAtPeriodEnd = previousCancelAtPeriodEnd ?? false;
       }
-      reactivateError = error instanceof Error ? error.message : 'Failed to reactivate subscription';
+      reactivateErrors.set(
+        sub.id,
+        error instanceof Error
+          ? error.message
+          : m.subscription_reactivate_error()
+      );
     } finally {
-      reactivateLoading = null;
+      reactivatingIds.delete(sub.id);
     }
   }
 
@@ -166,7 +175,14 @@
 <div class="subscriptions-page">
   <h1 class="page-title">{m.subscription_manage()}</h1>
 
-  {#if subscriptions.length === 0}
+  {#if data.loadError}
+    <Alert variant="error">
+      {m.subscription_load_error()}
+      <Button variant="ghost" size="sm" onclick={() => invalidateAll()}>
+        {m.common_try_again()}
+      </Button>
+    </Alert>
+  {:else if subscriptions.length === 0}
     <EmptyState
       title={m.subscription_no_subscriptions()}
       description={m.subscription_no_subscriptions_description()}
@@ -251,7 +267,7 @@
                   <Button
                     variant="primary"
                     size="sm"
-                    loading={reactivateLoading === sub.id}
+                    loading={reactivatingIds.has(sub.id)}
                     onclick={() => handleReactivate(sub)}
                   >
                     {m.subscription_reactivate()}
@@ -259,8 +275,8 @@
                 {/if}
               </div>
 
-              {#if reactivateError && reactivateLoading === null}
-                <Alert variant="error">{reactivateError}</Alert>
+              {#if reactivateErrors.has(sub.id)}
+                <Alert variant="error">{reactivateErrors.get(sub.id)}</Alert>
               {/if}
             </div>
           </Card.Content>

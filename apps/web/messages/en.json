@@ -424,6 +424,8 @@
   "subscription_disabled_title": "Subscriptions Not Available",
   "subscription_disabled_description": "This organisation does not currently offer subscription plans.",
   "subscription_checkout_error": "Something went wrong starting your subscription. Please try again.",
+  "subscription_load_error": "Couldn't load your subscriptions. Please try again.",
+  "subscription_reactivate_error": "Couldn't reactivate this subscription. Please try again.",
   "subscription_success_title": "Subscription activated!",
   "subscription_success_description": "Welcome! Your subscription is now active and you have access to all included content.",
 

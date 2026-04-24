@@ -3,8 +3,9 @@
  *
  * Covers:
  * 1. `load()` registers `depends('account:subscriptions')` exactly once.
- * 2. `load()` returns `{ subscriptions }` shaped from `api.subscription.getMine()`.
- * 3. When the API throws, the error propagates (no swallow).
+ * 2. `load()` returns `{ subscriptions, loadError: false }` from the API.
+ * 3. When the API throws, `load()` returns `{ subscriptions: [], loadError: true }`
+ *    so the page renders a retry alert instead of the +error boundary.
  *
  * Auth gating lives on the parent layout, so this load function does not
  * redirect on its own.
@@ -57,7 +58,7 @@ describe('Account Subscriptions Page Load', () => {
     expect(depends).toHaveBeenCalledWith('account:subscriptions');
   });
 
-  it('returns { subscriptions } from api.subscription.getMine()', async () => {
+  it('returns { subscriptions, loadError: false } from api.subscription.getMine()', async () => {
     const fixture = [
       {
         id: 'sub-1',
@@ -75,22 +76,26 @@ describe('Account Subscriptions Page Load', () => {
       depends,
     } as unknown as LoadInput);
 
-    expect(result).toEqual({ subscriptions: fixture });
+    expect(result).toEqual({ subscriptions: fixture, loadError: false });
     expect(getMineMock).toHaveBeenCalledTimes(1);
   });
 
-  it('propagates errors from the API (does not swallow)', async () => {
-    const boom = new Error('ecom worker unreachable');
-    getMineMock.mockRejectedValueOnce(boom);
+  it('returns loadError: true on API failure (no full-page 500)', async () => {
+    // Previously the load function let errors propagate, which would render
+    // the global +error.svelte and obscure the fact that only this one API
+    // call failed. The new discriminator lets the page render a retry alert
+    // inline while keeping the rest of the account layout intact.
+    getMineMock.mockRejectedValueOnce(new Error('ecom worker unreachable'));
 
     const { load } = await import('../+page.server');
 
-    await expect(
-      load({
-        platform: mockPlatform,
-        cookies: mockCookies,
-        depends,
-      } as unknown as LoadInput)
-    ).rejects.toThrow('ecom worker unreachable');
+    const result = await load({
+      platform: mockPlatform,
+      cookies: mockCookies,
+      depends,
+    } as unknown as LoadInput);
+
+    expect(result).toEqual({ subscriptions: [], loadError: true });
+    expect(getMineMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -3391,6 +3391,22 @@ export const subscription_checkout_error = () => `Something went wrong starting 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const subscription_load_error = () => `Couldn't load your subscriptions. Please try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_reactivate_error = () => `Couldn't reactivate this subscription. Please try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const subscription_success_title = () => `Subscription activated!`
 
 
