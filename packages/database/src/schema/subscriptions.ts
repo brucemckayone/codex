@@ -122,6 +122,9 @@ export const subscriptions = pgTable(
     cancelAtPeriodEnd: boolean('cancel_at_period_end').default(false).notNull(),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
     cancelReason: text('cancel_reason'),
+    // Structured churn taxonomy (Q7). See CHURN_REASON in @codex/constants.
+    // Complements cancel_reason (free-text) — both fields fill in independently.
+    churnReason: varchar('churn_reason', { length: 50 }),
 
     // Revenue split snapshot (immutable — calculated at creation, updated on renewal)
     // Platform keeps 10% of gross. Org gets 15% of post-platform. Creators get remainder.
@@ -166,6 +169,13 @@ export const subscriptions = pgTable(
     check(
       'check_billing_interval',
       sql`${table.billingInterval} IN ('month', 'year')`
+    ),
+    // Structured churn taxonomy (Q7). NULL until the user cancels; once
+    // populated must match the CHURN_REASON const in @codex/constants.
+    // Keep the IN list sorted to match CHURN_REASON for diff-review clarity.
+    check(
+      'check_churn_reason',
+      sql`${table.churnReason} IS NULL OR ${table.churnReason} IN ('too_expensive', 'not_enough_content', 'found_alternative', 'not_using_it', 'technical_issues', 'other')`
     ),
     check('check_sub_amount_positive', sql`${table.amountCents} >= 0`),
     check(

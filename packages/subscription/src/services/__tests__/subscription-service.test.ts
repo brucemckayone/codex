@@ -1424,6 +1424,61 @@ describe('SubscriptionService', () => {
       expect(result.subscription.organizationId).toBe(org.id);
       expect(result.subscription.userId).toBe(otherCreatorId);
     });
+
+    // Codex-kxecu (Q7): structured taxonomy is persisted alongside the
+    // free-text reason. Both fields fill in independently.
+    it('should persist churnReason alongside the free-text reason', async () => {
+      const { org, tier1 } = await createFullOrg('cancel-churn');
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          status: 'active',
+        })
+      );
+
+      await service.cancelSubscription(
+        otherCreatorId,
+        org.id,
+        'Tell me more',
+        'too_expensive'
+      );
+
+      const { eq, and } = await import('drizzle-orm');
+      const [updated] = await db
+        .select()
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.userId, otherCreatorId),
+            eq(subscriptions.organizationId, org.id)
+          )
+        );
+      expect(updated.churnReason).toBe('too_expensive');
+      expect(updated.cancelReason).toBe('Tell me more');
+    });
+
+    it('should persist NULL for churnReason when the caller omits it (legacy callers untouched)', async () => {
+      const { org, tier1 } = await createFullOrg('cancel-churn-null');
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          status: 'active',
+        })
+      );
+
+      await service.cancelSubscription(otherCreatorId, org.id, 'Just because');
+
+      const { eq, and } = await import('drizzle-orm');
+      const [updated] = await db
+        .select()
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.userId, otherCreatorId),
+            eq(subscriptions.organizationId, org.id)
+          )
+        );
+      expect(updated.churnReason).toBeNull();
+      expect(updated.cancelReason).toBe('Just because');
+    });
   });
 
   // ─── reactivateSubscription ───────────────────────────────────────

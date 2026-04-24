@@ -407,6 +407,13 @@
       "when": 1777042720280,
       "tag": "0057_wealthy_human_torch",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1777061298728,
+      "tag": "0058_chubby_wrecker",
+      "breakpoints": true
     }
   ]
 }

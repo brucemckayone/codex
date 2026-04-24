@@ -35,11 +35,35 @@
   // reconciled with authoritative server state.
   const subscriptions = $derived(data.subscriptions);
 
+  type ChurnReason =
+    | 'too_expensive'
+    | 'not_enough_content'
+    | 'found_alternative'
+    | 'not_using_it'
+    | 'technical_issues'
+    | 'other';
+
   let cancelDialogOpen = $state(false);
   let cancellingSubscription = $state<UserOrgSubscription | null>(null);
   let cancelReason = $state('');
+  let cancelChurnReason = $state<ChurnReason | ''>('');
   let cancelLoading = $state(false);
   let cancelError = $state('');
+
+  // The free-text field is only required when the user picks "Other" —
+  // every other reason stands alone. Enabling the textarea for non-'other'
+  // reasons would invite noise; disabling it prevents that by design.
+  const cancelReasonTextareaDisabled = $derived(
+    cancelChurnReason !== '' && cancelChurnReason !== 'other'
+  );
+  const churnReasonOptions: { value: ChurnReason; label: () => string }[] = [
+    { value: 'too_expensive', label: () => m.subscription_churn_reason_too_expensive() },
+    { value: 'not_enough_content', label: () => m.subscription_churn_reason_not_enough_content() },
+    { value: 'found_alternative', label: () => m.subscription_churn_reason_found_alternative() },
+    { value: 'not_using_it', label: () => m.subscription_churn_reason_not_using_it() },
+    { value: 'technical_issues', label: () => m.subscription_churn_reason_technical_issues() },
+    { value: 'other', label: () => m.subscription_churn_reason_other() },
+  ];
   // Per-card state: multiple cards can reactivate in parallel, and an error
   // on one must not render on the others. Single-slot $state<string | null>
   // rendered the error on any card whose loading slot happened to be null.
@@ -70,6 +94,7 @@
   function openCancelDialog(sub: UserOrgSubscription) {
     cancellingSubscription = sub;
     cancelReason = '';
+    cancelChurnReason = '';
     cancelError = '';
     cancelDialogOpen = true;
   }
@@ -95,8 +120,10 @@
       existing.cancelAtPeriodEnd = true;
     }
 
+    const churnReason = cancelChurnReason || undefined;
+
     try {
-      await cancelSubscription({ organizationId, reason });
+      await cancelSubscription({ organizationId, reason, churnReason });
       cancelDialogOpen = false;
       cancellingSubscription = null;
       await Promise.all([
@@ -362,6 +389,26 @@
         </p>
       {/if}
 
+      <fieldset
+        class="churn-reason-group"
+        aria-describedby="churn-reason-legend"
+      >
+        <legend id="churn-reason-legend" class="churn-reason-legend">
+          {m.subscription_churn_reason_label()}
+        </legend>
+        {#each churnReasonOptions as opt (opt.value)}
+          <label class="churn-reason-option">
+            <input
+              type="radio"
+              name="churn-reason"
+              value={opt.value}
+              bind:group={cancelChurnReason}
+            />
+            <span>{opt.label()}</span>
+          </label>
+        {/each}
+      </fieldset>
+
       <div class="form-field">
         <Label for="cancel-reason">{m.subscription_cancel_reason()}</Label>
         <TextArea
@@ -369,7 +416,14 @@
           bind:value={cancelReason}
           rows={3}
           maxlength={500}
+          disabled={cancelReasonTextareaDisabled}
+          aria-required={cancelChurnReason === 'other'}
         />
+        {#if cancelChurnReason === 'other'}
+          <p class="churn-reason-hint">
+            {m.subscription_churn_reason_other_required()}
+          </p>
+        {/if}
       </div>
 
       {#if cancelError}
@@ -504,5 +558,41 @@
     background: var(--color-surface-secondary);
     border-radius: var(--radius-md);
     line-height: var(--leading-relaxed);
+  }
+
+  .churn-reason-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-4);
+    padding: 0;
+    border: 0;
+  }
+
+  .churn-reason-legend {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text);
+    margin-bottom: var(--space-2);
+    padding: 0;
+  }
+
+  .churn-reason-option {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--color-text);
+    cursor: pointer;
+  }
+
+  .churn-reason-option input[type='radio'] {
+    accent-color: var(--color-primary-500);
+  }
+
+  .churn-reason-hint {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    margin: var(--space-1) 0 0;
   }
 </style>

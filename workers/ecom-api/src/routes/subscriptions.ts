@@ -213,7 +213,8 @@ subscriptions.post(
       await ctx.services.subscription.cancelSubscription(
         ctx.user.id,
         ctx.input.body.organizationId,
-        ctx.input.body.reason
+        ctx.input.body.reason,
+        ctx.input.body.churnReason
       );
       return await ctx.services.subscription.getSubscription(
         ctx.user.id,

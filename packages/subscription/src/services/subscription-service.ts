@@ -1593,11 +1593,18 @@ export class SubscriptionService extends BaseService {
   /**
    * Cancel subscription at period end.
    * Access retained until currentPeriodEnd.
+   *
+   * Two reason fields are recorded side-by-side:
+   * - `reason` is the legacy free-text field (max 500 chars, optional).
+   * - `churnReason` is the Q7 structured taxonomy (`CHURN_REASON` enum,
+   *   optional). Both are persisted independently so churn analytics can
+   *   aggregate on the enum while still surfacing long-tail free-text.
    */
   async cancelSubscription(
     userId: string,
     orgId: string,
-    reason?: string
+    reason?: string,
+    churnReason?: string
   ): Promise<{ userId: string; orgId: string; subscription: Subscription }> {
     try {
       const sub = await this.getSubscriptionOrThrow(userId, orgId);
@@ -1611,6 +1618,7 @@ export class SubscriptionService extends BaseService {
         .set({
           status: SUBSCRIPTION_STATUS.CANCELLING,
           cancelReason: reason ?? null,
+          churnReason: churnReason ?? null,
           updatedAt: new Date(),
         })
         .where(eq(subscriptions.id, sub.id));

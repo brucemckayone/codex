@@ -181,6 +181,16 @@ export const changeSubscriptionTier = command(
 const cancelCommandSchema = z.object({
   organizationId: z.string().uuid(),
   reason: z.string().max(500).optional(),
+  churnReason: z
+    .enum([
+      'too_expensive',
+      'not_enough_content',
+      'found_alternative',
+      'not_using_it',
+      'technical_issues',
+      'other',
+    ])
+    .optional(),
 });
 
 /**

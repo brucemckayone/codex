@@ -46,6 +46,33 @@ export const SUBSCRIPTION_STATUS = {
   PAUSED: 'paused',
 } as const;
 
+/**
+ * Structured churn-reason taxonomy for subscription cancellation (Q7).
+ *
+ * Persisted on `subscriptions.churn_reason` alongside the existing free-text
+ * `cancel_reason`. The 'other' option is the only value that requires the
+ * free-text field to be set — all others can stand alone.
+ *
+ * This const is the single source of truth for the allowed values, shared
+ * between the DB CHECK constraint (packages/database) and the Zod enum
+ * (packages/validation) so a taxonomy change touches exactly one file.
+ */
+export const CHURN_REASON = {
+  TOO_EXPENSIVE: 'too_expensive',
+  NOT_ENOUGH_CONTENT: 'not_enough_content',
+  FOUND_ALTERNATIVE: 'found_alternative',
+  NOT_USING_IT: 'not_using_it',
+  TECHNICAL_ISSUES: 'technical_issues',
+  OTHER: 'other',
+} as const;
+
+export const CHURN_REASON_VALUES = Object.values(CHURN_REASON) as [
+  string,
+  ...string[],
+];
+
+export type ChurnReason = (typeof CHURN_REASON)[keyof typeof CHURN_REASON];
+
 export const BILLING_INTERVAL = {
   MONTH: 'month',
   YEAR: 'year',

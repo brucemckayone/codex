@@ -1,0 +1,2 @@
+ALTER TABLE "subscriptions" ADD COLUMN "churn_reason" varchar(50);--> statement-breakpoint
+ALTER TABLE "subscriptions" ADD CONSTRAINT "check_churn_reason" CHECK ("subscriptions"."churn_reason" IS NULL OR "subscriptions"."churn_reason" IN ('too_expensive', 'not_enough_content', 'found_alternative', 'not_using_it', 'technical_issues', 'other'));

@@ -123,10 +123,24 @@ export const changeTierSchema = z.object({
 
 export const cancelSubscriptionSchema = z.object({
   organizationId: uuidSchema,
+  // Free-text reason (legacy field, optional). When `churnReason === 'other'`
+  // the client should ensure this is non-empty but we don't enforce that
+  // server-side — a user who clicks confirm quickly still gets cancelled.
   reason: z
     .string()
     .trim()
     .max(500, 'Reason must be 500 characters or less')
+    .optional(),
+  // Structured churn taxonomy (Q7). See CHURN_REASON in @codex/constants.
+  churnReason: z
+    .enum([
+      'too_expensive',
+      'not_enough_content',
+      'found_alternative',
+      'not_using_it',
+      'technical_issues',
+      'other',
+    ])
     .optional(),
 });
 
