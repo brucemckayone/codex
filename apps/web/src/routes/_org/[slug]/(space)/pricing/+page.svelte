@@ -1079,22 +1079,22 @@
     background:
       radial-gradient(
         ellipse 60% 70% at 18% 12%,
-        color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 18%, transparent),
+        color-mix(in oklch, var(--color-brand-primary) 18%, transparent),
         transparent 62%
       ),
       radial-gradient(
         ellipse 50% 60% at 82% 88%,
-        color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 11%, transparent),
+        color-mix(in oklch, var(--color-brand-primary) 11%, transparent),
         transparent 65%
       ),
       radial-gradient(
         ellipse 80% 60% at 50% 0%,
-        color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 7%, transparent),
+        color-mix(in oklch, var(--color-brand-primary) 7%, transparent),
         transparent 70%
       ),
       linear-gradient(
         180deg,
-        color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 4%, var(--color-surface)) 0%,
+        color-mix(in oklch, var(--color-brand-primary) 4%, var(--color-surface)) 0%,
         var(--color-surface) 100%
       );
   }
@@ -1125,8 +1125,8 @@
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wider);
-    text-transform: var(--text-transform-label, uppercase);
-    color: var(--color-brand-primary, var(--color-interactive));
+    text-transform: var(--text-transform-label);
+    color: var(--color-brand-primary);
     margin: 0;
     opacity: 0;
     transform: translateY(var(--space-2));
@@ -1139,7 +1139,7 @@
     background: linear-gradient(
       90deg,
       transparent,
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 72%, transparent),
+      color-mix(in oklch, var(--color-brand-primary) 72%, transparent),
       transparent
     );
     opacity: 0;
@@ -1229,8 +1229,8 @@
     border-radius: var(--radius-full);
     box-shadow:
       var(--shadow-sm),
-      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 14%, transparent),
-      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark, black) 3%, transparent);
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint) 14%, transparent),
+      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark) 3%, transparent);
   }
 
   .toggle-option {
@@ -1262,13 +1262,13 @@
     color: var(--color-text);
     background: linear-gradient(
       180deg,
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 8%, var(--color-surface)),
+      color-mix(in oklch, var(--color-brand-primary) 8%, var(--color-surface)),
       var(--color-surface)
     );
     box-shadow:
       var(--shadow-sm),
       0 0 0 1px color-mix(in srgb, var(--color-border) 60%, transparent),
-      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 22%, transparent);
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint) 22%, transparent);
   }
 
   .savings-pill {
@@ -1412,8 +1412,8 @@
     border-radius: var(--radius-lg);
     box-shadow:
       var(--shadow-lg),
-      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 10%, transparent),
-      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark, black) 4%, transparent);
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint) 10%, transparent),
+      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark) 4%, transparent);
     transition: transform calc(var(--duration-slow) * 1.17) var(--ease-smooth), box-shadow calc(var(--duration-slow) * 1.17);
   }
 
@@ -1421,9 +1421,9 @@
     transform: translateY(calc(-1 * var(--space-1)));
     box-shadow:
       var(--shadow-lg),
-      0 var(--space-4) var(--space-8) color-mix(in srgb, var(--color-glass-tint-dark, black) 8%, transparent),
-      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 12%, transparent),
-      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark, black) 4%, transparent);
+      0 var(--space-4) var(--space-8) color-mix(in srgb, var(--color-glass-tint-dark) 8%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint) 12%, transparent),
+      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark) 4%, transparent);
   }
 
   /* ── FEATURED CARD (recommended glow + brand tint) ─────────────── */
@@ -1433,24 +1433,24 @@
     background:
       linear-gradient(
         180deg,
-        color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 6%, var(--color-surface)) 0%,
-        color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 1%, var(--color-surface)) 55%,
-        color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 3%, var(--color-surface)) 100%
+        color-mix(in oklch, var(--color-brand-primary) 6%, var(--color-surface)) 0%,
+        color-mix(in oklch, var(--color-brand-primary) 1%, var(--color-surface)) 55%,
+        color-mix(in oklch, var(--color-brand-primary) 3%, var(--color-surface)) 100%
       );
-    border-color: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 45%, transparent);
+    border-color: color-mix(in srgb, var(--color-brand-primary) 45%, transparent);
     box-shadow:
       var(--shadow-xl),
-      0 var(--space-6) var(--space-12) calc(-1 * var(--space-4)) color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 22%, transparent),
-      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 14%, transparent),
-      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark, black) 3%, transparent);
+      0 var(--space-6) var(--space-12) calc(-1 * var(--space-4)) color-mix(in oklch, var(--color-brand-primary) 22%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint) 14%, transparent),
+      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark) 3%, transparent);
   }
 
   .card--featured:hover .card__inner {
     box-shadow:
       var(--shadow-xl),
-      0 var(--space-8) var(--space-16) calc(-1 * var(--space-4)) color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 32%, transparent),
-      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 18%, transparent),
-      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark, black) 3%, transparent);
+      0 var(--space-8) var(--space-16) calc(-1 * var(--space-4)) color-mix(in oklch, var(--color-brand-primary) 32%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint) 18%, transparent),
+      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark) 3%, transparent);
   }
 
   .card__glow {
@@ -1459,9 +1459,9 @@
     border-radius: calc(var(--radius-lg) + var(--border-width-thick));
     background: conic-gradient(
       from 180deg,
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 70%, transparent),
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 22%, transparent),
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 70%, transparent)
+      color-mix(in oklch, var(--color-brand-primary) 70%, transparent),
+      color-mix(in oklch, var(--color-brand-primary) 22%, transparent),
+      color-mix(in oklch, var(--color-brand-primary) 70%, transparent)
     );
     opacity: 0.55;
     filter: blur(var(--blur-sm));
@@ -1493,23 +1493,23 @@
     z-index: 2;
     display: inline-flex;
     align-items: center;
-    padding: var(--space-1-5, calc(var(--space-1) * 1.5)) var(--space-4);
+    padding: var(--space-1-5) var(--space-4);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wider);
-    text-transform: var(--text-transform-label, uppercase);
-    color: var(--color-text-on-brand, white);
+    text-transform: var(--text-transform-label);
+    color: var(--color-text-on-brand);
     background: linear-gradient(
       180deg,
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 92%, white),
-      var(--color-brand-primary, var(--color-interactive))
+      color-mix(in oklch, var(--color-brand-primary) 92%, white),
+      var(--color-brand-primary)
     );
-    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 60%, transparent);
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-brand-primary) 60%, transparent);
     border-radius: var(--radius-full);
     box-shadow:
       var(--shadow-md),
-      0 var(--space-1) var(--space-4) color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 25%, transparent),
-      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 25%, transparent);
+      0 var(--space-1) var(--space-4) color-mix(in oklch, var(--color-brand-primary) 25%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint) 25%, transparent);
     white-space: nowrap;
     overflow: hidden;
   }
@@ -1555,7 +1555,7 @@
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wider);
-    text-transform: var(--text-transform-label, uppercase);
+    text-transform: var(--text-transform-label);
     border-radius: var(--radius-full);
   }
 
@@ -1687,7 +1687,7 @@
 
   /* Featured tier: price amount in brand color for visual anchor */
   .card--featured .card__price-amount {
-    color: var(--color-brand-primary, var(--color-interactive));
+    color: var(--color-brand-primary);
   }
 
   .card__price-interval {
@@ -1755,13 +1755,13 @@
     width: var(--space-6);
     height: var(--space-6);
     border-radius: var(--radius-full);
-    background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 12%, transparent);
-    color: var(--color-brand-primary, var(--color-interactive));
+    background: color-mix(in srgb, var(--color-brand-primary) 12%, transparent);
+    color: var(--color-brand-primary);
     margin-top: calc(-1 * var(--space-0-5));
   }
 
   .card--featured .card__feature-icon {
-    background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 20%, transparent);
+    background: color-mix(in srgb, var(--color-brand-primary) 20%, transparent);
   }
 
   .card__features li :global(svg) {
@@ -1858,8 +1858,8 @@
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wider);
-    text-transform: var(--text-transform-label, uppercase);
-    color: var(--color-brand-primary, var(--color-interactive));
+    text-transform: var(--text-transform-label);
+    color: var(--color-brand-primary);
     margin: 0;
   }
 
@@ -1870,7 +1870,7 @@
     background: linear-gradient(
       90deg,
       transparent,
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 72%, transparent),
+      color-mix(in oklch, var(--color-brand-primary) 72%, transparent),
       transparent
     );
   }
@@ -2012,7 +2012,7 @@
       180deg,
       transparent 0%,
       transparent 42%,
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 18%, black) 100%
+      color-mix(in oklch, var(--color-brand-primary) 18%, black) 100%
     );
     opacity: 0.55;
     mix-blend-mode: multiply;
@@ -2028,7 +2028,7 @@
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wider);
-    text-transform: var(--text-transform-label, uppercase);
+    text-transform: var(--text-transform-label);
     color: white;
     background: color-mix(in srgb, black 40%, transparent);
     backdrop-filter: blur(var(--blur-md));
@@ -2123,7 +2123,7 @@
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wider);
-    text-transform: var(--text-transform-label, uppercase);
+    text-transform: var(--text-transform-label);
     color: var(--color-text-secondary);
   }
 
@@ -2159,9 +2159,9 @@
     font-weight: var(--font-semibold);
     /* Hover variant = brand color with -0.08L OKLCH — darker for legibility
        on light surfaces without abandoning brand identity. */
-    color: var(--color-brand-primary-hover, var(--color-interactive-hover, var(--color-brand-primary)));
-    background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 10%, var(--color-surface));
-    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 30%, transparent);
+    color: var(--color-brand-primary-hover);
+    background: color-mix(in srgb, var(--color-brand-primary) 10%, var(--color-surface));
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-brand-primary) 30%, transparent);
     border-radius: var(--radius-full);
     text-decoration: none;
     transition:
@@ -2171,10 +2171,10 @@
   }
 
   .preview__cta:hover {
-    background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 12%, var(--color-surface));
-    border-color: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 45%, transparent);
+    background: color-mix(in srgb, var(--color-brand-primary) 12%, var(--color-surface));
+    border-color: color-mix(in srgb, var(--color-brand-primary) 45%, transparent);
     box-shadow:
-      0 var(--space-1) var(--space-4) color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 22%, transparent);
+      0 var(--space-1) var(--space-4) color-mix(in oklch, var(--color-brand-primary) 22%, transparent);
   }
 
   .preview__cta:focus-visible {
@@ -2218,8 +2218,8 @@
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wider);
-    text-transform: var(--text-transform-label, uppercase);
-    color: var(--color-brand-primary, var(--color-interactive));
+    text-transform: var(--text-transform-label);
+    color: var(--color-brand-primary);
     margin: 0;
   }
 
@@ -2230,7 +2230,7 @@
     background: linear-gradient(
       90deg,
       transparent,
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 72%, transparent),
+      color-mix(in oklch, var(--color-brand-primary) 72%, transparent),
       transparent
     );
   }
@@ -2295,9 +2295,9 @@
   }
 
   .faq__list :global(.accordion-trigger:hover) {
-    color: var(--color-brand-primary, var(--color-interactive));
+    color: var(--color-brand-primary);
     text-decoration: none;
-    background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 4%, transparent);
+    background: color-mix(in srgb, var(--color-brand-primary) 4%, transparent);
   }
 
   .faq__list :global(.accordion-trigger:focus-visible) {
@@ -2306,7 +2306,7 @@
   }
 
   .faq__list :global(.accordion-trigger[aria-expanded="true"]) {
-    color: var(--color-brand-primary, var(--color-interactive));
+    color: var(--color-brand-primary);
   }
 
   /* Left-edge brand indicator — fills in on hover, stays lit when open.
@@ -2318,7 +2318,7 @@
     left: var(--space-2);
     width: var(--border-width-thick);
     height: 0;
-    background: var(--color-brand-primary, var(--color-interactive));
+    background: var(--color-brand-primary);
     border-radius: var(--radius-full);
     transform: translateY(-50%);
     transition: height var(--duration-normal) var(--ease-smooth);
@@ -2333,7 +2333,7 @@
   }
 
   .faq__list :global(.accordion-chevron) {
-    color: var(--color-brand-primary, var(--color-interactive));
+    color: var(--color-brand-primary);
     opacity: 1;
     height: var(--space-4);
     width: var(--space-4);
@@ -2377,7 +2377,7 @@
     background: linear-gradient(
       90deg,
       transparent,
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 72%, transparent),
+      color-mix(in oklch, var(--color-brand-primary) 72%, transparent),
       transparent
     );
   }
@@ -2406,8 +2406,8 @@
     width: var(--space-5);
     height: var(--space-5);
     border-radius: var(--radius-full);
-    background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 10%, transparent);
-    color: var(--color-brand-primary, var(--color-interactive));
+    background: color-mix(in srgb, var(--color-brand-primary) 10%, transparent);
+    color: var(--color-brand-primary);
     flex-shrink: 0;
   }
 
@@ -2427,7 +2427,7 @@
     width: var(--space-1);
     height: var(--space-1);
     border-radius: var(--radius-full);
-    background: color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 45%, transparent);
+    background: color-mix(in oklch, var(--color-brand-primary) 45%, transparent);
     flex-shrink: 0;
   }
 
@@ -2454,7 +2454,7 @@
        compositing layer, which would otherwise paint above it in Chrome despite
        our z-index being higher than the footer's (auto → 0) — a known
        backdrop-filter stacking quirk. */
-    z-index: var(--z-fixed, 1030);
+    z-index: var(--z-fixed);
     pointer-events: none;
     display: flex;
     justify-content: center;
@@ -2478,9 +2478,9 @@
     border-radius: var(--radius-full);
     box-shadow:
       var(--shadow-xl),
-      0 var(--space-4) var(--space-12) calc(-1 * var(--space-2)) color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 18%, transparent),
-      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 16%, transparent),
-      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark, black) 2%, transparent);
+      0 var(--space-4) var(--space-12) calc(-1 * var(--space-2)) color-mix(in oklch, var(--color-brand-primary) 18%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint) 16%, transparent),
+      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark) 2%, transparent);
   }
 
   /* Mobile: full-bleed bar sitting ABOVE the MobileBottomNav (64px tall).
@@ -2500,8 +2500,8 @@
     border-right: none;
     border-bottom: none;
     box-shadow:
-      0 calc(-1 * var(--space-2)) var(--space-6) color-mix(in srgb, var(--color-glass-tint-dark, black) 6%, transparent),
-      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 12%, transparent);
+      0 calc(-1 * var(--space-2)) var(--space-6) color-mix(in srgb, var(--color-glass-tint-dark) 6%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint) 12%, transparent);
   }
 
   .sticky-bar__info {
@@ -2516,8 +2516,8 @@
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wider);
-    text-transform: var(--text-transform-label, uppercase);
-    color: var(--color-brand-primary, var(--color-interactive));
+    text-transform: var(--text-transform-label);
+    color: var(--color-brand-primary);
     line-height: var(--leading-tight);
   }
 
@@ -2629,7 +2629,7 @@
     border-radius: var(--radius-md);
     box-shadow:
       var(--shadow-sm),
-      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 20%, transparent);
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint) 20%, transparent);
   }
 
   .checkout-error__icon {
@@ -2675,7 +2675,7 @@
   .checkout-error__retry {
     align-self: flex-start;
     margin-top: var(--space-2);
-    padding: var(--space-1-5, calc(var(--space-1) * 1.5)) var(--space-3);
+    padding: var(--space-1-5) var(--space-3);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-tight);
@@ -2703,14 +2703,14 @@
 
   .checkout-error__retry:disabled {
     cursor: progress;
-    opacity: var(--opacity-70, 0.7);
+    opacity: var(--opacity-70);
   }
 
   .checkout-error__escalation {
     margin: var(--space-1) 0 0;
     font-size: var(--text-xs);
     color: var(--color-error-700);
-    opacity: var(--opacity-70, 0.7);
+    opacity: var(--opacity-70);
     line-height: var(--leading-snug);
     text-wrap: pretty;
     max-width: 46ch;
@@ -2765,7 +2765,7 @@
     border-radius: var(--radius-lg);
     box-shadow:
       var(--shadow-md),
-      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint, white) 10%, transparent);
+      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint) 10%, transparent);
     opacity: 0;
     animation: cardReveal calc(var(--duration-slower) * 1.1) var(--ease-smooth) forwards;
     animation-delay: calc(120ms * var(--card-index));
@@ -2776,10 +2776,10 @@
     padding-top: var(--space-10);
     background: linear-gradient(
       180deg,
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 6%, var(--color-surface)),
-      color-mix(in oklch, var(--color-brand-primary, var(--color-interactive)) 1%, var(--color-surface))
+      color-mix(in oklch, var(--color-brand-primary) 6%, var(--color-surface)),
+      color-mix(in oklch, var(--color-brand-primary) 1%, var(--color-surface))
     );
-    border-color: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 30%, transparent);
+    border-color: color-mix(in srgb, var(--color-brand-primary) 30%, transparent);
   }
 
   .card-shell__features {
@@ -2850,7 +2850,7 @@
     }
     .card--featured .card__inner,
     .card-shell--featured {
-      background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 6%, var(--color-surface));
+      background: color-mix(in srgb, var(--color-brand-primary) 6%, var(--color-surface));
     }
     .preview__badge {
       background: color-mix(in srgb, black 70%, transparent);
@@ -2914,7 +2914,7 @@
     }
     .card--featured .card__inner,
     .card-shell--featured {
-      background: color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 6%, var(--color-surface));
+      background: color-mix(in srgb, var(--color-brand-primary) 6%, var(--color-surface));
     }
     .preview__badge {
       background: color-mix(in srgb, black 78%, transparent);
