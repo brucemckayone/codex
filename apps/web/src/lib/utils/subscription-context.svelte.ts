@@ -127,7 +127,15 @@ export function useSubscriptionContext(
   const liveSubscription = $derived.by(() => {
     const { organizationId, enableSubscriptions } = getParams();
     if (!browser || !enableSubscriptions || !organizationId) return null;
-    return subscriptionCollection?.state.get(organizationId) ?? null;
+    const entry = subscriptionCollection?.state.get(organizationId) ?? null;
+    // Only access-granting states flip the gate. paused / past_due /
+    // cancelled / incomplete rows persist for UI (Resume button, past-due
+    // alert) but must not short-circuit the content-detail access check —
+    // backend @codex/access would 403 the stream click anyway.
+    if (!entry) return null;
+    return entry.status === 'active' || entry.status === 'cancelling'
+      ? entry
+      : null;
   });
 
   const subCtx = $derived.by<SubCtx>(() => {

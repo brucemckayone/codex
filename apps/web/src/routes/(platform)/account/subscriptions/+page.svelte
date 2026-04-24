@@ -17,6 +17,7 @@
   import {
     cancelSubscription,
     reactivateSubscription,
+    resumeSubscription,
   } from '$lib/remote/subscription.remote';
   import { openBillingPortal } from '$lib/remote/account.remote';
   import { invalidateCollection } from '$lib/collections';
@@ -44,6 +45,8 @@
   // rendered the error on any card whose loading slot happened to be null.
   const reactivatingIds = new SvelteSet<string>();
   const reactivateErrors = new SvelteMap<string, string>();
+  const resumingIds = new SvelteSet<string>();
+  const resumeErrors = new SvelteMap<string, string>();
 
   function statusVariant(status: string): 'success' | 'warning' | 'error' | 'neutral' {
     switch (status) {
@@ -153,6 +156,39 @@
     }
   }
 
+  async function handleResume(sub: UserOrgSubscription) {
+    resumingIds.add(sub.id);
+    resumeErrors.delete(sub.id);
+
+    const existing = subscriptions.find(
+      (s) => s.organizationId === sub.organizationId
+    );
+    const previousStatus = existing?.status;
+
+    if (existing && existing.status !== 'active') {
+      existing.status = 'active';
+    }
+
+    try {
+      await resumeSubscription({ organizationId: sub.organizationId });
+      await Promise.all([
+        invalidate('account:subscriptions'),
+        invalidateCollection('library'),
+        invalidateCollection('subscription'),
+      ]);
+    } catch (error) {
+      if (existing && previousStatus !== undefined) {
+        existing.status = previousStatus;
+      }
+      resumeErrors.set(
+        sub.id,
+        error instanceof Error ? error.message : m.subscription_resume_error()
+      );
+    } finally {
+      resumingIds.delete(sub.id);
+    }
+  }
+
   async function handleUpdatePayment() {
     try {
       const result = await openBillingPortal({
@@ -223,6 +259,12 @@
                 </Alert>
               {/if}
 
+              {#if sub.status === 'paused'}
+                <Alert variant="warning">
+                  {m.subscription_paused_message()}
+                </Alert>
+              {/if}
+
               {#if sub.status === 'cancelling'}
                 <p class="cancelling-message">
                   {m.subscription_cancelling_message({
@@ -273,10 +315,23 @@
                     {m.subscription_reactivate()}
                   </Button>
                 {/if}
+                {#if sub.status === 'paused'}
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    loading={resumingIds.has(sub.id)}
+                    onclick={() => handleResume(sub)}
+                  >
+                    {m.subscription_resume()}
+                  </Button>
+                {/if}
               </div>
 
               {#if reactivateErrors.has(sub.id)}
                 <Alert variant="error">{reactivateErrors.get(sub.id)}</Alert>
+              {/if}
+              {#if resumeErrors.has(sub.id)}
+                <Alert variant="error">{resumeErrors.get(sub.id)}</Alert>
               {/if}
             </div>
           </Card.Content>

@@ -426,6 +426,9 @@
   "subscription_checkout_error": "Something went wrong starting your subscription. Please try again.",
   "subscription_load_error": "Couldn't load your subscriptions. Please try again.",
   "subscription_reactivate_error": "Couldn't reactivate this subscription. Please try again.",
+  "subscription_resume_error": "Couldn't resume this subscription. Please try again.",
+  "subscription_paused_message": "Your subscription is paused. Resume to restore access.",
+  "subscription_resume": "Resume",
   "subscription_success_title": "Subscription activated!",
   "subscription_success_description": "Welcome! Your subscription is now active and you have access to all included content.",
 

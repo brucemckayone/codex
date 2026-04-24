@@ -239,15 +239,22 @@ export async function loadSubscriptionContext(
     api.tiers.list(orgId).catch(() => [] as SubscriptionTier[]),
   ]);
 
-  const hasSubscription = !!currentSubscription;
+  // hasSubscription must mirror the backend access filter: the @codex/access
+  // streaming check only grants access for status IN (active, cancelling).
+  // paused / past_due / cancelled / incomplete are correctly denied by the
+  // DB filter but were previously flagged as "has subscription" here, so
+  // the UI showed a Play button that 403s on click.
+  const isAccessGranting =
+    !!currentSubscription &&
+    (currentSubscription.status === 'active' ||
+      currentSubscription.status === 'cancelling');
+  const hasSubscription = isAccessGranting;
   let subscriptionCoversContent = false;
 
-  if (currentSubscription) {
+  if (isAccessGranting && currentSubscription) {
     if (!contentMinimumTierId) {
-      // No minimum tier set — any active subscription grants access
       subscriptionCoversContent = true;
     } else {
-      // Minimum tier set — compare sortOrder
       const contentTier = tiers.find((t) => t.id === contentMinimumTierId);
       if (contentTier) {
         subscriptionCoversContent =

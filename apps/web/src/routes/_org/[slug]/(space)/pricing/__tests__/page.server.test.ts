@@ -57,6 +57,7 @@ describe('pricing page — currentSubscription envelope', () => {
 
     const result = await load(baseInput(null));
 
+    if (!result) throw new Error('load returned void');
     await expect(result.currentSubscription).resolves.toEqual({
       data: null,
       loadError: false,
@@ -77,6 +78,7 @@ describe('pricing page — currentSubscription envelope', () => {
 
     const result = await load(baseInput({ id: 'user-1' }));
 
+    if (!result) throw new Error('load returned void');
     await expect(result.currentSubscription).resolves.toEqual({
       data: fixture,
       loadError: false,
@@ -91,6 +93,7 @@ describe('pricing page — currentSubscription envelope', () => {
 
     const result = await load(baseInput({ id: 'user-1' }));
 
+    if (!result) throw new Error('load returned void');
     await expect(result.currentSubscription).resolves.toEqual({
       data: null,
       loadError: true,

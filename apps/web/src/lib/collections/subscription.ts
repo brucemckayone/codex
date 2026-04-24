@@ -35,12 +35,49 @@ export interface SubscriptionItem {
     name: string;
     sortOrder: number;
   };
-  /** Subscription lifecycle state */
-  status: 'active' | 'cancelling' | 'past_due';
+  /**
+   * Subscription lifecycle state — full backend enum so access-gate logic
+   * can match what the server actually stores. Collapsing this to just
+   * active/cancelling silently dropped paused/cancelled/incomplete from
+   * downstream consumers (previously identified as U1/U8 in the audit).
+   */
+  status:
+    | 'active'
+    | 'cancelling'
+    | 'past_due'
+    | 'paused'
+    | 'cancelled'
+    | 'incomplete';
   /** When the current billing period ends */
   currentPeriodEnd: string;
   /** Whether cancellation is scheduled */
   cancelAtPeriodEnd: boolean;
+}
+
+/**
+ * Narrow the arbitrary server-side status string into the client enum.
+ * Unknown values default to 'active' so we don't drop the entry entirely.
+ * The `cancelAtPeriodEnd` flag shadows 'active' into 'cancelling' so the
+ * collection matches backend semantics (Stripe reports 'active' for the
+ * remainder of the paid period after cancellation).
+ */
+function normaliseSubscriptionStatus(
+  status: string,
+  cancelAtPeriodEnd: boolean
+): SubscriptionItem['status'] {
+  if (status === 'active') {
+    return cancelAtPeriodEnd ? 'cancelling' : 'active';
+  }
+  if (
+    status === 'cancelling' ||
+    status === 'past_due' ||
+    status === 'paused' ||
+    status === 'cancelled' ||
+    status === 'incomplete'
+  ) {
+    return status;
+  }
+  return 'active';
 }
 
 export const subscriptionCollection = browser
@@ -85,7 +122,11 @@ export async function loadSubscriptionFromServer(
           ? { organizationSlug: orgSlug ?? existingSlug }
           : {}),
         tier: sub.tier,
-        status: sub.cancelAtPeriodEnd ? 'cancelling' : 'active',
+        // Pass server status through faithfully — the previous narrow
+        // 'active'/'cancelling' collapse silently dropped paused, past_due,
+        // cancelled, and incomplete, breaking consumers that need to
+        // render the right UI branch for each state.
+        status: normaliseSubscriptionStatus(sub.status, sub.cancelAtPeriodEnd),
         currentPeriodEnd:
           periodEnd instanceof Date
             ? periodEnd.toISOString()

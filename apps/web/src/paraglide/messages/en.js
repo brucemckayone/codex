@@ -3407,6 +3407,30 @@ export const subscription_reactivate_error = () => `Couldn't reactivate this sub
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const subscription_resume_error = () => `Couldn't resume this subscription. Please try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_paused_message = () => `Your subscription is paused. Resume to restore access.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_resume = () => `Resume`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const subscription_success_title = () => `Subscription activated!`
 
 
