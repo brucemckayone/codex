@@ -26,6 +26,13 @@ import {
 
 const SIM_RES = 512;
 
+// Frame-rate-independent click decay (docs/04-motion.md §4).
+// Old per-frame multiplier `clickStrength *= 0.9` decayed 2× faster on 120Hz
+// displays and half as fast on throttled 30Hz tabs. The canonical equivalent
+// at 60fps is `0.9^60 ≈ 1.83e-3` per second; tuned here to that value so the
+// felt decay matches the previous 60fps behaviour exactly.
+const CLICK_DECAY_PER_SECOND = 0.9 ** 60;
+
 /** Init shader — empty field (all zeros). */
 const MYCELIUM_INIT_FRAG = `#version 300 es
 precision highp float;
@@ -82,6 +89,11 @@ export function createMyceliumRenderer(): ShaderRenderer {
   let lastSeedTime = 0;
   let nextSeedInterval = 4.0 + Math.random() * 4.0;
   let clickStrength = 0;
+  // Tracks elapsed time from previous render() call to derive dt for
+  // frame-rate-independent decay. 0 means "no previous frame"; dt is clamped
+  // to 0.1s so pause/resume cliffs (tab hidden, preset switch) don't collapse
+  // clickStrength to zero on the first frame after resume.
+  let lastTime = 0;
 
   function stepSim(
     gl: WebGL2RenderingContext,
@@ -158,11 +170,18 @@ export function createMyceliumRenderer(): ShaderRenderer {
 
       const cfg = config as MyceliumConfig;
 
+      // Frame-rate-independent click decay (docs/04-motion.md §4).
+      // dt is clamped to 0.1s so pause/resume cliffs don't collapse
+      // clickStrength to zero on the first frame after resume (and also
+      // covers the first-frame case where lastTime is still 0).
+      const dt = lastTime === 0 ? 0 : Math.min(time - lastTime, 0.1);
+      lastTime = time;
+
       // Track click burst strength
       if (mouse.burstStrength > 0.01) {
         clickStrength = mouse.burstStrength;
       } else {
-        clickStrength *= 0.9;
+        clickStrength *= CLICK_DECAY_PER_SECOND ** dt;
         if (clickStrength < 0.01) clickStrength = 0;
       }
 
@@ -235,6 +254,7 @@ export function createMyceliumRenderer(): ShaderRenderer {
       lastSeedTime = 0;
       nextSeedInterval = 4.0 + Math.random() * 4.0;
       clickStrength = 0;
+      lastTime = 0;
 
       // Clear both FBO sides to empty
       gl.viewport(0, 0, SIM_RES, SIM_RES);
