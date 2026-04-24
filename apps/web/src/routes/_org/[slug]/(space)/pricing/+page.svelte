@@ -560,10 +560,15 @@
 
     <!-- ═══ TIER CARDS ═══ -->
     {#if checkoutError}
+      <!--
+        No transition:fly — the element has role="alert", so AT announces
+        regardless of visual motion. A 220ms fly would only delay the
+        announcement and violates 04-motion.md §2 (Svelte transition
+        directives bypass the reduced-motion token collapse). See Codex-mfl7.
+      -->
       <div
         class="checkout-error"
         role="alert"
-        transition:fly={{ y: -12, duration: 220, easing: cubicOut }}
       >
         <span class="checkout-error__icon" aria-hidden="true">
           <AlertTriangleIcon size={18} />

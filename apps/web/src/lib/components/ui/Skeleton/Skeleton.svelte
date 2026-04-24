@@ -54,7 +54,9 @@
       color-mix(in srgb, white 60%, transparent) 50%,
       transparent 100%
     );
-    animation: skeleton-shimmer 2s ease-in-out infinite;
+    /* Shimmer sweep — token-driven so motion.css can collapse it under
+       prefers-reduced-motion: reduce. --duration-slowest × 3 ≈ 2.4s. */
+    animation: skeleton-shimmer calc(var(--duration-slowest) * 3) ease-in-out infinite;
   }
 
   @keyframes skeleton-shimmer {
@@ -63,6 +65,16 @@
     }
     100% {
       transform: translateX(100%);
+    }
+  }
+
+  /* Explicit reduced-motion guard — belt-and-braces with motion.css global
+     !important collapse. Removing the sweep pseudo entirely is more
+     predictable than a 0.01ms infinite animation. */
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton::after {
+      animation: none;
+      display: none;
     }
   }
 </style>

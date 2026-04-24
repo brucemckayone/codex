@@ -6,6 +6,7 @@
   import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
   import Label from '$lib/components/ui/Label/Label.svelte';
   import { EmptyState } from '$lib/components/ui';
+  import { Skeleton } from '$lib/components/ui/Skeleton';
   import {
     PlusIcon,
     TrashIcon,
@@ -137,8 +138,8 @@
     <div class="faq-loading">
       {#each Array(3) as _}
         <div class="faq-item-skeleton">
-          <div class="skeleton skeleton--text"></div>
-          <div class="skeleton skeleton--text-sm"></div>
+          <Skeleton width="60%" height="var(--text-sm)" />
+          <Skeleton width="90%" height="var(--text-xs)" />
         </div>
       {/each}
     </div>
@@ -383,7 +384,7 @@
     border-top: var(--border-width) var(--border-style) var(--color-border);
   }
 
-  /* Loading skeleton */
+  /* Loading skeleton — shimmer + reduced-motion guard live in <Skeleton>. */
   .faq-loading {
     display: flex;
     flex-direction: column;
@@ -397,32 +398,5 @@
     padding: var(--space-4);
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-md);
-  }
-
-  .skeleton {
-    background: linear-gradient(
-      90deg,
-      var(--color-surface-secondary) 25%,
-      var(--color-surface-tertiary, var(--color-surface-secondary)) 50%,
-      var(--color-surface-secondary) 75%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-    border-radius: var(--radius-sm);
-  }
-
-  .skeleton--text { width: 60%; height: var(--text-sm); }
-  .skeleton--text-sm { width: 90%; height: var(--text-xs); }
-
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .skeleton {
-      animation: none;
-      background: var(--color-surface-secondary);
-    }
   }
 </style>
