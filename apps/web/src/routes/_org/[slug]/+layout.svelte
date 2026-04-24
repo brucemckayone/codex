@@ -21,6 +21,7 @@
   import { MobileBottomNav, MobileBottomSheet } from '$lib/components/layout/MobileNav';
   import CommandPaletteSearch from '$lib/components/search/CommandPaletteSearch.svelte';
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
+  import HealthBanner from '$lib/components/subscription/HealthBanner.svelte';
   import { brandEditor, injectTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
   import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
@@ -451,6 +452,7 @@
   {/if}
 
   <main id="main-content" class="org-main" class:org-main--studio={isStudio} class:org-main--blendable={isLanding} class:org-main--landing={isLanding}>
+    <HealthBanner />
     {@render children()}
   </main>
 

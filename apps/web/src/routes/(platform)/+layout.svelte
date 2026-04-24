@@ -9,6 +9,7 @@
   import { SidebarRail } from '$lib/components/layout/SidebarRail';
   import { MobileBottomNav, MobileBottomSheet } from '$lib/components/layout/MobileNav';
   import CommandPaletteSearch from '$lib/components/search/CommandPaletteSearch.svelte';
+  import HealthBanner from '$lib/components/subscription/HealthBanner.svelte';
   import { Footer, PageContainer } from '$lib/components/ui';
   import type { LayoutUser } from '$lib/types';
   import type { LayoutData } from './$types';
@@ -69,6 +70,7 @@
 
 <div class="platform-layout">
   <main id="main-content">
+    <HealthBanner />
     <PageContainer>
       {@render children()}
     </PageContainer>
