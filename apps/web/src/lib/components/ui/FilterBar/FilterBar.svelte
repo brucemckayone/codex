@@ -245,6 +245,11 @@
     background: var(--color-interactive-hover);
   }
 
+  .filter-bar__pill:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+  }
+
   /* Select */
   .filter-bar__select {
     flex-shrink: 0;
@@ -302,6 +307,11 @@
 
   .filter-bar__search-clear:hover {
     color: var(--color-text);
+  }
+
+  .filter-bar__search-clear:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
   }
 
   /* Chips */
