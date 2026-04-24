@@ -410,6 +410,95 @@ describe('handleSubscriptionWebhook', () => {
 
   // ─── Unhandled event types ──────────────────────────────────────────────────
 
+  // ─── Dashboard drift detection (product.updated / price.updated) ───────────
+  // Stripe Dashboard edits to Codex-managed tier Products/Prices don't sync
+  // back to the subscriptionTiers table today. The handler logs an obs.error
+  // so operators can reconcile manually. A Codex-managed tier is identified
+  // by metadata we set in TierService (codex_type='subscription_tier' on
+  // products, codex_organization_id on prices).
+
+  describe('product.updated (Dashboard drift detection)', () => {
+    it('should log obs.error when a Codex-managed tier Product is edited', async () => {
+      const event = createEvent(STRIPE_EVENTS.PRODUCT_UPDATED, {
+        id: 'prod_tier_123',
+        name: 'Renamed in Dashboard',
+        metadata: {
+          codex_type: 'subscription_tier',
+          codex_organization_id: 'org-1',
+        },
+      });
+      const { context, mock } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        'Codex-managed tier Product edited in Stripe Dashboard',
+        expect.objectContaining({
+          stripeProductId: 'prod_tier_123',
+          organizationId: 'org-1',
+          productName: 'Renamed in Dashboard',
+        })
+      );
+    });
+
+    it('should silently ignore product.updated for non-Codex products', async () => {
+      const event = createEvent(STRIPE_EVENTS.PRODUCT_UPDATED, {
+        id: 'prod_external_456',
+        metadata: { something: 'else' },
+      });
+      const { context, mock } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mock._obs.error).not.toHaveBeenCalled();
+    });
+
+    it('should silently ignore product.updated with no metadata', async () => {
+      const event = createEvent(STRIPE_EVENTS.PRODUCT_UPDATED, {
+        id: 'prod_bare',
+      });
+      const { context, mock } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mock._obs.error).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('price.updated (Dashboard drift detection)', () => {
+    it('should log obs.error when a Codex-managed tier Price is edited', async () => {
+      const event = createEvent(STRIPE_EVENTS.PRICE_UPDATED, {
+        id: 'price_tier_abc',
+        active: false,
+        metadata: { codex_organization_id: 'org-2', interval: 'month' },
+      });
+      const { context, mock } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mock._obs.error).toHaveBeenCalledWith(
+        'Codex-managed tier Price edited in Stripe Dashboard',
+        expect.objectContaining({
+          stripePriceId: 'price_tier_abc',
+          organizationId: 'org-2',
+          priceActive: false,
+        })
+      );
+    });
+
+    it('should silently ignore price.updated for non-Codex prices', async () => {
+      const event = createEvent(STRIPE_EVENTS.PRICE_UPDATED, {
+        id: 'price_external_xyz',
+        metadata: {},
+      });
+      const { context, mock } = createContext();
+
+      await handleSubscriptionWebhook(event, mockStripe, context);
+
+      expect(mock._obs.error).not.toHaveBeenCalled();
+    });
+  });
+
   describe('unhandled event types', () => {
     it('should log info for unrecognised event types', async () => {
       // Codex-a0vk2 added `customer.subscription.paused`, Codex-rh0on added

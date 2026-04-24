@@ -19,6 +19,11 @@ export const STRIPE_EVENTS = {
   // Disputes (treated as refunds for access purposes — purchase.disputedAt
   // is set and contentAccess is soft-deleted via processDispute)
   CHARGE_DISPUTE_CREATED: 'charge.dispute.created',
+  // Dashboard-drift detection: tier metadata edited outside Codex (e.g. in
+  // Stripe Dashboard) is logged as an obs.error so operators can reconcile.
+  // Sync-back behaviour depends on the operator policy.
+  PRODUCT_UPDATED: 'product.updated',
+  PRICE_UPDATED: 'price.updated',
 } as const;
 
 export const PURCHASE_STATUS = {

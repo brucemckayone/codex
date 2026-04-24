@@ -398,6 +398,42 @@ export async function handleSubscriptionWebhook(
         break;
       }
 
+      case STRIPE_EVENTS.PRODUCT_UPDATED: {
+        // Stripe Dashboard edits to a Codex-managed tier Product do not
+        // propagate to subscriptionTiers.name/description today. Emit
+        // obs.error on detection so operators see the drift; the sync-back
+        // decision is Q1-gated (see docs/subscription-audit: open-question
+        // on whether Dashboard edits are in-bounds).
+        const product = event.data.object as Stripe.Product;
+        if (product.metadata?.codex_type === 'subscription_tier') {
+          obs?.error('Codex-managed tier Product edited in Stripe Dashboard', {
+            stripeProductId: product.id,
+            organizationId: product.metadata.codex_organization_id,
+            productName: product.name,
+            eventId: event.id,
+          });
+        }
+        break;
+      }
+
+      case STRIPE_EVENTS.PRICE_UPDATED: {
+        // Stripe Prices are immutable (amount/currency/interval), so only
+        // metadata + nickname + active flip fire this event. TierService
+        // already creates a new Price on amount changes, so this webhook
+        // only detects OUT-OF-BAND edits. Codex-created Prices carry
+        // codex_organization_id in metadata; other orgs' prices pass through.
+        const price = event.data.object as Stripe.Price;
+        if (price.metadata?.codex_organization_id) {
+          obs?.error('Codex-managed tier Price edited in Stripe Dashboard', {
+            stripePriceId: price.id,
+            organizationId: price.metadata.codex_organization_id,
+            priceActive: price.active,
+            eventId: event.id,
+          });
+        }
+        break;
+      }
+
       case STRIPE_EVENTS.INVOICE_PAYMENT_FAILED: {
         const invoice = event.data.object as Stripe.Invoice;
         obs?.warn('Invoice payment failed', {
