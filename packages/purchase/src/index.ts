@@ -75,6 +75,13 @@ export {
   DEFAULT_PLATFORM_FEE_PERCENTAGE,
   type RevenueSplit,
 } from './services/revenue-calculator';
+// Customer integrity helpers (Codex-qsvxf — Q4.4 belt-and-braces)
+export {
+  findStripeCustomerCollisions,
+  findUsersByStripeCustomerId,
+  type StripeCustomerCollision,
+  type UserCustomerMatch,
+} from './services/stripe-customer-integrity';
 // Stripe client factory
 export { createStripeClient, verifyWebhookSignature } from './stripe-client';
 // Types
