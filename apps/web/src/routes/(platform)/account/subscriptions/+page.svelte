@@ -354,6 +354,14 @@
     </Dialog.Header>
 
     <Dialog.Body>
+      {#if cancellingSubscription}
+        <p class="follow-notice">
+          {m.subscription_cancel_follow_notice({
+            orgName: cancellingSubscription.organization.name,
+          })}
+        </p>
+      {/if}
+
       <div class="form-field">
         <Label for="cancel-reason">{m.subscription_cancel_reason()}</Label>
         <TextArea
@@ -486,5 +494,15 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
+  }
+
+  .follow-notice {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    margin: 0 0 var(--space-4);
+    padding: var(--space-3);
+    background: var(--color-surface-secondary);
+    border-radius: var(--radius-md);
+    line-height: var(--leading-relaxed);
   }
 </style>

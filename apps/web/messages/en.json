@@ -407,6 +407,7 @@
   "subscription_cancel": "Cancel Subscription",
   "subscription_cancel_reason": "Reason for cancelling (optional)",
   "subscription_cancel_confirm": "Cancel at end of period",
+  "subscription_cancel_follow_notice": "Cancelling won't unfollow you. If you follow {orgName}, you'll keep receiving their updates — unfollow from their page if you'd rather not.",
   "subscription_reactivate": "Reactivate",
   "subscription_change_tier": "Change Plan",
   "subscription_current_period_ends": "Current period ends {date}",
