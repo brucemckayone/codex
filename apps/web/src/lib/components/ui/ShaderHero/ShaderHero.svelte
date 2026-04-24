@@ -33,6 +33,13 @@
 
   const { class: className, preset: presetOverride }: Props = $props();
 
+  // Frame-rate-independent burst decay (docs/04-motion.md §4).
+  // Old per-frame multiplier `burstStrength *= 0.85` decayed 2× faster on 120Hz
+  // displays and half as fast on throttled 30Hz tabs. The canonical equivalent
+  // at 60fps is `0.85^60 ≈ 1.63e-5` per second; tuned here to that value so
+  // the felt decay matches the previous 60fps behaviour exactly.
+  const BURST_DECAY_PER_SECOND = 0.85 ** 60;
+
   let canvasEl: HTMLCanvasElement | undefined = $state();
   let containerEl: HTMLDivElement | undefined = $state();
   let hasWebGL = $state(true);
@@ -59,6 +66,7 @@
     let currentPreset: ShaderPresetId = 'none';
     let animFrameId = 0;
     let startTime = performance.now();
+    let lastFrameTime = performance.now();
     let isVisible = true;
     let isReducedMotion = false;
     let hasRenderedStaticFrame = false;
@@ -72,6 +80,11 @@
     // renderer init) call `scheduleFrame()` to resume after a pause.
     function scheduleFrame() {
       if (animFrameId !== 0) return; // already scheduled
+      // Reset lastFrameTime so the first frame after a pause (tab hidden,
+      // reduced-motion pause, preset switch) sees dt ≈ 16ms instead of the
+      // real wall-clock gap — otherwise burstStrength would decay to ~0
+      // instantly on resume.
+      lastFrameTime = performance.now();
       animFrameId = requestAnimationFrame(frame);
     }
 
@@ -197,13 +210,19 @@
         return; // no re-prime — static frame is final
       }
 
-      // Decay burst strength
+      // Frame-rate-independent burst decay (docs/04-motion.md §4).
+      // dt is clamped to 0.1s to avoid a tiny residual cliff if the RAF
+      // loop happens to fire before `scheduleFrame` resets lastFrameTime.
+      const now = performance.now();
+      const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
+      lastFrameTime = now;
+
       if (mouse.burstStrength > 0) {
-        mouse.burstStrength *= 0.85;
+        mouse.burstStrength *= Math.pow(BURST_DECAY_PER_SECOND, dt);
         if (mouse.burstStrength < 0.01) mouse.burstStrength = 0;
       }
 
-      const elapsed = (performance.now() - startTime) / 1000;
+      const elapsed = (now - startTime) / 1000;
       renderer.render(gl!, elapsed, mouse, config, canvasEl!.width, canvasEl!.height);
 
       // Re-prime ONLY from the render branch — hidden tabs and reduced-motion
