@@ -91,6 +91,51 @@
     onFilterChange(filter.key, value || null);
   }
 
+  // ── Pill radiogroup keyboard handling ─────────────────────────────
+  // ARIA radiogroup pattern: arrow keys (and Home/End) navigate + select.
+  // Follow-focus semantics — matches apps/web/src/routes/_org/[slug]/(space)/
+  // pricing/+page.svelte handleBillingKey. Roving tabindex is set inline on
+  // each pill so Tab only lands once on the group (on the checked radio).
+  function handlePillKey(e: KeyboardEvent, filter: PillFilter) {
+    const isNext = e.key === 'ArrowRight' || e.key === 'ArrowDown';
+    const isPrev = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
+    const isHome = e.key === 'Home';
+    const isEnd = e.key === 'End';
+    if (!isNext && !isPrev && !isHome && !isEnd) return;
+    e.preventDefault();
+
+    const options = filter.options;
+    if (options.length === 0) return;
+
+    const current = values[filter.key] ?? '';
+    const currentIdx = options.findIndex(
+      (o) => o.value === current || (!current && !o.value)
+    );
+    const safeIdx = currentIdx < 0 ? 0 : currentIdx;
+
+    let targetIdx: number;
+    if (isHome) {
+      targetIdx = 0;
+    } else if (isEnd) {
+      targetIdx = options.length - 1;
+    } else if (isNext) {
+      targetIdx = (safeIdx + 1) % options.length;
+    } else {
+      targetIdx = (safeIdx - 1 + options.length) % options.length;
+    }
+
+    const target = options[targetIdx];
+    if (!target) return;
+    onFilterChange(filter.key, target.value || null);
+
+    // Shift focus to the newly-checked pill on the next microtask, after
+    // Svelte updates aria-checked + tabindex.
+    const buttons = (e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>(
+      'button[role="radio"]'
+    );
+    queueMicrotask(() => buttons[targetIdx]?.focus());
+  }
+
   // Active chips for display
   const activeChips = $derived.by(() => {
     if (!showActiveChips) return [];
@@ -117,14 +162,18 @@
           class:filter-bar__pills--connected={filter.variant === 'connected'}
           role="radiogroup"
           aria-label={filter.label}
+          onkeydown={(e) => handlePillKey(e, filter)}
         >
           {#each filter.options as option (option.value)}
+            {@const isChecked = values[filter.key] === option.value || (!values[filter.key] && !option.value)}
             <button
+              type="button"
               class="filter-bar__pill"
-              class:filter-bar__pill--active={values[filter.key] === option.value || (!values[filter.key] && !option.value)}
+              class:filter-bar__pill--active={isChecked}
               onclick={() => onFilterChange(filter.key, option.value || null)}
               role="radio"
-              aria-checked={values[filter.key] === option.value || (!values[filter.key] && !option.value)}
+              aria-checked={isChecked}
+              tabindex={isChecked ? 0 : -1}
             >
               {option.label}
             </button>
