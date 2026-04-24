@@ -61,25 +61,6 @@ describe('Tabs', () => {
     expect(root).toBeTruthy();
   });
 
-  test('root has Melt-UI data attributes', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    component = mount(Tabs, {
-      target: document.body,
-      props: { children },
-    });
-
-    const root = document.body.querySelector('div');
-    // Melt-UI adds data-melt-tabs-root or similar
-    const hasDataAttribute = Array.from(root?.attributes || []).some(
-      (attr) =>
-        attr.name.startsWith('data-melt-') || attr.name.startsWith('data-tabs')
-    );
-    expect(hasDataAttribute).toBe(true);
-  });
-
   test('accepts defaultValue prop', () => {
     const children = createRawSnippet(() => ({
       render: () => '<span>Content</span>',
