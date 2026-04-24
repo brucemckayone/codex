@@ -8,15 +8,17 @@ import {
 import Dialog from './Dialog.svelte';
 import DialogContent from './DialogContent.svelte';
 import DialogDescription from './DialogDescription.svelte';
+import DialogHarness from './DialogHarness.test.svelte';
 import DialogTitle from './DialogTitle.svelte';
 
 /**
  * Dialog component unit tests.
  *
- * Note: Dialog is a complex compound component with portals and focus trapping.
- * Due to JSDOM limitations with Melt-UI actions and portal rendering,
- * we test basic props and structure. Interactive behavior (open/close,
- * focus trapping, keyboard escape) is covered by E2E tests.
+ * Dialog is a compound component built on Melt UI's createDialog. Sub-components
+ * (DialogContent/Title/Description) require the parent Dialog context, so they
+ * are tested via DialogHarness which wires a realistic composition. Interactive
+ * focus-trap and keyboard escape behaviour is covered by E2E tests — Melt UI's
+ * actions register focus handlers that JSDOM cannot fully exercise.
  */
 
 describe('Dialog', () => {
@@ -40,103 +42,204 @@ describe('Dialog', () => {
       props: { children },
     });
 
-    // When closed, only trigger button should be rendered (no modal content)
     expect(document.querySelector('[data-testid="trigger"]')).toBeTruthy();
   });
 
-  test('accepts open prop (controlled mode)', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    // Should not throw when open prop is provided
-    component = mount(Dialog, {
+  test('does not render portal content when closed', () => {
+    component = mount(DialogHarness, {
       target: document.body,
-      props: {
-        children,
-        open: false,
-      },
-    });
-
-    expect(document.body.querySelector('span')).toBeTruthy();
-  });
-
-  test('accepts onOpenChange callback', () => {
-    const onOpenChange = vi.fn();
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    component = mount(Dialog, {
-      target: document.body,
-      props: {
-        children,
-        onOpenChange,
-      },
-    });
-
-    // Callback should be wired without error
-    expect(document.body.querySelector('span')).toBeTruthy();
-  });
-
-  test('starts closed by default', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span data-testid="content">Dialog Content</span>',
-    }));
-
-    component = mount(Dialog, {
-      target: document.body,
-      props: { children },
-    });
-
-    // Dialog content (overlay, modal) should not be visible when closed
-    expect(document.querySelector('.dialog-overlay')).toBeNull();
-    expect(document.querySelector('.dialog-content')).toBeNull();
-  });
-
-  test('syncs open state with Melt-UI', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    // Mount with open=true
-    component = mount(Dialog, {
-      target: document.body,
-      props: {
-        children,
-        open: true,
-      },
+      props: { open: false },
     });
 
     flushSync();
 
-    // When open, the dialog context should have open state
-    // Note: Actual DOM visibility depends on DialogContent which requires context
-    expect(document.body.querySelector('span')).toBeTruthy();
+    expect(document.querySelector('.dialog-content')).toBeNull();
+    expect(document.querySelector('.dialog-overlay')).toBeNull();
+    expect(
+      document.querySelector('[data-testid="first-focusable"]')
+    ).toBeNull();
+  });
+
+  test('renders portal content when open', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+
+    flushSync();
+
+    expect(document.querySelector('.dialog-content')).toBeTruthy();
+    expect(document.querySelector('.dialog-overlay')).toBeTruthy();
+    expect(
+      document.querySelector('[data-testid="first-focusable"]')
+    ).toBeTruthy();
+  });
+
+  test('fires onOpenChange when Melt-UI syncs close state', () => {
+    const onOpenChange = vi.fn();
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, onOpenChange },
+    });
+
+    flushSync();
+
+    const closeButton =
+      document.querySelector<HTMLButtonElement>('.dialog-close');
+    expect(closeButton).toBeTruthy();
+    closeButton?.click();
+    flushSync();
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
 
 describe('DialogContent', () => {
-  // Note: DialogContent requires Dialog parent context.
-  // Testing in isolation verifies component structure only.
+  let component: ReturnType<typeof mount> | null = null;
 
-  test('component module exports correctly', () => {
-    expect(DialogContent).toBeDefined();
-    expect(typeof DialogContent).toBe('function');
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    document.body.innerHTML = '';
+  });
+
+  test('renders children inside the content panel when open', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+
+    flushSync();
+
+    const content = document.querySelector('.dialog-content');
+    expect(content).toBeTruthy();
+    expect(
+      content?.querySelector('[data-testid="first-focusable"]')
+    ).toBeTruthy();
+    expect(
+      content?.querySelector('[data-testid="second-focusable"]')
+    ).toBeTruthy();
+  });
+
+  test('content panel has dialog role and aria-modal via Melt UI', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+
+    flushSync();
+
+    const content = document.querySelector('.dialog-content');
+    expect(content?.getAttribute('role')).toBe('dialog');
+    expect(content?.getAttribute('aria-modal')).toBe('true');
+  });
+
+  test('close button has accessible label', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+
+    flushSync();
+
+    const closeButton = document.querySelector('.dialog-close');
+    expect(closeButton?.getAttribute('aria-label')).toBe('Close');
+  });
+
+  test('applies size variant via data-size attribute', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true, size: 'lg' },
+    });
+
+    flushSync();
+
+    const content = document.querySelector('.dialog-content');
+    expect(content?.getAttribute('data-size')).toBe('lg');
   });
 });
 
 describe('DialogTitle', () => {
-  test('component module exports correctly', () => {
-    expect(DialogTitle).toBeDefined();
-    expect(typeof DialogTitle).toBe('function');
+  let component: ReturnType<typeof mount> | null = null;
+
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    document.body.innerHTML = '';
+  });
+
+  test('renders as h2 with provided text', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+
+    flushSync();
+
+    const title = document.querySelector('h2.dialog-title');
+    expect(title).toBeTruthy();
+    expect(title?.textContent).toContain('Dialog Title');
+  });
+
+  test('title id is referenced by content aria-labelledby', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+
+    flushSync();
+
+    const title = document.querySelector<HTMLElement>('h2.dialog-title');
+    const content = document.querySelector('.dialog-content');
+
+    expect(title?.id).toBeTruthy();
+    expect(content?.getAttribute('aria-labelledby')).toBe(title?.id);
   });
 });
 
 describe('DialogDescription', () => {
-  test('component module exports correctly', () => {
-    expect(DialogDescription).toBeDefined();
-    expect(typeof DialogDescription).toBe('function');
+  let component: ReturnType<typeof mount> | null = null;
+
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    document.body.innerHTML = '';
+  });
+
+  test('renders as p with provided text', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+
+    flushSync();
+
+    const description = document.querySelector('p.dialog-description');
+    expect(description).toBeTruthy();
+    expect(description?.textContent).toContain('Dialog description text');
+  });
+
+  test('description id is referenced by content aria-describedby', () => {
+    component = mount(DialogHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+
+    flushSync();
+
+    const description = document.querySelector<HTMLElement>(
+      'p.dialog-description'
+    );
+    const content = document.querySelector('.dialog-content');
+
+    expect(description?.id).toBeTruthy();
+    expect(content?.getAttribute('aria-describedby')).toBe(description?.id);
   });
 });
 

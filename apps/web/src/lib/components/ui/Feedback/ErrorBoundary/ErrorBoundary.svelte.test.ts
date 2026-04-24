@@ -1,27 +1,27 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   createRawSnippet,
+  flushSync,
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 import ErrorBoundary from './ErrorBoundary.svelte';
+import ErrorBoundaryHarness from './ErrorBoundaryHarness.test.svelte';
 import ErrorTrigger from './ErrorTrigger.svelte';
 
 /**
  * ErrorBoundary component unit tests.
  *
  * ErrorBoundary uses Svelte 5's <svelte:boundary> to catch errors in child
- * components. Tests verify error catching, fallback UI, reset behavior, and
- * callback invocation.
- *
- * Note: Testing error boundaries requires components that intentionally throw.
- * The ErrorTrigger utility component is provided for this purpose.
+ * components. Interactive error paths (custom fallback, onerror/onreset
+ * callbacks) are verified via ErrorBoundaryHarness which wraps the boundary
+ * around ErrorTrigger — ErrorTrigger throws synchronously during render when
+ * shouldError is true, which is exactly what boundaries are designed to catch.
  */
 
 describe('ErrorBoundary', () => {
   let component: ReturnType<typeof mount> | null = null;
 
-  // Suppress console.error during error boundary tests
   const originalConsoleError = console.error;
   beforeEach(() => {
     console.error = vi.fn();
@@ -37,92 +37,110 @@ describe('ErrorBoundary', () => {
   });
 
   test('renders children when no error occurs', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<div data-testid="child">Normal content</div>',
-    }));
-
-    component = mount(ErrorBoundary, {
+    component = mount(ErrorBoundaryHarness, {
       target: document.body,
-      props: { children },
+      props: { shouldError: false },
     });
 
-    expect(document.querySelector('[data-testid="child"]')).toBeTruthy();
-    expect(document.body.textContent).toContain('Normal content');
+    flushSync();
+
+    expect(document.querySelector('[data-testid="normal-child"]')).toBeTruthy();
+    expect(document.body.textContent).toContain('Normal child content');
+    expect(document.querySelector('[role="alert"]')).toBeNull();
   });
 
-  test('default fallback has accessible structure', () => {
-    // Verify the default fallback template structure via code inspection
-    // Note: Actually rendering the fallback requires triggering an error in
-    // a child component, which is complex in unit tests. The ErrorBoundary
-    // default fallback includes:
-    // - role="alert" for screen readers
-    // - "Something went wrong" heading
-    // - "Try again" button
-    // Full error recovery behavior is tested via E2E tests.
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Normal content</span>',
-    }));
-
-    component = mount(ErrorBoundary, {
+  test('catches thrown error and renders default fallback', () => {
+    component = mount(ErrorBoundaryHarness, {
       target: document.body,
-      props: { children },
+      props: { shouldError: true, message: 'Boom' },
     });
 
-    // When no error, we just verify component mounted successfully
-    expect(document.body.textContent).toContain('Normal content');
+    flushSync();
+
+    const alert = document.querySelector('[role="alert"]');
+    expect(alert).toBeTruthy();
+    expect(alert?.textContent).toContain('Something went wrong');
+    expect(alert?.textContent).toContain('Try again');
+    expect(document.querySelector('[data-testid="normal-child"]')).toBeNull();
   });
 
-  test('accepts onerror callback prop', () => {
+  test('invokes onerror with the thrown Error and a reset function', () => {
     const onerror = vi.fn();
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    component = mount(ErrorBoundary, {
+    component = mount(ErrorBoundaryHarness, {
       target: document.body,
-      props: { children, onerror },
+      props: { shouldError: true, message: 'Kaboom', onerror },
     });
 
-    expect(document.body.querySelector('span')).toBeTruthy();
+    flushSync();
+
+    expect(onerror).toHaveBeenCalledTimes(1);
+    const [error, reset] = onerror.mock.calls[0];
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('Kaboom');
+    expect(typeof reset).toBe('function');
   });
 
-  test('accepts onreset callback prop', () => {
+  test('invokes onreset when Try again button is clicked', () => {
     const onreset = vi.fn();
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    component = mount(ErrorBoundary, {
+    component = mount(ErrorBoundaryHarness, {
       target: document.body,
-      props: { children, onreset },
+      props: { shouldError: true, onreset },
     });
 
-    expect(document.body.querySelector('span')).toBeTruthy();
+    flushSync();
+
+    const tryAgain = document.querySelector<HTMLButtonElement>(
+      '[role="alert"] button'
+    );
+    expect(tryAgain).toBeTruthy();
+    expect(tryAgain?.textContent).toContain('Try again');
+
+    tryAgain?.click();
+    flushSync();
+
+    expect(onreset).toHaveBeenCalledTimes(1);
   });
 
-  test('accepts fallback snippet prop', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    const fallback = createRawSnippet(() => ({
+  test('renders custom fallback snippet when provided on error', () => {
+    const fallback = createRawSnippet<[Error, () => void]>(() => ({
       render: () => '<div data-testid="custom-fallback">Custom error UI</div>',
     }));
 
-    component = mount(ErrorBoundary, {
+    component = mount(ErrorBoundaryHarness, {
       target: document.body,
-      props: { children, fallback },
+      props: { shouldError: true, fallback },
     });
 
-    // Fallback should not be visible when no error
+    flushSync();
+
+    expect(
+      document.querySelector('[data-testid="custom-fallback"]')
+    ).toBeTruthy();
+    // Default fallback must NOT render when a custom one is provided
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  test('does not render fallback when children render successfully', () => {
+    const fallback = createRawSnippet<[Error, () => void]>(() => ({
+      render: () => '<div data-testid="custom-fallback">Custom error UI</div>',
+    }));
+
+    component = mount(ErrorBoundaryHarness, {
+      target: document.body,
+      props: { shouldError: false, fallback },
+    });
+
+    flushSync();
+
     expect(
       document.querySelector('[data-testid="custom-fallback"]')
     ).toBeNull();
+    expect(document.querySelector('[role="alert"]')).toBeNull();
   });
 
-  test('wraps children in boundary element', () => {
+  test('renders children directly when mounted without any error path', () => {
     const children = createRawSnippet(() => ({
-      render: () => '<div data-testid="wrapped">Wrapped content</div>',
+      render: () => '<div data-testid="direct-child">Direct content</div>',
     }));
 
     component = mount(ErrorBoundary, {
@@ -130,7 +148,7 @@ describe('ErrorBoundary', () => {
       props: { children },
     });
 
-    expect(document.querySelector('[data-testid="wrapped"]')).toBeTruthy();
+    expect(document.querySelector('[data-testid="direct-child"]')).toBeTruthy();
   });
 });
 
@@ -143,11 +161,6 @@ describe('ErrorTrigger', () => {
       component = null;
     }
     document.body.innerHTML = '';
-  });
-
-  test('component module exports correctly', () => {
-    expect(ErrorTrigger).toBeDefined();
-    expect(typeof ErrorTrigger).toBe('function');
   });
 
   test('renders normally when shouldError is false', () => {
@@ -172,23 +185,7 @@ describe('ErrorTrigger', () => {
     );
   });
 
-  test('accepts custom message prop', () => {
-    component = mount(ErrorTrigger, {
-      target: document.body,
-      props: {
-        shouldError: false,
-        message: 'Custom error message',
-      },
-    });
-
-    // Message is only used when throwing, component should render normally
-    expect(document.body.textContent).toContain(
-      'This component renders successfully'
-    );
-  });
-
   test('throws error when shouldError is true', () => {
-    // We expect the component to throw during mount
     expect(() => {
       component = mount(ErrorTrigger, {
         target: document.body,
@@ -214,25 +211,5 @@ describe('ErrorBoundary integration', () => {
   test('both components can be imported together', () => {
     expect(ErrorBoundary).toBeDefined();
     expect(ErrorTrigger).toBeDefined();
-  });
-
-  test('default fallback includes required UI elements', () => {
-    // Test that the default fallback template has expected structure
-    // by inspecting the component source (verified via render tests)
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    const component = mount(ErrorBoundary, {
-      target: document.body,
-      props: { children },
-    });
-
-    // When no error, fallback is not rendered
-    expect(document.querySelector('.error-boundary')).toBeNull();
-    expect(document.querySelector('[role="alert"]')).toBeNull();
-
-    unmount(component);
-    document.body.innerHTML = '';
   });
 });
