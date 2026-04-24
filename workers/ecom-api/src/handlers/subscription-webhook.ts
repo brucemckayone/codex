@@ -185,12 +185,33 @@ export async function handleSubscriptionWebhook(
       : undefined;
     const waitUntil = c.executionCtx.waitUntil.bind(c.executionCtx);
 
+    // Q1.3 (Codex-7kc83): wire a mailer thunk so Dashboard-originated
+    // price changes (price.created → applyStripePriceCreated →
+    // propagateTierPriceToActiveSubscriptions) notify each affected
+    // subscriber. Mirrors the service-registry wiring used by
+    // `procedure()` routes. Same fire-and-forget semantics as
+    // cache invalidation: the webhook response returns 200 immediately
+    // and emails land on `waitUntil`.
+    const mailer = (params: {
+      to: string;
+      toName?: string;
+      templateName: 'subscription-tier-price-change';
+      category: 'transactional';
+      userId?: string;
+      organizationId?: string | null;
+      data: Record<string, string | number | boolean>;
+    }) => {
+      sendEmailToWorker(c.env, c.executionCtx, params);
+    };
+
     const service = new SubscriptionService(
       {
         db,
         environment: c.env.ENVIRONMENT || 'development',
         cache,
         waitUntil,
+        mailer,
+        webAppUrl: c.env.WEB_APP_URL,
       },
       stripe
     );

@@ -398,7 +398,10 @@ describe('SubscriptionService', () => {
 
       // Seed the subscription row as if the webhook had already processed
       // the event. verifyCheckoutSession matches on stripeSubscriptionId.
-      const stripeSubId = 'sub_verify_complete_123';
+      // Use a per-run suffix to dodge the global unique constraint on
+      // `stripe_subscription_id` when the shared test DB retains rows
+      // from earlier runs.
+      const stripeSubId = `sub_verify_complete_123_${Date.now()}`;
       await db.insert(subscriptions).values(
         createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
           stripeSubscriptionId: stripeSubId,
@@ -2204,13 +2207,17 @@ describe('SubscriptionService', () => {
       const { org, tier1 } = await createFullOrg('propagate-partial');
       const { retrieveSpy, updateSpy } = wireStripeSubSpies(stripe);
 
+      // Unique stripeSubscriptionId per run — the column is globally
+      // unique so hardcoded literals collide across repeated runs on
+      // the shared test DB.
+      const run = Date.now();
       const seed = await Promise.all([
         db
           .insert(subscriptions)
           .values(
             createTestSubscriptionInput(creatorId, org.id, tier1.id, {
               status: 'active',
-              stripeSubscriptionId: 'sub_partial_ok_1',
+              stripeSubscriptionId: `sub_partial_ok_1_${run}`,
             })
           )
           .returning(),
@@ -2219,7 +2226,7 @@ describe('SubscriptionService', () => {
           .values(
             createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
               status: 'active',
-              stripeSubscriptionId: 'sub_partial_fail',
+              stripeSubscriptionId: `sub_partial_fail_${run}`,
             })
           )
           .returning(),
@@ -2228,7 +2235,7 @@ describe('SubscriptionService', () => {
           .values(
             createTestSubscriptionInput(thirdUserId, org.id, tier1.id, {
               status: 'active',
-              stripeSubscriptionId: 'sub_partial_ok_2',
+              stripeSubscriptionId: `sub_partial_ok_2_${run}`,
             })
           )
           .returning(),
@@ -2258,12 +2265,13 @@ describe('SubscriptionService', () => {
       const { retrieveSpy, updateSpy } = wireStripeSubSpies(stripe);
 
       // Seed one active (MUST be swapped) + one of each excluded status.
+      const run = Date.now();
       const [okRow] = await db
         .insert(subscriptions)
         .values(
           createTestSubscriptionInput(creatorId, org.id, tier1.id, {
             status: 'active',
-            stripeSubscriptionId: 'sub_guard_active',
+            stripeSubscriptionId: `sub_guard_active_${run}`,
           })
         )
         .returning();
@@ -2279,7 +2287,7 @@ describe('SubscriptionService', () => {
         await db.insert(subscriptions).values(
           createTestSubscriptionInput(userId, org.id, tier1.id, {
             status,
-            stripeSubscriptionId: `sub_guard_${status}_${idx}`,
+            stripeSubscriptionId: `sub_guard_${status}_${idx}_${run}`,
             // cancelled / paused coexist with active for different users
             // via the partial unique index (which only applies to
             // ACTIVE/PAST_DUE/CANCELLING). But duplicate userIds across
@@ -2326,7 +2334,7 @@ describe('SubscriptionService', () => {
       await db.insert(subscriptions).values(
         createTestSubscriptionInput(creatorId, org.id, tier1.id, {
           status: 'active',
-          stripeSubscriptionId: 'sub_proration_1',
+          stripeSubscriptionId: `sub_proration_1_${Date.now()}`,
         })
       );
 
@@ -2354,7 +2362,7 @@ describe('SubscriptionService', () => {
         .values(
           createTestSubscriptionInput(creatorId, org.id, tier1.id, {
             status: 'active',
-            stripeSubscriptionId: 'sub_idempo_1',
+            stripeSubscriptionId: `sub_idempo_1_${Date.now()}`,
           })
         )
         .returning();
@@ -2389,11 +2397,12 @@ describe('SubscriptionService', () => {
       // same creatorId is NOT possible (unique index on userId+orgId
       // for active statuses), so seed fresh users.
       const newUserIds = await seedTestUsers(db, 25);
+      const run = Date.now();
       for (const [idx, uid] of newUserIds.entries()) {
         await db.insert(subscriptions).values(
           createTestSubscriptionInput(uid, org.id, tier1.id, {
             status: 'active',
-            stripeSubscriptionId: `sub_batch_${idx}`,
+            stripeSubscriptionId: `sub_batch_${idx}_${run}`,
           })
         );
       }
@@ -2432,6 +2441,250 @@ describe('SubscriptionService', () => {
           globalThis as unknown as { setTimeout: typeof setTimeout }
         ).setTimeout = originalSetTimeout;
       }
+    });
+
+    // ─── Email dispatch (Q1.3 — Codex-7kc83) ────────────────────────────
+
+    /**
+     * Q1.3 wires a `mailer` thunk into SubscriptionService so every
+     * SUCCESSFUL Stripe price swap fires a "subscription-tier-price-
+     * change" notice to the affected subscriber. The mailer is
+     * injected at construction — existing tests above construct the
+     * service without a mailer and assert propagation still succeeds
+     * (graceful degrade). The tests below construct a NEW service
+     * with a mailer injected so we can assert the email contract
+     * directly: payload shape, success/failure pairing, neutral copy.
+     */
+    describe('email dispatch on price change', () => {
+      function buildServiceWithMailer() {
+        const mailer = vi.fn();
+        const serviceWithMailer = new SubscriptionService(
+          {
+            db,
+            environment: 'test',
+            mailer,
+            webAppUrl: 'https://app.example.test',
+          },
+          stripe
+        );
+        return { serviceWithMailer, mailer };
+      }
+
+      it('dispatches one email per SUCCESSFUL Stripe update (positive path)', async () => {
+        const { org, tier1 } = await createFullOrg('propagate-email-happy');
+        wireStripeSubSpies(stripe);
+        const { serviceWithMailer, mailer } = buildServiceWithMailer();
+
+        const newUsers = await seedTestUsers(db, 3);
+        for (const [idx, uid] of newUsers.entries()) {
+          await db.insert(subscriptions).values(
+            createTestSubscriptionInput(uid, org.id, tier1.id, {
+              status: 'active',
+              stripeSubscriptionId: `sub_mail_happy_${Date.now()}_${idx}`,
+            })
+          );
+        }
+
+        const result =
+          await serviceWithMailer.propagateTierPriceToActiveSubscriptions(
+            tier1.id,
+            'price_new_happy',
+            { organizationId: org.id, interBatchDelayMs: 0 }
+          );
+
+        expect(result).toEqual({ total: 3, updated: 3, failed: 0 });
+        expect(mailer).toHaveBeenCalledTimes(3);
+
+        // Every call must be the right template + transactional category.
+        for (const call of mailer.mock.calls) {
+          const [params] = call;
+          expect(params.templateName).toBe('subscription-tier-price-change');
+          expect(params.category).toBe('transactional');
+          expect(params.data.planName).toBe(tier1.name);
+          expect(params.data.oldPriceFormatted).toMatch(/^£\d+\.\d{2}$/);
+          expect(params.data.newPriceFormatted).toMatch(/^£\d+\.\d{2}$/);
+          expect(params.data.billingInterval).toBeDefined();
+          expect(params.data.manageUrl).toBe(
+            'https://app.example.test/account/subscriptions'
+          );
+        }
+      });
+
+      it('does NOT email subscribers whose Stripe update failed (positive — 3 ok + 1 fail → 3 emails)', async () => {
+        const { org, tier1 } = await createFullOrg('propagate-email-partial');
+        const { updateSpy } = wireStripeSubSpies(stripe);
+        const { serviceWithMailer, mailer } = buildServiceWithMailer();
+
+        const newUsers = await seedTestUsers(db, 4);
+        const seeded: Array<{ stripeSubscriptionId: string }> = [];
+        for (const [idx, uid] of newUsers.entries()) {
+          const [row] = await db
+            .insert(subscriptions)
+            .values(
+              createTestSubscriptionInput(uid, org.id, tier1.id, {
+                status: 'active',
+                stripeSubscriptionId: `sub_mail_partial_${Date.now()}_${idx}`,
+              })
+            )
+            .returning();
+          seeded.push(row);
+        }
+        // Fail the 2nd sub — the rest should still mail.
+        const failId = seeded[1].stripeSubscriptionId;
+        updateSpy.mockImplementation((stripeSubId: string) => {
+          if (stripeSubId === failId) {
+            return Promise.reject(new Error('Stripe 500 simulated'));
+          }
+          return Promise.resolve({ id: stripeSubId, status: 'active' });
+        });
+
+        const result =
+          await serviceWithMailer.propagateTierPriceToActiveSubscriptions(
+            tier1.id,
+            'price_new_partial',
+            { organizationId: org.id, interBatchDelayMs: 0 }
+          );
+
+        expect(result).toEqual({ total: 4, updated: 3, failed: 1 });
+        // 3 emails — NOT 4. The failed sub stays on the old price, so
+        // notifying about a change that didn't happen would be a bug.
+        expect(mailer).toHaveBeenCalledTimes(3);
+        const toList = mailer.mock.calls.map((c) => c[0].to);
+        expect(new Set(toList).size).toBe(3);
+      });
+
+      it('still dispatches emails when proration override is "none" (positive)', async () => {
+        const { org, tier1 } = await createFullOrg(
+          'propagate-email-proration-none'
+        );
+        wireStripeSubSpies(stripe);
+        const { serviceWithMailer, mailer } = buildServiceWithMailer();
+
+        const [uid] = await seedTestUsers(db, 1);
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(uid, org.id, tier1.id, {
+            status: 'active',
+            stripeSubscriptionId: `sub_mail_prono_${Date.now()}_1`,
+          })
+        );
+
+        await serviceWithMailer.propagateTierPriceToActiveSubscriptions(
+          tier1.id,
+          'price_new_prono',
+          {
+            organizationId: org.id,
+            prorationBehavior: 'none',
+            interBatchDelayMs: 0,
+          }
+        );
+
+        // Proration policy only affects Stripe's invoice-time
+        // behaviour; the email still fires because the Price swap
+        // still happened.
+        expect(mailer).toHaveBeenCalledOnce();
+      });
+
+      it('email dispatch failure does NOT fail propagation (negative — mailer throws synchronously)', async () => {
+        const { org, tier1 } = await createFullOrg('propagate-email-throws');
+        wireStripeSubSpies(stripe);
+
+        // Mailer that throws — simulates a mis-wired implementation.
+        const throwingMailer = vi.fn(() => {
+          throw new Error('Mailer kaboom');
+        });
+        const serviceWithMailer = new SubscriptionService(
+          {
+            db,
+            environment: 'test',
+            mailer: throwingMailer,
+            webAppUrl: 'https://app.example.test',
+          },
+          stripe
+        );
+
+        const [uid] = await seedTestUsers(db, 1);
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(uid, org.id, tier1.id, {
+            status: 'active',
+            stripeSubscriptionId: `sub_mail_throws_${Date.now()}_1`,
+          })
+        );
+
+        // MUST NOT throw — the propagation must complete with
+        // updated=1 even though the mailer exploded inside the
+        // success branch.
+        const result =
+          await serviceWithMailer.propagateTierPriceToActiveSubscriptions(
+            tier1.id,
+            'price_new_throws',
+            { organizationId: org.id, interBatchDelayMs: 0 }
+          );
+
+        expect(result).toEqual({ total: 1, updated: 1, failed: 0 });
+        expect(throwingMailer).toHaveBeenCalledOnce();
+      });
+
+      it('never dispatches an empty-`to` email (defensive — `userEmail` guard)', async () => {
+        // Schema enforces `users.email NOT NULL` so the leftJoin is
+        // practically guaranteed to return a non-null email. This
+        // test verifies the positive invariant: for every
+        // propagated subscription with a seeded user, the mailer
+        // receives a concrete email string (not null, not undefined,
+        // not empty). The dispatch helper's null/empty guard is the
+        // defensive backstop for the impossible schema state — see
+        // `dispatchTierPriceChangeEmail` in subscription-service.ts.
+        const { org, tier1 } = await createFullOrg('propagate-email-guard');
+        wireStripeSubSpies(stripe);
+        const { serviceWithMailer, mailer } = buildServiceWithMailer();
+
+        const [uid] = await seedTestUsers(db, 1);
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(uid, org.id, tier1.id, {
+            status: 'active',
+            stripeSubscriptionId: `sub_mail_guard_${Date.now()}_1`,
+          })
+        );
+
+        const result =
+          await serviceWithMailer.propagateTierPriceToActiveSubscriptions(
+            tier1.id,
+            'price_new_guard',
+            { organizationId: org.id, interBatchDelayMs: 0 }
+          );
+
+        expect(result).toEqual({ total: 1, updated: 1, failed: 0 });
+        expect(mailer).toHaveBeenCalledOnce();
+        const [params] = mailer.mock.calls[0];
+        // The invariant: `to` is never empty / null / undefined.
+        expect(typeof params.to).toBe('string');
+        expect((params.to as string).length).toBeGreaterThan(0);
+        expect(params.to).toMatch(/@/);
+      });
+
+      it('still propagates when mailer is NOT injected (graceful degrade)', async () => {
+        const { org, tier1 } = await createFullOrg('propagate-email-nomailer');
+        wireStripeSubSpies(stripe);
+        // `service` above in beforeEach is constructed WITHOUT a
+        // mailer — use it directly to verify the no-op degrade.
+
+        const [uid] = await seedTestUsers(db, 1);
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(uid, org.id, tier1.id, {
+            status: 'active',
+            stripeSubscriptionId: `sub_mail_nomailer_${Date.now()}_1`,
+          })
+        );
+
+        const result = await service.propagateTierPriceToActiveSubscriptions(
+          tier1.id,
+          'price_new_nomailer',
+          { organizationId: org.id, interBatchDelayMs: 0 }
+        );
+
+        expect(result).toEqual({ total: 1, updated: 1, failed: 0 });
+        // No mailer injected — silent no-op. Propagation result
+        // MUST still match the swap outcome.
+      });
     });
   });
 });

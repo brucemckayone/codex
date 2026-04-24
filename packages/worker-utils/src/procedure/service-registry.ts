@@ -40,6 +40,7 @@ import {
   TierService,
 } from '@codex/subscription';
 import { TranscodingService } from '@codex/transcoding';
+import { sendEmailToWorker } from '../email/send-email';
 import type { ServiceRegistry } from './types';
 
 /**
@@ -404,12 +405,47 @@ export function createServiceRegistry(
           ? executionCtx.waitUntil.bind(executionCtx)
           : undefined;
 
+        // Q1.3 (Codex-7kc83): wire a mailer thunk so the price-change
+        // propagation path can notify affected subscribers fire-and-
+        // forget. The service stays unaware of Bindings /
+        // ExecutionContext — it just calls `mailer(params)` and
+        // `sendEmailToWorker` under the hood schedules the worker-to-
+        // worker fetch on `executionCtx.waitUntil`. When
+        // `executionCtx` is absent (shouldn't happen inside
+        // `procedure()` but be defensive) we skip the mailer rather
+        // than block — propagation still succeeds; the email side-
+        // effect is skipped with a `this.obs.warn` from
+        // SubscriptionService's dispatch guard.
+        const mailer = executionCtx
+          ? (params: {
+              to: string;
+              toName?: string;
+              templateName: 'subscription-tier-price-change';
+              category: 'transactional';
+              userId?: string;
+              organizationId?: string | null;
+              data: Record<string, string | number | boolean>;
+            }) => {
+              sendEmailToWorker(env, executionCtx, params);
+            }
+          : undefined;
+
+        // Web-app base URL powers the manage-subscription link inside
+        // the price-change notice. `WEB_APP_URL` is the canonical
+        // binding (same one webhook handlers accept as a method arg).
+        // When missing, the email template falls back to a relative
+        // path — still valid HTML, operator can fix the absolute URL
+        // without needing to re-send.
+        const webAppUrl = env.WEB_APP_URL;
+
         _subscription = new SubscriptionService(
           {
             db: getSharedDb(),
             environment: getEnvironment(),
             cache,
             waitUntil,
+            mailer,
+            webAppUrl,
           },
           getStripeClient()
         );

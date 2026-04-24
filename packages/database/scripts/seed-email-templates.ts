@@ -246,6 +246,16 @@ If you have any questions, please contact our support team at {{supportEmail}}.
     description: 'Sent when a subscription is cancelled',
   },
   {
+    name: 'subscription-tier-price-change',
+    scope: 'global' as const,
+    subject: 'Your {{planName}} subscription price is changing',
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}.details{background:#f9f9f9;padding:20px;border-radius:8px;margin:20px 0;border:1px solid #eee}.change-row{display:flex;justify-content:space-between;margin:8px 0}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>Subscription Price Update</h1><p>Hi {{userName}},</p><p>We're writing to let you know that the price of your <strong>{{planName}}</strong> subscription is changing from <strong>{{effectiveDate}}</strong>.</p><div class="details"><p style="margin:5px 0;"><strong>Current price:</strong> {{oldPriceFormatted}} / {{billingInterval}}</p><p style="margin:5px 0;"><strong>New price:</strong> {{newPriceFormatted}} / {{billingInterval}}</p><p style="margin:5px 0;"><strong>Effective from:</strong> {{effectiveDate}}</p></div><p>No action is needed if you're happy to continue — your subscription will renew at the new price on the next billing cycle.</p><p>If you'd prefer not to continue at the new price, you can cancel any time before <strong>{{effectiveDate}}</strong> from your subscription management page.</p><p style="text-align:center;margin:30px 0;"><a href="{{manageUrl}}" class="button" style="color:white;">Manage Subscription</a></p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>`,
+    textBody: `Hi {{userName}},\n\nWe're writing to let you know that the price of your {{planName}} subscription is changing from {{effectiveDate}}.\n\nCurrent price: {{oldPriceFormatted}} / {{billingInterval}}\nNew price: {{newPriceFormatted}} / {{billingInterval}}\nEffective from: {{effectiveDate}}\n\nNo action is needed if you're happy to continue — your subscription will renew at the new price on the next billing cycle.\n\nIf you'd prefer not to continue at the new price, you can cancel any time before {{effectiveDate}} from your subscription management page:\n{{manageUrl}}\n\n{{platformName}}`,
+    status: 'active' as const,
+    description:
+      'Sent to every active/cancelling subscriber when the tier Stripe Price changes (Codex-UI edit or Stripe Dashboard sync-back). Explains old → new price, effective date, and how to cancel before the change takes effect.',
+  },
+  {
     name: 'refund-processed',
     scope: 'global' as const,
     subject: 'Refund processed - {{platformName}}',

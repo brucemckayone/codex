@@ -203,6 +203,15 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'accessEndDate',
     'resubscribeUrl',
   ],
+  'subscription-tier-price-change': [
+    'userName',
+    'planName',
+    'oldPriceFormatted',
+    'newPriceFormatted',
+    'billingInterval',
+    'effectiveDate',
+    'manageUrl',
+  ],
   'refund-processed': [
     'userName',
     'contentTitle',
@@ -274,6 +283,7 @@ const TRANSACTIONAL_TEMPLATES = new Set([
   'subscription-created',
   'subscription-renewed',
   'subscription-cancelled',
+  'subscription-tier-price-change',
   'payment-failed',
   'refund-processed',
   'org-member-invitation',

@@ -215,6 +215,35 @@ export const subscriptionCancelledDataSchema = z.object({
   resubscribeUrl: z.string().url(),
 });
 
+/**
+ * Subscription tier price change notice (Q1.3 — Codex-7kc83).
+ *
+ * Sent to every active/cancelling subscriber when a tier's canonical
+ * Stripe Price changes (Codex-UI edit or Stripe Dashboard sync-back).
+ * Copy intentionally neutral — reads correctly for increase OR decrease
+ * OR identical amounts (rare edge case). All three legally / Stripe-
+ * recommended elements are non-negotiable: old price, new price,
+ * effective date, and a cancel-before-effective-date path via manageUrl.
+ *
+ * Category is transactional (billing lifecycle, not marketable) so the
+ * notification-preferences opt-out does NOT apply — subscribers cannot
+ * silently miss a price change notice.
+ */
+export const subscriptionTierPriceChangeDataSchema = z.object({
+  userName: z.string(),
+  planName: z.string(),
+  /** Previously-billed price formatted as GBP, e.g. "£9.99". */
+  oldPriceFormatted: z.string(),
+  /** New price that will bill on the next cycle, formatted as GBP. */
+  newPriceFormatted: z.string(),
+  /** Billing cadence label — "month" or "year". */
+  billingInterval: z.string(),
+  /** Locale-formatted date the new price takes effect (next billing cycle). */
+  effectiveDate: z.string(),
+  /** Billing portal / manage-subscription URL where the subscriber can cancel. */
+  manageUrl: z.string().url(),
+});
+
 export const refundProcessedDataSchema = z.object({
   userName: z.string(),
   contentTitle: z.string(),
@@ -329,6 +358,7 @@ export const templateDataSchemas = {
   'subscription-renewed': subscriptionRenewedDataSchema,
   'payment-failed': paymentFailedDataSchema,
   'subscription-cancelled': subscriptionCancelledDataSchema,
+  'subscription-tier-price-change': subscriptionTierPriceChangeDataSchema,
   'refund-processed': refundProcessedDataSchema,
   // Organization
   'org-member-invitation': orgMemberInvitationDataSchema,

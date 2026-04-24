@@ -226,18 +226,61 @@ interface SubscriptionServiceConfig extends ServiceConfig {
    * fire-and-forget KV writes after the response is returned.
    */
   waitUntil?: WaitUntilFn;
+  /**
+   * Optional mailer thunk used by `propagateTierPriceToActiveSubscriptions`
+   * (Codex-7kc83) to notify each affected subscriber that their Stripe
+   * Price is being swapped. Service stays unaware of the notifications-api
+   * transport — the registry wires this to `sendEmailToWorker(env, ctx,
+   * params)` so the service can call it synchronously inside the per-sub
+   * success branch without threading `Bindings` or `ExecutionContext`.
+   * When absent (narrow unit tests, legacy harnesses), price-change
+   * propagation still succeeds; only the email side-effect is skipped.
+   */
+  mailer?: TierPriceChangeMailer;
+  /**
+   * Optional base URL used to construct the subscription management link
+   * embedded in the price-change notice. Webhook handlers already accept
+   * a `webAppUrl` argument per method — surfacing it on config here is
+   * cleaner for propagation because the call site is deep inside a
+   * background tail rather than a request handler. When absent, the
+   * template falls back to a relative `/account/subscriptions` path so
+   * the email still renders; operator review can fix the absolute URL
+   * without needing to re-send.
+   */
+  webAppUrl?: string;
 }
+
+/**
+ * Fire-and-forget email dispatch used by price-change propagation.
+ * Matches the shape of `SendEmailToWorkerParams` from `@codex/worker-utils`
+ * so the registry can wire `sendEmailToWorker(env, ctx, params)` directly
+ * into this slot. Returns `void` — failures are the mailer's concern
+ * (notifications-api audit log on the remote side).
+ */
+export type TierPriceChangeMailer = (params: {
+  to: string;
+  toName?: string;
+  templateName: 'subscription-tier-price-change';
+  category: 'transactional';
+  userId?: string;
+  organizationId?: string | null;
+  data: Record<string, string | number | boolean>;
+}) => void;
 
 export class SubscriptionService extends BaseService {
   private readonly stripe: Stripe;
   private readonly cache: VersionedCache | undefined;
   private readonly waitUntil: WaitUntilFn | undefined;
+  private readonly mailer: TierPriceChangeMailer | undefined;
+  private readonly webAppUrl: string | undefined;
 
   constructor(config: SubscriptionServiceConfig, stripe: Stripe) {
     super(config);
     this.stripe = stripe;
     this.cache = config.cache;
     this.waitUntil = config.waitUntil;
+    this.mailer = config.mailer;
+    this.webAppUrl = config.webAppUrl;
   }
 
   /**
@@ -2178,13 +2221,35 @@ export class SubscriptionService extends BaseService {
         );
       }
 
+      // Left-join users + tiers so the per-sub success branch can dispatch
+      // the price-change notice email (Codex-7kc83) without a second round
+      // trip per subscription. Tiers are LEFT-joined because the tier could
+      // be soft-deleted between propagation runs and the archived-tier
+      // semantic lets reads still resolve (see subscription CLAUDE.md).
+      // Users LEFT-join preserves the propagation path even when a user
+      // somehow has no email (shouldn't happen — email is the BetterAuth
+      // primary key material — but we skip the email not the Stripe swap).
       const rows = await this.db
         .select({
           id: subscriptions.id,
           stripeSubscriptionId: subscriptions.stripeSubscriptionId,
           organizationId: subscriptions.organizationId,
+          userId: subscriptions.userId,
+          billingInterval: subscriptions.billingInterval,
+          amountCents: subscriptions.amountCents,
+          currentPeriodEnd: subscriptions.currentPeriodEnd,
+          userEmail: users.email,
+          userName: users.name,
+          tierName: subscriptionTiers.name,
+          tierPriceMonthly: subscriptionTiers.priceMonthly,
+          tierPriceAnnual: subscriptionTiers.priceAnnual,
         })
         .from(subscriptions)
+        .leftJoin(users, eq(users.id, subscriptions.userId))
+        .leftJoin(
+          subscriptionTiers,
+          eq(subscriptionTiers.id, subscriptions.tierId)
+        )
         .where(and(...conditions));
 
       if (rows.length === 0) {
@@ -2239,6 +2304,16 @@ export class SubscriptionService extends BaseService {
           if (!row) continue;
           if (result.status === 'fulfilled') {
             updated++;
+            // Q1.3 (Codex-7kc83): notify the subscriber that their
+            // Stripe Price is changing. Fire-and-forget — mailer is
+            // already inside the background `waitUntil` tail that
+            // wraps the propagator, so we don't add our own. A failed
+            // email MUST NOT fail the propagation; the mailer handles
+            // its own error suppression (see `sendEmailToWorker`).
+            this.dispatchTierPriceChangeEmail(row, newStripePriceId, {
+              tierId,
+              prorationBehavior,
+            });
           } else {
             failed++;
             const message =
@@ -2299,6 +2374,152 @@ export class SubscriptionService extends BaseService {
       return { total: rows.length, updated, failed };
     } catch (error) {
       this.handleError(error, 'propagateTierPriceToActiveSubscriptions');
+    }
+  }
+
+  /**
+   * Dispatch the `subscription-tier-price-change` email for a single
+   * subscription that was just successfully swapped by
+   * `propagateTierPriceToActiveSubscriptions` (Q1.3 — Codex-7kc83).
+   *
+   * Design contract:
+   * - Called ONLY in the per-sub fulfilled branch — a failed Stripe
+   *   update does not trigger an email (the subscription is still on
+   *   the old Price; nothing to notify). A failed email MUST NOT fail
+   *   the propagation loop.
+   * - Copy is neutral regarding direction: reads correctly whether the
+   *   new price is higher, lower, or equal to the old price. The
+   *   template surfaces both values plus the effective date + a
+   *   manage-subscription URL for cancellation before the change
+   *   takes effect.
+   * - Amounts are GBP pence; we format using the same `£X.XX` helper
+   *   the other subscription lifecycle emails use (see
+   *   `buildSubscriptionCreatedEmail`).
+   * - Effective date = the next billing cycle. Stripe's
+   *   `create_prorations` invoices the delta on the NEXT invoice — so
+   *   "effective from the next billing cycle" is the correct framing
+   *   regardless of proration override. We use the subscription's
+   *   `currentPeriodEnd` as the effective date; that's the boundary
+   *   between the old-price period and the new-price period.
+   * - Category is `transactional` — billing lifecycle emails are
+   *   legally required in many jurisdictions (UK/EU typically 30 days
+   *   notice for increases) and bypass the notification-preferences
+   *   opt-out per `NotificationsService.sendEmail`.
+   *
+   * Missing email / missing tier (defensive — BetterAuth enforces
+   * email on users and propagation already filtered by active status
+   * scoped to the tier) is logged at warn level and skipped without
+   * affecting the propagation result counts.
+   */
+  private dispatchTierPriceChangeEmail(
+    row: {
+      id: string;
+      stripeSubscriptionId: string;
+      organizationId: string;
+      userId: string;
+      billingInterval: string;
+      amountCents: number;
+      currentPeriodEnd: Date;
+      userEmail: string | null;
+      userName: string | null;
+      tierName: string | null;
+      tierPriceMonthly: number | null;
+      tierPriceAnnual: number | null;
+    },
+    newStripePriceId: string,
+    context: { tierId: string; prorationBehavior: string }
+  ): void {
+    if (!this.mailer) {
+      // No mailer wired (unit test harness). Propagation succeeds
+      // without side-effect — silent no-op to match the `cache` /
+      // `waitUntil` graceful-degrade semantics elsewhere on the
+      // service.
+      return;
+    }
+
+    if (!row.userEmail) {
+      this.obs.warn(
+        'Tier price propagation: subscriber has no email; skipping notice',
+        {
+          tierId: context.tierId,
+          newStripePriceId,
+          subscriptionId: row.id,
+          userId: row.userId,
+          organizationId: row.organizationId,
+        }
+      );
+      return;
+    }
+
+    // Old price = the subscription's current `amountCents` snapshot
+    // (this is the amount that was billing immediately before the
+    // swap). New price = the tier's now-authoritative pence amount
+    // for the subscription's billing interval. Annual subscribers
+    // see the annual column; monthly subscribers see the monthly
+    // column.
+    const newPriceCents =
+      row.billingInterval === 'year'
+        ? row.tierPriceAnnual
+        : row.tierPriceMonthly;
+
+    if (newPriceCents === null || newPriceCents === undefined) {
+      this.obs.warn(
+        'Tier price propagation: could not resolve new price amount; skipping notice',
+        {
+          tierId: context.tierId,
+          newStripePriceId,
+          subscriptionId: row.id,
+          billingInterval: row.billingInterval,
+        }
+      );
+      return;
+    }
+
+    const oldPriceFormatted = `£${(row.amountCents / 100).toFixed(2)}`;
+    const newPriceFormatted = `£${(newPriceCents / 100).toFixed(2)}`;
+
+    // Effective date = the end of the CURRENT billing period
+    // (== start of the first period that bills at the new price).
+    // Matches "effective from the next billing cycle" regardless of
+    // the caller's proration override: Stripe always respects period
+    // boundaries for the actual Price swap, `create_prorations` only
+    // governs whether the mid-cycle delta is invoiced now or rolled
+    // into the next invoice.
+    const effectiveDate = row.currentPeriodEnd
+      ? row.currentPeriodEnd.toLocaleDateString('en-GB')
+      : 'your next billing cycle';
+
+    try {
+      this.mailer({
+        to: row.userEmail,
+        toName: row.userName || undefined,
+        templateName: 'subscription-tier-price-change',
+        category: 'transactional',
+        userId: row.userId,
+        organizationId: row.organizationId,
+        data: {
+          userName: row.userName || 'there',
+          planName: row.tierName || 'your subscription',
+          oldPriceFormatted,
+          newPriceFormatted,
+          billingInterval: row.billingInterval,
+          effectiveDate,
+          manageUrl: `${this.webAppUrl ?? ''}/account/subscriptions`,
+        },
+      });
+    } catch (error) {
+      // The mailer itself is expected to be fire-and-forget and not
+      // throw — but catch synchronously anyway so a mis-wired
+      // implementation can never take down the propagation loop.
+      this.obs.warn(
+        'Tier price propagation: mailer threw synchronously; notice skipped',
+        {
+          tierId: context.tierId,
+          newStripePriceId,
+          subscriptionId: row.id,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
     }
   }
 
