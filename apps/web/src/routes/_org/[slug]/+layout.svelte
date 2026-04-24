@@ -21,7 +21,7 @@
   import { MobileBottomNav, MobileBottomSheet } from '$lib/components/layout/MobileNav';
   import CommandPaletteSearch from '$lib/components/search/CommandPaletteSearch.svelte';
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
-  import { brandEditor, injectTokenOverrides, clearTokenOverrides, parseDarkColorOverrides } from '$lib/brand-editor';
+  import { brandEditor, injectTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
   import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection, loadSubscriptionFromServer, subscriptionCollection } from '$lib/collections';
@@ -143,9 +143,32 @@
     }
   });
 
+  // Server-render tokenOverrides as an inline style attribute on .org-layout
+  // so shader-preset, shader-intensity, player/card/glass CSS vars etc. are
+  // present in the initial SSR HTML — ShaderHero reads these via
+  // getComputedStyle on mount and would otherwise initialise with the default
+  // preset and flicker (fix for Codex-wcwpw).
+  //
+  // Gated on brandEditor.isClosed to avoid fighting the editor's imperative
+  // injectBrandVars / removeOverrideVars calls during live preview. When the
+  // editor closes (save or discard), the binding re-applies and the $effect
+  // below idempotently re-injects to match.
+  const serverTokenOverrideStyle = $derived.by(() => {
+    if (!brandEditor.isClosed) return undefined;
+    const overrides = serverTokenOverrides;
+    if (!overrides) return undefined;
+    const vars = tokenOverridesToCssVars(overrides);
+    const entries = Object.entries(vars);
+    if (entries.length === 0) return undefined;
+    return entries.map(([prop, value]) => `${prop}: ${value}`).join('; ');
+  });
+
   // Inject token overrides as CSS custom properties on the org layout element.
   // Runs on mount and whenever serverTokenOverrides changes (e.g. after branding save).
   // Skipped when brand editor is open — the editor's live injectBrandVars handles it.
+  // This remains in addition to the SSR style binding above: idempotent with
+  // the server render on cold load, and needed for the editor preview path
+  // (editor opens → mutates → closes → this $effect re-injects server values).
   $effect(() => {
     if (!browser) return;
     const overrides = serverTokenOverrides;
@@ -419,6 +442,7 @@
   style:--brand-heading-weight={brandHeadingWeight}
   style:--brand-body-weight={brandBodyWeight}
   style:--brand-shader-logo-url={brandLogoUrl}
+  style={serverTokenOverrideStyle}
 >
   <ShaderHero class="shader-hero--fullpage" />
   <div class="shader-blur-overlay" class:shader-blur-overlay--landing={isLanding}></div>

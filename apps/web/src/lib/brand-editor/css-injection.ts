@@ -491,6 +491,37 @@ export function injectBrandVars(state: BrandEditorState): void {
 }
 
 /**
+ * Pure helper: map a tokenOverrides record (key → value, where keys are the
+ * bare names stored in branding_settings.tokenOverrides JSON) to a record of
+ * fully-prefixed CSS custom properties (`--brand-{key}` or `--color-{key}`)
+ * to their string values.
+ *
+ * Keys in BRAND_PREFIX_KEYS become `--brand-{key}`, all others become
+ * `--color-{key}` — same mapping as injectBrandVars uses for live preview.
+ *
+ * Null/undefined values are skipped so they don't show up as empty inline
+ * style declarations. Returning a plain Record makes this safe to call on
+ * the server (SSR) where `document` / `HTMLElement` don't exist.
+ *
+ * Fix for Codex-wcwpw: the org layout uses this to SSR-render the tokens
+ * so ShaderHero can read its preset/intensity from getComputedStyle on
+ * mount without flickering from the default preset.
+ */
+export function tokenOverridesToCssVars(
+  overrides: Record<string, string | null | undefined>
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value == null) continue;
+    const prop = BRAND_PREFIX_KEYS.has(key)
+      ? `--brand-${key}`
+      : `--color-${key}`;
+    out[prop] = value;
+  }
+  return out;
+}
+
+/**
  * Inject token overrides (from server-loaded tokenOverrides JSON) as CSS
  * custom properties on the given element.
  *
@@ -505,11 +536,8 @@ export function injectTokenOverrides(
   el: HTMLElement,
   overrides: Record<string, string | null>
 ): void {
-  for (const [key, value] of Object.entries(overrides)) {
-    if (value == null) continue;
-    const prop = BRAND_PREFIX_KEYS.has(key)
-      ? `--brand-${key}`
-      : `--color-${key}`;
+  const vars = tokenOverridesToCssVars(overrides);
+  for (const [prop, value] of Object.entries(vars)) {
     el.style.setProperty(prop, value);
   }
 }
