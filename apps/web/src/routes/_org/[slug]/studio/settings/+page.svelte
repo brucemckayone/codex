@@ -16,6 +16,7 @@
   import * as m from '$paraglide/messages';
   import { getContactSettings, updateContactForm } from '$lib/remote/settings.remote';
   import { Alert, Card, PageHeader, Select } from '$lib/components/ui';
+  import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
 
   let { data } = $props();
 
@@ -113,24 +114,28 @@
   <PageHeader title={m.settings_general_title()} />
   <div class="settings-skeleton">
     <div class="settings-skeleton-card">
-      <div class="skeleton" style="width: 120px; height: var(--text-lg); margin-bottom: var(--space-4);"></div>
+      <div class="settings-skeleton-title">
+        <Skeleton width="var(--space-32)" height="var(--text-lg)" />
+      </div>
       {#each Array(4) as _}
         <div class="settings-skeleton-field">
-          <div class="skeleton" style="width: 100px; height: var(--text-sm);"></div>
-          <div class="skeleton" style="width: 100%; height: var(--space-10);"></div>
+          <Skeleton width="var(--space-24)" height="var(--text-sm)" />
+          <Skeleton width="100%" height="var(--space-10)" />
         </div>
       {/each}
     </div>
     <div class="settings-skeleton-card">
-      <div class="skeleton" style="width: 100px; height: var(--text-lg); margin-bottom: var(--space-4);"></div>
+      <div class="settings-skeleton-title">
+        <Skeleton width="var(--space-24)" height="var(--text-lg)" />
+      </div>
       {#each Array(4) as _}
         <div class="settings-skeleton-field">
-          <div class="skeleton" style="width: 80px; height: var(--text-sm);"></div>
-          <div class="skeleton" style="width: 100%; height: var(--space-10);"></div>
+          <Skeleton width="var(--space-20)" height="var(--text-sm)" />
+          <Skeleton width="100%" height="var(--space-10)" />
         </div>
       {/each}
     </div>
-    <div class="skeleton" style="width: 80px; height: var(--space-10);"></div>
+    <Skeleton width="var(--space-20)" height="var(--space-10)" />
   </div>
 </div>
 {:else}
@@ -319,6 +324,10 @@
     background: var(--color-surface);
   }
 
+  .settings-skeleton-title {
+    margin-bottom: var(--space-4);
+  }
+
   .settings-skeleton-field {
     display: flex;
     flex-direction: column;
@@ -328,23 +337,6 @@
 
   .settings-skeleton-field:last-child {
     margin-bottom: 0;
-  }
-
-  .skeleton {
-    background: linear-gradient(
-      90deg,
-      var(--color-surface-secondary) 25%,
-      var(--color-surface-tertiary) 50%,
-      var(--color-surface-secondary) 75%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-    border-radius: var(--radius-md);
-  }
-
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
   }
 
 .settings-form {

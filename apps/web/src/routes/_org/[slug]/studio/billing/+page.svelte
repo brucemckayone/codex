@@ -14,6 +14,7 @@
   import Button from '$lib/components/ui/Button/Button.svelte';
   import * as Table from '$lib/components/ui/Table';
   import { Alert, Card, EmptyState } from '$lib/components/ui';
+  import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { portalSessionForm, getOrgRevenue, getTopContent } from '$lib/remote/billing.remote';
   import { formatPriceCompact } from '$lib/utils/format';
 
@@ -106,12 +107,12 @@
     <Card.Content>
     {#if loading}
       <div class="table-skeleton">
-        <div class="skeleton table-skeleton-header" style="width: 100%; height: var(--space-10);"></div>
+        <Skeleton class="table-skeleton-header" width="100%" height="var(--space-10)" />
         {#each Array(5) as _, i}
           <div class="table-skeleton-row">
-            <div class="skeleton" style="width: {40 + (i % 3) * 8}%; height: var(--space-5);"></div>
-            <div class="skeleton" style="width: 20%; height: var(--space-5);"></div>
-            <div class="skeleton" style="width: 15%; height: var(--space-5);"></div>
+            <Skeleton width="{40 + (i % 3) * 8}%" height="var(--space-5)" />
+            <Skeleton width="20%" height="var(--space-5)" />
+            <Skeleton width="15%" height="var(--space-5)" />
           </div>
         {/each}
       </div>
@@ -200,7 +201,9 @@
     gap: var(--space-1);
   }
 
-  .table-skeleton-header {
+  /* Scoped via parent — class is applied to inner Skeleton component's
+     root via its class prop. */
+  .table-skeleton :global(.table-skeleton-header) {
     border-radius: var(--radius-md) var(--radius-md) 0 0;
   }
 
@@ -209,23 +212,6 @@
     align-items: center;
     gap: var(--space-4);
     padding: var(--space-3) var(--space-4);
-  }
-
-  .skeleton {
-    background: linear-gradient(
-      90deg,
-      var(--color-surface-secondary) 25%,
-      var(--color-surface-tertiary) 50%,
-      var(--color-surface-secondary) 75%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-    border-radius: var(--radius-md);
-  }
-
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
   }
 
   :global(.content-title-cell) {

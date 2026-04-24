@@ -20,6 +20,7 @@
   import { FilterBar } from '$lib/components/ui/FilterBar';
   import { UsersIcon, DownloadIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
+  import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { getCustomers, listAdminContent } from '$lib/remote/admin.remote';
   import { formatPrice } from '$lib/utils/format';
   import { toast } from '$lib/components/ui/Toast/toast-store';
@@ -261,13 +262,13 @@
   {#if customersQuery?.loading}
     <PageHeader title={m.studio_customers_title()} />
     <div class="table-skeleton">
-      <div class="skeleton table-skeleton-header" style="width: 100%; height: var(--space-10);"></div>
+      <Skeleton class="table-skeleton-header" width="100%" height="var(--space-10)" />
       {#each Array(5) as _}
         <div class="table-skeleton-row">
-          <div class="skeleton" style="width: 40%; height: var(--space-5);"></div>
-          <div class="skeleton" style="width: 25%; height: var(--space-5);"></div>
-          <div class="skeleton" style="width: 15%; height: var(--space-5);"></div>
-          <div class="skeleton" style="width: 15%; height: var(--space-5);"></div>
+          <Skeleton width="40%" height="var(--space-5)" />
+          <Skeleton width="25%" height="var(--space-5)" />
+          <Skeleton width="15%" height="var(--space-5)" />
+          <Skeleton width="15%" height="var(--space-5)" />
         </div>
       {/each}
     </div>
@@ -488,7 +489,9 @@
     overflow: hidden;
   }
 
-  .table-skeleton-header {
+  /* Scoped via parent — class is applied to inner Skeleton component's
+     root via its class prop. */
+  .table-skeleton :global(.table-skeleton-header) {
     border-radius: 0;
   }
 
@@ -497,22 +500,5 @@
     align-items: center;
     gap: var(--space-4);
     padding: var(--space-3) var(--space-4);
-  }
-
-  .skeleton {
-    background: linear-gradient(
-      90deg,
-      var(--color-surface-secondary) 25%,
-      var(--color-surface-tertiary) 50%,
-      var(--color-surface-secondary) 75%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-    border-radius: var(--radius-md);
-  }
-
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
   }
 </style>

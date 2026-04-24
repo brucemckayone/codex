@@ -13,6 +13,7 @@
   import { ErrorBoundary } from '$lib/components/ui';
   import { Breadcrumb } from '$lib/components/ui/Breadcrumb';
   import ContentForm from '$lib/components/studio/ContentForm.svelte';
+  import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
 
   let { data } = $props();
 
@@ -51,18 +52,18 @@
   {#if loading}
     <div class="form-skeleton">
       <div class="form-skeleton-main">
-        <div class="skeleton" style="width: 60%; height: var(--space-10);"></div>
-        <div class="skeleton" style="width: 100%; height: var(--space-32);"></div>
+        <Skeleton width="60%" height="var(--space-10)" />
+        <Skeleton width="100%" height="var(--space-32)" />
         <div class="form-skeleton-row">
-          <div class="skeleton" style="width: 45%; height: var(--space-10);"></div>
-          <div class="skeleton" style="width: 45%; height: var(--space-10);"></div>
+          <Skeleton width="45%" height="var(--space-10)" />
+          <Skeleton width="45%" height="var(--space-10)" />
         </div>
-        <div class="skeleton" style="width: 100%; height: var(--space-24);"></div>
+        <Skeleton width="100%" height="var(--space-24)" />
       </div>
       <div class="form-skeleton-sidebar">
-        <div class="skeleton" style="width: 100%; height: var(--space-10);"></div>
-        <div class="skeleton" style="width: 100%; height: var(--space-10);"></div>
-        <div class="skeleton" style="width: 60%; height: var(--space-8);"></div>
+        <Skeleton width="100%" height="var(--space-10)" />
+        <Skeleton width="100%" height="var(--space-10)" />
+        <Skeleton width="60%" height="var(--space-8)" />
       </div>
     </div>
   {:else if error}
@@ -118,23 +119,6 @@
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-md);
     background: var(--color-surface);
-  }
-
-  .skeleton {
-    background: linear-gradient(
-      90deg,
-      var(--color-surface-secondary) 25%,
-      var(--color-surface-tertiary) 50%,
-      var(--color-surface-secondary) 75%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-    border-radius: var(--radius-md);
-  }
-
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
   }
 
   .error-text {

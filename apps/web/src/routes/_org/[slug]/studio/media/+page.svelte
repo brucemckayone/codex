@@ -2,6 +2,7 @@
   import { page } from '$app/state';
   import { listMedia } from '$lib/remote/media.remote';
   import StudioMediaPage from '$lib/components/studio/StudioMediaPage.svelte';
+  import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
 
   let { data } = $props();
 
@@ -41,16 +42,18 @@
 {#if mediaQuery.loading && (mediaQuery.current?.items ?? []).length === 0}
   <div class="media-skeleton">
     <div class="media-skeleton-header">
-      <div class="skeleton" style="width: 140px; height: var(--text-2xl);"></div>
-      <div class="skeleton" style="width: 120px; height: var(--space-8);"></div>
+      <Skeleton width="var(--space-32)" height="var(--text-2xl)" />
+      <Skeleton width="var(--space-32)" height="var(--space-8)" />
     </div>
     <div class="media-skeleton-grid">
       {#each Array(6) as _}
         <div class="media-skeleton-card">
-          <div class="skeleton media-skeleton-thumb"></div>
+          <div class="media-skeleton-thumb">
+            <Skeleton width="100%" height="100%" />
+          </div>
           <div class="media-skeleton-meta">
-            <div class="skeleton" style="width: 75%; height: var(--text-sm);"></div>
-            <div class="skeleton" style="width: 50%; height: var(--text-xs);"></div>
+            <Skeleton width="75%" height="var(--text-sm)" />
+            <Skeleton width="50%" height="var(--text-xs)" />
           </div>
         </div>
       {/each}
@@ -99,10 +102,12 @@
     background: var(--color-surface);
   }
 
+  /* Thumbnail wrapper — aspect-ratio governs height; inner Skeleton
+     fills 100% x 100%. */
   .media-skeleton-thumb {
     width: 100%;
     aspect-ratio: 16 / 9;
-    border-radius: 0;
+    overflow: hidden;
   }
 
   .media-skeleton-meta {
@@ -110,22 +115,5 @@
     flex-direction: column;
     gap: var(--space-2);
     padding: var(--space-3);
-  }
-
-  .skeleton {
-    background: linear-gradient(
-      90deg,
-      var(--color-surface-secondary) 25%,
-      var(--color-surface-tertiary) 50%,
-      var(--color-surface-secondary) 75%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-    border-radius: var(--radius-md);
-  }
-
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
   }
 </style>
