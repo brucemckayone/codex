@@ -37,9 +37,24 @@ let stepU: Record<string, WebGLUniformLocation | null> | null = null;
 let distU: Record<string, WebGLUniformLocation | null> | null = null;
 
 function ensurePrograms(gl: WebGL2RenderingContext): boolean {
-  if (cachedGL === gl && seedProg && stepProg && distProg) return true;
+  // Cache hit: validate handles are still live. An external `gl.deleteProgram`
+  // (e.g. explicit teardown or GPU context loss recovery) doesn't null out
+  // our module-scoped refs, so a stale handle could silently reach drawQuad
+  // and fail with no fail-fast. `gl.isProgram(null)` is false, so the
+  // nullability guard above short-circuits before we call it.
+  if (
+    cachedGL === gl &&
+    seedProg &&
+    stepProg &&
+    distProg &&
+    gl.isProgram(seedProg) &&
+    gl.isProgram(stepProg) &&
+    gl.isProgram(distProg)
+  ) {
+    return true;
+  }
 
-  // Context changed or first call — recompile
+  // Context changed, first call, or any cached handle was invalidated — recompile.
   seedProg = createProgram(gl, VERTEX_SHADER, JFA_SEED_FRAG);
   stepProg = createProgram(gl, VERTEX_SHADER, JFA_STEP_FRAG);
   distProg = createProgram(gl, VERTEX_SHADER, JFA_DISTANCE_FRAG);
@@ -59,6 +74,32 @@ function ensurePrograms(gl: WebGL2RenderingContext): boolean {
 
   cachedGL = gl;
   return true;
+}
+
+/**
+ * Dispose all cached JFA programs for this GL context.
+ *
+ * Call from ShaderHero teardown (unmount) — the cache is intentionally warm
+ * across preset switches so pulse activations don't pay the ~3ms compile
+ * cost every time. On actual subsystem unmount the cache would otherwise
+ * leak across SPA navigations (context persists on the canvas element,
+ * module stays loaded, programs orphan). Idempotent: safe to call more than
+ * once or after context teardown.
+ */
+export function destroyJFACache(gl: WebGL2RenderingContext): void {
+  if (cachedGL !== gl) return; // Cache belongs to a different context (or empty).
+
+  if (seedProg && gl.isProgram(seedProg)) gl.deleteProgram(seedProg);
+  if (stepProg && gl.isProgram(stepProg)) gl.deleteProgram(stepProg);
+  if (distProg && gl.isProgram(distProg)) gl.deleteProgram(distProg);
+
+  seedProg = null;
+  stepProg = null;
+  distProg = null;
+  seedU = null;
+  stepU = null;
+  distU = null;
+  cachedGL = null;
 }
 
 export interface SDFResult {

@@ -16,6 +16,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
+  import { destroyJFACache } from './jfa-sdf';
   import { getShaderConfig, type ShaderPresetId } from './shader-config';
   import { loadRenderer } from './load-renderer';
   import type { ShaderRenderer, MouseState } from './renderer-types';
@@ -313,6 +314,11 @@
     return () => {
       cancelAnimationFrame(animFrameId);
       if (renderer) renderer.destroy(gl!);
+      // JFA program cache is module-scoped and stays warm across preset
+      // switches (pulse recompilation would otherwise cost ~3ms per activation).
+      // On actual subsystem unmount it would orphan without this — the GL
+      // context lives on the canvas element, module lives across SPA nav.
+      if (gl) destroyJFACache(gl);
       document.removeEventListener('visibilitychange', onVisibilityChange);
       motionQuery.removeEventListener('change', onMotionChange);
       resizeObserver.disconnect();
