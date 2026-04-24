@@ -787,17 +787,10 @@
     color: var(--brand-hero-text, white);
   }
 
-  /* Fallback legibility gradient — guarantees white-text contrast when
-     the shader canvas is inactive (org has no preset configured, or the
-     preset is 'none'). Sits ABOVE the shader (z-index 1) and BELOW the
-     text content/title (hero__content at z-index 3), so:
-       - When shader is active: the gradient adds a subtle bottom-weighted
-         darken over the shader; title's mix-blend-mode still composites
-         against the combined canvas+gradient layer, producing readable
-         output regardless of shader colour.
-       - When shader is inactive: the gradient is the only dark floor the
-         text has, and the 55% black stop clears WCAG 3:1 for large text.
-     Top 35% is fully transparent so any shader visible up there breathes.
+  /* Bottom-weighted darken over the shader for stat/CTA legibility. Sits
+     ABOVE the title (z-index 1 > title's implicit 0) so it adds contrast
+     to the content block sitting at the bottom of the hero. Intentionally
+     subtle — orgs WITH a shader want the shader to breathe.
      Uses `hsl(0 0% 0% / α)` direct (same pattern as player.css) — semantic
      surface tokens flip to light in dark-theme orgs, which would invert
      the intended darkening effect. */
@@ -814,6 +807,33 @@
       hsl(0 0% 0% / 0.12) 55%,
       hsl(0 0% 0% / 0.38) 80%,
       hsl(0 0% 0% / 0.55) 100%
+    );
+  }
+
+  /* Shader-absent fallback backdrop — guarantees title contrast when no
+     shader preset is configured. The hero title uses `mix-blend-mode:
+     difference` against the shader canvas; when the canvas has opacity 0
+     the title composites against the light page background (often near
+     white) and `difference(white, white) ≈ black` collapses contrast to
+     ~1:1 (Codex-tl2ts, Lighthouse reported 1.04).
+     Rendered as `::before` (DOM-order sibling) with no explicit z-index so
+     it paints BEFORE the title in the same stacking level — making it the
+     title's actual blend backdrop rather than an overlay on top. Scoped
+     via `[data-hero-shader-active]` on `.org-layout` (set in the parent
+     layout from `tokenOverrides['shader-preset']`) so orgs WITH a shader
+     keep their current look and the shader shines through untouched.
+     Uses `hsl(0 0% 0% / α)` direct — same rationale as `::after` above. */
+  :global(.org-layout:not([data-hero-shader-active])) .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      180deg,
+      hsl(0 0% 0% / 0.55) 0%,
+      hsl(0 0% 0% / 0.4) 40%,
+      hsl(0 0% 0% / 0.45) 70%,
+      hsl(0 0% 0% / 0.6) 100%
     );
   }
 

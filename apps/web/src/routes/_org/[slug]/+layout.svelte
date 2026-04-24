@@ -104,6 +104,23 @@
     };
   });
 
+  // Shader-active flag — true iff the org has a non-empty, non-'none' shader preset.
+  // Reads from brand editor when open, server tokenOverrides otherwise. Drives
+  // the `data-hero-shader-active` attribute that gates the shader-less fallback
+  // backdrop on .hero (so orgs without a shader get a legible dark gradient for
+  // the difference-blended title, Codex-tl2ts).
+  const hasShaderPreset = $derived.by(() => {
+    const overrides = brandEditor.isOpen
+      ? (brandEditor.pending?.tokenOverrides ?? {})
+      : (() => {
+          const raw = data.org?.brandFineTune?.tokenOverrides;
+          if (!raw) return {};
+          try { return JSON.parse(raw) as Record<string, string | null>; } catch { return {}; }
+        })();
+    const preset = overrides['shader-preset'];
+    return typeof preset === 'string' && preset.length > 0 && preset !== 'none';
+  });
+
   // Fine-tune branding fields — injected as CSS vars alongside core branding
   const brandShadowScale = $derived(data.org?.brandFineTune?.shadowScale ?? undefined);
   const brandShadowColor = $derived(data.org?.brandFineTune?.shadowColor ?? undefined);
@@ -383,6 +400,7 @@
   data-hero-hide-description={heroHideFlags.description ? '' : undefined}
   data-hero-hide-logo={heroHideFlags.logo ? '' : undefined}
   data-hero-hide-title={heroHideFlags.title ? '' : undefined}
+  data-hero-shader-active={hasShaderPreset ? '' : undefined}
   style:--brand-color={brandPrimary}
   style:--brand-secondary={brandSecondary}
   style:--brand-accent={brandAccent}
