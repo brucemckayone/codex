@@ -357,6 +357,6 @@
     display: block;
     pointer-events: auto;
     opacity: 0;
-    transition: opacity var(--duration-normal, 200ms) var(--ease-default, ease);
+    transition: var(--transition-opacity);
   }
 </style>
