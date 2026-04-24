@@ -46,9 +46,6 @@ export const CacheType = {
   /** Organization subscription tiers (sorted list, public) */
   ORG_TIERS: 'org:tiers',
 
-  /** Org content list with auth-only sort (popular, top-selling) — TTL-only, no event invalidation */
-  ORG_CONTENT_SORTED: 'org:content:sorted',
-
   /** User session data (complements BetterAuth KV cache) */
   USER_SESSION: 'user:session',
 

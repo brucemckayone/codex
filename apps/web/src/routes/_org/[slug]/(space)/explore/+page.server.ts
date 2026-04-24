@@ -144,15 +144,20 @@ export const load: PageServerLoad = async ({
     // Cache sort-based browse queries (no search, no creator filter) — popularity
     // shifts slowly (3min TTL). Search + creator-filtered queries bypass cache: they
     // have too many variants, so caching would just pollute KV.
+    //
+    // Cache uses id=COLLECTION_ORG_CONTENT(orgId) so auth sorts share the
+    // same version key as the public list. One publish-side
+    // cache.invalidate(COLLECTION_ORG_CONTENT(orgId)) stales every cached
+    // auth-sort combo atomically. `type` carries the per-combo differentiator.
     const shouldCache = !q && !creator && platform?.env?.CACHE_KV;
     if (shouldCache) {
-      const cacheId = `${org.id}:${sort}:${contentType ?? 'all'}:${page}`;
       const cache = new VersionedCache({
         kv: platform.env.CACHE_KV as KVNamespace,
       });
+      const dataType = `content:auth:${sort}:${contentType ?? 'all'}:${page}`;
       contentResult = await cache.get(
-        cacheId,
-        CacheType.ORG_CONTENT_SORTED,
+        CacheType.COLLECTION_ORG_CONTENT(org.id),
+        dataType,
         () =>
           fetchAuthContent(
             api,

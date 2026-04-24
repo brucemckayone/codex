@@ -340,6 +340,122 @@ describe('VersionedCache', () => {
     });
   });
 
+  describe('invalidation contract', () => {
+    // Locks the `id`-is-invalidation-target semantics that the route/page
+    // callers depend on: different `type` values sharing the same `id` must
+    // all be stated by a single `invalidate(id)` call. The org content list
+    // bug (Codex stale-cache-on-publish) traced back to callers passing a
+    // filter-combo string as `id`, which fragmented the version namespace so
+    // `invalidate(COLLECTION_ORG_CONTENT(orgId))` bumped a key no reader
+    // ever looked up. These tests prevent that regression at the primitive
+    // level.
+    //
+    // Note on determinism: `VersionedCache` derives version values from
+    // `Date.now()`. In tests, multiple operations can fall inside the same
+    // millisecond, making invalidate appear to be a no-op. We stub
+    // `Date.now` to return a strictly-increasing counter so tests simulate
+    // the production scenario (where real latency separates write + read).
+
+    let dateNowSpy: ReturnType<typeof vi.spyOn>;
+    let nowCounter: number;
+
+    beforeEach(() => {
+      nowCounter = 1_000_000;
+      dateNowSpy = vi.spyOn(Date, 'now').mockImplementation(() => ++nowCounter);
+    });
+
+    afterEach(() => {
+      dateNowSpy.mockRestore();
+    });
+
+    it('invalidate(id) stales every type sharing that id', async () => {
+      const fetcherA = vi.fn().mockResolvedValue({ variant: 'A' });
+      const fetcherB = vi.fn().mockResolvedValue({ variant: 'B' });
+
+      // Prime two types for the same id
+      await cache.get('org-1', 'type:a', fetcherA);
+      await cache.get('org-1', 'type:b', fetcherB);
+      expect(fetcherA).toHaveBeenCalledTimes(1);
+      expect(fetcherB).toHaveBeenCalledTimes(1);
+
+      // Confirm both are served from cache on repeat
+      await cache.get('org-1', 'type:a', fetcherA);
+      await cache.get('org-1', 'type:b', fetcherB);
+      expect(fetcherA).toHaveBeenCalledTimes(1);
+      expect(fetcherB).toHaveBeenCalledTimes(1);
+
+      // Single invalidate must stale BOTH types
+      await cache.invalidate('org-1');
+
+      await cache.get('org-1', 'type:a', fetcherA);
+      await cache.get('org-1', 'type:b', fetcherB);
+      expect(fetcherA).toHaveBeenCalledTimes(2);
+      expect(fetcherB).toHaveBeenCalledTimes(2);
+    });
+
+    it('invalidate(id-a) does NOT stale entries under id-b', async () => {
+      const fetcherA = vi.fn().mockResolvedValue({ org: 'A' });
+      const fetcherB = vi.fn().mockResolvedValue({ org: 'B' });
+
+      await cache.get('org-1', 'type:shared', fetcherA);
+      await cache.get('org-2', 'type:shared', fetcherB);
+      expect(fetcherA).toHaveBeenCalledTimes(1);
+      expect(fetcherB).toHaveBeenCalledTimes(1);
+
+      await cache.invalidate('org-1');
+
+      // org-1 re-fetches, org-2 still serves from cache
+      await cache.get('org-1', 'type:shared', fetcherA);
+      await cache.get('org-2', 'type:shared', fetcherB);
+      expect(fetcherA).toHaveBeenCalledTimes(2);
+      expect(fetcherB).toHaveBeenCalledTimes(1);
+    });
+
+    it('version key is derived from id only, not type', async () => {
+      const fetcher = vi.fn().mockResolvedValue({ data: 'test' });
+
+      await cache.get('id-1', 'type:a', fetcher);
+
+      // The version key MUST be `cache:version:id-1` exactly — NO `type`
+      // fragment. A regression that re-introduces the id/type swap would
+      // produce `cache:version:type:a:id-1` (or similar) and fail this test.
+      const versionKeyPut = (
+        mockKV.put as ReturnType<typeof vi.fn>
+      ).mock.calls.find((call) =>
+        (call[0] as string).startsWith('cache:version:')
+      );
+      expect(versionKeyPut?.[0]).toBe('cache:version:id-1');
+    });
+
+    it('shares one version key across many types for the same id (contract for paginated public lists)', async () => {
+      // Mirrors the post-fix shape of the public content endpoint: one
+      // version per org, many filter-combo "types" layered on top.
+      const fetchers = Array.from({ length: 5 }, (_, i) =>
+        vi.fn().mockResolvedValue({ combo: i })
+      );
+      const orgId = 'org-1';
+      const typeFor = (i: number) => `content:public:newest:20:1:${i}`;
+
+      for (let i = 0; i < fetchers.length; i++) {
+        await cache.get(orgId, typeFor(i), fetchers[i]);
+      }
+
+      // Only ONE version key should exist, regardless of how many types
+      // were primed.
+      const versionKeys = [...mockKV._data.keys()].filter((k) =>
+        k.startsWith('cache:version:')
+      );
+      expect(versionKeys).toEqual([`cache:version:${orgId}`]);
+
+      // One invalidate must stale all five types in one atomic write.
+      await cache.invalidate(orgId);
+      for (let i = 0; i < fetchers.length; i++) {
+        await cache.get(orgId, typeFor(i), fetchers[i]);
+        expect(fetchers[i]).toHaveBeenCalledTimes(2);
+      }
+    });
+  });
+
   describe('getVersion', () => {
     it('should return version string when KV key exists', async () => {
       const version = '1712345678';

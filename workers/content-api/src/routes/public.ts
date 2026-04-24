@@ -8,7 +8,7 @@
  * - GET /api/content/public/discover - Browse all published content platform-wide (discover page)
  */
 
-import { CacheType, VersionedCache } from '@codex/cache';
+import { VersionedCache } from '@codex/cache';
 import type { ContentWithRelations } from '@codex/content';
 import {
   discoverContentQuerySchema,
@@ -17,6 +17,10 @@ import {
 import type { HonoEnv } from '@codex/shared-types';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
+import {
+  getCachedPublicContent,
+  shouldCachePublicContentQuery,
+} from './public-cache';
 
 const app = new Hono<HonoEnv>();
 
@@ -44,12 +48,17 @@ function resolveR2Urls(
 }
 
 /**
- * Cache-Control middleware for public content endpoints
- * Sets a 5-minute public cache for CDN and browser caching
+ * Cache-Control middleware for public content endpoints.
+ *
+ * Set to 60s (s-maxage=60 for CDN) so edge drift stays bounded now that
+ * the KV layer has working event-driven invalidation. A longer window
+ * would let CDN-cached responses serve stale content up to max-age after
+ * publish, defeating the invalidation. See public-cache.ts for the KV
+ * layer's invalidation contract.
  */
 app.use('*', async (c, next) => {
   await next();
-  c.header('Cache-Control', 'public, max-age=300');
+  c.header('Cache-Control', 'public, max-age=60, s-maxage=60');
 });
 
 /**
@@ -66,7 +75,7 @@ app.get(
     policy: { auth: 'none', rateLimit: 'api' },
     input: { query: publicContentQuerySchema },
     handler: async (ctx) => {
-      const { orgId, sort, limit, page, contentType, search } = ctx.input.query;
+      const { orgId } = ctx.input.query;
 
       const fetchContent = async () => {
         const result = await ctx.services.content.listPublic(ctx.input.query);
@@ -77,18 +86,20 @@ app.get(
       };
 
       // KV cache-aside for org-scoped browse queries only.
-      // Skip for search (too many variants), slug (exact lookups for content detail —
-      // the cache key doesn't include slug, so different slugs would return the same cached item),
-      // and creatorId (per-creator filter is lower-volume; skipping avoids cache-key explosion).
-      const { slug, creatorId } = ctx.input.query;
-      if (orgId && !search && !slug && !creatorId && ctx.env.CACHE_KV) {
+      // getCachedPublicContent keys every filter combo under a shared
+      // version (COLLECTION_ORG_CONTENT(orgId)) so one publish-side
+      // invalidate stales them all. See public-cache.ts.
+      if (
+        orgId &&
+        shouldCachePublicContentQuery(ctx.input.query) &&
+        ctx.env.CACHE_KV
+      ) {
         const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
-        const cacheSubKey = `${orgId}:${sort ?? 'newest'}:${limit ?? 20}:${page ?? 1}:${contentType ?? 'all'}`;
-        return cache.get(
-          cacheSubKey,
-          CacheType.COLLECTION_ORG_CONTENT(orgId),
-          fetchContent,
-          { ttl: 300 }
+        return getCachedPublicContent(
+          cache,
+          orgId,
+          ctx.input.query,
+          fetchContent
         );
       }
 
