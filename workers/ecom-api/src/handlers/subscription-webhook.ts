@@ -198,8 +198,45 @@ export async function handleSubscriptionWebhook(
     // TierService is constructed lazily — only `product.updated` and
     // `price.created` events use it for Dashboard sync-back. All other
     // events fall through to SubscriptionService.
+    //
+    // Q1.2 (Codex-3xyyb): inject a propagator thunk so
+    // `applyStripePriceCreated` fans the newly-adopted canonical Price
+    // id out to every active/cancelling subscription on the tier. The
+    // propagator runs on `executionCtx.waitUntil` — the webhook returns
+    // 200 immediately, and the per-sub Stripe updates (batched inside
+    // the service) complete asynchronously. This keeps the webhook
+    // response well under Stripe's delivery-timeout window even for
+    // tiers with many subscribers. The inner method owns per-sub error
+    // handling; a fire-and-forget catch on the outer promise just
+    // prevents unhandled-rejection noise on a catastrophic failure.
     const tierService = new TierService(
-      { db, environment: c.env.ENVIRONMENT || 'development' },
+      {
+        db,
+        environment: c.env.ENVIRONMENT || 'development',
+        propagator: (args) => {
+          c.executionCtx.waitUntil(
+            service
+              .propagateTierPriceToActiveSubscriptions(
+                args.tierId,
+                args.newStripePriceId,
+                { organizationId: args.organizationId }
+              )
+              .then(() => undefined)
+              .catch((error) => {
+                obs?.warn(
+                  'subscription-webhook: propagateTierPriceToActiveSubscriptions threw (tail caught)',
+                  {
+                    tierId: args.tierId,
+                    organizationId: args.organizationId,
+                    newStripePriceId: args.newStripePriceId,
+                    error:
+                      error instanceof Error ? error.message : String(error),
+                  }
+                );
+              })
+          );
+        },
+      },
       stripe
     );
 

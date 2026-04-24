@@ -71,8 +71,13 @@ export {
   type WaitUntilFn,
 } from './services/subscription-invalidation';
 export type {
+  PropagateTierPriceOptions,
+  PropagateTierPriceResult,
   WebhookEmailPayload,
   WebhookHandlerResult,
 } from './services/subscription-service';
 export { SubscriptionService } from './services/subscription-service';
-export { TierService } from './services/tier-service';
+export {
+  type TierPricePropagator,
+  TierService,
+} from './services/tier-service';

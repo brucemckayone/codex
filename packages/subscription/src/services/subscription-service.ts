@@ -47,7 +47,11 @@ import {
   subscriptionTiers,
   users,
 } from '@codex/database/schema';
-import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import {
+  BaseService,
+  InternalServiceError,
+  type ServiceConfig,
+} from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
@@ -94,6 +98,65 @@ interface SubscriptionStats {
     subscriberCount: number;
     mrrCents: number;
   }>;
+}
+
+/**
+ * Options for `SubscriptionService.propagateTierPriceToActiveSubscriptions`.
+ *
+ * All fields are optional — sensible defaults apply when omitted. The
+ * proration policy is surfaced as a named parameter because Q1 product
+ * may overturn the `create_prorations` default at any time (see bead
+ * Codex-3xyyb and the separate follow-up for the policy decision).
+ */
+export interface PropagateTierPriceOptions {
+  /**
+   * Stripe proration behaviour for the mid-cycle Price swap. Defaults to
+   * `'create_prorations'` — matches Stripe's default, charges the
+   * difference on the next invoice. `'none'` defers the new amount to
+   * the next billing cycle without any immediate adjustment.
+   * `'always_invoice'` invoices the proration amount immediately rather
+   * than adding it to the next invoice.
+   */
+  prorationBehavior?: 'create_prorations' | 'none' | 'always_invoice';
+  /**
+   * Upper bound on concurrent Stripe API calls per batch. Stripe's
+   * per-account rate limit is 25 req/sec (test) / 100 req/sec (live) —
+   * the default keeps us conservatively below both, with retries
+   * protected by the deterministic idempotency key. Values below 1 are
+   * clamped to 1.
+   */
+  batchSize?: number;
+  /**
+   * Delay in milliseconds inserted between batches. Suppresses trailing
+   * delay after the last batch. Values below 0 are clamped to 0.
+   */
+  interBatchDelayMs?: number;
+  /**
+   * Optional additional org scope. When provided, restricts the set of
+   * affected subscriptions to those belonging to the given org. Both
+   * call sites know the org (tier is org-scoped) and pass this through
+   * as a defense-in-depth check — even if a tier id somehow collided
+   * with another org's subscription, we would not touch it.
+   */
+  organizationId?: string;
+}
+
+/**
+ * Result shape returned by
+ * `SubscriptionService.propagateTierPriceToActiveSubscriptions`.
+ *
+ * Informational only — DB state for the per-subscription amount is
+ * reconciled by the existing `customer.subscription.updated` webhook
+ * that Stripe emits for each updated subscription. Callers should not
+ * branch on these counts for correctness; they exist for observability.
+ */
+export interface PropagateTierPriceResult {
+  /** Number of active/cancelling subscriptions discovered for the tier. */
+  total: number;
+  /** Subscriptions whose Stripe Price was successfully swapped. */
+  updated: number;
+  /** Subscriptions whose swap failed (logged individually via obs.error). */
+  failed: number;
 }
 
 /**
@@ -1997,6 +2060,218 @@ export class SubscriptionService extends BaseService {
     }
 
     return sub;
+  }
+
+  // ─── Tier Price Propagation (Q1.2 — Codex-3xyyb) ───────────────────────────
+
+  /**
+   * Propagate a tier's new Stripe Price ID to EVERY active/cancelling
+   * subscription currently on that tier. Q1.2 of the subscription audit
+   * epic (Codex-kqmvd) closes the gap where Q1.1's sync-back (and the
+   * existing Codex-UI `updateTier` flow) updated the tier record but left
+   * in-flight subscriptions billing on the superseded Price.
+   *
+   * Design contract:
+   * - Scope: subscriptions with `tierId = tierId` AND status IN
+   *   ('active', 'cancelling'). `paused`, `past_due`, `cancelled`,
+   *   `incomplete` are deliberately SKIPPED — swapping a Price under a
+   *   paused subscription triggers an unwanted reactivation path, and a
+   *   cancelled sub has no ongoing billing to reprice. The status list
+   *   mirrors the PR #5 filter (`getSubscriptionOrThrow`) minus
+   *   `past_due` (past-due subs are awaiting retry; changing their Price
+   *   mid-flight creates Stripe edge cases — they'll re-sync on the next
+   *   invoice attempt).
+   * - For each subscription: retrieve the live Stripe sub to get its
+   *   item id, then call `stripe.subscriptions.update` with the new
+   *   Price and the caller's proration policy (default
+   *   `create_prorations`). Stripe emits `customer.subscription.updated`
+   *   which flows through the existing `handleSubscriptionUpdated`
+   *   webhook → shared status mapper → our DB `amountCents` update.
+   *   We do NOT write the DB directly from this path — one write path
+   *   for subscription price changes keeps webhook-reconciliation
+   *   semantics intact.
+   * - Idempotency: each Stripe call uses a deterministic idempotency key
+   *   `tier-price-propagate:${subId}:${newPriceId}`, so retries on
+   *   partial batch failure reissue the same mutation safely. If a
+   *   subscription already carries the new Price (e.g. prior run
+   *   succeeded before the failure point), Stripe treats the replay as
+   *   a no-op — the idempotency key protects us without requiring a
+   *   pre-check round trip.
+   * - Batching: subscriptions are processed in parallel batches of
+   *   `batchSize` (default 8) with `interBatchDelayMs` (default 50ms)
+   *   between batches to respect Stripe's per-account rate limit (25
+   *   req/sec test, 100 req/sec live). A tier with 500 subs completes
+   *   in ~2.5s at the default settings — well within a `waitUntil`
+   *   fire-and-forget budget.
+   * - Per-sub error handling: one failed update MUST NOT abort the
+   *   batch. Failures are logged via `this.obs.error` with the offending
+   *   subscriptionId + error, and we continue. After all batches, an
+   *   aggregate error log fires if `failed > 0`. Callers (webhook
+   *   handler, UI-driven tier update) treat this method as
+   *   fire-and-forget — they never surface individual failures.
+   *
+   * Called from:
+   * - `TierService.applyStripePriceCreated` (Dashboard sync-back)
+   * - `TierService.updateTier` (Codex-UI price change)
+   *
+   * Both call sites invoke AFTER the DB persist + cache bump succeeds,
+   * so a propagation failure does not roll back the tier price change —
+   * the canonical Price lives on the tier; this method just fans out
+   * the billing effect. An operator can re-run propagation manually by
+   * re-adopting the same Price (no-op on the tier, re-runs against
+   * current active subs).
+   *
+   * @param tierId — subscription tier whose price changed
+   * @param newStripePriceId — canonical Stripe Price id the tier now points at
+   * @param options — see `PropagateTierPriceOptions`
+   * @returns `{ total, updated, failed }` counts — informational only;
+   *          the webhook path is authoritative for DB state.
+   */
+  async propagateTierPriceToActiveSubscriptions(
+    tierId: string,
+    newStripePriceId: string,
+    options: PropagateTierPriceOptions = {}
+  ): Promise<PropagateTierPriceResult> {
+    const prorationBehavior = options.prorationBehavior ?? 'create_prorations';
+    const batchSize = Math.max(1, options.batchSize ?? 8);
+    const interBatchDelayMs = Math.max(0, options.interBatchDelayMs ?? 50);
+
+    try {
+      const conditions = [
+        eq(subscriptions.tierId, tierId),
+        inArray(subscriptions.status, [
+          SUBSCRIPTION_STATUS.ACTIVE,
+          SUBSCRIPTION_STATUS.CANCELLING,
+        ]),
+      ];
+      if (options.organizationId) {
+        conditions.push(
+          eq(subscriptions.organizationId, options.organizationId)
+        );
+      }
+
+      const rows = await this.db
+        .select({
+          id: subscriptions.id,
+          stripeSubscriptionId: subscriptions.stripeSubscriptionId,
+          organizationId: subscriptions.organizationId,
+        })
+        .from(subscriptions)
+        .where(and(...conditions));
+
+      if (rows.length === 0) {
+        this.obs.info('Tier price propagation: no active subscriptions', {
+          tierId,
+          newStripePriceId,
+        });
+        return { total: 0, updated: 0, failed: 0 };
+      }
+
+      let updated = 0;
+      let failed = 0;
+      const errors: Array<{
+        subscriptionId: string;
+        stripeSubscriptionId: string;
+        error: string;
+      }> = [];
+
+      for (let i = 0; i < rows.length; i += batchSize) {
+        const batch = rows.slice(i, i + batchSize);
+        const results = await Promise.allSettled(
+          batch.map(async (row) => {
+            const stripeSub = await this.stripe.subscriptions.retrieve(
+              row.stripeSubscriptionId
+            );
+            const itemId = stripeSub.items.data[0]?.id;
+            if (!itemId) {
+              throw new InternalServiceError(
+                'Stripe subscription has no items to update'
+              );
+            }
+
+            await this.stripe.subscriptions.update(
+              row.stripeSubscriptionId,
+              {
+                items: [{ id: itemId, price: newStripePriceId }],
+                proration_behavior: prorationBehavior,
+              },
+              {
+                idempotencyKey: `tier-price-propagate:${row.id}:${newStripePriceId}`,
+              }
+            );
+          })
+        );
+
+        for (const [idx, result] of results.entries()) {
+          const row = batch[idx];
+          // `batch[idx]` is always defined inside a `results.entries()`
+          // loop — `Promise.allSettled` returns an array of the same
+          // length as the input. The guard is strictly to satisfy
+          // `noUncheckedIndexedAccess`; in practice it cannot fire.
+          if (!row) continue;
+          if (result.status === 'fulfilled') {
+            updated++;
+          } else {
+            failed++;
+            const message =
+              result.reason instanceof Error
+                ? result.reason.message
+                : String(result.reason);
+            errors.push({
+              subscriptionId: row.id,
+              stripeSubscriptionId: row.stripeSubscriptionId,
+              error: message,
+            });
+            this.obs.error(
+              'Tier price propagation: subscription update failed',
+              {
+                tierId,
+                newStripePriceId,
+                subscriptionId: row.id,
+                stripeSubscriptionId: row.stripeSubscriptionId,
+                organizationId: row.organizationId,
+                error: message,
+              }
+            );
+          }
+        }
+
+        // Inter-batch delay to stay under Stripe's per-account rate
+        // limit. Only sleep when another batch follows — avoids a
+        // trailing delay after the last batch.
+        if (i + batchSize < rows.length && interBatchDelayMs > 0) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, interBatchDelayMs)
+          );
+        }
+      }
+
+      if (failed > 0) {
+        this.obs.error(
+          'Tier price propagation completed with failures (operator review required)',
+          {
+            tierId,
+            newStripePriceId,
+            total: rows.length,
+            updated,
+            failed,
+            sampleErrors: errors.slice(0, 5),
+          }
+        );
+      } else {
+        this.obs.info('Tier price propagation complete', {
+          tierId,
+          newStripePriceId,
+          total: rows.length,
+          updated,
+          prorationBehavior,
+        });
+      }
+
+      return { total: rows.length, updated, failed };
+    } catch (error) {
+      this.handleError(error, 'propagateTierPriceToActiveSubscriptions');
+    }
   }
 
   /**

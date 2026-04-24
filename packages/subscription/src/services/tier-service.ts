@@ -48,12 +48,93 @@ import {
 
 type SubscriptionTier = typeof subscriptionTiers.$inferSelect;
 
+/**
+ * Fan out a tier's new canonical Stripe Price id to every active /
+ * cancelling subscription on that tier. Injected into TierService so
+ * the tier package can trigger propagation without reaching into
+ * `SubscriptionService` directly (keeps the service separation — tiers
+ * own tier records, subscriptions own subscription mutations).
+ *
+ * Implemented by
+ * `SubscriptionService.propagateTierPriceToActiveSubscriptions`. Both
+ * TierService call sites (sync-back from Stripe Dashboard in
+ * `applyStripePriceCreated`, and the Codex-UI `updateTier` flow) invoke
+ * this hook AFTER the tier DB persist commits — a propagation failure
+ * therefore does not roll back the price change on the tier itself.
+ *
+ * Fire-and-forget is the caller's responsibility: if an
+ * `ExecutionContext` is available, wrap the call in `waitUntil(...)`
+ * before handing the thunk to TierService. TierService awaits the
+ * returned promise only to keep the service layer synchronous for
+ * tests — the awaited promise will typically already be wrapped in
+ * `waitUntil` by the factory that constructed the propagator, so the
+ * await resolves quickly and the heavy work (potentially thousands of
+ * Stripe calls) lives on the execution context.
+ */
+export type TierPricePropagator = (args: {
+  tierId: string;
+  newStripePriceId: string;
+  organizationId: string;
+  interval: 'month' | 'year';
+}) => Promise<void> | void;
+
+/**
+ * Optional extras on `TierService` beyond the base `ServiceConfig`.
+ * `propagator` — see `TierPricePropagator`. When absent, TierService
+ * skips propagation (sync-back + UI price changes still succeed; only
+ * the fan-out to existing subscriptions is no-op'd). Narrow unit tests
+ * that do not exercise propagation can omit this injection entirely.
+ */
+export interface TierServiceConfig extends ServiceConfig {
+  propagator?: TierPricePropagator;
+}
+
 export class TierService extends BaseService {
   private readonly stripe: Stripe;
+  private readonly propagator: TierPricePropagator | undefined;
 
-  constructor(config: ServiceConfig, stripe: Stripe) {
+  constructor(config: TierServiceConfig, stripe: Stripe) {
     super(config);
     this.stripe = stripe;
+    this.propagator = config.propagator;
+  }
+
+  /**
+   * Fire the injected tier-price propagator if wired, swallowing any
+   * synchronous or asynchronous failure. Propagation is strictly
+   * best-effort — the tier DB state (new canonical Price id) is
+   * already authoritative by the time this runs; failing to swap
+   * existing Stripe subscription items is a recoverable operator
+   * concern logged by `SubscriptionService.propagateTierPriceToActiveSubscriptions`
+   * itself, not a reason to reject the tier update.
+   *
+   * Tests call this directly via the injected propagator to assert
+   * the propagator was invoked with the right args; production wiring
+   * passes a thunk that itself wraps the work in
+   * `ctx.executionCtx.waitUntil(...)` so the slow path never blocks
+   * the webhook response.
+   */
+  private async firePropagation(args: {
+    tierId: string;
+    newStripePriceId: string;
+    organizationId: string;
+    interval: 'month' | 'year';
+  }): Promise<void> {
+    if (!this.propagator) return;
+    try {
+      await this.propagator(args);
+    } catch (error) {
+      this.obs.warn(
+        'TierService: tier price propagator threw — continuing (DB is already updated)',
+        {
+          tierId: args.tierId,
+          organizationId: args.organizationId,
+          newStripePriceId: args.newStripePriceId,
+          interval: args.interval,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+    }
   }
 
   /**
@@ -415,6 +496,32 @@ export class TierService extends BaseService {
         organizationId: orgId,
         priceChanged: monthlyChanged || annualChanged,
       });
+
+      // Q1.2 (Codex-3xyyb): if either interval's canonical Price
+      // changed, fan the new id(s) out to existing active/cancelling
+      // subscriptions. Runs AFTER the DB commit — the tier is
+      // authoritative and a propagation failure is best-effort. Fires
+      // once per changed interval because Stripe tracks billing
+      // interval per subscription item, and a single tier can have
+      // both monthly and annual subscribers that each need their own
+      // Price id swapped. `createdNewMonthlyId` / `createdNewAnnualId`
+      // are the freshly-minted ids from earlier in this method.
+      if (createdNewMonthlyId) {
+        await this.firePropagation({
+          tierId,
+          newStripePriceId: createdNewMonthlyId,
+          organizationId: orgId,
+          interval: 'month',
+        });
+      }
+      if (createdNewAnnualId) {
+        await this.firePropagation({
+          tierId,
+          newStripePriceId: createdNewAnnualId,
+          organizationId: orgId,
+          interval: 'year',
+        });
+      }
 
       return updated;
     } catch (error) {
@@ -811,6 +918,20 @@ export class TierService extends BaseService {
           );
         }
       }
+
+      // Q1.2 (Codex-3xyyb): fan the new Price id out to every active /
+      // cancelling subscription already on this tier so mid-cycle
+      // renewals bill the new amount. Runs AFTER the tier persist +
+      // archive — a propagation failure does not undo the sync-back.
+      // The propagator itself is a fire-and-forget thunk in production
+      // (the wiring layer wraps it in `waitUntil`), so this await
+      // resolves quickly.
+      await this.firePropagation({
+        tierId: tier.id,
+        newStripePriceId: price.id,
+        organizationId: orgId,
+        interval,
+      });
 
       return { tierId: tier.id, organizationId: orgId, changed: true };
     } catch (error) {

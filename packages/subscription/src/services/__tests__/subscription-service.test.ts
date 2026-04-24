@@ -36,7 +36,15 @@ import {
   validateDatabaseConnection,
 } from '@codex/test-utils';
 import type Stripe from 'stripe';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import {
   AlreadySubscribedError,
   ConnectAccountNotReadyError,
@@ -1853,6 +1861,372 @@ describe('SubscriptionService', () => {
         .from(subscriptions)
         .where(eq(subscriptions.id, sub.id));
       expect(after.status).toBe('active');
+    });
+  });
+
+  // ─── propagateTierPriceToActiveSubscriptions (Q1.2 — Codex-3xyyb) ────────
+
+  describe('propagateTierPriceToActiveSubscriptions', () => {
+    /**
+     * Replace the mocked stripe.subscriptions.{retrieve,update} with
+     * spies configured to return (a) a predictable live subscription
+     * shape for `retrieve` so we can assert the propagator passed the
+     * right item id forward, and (b) a resolved value on `update` so
+     * per-sub results can be individually manipulated via
+     * `.mockImplementationOnce`. Returns both spies so tests can
+     * assert call order / args.
+     */
+    function wireStripeSubSpies(stripeClient: Stripe) {
+      const retrieveSpy = vi.fn().mockImplementation((stripeSubId: string) => ({
+        id: stripeSubId,
+        status: 'active',
+        items: {
+          data: [
+            {
+              id: `si_for_${stripeSubId}`,
+              price: {
+                id: 'price_old',
+                recurring: { interval: 'month' },
+              },
+            },
+          ],
+        },
+      }));
+      const updateSpy = vi.fn().mockImplementation((stripeSubId: string) => ({
+        id: stripeSubId,
+        status: 'active',
+      }));
+      (
+        stripeClient.subscriptions as unknown as {
+          retrieve: ReturnType<typeof vi.fn>;
+          update: ReturnType<typeof vi.fn>;
+        }
+      ).retrieve = retrieveSpy;
+      (
+        stripeClient.subscriptions as unknown as {
+          retrieve: ReturnType<typeof vi.fn>;
+          update: ReturnType<typeof vi.fn>;
+        }
+      ).update = updateSpy;
+      return { retrieveSpy, updateSpy };
+    }
+
+    it('returns zero counts and makes no Stripe calls when no active subs exist', async () => {
+      const { org, tier1 } = await createFullOrg('propagate-empty');
+      const { retrieveSpy, updateSpy } = wireStripeSubSpies(stripe);
+
+      const result = await service.propagateTierPriceToActiveSubscriptions(
+        tier1.id,
+        'price_new_abc',
+        { organizationId: org.id }
+      );
+
+      expect(result).toEqual({ total: 0, updated: 0, failed: 0 });
+      expect(retrieveSpy).not.toHaveBeenCalled();
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it('updates every active/cancelling subscription with deterministic idempotency keys', async () => {
+      const { org, tier1 } = await createFullOrg('propagate-happy');
+      const { retrieveSpy, updateSpy } = wireStripeSubSpies(stripe);
+
+      // Seed three subs: two active, one cancelling. All MUST be swapped.
+      const ns = createUniqueSlug('prop_happy');
+      const seed = await Promise.all([
+        db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(creatorId, org.id, tier1.id, {
+              status: 'active',
+              stripeSubscriptionId: `sub_${ns}_a1`,
+            })
+          )
+          .returning(),
+        db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status: 'active',
+              stripeSubscriptionId: `sub_${ns}_a2`,
+            })
+          )
+          .returning(),
+        db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(thirdUserId, org.id, tier1.id, {
+              status: 'cancelling',
+              stripeSubscriptionId: `sub_${ns}_c1`,
+            })
+          )
+          .returning(),
+      ]);
+      const seeded = seed.map(([row]) => row);
+
+      const result = await service.propagateTierPriceToActiveSubscriptions(
+        tier1.id,
+        'price_new_xyz',
+        { organizationId: org.id, interBatchDelayMs: 0 }
+      );
+
+      expect(result).toEqual({ total: 3, updated: 3, failed: 0 });
+      expect(retrieveSpy).toHaveBeenCalledTimes(3);
+      expect(updateSpy).toHaveBeenCalledTimes(3);
+
+      // Assert deterministic idempotency key per subscription.
+      for (const row of seeded) {
+        const match = updateSpy.mock.calls.find(
+          ([stripeSubId]) => stripeSubId === row.stripeSubscriptionId
+        );
+        expect(match).toBeDefined();
+        const [, params, opts] = match as [string, object, object];
+        expect(params).toMatchObject({
+          items: [
+            {
+              id: `si_for_${row.stripeSubscriptionId}`,
+              price: 'price_new_xyz',
+            },
+          ],
+          proration_behavior: 'create_prorations',
+        });
+        expect(opts).toMatchObject({
+          idempotencyKey: `tier-price-propagate:${row.id}:price_new_xyz`,
+        });
+      }
+    });
+
+    it('reports per-sub failure without aborting the batch', async () => {
+      const { org, tier1 } = await createFullOrg('propagate-partial');
+      const { retrieveSpy, updateSpy } = wireStripeSubSpies(stripe);
+
+      const seed = await Promise.all([
+        db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(creatorId, org.id, tier1.id, {
+              status: 'active',
+              stripeSubscriptionId: 'sub_partial_ok_1',
+            })
+          )
+          .returning(),
+        db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+              status: 'active',
+              stripeSubscriptionId: 'sub_partial_fail',
+            })
+          )
+          .returning(),
+        db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(thirdUserId, org.id, tier1.id, {
+              status: 'active',
+              stripeSubscriptionId: 'sub_partial_ok_2',
+            })
+          )
+          .returning(),
+      ]);
+      const [failRow] = seed[1];
+
+      updateSpy.mockImplementation((stripeSubId: string) => {
+        if (stripeSubId === failRow.stripeSubscriptionId) {
+          return Promise.reject(new Error('Stripe 500 for test'));
+        }
+        return Promise.resolve({ id: stripeSubId, status: 'active' });
+      });
+
+      const result = await service.propagateTierPriceToActiveSubscriptions(
+        tier1.id,
+        'price_partial',
+        { organizationId: org.id, interBatchDelayMs: 0 }
+      );
+
+      expect(result).toEqual({ total: 3, updated: 2, failed: 1 });
+      expect(retrieveSpy).toHaveBeenCalledTimes(3);
+      expect(updateSpy).toHaveBeenCalledTimes(3);
+    });
+
+    it('does NOT touch paused/past_due/cancelled/incomplete subscriptions (regression guard for status filter)', async () => {
+      const { org, tier1 } = await createFullOrg('propagate-status-guard');
+      const { retrieveSpy, updateSpy } = wireStripeSubSpies(stripe);
+
+      // Seed one active (MUST be swapped) + one of each excluded status.
+      const [okRow] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(creatorId, org.id, tier1.id, {
+            status: 'active',
+            stripeSubscriptionId: 'sub_guard_active',
+          })
+        )
+        .returning();
+
+      const excluded = ['paused', 'past_due', 'cancelled', 'incomplete'];
+      for (const [idx, status] of excluded.entries()) {
+        // Each excluded status needs its own user — the unique index
+        // `uq_active_subscription_per_user_org` allows past_due +
+        // cancelling to coexist with active for DIFFERENT users only.
+        // For test isolation we just use the creators we have.
+        const userId =
+          idx === 0 ? otherCreatorId : idx === 1 ? thirdUserId : creatorId;
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(userId, org.id, tier1.id, {
+            status,
+            stripeSubscriptionId: `sub_guard_${status}_${idx}`,
+            // cancelled / paused coexist with active for different users
+            // via the partial unique index (which only applies to
+            // ACTIVE/PAST_DUE/CANCELLING). But duplicate userIds across
+            // status='cancelled' / 'incomplete' + our existing active
+            // row would still collide on that index because `past_due`
+            // is in the index. Use a per-test clean slate by inserting
+            // cancelled / incomplete with the creator who already has
+            // an active sub — this works because the partial index
+            // excludes these statuses entirely.
+          })
+        );
+      }
+
+      const result = await service.propagateTierPriceToActiveSubscriptions(
+        tier1.id,
+        'price_guard',
+        { organizationId: org.id, interBatchDelayMs: 0 }
+      );
+
+      // Only the single active row is swapped; the four excluded rows
+      // are ignored by the WHERE clause.
+      expect(result).toEqual({ total: 1, updated: 1, failed: 0 });
+      expect(retrieveSpy).toHaveBeenCalledTimes(1);
+      expect(updateSpy).toHaveBeenCalledTimes(1);
+      expect(updateSpy).toHaveBeenCalledWith(
+        okRow.stripeSubscriptionId,
+        expect.objectContaining({
+          items: expect.arrayContaining([
+            expect.objectContaining({ price: 'price_guard' }),
+          ]),
+        }),
+        expect.objectContaining({
+          idempotencyKey: expect.stringContaining(
+            `tier-price-propagate:${okRow.id}:price_guard`
+          ),
+        })
+      );
+    });
+
+    it('respects the caller-supplied proration policy', async () => {
+      const { org, tier1 } = await createFullOrg('propagate-proration');
+      const { updateSpy } = wireStripeSubSpies(stripe);
+
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(creatorId, org.id, tier1.id, {
+          status: 'active',
+          stripeSubscriptionId: 'sub_proration_1',
+        })
+      );
+
+      await service.propagateTierPriceToActiveSubscriptions(
+        tier1.id,
+        'price_prorate_none',
+        {
+          organizationId: org.id,
+          prorationBehavior: 'none',
+          interBatchDelayMs: 0,
+        }
+      );
+
+      expect(updateSpy).toHaveBeenCalledOnce();
+      const [, params] = updateSpy.mock.calls[0] as [string, object];
+      expect(params).toMatchObject({ proration_behavior: 'none' });
+    });
+
+    it('produces deterministic idempotency keys for identical inputs (retry safety)', async () => {
+      const { org, tier1 } = await createFullOrg('propagate-idempo');
+      const { updateSpy } = wireStripeSubSpies(stripe);
+
+      const [row] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(creatorId, org.id, tier1.id, {
+            status: 'active',
+            stripeSubscriptionId: 'sub_idempo_1',
+          })
+        )
+        .returning();
+
+      await service.propagateTierPriceToActiveSubscriptions(
+        tier1.id,
+        'price_same',
+        { organizationId: org.id, interBatchDelayMs: 0 }
+      );
+      await service.propagateTierPriceToActiveSubscriptions(
+        tier1.id,
+        'price_same',
+        { organizationId: org.id, interBatchDelayMs: 0 }
+      );
+
+      expect(updateSpy).toHaveBeenCalledTimes(2);
+      const [firstOpts, secondOpts] = [
+        updateSpy.mock.calls[0]?.[2] as { idempotencyKey: string } | undefined,
+        updateSpy.mock.calls[1]?.[2] as { idempotencyKey: string } | undefined,
+      ];
+      expect(firstOpts?.idempotencyKey).toBe(
+        `tier-price-propagate:${row.id}:price_same`
+      );
+      expect(secondOpts?.idempotencyKey).toBe(firstOpts?.idempotencyKey);
+    });
+
+    it('batches large sub counts — 25 subs with batchSize=10 produces 3 batches', async () => {
+      const { org, tier1 } = await createFullOrg('propagate-batches');
+      const { updateSpy } = wireStripeSubSpies(stripe);
+
+      // Seed 25 additional users + subscriptions. Keep all with the
+      // same creatorId is NOT possible (unique index on userId+orgId
+      // for active statuses), so seed fresh users.
+      const newUserIds = await seedTestUsers(db, 25);
+      for (const [idx, uid] of newUserIds.entries()) {
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(uid, org.id, tier1.id, {
+            status: 'active',
+            stripeSubscriptionId: `sub_batch_${idx}`,
+          })
+        );
+      }
+
+      // Use a distinctive delay value so we can filter inter-batch
+      // sleeps from any other setTimeout calls in the hot path (db
+      // driver, Promise microtask adapters, etc.) without relying on
+      // an exact count of unrelated timers.
+      const batchDelayMarker = 7919;
+      const sleeps: number[] = [];
+      const originalSetTimeout = globalThis.setTimeout;
+      (globalThis as unknown as { setTimeout: typeof setTimeout }).setTimeout =
+        ((fn: () => void, ms?: number) => {
+          if (ms === batchDelayMarker) sleeps.push(ms);
+          return originalSetTimeout(fn, 0);
+        }) as typeof setTimeout;
+
+      try {
+        const result = await service.propagateTierPriceToActiveSubscriptions(
+          tier1.id,
+          'price_batched',
+          {
+            organizationId: org.id,
+            batchSize: 10,
+            interBatchDelayMs: batchDelayMarker,
+          }
+        );
+        expect(result.total).toBe(25);
+        expect(result.updated).toBe(25);
+        expect(updateSpy).toHaveBeenCalledTimes(25);
+        // 25 subs in batches of 10 → 3 batches → exactly 2 inter-batch
+        // sleeps (no trailing delay after the last batch).
+        expect(sleeps.length).toBe(2);
+      } finally {
+        (
+          globalThis as unknown as { setTimeout: typeof setTimeout }
+        ).setTimeout = originalSetTimeout;
+      }
     });
   });
 });

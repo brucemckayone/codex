@@ -11,5 +11,9 @@ export {
   invalidateForUser,
   type WaitUntilFn,
 } from './subscription-invalidation';
-export { SubscriptionService } from './subscription-service';
-export { TierService } from './tier-service';
+export {
+  type PropagateTierPriceOptions,
+  type PropagateTierPriceResult,
+  SubscriptionService,
+} from './subscription-service';
+export { type TierPricePropagator, TierService } from './tier-service';

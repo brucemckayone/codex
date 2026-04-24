@@ -419,10 +419,51 @@ export function createServiceRegistry(
 
     get tier() {
       if (!_tier) {
+        // Q1.2 (Codex-3xyyb): wire a propagator thunk so tier
+        // create/update flows that change the canonical Stripe Price
+        // automatically fan the new Price id out to every active /
+        // cancelling subscription on the tier. The propagator runs on
+        // `executionCtx.waitUntil` so the slow path (one Stripe call
+        // per subscriber, batched) never blocks the request response.
+        // When `executionCtx` is absent (shouldn't happen inside
+        // `procedure()`, but be defensive), we still run propagation
+        // awaited — the tier route handler will simply wait a bit
+        // longer. The inner `propagateTierPriceToActiveSubscriptions`
+        // method owns its own try/catch per sub; any rejection we
+        // surface here is a catastrophic (pre-batch) failure worth
+        // logging via the fire-and-forget tail.
+        const propagator = (args: {
+          tierId: string;
+          newStripePriceId: string;
+          organizationId: string;
+          interval: 'month' | 'year';
+        }): void => {
+          const run = async () => {
+            // Use the lazy getter so the SubscriptionService is only
+            // instantiated if propagation actually fires — tier reads
+            // and tier creates-without-price-change never pay the
+            // construction cost.
+            await registry.subscription.propagateTierPriceToActiveSubscriptions(
+              args.tierId,
+              args.newStripePriceId,
+              { organizationId: args.organizationId }
+            );
+          };
+          if (executionCtx) {
+            executionCtx.waitUntil(run());
+          } else {
+            // No waitUntil available — best-effort fire-and-forget via
+            // unawaited promise. `.catch` guard prevents unhandled
+            // rejection noise; the inner method already logs failures.
+            run().catch(() => {});
+          }
+        };
+
         _tier = new TierService(
           {
             db: getSharedDb(),
             environment: getEnvironment(),
+            propagator,
           },
           getStripeClient()
         );
