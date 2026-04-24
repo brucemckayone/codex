@@ -147,6 +147,22 @@ function makeDb(overrides: Record<string, unknown> = {}): DbSpy {
         ),
       },
     },
+    // Webhook handlers now wrap multi-step writes in a transaction — the
+    // mock exposes the same insert/update surface as the top-level db so
+    // the handler can call `tx.insert(...)` / `tx.update(...)` inside the
+    // callback without the test needing to stub every shape twice.
+    transaction: vi.fn(
+      async (
+        cb: (tx: {
+          insert: typeof db.insert;
+          update: typeof db.update;
+          select: typeof db.select;
+        }) => Promise<unknown>
+      ) => {
+        calls.push('transaction');
+        return cb({ insert: db.insert, update: db.update, select: db.select });
+      }
+    ),
   };
   return { calls, db };
 }

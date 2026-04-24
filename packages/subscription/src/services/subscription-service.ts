@@ -532,58 +532,67 @@ export class SubscriptionService extends BaseService {
     const periodStart = item?.current_period_start ?? 0;
     const periodEnd = item?.current_period_end ?? 0;
 
-    // Insert subscription record — rely on unique constraint for idempotency
-    // (eliminates TOCTOU race between SELECT check and INSERT)
+    // Atomic: subscription insert + follower upsert + membership upsert must
+    // all commit together. Partial state (e.g. subscription row exists but
+    // follower/membership missing) leaves the user in an inconsistent
+    // state that library queries and role-gated paths read incorrectly.
+    // The unique constraint on stripe_subscription_id still provides
+    // webhook-replay idempotency — the whole transaction rolls back on
+    // duplicate insert and we return normally.
     try {
-      await this.db.insert(subscriptions).values({
-        userId,
-        organizationId: orgId,
-        tierId,
-        stripeSubscriptionId: stripeSubId,
-        stripeCustomerId:
-          typeof stripeSubscription.customer === 'string'
-            ? stripeSubscription.customer
-            : stripeSubscription.customer.id,
-        status: SUBSCRIPTION_STATUS.ACTIVE,
-        billingInterval,
-        currentPeriodStart: new Date(periodStart * 1000),
-        currentPeriodEnd: new Date(periodEnd * 1000),
-        amountCents,
-        platformFeeCents: split.platformFeeCents,
-        organizationFeeCents: split.organizationFeeCents,
-        creatorPayoutCents: split.creatorPayoutCents,
-      });
+      await (this.db as typeof import('@codex/database').dbWs).transaction(
+        async (tx) => {
+          await tx.insert(subscriptions).values({
+            userId,
+            organizationId: orgId,
+            tierId,
+            stripeSubscriptionId: stripeSubId,
+            stripeCustomerId:
+              typeof stripeSubscription.customer === 'string'
+                ? stripeSubscription.customer
+                : stripeSubscription.customer.id,
+            status: SUBSCRIPTION_STATUS.ACTIVE,
+            billingInterval,
+            currentPeriodStart: new Date(periodStart * 1000),
+            currentPeriodEnd: new Date(periodEnd * 1000),
+            amountCents,
+            platformFeeCents: split.platformFeeCents,
+            organizationFeeCents: split.organizationFeeCents,
+            creatorPayoutCents: split.creatorPayoutCents,
+          });
 
-      // Auto-follow: subscribers implicitly follow the org (idempotent).
-      // Follower persists after subscription cancellation — user must explicitly unfollow.
-      await this.db
-        .insert(organizationFollowers)
-        .values({ organizationId: orgId, userId })
-        .onConflictDoNothing();
+          // Auto-follow: subscribers implicitly follow the org. Follower
+          // persists after cancellation; user must explicitly unfollow.
+          await tx
+            .insert(organizationFollowers)
+            .values({ organizationId: orgId, userId })
+            .onConflictDoNothing();
 
-      // BUG-016: Upsert organization membership with role=subscriber (backward compat).
-      // TODO(Phase 3): Remove this once frontend no longer reads membership roles for library access badges.
-      // If the user already has a higher-priority role (owner/admin/creator), preserve it.
-      // Only set role to 'subscriber' on conflict if current role is 'member' or 'subscriber'.
-      await this.db
-        .insert(organizationMemberships)
-        .values({
-          organizationId: orgId,
-          userId,
-          role: 'subscriber',
-          status: 'active',
-        })
-        .onConflictDoUpdate({
-          target: [
-            organizationMemberships.organizationId,
-            organizationMemberships.userId,
-          ],
-          set: {
-            status: 'active',
-            role: sql`CASE WHEN ${organizationMemberships.role} IN ('owner', 'admin', 'creator') THEN ${organizationMemberships.role} ELSE 'subscriber' END`,
-            updatedAt: new Date(),
-          },
-        });
+          // BUG-016: Upsert membership with role=subscriber (backward compat).
+          // TODO(Phase 3): Remove once frontend no longer reads membership
+          // roles for library access badges. Preserve higher roles (owner/
+          // admin/creator) on conflict.
+          await tx
+            .insert(organizationMemberships)
+            .values({
+              organizationId: orgId,
+              userId,
+              role: 'subscriber',
+              status: 'active',
+            })
+            .onConflictDoUpdate({
+              target: [
+                organizationMemberships.organizationId,
+                organizationMemberships.userId,
+              ],
+              set: {
+                status: 'active',
+                role: sql`CASE WHEN ${organizationMemberships.role} IN ('owner', 'admin', 'creator') THEN ${organizationMemberships.role} ELSE 'subscriber' END`,
+                updatedAt: new Date(),
+              },
+            });
+        }
+      );
 
       this.obs.info('Subscription created from webhook', {
         stripeSubscriptionId: stripeSubId,
@@ -1125,32 +1134,41 @@ export class SubscriptionService extends BaseService {
     const userId = metadata.codex_user_id;
     const orgId = metadata.codex_organization_id;
 
-    await this.db
-      .update(subscriptions)
-      .set({
-        status: SUBSCRIPTION_STATUS.CANCELLED,
-        cancelledAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
+    // Atomic: subscription cancel + membership demotion commit together.
+    // A DB hiccup between these two writes previously left the
+    // subscription cancelled but the user still listed as an active
+    // `subscriber` role — inconsistent state the access layer can't
+    // reason about.
+    await (this.db as typeof import('@codex/database').dbWs).transaction(
+      async (tx) => {
+        await tx
+          .update(subscriptions)
+          .set({
+            status: SUBSCRIPTION_STATUS.CANCELLED,
+            cancelledAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
 
-    // BUG-016: Update organization membership on subscription cancellation.
-    // Only deactivate if the member's role is 'subscriber' — preserve higher roles.
-    if (userId && orgId) {
-      await this.db
-        .update(organizationMemberships)
-        .set({
-          status: 'inactive',
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(organizationMemberships.organizationId, orgId),
-            eq(organizationMemberships.userId, userId),
-            eq(organizationMemberships.role, 'subscriber')
-          )
-        );
-    }
+        // BUG-016: Deactivate membership only when the role is 'subscriber'
+        // — preserves higher roles (owner/admin/creator).
+        if (userId && orgId) {
+          await tx
+            .update(organizationMemberships)
+            .set({
+              status: 'inactive',
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(organizationMemberships.organizationId, orgId),
+                eq(organizationMemberships.userId, userId),
+                eq(organizationMemberships.role, 'subscriber')
+              )
+            );
+        }
+      }
+    );
 
     this.obs.info('Subscription deleted/cancelled from webhook', {
       stripeSubscriptionId: stripeSubId,
