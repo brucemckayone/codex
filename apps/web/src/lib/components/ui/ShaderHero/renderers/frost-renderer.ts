@@ -66,6 +66,7 @@ const SIM_UNIFORM_NAMES = [
   'uSymmetry',
   'uMelt',
   'uTime',
+  'uDt',
   'uMouse',
   'uMouseActive',
   'uSeedPos',
@@ -117,11 +118,14 @@ export function createFrostRenderer(): ShaderRenderer {
   let lastSeedTime = 0;
   /** Next ambient seed interval (randomised 5-10s). */
   let nextSeedInterval = 5.0 + Math.random() * 5.0;
+  /** Timestamp (seconds) of previous render() call. -1 sentinel = first frame. */
+  let lastRenderTime = -1;
 
   // ── Sim step helper ────────────────────────────────────────
   function stepSim(
     gl: WebGL2RenderingContext,
     time: number,
+    dt: number,
     mouseX: number,
     mouseY: number,
     mouseOn: boolean,
@@ -146,6 +150,7 @@ export function createFrostRenderer(): ShaderRenderer {
     gl.uniform1i(simU.uSymmetry, Math.round(cfg.symmetry ?? DEFAULTS.symmetry));
     gl.uniform1f(simU.uMelt, cfg.melt ?? DEFAULTS.melt);
     gl.uniform1f(simU.uTime, time);
+    gl.uniform1f(simU.uDt, dt);
     gl.uniform2f(simU.uMouse, mouseX, mouseY);
     gl.uniform1f(simU.uMouseActive, mouseOn ? 1.0 : 0.0);
     gl.uniform2f(simU.uSeedPos, seedX, seedY);
@@ -198,6 +203,15 @@ export function createFrostRenderer(): ShaderRenderer {
       const cfg = config as unknown as FrostCfg;
       const amp = audio?.amplitude ?? 0;
 
+      // Frame-rate-independent dt for the sim shader. Clamped to 0.1s to
+      // match the ShaderHero RAF loop's clamp and avoid a single huge step
+      // after a tab-hidden → visible transition. -1 sentinel on first frame
+      // after reset yields a conservative 1/60s seed (avoids zero-decay on
+      // the very first step after the loop resumes).
+      const dt =
+        lastRenderTime < 0 ? 1 / 60 : Math.min(time - lastRenderTime, 0.1);
+      lastRenderTime = time;
+
       // ── Ambient seed (every 5-10s) ──────────────────────────
       let seedX = -10.0;
       let seedY = -10.0;
@@ -215,9 +229,14 @@ export function createFrostRenderer(): ShaderRenderer {
       }
 
       // ── Substep 1: with input (mouse melt + seed) ──────────
+      // Both substeps use the full frame `dt`. At 60fps this preserves the
+      // original 0.995 × 0.995 = 0.990 per-frame decay; at other refresh
+      // rates the two pow(0.995, dt*60) multiplications compensate so the
+      // per-wall-clock-second decay stays constant.
       stepSim(
         gl,
         time,
+        dt,
         mouse.active ? mouse.x : -10.0,
         mouse.active ? mouse.y : -10.0,
         mouse.active,
@@ -227,7 +246,7 @@ export function createFrostRenderer(): ShaderRenderer {
       );
 
       // ── Substep 2: coast (no input, no seed) ────────────────
-      stepSim(gl, time, -10.0, -10.0, false, -10.0, -10.0, cfg);
+      stepSim(gl, time, dt, -10.0, -10.0, false, -10.0, -10.0, cfg);
 
       // ── Display pass ────────────────────────────────────────
       gl.viewport(0, 0, width, height);
@@ -270,6 +289,7 @@ export function createFrostRenderer(): ShaderRenderer {
 
       lastSeedTime = 0;
       nextSeedInterval = 5.0 + Math.random() * 5.0;
+      lastRenderTime = -1;
 
       // Clear both FBO sides with init shader
       gl.viewport(0, 0, SIM_RES, SIM_RES);
@@ -287,8 +307,9 @@ export function createFrostRenderer(): ShaderRenderer {
       for (let i = 0; i < seedCount; i++) {
         const sx = 0.2 + Math.random() * 0.6;
         const sy = 0.2 + Math.random() * 0.6;
-        // Run a sim step with seed to plant crystal point
-        stepSim(gl, 0, -10.0, -10.0, false, sx, sy, {
+        // Run a sim step with seed to plant crystal point.
+        // dt=0 → pow(0.995, 0) = 1.0 (no decay during seed-planting).
+        stepSim(gl, 0, 0, -10.0, -10.0, false, sx, sy, {
           growth: DEFAULTS.growth,
           branch: DEFAULTS.branch,
           symmetry: DEFAULTS.symmetry,

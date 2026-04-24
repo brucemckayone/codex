@@ -15,6 +15,7 @@
  *   uSymmetry    — symmetry fold count (int, 4-8)
  *   uMelt        — mouse melt radius (UV units * 0.1)
  *   uTime        — elapsed time in seconds
+ *   uDt          — seconds since previous sim step (0 on seed-planting reset)
  *   uMouse       — mouse position (0-1)
  *   uMouseActive — 1.0 if mouse over canvas
  *   uSeedPos     — new seed crystal position (-10 if none)
@@ -31,6 +32,7 @@ uniform float uBranch;
 uniform int uSymmetry;
 uniform float uMelt;
 uniform float uTime;
+uniform float uDt;
 uniform vec2 uMouse;
 uniform float uMouseActive;
 uniform vec2 uSeedPos;
@@ -107,8 +109,10 @@ void main() {
   float laplacian = gN + gS + gE + gW - 4.0 * diffuse;
   diffuse += 0.15 * laplacian;
 
-  // Slow natural decay prevents runaway accumulation
-  diffuse *= 0.995;
+  // Slow natural decay prevents runaway accumulation.
+  // Frame-rate-independent: pow(perFrameAt60Fps, dt * 60) reduces to 0.995 at
+  // 60fps and compensates proportionally at lower/higher refresh rates.
+  diffuse *= pow(0.995, uDt * 60.0);
   diffuse = clamp(diffuse, 0.0, 1.0);
 
   // ---- 3. Freezing check: adjacent to frozen + diffusion > threshold ----
