@@ -6,6 +6,7 @@
 	import { SearchIcon, LayoutDashboardIcon } from '$lib/components/ui/Icon';
 	import { AUTH_ROLES } from '@codex/constants';
 	import { buildCreatorsUrl, extractSubdomain } from '$lib/utils/subdomain';
+	import { getInitials } from '$lib/utils/format';
 	import SidebarRailItem from './SidebarRailItem.svelte';
 	import SidebarRailUserSection from './SidebarRailUserSection.svelte';
 	import ThemeToggle from '$lib/components/ui/ThemeToggle/ThemeToggle.svelte';
@@ -60,6 +61,11 @@
 			? '/studio'
 			: buildCreatorsUrl(page.url, '/studio')
 	);
+
+	// ── Org logo initials fallback ────────────────────────────────────
+	// Up to 2 uppercase letters derived from the org name. Rendered in a
+	// neutral circle when `org.logoUrl` is null so there's no blank gap.
+	const orgInitials = $derived(getInitials(org?.name));
 </script>
 
 <nav
@@ -80,7 +86,8 @@
 				{#if org.logoUrl}
 					<img src={org.logoUrl} alt={org.name} class="rail-logo__image" />
 				{:else}
-					<span class="rail-logo__initial">{org.name[0]}</span>
+					<span class="rail-logo__initial" aria-hidden="true">{orgInitials}</span>
+					<span class="sr-only">{org.name}</span>
 				{/if}
 				<span class="rail-logo__name">{org.name}</span>
 			</a>
@@ -235,11 +242,14 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background-color: var(--color-interactive);
-		color: var(--color-text-inverse);
+		background-color: var(--color-surface-secondary);
+		color: var(--color-text);
+		border: var(--border-width) var(--border-style) var(--color-border);
 		border-radius: var(--radius-md);
-		font-size: var(--text-lg);
-		font-weight: var(--font-bold);
+		font-family: var(--font-sans);
+		font-size: var(--text-sm);
+		font-weight: var(--font-semibold);
+		letter-spacing: var(--tracking-tight);
 		flex-shrink: 0;
 	}
 
