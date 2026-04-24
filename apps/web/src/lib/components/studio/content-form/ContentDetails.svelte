@@ -80,10 +80,9 @@
         placeholder={m.studio_content_form_description_placeholder()}
         maxLength={10000}
         formFieldAttrs={form.fields.description.as('text')}
+        ariaInvalid={descriptionIssues.length > 0 ? true : undefined}
+        ariaDescribedby={descriptionIssues.length > 0 ? 'description-error' : undefined}
       />
-      <!-- RichTextEditor does not currently forward aria-invalid / aria-describedby
-           to its inner contentEditable; wiring described-by here would be inert.
-           Leaving the error list in place — follow-up to extend RichTextEditor Props. -->
       {#if descriptionIssues.length > 0}
         <p id="description-error" class="field-error">{descriptionErrorText}</p>
       {/if}

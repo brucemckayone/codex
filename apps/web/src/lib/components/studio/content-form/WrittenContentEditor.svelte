@@ -47,10 +47,12 @@
     placeholder={m.studio_content_form_body_placeholder()}
     formFieldAttrs={form.fields.contentBody.as('text')}
     oninput={handleInput}
+    ariaInvalid={contentBodyIssues.length > 0 ? true : undefined}
+    ariaDescribedby={contentBodyIssues.length > 0 ? 'content-body-error' : undefined}
   />
 
   {#if contentBodyIssues.length > 0}
-    <p class="field-error">{contentBodyErrorText}</p>
+    <p id="content-body-error" class="field-error">{contentBodyErrorText}</p>
   {/if}
 </section>
 

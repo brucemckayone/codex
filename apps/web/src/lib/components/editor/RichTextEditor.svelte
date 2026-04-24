@@ -11,6 +11,8 @@
   @prop {string} [name] - Hidden textarea name for form submission
   @prop {(json: string) => void} [oninput] - Called when content changes
   @prop {Record<string, unknown>} [formFieldAttrs] - Spread attrs from form.fields.*.as()
+  @prop {boolean} [ariaInvalid] - Forwarded to the inner ProseMirror contenteditable
+  @prop {string} [ariaDescribedby] - Forwarded to the inner ProseMirror contenteditable
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -29,6 +31,14 @@
     name?: string;
     oninput?: (json: string) => void;
     formFieldAttrs?: Record<string, unknown>;
+    /**
+     * Forwarded to the inner ProseMirror contenteditable. `undefined` omits the
+     * attribute entirely (an unvalidated field should not emit aria-invalid="false",
+     * which semantically announces "validated and valid").
+     */
+    ariaInvalid?: boolean;
+    /** ID(s) of element(s) describing the editor's validation state. */
+    ariaDescribedby?: string;
   }
 
   const {
@@ -39,7 +49,27 @@
     name,
     oninput,
     formFieldAttrs,
+    ariaInvalid,
+    ariaDescribedby,
   }: Props = $props();
+
+  /**
+   * Build the ProseMirror DOM attributes bag. Omits aria-* keys when the
+   * corresponding prop is undefined so we don't emit aria-invalid="false"
+   * by default (see Props doc above).
+   */
+  function buildEditorAttributes(): Record<string, string> {
+    const attrs: Record<string, string> = {
+      class: 'rich-text-editor__content',
+    };
+    if (ariaInvalid !== undefined) {
+      attrs['aria-invalid'] = ariaInvalid ? 'true' : 'false';
+    }
+    if (ariaDescribedby) {
+      attrs['aria-describedby'] = ariaDescribedby;
+    }
+    return attrs;
+  }
 
   // svelte-ignore non_reactive_update
   let editorElement: HTMLDivElement;
@@ -100,9 +130,7 @@
       extensions,
       content: initialContent,
       editorProps: {
-        attributes: {
-          class: 'rich-text-editor__content',
-        },
+        attributes: buildEditorAttributes(),
       },
       onTransaction: () => {
         // Bump the version counter — forces all derived state to re-evaluate
@@ -148,6 +176,21 @@
         }
       }
     }
+  });
+
+  // Forward aria-invalid / aria-describedby reactively to the ProseMirror root.
+  // Tiptap spreads editorProps.attributes onto `.ProseMirror` on every render, so
+  // setOptions() is the canonical API for dynamic attribute changes (tiptap v3).
+  $effect(() => {
+    // Track props so the effect re-runs when they change.
+    void ariaInvalid;
+    void ariaDescribedby;
+    if (!editorInstance) return;
+    editorInstance.setOptions({
+      editorProps: {
+        attributes: buildEditorAttributes(),
+      },
+    });
   });
 </script>
 
