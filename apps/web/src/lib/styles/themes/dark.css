@@ -37,6 +37,9 @@
   --color-focus: var(--color-primary-400);
   --color-focus-ring: var(--color-primary-800);
 
+  /* Skeleton shimmer — light sweep on dark surface-tertiary */
+  --color-skeleton-shimmer: hsl(0 0% 100% / 0.1);
+
   /* Brand defaults (overridden by [data-org-brand]) */
   --color-brand-secondary: var(--color-neutral-400);
   --color-brand-secondary-hover: var(--color-neutral-300);

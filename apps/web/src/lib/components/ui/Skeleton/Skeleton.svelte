@@ -51,7 +51,7 @@
     background: linear-gradient(
       90deg,
       transparent 0%,
-      color-mix(in srgb, white 60%, transparent) 50%,
+      var(--color-skeleton-shimmer) 50%,
       transparent 100%
     );
     /* Shimmer sweep — token-driven so motion.css can collapse it under
