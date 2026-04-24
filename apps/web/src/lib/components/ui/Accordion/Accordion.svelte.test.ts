@@ -1,21 +1,26 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   createRawSnippet,
+  flushSync,
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 import Accordion from './Accordion.svelte';
 import AccordionContent from './AccordionContent.svelte';
+import AccordionHarness from './AccordionHarness.test.svelte';
 import AccordionItem from './AccordionItem.svelte';
+import AccordionMultipleHarness from './AccordionMultipleHarness.test.svelte';
 import AccordionTrigger from './AccordionTrigger.svelte';
 
 /**
- * Creates a test accordion with specified items.
- * Uses Svelte's createRawSnippet for child content.
+ * Accordion component unit tests.
  *
- * Note: Compound components require special handling in unit tests.
- * Due to JSDOM limitations with Svelte context and Melt-UI actions,
- * we test basic structure and props. Interactive behavior is covered by E2E tests.
+ * Accordion is a compound component built on Melt UI's createAccordion. Sub-
+ * components (AccordionItem/Trigger/Content) require the parent context, so
+ * they are tested via AccordionHarness which wires a realistic composition.
+ * Interactive keyboard navigation (Arrow keys, Home/End) is covered by E2E
+ * tests — Melt UI's actions register key handlers that JSDOM cannot fully
+ * exercise.
  */
 
 describe('Accordion', () => {
@@ -29,7 +34,7 @@ describe('Accordion', () => {
     document.body.innerHTML = '';
   });
 
-  test('Accordion root renders as a div', () => {
+  test('renders root as a div with children', () => {
     const children = createRawSnippet(() => ({
       render: () => '<div data-testid="child">Test content</div>',
     }));
@@ -51,118 +56,13 @@ describe('Accordion', () => {
 
     component = mount(Accordion, {
       target: document.body,
-      props: {
-        children,
-        class: 'custom-accordion',
-      },
+      props: { children, class: 'custom-accordion' },
     });
 
-    const root = document.body.querySelector('.custom-accordion');
-    expect(root).toBeTruthy();
+    expect(document.body.querySelector('.custom-accordion')).toBeTruthy();
   });
 
-  test('accepts defaultValue prop', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    // Should not throw when defaultValue is provided
-    component = mount(Accordion, {
-      target: document.body,
-      props: {
-        children,
-        defaultValue: 'item-1',
-      },
-    });
-
-    expect(document.body.querySelector('div')).toBeTruthy();
-  });
-
-  test('accepts value prop (controlled mode)', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    component = mount(Accordion, {
-      target: document.body,
-      props: {
-        children,
-        value: 'item-2',
-      },
-    });
-
-    expect(document.body.querySelector('div')).toBeTruthy();
-  });
-
-  test('accepts onValueChange callback', () => {
-    const onValueChange = vi.fn();
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    component = mount(Accordion, {
-      target: document.body,
-      props: {
-        children,
-        onValueChange,
-      },
-    });
-
-    // Callback should be wired without error
-    expect(document.body.querySelector('div')).toBeTruthy();
-  });
-
-  test('accepts disabled prop', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    component = mount(Accordion, {
-      target: document.body,
-      props: {
-        children,
-        disabled: true,
-      },
-    });
-
-    // Should mount without error when disabled
-    expect(document.body.querySelector('div')).toBeTruthy();
-  });
-
-  test('accepts multiple prop', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    component = mount(Accordion, {
-      target: document.body,
-      props: {
-        children,
-        multiple: true,
-      },
-    });
-
-    // Should mount without error when multiple mode enabled
-    expect(document.body.querySelector('div')).toBeTruthy();
-  });
-
-  test('accepts forceVisible prop', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    component = mount(Accordion, {
-      target: document.body,
-      props: {
-        children,
-        forceVisible: true,
-      },
-    });
-
-    expect(document.body.querySelector('div')).toBeTruthy();
-  });
-
-  test('passes through rest props', () => {
+  test('passes through rest props like id and aria-label', () => {
     const children = createRawSnippet(() => ({
       render: () => '<span>Content</span>',
     }));
@@ -180,49 +80,259 @@ describe('Accordion', () => {
     expect(root).toBeTruthy();
     expect(root?.getAttribute('aria-label')).toBe('FAQ Section');
   });
+
+  test('opens an item on trigger click (single mode)', () => {
+    component = mount(AccordionHarness, {
+      target: document.body,
+      props: {},
+    });
+
+    flushSync();
+
+    expect(document.querySelector('[data-testid="content-1"]')).toBeNull();
+
+    const trigger1 = document.querySelector<HTMLButtonElement>(
+      '[data-testid="trigger-1"]'
+    );
+    trigger1?.click();
+    flushSync();
+
+    expect(document.querySelector('[data-testid="content-1"]')).toBeTruthy();
+    expect(trigger1?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  test('closes previously-open item in single mode', () => {
+    component = mount(AccordionHarness, {
+      target: document.body,
+      props: {},
+    });
+
+    flushSync();
+
+    const trigger1 = document.querySelector<HTMLButtonElement>(
+      '[data-testid="trigger-1"]'
+    );
+    const trigger2 = document.querySelector<HTMLButtonElement>(
+      '[data-testid="trigger-2"]'
+    );
+
+    trigger1?.click();
+    flushSync();
+    expect(trigger1?.getAttribute('aria-expanded')).toBe('true');
+
+    trigger2?.click();
+    flushSync();
+    expect(trigger1?.getAttribute('aria-expanded')).toBe('false');
+    expect(trigger2?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  test('keeps multiple items open in multiple mode', () => {
+    component = mount(AccordionMultipleHarness, {
+      target: document.body,
+      props: { defaultValue: ['item-1'] },
+    });
+
+    flushSync();
+
+    const trigger1 = document.querySelector<HTMLButtonElement>(
+      '[data-testid="trigger-1"]'
+    );
+    const trigger2 = document.querySelector<HTMLButtonElement>(
+      '[data-testid="trigger-2"]'
+    );
+    trigger2?.click();
+    flushSync();
+
+    expect(trigger1?.getAttribute('aria-expanded')).toBe('true');
+    expect(trigger2?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  test('fires onValueChange when an item toggles', () => {
+    const onValueChange = vi.fn();
+    component = mount(AccordionHarness, {
+      target: document.body,
+      props: { onValueChange },
+    });
+
+    flushSync();
+
+    const trigger1 = document.querySelector<HTMLButtonElement>(
+      '[data-testid="trigger-1"]'
+    );
+    trigger1?.click();
+    flushSync();
+
+    expect(onValueChange).toHaveBeenCalledWith('item-1');
+  });
+
+  test('respects defaultValue by rendering that item open', () => {
+    component = mount(AccordionHarness, {
+      target: document.body,
+      props: { defaultValue: 'item-2' },
+    });
+
+    flushSync();
+
+    expect(document.querySelector('[data-testid="content-2"]')).toBeTruthy();
+    const trigger2 = document.querySelector('[data-testid="trigger-2"]');
+    expect(trigger2?.getAttribute('aria-expanded')).toBe('true');
+  });
 });
 
 describe('AccordionItem', () => {
-  // Note: AccordionItem requires Accordion parent context.
-  // Testing in isolation verifies component structure only.
-  // Full integration testing with context is covered by E2E tests.
+  let component: ReturnType<typeof mount> | null = null;
 
-  test('component module exports correctly', () => {
-    expect(AccordionItem).toBeDefined();
-    expect(typeof AccordionItem).toBe('function');
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    document.body.innerHTML = '';
+  });
+
+  test('renders each item as a div with accordion-item class', () => {
+    component = mount(AccordionHarness, {
+      target: document.body,
+      props: {},
+    });
+
+    flushSync();
+
+    const items = document.querySelectorAll('.accordion-item');
+    expect(items.length).toBe(3);
+  });
+
+  test('disabled item propagates data-disabled to its item wrapper', () => {
+    component = mount(AccordionHarness, {
+      target: document.body,
+      props: {},
+    });
+
+    flushSync();
+
+    // Melt UI sets data-disabled on the item wrapper (not the trigger button),
+    // and aria-disabled on the trigger itself.
+    const items = document.querySelectorAll('.accordion-item');
+    const disabledItem = items[2];
+    expect(disabledItem?.getAttribute('data-disabled')).toBe('true');
   });
 });
 
 describe('AccordionTrigger', () => {
-  // Note: AccordionTrigger requires AccordionItem parent context.
-  // Testing in isolation verifies component structure only.
+  let component: ReturnType<typeof mount> | null = null;
 
-  test('component module exports correctly', () => {
-    expect(AccordionTrigger).toBeDefined();
-    expect(typeof AccordionTrigger).toBe('function');
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    document.body.innerHTML = '';
+  });
+
+  test('has aria-expanded reflecting open state', () => {
+    component = mount(AccordionHarness, {
+      target: document.body,
+      props: {},
+    });
+
+    flushSync();
+
+    const trigger1 = document.querySelector('[data-testid="trigger-1"]');
+    expect(trigger1?.getAttribute('aria-expanded')).toBe('false');
+
+    (trigger1 as HTMLButtonElement).click();
+    flushSync();
+
+    expect(trigger1?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  test('data-state on trigger reflects item open/closed state', () => {
+    component = mount(AccordionHarness, {
+      target: document.body,
+      props: { defaultValue: 'item-1' },
+    });
+
+    flushSync();
+
+    expect(
+      document
+        .querySelector('[data-testid="trigger-1"]')
+        ?.getAttribute('data-state')
+    ).toBe('open');
+    expect(
+      document
+        .querySelector('[data-testid="trigger-2"]')
+        ?.getAttribute('data-state')
+    ).toBe('closed');
   });
 });
 
 describe('AccordionContent', () => {
-  // Note: AccordionContent requires AccordionItem parent context.
-  // Testing in isolation verifies component structure only.
+  let component: ReturnType<typeof mount> | null = null;
 
-  test('component module exports correctly', () => {
-    expect(AccordionContent).toBeDefined();
-    expect(typeof AccordionContent).toBe('function');
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    document.body.innerHTML = '';
+  });
+
+  test('content is not present when item is closed', () => {
+    component = mount(AccordionHarness, {
+      target: document.body,
+      props: {},
+    });
+
+    flushSync();
+
+    expect(document.querySelector('[data-testid="content-1"]')).toBeNull();
+  });
+
+  test('content appears when item is open', () => {
+    component = mount(AccordionHarness, {
+      target: document.body,
+      props: { defaultValue: 'item-1' },
+    });
+
+    flushSync();
+
+    const content = document.querySelector('[data-testid="content-1"]');
+    expect(content).toBeTruthy();
+    expect(content?.textContent).toContain('Answer One');
+  });
+
+  test('content reflects data-state="open" when its item is active', () => {
+    component = mount(AccordionHarness, {
+      target: document.body,
+      props: { defaultValue: 'item-1' },
+    });
+
+    flushSync();
+
+    const content = document.querySelector('[data-testid="content-1"]');
+    expect(content?.getAttribute('data-state')).toBe('open');
+    expect(content?.getAttribute('data-value')).toBe('item-1');
   });
 });
 
 describe('Accordion compound component integration', () => {
-  // Note: Full compound component integration testing with Melt-UI context
-  // is challenging in JSDOM due to action-based event handling.
-  // Interactive tests (expand/collapse, keyboard navigation) are covered by E2E tests.
-  // These unit tests verify that components can be imported and basic props are accepted.
-
   test('all components can be imported together', () => {
     expect(Accordion).toBeDefined();
     expect(AccordionItem).toBeDefined();
     expect(AccordionTrigger).toBeDefined();
     expect(AccordionContent).toBeDefined();
+  });
+
+  test('index exports named components and aliases', async () => {
+    const exports = await import('./index.js');
+    expect(exports.Accordion).toBeDefined();
+    expect(exports.AccordionItem).toBeDefined();
+    expect(exports.AccordionTrigger).toBeDefined();
+    expect(exports.AccordionContent).toBeDefined();
+    expect(exports.Root).toBeDefined();
+    expect(exports.Item).toBeDefined();
+    expect(exports.Trigger).toBeDefined();
+    expect(exports.Content).toBeDefined();
   });
 });

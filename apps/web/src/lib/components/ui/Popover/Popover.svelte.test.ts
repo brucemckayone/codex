@@ -9,15 +9,18 @@ import Popover from './Popover.svelte';
 import PopoverArrow from './PopoverArrow.svelte';
 import PopoverClose from './PopoverClose.svelte';
 import PopoverContent from './PopoverContent.svelte';
+import PopoverHarness from './PopoverHarness.test.svelte';
 import PopoverTrigger from './PopoverTrigger.svelte';
 
 /**
  * Popover component unit tests.
  *
- * Note: Popover is a Melt-UI compound component with actions and context.
- * Due to JSDOM limitations with Melt-UI actions (positioning, focus trapping),
- * we test basic props and structure. Interactive behavior (open/close,
- * positioning, click outside) is covered by E2E tests.
+ * Popover is a compound component built on Melt UI's createPopover. Sub-
+ * components (PopoverTrigger/Content/Close/Arrow) require the parent context,
+ * so they are tested via PopoverHarness which wires a realistic composition.
+ * Interactive focus-trap, outside-click, and positioning behaviour is covered
+ * by E2E tests — Melt UI's actions rely on pointer events and floating-ui
+ * layout which JSDOM cannot fully exercise.
  */
 
 describe('Popover', () => {
@@ -33,7 +36,7 @@ describe('Popover', () => {
 
   test('renders children when closed', () => {
     const children = createRawSnippet(() => ({
-      render: () => '<button data-testid="trigger">Open Popover</button>',
+      render: () => '<button data-testid="trigger">Open</button>',
     }));
 
     component = mount(Popover, {
@@ -41,174 +44,169 @@ describe('Popover', () => {
       props: { children },
     });
 
-    // When closed, only trigger content should be rendered
     expect(document.querySelector('[data-testid="trigger"]')).toBeTruthy();
   });
 
-  test('accepts open prop (controlled mode)', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    // Should not throw when open prop is provided
-    component = mount(Popover, {
+  test('does not render content when closed', () => {
+    component = mount(PopoverHarness, {
       target: document.body,
-      props: {
-        children,
-        open: false,
-      },
-    });
-
-    expect(document.body.querySelector('span')).toBeTruthy();
-  });
-
-  test('accepts onOpenChange callback', () => {
-    const onOpenChange = vi.fn();
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    component = mount(Popover, {
-      target: document.body,
-      props: {
-        children,
-        onOpenChange,
-      },
-    });
-
-    // Callback should be wired without error
-    expect(document.body.querySelector('span')).toBeTruthy();
-  });
-
-  test('starts closed by default', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span data-testid="content">Popover Content</span>',
-    }));
-
-    component = mount(Popover, {
-      target: document.body,
-      props: { children },
-    });
-
-    // Popover content overlay should not be visible when closed
-    expect(document.querySelector('.popover-content')).toBeNull();
-  });
-
-  test('accepts positioning prop', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    // Should not throw with positioning prop
-    component = mount(Popover, {
-      target: document.body,
-      props: {
-        children,
-        positioning: { placement: 'bottom' },
-      },
-    });
-
-    expect(document.body.querySelector('span')).toBeTruthy();
-  });
-
-  test('accepts arrowSize prop', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    component = mount(Popover, {
-      target: document.body,
-      props: {
-        children,
-        arrowSize: 10,
-      },
-    });
-
-    expect(document.body.querySelector('span')).toBeTruthy();
-  });
-
-  test('accepts closeOnOutsideClick prop', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    component = mount(Popover, {
-      target: document.body,
-      props: {
-        children,
-        closeOnOutsideClick: false,
-      },
-    });
-
-    expect(document.body.querySelector('span')).toBeTruthy();
-  });
-
-  test('accepts escapeBehavior prop', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    component = mount(Popover, {
-      target: document.body,
-      props: {
-        children,
-        escapeBehavior: 'close',
-      },
-    });
-
-    expect(document.body.querySelector('span')).toBeTruthy();
-  });
-
-  test('syncs open state with Melt-UI', () => {
-    const children = createRawSnippet(() => ({
-      render: () => '<span>Content</span>',
-    }));
-
-    // Mount with open=true
-    component = mount(Popover, {
-      target: document.body,
-      props: {
-        children,
-        open: true,
-      },
+      props: { open: false },
     });
 
     flushSync();
 
-    // When open, the popover context should have open state
-    // Note: Actual DOM visibility depends on PopoverContent which requires context
-    expect(document.body.querySelector('span')).toBeTruthy();
+    expect(
+      document.querySelector('[data-testid="popover-content"]')
+    ).toBeNull();
+  });
+
+  test('renders content when open', () => {
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+
+    flushSync();
+
+    const content = document.querySelector('[data-testid="popover-content"]');
+    expect(content).toBeTruthy();
+    expect(content?.textContent).toContain('Popover body text');
+  });
+
+  test('fires onOpenChange when close button is clicked', () => {
+    const onOpenChange = vi.fn();
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: true, onOpenChange },
+    });
+
+    flushSync();
+
+    const closeButton = document.querySelector<HTMLButtonElement>(
+      '[data-testid="popover-close"]'
+    );
+    expect(closeButton).toBeTruthy();
+    closeButton?.click();
+    flushSync();
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
 
 describe('PopoverTrigger', () => {
-  // Note: PopoverTrigger requires Popover parent context.
-  // Testing in isolation verifies component structure only.
+  let component: ReturnType<typeof mount> | null = null;
 
-  test('component module exports correctly', () => {
-    expect(PopoverTrigger).toBeDefined();
-    expect(typeof PopoverTrigger).toBe('function');
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    document.body.innerHTML = '';
+  });
+
+  test('has aria-haspopup="dialog" and aria-expanded reflecting state', () => {
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: false },
+    });
+
+    flushSync();
+
+    const trigger = document.querySelector('[data-testid="popover-trigger"]');
+    expect(trigger?.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  test('aria-expanded becomes "true" when popover is open', () => {
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+
+    flushSync();
+
+    const trigger = document.querySelector('[data-testid="popover-trigger"]');
+    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+    expect(trigger?.getAttribute('data-state')).toBe('open');
+  });
+
+  test('aria-controls references the popover content id when open', () => {
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+
+    flushSync();
+
+    const trigger = document.querySelector('[data-testid="popover-trigger"]');
+    const controlsId = trigger?.getAttribute('aria-controls');
+    expect(controlsId).toBeTruthy();
+
+    const content = document.getElementById(controlsId!);
+    expect(content).toBe(
+      document.querySelector('[data-testid="popover-content"]')
+    );
   });
 });
 
 describe('PopoverContent', () => {
-  test('component module exports correctly', () => {
-    expect(PopoverContent).toBeDefined();
-    expect(typeof PopoverContent).toBe('function');
-  });
-});
+  let component: ReturnType<typeof mount> | null = null;
 
-describe('PopoverArrow', () => {
-  test('component module exports correctly', () => {
-    expect(PopoverArrow).toBeDefined();
-    expect(typeof PopoverArrow).toBe('function');
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    document.body.innerHTML = '';
+  });
+
+  test('is focusable via tabindex="-1"', () => {
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+
+    flushSync();
+
+    const content = document.querySelector('[data-testid="popover-content"]');
+    expect(content?.getAttribute('tabindex')).toBe('-1');
+  });
+
+  test('has data-state="open" when popover is open', () => {
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+
+    flushSync();
+
+    const content = document.querySelector('[data-testid="popover-content"]');
+    expect(content?.getAttribute('data-state')).toBe('open');
   });
 });
 
 describe('PopoverClose', () => {
-  test('component module exports correctly', () => {
-    expect(PopoverClose).toBeDefined();
-    expect(typeof PopoverClose).toBe('function');
+  let component: ReturnType<typeof mount> | null = null;
+
+  afterEach(() => {
+    if (component) {
+      unmount(component);
+      component = null;
+    }
+    document.body.innerHTML = '';
+  });
+
+  test('renders as a button inside content', () => {
+    component = mount(PopoverHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+
+    flushSync();
+
+    const close = document.querySelector('[data-testid="popover-close"]');
+    expect(close?.tagName.toLowerCase()).toBe('button');
+    expect(close?.textContent).toContain('Close');
   });
 });
 
@@ -223,13 +221,11 @@ describe('Popover compound component integration', () => {
 
   test('index exports named components and aliases', async () => {
     const exports = await import('./index.js');
-    // Direct exports
     expect(exports.Popover).toBeDefined();
     expect(exports.PopoverTrigger).toBeDefined();
     expect(exports.PopoverContent).toBeDefined();
     expect(exports.PopoverArrow).toBeDefined();
     expect(exports.PopoverClose).toBeDefined();
-    // Aliases
     expect(exports.Root).toBeDefined();
     expect(exports.Trigger).toBeDefined();
     expect(exports.Content).toBeDefined();
