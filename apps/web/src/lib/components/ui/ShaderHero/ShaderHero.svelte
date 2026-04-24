@@ -158,18 +158,31 @@
       currentPreset = preset;
 
       if (preset === 'none') {
-        // Hide canvas so CSS gradient fallback shows through
+        // Hide canvas so CSS gradient fallback shows through.
         canvasEl!.style.opacity = '0';
+        // Keep the poll loop alive so a brand-editor activation (user sets a
+        // shader preset via CSS var) is detected — frame() polls every ~30
+        // frames and calls ensureRenderer on preset mismatch. Without this,
+        // orgs that ship without a shader can never light one up at runtime.
+        scheduleFrame();
         return false;
       }
 
       const newRenderer = await loadRenderer(preset);
-      if (!newRenderer) return false;
+      if (!newRenderer) {
+        // Loader failed — keep polling so the user (or editor) can switch to
+        // a working preset without a full remount.
+        scheduleFrame();
+        return false;
+      }
 
       resize(); // Ensure canvas is sized before init
       const ok = newRenderer.init(gl!, canvasEl!.width, canvasEl!.height);
       if (!ok) {
         newRenderer.destroy(gl!);
+        // init() failure (e.g. missing EXT_color_buffer_float) — keep polling
+        // so switching to a less-demanding preset still works.
+        scheduleFrame();
         return false;
       }
 
@@ -193,13 +206,24 @@
       const config = pollConfig();
 
       // Switch preset if needed (async — may take a frame).
-      // ensureRenderer calls scheduleFrame() on success; don't re-prime here.
+      // ensureRenderer calls scheduleFrame() on all branches (success AND
+      // every failure mode, including 'none') so the poll loop keeps running
+      // and later brand-editor activations are detected.
       if (config.preset !== currentPreset) {
         ensureRenderer(config.preset);
         return;
       }
 
-      if (!renderer || !isVisible) return;
+      // Tab hidden — release loop; onVisibilityChange re-primes on return.
+      if (!isVisible) return;
+
+      // No renderer but preset matches (i.e. currentPreset === 'none'): keep
+      // polling so a future brand-editor preset change is detected. Hidden
+      // tab early-return above still cuts this path on inactive tabs.
+      if (!renderer) {
+        animFrameId = requestAnimationFrame(frame);
+        return;
+      }
 
       // Reduced motion: render one static frame, then release the loop.
       // onMotionChange re-primes if the user turns reduced-motion off.
