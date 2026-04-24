@@ -62,16 +62,33 @@
     let isVisible = true;
     let isReducedMotion = false;
     let hasRenderedStaticFrame = false;
+    let pointerListenersAttached = false;
 
     const mouse: MouseState = { x: 0.5, y: 0.5, active: false, burstStrength: 0 };
+
+    // ── RAF scheduling ─────────────────────────────────────────
+    // Guarded re-prime: the loop re-schedules itself only from the render
+    // branch inside `frame()`. State transitions (visibility, reduced-motion,
+    // renderer init) call `scheduleFrame()` to resume after a pause.
+    function scheduleFrame() {
+      if (animFrameId !== 0) return; // already scheduled
+      animFrameId = requestAnimationFrame(frame);
+    }
 
     // ── Reduced motion check ───────────────────────────────────
     const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
     isReducedMotion = motionQuery.matches;
     const onMotionChange = (e: MediaQueryListEvent) => {
+      const wasReduced = isReducedMotion;
       isReducedMotion = e.matches;
       if (isReducedMotion) {
         hasRenderedStaticFrame = false;
+        detachPointerListeners();
+        // Schedule one frame to render the static snapshot, then loop self-exits.
+        scheduleFrame();
+      } else if (wasReduced) {
+        attachPointerListeners();
+        scheduleFrame();
       }
     };
     motionQuery.addEventListener('change', onMotionChange);
@@ -145,16 +162,24 @@
       renderer = newRenderer;
       hasRenderedStaticFrame = false;
       canvasEl!.style.opacity = '1';
+      // Re-prime the loop: frame() returns early on preset mismatch without
+      // re-scheduling, so after an async preset switch the loop is released.
+      scheduleFrame();
       return true;
     }
 
     // ── Render loop ────────────────────────────────────────────
+    // RAF hygiene (docs/04-motion.md §6): the loop re-primes ONLY at the end
+    // of the render branch. Short-circuit returns (no renderer, hidden tab,
+    // reduced-motion after static frame) release the loop; `scheduleFrame()`
+    // resumes it from state-change handlers (visibility/motion/ensureRenderer).
     function frame() {
-      animFrameId = requestAnimationFrame(frame);
+      animFrameId = 0; // this callback has fired — clear handle before deciding to re-prime
 
       const config = pollConfig();
 
-      // Switch preset if needed (async — may take a frame)
+      // Switch preset if needed (async — may take a frame).
+      // ensureRenderer calls scheduleFrame() on success; don't re-prime here.
       if (config.preset !== currentPreset) {
         ensureRenderer(config.preset);
         return;
@@ -162,10 +187,14 @@
 
       if (!renderer || !isVisible) return;
 
-      // Reduced motion: render one frame then stop
+      // Reduced motion: render one static frame, then release the loop.
+      // onMotionChange re-primes if the user turns reduced-motion off.
       if (isReducedMotion) {
         if (hasRenderedStaticFrame) return;
         hasRenderedStaticFrame = true;
+        const elapsed = (performance.now() - startTime) / 1000;
+        renderer.render(gl!, elapsed, mouse, config, canvasEl!.width, canvasEl!.height);
+        return; // no re-prime — static frame is final
       }
 
       // Decay burst strength
@@ -176,6 +205,10 @@
 
       const elapsed = (performance.now() - startTime) / 1000;
       renderer.render(gl!, elapsed, mouse, config, canvasEl!.width, canvasEl!.height);
+
+      // Re-prime ONLY from the render branch — hidden tabs and reduced-motion
+      // users no longer pay for 1Hz / 60Hz wake-ups that render nothing.
+      animFrameId = requestAnimationFrame(frame);
     }
 
     // ── Mouse / touch events ───────────────────────────────────
@@ -210,17 +243,37 @@
       mouse.active = false;
     }
 
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('click', onClick);
-    window.addEventListener('touchstart', onTouchStart, { passive: true });
-    window.addEventListener('touchmove', onTouchMove, { passive: true });
-    window.addEventListener('touchend', onTouchEnd);
+    function attachPointerListeners() {
+      if (pointerListenersAttached) return;
+      pointerListenersAttached = true;
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('click', onClick);
+      window.addEventListener('touchstart', onTouchStart, { passive: true });
+      window.addEventListener('touchmove', onTouchMove, { passive: true });
+      window.addEventListener('touchend', onTouchEnd);
+    }
+
+    function detachPointerListeners() {
+      if (!pointerListenersAttached) return;
+      pointerListenersAttached = false;
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('click', onClick);
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+    }
+
+    if (!isReducedMotion) attachPointerListeners();
 
     // ── Visibility — pause when tab is hidden ───────────────────
     // For full-page fixed backgrounds, IntersectionObserver doesn't work
     // reliably. Use document visibility instead (saves GPU when tab is hidden).
     function onVisibilityChange() {
+      const wasVisible = isVisible;
       isVisible = document.visibilityState === 'visible';
+      // Resume the loop when the tab becomes visible again — frame() releases
+      // the loop on hidden tabs (no re-prime), so nothing restarts it otherwise.
+      if (isVisible && !wasVisible) scheduleFrame();
     }
     document.addEventListener('visibilitychange', onVisibilityChange);
 
@@ -233,10 +286,9 @@
     if (containerEl) resizeObserver.observe(containerEl);
 
     // ── Start ──────────────────────────────────────────────────
+    // ensureRenderer() calls scheduleFrame() on success — no need to re-prime here.
     const initialConfig = getShaderConfig(undefined, presetOverride);
-    ensureRenderer(initialConfig.preset).then(() => {
-      animFrameId = requestAnimationFrame(frame);
-    });
+    void ensureRenderer(initialConfig.preset);
 
     // ── Cleanup ────────────────────────────────────────────────
     return () => {
@@ -245,11 +297,7 @@
       document.removeEventListener('visibilitychange', onVisibilityChange);
       motionQuery.removeEventListener('change', onMotionChange);
       resizeObserver.disconnect();
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('click', onClick);
-      window.removeEventListener('touchstart', onTouchStart);
-      window.removeEventListener('touchmove', onTouchMove);
-      window.removeEventListener('touchend', onTouchEnd);
+      detachPointerListeners();
     };
   });
 </script>
