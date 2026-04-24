@@ -1408,8 +1408,13 @@ export class ContentAccessService extends BaseService {
         membershipContentFilter,
         eq(content.status, CONTENT_STATUS.PUBLISHED),
         isNull(content.deletedAt),
-        // Exclude content the user already purchased
-        sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} = ${PURCHASE_STATUS.COMPLETED})`,
+        // Exclude content the user has acquired or is acquiring via purchase.
+        // Both `completed` (webhook landed) and `pending` (Stripe redirect beat
+        // the webhook — row exists but status hasn't flipped yet) count as
+        // "already owned" for library-categorisation purposes. Without the
+        // `pending` clause, a purchase mid-flight leaks into membership and
+        // shows up with the wrong accessType tag until the webhook lands.
+        sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING}))`,
         ...contentFilters,
         ...progressFilters,
       ];
@@ -1551,8 +1556,16 @@ export class ContentAccessService extends BaseService {
         isNull(content.deletedAt),
         // Must belong to one of the user's subscribed orgs (with tier check)
         or(...subConditions)!,
-        // Exclude content the user already purchased (prevents duplicates)
-        sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} = ${PURCHASE_STATUS.COMPLETED})`,
+        // Exclude content the user has acquired or is acquiring via purchase.
+        // Both `completed` and `pending` count — a `pending` purchase is a
+        // Stripe session whose webhook hasn't landed yet. Without the
+        // `pending` clause, a mid-flight purchase leaks into the subscription
+        // arm (particularly for `accessType='paid'` + `minimumTierId` set
+        // content, which now qualifies for both arms — see 1b6f14a0) and
+        // shows up with the wrong accessType tag on the library. Once the
+        // webhook lands and `status` flips to `completed`, the row continues
+        // to be excluded here and surfaces in the purchased arm instead.
+        sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING}))`,
         // Exclude content from management orgs (owner/admin/creator see
         // all their org's content via the membership query).
         ...(managementOrgIds.length > 0

@@ -27,6 +27,7 @@ import {
   organizationFollowers,
   organizationMemberships,
   organizations,
+  purchases,
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
@@ -1040,6 +1041,59 @@ describe('ContentAccessService Integration', () => {
         const matches = result.items.filter((i) => i.content.id === item.id);
         expect(matches).toHaveLength(1);
         expect(matches[0].accessType).toBe('purchased');
+      });
+
+      it('excludes an item with a PENDING purchase from the subscription arm (race-window dedup)', async () => {
+        // Regression: after 1b6f14a0 (broadening querySubscription to include
+        // `accessType='paid' + minimumTierId IS NOT NULL` content) the dedup
+        // subquery that filtered out "already purchased" content only
+        // matched `status='completed'`. A pending purchase — created by the
+        // client-initiated Stripe checkout but not yet finalised by the
+        // `checkout.session.completed` webhook — would therefore leak into
+        // the subscription arm and show up in the library tagged
+        // `accessType='subscription'` instead of hiding until the webhook
+        // finalised it. The fix (this test's contract) is to dedup against
+        // both `completed` AND `pending` statuses.
+        const { creatorUserId, subscriberUserId, orgId, tierId } =
+          await seedOrgWithTierAndSubscriber();
+
+        const item = await createSubscriberContent(creatorUserId, orgId, {
+          slugPrefix: 'paid-pending-dedup',
+          accessType: 'paid',
+          minimumTierId: tierId,
+          priceCents: 999,
+        });
+
+        // Insert a purchase in the `pending` state — webhook hasn't landed
+        // yet. Bypasses seedPurchaseWithAccess because that helper creates a
+        // completed purchase + contentAccess row.
+        await db.insert(purchases).values({
+          customerId: subscriberUserId,
+          contentId: item.id,
+          organizationId: orgId,
+          amountPaidCents: 999,
+          platformFeeCents: 100,
+          organizationFeeCents: 135,
+          creatorPayoutCents: 764,
+          currency: 'GBP',
+          status: 'pending',
+          stripePaymentIntentId: `pi_pending_${Date.now()}`,
+          stripeSessionId: `cs_pending_${Date.now()}`,
+        });
+
+        const result = await accessService.listUserLibrary(subscriberUserId, {
+          page: 1,
+          limit: 20,
+          filter: 'all',
+          sortBy: 'recent',
+        });
+
+        // Pending purchase is neither in purchased (requires completed) nor
+        // subscription (now deduped by pending) — the item shouldn't leak
+        // into the library under the wrong tag. Once the webhook lands and
+        // flips status to completed, the purchased arm surfaces it.
+        const matches = result.items.filter((i) => i.content.id === item.id);
+        expect(matches).toHaveLength(0);
       });
     });
   });
