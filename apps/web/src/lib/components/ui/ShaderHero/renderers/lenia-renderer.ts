@@ -30,6 +30,13 @@ import {
 
 const SIM_RES = 256; // Lower res than ink/turing due to expensive kernel
 
+// Frame-rate-independent click-burst lifespan (docs/04-motion.md §4).
+// Old per-frame counter (`b.frame++` with `b.frame < 5`) made clicks visibly
+// live for 5 frames — 83ms on 60Hz, 42ms on 120Hz, 167ms on throttled 30Hz.
+// Switching to elapsed-time lets wall-clock duration stay constant regardless
+// of refresh rate. Value tuned to match the previous 5-frames-at-60fps feel.
+const BURST_LIFETIME_SECONDS = 5 / 60;
+
 /** Init fragment shader — smooth Gaussian blobs for Lenia-appropriate seeding. */
 const LENIA_INIT_FRAG = `#version 300 es
 precision highp float;
@@ -113,7 +120,10 @@ export function createLeniaRenderer(): ShaderRenderer {
   let nextAmbientInterval = 4.0 + Math.random() * 3.0;
 
   /** Active click burst animations. */
-  let clickBursts: Array<{ x: number; y: number; frame: number }> = [];
+  let clickBursts: Array<{ x: number; y: number; age: number }> = [];
+
+  /** Previous render() timestamp (seconds). Used for dt computation. */
+  let lastTime = 0;
 
   // ── Sim step helper ────────────────────────────────────────
   function stepSim(
@@ -193,6 +203,13 @@ export function createLeniaRenderer(): ShaderRenderer {
       if (!simProg || !displayProg || !simU || !displayU || !simBuf || !quad)
         return;
 
+      // Elapsed-time delta, clamped to 0.1s to survive pauses (tab hidden,
+      // preset switch, reduced-motion resume). First frame after a pause
+      // would otherwise see a multi-second dt and collapse burst lifetimes
+      // instantly.
+      const dt = Math.min(time - lastTime, 0.1);
+      lastTime = time;
+
       const cfg = config as LeniaConfig;
       const steps = Math.round(cfg.speed ?? 2);
 
@@ -206,9 +223,9 @@ export function createLeniaRenderer(): ShaderRenderer {
         dropY = 0.15 + Math.random() * 0.7;
       }
 
-      // ── Click bursts: deposit large blob over 5 frames ──────
+      // ── Click bursts: deposit large blob over BURST_LIFETIME_SECONDS ──
       if (mouse.burstStrength > 0) {
-        clickBursts.push({ x: mouse.x, y: mouse.y, frame: 0 });
+        clickBursts.push({ x: mouse.x, y: mouse.y, age: 0 });
       }
 
       // ── Sim steps ───────────────────────────────────────────
@@ -231,11 +248,11 @@ export function createLeniaRenderer(): ShaderRenderer {
           // Click burst processing
           for (let i = clickBursts.length - 1; i >= 0; i--) {
             const b = clickBursts[i];
-            if (b.frame < 5) {
+            if (b.age < BURST_LIFETIME_SECONDS) {
               mx = b.x;
               my = b.y;
-              mStr = 0.6 * (1.0 - b.frame / 5.0); // Decaying strength
-              b.frame++;
+              mStr = 0.6 * Math.max(0, 1 - b.age / BURST_LIFETIME_SECONDS); // Decaying strength
+              b.age += dt;
             } else {
               clickBursts.splice(i, 1);
             }
@@ -279,6 +296,7 @@ export function createLeniaRenderer(): ShaderRenderer {
       if (!initProg || !simBuf || !quad) return;
 
       lastAmbientTime = 0;
+      lastTime = 0;
       nextAmbientInterval = 4.0 + Math.random() * 3.0;
       clickBursts = [];
 

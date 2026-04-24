@@ -30,6 +30,13 @@ const SIM_RES = 512;
 /** Number of init frames to seed the noise field (matches original). */
 const INIT_FRAMES = 10;
 
+// Frame-rate-independent click-burst lifespan (docs/04-motion.md §4).
+// Old per-frame counter (`b.frame++` with `b.frame < 8`) swept the radial
+// injection angle over 8 frames — 133ms on 60Hz but half that on 120Hz.
+// Switching to elapsed-time keeps wall-clock duration constant regardless
+// of refresh rate. Value tuned to match the previous 8-frames-at-60fps feel.
+const BURST_LIFETIME_SECONDS = 8 / 60;
+
 /** Suture init fragment shader — IQ's simplex noise. */
 const SUTURE_INIT_FRAG = `#version 300 es
 precision highp float;
@@ -112,7 +119,10 @@ export function createSutureRenderer(): ShaderRenderer {
   let lastAmbientTime = 0;
 
   /** Active click burst animations. */
-  let clickBursts: Array<{ x: number; y: number; frame: number }> = [];
+  let clickBursts: Array<{ x: number; y: number; age: number }> = [];
+
+  /** Previous render() timestamp (seconds). Used for dt computation. */
+  let lastTime = 0;
 
   // ── Sim step helper ────────────────────────────────────────
   function stepSim(
@@ -240,6 +250,13 @@ export function createSutureRenderer(): ShaderRenderer {
       )
         return;
 
+      // Elapsed-time delta, clamped to 0.1s to survive pauses (tab hidden,
+      // preset switch, reduced-motion resume). First frame after a pause
+      // would otherwise see a multi-second dt and collapse burst lifetimes
+      // instantly.
+      const dt = Math.min(time - lastTime, 0.1);
+      lastTime = time;
+
       const cfg = config as SutureConfig;
 
       // Cache config values for stepSim
@@ -294,22 +311,23 @@ export function createSutureRenderer(): ShaderRenderer {
         );
       }
 
-      // ── Click bursts: 8 radial force injections ────────────
+      // ── Click bursts: radial force injections over BURST_LIFETIME_SECONDS ──
       if (mouse.burstStrength > 0) {
         const mx = mouse.x * SIM_RES;
         const my = mouse.y * SIM_RES;
-        clickBursts.push({ x: mx, y: my, frame: 0 });
+        clickBursts.push({ x: mx, y: my, age: 0 });
       }
 
       for (let i = clickBursts.length - 1; i >= 0; i--) {
         const b = clickBursts[i];
-        if (b.frame < 8) {
-          const angle = (b.frame / 8) * Math.PI * 2;
+        if (b.age < BURST_LIFETIME_SECONDS) {
+          const progress = b.age / BURST_LIFETIME_SECONDS;
+          const angle = progress * Math.PI * 2;
           const r = 20; // 20 sim-pixels radius
           const bx = b.x + Math.cos(angle) * r;
           const by = b.y + Math.sin(angle) * r;
           stepSim(gl, bx, by, true, 2.0);
-          b.frame++;
+          b.age += dt;
         } else {
           clickBursts.splice(i, 1);
         }
@@ -334,6 +352,7 @@ export function createSutureRenderer(): ShaderRenderer {
 
       frameNum = 0;
       lastAmbientTime = 0;
+      lastTime = 0;
       clickBursts = [];
 
       gl.viewport(0, 0, SIM_RES, SIM_RES);
