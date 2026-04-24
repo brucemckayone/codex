@@ -47,14 +47,22 @@ const service = createContentAccessService(env);
 | accessType | Granted when |
 |---|---|
 | `team` | User has a management role in the org (owner / admin / creator). |
-| `followers` | User follows the org **or** has a management role. An active subscription alone does **not** grant access — subscribers must explicitly follow. |
+| `followers` | User has an **active subscription** to the org **or** follows the org **or** has a management role. |
 | `subscribers` | User has an active subscription meeting the content's `minimumTierId` **or** has a completed purchase **or** has a management role. |
 | paid (`priceCents > 0`) | User has a completed purchase **or** an active subscription meeting `minimumTierId` (if set) **or** a management role. |
 | `free` / `null` (no price) | Granted — subject only to content being published and non-deleted. |
 
 Content must always be published and non-deleted. Otherwise → `AccessDeniedError` (403).
 
-**Why follower ≠ subscriber:** the two relationships are intentionally independent. Following is a free, low-friction signal of interest; subscribing is a paid commitment. Creators can gate content to followers for community-building reasons without implicitly bundling it into every paid tier. A subscriber who wants follower-only posts simply clicks Follow (free).
+### Access hierarchy (Codex-xybr3)
+
+The platform's access hierarchy is **`subscribers ⊇ followers ⊇ public`**. An active subscription to the content's org grants followers-only access without requiring a follower row. Tier-gated (subscribers-only) content is **orthogonal** to this hierarchy — a subscription does NOT automatically unlock tier-gated content unless the subscriber's tier meets the content's `minimumTierId`.
+
+Inside the followers branch, checks run in this order:
+
+1. **Subscription** — `status IN (active, cancelling)` AND `currentPeriodEnd > now()`. Any tier qualifies (`minimumTierId` is not enforced for followers-only content). Paused / past_due / expired subscriptions are filtered out. On grant, `obs.info` emits `reason='followers_content_granted_via_subscription'` so analytics can distinguish the subscription-driven path from an explicit follow.
+2. **Follower row** — fallback so ex-subscribers (status=cancelled) who are still following continue to see the content.
+3. **Management membership** — owner/admin/creator implicitly bypass the gate.
 
 **Archived (soft-deleted) tiers still resolve during access checks.** When `content.minimum_tier_id` points at a tier that has been soft-deleted after the content was gated — or when an active subscription's `tier_id` references an archived tier — the access decision must still compare sortOrder. The inline tier lookup inside `getStreamingUrl` therefore deliberately omits the `deletedAt` filter (mirror of `TierService.getTierForAccessCheck`). See `packages/subscription/CLAUDE.md` → **Archived-tier semantic** for the full write-vs-read-path contract.
 

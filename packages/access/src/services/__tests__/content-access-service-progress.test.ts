@@ -290,11 +290,12 @@ describe('ContentAccessService.savePlaybackProgress — access gate', () => {
     });
   });
 
-  describe('follower-only content does NOT grant access via subscription alone', () => {
-    // Regression guard for the rule change: subscribers must explicitly
-    // follow to see `accessType: 'followers'` content. Keeps follow +
-    // subscribe as independent relationships — paying for a subscription
-    // does not auto-enrol the user in the org's follower feed.
+  describe('follower-only content — subscribers ⊇ followers hierarchy (Codex-xybr3)', () => {
+    // The access hierarchy was inverted in Codex-xybr3: an active
+    // subscription to the content's org now grants followers-only access
+    // without needing a follower row. The follower row remains as a
+    // fallback so ex-subscribers (cancelled) who are still following
+    // continue to see the content.
     const followersContent = {
       id: contentId,
       organizationId: orgId,
@@ -303,7 +304,7 @@ describe('ContentAccessService.savePlaybackProgress — access gate', () => {
       minimumTierId: null,
     };
 
-    it('rejects a subscriber who has NOT followed the org', async () => {
+    it('allows a subscriber who has NOT followed the org (new grant path)', async () => {
       stub.mocks.content.findFirst.mockResolvedValue(followersContent);
       // User has an active subscription…
       stub.mocks.subscriptions.findFirst.mockResolvedValue(activeSub);
@@ -316,12 +317,13 @@ describe('ContentAccessService.savePlaybackProgress — access gate', () => {
 
       await expect(
         service.savePlaybackProgress(userId, progressInput)
-      ).rejects.toBeInstanceOf(ForbiddenError);
+      ).resolves.toBeUndefined();
 
-      expect(stub.insert).not.toHaveBeenCalled();
+      // Upsert ran — subscription alone now grants followers-only access.
+      expect(stub.insert).toHaveBeenCalledTimes(1);
     });
 
-    it('allows a subscriber who IS also a follower', async () => {
+    it('allows a subscriber who IS also a follower (follower fallback still works)', async () => {
       stub.mocks.content.findFirst.mockResolvedValue(followersContent);
       // Follower lookup hits — the primary gate. Subscription state is
       // irrelevant once the follower check passes.
@@ -336,6 +338,22 @@ describe('ContentAccessService.savePlaybackProgress — access gate', () => {
       ).resolves.toBeUndefined();
 
       expect(stub.insert).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects a non-subscriber, non-follower, non-management user', async () => {
+      stub.mocks.content.findFirst.mockResolvedValue(followersContent);
+      // No subscription, no follower row, no membership.
+      stub.mocks.subscriptions.findFirst.mockResolvedValue(undefined);
+      stub.mocks.organizationFollowers.findFirst.mockResolvedValue(undefined);
+      stub.mocks.organizationMemberships.findFirst.mockResolvedValue(undefined);
+
+      const { service } = buildService(stub);
+
+      await expect(
+        service.savePlaybackProgress(userId, progressInput)
+      ).rejects.toBeInstanceOf(ForbiddenError);
+
+      expect(stub.insert).not.toHaveBeenCalled();
     });
   });
 });

@@ -211,11 +211,12 @@ export class ContentAccessService extends BaseService {
    * Returns `false` for:
    *   - Content not found / unpublished / soft-deleted (treated as no access)
    *   - Team-only content when user lacks a management role
-   *   - Followers-only content when user is neither follower nor management.
-   *     Note: an active subscription does NOT grant follower-only access on
-   *     its own — a subscriber who wants to see follower content must also
-   *     explicitly follow the org (the follow action is free, so this is a
-   *     low-friction ask rather than a paywall).
+   *   - Followers-only content when user is neither follower, active subscriber,
+   *     nor management. Note: as of Codex-xybr3 the access hierarchy is
+   *     `subscribers ⊇ followers ⊇ public` — an active subscription to the
+   *     content's org grants followers-only access without needing a follower
+   *     row. Ex-subscribers (status=cancelled) with an active follower row
+   *     still get access via the follower fallback.
    *   - Subscribers-only content when user has neither an active subscription
    *     meeting the minimum tier, a purchase, nor management
    *   - Paid content when user has neither purchased nor (via tier) subscribed
@@ -316,10 +317,12 @@ export class ContentAccessService extends BaseService {
 
     if (contentRecord.accessType === CONTENT_ACCESS_TYPE.FOLLOWERS) {
       if (!orgId) return false;
+      // Codex-xybr3: subscribers ⊇ followers. Active subscribers to the
+      // content's org get followers-only access without needing a follower
+      // row. Checked BEFORE the follower row so subscribers don't require
+      // the follow action. Any active tier qualifies (null minimumTierId).
+      if (await hasSubscriptionAccess(orgId, null)) return true;
       if (await hasFollower(orgId)) return true;
-      // Subscription does NOT satisfy follower-only access on its own — the
-      // creator is rewarding the follow action specifically, and following
-      // is free. Subscribers who want follower content must also follow.
       return hasManagementMembership(orgId);
     }
 
@@ -625,13 +628,20 @@ export class ContentAccessService extends BaseService {
                 }
               );
             }
-            // (b) Followers-only: require follower or management role.
-            // Subscription alone does NOT grant follower-only access — the
-            // creator is rewarding the (free) follow action, and subscribers
-            // must follow separately to see this content. Keeps the two
-            // relationships independent: paying doesn't auto-subscribe the
-            // user to the org's follower feed, and a follower doesn't have
-            // to pay to see follower-tagged posts.
+            // (b) Followers-only: require active subscription, follower row,
+            // or management role. Codex-xybr3 inverted the prior orthogonality:
+            // the access hierarchy is now `subscribers ⊇ followers ⊇ public`,
+            // so an active subscription to the content's org grants followers-
+            // only access without needing a follower row. The subscriber check
+            // runs FIRST so subscribers don't require the (free) follow action;
+            // the follower check remains as a fallback so ex-subscribers
+            // (status=cancelled) with an active follower row still see
+            // followers-only content via the community signal.
+            //
+            // Paused / past_due / expired subscriptions are filtered out by
+            // `checkSubscriptionAccess` (status IN (active, cancelling) AND
+            // currentPeriodEnd > now) — consistent with the PR #5 filter used
+            // for subscribers-only content.
             else if (contentRecord.accessType === 'followers') {
               if (!contentRecord.organizationId) {
                 throw new AccessDeniedError(userId, input.contentId, {
@@ -642,18 +652,40 @@ export class ContentAccessService extends BaseService {
               let granted = false;
               const orgId = contentRecord.organizationId;
 
-              // Primary check: is user a follower?
-              const follower = await checkFollower(orgId);
-              if (follower) {
+              // Primary check (new): active subscription grants followers-only
+              // access. `minimumTierId` is passed as null — any active tier
+              // qualifies, because the content is gated to the community
+              // (followers), not to a specific paid tier.
+              const hasSubAccess = await checkSubscriptionAccess(orgId, null);
+              if (hasSubAccess) {
                 this.obs.info(
-                  'Access granted via follower (followers content)',
+                  'Access granted via subscription (followers content)',
                   {
                     userId,
                     contentId: input.contentId,
                     organizationId: orgId,
+                    reason: 'followers_content_granted_via_subscription',
                   }
                 );
                 granted = true;
+              }
+
+              // Fallback: explicit follower row — preserves access for
+              // ex-subscribers (status=cancelled) who followed before their
+              // subscription lapsed, plus free-tier followers.
+              if (!granted) {
+                const follower = await checkFollower(orgId);
+                if (follower) {
+                  this.obs.info(
+                    'Access granted via follower (followers content)',
+                    {
+                      userId,
+                      contentId: input.contentId,
+                      organizationId: orgId,
+                    }
+                  );
+                  granted = true;
+                }
               }
 
               // Fallback: management membership (team implicitly has access)

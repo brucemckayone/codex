@@ -66,6 +66,12 @@ Callers MUST pick the variant that matches their path. Using the strict helper f
 - Cancel / reactivate subscriptions
 - Query subscriber stats and current subscription
 
+### Access hierarchy (Codex-xybr3)
+
+The platform's access hierarchy is **`subscribers ⊇ followers ⊇ public`**: an active subscription to an org grants followers-only content access automatically — subscribers do **not** need an explicit follower row for `accessType='followers'` content. The follower row remains as a fallback so ex-subscribers (status=cancelled) who are still following continue to see the content.
+
+Tier-gated (`accessType='subscribers'`) content is **orthogonal** to this hierarchy: a subscription only unlocks tier-gated content if the subscriber's tier `sortOrder >= content.minimumTierId.sortOrder`. The grant path is implemented in `ContentAccessService` (see `packages/access/CLAUDE.md`).
+
 Revenue split defaults: Platform 10%, Org 15% of post-platform, Creators 75% of post-platform. Amounts are in pence (GBP).
 
 ## ConnectAccountService Responsibilities
