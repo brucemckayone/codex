@@ -60,8 +60,23 @@ export async function loadLogoTexture(
   url: string,
   size: number = 512
 ): Promise<WebGLTexture | null> {
+  // Abort the fetch after 10s to prevent indefinite hangs on captive portals,
+  // R2 cold starts, or a stalled CDN — matches the `createServerApi` timeout
+  // convention in `apps/web/src/lib/server/api.ts`.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+
   try {
-    const response = await fetch(url);
+    let response: Response;
+    try {
+      response = await fetch(url, { signal: controller.signal });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        console.warn(`[ShaderHero] Logo fetch timed out: ${url}`);
+        return null;
+      }
+      throw err;
+    }
     if (!response.ok) {
       console.warn(`[ShaderHero] Logo fetch failed: ${response.status} ${url}`);
       return null;
@@ -97,7 +112,11 @@ export async function loadLogoTexture(
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
+    // Privacy-hardened browsers (Firefox resistFingerprinting, Safari Lockdown,
+    // Brave shields) can return `null` from 2D context alongside WebGL. Guard
+    // explicitly — callers already fall through to the CSS gradient on null.
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
 
     const pad = size * PADDING_FRACTION;
     const drawArea = size - pad * 2;
@@ -132,6 +151,8 @@ export async function loadLogoTexture(
   } catch (err) {
     console.warn('[ShaderHero] Logo texture load failed:', err);
     return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
