@@ -23,4 +23,5 @@
   --space-16: calc(var(--space-unit) * 16); /* 64px * density */
   --space-20: calc(var(--space-unit) * 20); /* 80px * density */
   --space-24: calc(var(--space-unit) * 24); /* 96px * density */
+  --space-32: calc(var(--space-unit) * 32); /* 128px * density */
 }
