@@ -517,7 +517,13 @@ export class ContentAccessService extends BaseService {
                 return true;
               }
 
-              // Minimum tier set — compare sortOrder
+              // Minimum tier set — compare sortOrder.
+              // Archived (soft-deleted) tiers MUST still resolve here: a
+              // creator who deletes a tier leaves historic content gated
+              // against it, and active subscribers whose own subscription
+              // predates the delete still need their access decision to
+              // compare sort orders. The deletedAt filter is therefore
+              // omitted intentionally — mirror of TierService.getTierForAccessCheck.
               const contentTier = await tx.query.subscriptionTiers.findFirst({
                 where: eq(subscriptionTiers.id, minimumTierId),
               });

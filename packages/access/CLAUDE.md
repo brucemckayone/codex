@@ -56,6 +56,8 @@ Content must always be published and non-deleted. Otherwise → `AccessDeniedErr
 
 **Why follower ≠ subscriber:** the two relationships are intentionally independent. Following is a free, low-friction signal of interest; subscribing is a paid commitment. Creators can gate content to followers for community-building reasons without implicitly bundling it into every paid tier. A subscriber who wants follower-only posts simply clicks Follow (free).
 
+**Archived (soft-deleted) tiers still resolve during access checks.** When `content.minimum_tier_id` points at a tier that has been soft-deleted after the content was gated — or when an active subscription's `tier_id` references an archived tier — the access decision must still compare sortOrder. The inline tier lookup inside `getStreamingUrl` therefore deliberately omits the `deletedAt` filter (mirror of `TierService.getTierForAccessCheck`). See `packages/subscription/CLAUDE.md` → **Archived-tier semantic** for the full write-vs-read-path contract.
+
 ## Library Query
 
 `listUserLibrary()` runs three independent queries in parallel:

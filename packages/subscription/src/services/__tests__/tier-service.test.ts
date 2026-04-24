@@ -801,4 +801,48 @@ describe('TierService', () => {
       );
     });
   });
+
+  // ─── getTierForAccessCheck (archived-tier read path) ────────────────────
+
+  describe('getTierForAccessCheck', () => {
+    it('should return the tier when active (positive, non-archived)', async () => {
+      const org = await createOrgWithConnect('access-active');
+      const tier = await service.createTier(org.id, {
+        name: 'Active',
+        priceMonthly: 499,
+        priceAnnual: 4990,
+      });
+
+      const resolved = await service.getTierForAccessCheck(tier.id);
+      expect(resolved?.id).toBe(tier.id);
+      expect(resolved?.deletedAt).toBeNull();
+    });
+
+    it('should return soft-deleted tiers so access checks can still resolve sortOrder (Q8 archived model)', async () => {
+      // Q8 product decision: archived tiers still resolve for access-check
+      // read paths. A subscription that predates the delete still references
+      // the tier via subscriptions.tier_id; access checks compare sortOrder
+      // against content.minimum_tier_id which may also point at the archived
+      // tier. Filtering deletedAt here would silently break those reads.
+      const org = await createOrgWithConnect('access-archived');
+      const tier = await service.createTier(org.id, {
+        name: 'Archived',
+        priceMonthly: 499,
+        priceAnnual: 4990,
+      });
+      await service.deleteTier(tier.id, org.id);
+
+      const resolved = await service.getTierForAccessCheck(tier.id);
+      expect(resolved?.id).toBe(tier.id);
+      expect(resolved?.deletedAt).toBeInstanceOf(Date);
+      expect(resolved?.sortOrder).toBe(tier.sortOrder);
+    });
+
+    it('should return null when the tier id does not exist at all', async () => {
+      const resolved = await service.getTierForAccessCheck(
+        '00000000-0000-0000-0000-000000000000'
+      );
+      expect(resolved).toBeNull();
+    });
+  });
 });

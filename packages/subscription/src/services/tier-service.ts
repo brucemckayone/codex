@@ -628,10 +628,46 @@ export class TierService extends BaseService {
     }
   }
 
+  /**
+   * Resolve a tier by id for an access-check or historic read path,
+   * **including soft-deleted (archived) tiers**.
+   *
+   * Use this for:
+   * - Access control (content.minimum_tier_id may point at an archived tier
+   *   that active subscribers still reference via subscriptions.tier_id)
+   * - Subscription → tier joins in notification/email/reporting paths
+   * - Any read where the caller must resolve historic tier metadata (name,
+   *   sortOrder, prices) rather than a mutable target
+   *
+   * Do NOT use for write paths (create / update / delete / new checkout).
+   * Those must use the strict private `getTierOrThrow` helper so a
+   * soft-deleted tier cannot silently receive new subscriptions or mutations.
+   *
+   * Returns null when the tier does not exist at all. Archived tiers still
+   * resolve.
+   */
+  async getTierForAccessCheck(
+    tierId: string
+  ): Promise<SubscriptionTier | null> {
+    const [tier] = await this.db
+      .select()
+      .from(subscriptionTiers)
+      .where(eq(subscriptionTiers.id, tierId))
+      .limit(1);
+
+    return tier ?? null;
+  }
+
   // ─── Private Helpers ─────────────────────────────────────────────────────
 
   /**
-   * Get a tier or throw TierNotFoundError.
+   * Resolve a tier for a **write path** (update / delete). Throws
+   * TierNotFoundError if the tier is missing, belongs to another org, or
+   * has been soft-deleted.
+   *
+   * Read paths that must resolve archived tiers (access checks, historic
+   * joins, notification metadata) MUST use the public `getTierForAccessCheck`
+   * method instead — it deliberately omits the deletedAt filter.
    */
   private async getTierOrThrow(
     tierId: string,

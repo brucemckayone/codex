@@ -42,6 +42,18 @@ In `procedure()` handlers, access via `ctx.services.tier`, `ctx.services.subscri
 - Only one tier per org can have `isRecommended: true` (enforced in a transaction)
 - Soft delete only; cannot delete tiers with active subscribers (`TierHasSubscribersError`)
 
+### Archived-tier semantic (Q8 product decision)
+
+Soft-deleted tiers behave as **archived, not gone**. They are excluded from active-tier listings and cannot receive new writes or new subscription checkouts, but they **must still resolve for read/historic paths**: access-control checks, subscription → tier joins in notification/reporting code, and any query that resolves tier metadata for a subscription that predates the delete.
+
+| Path | Helper | Filters `deletedAt` |
+|---|---|---|
+| Write (update, delete, new checkout, change tier) | private `getTierOrThrow` + inline write queries | Yes — strict |
+| Read (access check, email/notification joins, historic reads) | public `TierService.getTierForAccessCheck(tierId)` | **No** — archived tiers resolve |
+| Active-tier list (storefront, admin) | `listTiers` / `listAllTiers` | Yes — strict |
+
+Callers MUST pick the variant that matches their path. Using the strict helper for a read path silently breaks subscribers whose tier was archived after they subscribed; using the loose helper for a write path lets a deleted tier silently receive new subscriptions.
+
 ## SubscriptionService Responsibilities
 
 - Create Stripe Checkout sessions in `subscription` mode
