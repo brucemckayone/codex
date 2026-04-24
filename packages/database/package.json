@@ -24,6 +24,7 @@
     "db:reset": "pnpm exec tsx scripts/reset-data.ts",
     "db:seed": "pnpm exec tsx scripts/seed-data.ts",
     "db:seed:templates": "pnpm exec tsx scripts/seed-email-templates.ts",
+    "backfill:stripe-customer-ids": "pnpm exec tsx scripts/backfill-stripe-customer-ids.ts",
     "db:dry-run": "pnpm exec tsx scripts/neon-dry-run.ts",
     "db:studio": "pnpm exec tsx scripts/db-commands.ts studio",
     "db:push": "pnpm exec tsx scripts/db-commands.ts push",

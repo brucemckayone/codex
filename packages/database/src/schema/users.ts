@@ -41,6 +41,18 @@ export const users = pgTable(
     bio: text('bio'),
     /** Social media and website links for creator profile */
     socialLinks: jsonb('social_links').$type<SocialLinks>(),
+    /**
+     * Unified Stripe Customer ID (Codex-pkqxd epic).
+     *
+     * One Customer per Codex user, shared across every org they transact with.
+     * Nullable: users that have never hit checkout (one-time or subscription)
+     * stay NULL until first subscribe — `resolveOrCreateCustomer` (Codex-49gev)
+     * will populate it lazily.
+     *
+     * Partial unique index below guarantees at most one Codex user per Stripe
+     * Customer while permitting many NULL rows.
+     */
+    stripeCustomerId: text('stripe_customer_id'),
     /** Soft delete timestamp - null means account is active */
     deletedAt: timestamp('deleted_at'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -53,6 +65,9 @@ export const users = pgTable(
     uniqueIndex('idx_unique_username')
       .on(table.username)
       .where(sql`${table.deletedAt} IS NULL`),
+    uniqueIndex('idx_unique_users_stripe_customer_id')
+      .on(table.stripeCustomerId)
+      .where(sql`${table.stripeCustomerId} IS NOT NULL`),
   ]
 );
 

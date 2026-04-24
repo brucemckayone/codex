@@ -70,13 +70,23 @@ const SOCIAL_LINKS: Record<
 };
 
 export async function seedUsers(db: typeof DbClient) {
-  // Users — with avatar URLs pointing to dev-cdn
+  // Users — with avatar URLs pointing to dev-cdn.
+  //
+  // stripeCustomerId is seeded with a synthetic `cus_test_<username>` value so
+  // the unified-customer column (Codex-cmhnv) is exercised in local dev and
+  // E2E tests. These IDs don't resolve against Stripe — the real
+  // `resolveOrCreateCustomer` helper (Codex-49gev) will overwrite them on
+  // first real checkout for the `fresh` user. We leave `fresh` NULL on purpose
+  // so the "never transacted" path stays covered.
   await db.insert(schema.users).values(
     Object.values(USERS).map((u) => {
       const daysAgo = USER_JOINED_DAYS_AGO[u.id];
       const userCreatedAt = daysAgo
         ? new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000)
         : now;
+      // `fresh` is our "no commerce history" fixture — leave NULL.
+      const stripeCustomerId =
+        u.username === USERS.fresh.username ? null : `cus_test_${u.username}`;
       return {
         id: u.id,
         name: u.name,
@@ -87,6 +97,7 @@ export async function seedUsers(db: typeof DbClient) {
         username: u.username,
         bio: BIOS[u.id] ?? `Hi, I'm ${u.name}.`,
         socialLinks: SOCIAL_LINKS[u.id] ?? null,
+        stripeCustomerId,
         createdAt: userCreatedAt,
         updatedAt: userCreatedAt,
       };

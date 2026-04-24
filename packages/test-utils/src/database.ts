@@ -302,6 +302,18 @@ export async function cleanupTables(
 }
 
 /**
+ * Options for `seedTestUsers`.
+ */
+export interface SeedTestUsersOptions {
+  /**
+   * Default: `null`. When provided, ALL seeded users get this Stripe
+   * Customer ID. For per-user customisation, insert via the schema directly.
+   * Preserves existing unit-test behaviour (users start unlinked from Stripe).
+   */
+  stripeCustomerId?: string | null;
+}
+
+/**
  * Seed test users
  *
  * Creates test users in the auth.users table.
@@ -309,11 +321,13 @@ export async function cleanupTables(
  *
  * @param db - Database client
  * @param count - Number of users to create
+ * @param options - Optional per-batch overrides (e.g. stripeCustomerId)
  * @returns Array of user IDs
  */
 export async function seedTestUsers(
   db: Database,
-  count: number = 1
+  count: number = 1,
+  options: SeedTestUsersOptions = {}
 ): Promise<string[]> {
   const users: {
     id: string;
@@ -323,6 +337,7 @@ export async function seedTestUsers(
     image: string | null;
     avatarUrl: string | null;
     role: string;
+    stripeCustomerId: string | null;
     createdAt: Date;
     updatedAt: Date;
   }[] = [];
@@ -338,6 +353,10 @@ export async function seedTestUsers(
       image: null,
       avatarUrl: null,
       role: 'customer',
+      // Default null preserves pre-Codex-cmhnv behaviour — tests opt in to a
+      // stripe_customer_id only when they need to exercise the unified-customer
+      // path.
+      stripeCustomerId: options.stripeCustomerId ?? null,
       createdAt: new Date(timestamp),
       updatedAt: new Date(timestamp),
     });

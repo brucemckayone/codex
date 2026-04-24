@@ -444,6 +444,12 @@ export interface MockUserData {
   emailVerified: boolean;
   image: string | null;
   role: string;
+  /**
+   * Unified Stripe Customer ID (Codex-cmhnv). Defaults to null in `createMockUser`
+   * so pre-existing tests keep the "no Stripe linkage" shape. Override in tests
+   * that exercise the unified-customer resolution path.
+   */
+  stripeCustomerId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -485,6 +491,7 @@ export function createMockUser(
     emailVerified: true,
     image: null,
     role: 'user',
+    stripeCustomerId: null,
     createdAt: now,
     updatedAt: now,
     ...overrides,

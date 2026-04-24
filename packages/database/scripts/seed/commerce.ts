@@ -646,6 +646,17 @@ export async function seedCommerce(db: typeof DbClient) {
         subStripeCustomerId = result.stripeCustomerId;
         subCurrentPeriodStart = result.currentPeriodStart;
         subCurrentPeriodEnd = result.currentPeriodEnd;
+
+        // Unified-customer invariant (Codex-cmhnv): the real Stripe Customer
+        // created above IS the viewer's canonical customer. Overwrite the
+        // synthetic `cus_test_samviewer` value seeded in seedUsers() so
+        // `users.stripe_customer_id` reflects the same Customer the
+        // subscription points to.
+        await db
+          .update(schema.users)
+          .set({ stripeCustomerId: result.stripeCustomerId })
+          .where(eq(schema.users.id, USERS.viewer.id));
+
         console.log(
           `  ✓ Created real Stripe test-mode subscription for viewer@test.com (${subStripeSubscriptionId})`
         );

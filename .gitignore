@@ -112,5 +112,8 @@ skills-lock.json
 .fallow/
 **/.fallow/
 
+# Backfill script checkpoints + needs-review logs (one-shot scripts only)
+packages/database/.backfill/
+
 # Local-only shader verification scripts
 apps/web/.*-shot.mjs
