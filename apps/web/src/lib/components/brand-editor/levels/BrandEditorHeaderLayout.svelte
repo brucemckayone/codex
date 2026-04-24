@@ -1,13 +1,17 @@
 <script lang="ts">
+  import type { HeroLayout } from '@codex/validation';
   import { brandEditor } from '$lib/brand-editor';
   import BrandSliderField from '../BrandSliderField.svelte';
 
   interface LayoutOption {
-    id: string;
+    id: HeroLayout;
     label: string;
     description: string;
   }
 
+  // Labels/descriptions stay local (UI concern). Keys are narrowed to
+  // HeroLayout so TypeScript catches any typo or drift from @codex/validation's
+  // HERO_LAYOUTS single source of truth.
   const LAYOUTS: LayoutOption[] = [
     { id: 'default', label: 'Classic', description: 'Bottom-left editorial' },
     { id: 'centered', label: 'Centered', description: 'Center-aligned hero' },
@@ -36,7 +40,7 @@
 
   const activeLayout = $derived(brandEditor.pending?.heroLayout ?? 'default');
 
-  function selectLayout(id: string) {
+  function selectLayout(id: HeroLayout) {
     brandEditor.updateField('heroLayout', id);
   }
 

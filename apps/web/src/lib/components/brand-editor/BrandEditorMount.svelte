@@ -14,6 +14,7 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { goto, invalidate } from '$app/navigation';
+  import type { HeroLayout } from '@codex/validation';
   import { brandEditor } from '$lib/brand-editor';
   import { updateBrandingCommand } from '$lib/remote/branding.remote';
   import { toast } from '$lib/components/ui/Toast/toast-store';
@@ -63,9 +64,7 @@
         densityValue: payload.density,
         tokenOverrides: hasOverrides ? JSON.stringify(overrides) : '',
         darkModeOverrides: payload.darkOverrides ? JSON.stringify(payload.darkOverrides) : '',
-        heroLayout: payload.heroLayout as
-          | 'default' | 'split' | 'centered' | 'logo-hero' | 'minimal'
-          | 'magazine' | 'asymmetric' | 'portrait' | 'gallery' | 'stacked',
+        heroLayout: payload.heroLayout as HeroLayout,
       });
       brandEditor.markSaved();
       // Codex-7afgp: trigger the org layout's server load to re-run so

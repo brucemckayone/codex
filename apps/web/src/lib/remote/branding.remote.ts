@@ -12,6 +12,7 @@
  */
 
 import type { BrandingSettingsResponse } from '@codex/shared-types';
+import { HERO_LAYOUTS } from '@codex/validation';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
@@ -190,21 +191,8 @@ const updateBrandingCommandSchema = z.object({
   bodyWeight: nullableString.optional(),
   // Dark mode overrides
   darkModeOverrides: nullableString.optional(), // JSON string of Partial<ThemeColors>
-  // Hero layout
-  heroLayout: z
-    .enum([
-      'default',
-      'centered',
-      'logo-hero',
-      'minimal',
-      'split',
-      'magazine',
-      'asymmetric',
-      'portrait',
-      'gallery',
-      'stacked',
-    ])
-    .optional(),
+  // Hero layout — HERO_LAYOUTS is the single source of truth (@codex/validation).
+  heroLayout: z.enum(HERO_LAYOUTS).optional(),
 });
 
 /**

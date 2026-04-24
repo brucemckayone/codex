@@ -96,6 +96,36 @@ export const pricingFaqSchema = z
 export type PricingFaqItem = z.infer<typeof pricingFaqItemSchema>;
 
 // ============================================================================
+// Hero Layout
+// ============================================================================
+
+/**
+ * Supported hero layout variants.
+ *
+ * SINGLE SOURCE OF TRUTH — consumed by:
+ *   - updateBrandingSchema (this file) via z.enum(HERO_LAYOUTS)
+ *   - updateBrandingCommandSchema in apps/web/src/lib/remote/branding.remote.ts
+ *   - BrandEditorMount.svelte save payload cast via the HeroLayout type
+ *   - BrandEditorHeaderLayout.svelte LAYOUTS array (narrowed to HeroLayout keys)
+ *
+ * Adding a new layout = add it here; every Zod schema and TS cast picks it up.
+ */
+export const HERO_LAYOUTS = [
+  'default',
+  'centered',
+  'logo-hero',
+  'minimal',
+  'split',
+  'magazine',
+  'asymmetric',
+  'portrait',
+  'gallery',
+  'stacked',
+] as const;
+
+export type HeroLayout = (typeof HERO_LAYOUTS)[number];
+
+// ============================================================================
 // Domain Schemas
 // ============================================================================
 
@@ -121,20 +151,7 @@ export const updateBrandingSchema = z.object({
   textScale: z.string().max(10).nullable().optional(),
   headingWeight: z.string().max(10).nullable().optional(),
   bodyWeight: z.string().max(10).nullable().optional(),
-  heroLayout: z
-    .enum([
-      'default',
-      'centered',
-      'logo-hero',
-      'minimal',
-      'split',
-      'magazine',
-      'asymmetric',
-      'portrait',
-      'gallery',
-      'stacked',
-    ])
-    .optional(),
+  heroLayout: z.enum(HERO_LAYOUTS).optional(),
   pricingFaq: z.union([z.literal(null), z.string().min(1)]).optional(),
 });
 
