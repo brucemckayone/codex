@@ -312,7 +312,7 @@ describe('ContentAccessService Integration', () => {
       expect(mockPurchaseService.verifyPurchase).toHaveBeenCalledTimes(1);
     });
 
-    it('should grant access to org paid content for active members (fallback)', async () => {
+    it('should grant access to org paid content for management members (fallback)', async () => {
       // Reset mock before test
       mockPurchaseService.verifyPurchase.mockClear();
 
@@ -358,15 +358,18 @@ describe('ContentAccessService Integration', () => {
       // Mock: User has NOT purchased this content
       mockPurchaseService.verifyPurchase.mockResolvedValue(false);
 
-      // Create org membership for otherUserId (active member)
+      // Create org membership for otherUserId with a management role (creator).
+      // Per the members→team rename (commits f585f835, 8b40f190) the paid-content
+      // fallback is restricted to owner/admin/creator — regular 'member' and
+      // 'subscriber' roles must purchase or subscribe.
       await db.insert(organizationMemberships).values({
         userId: otherUserId,
         organizationId,
-        role: 'member',
+        role: 'creator',
         status: 'active',
       });
 
-      // User should be able to stream via org membership (fallback)
+      // User should be able to stream via management-membership fallback
       const result = await accessService.getStreamingUrl(otherUserId, {
         contentId: orgPaidContent.id,
         expirySeconds: 3600,
