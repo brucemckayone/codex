@@ -9,7 +9,10 @@
  * instead of a server stream, saving ~567ms on authenticated page loads.
  */
 import { browser } from '$app/environment';
-import { subscriptionCollection } from '$lib/collections';
+import {
+  type SubscriptionItem,
+  subscriptionCollection,
+} from '$lib/collections';
 import type { SubscriptionTier } from '$lib/types';
 
 interface SubscriptionContext {
@@ -28,6 +31,54 @@ interface AccessContextInput {
 interface ContentAccessItem {
   accessType: string;
   minimumTierId: string | null;
+}
+
+/**
+ * Minimal subscription shape used by the pure decision helpers — accepts the
+ * full SubscriptionItem from the collection but only reads the fields needed
+ * for the badge decision so the helpers stay test-friendly.
+ */
+type AccessGrantingSubscription = Pick<SubscriptionItem, 'status' | 'tier'>;
+
+/**
+ * Whether a subscription is in an access-granting state. Mirrors the backend
+ * rule in `@codex/access` ContentAccessService — only `active` and
+ * `cancelling` count as access-granting; `past_due`, `paused`, `cancelled`,
+ * and `incomplete` do NOT. Filtering here keeps the badge consistent with
+ * what the streaming gate would actually allow.
+ */
+export function isAccessGrantingSubscription(
+  sub: { status: string } | null | undefined
+): sub is AccessGrantingSubscription {
+  return !!sub && (sub.status === 'active' || sub.status === 'cancelling');
+}
+
+/**
+ * Pure decision helper for the `included` badge variant.
+ *
+ * Encodes two rules:
+ *   1. `subscribers ⊇ followers` (Codex-xybr3) — any access-granting
+ *      subscription covers followers-only content, regardless of tier.
+ *   2. Subscriber-gated content — covered only when the user's tier
+ *      `sortOrder` meets the content's `minimumTierId`. No `minimumTierId`
+ *      means any tier qualifies.
+ *
+ * Returns false for any other access type (free, paid, team) — those
+ * surfaces use `purchased` or their own labels.
+ */
+export function decideIsIncluded(
+  item: ContentAccessItem,
+  sub: AccessGrantingSubscription | null,
+  tiers: SubscriptionTier[]
+): boolean {
+  if (!sub) return false;
+
+  if (item.accessType === 'followers') return true;
+
+  if (item.accessType !== 'subscribers') return false;
+  if (!item.minimumTierId) return true;
+  const minTier = tiers.find((t) => t.id === item.minimumTierId);
+  return minTier ? sub.tier.sortOrder >= minTier.sortOrder : false;
 }
 
 export function useAccessContext(getData: () => AccessContextInput) {
@@ -57,27 +108,25 @@ export function useAccessContext(getData: () => AccessContextInput) {
   });
 
   /**
-   * Read the user's tier sort order from the client-side subscriptionCollection.
-   * Returns null when no subscription exists or on the server.
+   * Read the user's access-granting subscription from the client-side
+   * subscriptionCollection. Returns null on the server, when no subscription
+   * exists, or when the subscription is in a non-access-granting state
+   * (past_due / paused / cancelled / incomplete).
    */
-  function getUserTierSortOrder(): number | null {
+  function getActiveSubscription(): AccessGrantingSubscription | null {
     if (!browser || !subscriptionCollection) return null;
     const { orgId } = getData();
     const sub = subscriptionCollection.state.get(orgId);
-    return sub?.tier?.sortOrder ?? null;
+    return isAccessGrantingSubscription(sub) ? sub : null;
   }
 
   /**
-   * Whether the user's subscription tier covers a specific content item.
-   * Only applies to subscriber-gated content (accessType === 'subscribers').
+   * Whether the user's active subscription covers a specific content item.
+   * Covers subscriber-gated content (tier-aware) and followers-only content
+   * (Codex-xybr3 — subscribers ⊇ followers).
    */
   function isIncluded(item: ContentAccessItem): boolean {
-    const userTierSortOrder = getUserTierSortOrder();
-    if (!userTierSortOrder) return false;
-    if (item.accessType !== 'subscribers') return false;
-    if (!item.minimumTierId) return true; // Any tier covers it
-    const minTier = resolvedTiers.find((t) => t.id === item.minimumTierId);
-    return minTier ? userTierSortOrder >= minTier.sortOrder : false;
+    return decideIsIncluded(item, getActiveSubscription(), resolvedTiers);
   }
 
   /**
@@ -106,7 +155,7 @@ export function useAccessContext(getData: () => AccessContextInput) {
       return resolvedTiers;
     },
     get hasSubscription() {
-      return getUserTierSortOrder() !== null;
+      return getActiveSubscription() !== null;
     },
     isIncluded,
     getTierName,
