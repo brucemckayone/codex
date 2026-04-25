@@ -352,7 +352,21 @@ describe('handleCheckoutCompleted', () => {
   });
 
   describe('error handling', () => {
-    it('should log error but not throw when PurchaseService throws', async () => {
+    /**
+     * Error contract (post-Wave 2-3 hardening):
+     *
+     * The handler intentionally lets PurchaseService errors propagate so the
+     * outer createWebhookHandler() wrapper can classify them as transient
+     * (return 500 → Stripe retries) vs permanent (return 200 → acknowledge).
+     * See workers/ecom-api/src/utils/webhook-handler.ts and
+     * workers/ecom-api/src/utils/error-classification.ts.
+     *
+     * The handler MUST still run cleanup() on the error path via its
+     * try { ... } finally { await cleanup(); } block — DB connection leaks
+     * on errors are a real safety regression under load.
+     */
+
+    it('should rethrow PurchaseService errors so the wrapper can classify them', async () => {
       const event = createMockStripeCheckoutEvent({
         metadata: {
           customerId: 'user_123',
@@ -360,24 +374,16 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      const { context, mock } = createContext();
+      const { context } = createContext();
 
-      mockCompletePurchase.mockRejectedValueOnce(
-        new Error('Database connection failed')
-      );
+      const dbError = new Error('Database connection failed');
+      mockCompletePurchase.mockRejectedValueOnce(dbError);
 
-      // Should NOT throw
+      // Handler MUST surface the error to createWebhookHandler so it can
+      // decide whether to return 500 (transient → retry) or 200 (permanent).
       await expect(
         handleCheckoutCompleted(event, mockStripe, context)
-      ).resolves.not.toThrow();
-
-      // Should log the error
-      expect(mock._obs.error).toHaveBeenCalledWith(
-        'Failed to complete purchase from Stripe webhook',
-        expect.objectContaining({
-          errorMessage: 'Database connection failed',
-        })
-      );
+      ).rejects.toThrow('Database connection failed');
     });
 
     it('should always cleanup database connection even on error', async () => {
@@ -392,12 +398,16 @@ describe('handleCheckoutCompleted', () => {
 
       mockCompletePurchase.mockRejectedValueOnce(new Error('Test error'));
 
-      await handleCheckoutCompleted(event, mockStripe, context);
+      // Cleanup runs in a `finally` block — assert it fired even though
+      // the handler rethrew the underlying error.
+      await expect(
+        handleCheckoutCompleted(event, mockStripe, context)
+      ).rejects.toThrow('Test error');
 
       expect(mockCleanup).toHaveBeenCalled();
     });
 
-    it('should include error context in logs', async () => {
+    it('should preserve error type and message for the wrapper to log', async () => {
       const event = createMockStripeCheckoutEvent({
         sessionId: 'cs_specific_session',
         metadata: {
@@ -406,22 +416,20 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      const { context, mock } = createContext();
+      const { context } = createContext();
 
       const testError = new Error('Specific failure reason');
       testError.name = 'PaymentProcessingError';
       mockCompletePurchase.mockRejectedValueOnce(testError);
 
-      await handleCheckoutCompleted(event, mockStripe, context);
-
-      expect(mock._obs.error).toHaveBeenCalledWith(
-        'Failed to complete purchase from Stripe webhook',
-        expect.objectContaining({
-          sessionId: 'cs_specific_session',
-          errorType: 'PaymentProcessingError',
-          errorMessage: 'Specific failure reason',
-        })
-      );
+      // Error must propagate intact (name + message) so the wrapper's
+      // classification + log output retains full context.
+      await expect(
+        handleCheckoutCompleted(event, mockStripe, context)
+      ).rejects.toMatchObject({
+        name: 'PaymentProcessingError',
+        message: 'Specific failure reason',
+      });
     });
   });
 
