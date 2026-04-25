@@ -7,7 +7,7 @@
  */
 
 /** A single framebuffer object with its backing texture. */
-interface FBO {
+export interface FBO {
   fbo: WebGLFramebuffer;
   tex: WebGLTexture;
   w: number;

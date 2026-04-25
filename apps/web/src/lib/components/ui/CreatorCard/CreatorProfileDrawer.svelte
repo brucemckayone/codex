@@ -28,38 +28,8 @@
   import { buildCreatorsUrl, buildContentUrl, buildOrgUrl } from '$lib/utils/subdomain';
   import { formatRelativeTime } from '$lib/utils/format';
 
-  interface SocialLinks {
-    website?: string;
-    twitter?: string;
-    youtube?: string;
-    instagram?: string;
-  }
-
-  interface ContentItem {
-    title: string;
-    slug: string;
-    thumbnailUrl: string | null;
-    contentType: string;
-  }
-
-  interface OrgMembership {
-    name: string;
-    slug: string;
-    logoUrl: string | null;
-  }
-
-  export interface CreatorDrawerData {
-    name: string;
-    username: string | null;
-    avatarUrl: string | null;
-    bio: string | null;
-    socialLinks: SocialLinks | null;
-    role: string;
-    joinedAt: string;
-    contentCount: number;
-    recentContent: ContentItem[];
-    organizations: OrgMembership[];
-  }
+  import type { CreatorDrawerData } from './types';
+  export type { CreatorDrawerData };
 
   interface Props {
     open?: boolean;

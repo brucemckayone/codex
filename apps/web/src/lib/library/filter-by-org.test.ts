@@ -35,7 +35,11 @@ describe('filterLibraryItemsByOrg', () => {
   });
 
   it('excludes items with missing organizationId key (pre-fix entries)', () => {
-    const preFix = { content: { id: 'pre' } }; // no organizationId property at all
+    // The whole point of this test is the absence of organizationId, so
+    // we deliberately construct a malformed item and cast through unknown.
+    const preFix = { content: { id: 'pre' } } as unknown as {
+      content: { id: string; organizationId?: string | null };
+    };
     const current = item(ORG_A, 'current');
     expect(filterLibraryItemsByOrg([preFix, current], ORG_A)).toEqual([
       current,

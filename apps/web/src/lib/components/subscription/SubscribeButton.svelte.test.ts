@@ -233,7 +233,9 @@ describe('SubscribeButton', () => {
     const { resumeSubscription } = await import(
       '$lib/remote/subscription.remote'
     );
-    const mockResume = resumeSubscription as ReturnType<typeof vi.fn>;
+    const mockResume = resumeSubscription as unknown as ReturnType<
+      typeof vi.fn
+    >;
     mockResume.mockResolvedValueOnce(undefined);
 
     seed({ status: 'paused' });

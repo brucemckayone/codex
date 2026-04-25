@@ -140,14 +140,17 @@ export const updateProfileForm = form(
  */
 export const updateNotificationsForm = form(
   updateNotificationsFormSchema,
-  async ({ emailMarketing, emailTransactional, emailDigest }) => {
+  async ({ emailMarketing, emailDigest }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
     try {
+      // emailTransactional is intentionally NOT passed: transactional
+      // emails cannot be disabled (the form surfaces the read-only
+      // value to the user but the schema in @codex/validation excludes
+      // the field — passing it triggers an unknown-key error).
       const response = await api.account.updateNotificationPreferences({
         emailMarketing,
-        emailTransactional,
         emailDigest,
       });
 

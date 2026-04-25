@@ -53,6 +53,10 @@ describe('Brand Cache', () => {
     textScale: null,
     headingWeight: null,
     bodyWeight: null,
+    introVideoMediaItemId: null,
+    introVideoUrl: null,
+    heroLayout: 'classic',
+    pricingFaq: null,
   };
   const mockCachedData: CachedBrandConfig = {
     updatedAt: new Date().toISOString(),

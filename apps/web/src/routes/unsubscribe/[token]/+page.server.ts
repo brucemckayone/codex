@@ -7,7 +7,14 @@ export const load: PageServerLoad = async ({ params, platform }) => {
     const response = await fetch(
       `${notificationsUrl}/unsubscribe/${params.token}`
     );
-    const data = await response.json();
+    // Notifications worker returns a plain JSON envelope here (not the
+    // procedure() shape) — type the parsed shape explicitly so the
+    // strict-mode `unknown` from response.json() narrows.
+    const data = (await response.json()) as {
+      valid?: boolean;
+      category?: string | null;
+      reason?: string | null;
+    };
     return {
       token: params.token,
       valid: data.valid ?? false,
