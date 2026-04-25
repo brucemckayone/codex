@@ -1577,20 +1577,168 @@ describe('PurchaseService Integration', () => {
         currency: 'gbp',
       });
 
+      const beforeRefund = Date.now();
+
       await purchaseService.processRefund(paymentIntentId, {
         stripeRefundId: 're_meta_test_456',
         refundAmountCents: 2999,
         refundReason: 'duplicate',
       });
 
-      // Verify metadata was stored by checking purchase is refunded
-      // (refund metadata fields are set in the same transaction)
+      // Verify all four refund metadata fields were persisted in the same
+      // transaction as the status flip. Audit + support forensics + reporting
+      // depend on these being non-null after a successful refund (Codex-98yb).
       const result = await purchaseService.getPurchase(
         purchase.id,
         otherUserId
       );
 
       expect(result?.status).toBe('refunded');
+      expect(result?.stripeRefundId).toBe('re_meta_test_456');
+      expect(result?.refundAmountCents).toBe(2999);
+      expect(result?.refundReason).toBe('duplicate');
+      expect(result?.refundedAt).toBeInstanceOf(Date);
+      // Narrow the optional chain — biome rejects `result?.refundedAt!` and
+      // the field is nullable in the schema. A separate assertion makes the
+      // null-check explicit so getTime() is reachable without ! on ?.
+      const refundedAt = result?.refundedAt;
+      expect(refundedAt).not.toBeNull();
+      if (refundedAt) {
+        expect(refundedAt.getTime()).toBeGreaterThanOrEqual(
+          beforeRefund - 1000
+        );
+      }
+    });
+
+    it('rolls back purchase status when contentAccess revocation throws (atomicity)', async () => {
+      // Codex-98yb: load-bearing assertion that processRefund's
+      // db.transaction() actually rolls back the purchase status update
+      // when the contentAccess update throws partway through. Without the
+      // transaction wrap, a failed access revocation would leave the
+      // purchase row at status='refunded' while the user keeps content.
+      const media = await mediaService.create(
+        {
+          title: 'Rollback Refund Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/rollback-refund/master.m3u8',
+          thumbnailKey: 'thumbnails/rollback-refund.jpg',
+          durationSeconds: 120,
+        },
+        userId
+      );
+
+      const content = await contentService.create(
+        {
+          organizationId,
+          title: 'Rollback Refund Content',
+          slug: createUniqueSlug('rollback-refund'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 1499,
+        },
+        userId
+      );
+
+      await contentService.publish(content.id, userId);
+
+      const paymentIntentId = `pi_rollback_${Date.now()}`;
+
+      const purchase = await purchaseService.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId,
+        amountPaidCents: 1499,
+        currency: 'gbp',
+      });
+
+      // Build a Proxy db for a one-shot PurchaseService that wraps the real
+      // db.transaction() but injects a tx Proxy that throws on the
+      // contentAccess update. The purchases update succeeds first, then the
+      // contentAccess update throws, so the transaction must roll back.
+      type DbLike = typeof db;
+      type TxLike = Parameters<Parameters<DbLike['transaction']>[0]>[0];
+
+      const failingDb = new Proxy(db as DbLike, {
+        get(target, prop, receiver) {
+          if (prop === 'transaction') {
+            return (callback: (tx: TxLike) => Promise<unknown>) =>
+              target.transaction(async (realTx) => {
+                const txProxy = new Proxy(realTx as TxLike, {
+                  get(txTarget, txProp, txReceiver) {
+                    if (txProp === 'update') {
+                      const realUpdate = txTarget.update.bind(txTarget);
+                      return (table: unknown) => {
+                        if (table === schema.contentAccess) {
+                          throw new Error(
+                            'INJECTED FAILURE: contentAccess revocation failed'
+                          );
+                        }
+                        return realUpdate(
+                          table as Parameters<typeof realUpdate>[0]
+                        );
+                      };
+                    }
+                    return Reflect.get(txTarget, txProp, txReceiver);
+                  },
+                });
+                return callback(txProxy);
+              });
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      });
+
+      const failingService = new PurchaseService(
+        { db: failingDb, environment: 'test' },
+        mockStripe
+      );
+
+      // Snapshot pre-refund state
+      const before = await db.query.purchases.findFirst({
+        where: eq(schema.purchases.id, purchase.id),
+      });
+      expect(before?.status).toBe('completed');
+      expect(before?.refundedAt).toBeNull();
+
+      // Process refund — should throw because contentAccess update fails.
+      // handleError() wraps the raw error into a typed ServiceError; we
+      // only care that something propagates (i.e. the catch in processRefund
+      // re-raises rather than swallowing).
+      await expect(
+        failingService.processRefund(paymentIntentId, {
+          stripeRefundId: 're_rollback_999',
+          refundAmountCents: 1499,
+          refundReason: 'requested_by_customer',
+        })
+      ).rejects.toThrow();
+
+      // Purchase row must be unchanged — transaction rolled back.
+      const after = await db.query.purchases.findFirst({
+        where: eq(schema.purchases.id, purchase.id),
+      });
+      expect(after?.status).toBe('completed');
+      expect(after?.refundedAt).toBeNull();
+      expect(after?.stripeRefundId).toBeNull();
+      expect(after?.refundAmountCents).toBeNull();
+      expect(after?.refundReason).toBeNull();
+
+      // contentAccess must remain active (deletedAt still null).
+      const accessRow = await db.query.contentAccess.findFirst({
+        where: eq(schema.contentAccess.contentId, content.id),
+      });
+      expect(accessRow).toBeDefined();
+      expect(accessRow?.deletedAt).toBeNull();
     });
 
     it('should soft-delete contentAccess record (set deletedAt)', async () => {
