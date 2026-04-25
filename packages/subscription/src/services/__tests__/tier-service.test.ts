@@ -61,7 +61,11 @@ describe('TierService', () => {
 
   beforeEach(() => {
     stripe = createMockStripe();
-    service = new TierService({ db, environment: 'test' }, stripe);
+    // X7 (Codex-z9fzv): TierService now takes an explicit dbWs for
+    // transactions instead of casting `this.db` at every call site.
+    // setupTestDatabase() returns a WebSocket client, so the same
+    // instance satisfies both `db` and `dbWs`.
+    service = new TierService({ db, dbWs: db, environment: 'test' }, stripe);
   });
 
   afterAll(async () => {

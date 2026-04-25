@@ -233,6 +233,11 @@ export async function handleSubscriptionWebhook(
     const tierService = new TierService(
       {
         db,
+        // X7 (Codex-z9fzv): pass dbWs explicitly. The per-request
+        // client returned by createPerRequestDbClient is already a
+        // DatabaseWs, so the same instance satisfies both slots and
+        // reuses the WebSocket connection.
+        dbWs: db,
         environment: c.env.ENVIRONMENT || 'development',
         propagator: (args) => {
           c.executionCtx.waitUntil(

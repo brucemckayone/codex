@@ -498,6 +498,12 @@ export function createServiceRegistry(
         _tier = new TierService(
           {
             db: getSharedDb(),
+            // X7 (Codex-z9fzv): same per-request WebSocket client used
+            // for transactions; `getSharedDb()` already returns a
+            // DatabaseWs (it caches the createPerRequestDbClient
+            // result), so passing it as both `db` and `dbWs` reuses
+            // the connection.
+            dbWs: getSharedDb(),
             environment: getEnvironment(),
             propagator,
           },

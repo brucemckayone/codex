@@ -24,6 +24,7 @@
  */
 
 import { CURRENCY } from '@codex/constants';
+import type { DatabaseWs } from '@codex/database';
 import {
   content,
   organizations,
@@ -86,16 +87,28 @@ export type TierPricePropagator = (args: {
  * that do not exercise propagation can omit this injection entirely.
  */
 export interface TierServiceConfig extends ServiceConfig {
+  /**
+   * WebSocket Drizzle client used by every transaction in this service.
+   * Required (X7 — Codex-z9fzv): in production this is the same client
+   * `ServiceConfig.db` points at, but ServiceConfig types `db` as the
+   * union `Database | DatabaseWs` to keep the BaseService contract
+   * compatible with HTTP-only services. Threading `dbWs` separately
+   * lets TierService call `dbWs.transaction(...)` without a runtime-
+   * unchecked `as typeof dbWs` cast.
+   */
+  dbWs: DatabaseWs;
   propagator?: TierPricePropagator;
 }
 
 export class TierService extends BaseService {
   private readonly stripe: Stripe;
+  private readonly dbWs: DatabaseWs;
   private readonly propagator: TierPricePropagator | undefined;
 
   constructor(config: TierServiceConfig, stripe: Stripe) {
     super(config);
     this.stripe = stripe;
+    this.dbWs = config.dbWs;
     this.propagator = config.propagator;
   }
 
@@ -251,16 +264,14 @@ export class TierService extends BaseService {
       try {
         if (input.isRecommended) {
           // Atomically clear other recommended flags + insert new tier
-          await (this.db as typeof import('@codex/database').dbWs).transaction(
-            async (tx) => {
-              await this.ensureSingleRecommended(tx, orgId);
-              const [inserted] = await tx
-                .insert(subscriptionTiers)
-                .values(tierValues)
-                .returning();
-              tier = inserted;
-            }
-          );
+          await this.dbWs.transaction(async (tx) => {
+            await this.ensureSingleRecommended(tx, orgId);
+            const [inserted] = await tx
+              .insert(subscriptionTiers)
+              .values(tierValues)
+              .returning();
+            tier = inserted;
+          });
         } else {
           const [inserted] = await this.db
             .insert(subscriptionTiers)
@@ -444,17 +455,15 @@ export class TierService extends BaseService {
       try {
         if (input.isRecommended === true) {
           // Atomically clear other recommended flags + update this tier
-          await (this.db as typeof import('@codex/database').dbWs).transaction(
-            async (tx) => {
-              await this.ensureSingleRecommended(tx, orgId, tierId);
-              const [result] = await tx
-                .update(subscriptionTiers)
-                .set(updateSet)
-                .where(updateWhere)
-                .returning();
-              updated = result;
-            }
-          );
+          await this.dbWs.transaction(async (tx) => {
+            await this.ensureSingleRecommended(tx, orgId, tierId);
+            const [result] = await tx
+              .update(subscriptionTiers)
+              .set(updateSet)
+              .where(updateWhere)
+              .returning();
+            updated = result;
+          });
         } else {
           const [result] = await this.db
             .update(subscriptionTiers)
@@ -563,30 +572,28 @@ export class TierService extends BaseService {
       // A partial state (tier gone, content still gated) is the exact bug
       // this sweep is here to fix.
       let affectedContentCount = 0;
-      await (this.db as typeof import('@codex/database').dbWs).transaction(
-        async (tx) => {
-          await tx
-            .update(subscriptionTiers)
-            .set({
-              deletedAt: new Date(),
-              isActive: false,
-              isRecommended: false,
-            })
-            .where(eq(subscriptionTiers.id, tierId));
+      await this.dbWs.transaction(async (tx) => {
+        await tx
+          .update(subscriptionTiers)
+          .set({
+            deletedAt: new Date(),
+            isActive: false,
+            isRecommended: false,
+          })
+          .where(eq(subscriptionTiers.id, tierId));
 
-          const cleared = await tx
-            .update(content)
-            .set({ minimumTierId: null })
-            .where(
-              and(
-                eq(content.minimumTierId, tierId),
-                eq(content.organizationId, orgId)
-              )
+        const cleared = await tx
+          .update(content)
+          .set({ minimumTierId: null })
+          .where(
+            and(
+              eq(content.minimumTierId, tierId),
+              eq(content.organizationId, orgId)
             )
-            .returning({ id: content.id });
-          affectedContentCount = cleared.length;
-        }
-      );
+          )
+          .returning({ id: content.id });
+        affectedContentCount = cleared.length;
+      });
 
       // Archive Stripe Product after the DB transaction commits so a Stripe
       // 500 doesn't leave us with an orphaned deletedAt in the DB (the
@@ -706,25 +713,23 @@ export class TierService extends BaseService {
       // Update sort orders in a single transaction.
       // Uses high-offset temp values (10000+) to avoid both the UNIQUE constraint
       // on (organizationId, sortOrder) and the CHECK constraint (sort_order > 0).
-      await (this.db as typeof import('@codex/database').dbWs).transaction(
-        async (tx) => {
-          // Phase 1: Move all to high temp values to clear the target range
-          for (const [i, tierId] of tierIds.entries()) {
-            await tx
-              .update(subscriptionTiers)
-              .set({ sortOrder: 10000 + i + 1 })
-              .where(eq(subscriptionTiers.id, tierId));
-          }
-
-          // Phase 2: Set to final values (1-based)
-          for (const [i, tierId] of tierIds.entries()) {
-            await tx
-              .update(subscriptionTiers)
-              .set({ sortOrder: i + 1, updatedAt: new Date() })
-              .where(eq(subscriptionTiers.id, tierId));
-          }
+      await this.dbWs.transaction(async (tx) => {
+        // Phase 1: Move all to high temp values to clear the target range
+        for (const [i, tierId] of tierIds.entries()) {
+          await tx
+            .update(subscriptionTiers)
+            .set({ sortOrder: 10000 + i + 1 })
+            .where(eq(subscriptionTiers.id, tierId));
         }
-      );
+
+        // Phase 2: Set to final values (1-based)
+        for (const [i, tierId] of tierIds.entries()) {
+          await tx
+            .update(subscriptionTiers)
+            .set({ sortOrder: i + 1, updatedAt: new Date() })
+            .where(eq(subscriptionTiers.id, tierId));
+        }
+      });
 
       this.obs.info('Subscription tiers reordered', {
         organizationId: orgId,
