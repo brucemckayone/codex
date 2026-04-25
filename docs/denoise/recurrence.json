@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-25",
+  "last_updated": "2026-04-26",
   "patterns": {
     "packages:throw-raw-error": {
       "hits": 1,
@@ -66,6 +66,61 @@
       "beads": ["Codex-ttavz.6"],
       "severity": "minor",
       "note": "Doc-rot: workerAuth.sign() cited but actual caller-side API is workerFetch / generateWorkerSignature."
+    },
+    "security:auth-endpoint-no-ratelimit": {
+      "hits": 1,
+      "iters": ["iter-002"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": true,
+      "rule_id": "R9 (queued — apply in next cycle's prep)",
+      "beads": ["Codex-ttavz.7"],
+      "severity": "blocker",
+      "note": "BLOCKER. R7 single-hit security exception applied (severity=blocker AND fingerprint starts with 'security:'). Next cycle's first action is to add R9 hard rule to SKILL.md §1."
+    },
+    "security:public-route-no-ratelimit": {
+      "hits": 1,
+      "iters": ["iter-002"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-ttavz.8"],
+      "severity": "major",
+      "note": "NEW fingerprint not in reference 01 §8 anti-pattern table. Suggest adding as row 13 if it recurs."
+    },
+    "workers:waituntil-no-catch": {
+      "hits": 1,
+      "iters": ["iter-002"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-ttavz.9"],
+      "severity": "minor",
+      "note": "Already in reference 06 §9 row 4. First sighting in cycle data — recurrence increment baseline."
+    },
+    "denoise:doc-rot:06-domain-workers:row11": {
+      "hits": 1,
+      "iters": ["iter-002"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-ttavz.10"],
+      "severity": "minor",
+      "note": "Doc-rot: stripe.webhooks.constructEvent cited but actual API is constructEventAsync (workerd has no sync SubtleCrypto). Folded fix should also patch ref 01 §8 row 5."
+    },
+    "denoise:doc-rot:06-domain-workers:row9": {
+      "hits": 1,
+      "iters": ["iter-002"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-ttavz.11"],
+      "severity": "minor",
+      "note": "Doc-rot: ctx.storage.transaction / alarmInFlight cited but no DurableObject in repo implements either. Only DO is workers/media-api/src/durable-objects/orphaned-file-cleanup-do.ts."
     }
   }
 }
