@@ -577,7 +577,7 @@
       <div class="audio-player__error">
         <AlertCircleIcon size={24} />
         <p class="audio-player__error-message">{errorMessage}</p>
-        <button class="audio-player__error-retry" onclick={retry}>
+        <button type="button" class="audio-player__error-retry" onclick={retry}>
           Try Again
         </button>
       </div>
@@ -590,6 +590,7 @@
         <div class="audio-player__main">
           <!-- Play button (left-aligned overlay) -->
           <button
+            type="button"
             class="audio-player__btn audio-player__btn--play"
             class:audio-player__btn--playing={isPlaying}
             onclick={togglePlay}
@@ -632,6 +633,7 @@
 
           <!-- Volume -->
           <button
+            type="button"
             class="audio-player__btn"
             onclick={toggleMute}
             aria-label={isMuted ? 'Unmute' : 'Mute'}
@@ -657,6 +659,7 @@
           <!-- Playback speed — tap to cycle (mobile), hover to expand (desktop) -->
           <div class="audio-player__speed" role="group" aria-label="Playback speed">
             <button
+              type="button"
               class="audio-player__speed-current"
               onclick={cyclePlaybackRate}
               aria-label="Playback speed: {playbackRate}x — tap to change"
@@ -666,6 +669,7 @@
             <div class="audio-player__speed-options">
               {#each RATES as rate}
                 <button
+                  type="button"
                   class="audio-player__speed-btn"
                   class:active={playbackRate === rate}
                   onclick={() => setPlaybackRate(rate)}
@@ -679,6 +683,7 @@
           <!-- Immersive mode — always available; falls back to 'nebula' when
                content has no preset assigned. -->
           <button
+            type="button"
             class="audio-player__btn audio-player__btn--immersive"
             onclick={() => { showImmersive = true; }}
             aria-label="Enter immersive mode"
@@ -723,6 +728,7 @@
           </div>
 
           <button
+            type="button"
             class="audio-mini-player__btn"
             onclick={togglePlay}
             aria-label={isPlaying ? 'Pause' : 'Play'}
@@ -737,6 +743,7 @@
       </WaveformShader>
 
       <button
+        type="button"
         class="audio-mini-player__close"
         onclick={() => { miniMode = false; }}
         aria-label="Close mini player"

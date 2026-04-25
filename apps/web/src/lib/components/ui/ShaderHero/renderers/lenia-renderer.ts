@@ -245,7 +245,8 @@ export function createLeniaRenderer(): ShaderRenderer {
             mStr = 0.3;
           }
 
-          // Click burst processing
+          // Click burst processing — age each burst by dt; retire when
+          // elapsed ≥ BURST_LIFETIME_SECONDS. Frame-rate independent.
           for (let i = clickBursts.length - 1; i >= 0; i--) {
             const b = clickBursts[i];
             if (b.age < BURST_LIFETIME_SECONDS) {

@@ -148,16 +148,22 @@
       mouse.burstStrength = 0;
     }
 
-    // Get audio analysis
+    // Get audio analysis — pass through smoothed envelopes + beat pulse so
+    // presets can choose raw vs. smoothed per-channel.
     let audioState: AudioState | undefined;
     if (analyser) {
-      const analysis = analyser.getAnalysis();
+      const a = analyser.getAnalysis();
       audioState = {
-        bass: analysis.bass,
-        mids: analysis.mids,
-        treble: analysis.treble,
-        amplitude: analysis.amplitude,
-        active: analysis.active,
+        bass: a.bass,
+        mids: a.mids,
+        treble: a.treble,
+        amplitude: a.amplitude,
+        bassSmooth: a.bassSmooth,
+        midsSmooth: a.midsSmooth,
+        trebleSmooth: a.trebleSmooth,
+        amplitudeSmooth: a.amplitudeSmooth,
+        beatPulse: a.beatPulse,
+        active: a.active,
       };
     }
 
@@ -391,7 +397,7 @@
   <!-- Controls overlay -->
   <div class="immersive__controls" class:visible={controlsVisible}>
     <!-- Close button -->
-    <button class="immersive__close" onclick={onclose} aria-label="Exit immersive mode">
+    <button type="button" class="immersive__close" onclick={onclose} aria-label="Exit immersive mode">
       <XIcon size={24} />
     </button>
 
@@ -418,7 +424,7 @@
       </div>
 
       <div class="immersive__bar-inner">
-        <button class="immersive__btn" onclick={togglePlay} aria-label={isPlaying ? 'Pause' : 'Play'}>
+        <button type="button" class="immersive__btn" onclick={togglePlay} aria-label={isPlaying ? 'Pause' : 'Play'}>
           {#if isPlaying}
             <PauseIcon size={22} />
           {:else}
@@ -432,7 +438,7 @@
 
         <div class="immersive__spacer"></div>
 
-        <button class="immersive__btn" onclick={toggleMute} aria-label={isMuted ? 'Unmute' : 'Mute'}>
+        <button type="button" class="immersive__btn" onclick={toggleMute} aria-label={isMuted ? 'Unmute' : 'Mute'}>
           {#if isMuted}
             <VolumeXIcon size={20} />
           {:else}
@@ -440,7 +446,7 @@
           {/if}
         </button>
 
-        <button class="immersive__btn immersive__btn--close" onclick={onclose} aria-label="Exit">
+        <button type="button" class="immersive__btn immersive__btn--close" onclick={onclose} aria-label="Exit">
           Exit
         </button>
       </div>

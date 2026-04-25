@@ -977,7 +977,7 @@
       <div class="video-player-error">
         <AlertCircleIcon class="video-player-error-icon" />
         <p class="video-player-error-message" role="alert">{errorMessage}</p>
-        <button class="video-player-error-retry" onclick={retry}>
+        <button type="button" class="video-player-error-retry" onclick={retry}>
           Try Again
         </button>
       </div>
@@ -1085,6 +1085,7 @@
             {#if hasCaptions}
               <span class="video-player-pill-divider"></span>
               <button
+                type="button"
                 class="video-player-captions-btn"
                 onclick={toggleCaptions}
                 aria-label={captionsEnabled ? 'Hide captions' : 'Show captions'}
@@ -1138,6 +1139,7 @@
             {/if}
             <span class="video-player-pill-divider"></span>
             <button
+              type="button"
               class="video-player-cinema-btn"
               onclick={toggleCinemaMode}
               aria-label={cinemaMode ? 'Exit cinema mode' : 'Cinema mode'}
@@ -1154,6 +1156,7 @@
         <!-- Row 1 (bottom): play + progress bar + volume pill -->
         <div class="video-player-controls-row video-player-controls-row--bottom">
           <button
+            type="button"
             class="video-player-play-btn"
             onclick={togglePlay}
             aria-label={isPaused ? 'Play' : 'Pause'}
@@ -1193,6 +1196,7 @@
 
           <div class="video-player-pill video-player-volume-pill">
             <button
+              type="button"
               class="video-player-mute-btn"
               onclick={() => { if (videoEl) videoEl.muted = !videoEl.muted; }}
               aria-label={isMuted ? 'Unmute' : 'Mute'}
