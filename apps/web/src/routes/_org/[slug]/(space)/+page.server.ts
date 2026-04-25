@@ -256,15 +256,6 @@ export const load: PageServerLoad = async ({
 
   const { org } = await parent();
 
-  // REVALIDATE variant forces browsers to revalidate on every request so a
-  // user who signs in (or buys/subscribes) doesn't get served the anonymous
-  // response cached during an earlier logged-out visit to the same URL.
-  setHeaders(
-    locals.user
-      ? CACHE_HEADERS.PRIVATE
-      : CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE
-  );
-
   // Single catalogue fetch — slice in memory for every section below.
   const catalogueResult = await getPublicContent({
     orgId: org.id,
@@ -276,6 +267,19 @@ export const load: PageServerLoad = async ({
   const sections = buildSections(allContent);
 
   const statsResult = await statsPromise.catch(() => null);
+
+  // Set cache headers only after the critical awaits. If `parent()` throws
+  // (e.g. an auth/branding load failure), the resulting error response
+  // inherits SvelteKit's default no-cache headers instead of poisoning the
+  // CDN with the public-cache policy. REVALIDATE variant forces browsers to
+  // revalidate on every request so a user who signs in (or buys/subscribes)
+  // doesn't get served the anonymous response cached during an earlier
+  // logged-out visit to the same URL.
+  setHeaders(
+    locals.user
+      ? CACHE_HEADERS.PRIVATE
+      : CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE
+  );
 
   // Categories for the hero pill row + sticky pill bar. Derived from
   // `allContent` (already on this request) rather than `stats.categories`

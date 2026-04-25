@@ -12,8 +12,6 @@ import type { PageServerLoad } from './$types';
 const PAGE_LIMIT = 12;
 
 export const load: PageServerLoad = async ({ url, setHeaders, parent }) => {
-  setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
-
   const { org } = await parent();
 
   // Extract pagination from URL
@@ -25,6 +23,12 @@ export const load: PageServerLoad = async ({ url, setHeaders, parent }) => {
     page,
     limit: PAGE_LIMIT,
   });
+
+  // Set the public cache header only on the success path. If any await above
+  // throws, the resulting 4xx/5xx error response inherits SvelteKit's default
+  // (no-cache) headers instead of the public CDN policy — which would otherwise
+  // poison the CDN with the error page for every visitor for `max-age` seconds.
+  setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
 
   return {
     creators: {

@@ -19,8 +19,6 @@ export const load: PageServerLoad = async ({
   cookies,
   setHeaders,
 }) => {
-  setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
-
   // Strip leading @ from username (URL convention: /@alex-creator)
   const username = params.username.replace(/^@/, '');
   const api = createServerApi(platform, cookies);
@@ -103,6 +101,11 @@ export const load: PageServerLoad = async ({
       contentItems = [];
     }
   }
+
+  // Set the public cache header only on the success path. If any await above
+  // throws an unhandled error, SvelteKit's default no-cache headers apply to
+  // the error response instead of poisoning the CDN with a publicly-cached 4xx/5xx.
+  setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
 
   return {
     username,

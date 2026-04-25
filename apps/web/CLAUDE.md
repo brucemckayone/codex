@@ -232,6 +232,37 @@ setHeaders(CACHE_HEADERS.STATIC_PUBLIC);    // Static pages: 1 hour
 setHeaders(CACHE_HEADERS.PRIVATE);          // Auth pages: no-cache (default for studio)
 ```
 
+**Rule (MANDATORY):** `setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC)`,
+`STATIC_PUBLIC`, and `DYNAMIC_PUBLIC_REVALIDATE` MUST be called only AFTER
+every `await` that could throw has succeeded. SvelteKit applies any headers
+set on the load function to error responses too — so `setHeaders(...)`
+followed by a thrown `error(404)` or rejected `await` causes the 4xx/5xx
+response to inherit `Cache-Control: public, max-age=300`, and CDNs cache the
+**error page** for every subsequent visitor for `max-age` seconds (cache
+poisoning).
+
+`CACHE_HEADERS.PRIVATE` is safe to call anywhere — `private, no-cache` is
+exactly what we want for error responses, so eagerly setting it has no
+poisoning risk.
+
+Correct pattern:
+
+```typescript
+export const load: PageServerLoad = async ({ setHeaders, ... }) => {
+  const data = await thingThatCanThrow();
+  // Awaits BEFORE setHeaders. If they throw, the error response inherits
+  // the default no-cache headers — never `public, max-age=...`.
+  setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
+  return { data };
+};
+```
+
+For loaders with multiple return paths (auth-aware pages, content detail),
+hoist the chosen preset into a `successCacheHeaders` const and call
+`setHeaders(successCacheHeaders)` immediately before each `return`. See
+`apps/web/src/routes/_org/[slug]/(space)/content/[contentSlug]/+page.server.ts`
+for the canonical pattern.
+
 ---
 
 ## API Client

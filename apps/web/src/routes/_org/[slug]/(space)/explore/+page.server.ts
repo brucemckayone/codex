@@ -182,7 +182,6 @@ export const load: PageServerLoad = async ({
       );
     }
   } else {
-    setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
     contentResult = await getPublicContent({
       orgId: org.id,
       search: q,
@@ -192,6 +191,10 @@ export const load: PageServerLoad = async ({
       limit: PAGE_LIMIT,
       creatorId: creator?.id,
     });
+    // Set the public cache header only after the fetch succeeds. If
+    // getPublicContent throws (4xx/5xx), the error response inherits the
+    // default no-cache headers instead of poisoning the CDN.
+    setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
   }
 
   return {

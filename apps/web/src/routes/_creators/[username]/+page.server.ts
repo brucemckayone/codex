@@ -19,11 +19,6 @@ export const load: PageServerLoad = async ({
   cookies,
   setHeaders,
 }) => {
-  // Payload includes `user: locals.user` (see return below), so the response
-  // varies by auth. REVALIDATE lets the CDN serve the shared anonymous version
-  // while forcing the browser to revalidate once the user signs in.
-  setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE);
-
   // Strip leading @ from username (URL convention: /@alex-creator)
   const username = params.username.replace(/^@/, '');
   const api = createServerApi(platform, cookies);
@@ -127,6 +122,13 @@ export const load: PageServerLoad = async ({
     }
   }
   const organizations = [...orgMap.values()];
+
+  // Set the public cache header only on the success path. Payload includes
+  // `user: locals.user`, so the response varies by auth — REVALIDATE lets the
+  // CDN serve the shared anonymous version while forcing the browser to
+  // revalidate once the user signs in. Setting AFTER the awaits prevents the
+  // CDN from caching a 4xx/5xx error response with these public-cache headers.
+  setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE);
 
   return {
     username,

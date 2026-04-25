@@ -21,9 +21,6 @@ export const load: PageServerLoad = async ({
   url,
   setHeaders,
 }) => {
-  // Public endpoint — cacheable for all visitors
-  setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
-
   const api = createServerApi(platform, cookies);
 
   const params = new URLSearchParams();
@@ -44,6 +41,10 @@ export const load: PageServerLoad = async ({
 
   try {
     const content = await api.content.getDiscoverContent(params);
+    // Public endpoint — cacheable for all visitors. Setting AFTER the await
+    // ensures a thrown error never inherits public-cache headers (which would
+    // poison the CDN with the error response for max-age seconds).
+    setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
     return {
       content: content ?? EMPTY_CONTENT,
       search,
@@ -53,6 +54,9 @@ export const load: PageServerLoad = async ({
     logger.warn('Failed to load discover content', {
       error: err instanceof Error ? err.message : String(err),
     });
+    // Cached error fallback path — handler swallowed the error, so this is
+    // a successful 200 with `error: true`. Safe to apply public cache here.
+    setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
     return { content: EMPTY_CONTENT, search, error: true };
   }
 };

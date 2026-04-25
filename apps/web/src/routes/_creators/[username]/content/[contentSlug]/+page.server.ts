@@ -78,14 +78,16 @@ export const load: PageServerLoad = async ({
     error(404, 'Content not found');
   }
 
-  // Set cache headers based on auth state. REVALIDATE variant forces browsers
-  // to revalidate on every request so a buyer returning from Stripe doesn't
-  // see the anonymous response cached earlier.
-  setHeaders(
-    locals.user
-      ? CACHE_HEADERS.PRIVATE
-      : CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE
-  );
+  // Cache header is applied ONLY on the success path right before each return.
+  // Setting it eagerly here would cause `error(404)` and unhandled rejections
+  // in awaits below (renderContentBody, loadAccessAndProgress) to inherit
+  // `Cache-Control: public, max-age=...`, poisoning the CDN with the error
+  // response. REVALIDATE variant forces browsers to revalidate on every
+  // request so a buyer returning from Stripe doesn't see the anonymous
+  // response cached earlier.
+  const successCacheHeaders = locals.user
+    ? CACHE_HEADERS.PRIVATE
+    : CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE;
 
   // Body gating: only render the body once access is confirmed. Free content
   // renders immediately (SEO + first-paint). Everything else (followers /
@@ -144,6 +146,7 @@ export const load: PageServerLoad = async ({
   // For unauthenticated visitors — body unlocks for public (free) content
   // so visitors can read it; streaming stays locked (no cookie, no signed URL).
   if (!locals.user) {
+    setHeaders(successCacheHeaders);
     return {
       content,
       contentBodyHtml: publicBodyHtml,
@@ -161,6 +164,7 @@ export const load: PageServerLoad = async ({
   // Authenticated + free content: fast path — body already rendered, stream
   // the access+progress for the player/streaming URL.
   if (isPublic) {
+    setHeaders(successCacheHeaders);
     return {
       content,
       contentBodyHtml: publicBodyHtml,
@@ -208,6 +212,7 @@ export const load: PageServerLoad = async ({
     ? await renderContentBody(content)
     : null;
 
+  setHeaders(successCacheHeaders);
   return {
     content,
     contentBodyHtml: gatedBodyHtml,

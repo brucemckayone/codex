@@ -33,14 +33,16 @@ export const load: PageServerLoad = async ({
   const { org } = parentData;
   const { contentSlug } = params;
 
-  // Public visitors get CDN caching; authenticated responses vary by access state.
-  // REVALIDATE variant forces browsers to revalidate on every request so a buyer
-  // returning from Stripe doesn't see the anonymous response cached earlier.
-  setHeaders(
-    locals.user
-      ? CACHE_HEADERS.PRIVATE
-      : CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE
-  );
+  // Cache header is applied ONLY on the success path right before each return.
+  // Setting it eagerly here would cause `error(404)` and unhandled rejections
+  // in awaits below to inherit `Cache-Control: public, max-age=...`, poisoning
+  // the CDN with the error response. Public visitors get CDN caching;
+  // authenticated responses vary by access state. REVALIDATE variant forces
+  // browsers to revalidate on every request so a buyer returning from Stripe
+  // doesn't see the anonymous response cached earlier.
+  const successCacheHeaders = locals.user
+    ? CACHE_HEADERS.PRIVATE
+    : CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE;
 
   // Fetch content via public endpoint with org.id + slug — 1 API call.
   // The old getContentBySlug() made 2 sequential HTTP calls:
@@ -109,6 +111,7 @@ export const load: PageServerLoad = async ({
   // for public (free) content so visitors can read it. Gated content gets
   // null body (paywall teaser / CTA handles the display).
   if (!locals.user) {
+    setHeaders(successCacheHeaders);
     return {
       content,
       contentBodyHtml: publicBodyHtml,
@@ -124,6 +127,7 @@ export const load: PageServerLoad = async ({
   // For authenticated users on free content: fast path — body is already
   // rendered, stream the access+progress for the player/streaming URL.
   if (isPublic) {
+    setHeaders(successCacheHeaders);
     return {
       content,
       contentBodyHtml: publicBodyHtml,
@@ -170,6 +174,7 @@ export const load: PageServerLoad = async ({
     ? await renderContentBody(content)
     : null;
 
+  setHeaders(successCacheHeaders);
   return {
     content,
     contentBodyHtml: gatedBodyHtml,

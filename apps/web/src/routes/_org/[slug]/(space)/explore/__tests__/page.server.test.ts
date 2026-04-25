@@ -259,6 +259,55 @@ describe('explore +page.server.ts — cache wiring', () => {
     });
   });
 
+  describe('cache-header poisoning regression (Codex-vn49p)', () => {
+    it('sets DYNAMIC_PUBLIC only AFTER getPublicContent resolves on the unauthenticated path', async () => {
+      const callOrder: string[] = [];
+      getPublicContentMock.mockImplementationOnce(async () => {
+        callOrder.push('getPublicContent');
+        return { items: [], pagination: { total: 0 } };
+      });
+
+      const input = baseInput({
+        user: null,
+        url: 'http://lvh.me:3000/explore?sort=newest',
+      });
+      const setHeadersSpy = input.setHeaders as ReturnType<typeof vi.fn>;
+      setHeadersSpy.mockImplementation(() => {
+        callOrder.push('setHeaders');
+      });
+
+      const { load } = await import('../+page.server');
+      await load(input);
+
+      // Ordering matters: a thrown error from getPublicContent must NOT
+      // leave DYNAMIC_PUBLIC headers on the wire (CDN poisoning bug).
+      expect(callOrder).toEqual(['getPublicContent', 'setHeaders']);
+      expect(setHeadersSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          'cache-control': expect.stringContaining('public'),
+        })
+      );
+    });
+
+    it('does NOT call setHeaders when getPublicContent rejects on the unauthenticated path', async () => {
+      getPublicContentMock.mockRejectedValueOnce(new Error('upstream 400'));
+
+      const input = baseInput({
+        user: null,
+        url: 'http://lvh.me:3000/explore?sort=newest',
+      });
+      const setHeadersSpy = input.setHeaders as ReturnType<typeof vi.fn>;
+
+      const { load } = await import('../+page.server');
+      await expect(load(input)).rejects.toThrow('upstream 400');
+
+      // Critical guarantee: an error response must inherit SvelteKit's default
+      // no-cache headers, NEVER `public, max-age=300`. Otherwise the CDN
+      // caches the error page for every subsequent visitor.
+      expect(setHeadersSpy).not.toHaveBeenCalled();
+    });
+  });
+
   describe('architectural regression guards', () => {
     it('does NOT reference the deleted CacheType.ORG_CONTENT_SORTED constant', async () => {
       const cacheKeys = await import('@codex/cache');
