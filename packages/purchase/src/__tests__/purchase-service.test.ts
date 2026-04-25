@@ -171,7 +171,6 @@ describe('PurchaseService Integration', () => {
           title: 'Paid Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/paid-video.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -547,7 +546,6 @@ describe('PurchaseService Integration', () => {
           title: 'Free Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/free-video-2.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -597,7 +595,6 @@ describe('PurchaseService Integration', () => {
           title: 'Draft Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/draft-video.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -647,7 +644,6 @@ describe('PurchaseService Integration', () => {
           title: 'Already Owned Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/already-owned.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -713,7 +709,6 @@ describe('PurchaseService Integration', () => {
           title: 'Revenue Split Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/revenue-split.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -782,7 +777,6 @@ describe('PurchaseService Integration', () => {
           title: 'Idempotent Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/idempotent.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -851,7 +845,6 @@ describe('PurchaseService Integration', () => {
           title: 'Access Grant Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/access-grant.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -910,7 +903,6 @@ describe('PurchaseService Integration', () => {
           title: 'Verify Purchase Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/verify-purchase.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -965,7 +957,6 @@ describe('PurchaseService Integration', () => {
           title: 'No Purchase Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/no-purchase.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -1012,7 +1003,6 @@ describe('PurchaseService Integration', () => {
           title: 'Other Customer Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/other-customer.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -1075,7 +1065,6 @@ describe('PurchaseService Integration', () => {
             title: `History Video ${i}`,
             mediaType: 'video',
             mimeType: 'video/mp4',
-            r2Key: `originals/history-${i}.mp4`,
             fileSizeBytes: 1024 * 1024,
           },
           userId
@@ -1128,9 +1117,9 @@ describe('PurchaseService Integration', () => {
       });
 
       expect(history.items.length).toBeLessThanOrEqual(2);
-      expect(history.page).toBe(1);
-      expect(history.limit).toBe(2);
-      expect(history.total).toBeGreaterThanOrEqual(3);
+      expect(history.pagination.page).toBe(1);
+      expect(history.pagination.limit).toBe(2);
+      expect(history.pagination.total).toBeGreaterThanOrEqual(3);
     });
 
     it('filters by status', async () => {
@@ -1166,7 +1155,6 @@ describe('PurchaseService Integration', () => {
           title: 'Get Purchase Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/get-purchase.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -1226,7 +1214,6 @@ describe('PurchaseService Integration', () => {
           title: 'Forbidden Purchase Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/forbidden-purchase.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -1269,10 +1256,15 @@ describe('PurchaseService Integration', () => {
         }
       );
 
-      // Different user trying to access
+      // Different user trying to access — the service is scoped by both
+      // (purchaseId, customerId) at the query level, so a non-owner gets
+      // NotFound rather than Forbidden. This is intentional hardening:
+      // returning Forbidden would leak the existence of the purchase to
+      // an unrelated user. PurchaseNotFoundError extends NotFoundError
+      // and maps to a 404 response.
       await expect(
         purchaseService.getPurchase(purchase.id, userId)
-      ).rejects.toThrow(ForbiddenError);
+      ).rejects.toThrow(PurchaseNotFoundError);
     });
 
     it('throws PurchaseNotFoundError for missing ID', async () => {
@@ -1423,7 +1415,6 @@ describe('PurchaseService Integration', () => {
           title: 'Refund Test Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/refund-test.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -1486,7 +1477,6 @@ describe('PurchaseService Integration', () => {
           title: 'Idempotent Refund Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/idempotent-refund.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -1546,7 +1536,6 @@ describe('PurchaseService Integration', () => {
           title: 'Refund Metadata Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/refund-metadata.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -1610,7 +1599,6 @@ describe('PurchaseService Integration', () => {
           title: 'Access Revoke Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/access-revoke.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -1679,7 +1667,6 @@ describe('PurchaseService Integration', () => {
           title: 'Atomic Refund Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/atomic-refund.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -1761,7 +1748,6 @@ describe('PurchaseService Integration', () => {
           title: 'Dispute Test Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/dispute-test.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -1842,7 +1828,6 @@ describe('PurchaseService Integration', () => {
           title: 'Idempotent Dispute Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/idempotent-dispute.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         userId
@@ -1956,7 +1941,6 @@ describe('PurchaseService Integration', () => {
           title: 'Verify Test Video',
           mediaType: 'video',
           mimeType: 'video/mp4',
-          r2Key: 'originals/verify-test.mp4',
           fileSizeBytes: 1024 * 1024,
         },
         verifyUserId

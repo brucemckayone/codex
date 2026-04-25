@@ -540,11 +540,19 @@ export class PurchaseService extends BaseService {
     customerId: string
   ): Promise<boolean> {
     try {
+      // A disputed purchase keeps `status='completed'` by design (Stripe's
+      // semantics — a chargeback doesn't refund until the dispute resolves)
+      // so a status-only filter would still grant access during the
+      // dispute window. processDispute soft-deletes the contentAccess
+      // row but a caller using verifyPurchase directly would miss that.
+      // Filter `disputedAt IS NULL` here to keep verifyPurchase aligned
+      // with the access-revocation invariant.
       const purchase = await this.db.query.purchases.findFirst({
         where: and(
           eq(purchases.contentId, contentId),
           eq(purchases.customerId, customerId),
-          eq(purchases.status, PURCHASE_STATUS.COMPLETED)
+          eq(purchases.status, PURCHASE_STATUS.COMPLETED),
+          isNull(purchases.disputedAt)
         ),
       });
 
