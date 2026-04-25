@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "last_updated": "2026-04-25",
+  "patterns": {
+    "packages:throw-raw-error": {
+      "hits": 1,
+      "iters": ["iter-001"],
+      "first_seen": "2026-04-25",
+      "last_seen": "2026-04-25",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-ttavz.1"],
+      "severity": "minor"
+    },
+    "packages:identifier-no-shape-validation": {
+      "hits": 1,
+      "iters": ["iter-001"],
+      "first_seen": "2026-04-25",
+      "last_seen": "2026-04-25",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-ttavz.2"],
+      "severity": "minor",
+      "note": "NEW fingerprint not present in reference 07 §7. Add to anti-pattern table if it recurs."
+    },
+    "denoise:doc-rot:07-domain-packages:row1": {
+      "hits": 1,
+      "iters": ["iter-001"],
+      "first_seen": "2026-04-25",
+      "last_seen": "2026-04-25",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-ttavz.3"],
+      "severity": "minor",
+      "note": "Doc-rot: assertNotFound cited but does not exist."
+    },
+    "denoise:doc-rot:07-domain-packages:row3": {
+      "hits": 1,
+      "iters": ["iter-001"],
+      "first_seen": "2026-04-25",
+      "last_seen": "2026-04-25",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-ttavz.4"],
+      "severity": "minor",
+      "note": "Doc-rot: BusinessRuleError/RateLimitError/InternalError cited but actual classes are BusinessLogicError/InternalServiceError."
+    },
+    "denoise:doc-rot:01-security-audit:row9": {
+      "hits": 1,
+      "iters": ["iter-001"],
+      "first_seen": "2026-04-25",
+      "last_seen": "2026-04-25",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-ttavz.5"],
+      "severity": "minor",
+      "note": "Doc-rot: obs.redact() cited but actual API is redactSensitiveData() + auto-redaction in obs.* methods."
+    },
+    "denoise:doc-rot:01-security-audit:row6": {
+      "hits": 1,
+      "iters": ["iter-001"],
+      "first_seen": "2026-04-25",
+      "last_seen": "2026-04-25",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-ttavz.6"],
+      "severity": "minor",
+      "note": "Doc-rot: workerAuth.sign() cited but actual caller-side API is workerFetch / generateWorkerSignature."
+    }
+  }
+}
