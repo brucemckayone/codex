@@ -2,6 +2,50 @@
   "schema_version": 1,
   "last_updated": "2026-04-26",
   "patterns": {
+    "web:auth-remote-broken-endpoint": {
+      "hits": 1,
+      "iters": ["iter-003"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-ttavz.12"],
+      "severity": "blocker",
+      "note": "BLOCKER (feature-availability, not security exception). Forgot/forget-password typo silently breaks reset via the remote function codepath. Entangles with web:auth-form-orphan-rpc-surface — fix together."
+    },
+    "security:missing-csp": {
+      "hits": 1,
+      "iters": ["iter-003"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": true,
+      "rule_id": "R10 (queued — apply in iter-004's prep)",
+      "beads": ["Codex-ttavz.13"],
+      "severity": "blocker",
+      "note": "BLOCKER. R7 single-hit security exception applied. apps/web ships with no CSP header at all — strictly worse than ref 01 §8 row 8 (security:csp-unsafe-inline). Iter-004 first action: add R10 to SKILL.md §1."
+    },
+    "security:missing-hsts": {
+      "hits": 1,
+      "iters": ["iter-003"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-ttavz.14"],
+      "severity": "major",
+      "note": "Severity major (not blocker) so single-hit exception does not fire. Track for recurrence."
+    },
+    "web:auth-form-orphan-rpc-surface": {
+      "hits": 1,
+      "iters": ["iter-003"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-ttavz.15"],
+      "severity": "major",
+      "note": "NEW fingerprint. Add to ref 05 §9 if recurs. Entangles with web:auth-remote-broken-endpoint."
+    },
     "packages:throw-raw-error": {
       "hits": 1,
       "iters": ["iter-001"],
@@ -90,15 +134,15 @@
       "note": "NEW fingerprint not in reference 01 §8 anti-pattern table. Suggest adding as row 13 if it recurs."
     },
     "workers:waituntil-no-catch": {
-      "hits": 1,
-      "iters": ["iter-002"],
+      "hits": 2,
+      "iters": ["iter-002", "iter-003"],
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": false,
       "rule_id": null,
-      "beads": ["Codex-ttavz.9"],
+      "beads": ["Codex-ttavz.9", "Codex-ttavz.16"],
       "severity": "minor",
-      "note": "Already in reference 06 §9 row 4. First sighting in cycle data — recurrence increment baseline."
+      "note": "RECURRENCE #2 in trailing 6 cycles. iter-002 F3 (workers/ecom-api/handlers/checkout.ts) + iter-003 F5 (apps/web/src/lib/server/brand-cache.ts). One more sighting in iter-004-006 → R7 standard 3-hit promotion fires."
     },
     "denoise:doc-rot:06-domain-workers:row11": {
       "hits": 1,
