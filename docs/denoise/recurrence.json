@@ -2,6 +2,25 @@
   "schema_version": 1,
   "last_updated": "2026-04-26",
   "patterns": {
+    "types:type-duplicate-cross-package": {
+      "hits": 1,
+      "iters": ["iter-004"],
+      "cycle_density": { "iter-004": 6 },
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": [
+        "Codex-lqvw4.1",
+        "Codex-lqvw4.2",
+        "Codex-lqvw4.3",
+        "Codex-lqvw4.4",
+        "Codex-lqvw4.5",
+        "Codex-lqvw4.6"
+      ],
+      "severity": "blocker (F4 SessionData/UserData) + major (F1 Database, F2 RevenueSplit) + minor (F3, F5, F6)",
+      "note": "FIRST CYCLE finding. 6 distinct instances in single cycle (cycle_density=6) — strong endemic-pattern signal. Standard 3-hit threshold applies (single-hit security exception does not — phase=types). If iter-005 surfaces another instance, dispatching skill should consider 2-hit early promotion given density."
+    },
     "web:auth-remote-broken-endpoint": {
       "hits": 1,
       "iters": ["iter-003"],
