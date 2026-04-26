@@ -3,8 +3,8 @@
 	import { page } from '$app/state';
 	import { fade, fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
-	import { AUTH_ROLES } from '@codex/constants';
-	import { buildCreatorsUrl, buildPlatformUrl, extractSubdomain } from '$lib/utils/subdomain';
+	import { buildPlatformUrl } from '$lib/utils/subdomain';
+	import { getInitials, useStudioAccess } from '$lib/utils/studio-access.svelte';
 	import { submitFormPost } from '$lib/utils/navigation';
 	import {
 		LogInIcon,
@@ -29,25 +29,7 @@
 
 	let { open = $bindable(false), variant, user, org }: Props = $props();
 
-	// ── Auth logic (reused from UserMenu) ─────────────────────
-	const STUDIO_ROLES = new Set([AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN, AUTH_ROLES.PLATFORM_OWNER]);
-	const canAccessStudio = $derived(!!user?.role && STUDIO_ROLES.has(user.role));
-
-	const currentSubdomain = $derived(extractSubdomain(page.url.hostname));
-	const studioHref = $derived(
-		currentSubdomain && currentSubdomain !== 'creators' && currentSubdomain !== 'www'
-			? '/studio'
-			: buildCreatorsUrl(page.url, '/studio')
-	);
-
-	function getInitials(name: string): string {
-		return name
-			.split(' ')
-			.map((p) => p[0])
-			.slice(0, 2)
-			.join('')
-			.toUpperCase();
-	}
+	const studioAccess = useStudioAccess(() => ({ user, url: page.url }));
 
 	// ── Close on route change ─────────────────────────────────
 	// Track pathname separately to avoid closing when `open` toggles
@@ -150,9 +132,9 @@
 				<TagIcon size={20} />
 				<span>{m.sidebar_pricing()}</span>
 			</a>
-			{#if canAccessStudio}
+			{#if studioAccess.canAccessStudio}
 				<a
-					href={studioHref}
+					href={studioAccess.studioHref}
 					class="sheet__link"
 					onclick={() => {
 						open = false;

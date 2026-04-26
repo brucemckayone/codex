@@ -35,7 +35,7 @@ import {
   invalidateContentAccess,
   updateContentSchema,
 } from '@codex/content';
-import { createDbClient, eq, schema } from '@codex/database';
+import { createDbClient } from '@codex/database';
 import {
   MAX_IMAGE_SIZE_BYTES,
   SUPPORTED_IMAGE_MIME_TYPES,
@@ -43,6 +43,7 @@ import {
 import type { CheckSlugResponse, HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
 import {
+  invalidateOrgSlugCache,
   multipartProcedure,
   PaginatedResult,
   procedure,
@@ -69,26 +70,14 @@ function bumpOrgContentVersion(
 ): void {
   if (!organizationId || !env.CACHE_KV) return;
   const cache = new VersionedCache({ kv: env.CACHE_KV });
+  const db = createDbClient(env);
   executionCtx.waitUntil(
     Promise.all([
       // Invalidate org content collection version
       cache.invalidate(CacheType.COLLECTION_ORG_CONTENT(organizationId)),
-      // Invalidate slug-keyed cache (stats, creators, public info)
-      // Resolve slug from orgId — non-critical, fails gracefully
-      (async () => {
-        try {
-          const db = createDbClient(env);
-          const org = await db.query.organizations.findFirst({
-            where: eq(schema.organizations.id, organizationId),
-            columns: { slug: true },
-          });
-          if (org?.slug) {
-            await cache.invalidate(org.slug);
-          }
-        } catch {
-          // Non-critical — slug cache expires via TTL
-        }
-      })(),
+      // Invalidate slug-keyed cache (stats, creators, public info) — shared
+      // helper resolves orgId → slug and swallows transient failures.
+      invalidateOrgSlugCache({ db, cache, orgId: organizationId, logger: obs }),
     ]).catch((err: unknown) => {
       obs?.warn('Cache invalidation failed', {
         error: err instanceof Error ? err.message : String(err),

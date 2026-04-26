@@ -36,27 +36,31 @@
  *
  * `it.skip` while the duplication stands.
  */
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+// Vite `?raw` baked-at-build-time imports — works under both Node and the
+// workerd runtime used by @cloudflare/vitest-pool-workers (which has no
+// node:fs).
 import { describe, expect, it } from 'vitest';
+import checkoutSrc from '../../../../ecom-api/src/handlers/checkout.ts?raw';
+import followersSrc from '../../routes/followers.ts?raw';
+import membersSrc from '../../routes/members.ts?raw';
 
-const PROJECT_ROOT = join(__dirname, '..', '..', '..', '..', '..');
-
-const SITES = [
-  'workers/organization-api/src/routes/members.ts',
-  'workers/organization-api/src/routes/followers.ts',
-  'workers/ecom-api/src/handlers/checkout.ts',
+const SITES: Array<{ path: string; src: string }> = [
+  { path: 'workers/organization-api/src/routes/members.ts', src: membersSrc },
+  {
+    path: 'workers/organization-api/src/routes/followers.ts',
+    src: followersSrc,
+  },
+  { path: 'workers/ecom-api/src/handlers/checkout.ts', src: checkoutSrc },
 ];
 
-describe.skip('iter-011 F1 — bumpUserLibrary helper duplicated', () => {
+describe('iter-011 F1 — bumpUserLibrary helper duplicated', () => {
   it('declares `function bumpUserLibrary` at most once across worker route files', () => {
     const declarations: Array<{ path: string; line: number }> = [];
-    for (const rel of SITES) {
-      const src = readFileSync(join(PROJECT_ROOT, rel), 'utf8');
+    for (const { path, src } of SITES) {
       const lines = src.split('\n');
       lines.forEach((ln, i) => {
         if (/function bumpUserLibrary\b/.test(ln)) {
-          declarations.push({ path: rel, line: i + 1 });
+          declarations.push({ path, line: i + 1 });
         }
       });
     }
@@ -69,14 +73,13 @@ describe.skip('iter-011 F1 — bumpUserLibrary helper duplicated', () => {
   it('cache.invalidate(CacheType.COLLECTION_USER_LIBRARY(...)) appears in at most one worker file', () => {
     // After fix the shared helper is the only caller; route files import it.
     const offenders: Array<{ path: string; lines: number[] }> = [];
-    for (const rel of SITES) {
-      const src = readFileSync(join(PROJECT_ROOT, rel), 'utf8');
+    for (const { path, src } of SITES) {
       const hits = Array.from(
         src.matchAll(
           /cache\.invalidate\(\s*CacheType\.COLLECTION_USER_LIBRARY/g
         )
       ).map((m) => src.slice(0, m.index ?? 0).split('\n').length);
-      if (hits.length > 0) offenders.push({ path: rel, lines: hits });
+      if (hits.length > 0) offenders.push({ path, lines: hits });
     }
     // Currently: 3 sites (members.ts, followers.ts, checkout.ts).
     // Post-fix: 0 sites in workers/ (helper lives in @codex/cache).

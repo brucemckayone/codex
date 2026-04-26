@@ -4,7 +4,7 @@
   import type { NavLink } from '$lib/config/navigation';
   import { page } from '$app/state';
   import { submitFormPost } from '$lib/utils/navigation';
-  import { AUTH_ROLES } from '@codex/constants';
+  import { hasStudioRole } from '$lib/utils/studio-access.svelte';
   import { XIcon } from '$lib/components/ui/Icon';
   import ThemeToggle from '$lib/components/ui/ThemeToggle/ThemeToggle.svelte';
   import * as m from '$paraglide/messages';
@@ -17,8 +17,7 @@
 
   const { variant, user, links, actions }: Props = $props();
 
-  const STUDIO_ROLES = new Set([AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN, AUTH_ROLES.PLATFORM_OWNER]);
-  const canAccessStudio = $derived(!!user?.role && STUDIO_ROLES.has(user.role));
+  const canAccessStudio = $derived(hasStudioRole(user));
 
   let open = $state(false);
 

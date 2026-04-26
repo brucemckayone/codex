@@ -12,6 +12,13 @@ export {
 } from './auth-middleware';
 // Body parsing middleware
 export { createBodyParsingMiddleware } from './body-parsing-middleware';
+// Cache-fanout helpers (R14: cache helpers belong in @codex/cache OR
+// @codex/worker-utils — DB-touching ones live here so @codex/cache stays
+// thin/standalone)
+export {
+  type InvalidateOrgSlugCacheArgs,
+  invalidateOrgSlugCache,
+} from './cache-fanout';
 // Email sending helper (worker-to-worker)
 export {
   type SendEmailToWorkerParams,

@@ -12,6 +12,12 @@ export {
   CacheType,
 } from './cache-keys';
 export type {
+  InvalidateUserLibraryArgs,
+  InvalidationLogger,
+  WaitUntilFn,
+} from './helpers/invalidate';
+export { invalidateUserLibrary } from './helpers/invalidate';
+export type {
   CacheEntry,
   CacheOptions,
   CacheResult,

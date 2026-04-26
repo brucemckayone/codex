@@ -13,8 +13,11 @@
  * - DELETE /:userId         - Remove member
  */
 
-import { CacheType, VersionedCache } from '@codex/cache';
-import { createDbClient, eq, schema } from '@codex/database';
+import {
+  invalidateUserLibrary as invalidateUserLibraryShared,
+  VersionedCache,
+} from '@codex/cache';
+import { createDbClient } from '@codex/database';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   inviteMemberSchema,
@@ -24,6 +27,8 @@ import {
   uuidSchema,
 } from '@codex/validation';
 import {
+  invalidateOrgSlugCache as invalidateOrgSlugCacheShared,
+  membershipCacheKey,
   PaginatedResult,
   procedure,
   sendEmailToWorker,
@@ -31,110 +36,53 @@ import {
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-/** Build membership cache key — matches org-helpers.ts memberCacheKey() */
-function memberCacheKey(orgId: string, userId: string): string {
-  return `membership:${orgId}:${userId}`;
+/** Minimal logger interface to avoid direct @codex/observability dependency */
+interface Logger {
+  warn(message: string, metadata?: Record<string, unknown>): void;
 }
 
-/** Context shape shared by write-through helpers */
+/** Context shape shared by cache-invalidation helpers */
 interface CacheCtx {
-  env: { CACHE_KV?: unknown };
+  env: HonoEnv['Bindings'];
   executionCtx: { waitUntil(p: Promise<unknown>): void };
 }
 
 /**
- * Write-through: write fresh membership data to KV after a mutation.
- * No TTL — entry persists until the next mutation overwrites or deletes it.
+ * Invalidate the per-user membership cache after a mutation.
+ *
+ * Bumps the {@link VersionedCache} version key for `${orgId}:${userId}` so
+ * the next `checkOrganizationMembership()` call falls through to Neon.
+ * Fire-and-forget via `waitUntil` — cache invalidation never blocks the
+ * mutation response and never throws (graceful degradation).
  */
-function writeMembershipCache(
+function invalidateMembershipCache(
   ctx: CacheCtx,
   orgId: string,
-  userId: string,
-  role: string
+  userId: string
 ) {
   if (!ctx.env.CACHE_KV) return;
-  const kv = ctx.env
-    .CACHE_KV as import('@cloudflare/workers-types').KVNamespace;
-  const key = memberCacheKey(orgId, userId);
-  ctx.executionCtx.waitUntil(
-    kv
-      .put(
-        key,
-        JSON.stringify({
-          role,
-          status: 'active',
-          joinedAt: new Date().toISOString(),
-        })
-      )
-      .catch(() => {})
-  );
+  const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+  const cacheId = membershipCacheKey(orgId, userId);
+  ctx.executionCtx.waitUntil(cache.invalidate(cacheId).catch(() => {}));
 }
 
 /**
- * Delete membership cache entry (on member removal).
- */
-function deleteMembershipCache(ctx: CacheCtx, orgId: string, userId: string) {
-  if (!ctx.env.CACHE_KV) return;
-  const kv = ctx.env
-    .CACHE_KV as import('@cloudflare/workers-types').KVNamespace;
-  ctx.executionCtx.waitUntil(
-    kv.delete(memberCacheKey(orgId, userId)).catch(() => {})
-  );
-}
-
-/**
- * Bump one user's library KV version key (Codex-c01do).
+ * Invalidate slug-keyed cache (public org info, stats, creators) after
+ * membership changes. Resolves slug from orgId in fire-and-forget fashion.
  *
- * Membership mutations (invite/update-role/remove) can change what a user
- * sees in their library:
- *   - owner/admin/creator role grants `team` content access
- *   - role changes can grant/revoke management-content access
- *   - removing a member revokes all management-conditional content
- *
- * Fires once per affected user, fire-and-forget via waitUntil. Mirrors
- * the shape of `invalidateOrgMembership()` in `@codex/content` without
- * pulling the content package as a dep of organization-api.
+ * R14: thin wrapper over the shared `@codex/cache` helper — preserves the
+ * waitUntil dispatch and per-task swallow ergonomics expected by callers.
  */
-function bumpUserLibrary(ctx: CacheCtx, userId: string): void {
-  if (!ctx.env.CACHE_KV || !userId) return;
-  const cache = new VersionedCache({
-    kv: ctx.env.CACHE_KV as import('@cloudflare/workers-types').KVNamespace,
-  });
-  ctx.executionCtx.waitUntil(
-    cache.invalidate(CacheType.COLLECTION_USER_LIBRARY(userId)).catch(() => {})
-  );
-}
-
-/**
- * Invalidate slug-keyed cache (public org info, stats, creators) after membership changes.
- * Resolves slug from orgId in fire-and-forget fashion.
- */
-function invalidateOrgSlugCache(ctx: {
-  env: { CACHE_KV?: unknown; ENVIRONMENT?: string };
-  executionCtx: { waitUntil(p: Promise<unknown>): void };
-  input: { params: { id: string } };
-}) {
+function dispatchOrgSlugInvalidation(
+  ctx: CacheCtx,
+  orgId: string,
+  obs?: Logger
+): void {
   if (!ctx.env.CACHE_KV) return;
-  const cache = new VersionedCache({
-    kv: ctx.env.CACHE_KV as import('@cloudflare/workers-types').KVNamespace,
-  });
+  const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+  const db = createDbClient(ctx.env);
   ctx.executionCtx.waitUntil(
-    (async () => {
-      try {
-        const db = createDbClient(
-          ctx.env as Parameters<typeof createDbClient>[0]
-        );
-        const org = await db.query.organizations.findFirst({
-          where: eq(schema.organizations.id, ctx.input.params.id),
-          columns: { slug: true },
-        });
-        if (org?.slug) {
-          await cache.invalidate(org.slug);
-        }
-      } catch {
-        // Non-critical — slug cache expires via TTL
-      }
-    })()
+    invalidateOrgSlugCacheShared({ db, cache, orgId, logger: obs })
   );
 }
 
@@ -190,17 +138,19 @@ app.post(
         ctx.user.id
       );
 
-      // Write-through membership cache + invalidate public creators
-      writeMembershipCache(
-        ctx,
-        ctx.input.params.id,
-        result.userId,
-        ctx.input.body.role
-      );
-      invalidateOrgSlugCache(ctx);
+      // Bust the per-user membership cache so the new member's next
+      // `requireOrgMembership` check sees them, then invalidate public
+      // org caches (creators / stats) that reflect membership.
+      invalidateMembershipCache(ctx, ctx.input.params.id, result.userId);
+      dispatchOrgSlugInvalidation(ctx, ctx.input.params.id, ctx.obs);
       // Invalidate invited user's library cache (Codex-c01do) — gaining a
       // management role unlocks team-only content in their library UI.
-      bumpUserLibrary(ctx, result.userId);
+      invalidateUserLibraryShared({
+        kv: ctx.env.CACHE_KV,
+        waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
+        userId: result.userId,
+        logger: ctx.obs,
+      });
 
       // Send invitation email (fire-and-forget)
       sendEmailToWorker(ctx.env, ctx.executionCtx, {
@@ -243,16 +193,22 @@ app.patch(
         ctx.input.params.userId,
         ctx.input.body.role
       );
-      writeMembershipCache(
+      // Bust per-user membership cache — role changes take effect on the
+      // next `requireOrgMembership` check (no longer waits up to 5 min).
+      invalidateMembershipCache(
         ctx,
         ctx.input.params.id,
-        ctx.input.params.userId,
-        ctx.input.body.role
+        ctx.input.params.userId
       );
-      invalidateOrgSlugCache(ctx);
+      dispatchOrgSlugInvalidation(ctx, ctx.input.params.id, ctx.obs);
       // Invalidate the role-target user's library cache (Codex-c01do) — role
       // changes toggle management-content access.
-      bumpUserLibrary(ctx, ctx.input.params.userId);
+      invalidateUserLibraryShared({
+        kv: ctx.env.CACHE_KV,
+        waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
+        userId: ctx.input.params.userId,
+        logger: ctx.obs,
+      });
       return result;
     },
   })
@@ -278,11 +234,22 @@ app.delete(
         ctx.input.params.id,
         ctx.input.params.userId
       );
-      deleteMembershipCache(ctx, ctx.input.params.id, ctx.input.params.userId);
-      invalidateOrgSlugCache(ctx);
+      // Bust per-user membership cache — the removed user's next
+      // `requireOrgMembership` check refetches and sees `null`, denying access.
+      invalidateMembershipCache(
+        ctx,
+        ctx.input.params.id,
+        ctx.input.params.userId
+      );
+      dispatchOrgSlugInvalidation(ctx, ctx.input.params.id, ctx.obs);
       // Invalidate the removed user's library cache (Codex-c01do) — they
       // lose all management-conditional content access.
-      bumpUserLibrary(ctx, ctx.input.params.userId);
+      invalidateUserLibraryShared({
+        kv: ctx.env.CACHE_KV,
+        waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
+        userId: ctx.input.params.userId,
+        logger: ctx.obs,
+      });
       return null;
     },
   })

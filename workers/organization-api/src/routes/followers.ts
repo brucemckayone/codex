@@ -12,34 +12,12 @@
  * - GET    /count  - Get follower count (public)
  */
 
-import { CacheType, VersionedCache } from '@codex/cache';
+import { invalidateUserLibrary } from '@codex/cache';
 import type { HonoEnv } from '@codex/shared-types';
 import { uuidSchema } from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
-
-/**
- * Bump one user's library KV version key (Codex-c01do).
- *
- * Follow/unfollow toggles access to `followers`-gated content on the org.
- * Library UI needs to reflect the change immediately — without this bump,
- * the follower-gated items stay with stale access flags until the next
- * visibility-change staleness roundtrip.
- *
- * Fire-and-forget via waitUntil.
- */
-function bumpUserLibrary(
-  env: HonoEnv['Bindings'],
-  executionCtx: ExecutionContext,
-  userId: string
-): void {
-  if (!env.CACHE_KV || !userId) return;
-  const cache = new VersionedCache({ kv: env.CACHE_KV });
-  executionCtx.waitUntil(
-    cache.invalidate(CacheType.COLLECTION_USER_LIBRARY(userId)).catch(() => {})
-  );
-}
 
 const app = new Hono<HonoEnv>();
 
@@ -63,7 +41,12 @@ app.post(
       // Codex-c01do — follow unlocks follower-gated content; bump the
       // actor's library cache so their UI reflects access changes on next
       // load.
-      bumpUserLibrary(ctx.env, ctx.executionCtx, ctx.user.id);
+      invalidateUserLibrary({
+        kv: ctx.env.CACHE_KV,
+        waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
+        userId: ctx.user.id,
+        logger: ctx.obs,
+      });
       return null;
     },
   })
@@ -87,7 +70,12 @@ app.delete(
       );
       // Codex-c01do — unfollow revokes follower-gated access; bump the
       // actor's library cache so their UI reflects the change.
-      bumpUserLibrary(ctx.env, ctx.executionCtx, ctx.user.id);
+      invalidateUserLibrary({
+        kv: ctx.env.CACHE_KV,
+        waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
+        userId: ctx.user.id,
+        logger: ctx.obs,
+      });
       return null;
     },
   })

@@ -2,8 +2,8 @@
   import type { LayoutUser } from '$lib/types';
   import { page } from '$app/state';
   import { submitFormPost } from '$lib/utils/navigation';
-  import { AUTH_ROLES } from '@codex/constants';
-  import { buildCreatorsUrl, buildPlatformUrl, extractSubdomain } from '$lib/utils/subdomain';
+  import { buildPlatformUrl } from '$lib/utils/subdomain';
+  import { getInitials, useStudioAccess } from '$lib/utils/studio-access.svelte';
   import { ChevronDownIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
   import Avatar from '$lib/components/ui/Avatar/Avatar.svelte';
@@ -21,26 +21,7 @@
 
   const { user }: Props = $props();
 
-  const STUDIO_ROLES = new Set([AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN, AUTH_ROLES.PLATFORM_OWNER]);
-  const canAccessStudio = $derived(!!user?.role && STUDIO_ROLES.has(user.role));
-
-  // On org subdomains, Studio link should go to the current org's studio (root-relative)
-  // On platform/creators, go to the creators studio
-  const currentSubdomain = $derived(extractSubdomain(page.url.hostname));
-  const studioHref = $derived(
-    currentSubdomain && currentSubdomain !== 'creators' && currentSubdomain !== 'www'
-      ? '/studio'
-      : buildCreatorsUrl(page.url, '/studio')
-  );
-
-  function getInitials(name: string): string {
-    return name
-      .split(' ')
-      .map((part) => part[0])
-      .slice(0, 2)
-      .join('')
-      .toUpperCase();
-  }
+  const studioAccess = useStudioAccess(() => ({ user, url: page.url }));
 </script>
 
 {#if user}
@@ -67,8 +48,8 @@
       <a href={buildPlatformUrl(page.url, '/library')}>
         <DropdownMenuItem>{m.nav_library()}</DropdownMenuItem>
       </a>
-      {#if canAccessStudio}
-        <a href={studioHref}>
+      {#if studioAccess.canAccessStudio}
+        <a href={studioAccess.studioHref}>
           <DropdownMenuItem>{m.nav_studio()}</DropdownMenuItem>
         </a>
       {/if}

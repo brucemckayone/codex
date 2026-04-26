@@ -41,14 +41,14 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const repoRoot = resolve(__dirname, '../../../../../..');
+const repoRoot = resolve(__dirname, '../../../../..');
 const sites = [
   'apps/web/src/lib/components/layout/Header/UserMenu.svelte',
   'apps/web/src/lib/components/layout/Header/MobileNav.svelte',
   'apps/web/src/lib/components/layout/MobileNav/MobileBottomSheet.svelte',
 ];
 
-describe.skip('iter-012 F3 — STUDIO_ROLES + canAccessStudio + studioHref logic should live in one place', () => {
+describe('iter-012 F3 — STUDIO_ROLES + canAccessStudio + studioHref logic should live in one place', () => {
   it('STUDIO_ROLES Set construction appears in at most one source file', () => {
     const matches = sites.filter((rel) => {
       const src = readFileSync(resolve(repoRoot, rel), 'utf8');

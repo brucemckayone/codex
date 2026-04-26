@@ -29,24 +29,24 @@
  *
  * `it.skip` while the duplication stands.
  */
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+// Vite `?raw` baked-at-build-time imports — works under both Node and the
+// workerd runtime used by @cloudflare/vitest-pool-workers (which has no
+// node:fs).
 import { describe, expect, it } from 'vitest';
+import contentSrc from '../../../../content-api/src/routes/content.ts?raw';
+import membersSrc from '../../routes/members.ts?raw';
 
-const PROJECT_ROOT = join(__dirname, '..', '..', '..', '..', '..');
-
-const SITES = [
-  'workers/content-api/src/routes/content.ts',
-  'workers/organization-api/src/routes/members.ts',
+const SITES: Array<{ path: string; src: string }> = [
+  { path: 'workers/content-api/src/routes/content.ts', src: contentSrc },
+  { path: 'workers/organization-api/src/routes/members.ts', src: membersSrc },
 ];
 
-describe.skip('iter-011 F2 — slug-resolve-then-invalidate duplication', () => {
+describe('iter-011 F2 — slug-resolve-then-invalidate duplication', () => {
   it('canonical "findFirst({where: eq(...organizations.id), columns: {slug: true}})" appears at most once across worker route files', () => {
     const offenders: Array<{ path: string; line: number; snippet: string }> =
       [];
 
-    for (const rel of SITES) {
-      const src = readFileSync(join(PROJECT_ROOT, rel), 'utf8');
+    for (const { path, src } of SITES) {
       // Look for the exact slug-only column projection inside an
       // organizations.findFirst — it's the unambiguous fingerprint.
       const re =
@@ -55,7 +55,7 @@ describe.skip('iter-011 F2 — slug-resolve-then-invalidate duplication', () => 
       for (const m of matches) {
         const line = src.slice(0, m.index ?? 0).split('\n').length;
         offenders.push({
-          path: rel,
+          path,
           line,
           snippet: m[0].slice(0, 80),
         });

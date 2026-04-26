@@ -24,6 +24,7 @@
     "@codex/observability": "workspace:*"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250102.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.6.3",
     "vite-plugin-dts": "^4.5.4",

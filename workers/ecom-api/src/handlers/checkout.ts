@@ -16,7 +16,7 @@
  * - Transaction safety ensures purchase + access grant atomicity
  */
 
-import { CacheType, VersionedCache } from '@codex/cache';
+import { invalidateUserLibrary } from '@codex/cache';
 import { CURRENCY } from '@codex/constants';
 import { createPerRequestDbClient } from '@codex/database';
 import { PurchaseService } from '@codex/purchase';
@@ -163,14 +163,15 @@ export async function handleCheckoutCompleted(
       amountCents: amountTotal,
     });
 
-    // Bump user library version so other devices detect the new purchase on next load
-    if (c.env.CACHE_KV) {
-      const cache = new VersionedCache({ kv: c.env.CACHE_KV });
-      c.executionCtx.waitUntil(
-        cache.invalidate(
-          CacheType.COLLECTION_USER_LIBRARY(validatedMetadata.customerId)
-        )
-      );
+    // Bump user library version so other devices detect the new purchase on next load.
+    // Guard against a missing executionCtx (mock contexts in tests omit it).
+    if (c.executionCtx) {
+      invalidateUserLibrary({
+        kv: c.env.CACHE_KV,
+        waitUntil: c.executionCtx.waitUntil.bind(c.executionCtx),
+        userId: validatedMetadata.customerId,
+        logger: obs,
+      });
     }
 
     // Send purchase receipt email (fire-and-forget)
