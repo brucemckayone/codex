@@ -39,7 +39,7 @@ _None._
 | security × workers | iter-014 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
 | security × apps/web | iter-015 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
 | types × packages | iter-016 (2026-04-26) | 6 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
-| types × workers | iter-005 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn since iter-005) |
+| types × workers | iter-017 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
 | types × apps/web | iter-006 (2026-04-26) | 8 | 0 | 2026-04-26 | skipped (no churn since iter-006) |
 | performance × packages | iter-007 (2026-04-26) | 8 | 0 | 2026-04-26 | skipped (no churn since iter-007) |
 | performance × workers | iter-008 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn since iter-008) |
@@ -132,6 +132,7 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-014 | 0 | 0 | 0% | clean cycle (no churn, security × workers) |
 | iter-015 | 0 | 0 | 0% | clean cycle (no churn, security × apps/web) — security row complete in Round 2 |
 | iter-016 | 0 | 0 | 0% | clean cycle (no churn, types × packages) — types row begins |
+| iter-017 | 0 | 0 | 0% | clean cycle (no churn, types × workers) |
 
 > R8 fires when rate > 15% in any cycle. The next cycle's prep includes a meta-warning and a justification audit of every testability-bug.
 
@@ -157,6 +158,7 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-014 | security × workers | 2026-04-26 | 0 (CLEAN) | — | Second Round 2 cycle. Zero production code churn in workers/*/src/** since iter-002 baseline. Stop-criterion countdown 1/3 |
 | iter-015 | security × apps/web | 2026-04-26 | 0 (CLEAN) | — | Third Round 2 cycle. Zero production code churn in apps/web/src/** since iter-003 baseline. **Security row first pass complete** — all 3 security cells at 1/3. Stop-criterion countdown 1/3 |
 | iter-016 | types × packages | 2026-04-26 | 0 (CLEAN) | — | Fourth Round 2 cycle. Zero production code churn in packages/*/src/** since iter-004 baseline. **Types row begins.** Stop-criterion countdown 1/3 |
+| iter-017 | types × workers | 2026-04-26 | 0 (CLEAN) | — | Fifth Round 2 cycle. Zero churn in workers/*/src/** since iter-005. Stop-criterion 1/3 |
 
 ---
 
