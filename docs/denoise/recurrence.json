@@ -108,6 +108,63 @@
       "severity": "minor",
       "note": "NEW fingerprint. Single site (notifications/renderer.ts). Track for recurrence."
     },
+    "simplification:duplicate-utility-helper": {
+      "hits": 1,
+      "iters": ["iter-009"],
+      "cycle_density": { "iter-009": 2 },
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-mqyql.1", "Codex-mqyql.5"],
+      "severity": "mixed (1 major + 1 minor)",
+      "note": "NEW family-stem fingerprint. F1 (worker-utils generateRequestId/getClientIP) + F5 (content/subscription bumpWithLogger sibling). Track for recurrence."
+    },
+    "simplification:dup-procedure-context-builder": {
+      "hits": 1,
+      "iters": ["iter-009"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-mqyql.2"],
+      "severity": "major",
+      "note": "NEW fingerprint. procedure() context builder vs upload-shared.ts buildUploadBaseContext drift risk across all 9 workers."
+    },
+    "simplification:dup-paginated-list-shape": {
+      "hits": 1,
+      "iters": ["iter-009"],
+      "cycle_density": { "iter-009": 6 },
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-mqyql.3"],
+      "severity": "major",
+      "note": "NEW fingerprint. ENDEMIC-DENSITY SIGNAL (cycle_density=6, mirrors R12 single-cycle profile). Per agent recommendation, NOT auto-promoted; queued as 2-hit early-promotion watch — if iter-010+ surfaces another instance OR fix-PR doesn't land, fire 2-hit early like R11. R14 candidate."
+    },
+    "simplification:dup-image-pipeline": {
+      "hits": 1,
+      "iters": ["iter-009"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-mqyql.4"],
+      "severity": "major",
+      "note": "NEW fingerprint. 3 raster pipelines in image-processing/service.ts; cacheControl literal repeated 9 times; rule-of-three vindicated."
+    },
+    "simplification:dup-fetch-with-without-scope": {
+      "hits": 1,
+      "iters": ["iter-009"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-mqyql.6"],
+      "severity": "minor",
+      "note": "NEW fingerprint. transcoding-service.ts has scoped + internal-HMAC variants sharing 22-column projection. Single-file, low blast radius."
+    },
     "performance:subrequest-cap-sequential-stripe-calls": {
       "hits": 1,
       "iters": ["iter-007"],
