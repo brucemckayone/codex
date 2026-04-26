@@ -31,6 +31,9 @@ export type {
   SortOrder,
 } from './api-responses';
 
+// Financial types (revenue splits, fees, payouts)
+export type { RevenueSplit } from './financial';
+
 // Organization and Member types
 export type { OrgMemberContext, OrgMemberRole } from './member-types';
 

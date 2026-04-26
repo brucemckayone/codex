@@ -19,19 +19,13 @@
  */
 
 import { FEES } from '@codex/constants';
+import type { RevenueSplit } from '@codex/shared-types';
 import { RevenueCalculationError } from '../errors';
 
-/**
- * Revenue split result
- */
-export interface RevenueSplit {
-  /** Platform fee in cents (rounded up) */
-  platformFeeCents: number;
-  /** Organization fee in cents (rounded up) */
-  organizationFeeCents: number;
-  /** Creator payout in cents (exact remainder) */
-  creatorPayoutCents: number;
-}
+// Re-export the canonical type for back-compat with existing
+// `import { RevenueSplit } from '@codex/purchase'` consumers.
+// The single source of truth is `@codex/shared-types`.
+export type { RevenueSplit };
 
 /**
  * Calculate revenue split with proper rounding

@@ -50,7 +50,7 @@ import { describe, expectTypeOf, it } from 'vitest';
 import type { RevenueSplit as SubscriptionRevenueSplit } from '../services/revenue-split';
 
 describe('denoise proof: F2 types:type-duplicate-cross-package — RevenueSplit', () => {
-  it.skip('purchase.RevenueSplit and subscription.RevenueSplit MUST resolve to a single canonical type', () => {
+  it('purchase.RevenueSplit and subscription.RevenueSplit MUST resolve to a single canonical type', () => {
     // Today this passes structurally but the two declarations are different
     // file-system identities — TS sees them as distinct types in some
     // assignment positions. After consolidation the two named imports

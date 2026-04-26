@@ -13,12 +13,12 @@
  */
 
 import { InternalServiceError } from '@codex/service-errors';
+import type { RevenueSplit } from '@codex/shared-types';
 
-export interface RevenueSplit {
-  platformFeeCents: number;
-  organizationFeeCents: number;
-  creatorPayoutCents: number;
-}
+// Re-export the canonical type for back-compat with existing
+// `import { RevenueSplit } from '@codex/subscription'` consumers.
+// The single source of truth is `@codex/shared-types`.
+export type { RevenueSplit };
 
 /**
  * Calculate revenue split from a subscription payment.

@@ -226,12 +226,16 @@ export interface ProcedureContext<
   // Organization context
   // organizationId is guaranteed for:
   // - requireOrgMembership: true (extracted from subdomain/params + membership check)
+  // - requireOrgManagement: true (gates the same `needsOrg` resolver as membership;
+  //   enforcePolicy throws ValidationError if organizationId can't be resolved)
   // - auth: 'platform_owner' (automatically looked up from user's membership)
   organizationId: TPolicy['requireOrgMembership'] extends true
     ? string
-    : TPolicy['auth'] extends 'platform_owner'
+    : TPolicy['requireOrgManagement'] extends true
       ? string
-      : string | undefined;
+      : TPolicy['auth'] extends 'platform_owner'
+        ? string
+        : string | undefined;
   organizationRole: string | undefined;
 
   // Environment bindings

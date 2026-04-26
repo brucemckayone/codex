@@ -309,7 +309,7 @@ subscriptions.get(
     input: { query: getSubscriptionStatsQuerySchema },
     handler: async (ctx) => {
       return await ctx.services.subscription.getSubscriptionStats(
-        ctx.organizationId as string
+        ctx.organizationId
       );
     },
   })
@@ -326,7 +326,7 @@ subscriptions.get(
     input: { query: listSubscribersQuerySchema },
     handler: async (ctx) => {
       const result = await ctx.services.subscription.listSubscribers(
-        ctx.organizationId as string,
+        ctx.organizationId,
         ctx.input.query
       );
       return new PaginatedResult(result.items, result.pagination);

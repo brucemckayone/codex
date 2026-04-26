@@ -74,7 +74,7 @@ app.post(
     input: { body: createTierSchema },
     successStatus: 201,
     handler: async (ctx) => {
-      const orgId = ctx.organizationId as string;
+      const orgId = ctx.organizationId;
       const tier = await ctx.services.tier.createTier(orgId, ctx.input.body);
       warmTierCache(ctx, orgId);
       return tier;
@@ -125,7 +125,7 @@ app.patch(
       body: updateTierSchema,
     },
     handler: async (ctx) => {
-      const orgId = ctx.organizationId as string;
+      const orgId = ctx.organizationId;
       const { tierId } = ctx.input.params;
       const tier = await ctx.services.tier.updateTier(
         tierId,
@@ -155,7 +155,7 @@ app.delete(
     },
     successStatus: 204,
     handler: async (ctx) => {
-      const orgId = ctx.organizationId as string;
+      const orgId = ctx.organizationId;
       const { tierId } = ctx.input.params;
       await ctx.services.tier.deleteTier(tierId, orgId);
       warmTierCache(ctx, orgId);
@@ -179,7 +179,7 @@ app.post(
     input: { body: reorderTiersSchema },
     successStatus: 204,
     handler: async (ctx) => {
-      const orgId = ctx.organizationId as string;
+      const orgId = ctx.organizationId;
       await ctx.services.tier.reorderTiers(orgId, ctx.input.body.tierIds);
       warmTierCache(ctx, orgId);
       return null;
