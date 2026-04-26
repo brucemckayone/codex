@@ -33,13 +33,13 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const repoRoot = resolve(__dirname, '../../../../../..');
+const repoRoot = resolve(__dirname, '../../../../..');
 const remoteFile = resolve(
   repoRoot,
   'apps/web/src/lib/remote/checkout.remote.ts'
 );
 
-describe.skip('iter-012 F6 — checkout form/command share one schema and one body', () => {
+describe('iter-012 F6 — checkout form/command share one schema and one body', () => {
   it('the file declares only one z.object literal for checkout input', () => {
     const src = readFileSync(remoteFile, 'utf8');
     const literals = src.match(

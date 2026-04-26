@@ -393,7 +393,15 @@ const formBoolean = z
   .default('')
   .transform((v) => v === 'true' || v === 'on');
 
-const createContentFormSchema = z.object({
+/**
+ * Shared base schema for create/update content forms.
+ *
+ * The create form uses this directly. The update form extends it with a
+ * `contentId` field. Keeping the field definitions (including the non-trivial
+ * `price` and `tags` transforms) in one place prevents silent drift between
+ * the two forms.
+ */
+const contentBaseFormSchema = z.object({
   organizationId: optionalUuid,
   title: z.string().min(1, 'Title is required'),
   slug: z.string().min(1, 'Slug is required'),
@@ -426,6 +434,8 @@ const createContentFormSchema = z.object({
   shaderPreset: optionalString,
   featured: formBoolean,
 });
+
+const createContentFormSchema = contentBaseFormSchema;
 
 /**
  * Create content form (progressive enhancement)
@@ -556,39 +566,8 @@ export const deleteThumbnailCommand = command(
 // Content Update Form (progressive enhancement)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const updateContentFormSchema = z.object({
+const updateContentFormSchema = contentBaseFormSchema.extend({
   contentId: z.string().uuid(),
-  organizationId: optionalUuid,
-  title: z.string().min(1, 'Title is required'),
-  slug: z.string().min(1, 'Slug is required'),
-  description: optionalString,
-  contentType: z.enum(['video', 'audio', 'written']),
-  mediaItemId: optionalUuid,
-  contentBody: optionalString,
-  accessType: z
-    .enum(['free', 'paid', 'followers', 'subscribers', 'team'])
-    .default('free'),
-  price: z.string().transform((v) => {
-    const parsed = parseFloat(v || '0');
-    return Number.isNaN(parsed) ? 0 : Math.round(parsed * 100);
-  }),
-  category: optionalString,
-  tags: z
-    .string()
-    .optional()
-    .default('[]')
-    .transform((v) => {
-      try {
-        return JSON.parse(v) as string[];
-      } catch {
-        return [];
-      }
-    })
-    .pipe(z.array(z.string().trim().max(50)).max(20)),
-  thumbnailUrl: optionalString,
-  minimumTierId: optionalUuid,
-  shaderPreset: optionalString,
-  featured: formBoolean,
 });
 
 /**

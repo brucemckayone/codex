@@ -12,14 +12,46 @@ import { command, form, getRequestEvent } from '$app/server';
 import { createServerApi } from '$lib/server/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Checkout Form (Progressive Enhancement)
+// Shared schema + helper
 // ─────────────────────────────────────────────────────────────────────────────
 
-const checkoutFormSchema = z.object({
+/**
+ * Shared input shape for both the form and command checkout entry points.
+ * One source of truth — drift between the two surfaces is impossible.
+ */
+const checkoutInputSchema = z.object({
   contentId: z.string().uuid(),
   successUrl: z.string().url().optional(),
   cancelUrl: z.string().url().optional(),
 });
+
+type CheckoutInput = z.infer<typeof checkoutInputSchema>;
+
+/**
+ * Calls the ecom-api checkout endpoint with sensible default URLs.
+ * Both `createCheckout` (form) and `createCheckoutSession` (command) delegate
+ * here so the request shape and default URL logic live in one place.
+ */
+async function createStripeCheckoutSession({
+  contentId,
+  successUrl,
+  cancelUrl,
+}: CheckoutInput): Promise<{ sessionUrl: string }> {
+  const { platform, cookies, url } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+
+  const result = await api.checkout.create({
+    contentId,
+    successUrl: successUrl || `${url.origin}/library?purchase=success`,
+    cancelUrl: cancelUrl || `${url.origin}/content/${contentId}`,
+  });
+
+  return { sessionUrl: result.sessionUrl };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Checkout Form (Progressive Enhancement)
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Create Stripe checkout session via form submission
@@ -37,42 +69,24 @@ const checkoutFormSchema = z.object({
  * </form>
  * ```
  */
-export const createCheckout = form(
-  checkoutFormSchema,
-  async ({ contentId, successUrl, cancelUrl }) => {
-    const { platform, cookies, url } = getRequestEvent();
-    const api = createServerApi(platform, cookies);
+export const createCheckout = form(checkoutInputSchema, async (input) => {
+  try {
+    const { sessionUrl } = await createStripeCheckoutSession(input);
+    // Redirect to Stripe Checkout
+    redirect(303, sessionUrl);
+  } catch (error) {
+    // SvelteKit redirect() throws - let it propagate
+    if (isRedirect(error)) throw error;
 
-    try {
-      const result = await api.checkout.create({
-        contentId,
-        successUrl: successUrl || `${url.origin}/library?purchase=success`,
-        cancelUrl: cancelUrl || `${url.origin}/content/${contentId}`,
-      });
-
-      // Redirect to Stripe Checkout
-      redirect(303, result.sessionUrl);
-    } catch (error) {
-      // SvelteKit redirect() throws - let it propagate
-      if (isRedirect(error)) throw error;
-
-      // Return error for form display
-      const message =
-        error instanceof Error ? error.message : 'Checkout failed';
-      return { success: false, error: message };
-    }
+    // Return error for form display
+    const message = error instanceof Error ? error.message : 'Checkout failed';
+    return { success: false, error: message };
   }
-);
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Checkout Command (SPA Style)
 // ─────────────────────────────────────────────────────────────────────────────
-
-const checkoutCommandSchema = z.object({
-  contentId: z.string().uuid(),
-  successUrl: z.string().url().optional(),
-  cancelUrl: z.string().url().optional(),
-});
 
 /**
  * Create Stripe checkout session and return URL
@@ -105,19 +119,6 @@ const checkoutCommandSchema = z.object({
  * </button>
  * ```
  */
-export const createCheckoutSession = command(
-  checkoutCommandSchema,
-  async ({ contentId, successUrl, cancelUrl }) => {
-    const { platform, cookies, url } = getRequestEvent();
-    const api = createServerApi(platform, cookies);
-
-    const result = await api.checkout.create({
-      contentId,
-      successUrl: successUrl || `${url.origin}/library?purchase=success`,
-      cancelUrl: cancelUrl || `${url.origin}/content/${contentId}`,
-    });
-
-    // Return URL for client-side redirect
-    return { sessionUrl: result.sessionUrl };
-  }
+export const createCheckoutSession = command(checkoutInputSchema, (input) =>
+  createStripeCheckoutSession(input)
 );

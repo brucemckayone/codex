@@ -35,13 +35,13 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const repoRoot = resolve(__dirname, '../../../../../..');
+const repoRoot = resolve(__dirname, '../../../../..');
 const remoteFile = resolve(
   repoRoot,
   'apps/web/src/lib/remote/content.remote.ts'
 );
 
-describe.skip('iter-012 F4 — content create/update form schemas must share a base via .extend()', () => {
+describe('iter-012 F4 — content create/update form schemas must share a base via .extend()', () => {
   it('the two schemas do not each declare a standalone z.object({...}) literal', () => {
     const src = readFileSync(remoteFile, 'utf8');
 
