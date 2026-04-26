@@ -109,27 +109,33 @@
       "note": "NEW fingerprint. Single site (notifications/renderer.ts). Track for recurrence."
     },
     "simplification:duplicate-utility-helper": {
-      "hits": 1,
-      "iters": ["iter-009"],
-      "cycle_density": { "iter-009": 2 },
+      "hits": 2,
+      "iters": ["iter-009", "iter-011"],
+      "cycle_density": { "iter-009": 2, "iter-011": 5 },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
-      "promoted": false,
-      "rule_id": null,
-      "beads": ["Codex-mqyql.1", "Codex-mqyql.5"],
-      "severity": "mixed (1 major + 1 minor)",
-      "note": "NEW family-stem fingerprint. F1 (worker-utils generateRequestId/getClientIP) + F5 (content/subscription bumpWithLogger sibling). Track for recurrence."
+      "promoted": true,
+      "rule_id": "R14 (queued — apply in iter-012's prep, endemic 2-hit early promotion)",
+      "beads": [
+        "Codex-mqyql.1",
+        "Codex-mqyql.5",
+        "Codex-mqyql.7",
+        "Codex-mqyql.8"
+      ],
+      "severity": "mixed (3 major + 1 minor across 2 cycles)",
+      "note": "R7 ENDEMIC 2-HIT PROMOTION fires. Cumulative cycle_density=7 across 2 cycles (iter-009=2, iter-011=5). Mirrors R11/R12 endemic profile. R14 queued for iter-012. Suggested rule: 'Cache-fanout helpers (per-user library invalidation, slug-keyed cache invalidation, content-version bumps) MUST live in @codex/cache or @codex/worker-utils, not as inline route helpers.'"
     },
     "simplification:dup-procedure-context-builder": {
-      "hits": 1,
-      "iters": ["iter-009"],
+      "hits": 2,
+      "iters": ["iter-009", "iter-011"],
+      "cycle_density": { "iter-009": 1, "iter-011": 5 },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": false,
       "rule_id": null,
-      "beads": ["Codex-mqyql.2"],
+      "beads": ["Codex-mqyql.2", "Codex-mqyql.9"],
       "severity": "major",
-      "note": "NEW fingerprint. procedure() context builder vs upload-shared.ts buildUploadBaseContext drift risk across all 9 workers."
+      "note": "RECURRENCE #2. iter-009 was procedure() context vs upload-shared.ts; iter-011 was webhook DB-client triple. ONE MORE CYCLE HIT triggers R7 STANDARD 3-HIT PROMOTION."
     },
     "simplification:dup-paginated-list-shape": {
       "hits": 1,
@@ -153,6 +159,29 @@
       "beads": ["Codex-mqyql.4"],
       "severity": "major",
       "note": "NEW fingerprint. 3 raster pipelines in image-processing/service.ts; cacheControl literal repeated 9 times; rule-of-three vindicated."
+    },
+    "simplification:speculative-extension-point": {
+      "hits": 1,
+      "iters": ["iter-011"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-mqyql.10"],
+      "severity": "minor",
+      "note": "NEW fingerprint. AdminVariables.perRequestDb references middleware that doesn't exist. Track for recurrence."
+    },
+    "simplification:dup-r2-key-resolution": {
+      "hits": 1,
+      "iters": ["iter-011"],
+      "cycle_density": { "iter-011": 3 },
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-mqyql.11"],
+      "severity": "minor",
+      "note": "NEW fingerprint. R2 key→URL resolution inlined 3 times across content-api routes; per memory feedback_logic_in_services.md belongs in service layer."
     },
     "simplification:dup-fetch-with-without-scope": {
       "hits": 1,

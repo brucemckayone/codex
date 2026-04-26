@@ -3,17 +3,19 @@
 > Generated and maintained by the `/denoise` skill. Do not edit by hand outside of dismissing diffs.
 > See `.claude/skills/denoise/SKILL.md` for the workflow.
 
-## ⚠️ R7 promotions — R9, R10, R11, R12, R13 all applied
+## ⚠️ R7 promotions — R9-R13 applied; **R14 queued (endemic 2-hit fired iter-011)**
 
 - **R9 (applied iter-003)** — `security:auth-endpoint-no-ratelimit` from iter-002 F1.
 - **R10 (applied iter-004)** — `security:missing-csp` from iter-003 F2.
 - **R11 (applied iter-006)** — `types:type-duplicate-cross-package` from iter-005 endemic 2-hit early promotion.
 - **R12 (applied iter-008)** — `performance:sequential-await-independent-queries` from iter-007 endemic single-cycle 5-hit promotion.
 - **R13 (applied iter-009)** — `workers:waituntil-no-catch` from iter-008 R7 standard 3-hit threshold.
-- **Recurrence watches (iter-010+)**:
-  - `simplification:dup-paginated-list-shape` — NEW iter-009 with cycle_density=6 (R12-profile). Per agent recommendation, queued as 2-hit early-promotion watch (not auto-promoted on first sighting). If iter-010+ surfaces another instance OR fix-PR doesn't land, fire 2-hit early promotion to R14.
+- **R14 (queued for iter-012)** — `simplification:duplicate-utility-helper`. **R7 ENDEMIC 2-HIT PROMOTION fires** in iter-011. Cumulative cycle_density=7 across iter-009 + iter-011 (mirrors R11 endemic-2-hit profile). Iter-012's first action MUST add **R14** to SKILL.md §1 with citation `<!-- R14 promoted from iter-011, fingerprint simplification:duplicate-utility-helper (endemic 2-hit early promotion; cumulative cycle_density 7) -->`. Suggested rule: "Cache-fanout helpers (per-user library invalidation, slug-keyed cache invalidation, content-version bumps) MUST live in `@codex/cache` or `@codex/worker-utils`, not as inline route helpers. Verified by a grep guard over `workers/*/src/routes/**` asserting no `cache.invalidate(CacheType.COLLECTION_*)` literal appears outside the canonical helper sites." Severity: Major.
+- **Recurrence watches (iter-012+)**:
+  - `simplification:dup-procedure-context-builder` — hits=2 (iter-009 + iter-011). One more cycle hit triggers R7 standard 3-hit promotion.
+  - `simplification:dup-paginated-list-shape` (iter-009, cycle_density=6) — 2-hit early-promotion watch CLOSED for workers cell (workers correctly delegate to services). Carries forward to next packages cycle.
   - `types:as-unknown-as` + `types:as-cast-without-guard` both at hits=2 — one more cycle hit triggers R7 standard 3-hit promotion.
-  - `types:redundant-cast-after-narrow` (NEW iter-006, cycle_density=6) — sibling shape to type-duplicate, watch for endemic threshold.
+  - `types:redundant-cast-after-narrow` (NEW iter-006, cycle_density=6) — sibling shape watch.
 
 ---
 
@@ -40,7 +42,7 @@ _None._
 | performance × workers | iter-008 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn since iter-008) |
 | performance × apps/web | iter-010 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn since iter-010) |
 | simplification × packages | iter-009 (2026-04-26) | 6 | 0 | 2026-04-26 | skipped (no churn since iter-009) |
-| simplification × workers | _never_ | 0 | 0 | _never_ | **due** ✅ |
+| simplification × workers | iter-011 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn since iter-011) |
 | simplification × apps/web | _never_ | 0 | 0 | _never_ | **due** ✅ |
 
 **Cell-due algorithm** (delta mode):
@@ -84,8 +86,10 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | `performance:sequential-await-independent-queries` | **2** | 2026-04-26 | 2026-04-26 | **PROMOTED → R12 (APPLIED iter-008)**, cumulative cycle_density=6 (Codex-y63gl.1-5, .8, .13) |
 | `performance:array-spread-and-linear-includes-per-render` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint (Codex-y63gl.6) |
 | `performance:subrequest-cap-sequential-stripe-calls` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint (Codex-y63gl.7) |
-| `simplification:duplicate-utility-helper` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW family-stem (Codex-mqyql.1, .5) |
-| `simplification:dup-procedure-context-builder` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint (Codex-mqyql.2) |
+| `simplification:duplicate-utility-helper` | **2** | 2026-04-26 | 2026-04-26 | **PROMOTED → R14 (queued for iter-012)**, cumulative cycle_density=7 (Codex-mqyql.1, .5, .7, .8) |
+| `simplification:dup-procedure-context-builder` | **2** | 2026-04-26 | 2026-04-26 | recurrence #2 of 3 (Codex-mqyql.2, .9) — 1 more triggers R7 standard 3-hit |
+| `simplification:speculative-extension-point` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint (Codex-mqyql.10) |
+| `simplification:dup-r2-key-resolution` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint (Codex-mqyql.11) |
 | `simplification:dup-paginated-list-shape` | 1 | 2026-04-26 | 2026-04-26 | **endemic-density watch (cycle_density=6)**, R14 candidate (Codex-mqyql.3) — 2-hit early promotion if recurs |
 | `simplification:dup-image-pipeline` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint (Codex-mqyql.4) — rule of three |
 | `simplification:dup-fetch-with-without-scope` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint (Codex-mqyql.6) |
@@ -114,6 +118,7 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-008 | 6 | 0 | 0% | within budget |
 | iter-009 | 6 | 0 | 0% | within budget |
 | iter-010 | 5 | 0 | 0% | within budget |
+| iter-011 | 5 | 0 | 0% | within budget |
 
 > R8 fires when rate > 15% in any cycle. The next cycle's prep includes a meta-warning and a justification audit of every testability-bug.
 
@@ -133,22 +138,26 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-008 | performance × workers | 2026-04-26 | 5 (0B/2M/3m) | Codex-y63gl.9–13 | Cycle 0 for cell; **R12 applied at start**; F1 (DUPLICATE of Codex-ttavz.9, NOT re-filed — still-open from iter-002 ecom-api checkout cache invalidation); F2 (.9) MAJOR media-api transcoding dispatchPromise no .catch (RunPod failures silenced); F3 (.10) MAJOR organization-api settings 3 sites (lines 217, 454, 499) — Promise.all+cache.invalidate in branding mutation rejects on first failure; F4 (.11) MINOR organizations.ts 3 sites — :572 raw BRAND_KV.delete is genuine hazard, :79+:577 defensive only; F5 (.12) MINOR media-api scheduled cron defensive; F6 (.13) MINOR R12 violation in auth-config dev-path KV.put + email sequential (production single-await unchanged). 5 of 6 share workers:waituntil-no-catch fingerprint (3rd cycle appearance + 4 new sites + 1 duplicate confirmation) → R7 STANDARD 3-HIT PROMOTION fires (R13 queued for iter-009). First standard-3-hit promotion (R9/R10/R11/R12 used non-standard paths). Fabrication check 14/14 cited symbols live |
 | iter-009 | simplification × packages | 2026-04-26 | 6 (0B/4M/2m) | Codex-mqyql.1–6 | Cycle 0 for cell + first beads under simplification epic; **R13 applied at start**; F1+F2 (.1, .2) MAJOR worker-utils dedupe (generateRequestId/getClientIP + procedure context builder vs buildUploadBaseContext); F3 (.3) MAJOR NEW fingerprint simplification:dup-paginated-list-shape — 6 instances across content/notifications (cycle_density=6, R12-profile, queued as 2-hit early-promotion watch for iter-010); F4 (.4) MAJOR image-processing 3 nearly-identical pipelines — cacheControl literal repeated 9 times (rule-of-three); F5 (.5) MINOR @codex/cache should host bumpWithLogger; F6 (.6) MINOR transcoding-service column projection drift. JSCPD: 508 clones cluster-wide; 60+ TS source clones, 6 actionable. Fabrication check 38/38 cited symbols live (0 stale). 0 testability-bugs (R8 budget). Agent showed strong hand-off discipline (14 unused types routed to /fallow-audit, not filed) |
 | iter-010 | performance × apps/web | 2026-04-26 | 5 (0B/1M/4m) | Codex-y63gl.14–18 | Cycle 0 for cell; **R12 EFFECTIVENESS CHECK PASSED** — first apps/web cycle since R12 promoted iter-008; zero new sequential-await-independent-queries violations across 13 SvelteKit loaders + helpers; existing parallelism correct (Promise.all for independent, guard-then-fetch for FK ordering — R12 carve-out respected). F1 (.14) MAJOR NEW fingerprint performance:hot-path-shader-config-getcomputedstyle — ImmersiveShaderPlayer + ShaderPreview hit getComputedStyle every frame (60 forced-style-recalcs/sec per active player); canonical ShaderHero already amortises with 30-frame poll counter, immersive overlay shipped without inheriting; F2 (.15) MINOR NEW fingerprint performance:hot-path-allocation-render-loop (120 alloc/sec in immersive playback); F3 (.16) MINOR keyless {#each} on org landing; F4 (.17) MINOR BRAND_KV.get without cacheTtl; F5 (.18) MINOR auth RegExp recompiled per call. Fabrication check 12/12 live |
+| iter-011 | simplification × workers | 2026-04-26 | 5 (0B/3M/2m) | Codex-mqyql.7–11 | Cycle 0 for cell; **R12 + R13 EFFECTIVENESS CHECKS PASSED** in spot-checks across ecom-api webhook handlers; F1+F2 (.7, .8) MAJOR — `simplification:duplicate-utility-helper` RECURRENCE #2 (iter-009 + iter-011): 3 inline bumpUserLibrary sites + slug-resolve-then-invalidate dup. Cumulative cycle_density=7 → R7 ENDEMIC 2-HIT PROMOTION fires (R14 queued for iter-012). F3 (.9) MAJOR — `simplification:dup-procedure-context-builder` RECURRENCE #2 (5 sites of createPerRequestDbClient triple-field boilerplate in ecom-api webhooks); ONE MORE CYCLE HIT → R7 standard 3-hit promotion. F4 (.10) MINOR speculative perRequestDb in admin-api types referencing nonexistent middleware; F5 (.11) MINOR R2 key→URL resolution inlined 3× in content-api routes (belongs in service layer). `simplification:dup-paginated-list-shape` 2-hit early-promotion watch CLOSED for workers cell (services own pagination). Fabrication check 14/14 live |
 
 ---
 
 ## Next-cycle prep
 
-- **No promotion queued for iter-011**.
-- **R12 EFFECTIVENESS CONFIRMED iter-010**: zero new R12 violations in apps/web SvelteKit loaders + helpers across 13 inspected files. Hard rule R12 is genuinely preventing the sequential-await pattern at this boundary (not just cataloguing existing debt).
-- **Suggested next cell**: 2 cells still untouched: `simplification × workers`, `simplification × apps/web`. Phase priority among never-run cells: pick by churn or context. **`simplification × workers`** keeps cycle scope manageable (~31 files vs apps/web ~464). Either is acceptable.
-- **Round 1 stop-criterion review**: after iter-011 + iter-012 (the two remaining never-run cells), all 12 cells will have been cycled at least once. Round 2 begins after — focus shifts from discovery to drift-detection (cells reach fidelity per §7 stop criterion when 3 consecutive zero-finding cycles run).
+- **PROMOTION (highest priority)**: iter-012's first action is to add R14 to local SKILL.md §1 Hard Rules table:
+  > **R14** | Cache-fanout helpers (per-user library invalidation, slug-keyed cache invalidation, content-version bumps) MUST live in `@codex/cache` or `@codex/worker-utils`, not as inline route helpers. Verified by a grep guard over `workers/*/src/routes/**` asserting no `cache.invalidate(CacheType.COLLECTION_*)` literal appears outside the canonical helper sites. | Major
+
+  With citation comment `<!-- R14 promoted from iter-011, fingerprint simplification:duplicate-utility-helper (endemic 2-hit early promotion; cumulative cycle_density 7) -->`.
+
+- **R12 + R13 EFFECTIVENESS CONFIRMED iter-011**: spot-checks across ecom-api webhook handlers found zero new violations of either rule. Both holding on workers cell.
+- **Suggested next cell**: ONE remaining never-run cell: **`simplification × apps/web`**. After iter-012, all 12 cells have a baseline cycle and Round 1 closes — Round 2 / drift-detection mode begins.
 - **Recurrence watches (carry-forward)**:
-  - `simplification:dup-paginated-list-shape` (NEW iter-009, cycle_density=6) — 2-hit early-promotion watch (next simplification cycle is iter-011 candidate)
-  - `types:as-unknown-as` + `types:as-cast-without-guard` at hits=2 — one more cycle hit → R7 standard 3-hit promotion (out of phase scope this cycle, watch in next types cycle)
+  - `simplification:dup-procedure-context-builder` at hits=2 — one more cycle hit → R7 standard 3-hit promotion
+  - `simplification:dup-paginated-list-shape` (cycle_density=6 iter-009) — 2-hit early-promotion watch carries to next packages cycle
+  - `types:as-unknown-as` + `types:as-cast-without-guard` at hits=2 — one more cycle hit → R7 standard 3-hit promotion
   - `types:redundant-cast-after-narrow` (cycle_density=6 iter-006) — endemic shape watch
-  - `performance:array-spread-and-linear-includes-per-render` + `performance:subrequest-cap-sequential-stripe-calls` (iter-007) — track for recurrence in next perf cycle
-  - 5 new performance fingerprints from iter-010 (`hot-path-shader-config-getcomputedstyle`, `hot-path-allocation-render-loop`, `render-thrash-list-no-key`, `kv-get-no-cache-ttl`, `regex-recompiled-per-call`) — track for recurrence
-- **R13 effectiveness check**: deferred to next workers cycle (iter-010 was apps/web only; no waitUntil sites in scope).
+  - 5 NEW performance fingerprints from iter-010 — track for recurrence in next perf cycle
+  - 2 new simplification fingerprints (`speculative-extension-point`, `dup-r2-key-resolution`) — track for recurrence
 - **Suggested next cell**: Per phase priority + recent guidance, `types × workers` (same complementary axis as iter-002, will pick up `c.env[name] as ...` patterns hinted by 3 baseline TS errors in worker-utils). Alternative: `types × apps/web` (heaviest churn 464 files; paraglide / TanStack DB / Svelte 5 props axis). Tie-break: continuity with iter-002 → `types × workers`.
 - **Fingerprint watches** (carry-forward):
   - `packages:identifier-no-shape-validation` (iter-001 F2) — add to ref 07 §7 if recurs
