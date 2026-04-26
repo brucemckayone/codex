@@ -78,9 +78,9 @@
       "note": "NEW fingerprint. cycle_density=6 in single cycle — sibling shape to type-duplicate-cross-package. Watch for endemic-pattern threshold."
     },
     "performance:sequential-await-independent-queries": {
-      "hits": 2,
-      "iters": ["iter-007", "iter-008"],
-      "cycle_density": { "iter-007": 5, "iter-008": 1 },
+      "hits": 3,
+      "iters": ["iter-007", "iter-008", "iter-026"],
+      "cycle_density": { "iter-007": 5, "iter-008": 1, "iter-026": 1 },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": true,
@@ -92,10 +92,11 @@
         "Codex-y63gl.4",
         "Codex-y63gl.5",
         "Codex-y63gl.8",
-        "Codex-y63gl.13"
+        "Codex-y63gl.13",
+        "Codex-bwgfv"
       ],
-      "severity": "mixed (3 major + 4 minor)",
-      "note": "R12 APPLIED iter-008. iter-008 F6 surfaced first R12-violation (auth-config dev-path KV.put + email send sequential, minor since dev-only). Cumulative cycle_density=6 across 2 cycles."
+      "severity": "mixed (3 major + 5 minor)",
+      "note": "R12 APPLIED iter-008. iter-008 F6 surfaced first R12-violation (auth-config dev-path KV.put + email send sequential, minor since dev-only). iter-026 hit #3 (drift-detection): getCustomerStats lines 462+482 — uncovered call site that Tier 4.D missed (was outside iter-007 scope), NOT a regression of fixed code. Round 3 Tier 4.D effectively parallelised 8 sites (computeRevenueBlock/SubscriberBlock/FollowerBlock + getRevenueStats/SubscriberStats/FollowerStats current+previous + getDashboardStats + getRecentActivity + hasContentAccess FOLLOWERS/SUBSCRIBERS branches) — R12 effectiveness confirmed. Cumulative cycle_density=7 across 3 cycles. 3-hit threshold informational only since R12 already promoted."
     },
     "performance:array-spread-and-linear-includes-per-render": {
       "hits": 1,
