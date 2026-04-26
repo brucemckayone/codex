@@ -77,6 +77,47 @@
       "severity": "minor",
       "note": "NEW fingerprint. cycle_density=6 in single cycle — sibling shape to type-duplicate-cross-package. Watch for endemic-pattern threshold."
     },
+    "performance:sequential-await-independent-queries": {
+      "hits": 1,
+      "iters": ["iter-007"],
+      "cycle_density": { "iter-007": 5 },
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": true,
+      "rule_id": "R12 (queued — apply in iter-008's prep, endemic-density 5-hit single-cycle promotion)",
+      "beads": [
+        "Codex-y63gl.1",
+        "Codex-y63gl.2",
+        "Codex-y63gl.3",
+        "Codex-y63gl.4",
+        "Codex-y63gl.5",
+        "Codex-y63gl.8"
+      ],
+      "severity": "mixed (3 major + 3 minor)",
+      "note": "ENDEMIC-DENSITY PROMOTION fired on first sighting (cycle_density=5). Same precedent as R11's 2-hit early promotion for types:type-duplicate-cross-package. Service methods MUST launch independent DB queries via Promise.all. Iter-008's first action: add R12 to local SKILL.md §1."
+    },
+    "performance:array-spread-and-linear-includes-per-render": {
+      "hits": 1,
+      "iters": ["iter-007"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-y63gl.6"],
+      "severity": "minor",
+      "note": "NEW fingerprint. Single site (notifications/renderer.ts). Track for recurrence."
+    },
+    "performance:subrequest-cap-sequential-stripe-calls": {
+      "hits": 1,
+      "iters": ["iter-007"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-y63gl.7"],
+      "severity": "minor",
+      "note": "NEW fingerprint. tier-service.ts:340 updateTier 5 sequential Stripe calls. Track for recurrence."
+    },
     "types:any-explicit": {
       "hits": 1,
       "iters": ["iter-006"],
