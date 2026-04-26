@@ -16,6 +16,8 @@ import {
 } from '@codex/security';
 import type { Bindings, HonoEnv } from '@codex/shared-types';
 
+import { generateRequestId, getClientIP } from './procedure/helpers';
+
 /** Keys in Bindings whose values are KVNamespace */
 type KVBindingKey = {
   [K in keyof Bindings]: NonNullable<Bindings[K]> extends KVNamespace
@@ -650,29 +652,6 @@ export function createRateLimitWrapper(
       ...RATE_LIMIT_PRESETS[preset],
     })(c, next);
   };
-}
-
-/**
- * Generate a unique request ID (UUID v4)
- */
-function generateRequestId(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
-
-/**
- * Extract client IP from Cloudflare headers
- */
-function getClientIP(c: Context<HonoEnv>): string {
-  return (
-    c.req.header('CF-Connecting-IP') ||
-    c.req.header('X-Real-IP') ||
-    c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ||
-    'unknown'
-  );
 }
 
 /**

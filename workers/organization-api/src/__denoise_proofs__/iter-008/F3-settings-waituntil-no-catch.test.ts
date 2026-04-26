@@ -31,19 +31,15 @@
  *
  * `it.skip` while the bug stands.
  */
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+// Vite `?raw` baked-at-build-time import — works under both Node and the
+// workerd runtime used by @cloudflare/vitest-pool-workers.
+
 import { describe, expect, it } from 'vitest';
+import settingsSrc from '../../routes/settings.ts?raw';
 
-const PROJECT_ROOT = join(__dirname, '..', '..', '..', '..', '..');
-const SETTINGS_ROUTE = join(
-  PROJECT_ROOT,
-  'workers/organization-api/src/routes/settings.ts'
-);
-
-describe.skip('iter-008 F3 — settings.ts waitUntil missing .catch', () => {
+describe('iter-008 F3 — settings.ts waitUntil missing .catch', () => {
   it('every waitUntil(...) in routes/settings.ts has a .catch handler', () => {
-    const src = readFileSync(SETTINGS_ROUTE, 'utf8');
+    const src = settingsSrc;
 
     const waitUntilRegex = /executionCtx\.waitUntil\(\s*([\s\S]*?)\s*\)\s*;/g;
 

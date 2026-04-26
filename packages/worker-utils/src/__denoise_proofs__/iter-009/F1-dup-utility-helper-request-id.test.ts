@@ -59,7 +59,7 @@ function countDeclarations(symbol: string): string[] {
 }
 
 describe('denoise proof: F1 simplification:duplicate-utility-helper — generateRequestId/getClientIP', () => {
-  it.skip('generateRequestId is declared exactly once in @codex/worker-utils', () => {
+  it('generateRequestId is declared exactly once in @codex/worker-utils', () => {
     const sites = countDeclarations('generateRequestId');
     // Currently fails (sites.length === 2): middleware.ts AND helpers.ts.
     // After fix: only helpers.ts remains.
@@ -67,7 +67,7 @@ describe('denoise proof: F1 simplification:duplicate-utility-helper — generate
     expect(sites[0]).toMatch(/procedure\/helpers\.ts$/);
   });
 
-  it.skip('getClientIP is declared exactly once in @codex/worker-utils', () => {
+  it('getClientIP is declared exactly once in @codex/worker-utils', () => {
     const sites = countDeclarations('getClientIP');
     expect(sites).toHaveLength(1);
     expect(sites[0]).toMatch(/procedure\/helpers\.ts$/);

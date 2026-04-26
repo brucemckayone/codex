@@ -53,7 +53,18 @@ app.post(
       const { dispatchPromise } =
         await ctx.services.transcoding.triggerJobInternal(id, priority);
 
-      ctx.executionCtx.waitUntil(dispatchPromise);
+      // dispatchRunPodJob is internally try/caught (marks media failed on
+      // error), so dispatchPromise should never reject. The .catch is
+      // belt-and-suspenders: any future change that lets a rejection
+      // escape will surface in obs instead of evaporating silently.
+      ctx.executionCtx.waitUntil(
+        dispatchPromise.catch((err: unknown) => {
+          ctx.obs?.error('Transcoding dispatch failed (waitUntil fallback)', {
+            mediaId: id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        })
+      );
 
       return { message: 'Transcoding job triggered', mediaId: id };
     },

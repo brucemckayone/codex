@@ -72,6 +72,17 @@ const securityHook: Handle = async ({ event, resolve }) => {
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   response.headers.set('X-Request-Id', event.locals.requestId);
 
+  // HSTS: 2-year max-age + subdomains. Production-only — pinning HTTPS on
+  // a developer's browser via lvh.me would block local HTTP dev, and
+  // preview/staging deploys without zone-level HSTS get worker-level
+  // protection from this header.
+  if (!dev) {
+    response.headers.set(
+      'Strict-Transport-Security',
+      'max-age=63072000; includeSubDomains'
+    );
+  }
+
   return response;
 };
 

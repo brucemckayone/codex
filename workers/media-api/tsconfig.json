@@ -19,6 +19,10 @@
       "@cloudflare/vitest-pool-workers"
     ]
   },
-  "include": ["src/**/*", "../../config/vitest/cloudflare-test-env.d.ts"],
+  "include": [
+    "src/**/*",
+    "../../config/vitest/cloudflare-test-env.d.ts",
+    "../../config/vitest/raw-imports.d.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

@@ -35,19 +35,15 @@
  *
  * `it.skip` while the bug stands. Un-skip in the same PR as the fix.
  */
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+// Vite `?raw` baked-at-build-time import — works under both Node and the
+// workerd runtime used by @cloudflare/vitest-pool-workers.
+
 import { describe, expect, it } from 'vitest';
+import transcodingSrc from '../../routes/transcoding.ts?raw';
 
-const PROJECT_ROOT = join(__dirname, '..', '..', '..', '..', '..');
-const TRANSCODING_ROUTE = join(
-  PROJECT_ROOT,
-  'workers/media-api/src/routes/transcoding.ts'
-);
-
-describe.skip('iter-008 F2 — transcoding dispatchPromise missing .catch', () => {
+describe('iter-008 F2 — transcoding dispatchPromise missing .catch', () => {
   it('every waitUntil(...) in routes/transcoding.ts has a .catch handler', () => {
-    const src = readFileSync(TRANSCODING_ROUTE, 'utf8');
+    const src = transcodingSrc;
 
     const waitUntilRegex = /executionCtx\.waitUntil\(\s*([\s\S]*?)\s*\)\s*;/g;
 

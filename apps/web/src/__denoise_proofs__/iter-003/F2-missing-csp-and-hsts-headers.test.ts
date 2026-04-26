@@ -72,7 +72,7 @@ describe.skip('iter-003 F2 — apps/web missing Content-Security-Policy', () => 
   });
 });
 
-describe.skip('iter-003 F3 — apps/web missing Strict-Transport-Security', () => {
+describe('iter-003 F3 — apps/web missing Strict-Transport-Security', () => {
   it('hooks.server.ts sets HSTS header in production', () => {
     const hooks = readFileSync(HOOKS_SERVER, 'utf-8');
 

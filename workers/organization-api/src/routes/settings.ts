@@ -209,12 +209,40 @@ async function invalidateBrandAndCache(
   // 2. Fire-and-forget: warm BRAND_KV + bump orgId version.
   //    These are not on the reload-critical path; clients that care about
   //    the orgId-keyed version detect staleness via client-side polling.
-  const tasks: Promise<unknown>[] = [updateBrandCache(ctx.env, orgId, obs)];
+  //
+  //    Each task gets its own `.catch()` so a KV reject on cache.invalidate
+  //    can't cancel the BRAND_KV warm. updateBrandCache is internally
+  //    try/caught, so `.catch()` here is belt-and-suspenders.
+  const tasks: Promise<unknown>[] = [
+    updateBrandCache(ctx.env, orgId, obs).catch((err: unknown) => {
+      obs?.warn(`Background BRAND_KV warm failed for org ${orgId}`, {
+        orgId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }),
+  ];
   if (ctx.env.CACHE_KV) {
     const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
-    tasks.push(cache.invalidate(orgId));
+    tasks.push(
+      cache.invalidate(orgId).catch((err: unknown) => {
+        obs?.warn(`Background CACHE_KV invalidate failed for org ${orgId}`, {
+          orgId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      })
+    );
   }
-  ctx.executionCtx.waitUntil(Promise.all(tasks));
+  // Per-task `.catch()` above prevents Promise.all from rejecting; the
+  // wrapper `.catch()` is belt-and-suspenders for the workers:
+  // waitUntil-no-catch contract (and surfaces a final-fallback warn).
+  ctx.executionCtx.waitUntil(
+    Promise.all(tasks).catch((err: unknown) => {
+      obs?.warn(`Background brand/version tasks failed for org ${orgId}`, {
+        orgId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    })
+  );
 }
 
 const app = new Hono<HonoEnv>();
@@ -451,7 +479,15 @@ app.put(
       // Bump org version for client staleness detection
       if (ctx.env.CACHE_KV) {
         const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
-        ctx.executionCtx.waitUntil(cache.invalidate(ctx.input.params.id));
+        const orgId = ctx.input.params.id;
+        ctx.executionCtx.waitUntil(
+          cache.invalidate(orgId).catch((err: unknown) => {
+            ctx.obs?.warn(`Failed to invalidate org cache after PUT /contact`, {
+              orgId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          })
+        );
       }
 
       return result;
@@ -496,7 +532,18 @@ app.put(
       // Bump org version for client staleness detection
       if (ctx.env.CACHE_KV) {
         const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
-        ctx.executionCtx.waitUntil(cache.invalidate(ctx.input.params.id));
+        const orgId = ctx.input.params.id;
+        ctx.executionCtx.waitUntil(
+          cache.invalidate(orgId).catch((err: unknown) => {
+            ctx.obs?.warn(
+              `Failed to invalidate org cache after PUT /features`,
+              {
+                orgId,
+                error: err instanceof Error ? err.message : String(err),
+              }
+            );
+          })
+        );
       }
 
       return result;
