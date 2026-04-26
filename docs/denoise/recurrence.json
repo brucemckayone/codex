@@ -109,21 +109,23 @@
       "note": "NEW fingerprint. Single site (notifications/renderer.ts). Track for recurrence."
     },
     "simplification:duplicate-utility-helper": {
-      "hits": 2,
-      "iters": ["iter-009", "iter-011"],
-      "cycle_density": { "iter-009": 2, "iter-011": 5 },
+      "hits": 3,
+      "iters": ["iter-009", "iter-011", "iter-012"],
+      "cycle_density": { "iter-009": 2, "iter-011": 5, "iter-012": 2 },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": true,
-      "rule_id": "R14 (queued — apply in iter-012's prep, endemic 2-hit early promotion)",
+      "rule_id": "R14 (applied in iter-012)",
       "beads": [
         "Codex-mqyql.1",
         "Codex-mqyql.5",
         "Codex-mqyql.7",
-        "Codex-mqyql.8"
+        "Codex-mqyql.8",
+        "Codex-mqyql.14",
+        "Codex-mqyql.15"
       ],
-      "severity": "mixed (3 major + 1 minor across 2 cycles)",
-      "note": "R7 ENDEMIC 2-HIT PROMOTION fires. Cumulative cycle_density=7 across 2 cycles (iter-009=2, iter-011=5). Mirrors R11/R12 endemic profile. R14 queued for iter-012. Suggested rule: 'Cache-fanout helpers (per-user library invalidation, slug-keyed cache invalidation, content-version bumps) MUST live in @codex/cache or @codex/worker-utils, not as inline route helpers.'"
+      "severity": "mixed (4 major + 2 minor across 3 cycles)",
+      "note": "R14 APPLIED iter-012. Cumulative cycle_density=9 across 3 cycles (iter-009=2 packages, iter-011=5 workers, iter-012=2 apps/web). Endemic across all 3 scopes. iter-012 added F3 (STUDIO_ROLES copy-paste) + F5 (Stripe success-page loaders)."
     },
     "simplification:dup-procedure-context-builder": {
       "hits": 2,
@@ -170,6 +172,63 @@
       "beads": ["Codex-mqyql.10"],
       "severity": "minor",
       "note": "NEW fingerprint. AdminVariables.perRequestDb references middleware that doesn't exist. Track for recurrence."
+    },
+    "simplification:dup-content-item-shape": {
+      "hits": 1,
+      "iters": ["iter-012"],
+      "cycle_density": { "iter-012": 4 },
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-mqyql.13"],
+      "severity": "major",
+      "note": "NEW fingerprint. 4 inline ContentItem redeclarations of feed-types.ts canonical. Sibling shape of dup-paginated-list-shape family. 2-hit early-promotion watch in next apps/web simplification cycle."
+    },
+    "simplification:duplicate-component": {
+      "hits": 1,
+      "iters": ["iter-012"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-mqyql.12"],
+      "severity": "major",
+      "note": "NEW fingerprint. StudioSidebarItem vs SidebarRailItem with explicit dup-admission comment."
+    },
+    "simplification:dup-zod-schema-fragment": {
+      "hits": 1,
+      "iters": ["iter-012"],
+      "cycle_density": { "iter-012": 2 },
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-mqyql.16", "Codex-mqyql.17"],
+      "severity": "major",
+      "note": "NEW fingerprint. createContentFormSchema/updateContentFormSchema + checkoutFormSchema/checkoutCommandSchema both inline duplicate Zod fields instead of .extend()/partial(). cycle_density=2 — track for recurrence."
+    },
+    "simplification:lonely-abstraction": {
+      "hits": 1,
+      "iters": ["iter-012"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-mqyql.19"],
+      "severity": "minor",
+      "note": "Header/MobileNav + Header/UserMenu only consumed by _creators layout after platform/org migrated to bottom-nav. Decision: delete OR generalise."
+    },
+    "denoise:doc-rot:05-domain-web:row-loadFromServer": {
+      "hits": 1,
+      "iters": ["iter-012"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-mqyql.18"],
+      "severity": "minor",
+      "note": "NEW doc-rot. Reference 05 §4 cites loadFromServer() — symbol renamed to hydrateIfNeeded()."
     },
     "simplification:dup-r2-key-resolution": {
       "hits": 1,
