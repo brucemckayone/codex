@@ -78,23 +78,24 @@
       "note": "NEW fingerprint. cycle_density=6 in single cycle — sibling shape to type-duplicate-cross-package. Watch for endemic-pattern threshold."
     },
     "performance:sequential-await-independent-queries": {
-      "hits": 1,
-      "iters": ["iter-007"],
-      "cycle_density": { "iter-007": 5 },
+      "hits": 2,
+      "iters": ["iter-007", "iter-008"],
+      "cycle_density": { "iter-007": 5, "iter-008": 1 },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": true,
-      "rule_id": "R12 (queued — apply in iter-008's prep, endemic-density 5-hit single-cycle promotion)",
+      "rule_id": "R12 (applied in iter-008)",
       "beads": [
         "Codex-y63gl.1",
         "Codex-y63gl.2",
         "Codex-y63gl.3",
         "Codex-y63gl.4",
         "Codex-y63gl.5",
-        "Codex-y63gl.8"
+        "Codex-y63gl.8",
+        "Codex-y63gl.13"
       ],
-      "severity": "mixed (3 major + 3 minor)",
-      "note": "ENDEMIC-DENSITY PROMOTION fired on first sighting (cycle_density=5). Same precedent as R11's 2-hit early promotion for types:type-duplicate-cross-package. Service methods MUST launch independent DB queries via Promise.all. Iter-008's first action: add R12 to local SKILL.md §1."
+      "severity": "mixed (3 major + 4 minor)",
+      "note": "R12 APPLIED iter-008. iter-008 F6 surfaced first R12-violation (auth-config dev-path KV.put + email send sequential, minor since dev-only). Cumulative cycle_density=6 across 2 cycles."
     },
     "performance:array-spread-and-linear-includes-per-render": {
       "hits": 1,
@@ -262,15 +263,23 @@
       "note": "NEW fingerprint not in reference 01 §8 anti-pattern table. Suggest adding as row 13 if it recurs."
     },
     "workers:waituntil-no-catch": {
-      "hits": 2,
-      "iters": ["iter-002", "iter-003"],
+      "hits": 3,
+      "iters": ["iter-002", "iter-003", "iter-008"],
+      "cycle_density": { "iter-002": 1, "iter-003": 1, "iter-008": 5 },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
-      "promoted": false,
-      "rule_id": null,
-      "beads": ["Codex-ttavz.9", "Codex-ttavz.16"],
-      "severity": "minor",
-      "note": "RECURRENCE #2 in trailing 6 cycles. iter-002 F3 (workers/ecom-api/handlers/checkout.ts) + iter-003 F5 (apps/web/src/lib/server/brand-cache.ts). One more sighting in iter-004-006 → R7 standard 3-hit promotion fires."
+      "promoted": true,
+      "rule_id": "R13 (queued — apply in iter-009's prep, R7 standard 3-hit threshold)",
+      "beads": [
+        "Codex-ttavz.9",
+        "Codex-ttavz.16",
+        "Codex-y63gl.9",
+        "Codex-y63gl.10",
+        "Codex-y63gl.11",
+        "Codex-y63gl.12"
+      ],
+      "severity": "mixed (2 major + 3 minor; iter-008 F1 was duplicate of Codex-ttavz.9 still-open and NOT re-filed)",
+      "note": "R7 STANDARD 3-HIT PROMOTION fires. Cumulative cycle_density=7 across 3 cycles. iter-008 surfaced 5 sites (F1 duplicate of ttavz.9 not re-filed, F2 media-api transcoding RunPod call, F3 organization-api settings ×3 → single bead, F4 organizations.ts ×3 → single bead with :572 BRAND_KV.delete genuine hazard, F5 media-api scheduled). R13 queued for iter-009."
     },
     "denoise:doc-rot:06-domain-workers:row11": {
       "hits": 1,
