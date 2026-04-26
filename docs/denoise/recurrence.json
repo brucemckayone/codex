@@ -3,13 +3,13 @@
   "last_updated": "2026-04-26",
   "patterns": {
     "types:type-duplicate-cross-package": {
-      "hits": 2,
-      "iters": ["iter-004", "iter-005"],
-      "cycle_density": { "iter-004": 6, "iter-005": 7 },
+      "hits": 3,
+      "iters": ["iter-004", "iter-005", "iter-006"],
+      "cycle_density": { "iter-004": 6, "iter-005": 7, "iter-006": 3 },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": true,
-      "rule_id": "R11 (queued — apply in iter-006's prep, 2-hit early promotion via endemic-pattern watch)",
+      "rule_id": "R11 (applied in iter-006)",
       "beads": [
         "Codex-lqvw4.1",
         "Codex-lqvw4.2",
@@ -18,10 +18,12 @@
         "Codex-lqvw4.5",
         "Codex-lqvw4.6",
         "Codex-lqvw4.7",
-        "Codex-lqvw4.8"
+        "Codex-lqvw4.8",
+        "Codex-lqvw4.15",
+        "Codex-lqvw4.16"
       ],
-      "severity": "mixed (1 blocker + 4 major + 4 minor across iter-004 + iter-005)",
-      "note": "RECURRENCE #2 — endemic 2-hit early promotion fires per master.md endemic-pattern watch. Cumulative cycle_density = 13 distinct instances across 2 cycles (iter-004=6 in packages, iter-005=7 in workers). Iter-006's first action is to add R11 to local SKILL.md §1 mandating canonical declaration sites for cross-cutting type shapes."
+      "severity": "mixed (1 blocker + 5 major + 6 minor across 3 cycles)",
+      "note": "R11 APPLIED iter-006. Cumulative cycle_density=16 across 3 cycles (iter-004=6 packages, iter-005=7 workers, iter-006=3 apps/web). Endemic across all 3 scopes confirmed. Next types-focused cycle should validate R11 prevents NEW instances."
     },
     "types:type-narrowing-incomplete-orgmanagement": {
       "hits": 1,
@@ -35,26 +37,57 @@
       "note": "BLOCKER on blast-radius grounds (6 silent type-system bypasses in production routes). NEW fingerprint. Single-hit security exception does NOT fire (phase=types not security)."
     },
     "types:as-cast-without-guard": {
-      "hits": 1,
-      "iters": ["iter-005"],
+      "hits": 2,
+      "iters": ["iter-005", "iter-006"],
+      "cycle_density": { "iter-005": 5, "iter-006": 1 },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": false,
       "rule_id": null,
-      "beads": ["Codex-lqvw4.9"],
+      "beads": ["Codex-lqvw4.9", "Codex-lqvw4.12"],
       "severity": "major",
-      "note": "First workers-side filing. Fingerprint defined in ref 02 §7 row 8."
+      "note": "RECURRENCE #2. One more cycle increment triggers standard 3-hit R7 promotion."
     },
     "types:as-unknown-as": {
-      "hits": 1,
-      "iters": ["iter-005"],
+      "hits": 2,
+      "iters": ["iter-005", "iter-006"],
+      "cycle_density": { "iter-005": 2, "iter-006": 3 },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": false,
       "rule_id": null,
-      "beads": ["Codex-lqvw4.10"],
+      "beads": [
+        "Codex-lqvw4.10",
+        "Codex-lqvw4.17",
+        "Codex-lqvw4.18",
+        "Codex-lqvw4.19"
+      ],
+      "severity": "mixed (minor + major)",
+      "note": "RECURRENCE #2. One more cycle increment triggers standard 3-hit R7 promotion."
+    },
+    "types:redundant-cast-after-narrow": {
+      "hits": 1,
+      "iters": ["iter-006"],
+      "cycle_density": { "iter-006": 6 },
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-lqvw4.13"],
       "severity": "minor",
-      "note": "First cycle filing as a finding (iter-004 deferred 2 instances as pragmatic; these 2 worker-side are not). Track for recurrence."
+      "note": "NEW fingerprint. cycle_density=6 in single cycle — sibling shape to type-duplicate-cross-package. Watch for endemic-pattern threshold."
+    },
+    "types:any-explicit": {
+      "hits": 1,
+      "iters": ["iter-006"],
+      "cycle_density": { "iter-006": 2 },
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-lqvw4.14"],
+      "severity": "minor",
+      "note": "First apps/web filing. Ref 02 §7 row 1 defines fingerprint."
     },
     "web:auth-remote-broken-endpoint": {
       "hits": 1,
