@@ -37,7 +37,7 @@ _None._
 |------|----------|---------------|------------------------|--------------|----------|
 | security × packages | iter-013 (2026-04-26) | 6 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
 | security × workers | iter-014 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
-| security × apps/web | iter-003 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn since iter-003) |
+| security × apps/web | iter-015 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
 | types × packages | iter-004 (2026-04-26) | 6 | 0 | 2026-04-26 | skipped (no churn since iter-004) |
 | types × workers | iter-005 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn since iter-005) |
 | types × apps/web | iter-006 (2026-04-26) | 8 | 0 | 2026-04-26 | skipped (no churn since iter-006) |
@@ -130,6 +130,7 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-012 | 8 | 0 | 0% | within budget |
 | iter-013 | 0 | 0 | 0% | clean cycle (no churn, security × packages) |
 | iter-014 | 0 | 0 | 0% | clean cycle (no churn, security × workers) |
+| iter-015 | 0 | 0 | 0% | clean cycle (no churn, security × apps/web) — security row complete in Round 2 |
 
 > R8 fires when rate > 15% in any cycle. The next cycle's prep includes a meta-warning and a justification audit of every testability-bug.
 
@@ -153,6 +154,7 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-012 | simplification × apps/web | 2026-04-26 | 8 (0B/5M/3m) | Codex-mqyql.12–19 | **🎯 ROUND 1 CLOSED — ALL 12 CELLS NOW HAVE BASELINE CYCLE**. **R14 applied at start**. F1 (.13) MAJOR NEW fingerprint simplification:dup-content-item-shape — 4 inline redeclarations of canonical ContentItem; F2 (.12) MAJOR StudioSidebarItem vs SidebarRailItem dup-admission; F3 (.14) MAJOR STUDIO_ROLES copy-paste across UserMenu/MobileNav/MobileBottomSheet (R14 family); F4+F6 (.16, .17) MAJOR NEW fingerprint simplification:dup-zod-schema-fragment — createContentFormSchema/updateContentFormSchema + checkoutFormSchema/checkoutCommandSchema inline duplicate Zod fields (cycle_density=2); F5 (.15) MINOR 3 Stripe-success page loaders share skeleton; F7 (.19) MINOR Header/MobileNav + Header/UserMenu lonely-abstraction (only consumed by _creators layout post bottom-nav migration); F8 (.18) MINOR doc-rot in ref 05 (loadFromServer renamed to hydrateIfNeeded). Total beads across denoise: 72. simplification:duplicate-utility-helper now at hits=3 cycle_density=9 across all 3 scopes |
 | iter-013 | security × packages | 2026-04-26 | 0 (CLEAN) | — | **First Round 2 cycle. Idle steady-state achieved.** Zero production code churn in packages/*/src/** since iter-001 baseline. Stop-criterion countdown 1/3 |
 | iter-014 | security × workers | 2026-04-26 | 0 (CLEAN) | — | Second Round 2 cycle. Zero production code churn in workers/*/src/** since iter-002 baseline. Stop-criterion countdown 1/3 |
+| iter-015 | security × apps/web | 2026-04-26 | 0 (CLEAN) | — | Third Round 2 cycle. Zero production code churn in apps/web/src/** since iter-003 baseline. **Security row first pass complete** — all 3 security cells at 1/3. Stop-criterion countdown 1/3 |
 
 ---
 
