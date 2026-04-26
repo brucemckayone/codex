@@ -35,7 +35,7 @@ _None._
 
 | Cell | Last run | Open findings | Open testability-bugs | Last checked | Next due |
 |------|----------|---------------|------------------------|--------------|----------|
-| security × packages | iter-001 (2026-04-25) | 6 | 0 | 2026-04-25 | skipped (no churn since iter-001) |
+| security × packages | iter-013 (2026-04-26) | 6 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
 | security × workers | iter-002 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn since iter-002) |
 | security × apps/web | iter-003 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn since iter-003) |
 | types × packages | iter-004 (2026-04-26) | 6 | 0 | 2026-04-26 | skipped (no churn since iter-004) |
@@ -128,6 +128,7 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-010 | 5 | 0 | 0% | within budget |
 | iter-011 | 5 | 0 | 0% | within budget |
 | iter-012 | 8 | 0 | 0% | within budget |
+| iter-013 | 0 | 0 | 0% | clean cycle (no churn, security × packages) |
 
 > R8 fires when rate > 15% in any cycle. The next cycle's prep includes a meta-warning and a justification audit of every testability-bug.
 
@@ -149,6 +150,7 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-010 | performance × apps/web | 2026-04-26 | 5 (0B/1M/4m) | Codex-y63gl.14–18 | Cycle 0 for cell; **R12 EFFECTIVENESS CHECK PASSED** — first apps/web cycle since R12 promoted iter-008; zero new sequential-await-independent-queries violations across 13 SvelteKit loaders + helpers; existing parallelism correct (Promise.all for independent, guard-then-fetch for FK ordering — R12 carve-out respected). F1 (.14) MAJOR NEW fingerprint performance:hot-path-shader-config-getcomputedstyle — ImmersiveShaderPlayer + ShaderPreview hit getComputedStyle every frame (60 forced-style-recalcs/sec per active player); canonical ShaderHero already amortises with 30-frame poll counter, immersive overlay shipped without inheriting; F2 (.15) MINOR NEW fingerprint performance:hot-path-allocation-render-loop (120 alloc/sec in immersive playback); F3 (.16) MINOR keyless {#each} on org landing; F4 (.17) MINOR BRAND_KV.get without cacheTtl; F5 (.18) MINOR auth RegExp recompiled per call. Fabrication check 12/12 live |
 | iter-011 | simplification × workers | 2026-04-26 | 5 (0B/3M/2m) | Codex-mqyql.7–11 | Cycle 0 for cell; **R12 + R13 EFFECTIVENESS CHECKS PASSED** in spot-checks across ecom-api webhook handlers; F1+F2 (.7, .8) MAJOR — `simplification:duplicate-utility-helper` RECURRENCE #2 (iter-009 + iter-011): 3 inline bumpUserLibrary sites + slug-resolve-then-invalidate dup. Cumulative cycle_density=7 → R7 ENDEMIC 2-HIT PROMOTION fires (R14 queued for iter-012). F3 (.9) MAJOR — `simplification:dup-procedure-context-builder` RECURRENCE #2 (5 sites of createPerRequestDbClient triple-field boilerplate in ecom-api webhooks); ONE MORE CYCLE HIT → R7 standard 3-hit promotion. F4 (.10) MINOR speculative perRequestDb in admin-api types referencing nonexistent middleware; F5 (.11) MINOR R2 key→URL resolution inlined 3× in content-api routes (belongs in service layer). `simplification:dup-paginated-list-shape` 2-hit early-promotion watch CLOSED for workers cell (services own pagination). Fabrication check 14/14 live |
 | iter-012 | simplification × apps/web | 2026-04-26 | 8 (0B/5M/3m) | Codex-mqyql.12–19 | **🎯 ROUND 1 CLOSED — ALL 12 CELLS NOW HAVE BASELINE CYCLE**. **R14 applied at start**. F1 (.13) MAJOR NEW fingerprint simplification:dup-content-item-shape — 4 inline redeclarations of canonical ContentItem; F2 (.12) MAJOR StudioSidebarItem vs SidebarRailItem dup-admission; F3 (.14) MAJOR STUDIO_ROLES copy-paste across UserMenu/MobileNav/MobileBottomSheet (R14 family); F4+F6 (.16, .17) MAJOR NEW fingerprint simplification:dup-zod-schema-fragment — createContentFormSchema/updateContentFormSchema + checkoutFormSchema/checkoutCommandSchema inline duplicate Zod fields (cycle_density=2); F5 (.15) MINOR 3 Stripe-success page loaders share skeleton; F7 (.19) MINOR Header/MobileNav + Header/UserMenu lonely-abstraction (only consumed by _creators layout post bottom-nav migration); F8 (.18) MINOR doc-rot in ref 05 (loadFromServer renamed to hydrateIfNeeded). Total beads across denoise: 72. simplification:duplicate-utility-helper now at hits=3 cycle_density=9 across all 3 scopes |
+| iter-013 | security × packages | 2026-04-26 | 0 (CLEAN) | — | **First Round 2 cycle. Idle steady-state achieved.** Zero production code churn in packages/*/src/** since iter-001 baseline (every subsequent commit was denoise scaffolding). §5.0 "no work" exit per protocol — no agent dispatch, no fallow run, ~50ms `git log` check. Stop-criterion countdown advances 1/3 for the cell. Loop will continue self-skipping every 15 min until real production code lands |
 
 ---
 
