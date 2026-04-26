@@ -112,6 +112,9 @@ export async function loadSubscriptionFromServer(
     const sub = await getCurrentSubscription(orgId);
 
     if (sub && sub.tier) {
+      // `currentPeriodEnd` arrives as an ISO string over the JSON wire — the
+      // `CurrentSubscription` type now reflects that via `DateAsString<…>`,
+      // so no instanceof guard is needed here. Stored as-is.
       const periodEnd = sub.currentPeriodEnd;
       // Preserve a previously-stored slug if this caller didn't supply one.
       const existingSlug =
@@ -127,10 +130,7 @@ export async function loadSubscriptionFromServer(
         // cancelled, and incomplete, breaking consumers that need to
         // render the right UI branch for each state.
         status: normaliseSubscriptionStatus(sub.status, sub.cancelAtPeriodEnd),
-        currentPeriodEnd:
-          periodEnd instanceof Date
-            ? periodEnd.toISOString()
-            : String(periodEnd),
+        currentPeriodEnd: periodEnd,
         cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
       };
       if (subscriptionCollection.state.has(orgId)) {

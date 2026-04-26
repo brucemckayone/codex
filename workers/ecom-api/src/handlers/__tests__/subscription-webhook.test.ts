@@ -44,10 +44,16 @@ vi.mock('@codex/subscription', () => ({
 
 // The subscription-webhook handler dispatches emails via `sendEmailToWorker`
 // from `@codex/worker-utils`. Mock it so no real fetch is attempted and so
-// the trial_will_end tests can assert on dispatch.
-vi.mock('@codex/worker-utils', () => ({
-  sendEmailToWorker: vi.fn(),
-}));
+// the trial_will_end tests can assert on dispatch. `createWebhookDbClient`
+// must remain a real export — it forwards to the (mocked)
+// `createPerRequestDbClient`, so use importOriginal + spread.
+vi.mock('@codex/worker-utils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@codex/worker-utils')>();
+  return {
+    ...actual,
+    sendEmailToWorker: vi.fn(),
+  };
+});
 
 import { createPerRequestDbClient } from '@codex/database';
 import { SubscriptionService, TierService } from '@codex/subscription';

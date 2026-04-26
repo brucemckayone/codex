@@ -20,10 +20,9 @@
 import { AccessRevocation } from '@codex/access';
 import { VersionedCache } from '@codex/cache';
 import { STRIPE_EVENTS } from '@codex/constants';
-import { createPerRequestDbClient } from '@codex/database';
 import { PurchaseService } from '@codex/purchase';
 import { invalidateForUser } from '@codex/subscription';
-import { sendEmailToWorker } from '@codex/worker-utils';
+import { createWebhookDbClient, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
@@ -242,11 +241,7 @@ export async function handlePaymentWebhook(
 ) {
   const obs = c.get('obs');
 
-  const { db, cleanup } = createPerRequestDbClient({
-    DATABASE_URL: c.env.DATABASE_URL,
-    DATABASE_URL_LOCAL_PROXY: c.env.DATABASE_URL_LOCAL_PROXY,
-    DB_METHOD: c.env.DB_METHOD,
-  });
+  const { db, cleanup } = createWebhookDbClient(c.env);
 
   try {
     const service = new PurchaseService(

@@ -30,10 +30,9 @@
 import { AccessRevocation, type RevocationReason } from '@codex/access';
 import { VersionedCache } from '@codex/cache';
 import { STRIPE_EVENTS } from '@codex/constants';
-import { createPerRequestDbClient } from '@codex/database';
 import type { WebhookHandlerResult } from '@codex/subscription';
 import { SubscriptionService, TierService } from '@codex/subscription';
-import { sendEmailToWorker } from '@codex/worker-utils';
+import { createWebhookDbClient, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
@@ -167,11 +166,7 @@ export async function handleSubscriptionWebhook(
   const obs = c.get('obs');
   const webAppUrl = c.env.WEB_APP_URL || '';
 
-  const { db, cleanup } = createPerRequestDbClient({
-    DATABASE_URL: c.env.DATABASE_URL,
-    DATABASE_URL_LOCAL_PROXY: c.env.DATABASE_URL_LOCAL_PROXY,
-    DB_METHOD: c.env.DB_METHOD,
-  });
+  const { db, cleanup } = createWebhookDbClient(c.env);
 
   try {
     // Wire the cache + waitUntil orchestrator hook so every `handle*`

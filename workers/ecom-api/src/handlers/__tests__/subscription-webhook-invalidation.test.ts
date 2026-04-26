@@ -65,10 +65,16 @@ vi.mock('@codex/purchase', () => ({
   PurchaseService: vi.fn(),
 }));
 
-vi.mock('@codex/worker-utils', () => ({
-  // sendEmailToWorker is fire-and-forget — stub so it doesn't try a real fetch.
-  sendEmailToWorker: vi.fn(),
-}));
+// `createWebhookDbClient` must remain a real export — it forwards to the
+// (mocked) `createPerRequestDbClient`, so use importOriginal + spread.
+vi.mock('@codex/worker-utils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@codex/worker-utils')>();
+  return {
+    ...actual,
+    // sendEmailToWorker is fire-and-forget — stub so it doesn't try a real fetch.
+    sendEmailToWorker: vi.fn(),
+  };
+});
 
 import { createPerRequestDbClient } from '@codex/database';
 import { PurchaseService } from '@codex/purchase';

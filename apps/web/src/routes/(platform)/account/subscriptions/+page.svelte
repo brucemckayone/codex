@@ -295,7 +295,7 @@
               {#if sub.status === 'cancelling'}
                 <p class="cancelling-message">
                   {m.subscription_cancelling_message({
-                    date: formatDate(sub.currentPeriodEnd as unknown as string),
+                    date: formatDate(sub.currentPeriodEnd),
                   })}
                 </p>
               {/if}
@@ -307,7 +307,7 @@
                 </span>
                 <span class="subscription-period">
                   {m.subscription_current_period_ends({
-                    date: formatDate(sub.currentPeriodEnd as unknown as string),
+                    date: formatDate(sub.currentPeriodEnd),
                   })}
                 </span>
               </div>

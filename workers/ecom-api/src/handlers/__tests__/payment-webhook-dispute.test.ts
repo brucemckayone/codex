@@ -45,9 +45,15 @@ vi.mock('@codex/purchase', () => ({
   PurchaseService: vi.fn(),
 }));
 
-vi.mock('@codex/worker-utils', () => ({
-  sendEmailToWorker: vi.fn(),
-}));
+// `createWebhookDbClient` must remain a real export — it forwards to the
+// (mocked) `createPerRequestDbClient`, so use importOriginal + spread.
+vi.mock('@codex/worker-utils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@codex/worker-utils')>();
+  return {
+    ...actual,
+    sendEmailToWorker: vi.fn(),
+  };
+});
 
 const mockRevoke = vi.fn().mockResolvedValue(undefined);
 const mockIsRevoked = vi.fn().mockResolvedValue(null);

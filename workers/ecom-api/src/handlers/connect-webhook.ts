@@ -9,11 +9,11 @@
  */
 
 import { STRIPE_EVENTS } from '@codex/constants';
-import { createPerRequestDbClient } from '@codex/database';
 import {
   ConnectAccountService,
   SubscriptionService,
 } from '@codex/subscription';
+import { createWebhookDbClient } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
@@ -25,11 +25,7 @@ export async function handleConnectWebhook(
 ) {
   const obs = c.get('obs');
 
-  const { db, cleanup } = createPerRequestDbClient({
-    DATABASE_URL: c.env.DATABASE_URL,
-    DATABASE_URL_LOCAL_PROXY: c.env.DATABASE_URL_LOCAL_PROXY,
-    DB_METHOD: c.env.DB_METHOD,
-  });
+  const { db, cleanup } = createWebhookDbClient(c.env);
 
   try {
     const service = new ConnectAccountService(
@@ -67,12 +63,8 @@ export async function handleConnectWebhook(
         if (isNowActive && !wasActive) {
           const orgId = account.metadata?.codex_organization_id;
           if (orgId) {
-            const { db: subDb, cleanup: subCleanup } = createPerRequestDbClient(
-              {
-                DATABASE_URL: c.env.DATABASE_URL,
-                DATABASE_URL_LOCAL_PROXY: c.env.DATABASE_URL_LOCAL_PROXY,
-                DB_METHOD: c.env.DB_METHOD,
-              }
+            const { db: subDb, cleanup: subCleanup } = createWebhookDbClient(
+              c.env
             );
             const subscriptionService = new SubscriptionService(
               { db: subDb, environment: c.env.ENVIRONMENT || 'development' },

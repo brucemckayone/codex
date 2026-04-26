@@ -70,14 +70,51 @@ export interface OrgBrandFineTune {
   bodyWeight?: string | null;
 }
 
+// ─── Wire-Shape Helpers ────────────────────────────────────────────────────
+
+/**
+ * Replace every `Date` field on `T` with `string`.
+ *
+ * Drizzle row types (e.g. `Subscription`, `SubscriptionTier`) declare
+ * `timestamp` columns as `Date`, but those values become ISO strings the
+ * moment they cross a JSON boundary (server load → page, fetch → response).
+ * Using the bare row type on the client invites `as unknown as string`
+ * casts at every `formatDate(...)` call site.
+ *
+ * `DateAsString<T>` is the canonical wire-shape transformation: it walks
+ * `T` once, rewrites `Date` → `string`, preserves nullability, and is
+ * idempotent on already-string fields.
+ *
+ * Use it whenever you ascribe a Drizzle row as the response type of an
+ * API call or `+page.server.ts` load — never reach for `as unknown as` to
+ * paper over the mismatch in components.
+ */
+export type DateAsString<T> = {
+  [K in keyof T]: T[K] extends Date
+    ? string
+    : T[K] extends Date | null
+      ? string | null
+      : T[K] extends Date | undefined
+        ? string | undefined
+        : T[K] extends Date | null | undefined
+          ? string | null | undefined
+          : T[K];
+};
+
 // ─── Subscription Types ────────────────────────────────────────────────────
 
 /**
  * Subscription with tier and org info, matching backend SubscriptionWithOrg shape.
- * Returned by GET /subscriptions/mine
+ * Returned by GET /subscriptions/mine.
+ *
+ * Wire shape: timestamps (`currentPeriodStart`, `currentPeriodEnd`,
+ * `cancelledAt`, `createdAt`, `updatedAt`) arrive as ISO strings over JSON,
+ * not the `Date` instances Drizzle declares. `DateAsString<...>` performs
+ * the row → wire transformation at the type level so `formatDate(...)`
+ * call sites never need `as unknown as string`.
  */
-export interface UserOrgSubscription extends Subscription {
-  tier: SubscriptionTier;
+export interface UserOrgSubscription extends DateAsString<Subscription> {
+  tier: DateAsString<SubscriptionTier>;
   organization: {
     id: string;
     name: string;
@@ -88,10 +125,12 @@ export interface UserOrgSubscription extends Subscription {
 
 /**
  * Subscription with tier info for current org context.
- * Returned by GET /subscriptions/current
+ * Returned by GET /subscriptions/current.
+ *
+ * Wire shape: see `UserOrgSubscription` above for rationale.
  */
-export interface CurrentSubscription extends Subscription {
-  tier: SubscriptionTier;
+export interface CurrentSubscription extends DateAsString<Subscription> {
+  tier: DateAsString<SubscriptionTier>;
 }
 
 /**

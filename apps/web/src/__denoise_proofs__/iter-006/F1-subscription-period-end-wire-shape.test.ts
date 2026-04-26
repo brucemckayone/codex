@@ -20,7 +20,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import type { UserOrgSubscription } from '../../lib/types';
 
-describe.skip('iter-006 F1 — UserOrgSubscription.currentPeriodEnd wire shape', () => {
+describe('iter-006 F1 — UserOrgSubscription.currentPeriodEnd wire shape', () => {
   it('currentPeriodEnd should be `string` over the wire (not Date)', () => {
     // Before fix: Subscription.currentPeriodEnd is `Date` from Drizzle's
     // timestamp column. The runtime value is `string` because JSON serialises

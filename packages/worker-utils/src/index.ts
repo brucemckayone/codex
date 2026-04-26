@@ -117,6 +117,14 @@ export type {
   ErrorResponse,
   HealthCheckResponse,
 } from './types';
+// Webhook DB-client helper (R-denoise iter-011 F3): ecom-api Stripe
+// webhooks bypass procedure() and manage their own DB lifecycle. This
+// helper collapses the {DATABASE_URL, DATABASE_URL_LOCAL_PROXY,
+// DB_METHOD} triple-field call shape to a single import.
+export {
+  createWebhookDbClient,
+  type WebhookDbEnv,
+} from './webhook-db-client';
 // Worker factory
 export {
   type CORSConfig,

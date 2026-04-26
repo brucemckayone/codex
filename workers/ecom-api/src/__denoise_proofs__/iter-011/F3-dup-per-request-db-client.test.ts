@@ -8,67 +8,64 @@
  * `buildUploadBaseContext`. This filing is the second hit (different
  * site shape — Stripe webhook handlers). Hits=2.
  *
- * Sites (all five lift the IDENTICAL `{DATABASE_URL, DATABASE_URL_LOCAL_PROXY,
- * DB_METHOD}` triple off `c.env`):
- *   - workers/ecom-api/src/handlers/checkout.ts:132-136
- *   - workers/ecom-api/src/handlers/connect-webhook.ts:28-32
- *   - workers/ecom-api/src/handlers/connect-webhook.ts:70-75 (nested in
- *     account-activation pending-payouts branch)
- *   - workers/ecom-api/src/handlers/payment-webhook.ts:245-249
- *   - workers/ecom-api/src/handlers/subscription-webhook.ts:170-174
+ * Sites (all five lifted the IDENTICAL `{DATABASE_URL,
+ * DATABASE_URL_LOCAL_PROXY, DB_METHOD}` triple off `c.env`):
+ *   - workers/ecom-api/src/handlers/checkout.ts
+ *   - workers/ecom-api/src/handlers/connect-webhook.ts (×2)
+ *   - workers/ecom-api/src/handlers/payment-webhook.ts
+ *   - workers/ecom-api/src/handlers/subscription-webhook.ts
  *
  * Procedure() handlers don't have this boilerplate because the service
  * registry handles per-request DB lifecycle. Webhook handlers bypass
  * procedure() (HMAC + raw-body verification), so they need their own DB
  * lifecycle — but the shape is so uniform that a single helper
- * `createWebhookDbClient(c.env)` would collapse 5 sites into one
- * import. Drift risk: a future env-binding name change (e.g. `DB_METHOD`
- * → `DB_DRIVER`) would silently miss any one of the five sites.
+ * `createWebhookDbClient(c.env)` collapses 5 sites into one import. Drift
+ * risk: a future env-binding name change (e.g. `DB_METHOD` → `DB_DRIVER`)
+ * would silently miss any one of the five sites without the helper.
  *
  * Proof shape: Catalogue row 12 — clone-count assertion via static grep
- * over the literal three-field call shape.
+ * over the literal three-field call shape inside ecom-api handlers.
  *
- * Fix: extract `createWebhookDbClient(env: { DATABASE_URL: string;
- * DATABASE_URL_LOCAL_PROXY?: string; DB_METHOD?: string })` (likely in
- * @codex/database or workers/ecom-api/src/utils/) and have all five
- * sites consume it.
- *
- * `it.skip` while the duplication stands.
+ * Fix landed: `createWebhookDbClient(env)` in `@codex/worker-utils` —
+ * each handler imports it and calls it with `c.env`.
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+// Vite `?raw` baked-at-build-time imports — works under both Node and the
+// workerd runtime used by @cloudflare/vitest-pool-workers (which has no
+// node:fs).
 import { describe, expect, it } from 'vitest';
+import checkoutSrc from '../../handlers/checkout.ts?raw';
+import connectSrc from '../../handlers/connect-webhook.ts?raw';
+import paymentSrc from '../../handlers/payment-webhook.ts?raw';
+import subscriptionSrc from '../../handlers/subscription-webhook.ts?raw';
 
-const PROJECT_ROOT = join(__dirname, '..', '..', '..', '..', '..');
+const SITES: Array<{ path: string; src: string }> = [
+  { path: 'workers/ecom-api/src/handlers/checkout.ts', src: checkoutSrc },
+  {
+    path: 'workers/ecom-api/src/handlers/connect-webhook.ts',
+    src: connectSrc,
+  },
+  { path: 'workers/ecom-api/src/handlers/payment-webhook.ts', src: paymentSrc },
+  {
+    path: 'workers/ecom-api/src/handlers/subscription-webhook.ts',
+    src: subscriptionSrc,
+  },
+];
 
-const HANDLERS_DIR = join(PROJECT_ROOT, 'workers/ecom-api/src/handlers');
-
-function listTsFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const name of readdirSync(dir)) {
-    const full = join(dir, name);
-    if (statSync(full).isDirectory()) continue;
-    if (name.endsWith('.ts') && !name.endsWith('.test.ts')) out.push(full);
-  }
-  return out;
-}
-
-describe.skip('iter-011 F3 — createPerRequestDbClient triple-field shape duplicated', () => {
+describe('iter-011 F3 — createPerRequestDbClient triple-field shape duplicated', () => {
   it('the {DATABASE_URL, DATABASE_URL_LOCAL_PROXY, DB_METHOD} call shape appears at most once across ecom-api handlers', () => {
     const offenders: Array<{ path: string; line: number }> = [];
 
-    for (const file of listTsFiles(HANDLERS_DIR)) {
-      const src = readFileSync(file, 'utf8');
+    for (const { path, src } of SITES) {
       // Match the exact triple-field call. Allows whitespace / newlines.
       const re =
         /createPerRequestDbClient\(\s*\{\s*DATABASE_URL:[\s\S]{0,80}?DATABASE_URL_LOCAL_PROXY:[\s\S]{0,80}?DB_METHOD:/g;
       for (const m of Array.from(src.matchAll(re))) {
         const line = src.slice(0, m.index ?? 0).split('\n').length;
-        offenders.push({ path: file.slice(PROJECT_ROOT.length + 1), line });
+        offenders.push({ path, line });
       }
     }
 
-    // Pre-fix: 5 offenders. Post-fix: 0 (shared helper owns the call).
+    // Pre-fix: 5 offenders. Post-fix: 0 (createWebhookDbClient owns the call).
     expect(
       offenders,
       `Inline createPerRequestDbClient(...) call shape duplicated. Extract to a shared helper. Offenders:\n${offenders.map((o) => `  ${o.path}:${o.line}`).join('\n')}`
