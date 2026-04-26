@@ -40,7 +40,7 @@ _None._
 | security × apps/web | iter-015 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
 | types × packages | iter-016 (2026-04-26) | 6 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
 | types × workers | iter-017 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
-| types × apps/web | iter-018 (2026-04-26) | 8 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
+| types × apps/web | iter-025 (2026-04-26) | 8 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 2/3) |
 | performance × packages | iter-019 (2026-04-26) | 8 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
 | performance × workers | iter-020 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
 | performance × apps/web | iter-021 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
@@ -140,6 +140,7 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-022 | 0 | 0 | 0% | clean cycle (no churn, simplification × packages) — simplification row begins |
 | iter-023 | 0 | 0 | 0% | clean cycle (no churn, simplification × workers) |
 | iter-024 | 0 | 0 | 0% | clean cycle (no churn, simplification × apps/web) — **🎯 ROUND 2 FIRST PASS COMPLETE** |
+| iter-025 | 0 | 0 | 0% | clean cycle (no churn, types × apps/web) — **second pass cycle 1** — first cell at countdown 2/3 |
 
 > R8 fires when rate > 15% in any cycle. The next cycle's prep includes a meta-warning and a justification audit of every testability-bug.
 
@@ -173,17 +174,19 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-022 | simplification × packages | 2026-04-26 | 0 (CLEAN) | — | Tenth Round 2 cycle. Zero churn in packages/*/src/** since iter-009. **Simplification row begins.** Stop-criterion 1/3 |
 | iter-023 | simplification × workers | 2026-04-26 | 0 (CLEAN) | — | Eleventh Round 2 cycle. Zero churn in workers/*/src/** since iter-011. Stop-criterion 1/3 |
 | iter-024 | simplification × apps/web | 2026-04-26 | 0 (CLEAN) | — | Twelfth Round 2 cycle. Zero churn in apps/web/src/** since iter-012. **🎯 ROUND 2 FIRST PASS COMPLETE — all 12 cells at countdown 1/3.** Round 1 found 72 issues; Round 2 found 0. Drift-detection working as designed |
+| iter-025 | types × apps/web | 2026-04-26 | 0 (CLEAN) | — | Thirteenth Round 2 cycle, **second-pass cycle 1**. Zero churn in apps/web/src/** since iter-018 (only commit was 7345a106 batch-sweep, docs-only). First cell to reach **countdown 2/3** — one more clean cycle reaches fidelity per §7 |
 
 ---
 
 ## Next-cycle prep — Round 2 / drift-detection mode begins
 
 - **🎯 ROUND 1 COMPLETE** after iter-012. All 12 cells have baseline iter files. Future cycles measure whether R9-R14 prevent NEW instances vs only catalogue existing ones.
-- **🎯 Round 2 progress (after iter-024)**: **12 of 12 cells visited — Round 2 first pass complete.** All cells at stop-criterion countdown 1/3.
-  - Round 1 (iter-001 → iter-012): 72 findings catalogued (cataloguing/discovery mode)
-  - Round 2 first pass (iter-013 → iter-024): 0 findings (drift-detection mode active, no regression detected)
-- **No promotion queued for iter-025**.
-- **Suggested next cell** (per §5.0 sort): tied top tier at 8 open findings — types × apps/web (iter-018), performance × packages (iter-019), simplification × apps/web (iter-024). `last_run ASC` → **`types × apps/web` (iter-025)** begins Round 2 second pass.
+- **🎯 Round 2 progress (after iter-025)**: First pass complete (12/12). Second pass underway — 1 of 12 cells advanced to 2/3.
+  - Round 1 (iter-001 → iter-012): 72 findings catalogued
+  - Round 2 first pass (iter-013 → iter-024): 0 findings
+  - Round 2 second pass (iter-025+): in progress, types × apps/web at 2/3
+- **No promotion queued for iter-026**.
+- **Suggested next cell** (§5.0 sort): tied top tier at 8 open findings — performance × packages (iter-019, 1/3), simplification × apps/web (iter-024, 1/3), types × apps/web (iter-025, 2/3). `last_run ASC` → **`performance × packages` (iter-026)** continues second pass.
 - **Round 2 stop-criterion countdown**: each cell's countdown starts at 3. A cell reaches **fidelity** at 3 consecutive zero-finding cycles. Cells producing findings reset to 3.
 - **Recurrence watches (carry-forward)**:
   - `simplification:dup-procedure-context-builder` (hits=2) — one more hit → R7 standard 3-hit
