@@ -10,80 +10,90 @@
  * Proof shape: Catalogue row 11 — "API regression with no test infra:
  * Snapshot the route map; any drift fails." Adapted: structurally
  * assert that the notifications-api app's middleware stack contains
- * a rate limiter for `/unsubscribe/*` (or that the route-handler file
- * exports a `procedure()` with `rateLimit` set).
+ * a rate limiter for `/unsubscribe/*`.
  *
- * Failure mode this test would catch: anyone with a leaked
- * unsubscribe token URL can replay it as fast as TCP allows. The
- * HMAC verification cost is non-trivial and the POST mutates DB
- * state (idempotently, but still — write amplification). Without a
- * rate limit:
+ * Originally this proof read the index.ts source via `node:fs` to
+ * grep for the wiring. That style does NOT work in the workers pool
+ * (workerd sandboxes the host filesystem) — confirmed by the cousin
+ * file at workers/content-api/src/__denoise_proofs__/iter-005/F2-*
+ * which moved its filesystem-grep guard into the node pool for the
+ * same reason. So this proof now does the equivalent assertion via
+ * runtime behaviour: hit the worker through SELF.fetch and verify
+ * the X-RateLimit-* headers are emitted on /unsubscribe/* responses.
+ * If the middleware is removed or detached, those headers disappear
+ * and this test fails.
+ *
+ * Failure mode this test catches: anyone with a leaked unsubscribe
+ * token URL can replay it as fast as TCP allows. The HMAC verify
+ * cost is non-trivial and the POST mutates DB state (idempotently,
+ * but still — write amplification). Without the rate limit:
  *   - DoS by flooding /unsubscribe/<random> tokens (HMAC verify
  *     cycles per request)
  *   - Token-format enumeration (timing on validity vs invalidity)
  *   - DB write amplification on the hot table
  *     `notification_preferences` if a token is replayed
  *
- * Compare against the auth worker which does apply
+ * Compare against the auth worker which applies
  * `RATE_LIMIT_PRESETS.auth` (5/15min) on its public endpoints and
  * the ecom-api worker which applies `webhook` (1000/min) on
  * `/webhooks/*`.
  *
- * `it.skip` while the bug stands. Un-skip in the same PR as the fix,
- * which should add `app.use('/unsubscribe/*', rateLimit({ kv:
- * c.env.RATE_LIMIT_KV, ...RATE_LIMIT_PRESETS.api }))` (or `.strict`)
- * to `workers/notifications-api/src/index.ts`.
+ * Fix landed: `app.use('/unsubscribe/*', rateLimit({ kv:
+ * c.env.RATE_LIMIT_KV, ...RATE_LIMIT_PRESETS.api }))` in
+ * workers/notifications-api/src/index.ts. See bead Codex-ttavz.8.
+ *
+ * Behavioural integration coverage (positive + negative budget,
+ * per-IP + per-path isolation) lives at
+ * `workers/notifications-api/src/__tests__/unsubscribe-rate-limit.test.ts`.
  */
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-const PROJECT_ROOT = join(__dirname, '..', '..', '..', '..', '..');
-const NOTIFICATIONS_INDEX = join(
-  PROJECT_ROOT,
-  'workers/notifications-api/src/index.ts'
-);
-const UNSUBSCRIBE_ROUTE = join(
-  PROJECT_ROOT,
-  'workers/notifications-api/src/routes/unsubscribe.ts'
-);
+describe('iter-002 F2 — public unsubscribe endpoint has no rate limit', () => {
+  it('GET /unsubscribe/:token responses carry X-RateLimit-* headers', async () => {
+    // Use a unique IP so this test does not race with other tests
+    // for the same (ip, path) budget bucket.
+    const res = await SELF.fetch(
+      'http://localhost/unsubscribe/proof-f2-token-get',
+      {
+        method: 'GET',
+        headers: { 'cf-connecting-ip': '198.51.100.10' },
+      }
+    );
 
-describe.skip('iter-002 F2 — public unsubscribe endpoint has no rate limit', () => {
-  it('notifications-api index has rate-limit middleware on /unsubscribe/*', () => {
-    const indexSrc = readFileSync(NOTIFICATIONS_INDEX, 'utf8');
-    // FAILS on current main: index.ts has no `rateLimit(` import or
-    // call anywhere — there is zero rate-limit wiring on this worker
-    // (compare with workers/ecom-api/src/index.ts which calls
-    // rateLimit({ ...RATE_LIMIT_PRESETS.webhook }) for /webhooks/*).
+    // The middleware must have run — these headers are added
+    // unconditionally by `rateLimit()` in @codex/security.
     expect(
-      indexSrc,
-      'notifications-api/src/index.ts should import rateLimit'
-    ).toContain("from '@codex/security'");
-    expect(
-      indexSrc,
-      'notifications-api should apply rate limiting to /unsubscribe/*'
-    ).toMatch(/app\.use\(\s*['"]\/unsubscribe\/\*['"]/);
+      res.headers.get('X-RateLimit-Limit'),
+      'X-RateLimit-Limit header proves rate-limit middleware ran on /unsubscribe/*'
+    ).not.toBeNull();
+    expect(res.headers.get('X-RateLimit-Remaining')).not.toBeNull();
+    expect(res.headers.get('X-RateLimit-Reset')).not.toBeNull();
+
+    // Drain body to free the stream.
+    await res.text();
   });
 
-  it('unsubscribe handler does not bypass procedure() rate limiting', () => {
-    const routeSrc = readFileSync(UNSUBSCRIBE_ROUTE, 'utf8');
-    // FAILS on current main: the route uses raw `app.post(...)` and
-    // `app.get(...)` Hono handlers with NO procedure() wrapping
-    // (because token verification is HMAC-based, not session-based).
-    // Per CLAUDE.md this is intentional — but rate limiting must
-    // still happen at the Hono middleware level. Either of these
-    // assertions should hold after the fix:
-    //   - the route uses procedure() with `rateLimit` set, OR
-    //   - the index.ts (covered above) attaches `app.use(...
-    //     rateLimit(...))` for `/unsubscribe/*`.
-    const usesProcedureWithRateLimit =
-      /procedure\(\s*\{[\s\S]*?rateLimit\s*:/.test(routeSrc);
-    const indexSrc = readFileSync(NOTIFICATIONS_INDEX, 'utf8');
-    const indexAttachesRateLimit =
-      /app\.use\(\s*['"]\/unsubscribe\/\*['"][\s\S]*?rateLimit/.test(indexSrc);
+  it('POST /unsubscribe/:token responses carry X-RateLimit-* headers', async () => {
+    // Same assertion for POST — the route file uses raw Hono
+    // handlers (not procedure()) for both verbs, so the index-level
+    // middleware MUST cover both. If a future refactor accidentally
+    // limits this to GET, this test fails.
+    const res = await SELF.fetch(
+      'http://localhost/unsubscribe/proof-f2-token-post',
+      {
+        method: 'POST',
+        headers: { 'cf-connecting-ip': '198.51.100.11' },
+      }
+    );
+
     expect(
-      usesProcedureWithRateLimit || indexAttachesRateLimit,
-      'unsubscribe routes must be rate-limited (either procedure({rateLimit}) or app.use rateLimit at index)'
-    ).toBe(true);
+      res.headers.get('X-RateLimit-Limit'),
+      'X-RateLimit-Limit header proves rate-limit middleware ran on POST /unsubscribe/*'
+    ).not.toBeNull();
+    expect(res.headers.get('X-RateLimit-Remaining')).not.toBeNull();
+    expect(res.headers.get('X-RateLimit-Reset')).not.toBeNull();
+
+    await res.text();
   });
 });

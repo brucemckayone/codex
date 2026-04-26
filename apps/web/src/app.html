@@ -9,7 +9,7 @@
          scheme before CSS paints. Prevents a brief flash of default light
          scrollbar on dark theme in Chromium browsers. -->
     <meta name="color-scheme" content="light dark" />
-    <script>
+    <script nonce="%sveltekit.nonce%">
       // Polyfill crypto.randomUUID for non-secure contexts (HTTP on lvh.me dev)
       if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
         crypto.randomUUID = function() {
@@ -19,7 +19,7 @@
         };
       }
     </script>
-    <script>
+    <script nonce="%sveltekit.nonce%">
       (function() {
         const theme = document.cookie.match(/theme=(dark|light)/)?.[1]
           || localStorage.getItem('theme')

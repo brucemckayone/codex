@@ -19,6 +19,7 @@
  * - /api/templates/* - Template management endpoints
  */
 
+import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import {
   createEnvValidationMiddleware,
   createKvCheck,
@@ -69,6 +70,35 @@ app.use(
     ],
   })
 );
+
+// ============================================================================
+// Custom Middleware
+// ============================================================================
+
+/**
+ * Rate limit unsubscribe endpoints (CAN-SPAM/GDPR public routes).
+ *
+ * The /unsubscribe/* routes bypass procedure() because they use HMAC-token
+ * verification rather than session auth. Without this middleware they would
+ * have NO rate-limit protection — every request forces an HMAC verification
+ * cycle and the POST mutates `notification_preferences`. Without a limit:
+ *   - DoS via repeated POST /unsubscribe/<random> (HMAC verify per request)
+ *   - DB write amplification on the hot preferences upsert path
+ *   - Token-format enumeration via HMAC timing
+ *
+ * Uses the `api` preset (100 req/min) — permissive enough for legitimate
+ * humans retrying an unsubscribe link, tight enough to stop scripted DoS.
+ * Keyed per-IP per-route via the default keyGenerator (CF-Connecting-IP).
+ *
+ * Mounted BEFORE app.route('/unsubscribe', ...) so it intercepts every
+ * request to that subtree. See denoise iter-002 F2 (Codex-ttavz.8).
+ */
+app.use('/unsubscribe/*', (c, next) => {
+  return rateLimit({
+    kv: c.env.RATE_LIMIT_KV,
+    ...RATE_LIMIT_PRESETS.api,
+  })(c, next);
+});
 
 // ============================================================================
 // API Routes

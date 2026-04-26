@@ -53,8 +53,8 @@ import { describe, expect, it } from 'vitest';
 const SVELTE_CONFIG = resolve(__dirname, '../../../svelte.config.js');
 const HOOKS_SERVER = resolve(__dirname, '../../hooks.server.ts');
 
-describe.skip('iter-003 F2 — apps/web missing Content-Security-Policy', () => {
-  it('CSP is configured in either svelte.config.js or hooks.server.ts', () => {
+describe('iter-003 F2 — apps/web Content-Security-Policy posture', () => {
+  it('CSP is configured in either svelte.config.js or hooks.server.ts (positive path)', () => {
     const config = readFileSync(SVELTE_CONFIG, 'utf-8');
     const hooks = readFileSync(HOOKS_SERVER, 'utf-8');
 
@@ -68,6 +68,64 @@ describe.skip('iter-003 F2 — apps/web missing Content-Security-Policy', () => 
     expect(
       hasFrameworkCsp || hasHookCsp,
       'apps/web must set Content-Security-Policy via either kit.csp.directives in svelte.config.js or response.headers.set in hooks.server.ts securityHook'
+    ).toBe(true);
+  });
+
+  it('script-src does not allow unsafe-inline (negative path — XSS containment)', () => {
+    // Negative test (per memory feedback_security_deep_test): security
+    // changes must verify both that the header is set AND that the
+    // chosen directives actually contain inline-script XSS.
+    //
+    // SvelteKit auto-injects nonces (dynamic SSR) / hashes (prerender) for
+    // every <script> it generates. Manual <script> blocks in app.html
+    // opt in via `nonce="%sveltekit.nonce%"`. With this in place,
+    // `script-src` MUST NOT include `'unsafe-inline'` — otherwise the
+    // entire CSP is paper armour against reflected XSS.
+    //
+    // We grep the literal config; the SvelteKit emitter is a black box at
+    // build-time, so the source-of-truth assertion is on the config.
+    const config = readFileSync(SVELTE_CONFIG, 'utf-8');
+
+    // Extract the script-src directive specifically. The catalogue allows
+    // either `kit.csp.directives` OR a hand-set header — this test only
+    // applies to the framework-level path (which is what we use today).
+    const scriptSrcMatch = config.match(
+      /['"]script-src['"]\s*:\s*\[([^\]]*)\]/
+    );
+
+    expect(
+      scriptSrcMatch,
+      'svelte.config.js kit.csp.directives must declare a `script-src` directive'
+    ).not.toBeNull();
+
+    const scriptSrc = scriptSrcMatch?.[1] ?? '';
+
+    expect(
+      /['"]unsafe-inline['"]/.test(scriptSrc),
+      "script-src must NOT include 'unsafe-inline' — SvelteKit nonces handle inline scripts; allowing unsafe-inline negates CSP's XSS containment"
+    ).toBe(false);
+  });
+
+  it('frame-ancestors blocks clickjacking (negative path — embed surface)', () => {
+    // Defence-in-depth check: the CSP-era replacement for X-Frame-Options
+    // is `frame-ancestors`. Browsers prefer the CSP directive; older
+    // browsers honour the header. Both should agree (DENY / 'none').
+    const config = readFileSync(SVELTE_CONFIG, 'utf-8');
+
+    const frameAncestorsMatch = config.match(
+      /['"]frame-ancestors['"]\s*:\s*\[([^\]]*)\]/
+    );
+
+    expect(
+      frameAncestorsMatch,
+      'svelte.config.js kit.csp.directives must declare a `frame-ancestors` directive (clickjacking defence)'
+    ).not.toBeNull();
+
+    const frameAncestors = frameAncestorsMatch?.[1] ?? '';
+
+    expect(
+      /['"]none['"]/.test(frameAncestors),
+      "frame-ancestors must be 'none' to block all framing — apps/web does not host any embeddable surface"
     ).toBe(true);
   });
 });
