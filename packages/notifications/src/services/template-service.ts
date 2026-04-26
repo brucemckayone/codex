@@ -10,7 +10,7 @@ import {
   ORGANIZATION_STATUS,
   TEMPLATE_SCOPES,
 } from '@codex/constants';
-import { schema } from '@codex/database';
+import { paginatedQuery, schema } from '@codex/database';
 import {
   BaseService,
   InternalServiceError,
@@ -24,7 +24,7 @@ import type {
   ListTemplatesQuery,
   UpdateTemplateInput,
 } from '@codex/validation';
-import { and, count, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { TemplateAccessDeniedError, TemplateNotFoundError } from '../errors';
 import type { NotificationsService } from './notifications-service';
 
@@ -75,7 +75,6 @@ export class TemplateService extends BaseService {
     query: ListTemplatesQuery
   ): Promise<PaginatedListResponse<EmailTemplate>> {
     const { page, limit, status } = query;
-    const offset = (page - 1) * limit;
 
     const whereGlobalTemplates = and(
       eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.GLOBAL),
@@ -83,30 +82,22 @@ export class TemplateService extends BaseService {
       status ? eq(schema.emailTemplates.status, status) : undefined
     );
 
-    const [templates, countResult] = await Promise.all([
-      this.db.query.emailTemplates.findMany({
+    return paginatedQuery({
+      page,
+      limit,
+      fetchItems: (limit, offset) =>
+        this.db.query.emailTemplates.findMany({
+          where: whereGlobalTemplates,
+          limit,
+          offset,
+          orderBy: [desc(schema.emailTemplates.createdAt)],
+        }),
+      countQuery: {
+        db: this.db,
+        table: schema.emailTemplates,
         where: whereGlobalTemplates,
-        limit,
-        offset,
-        orderBy: [desc(schema.emailTemplates.createdAt)],
-      }),
-      this.db
-        .select({ count: count(schema.emailTemplates.id) })
-        .from(schema.emailTemplates)
-        .where(whereGlobalTemplates),
-    ]);
-
-    const total = countResult[0]?.count ?? 0;
-
-    return {
-      items: templates,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
       },
-    };
+    });
   }
 
   /**
@@ -237,7 +228,6 @@ export class TemplateService extends BaseService {
     await this.requireOrgMembership(orgId, userId);
 
     const { page, limit, status } = query;
-    const offset = (page - 1) * limit;
 
     const whereClause = and(
       eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.ORGANIZATION),
@@ -246,30 +236,22 @@ export class TemplateService extends BaseService {
       status ? eq(schema.emailTemplates.status, status) : undefined
     );
 
-    const [templates, countResult] = await Promise.all([
-      this.db.query.emailTemplates.findMany({
+    return paginatedQuery({
+      page,
+      limit,
+      fetchItems: (limit, offset) =>
+        this.db.query.emailTemplates.findMany({
+          where: whereClause,
+          limit,
+          offset,
+          orderBy: [desc(schema.emailTemplates.createdAt)],
+        }),
+      countQuery: {
+        db: this.db,
+        table: schema.emailTemplates,
         where: whereClause,
-        limit,
-        offset,
-        orderBy: [desc(schema.emailTemplates.createdAt)],
-      }),
-      this.db
-        .select({ count: count(schema.emailTemplates.id) })
-        .from(schema.emailTemplates)
-        .where(whereClause),
-    ]);
-
-    const total = countResult[0]?.count ?? 0;
-
-    return {
-      items: templates,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
       },
-    };
+    });
   }
 
   /**
@@ -407,7 +389,6 @@ export class TemplateService extends BaseService {
     query: ListTemplatesQuery
   ): Promise<PaginatedListResponse<EmailTemplate>> {
     const { page, limit, status } = query;
-    const offset = (page - 1) * limit;
 
     const whereClause = and(
       eq(schema.emailTemplates.scope, TEMPLATE_SCOPES.CREATOR),
@@ -416,30 +397,22 @@ export class TemplateService extends BaseService {
       status ? eq(schema.emailTemplates.status, status) : undefined
     );
 
-    const [templates, countResult] = await Promise.all([
-      this.db.query.emailTemplates.findMany({
+    return paginatedQuery({
+      page,
+      limit,
+      fetchItems: (limit, offset) =>
+        this.db.query.emailTemplates.findMany({
+          where: whereClause,
+          limit,
+          offset,
+          orderBy: [desc(schema.emailTemplates.createdAt)],
+        }),
+      countQuery: {
+        db: this.db,
+        table: schema.emailTemplates,
         where: whereClause,
-        limit,
-        offset,
-        orderBy: [desc(schema.emailTemplates.createdAt)],
-      }),
-      this.db
-        .select({ count: count(schema.emailTemplates.id) })
-        .from(schema.emailTemplates)
-        .where(whereClause),
-    ]);
-
-    const total = countResult[0]?.count ?? 0;
-
-    return {
-      items: templates,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
       },
-    };
+    });
   }
 
   /**

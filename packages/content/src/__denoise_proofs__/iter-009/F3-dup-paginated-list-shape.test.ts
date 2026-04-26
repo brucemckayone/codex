@@ -76,7 +76,7 @@ function countSelectCountHits(): string[] {
 }
 
 describe('denoise proof: F3 simplification:dup-paginated-list-shape', () => {
-  it.skip('paginated `select({ x: count() }).from(...)` shape is centralised in <=1 file (the helper)', () => {
+  it('paginated `select({ x: count() }).from(...)` shape is centralised in <=1 file (the helper)', () => {
     const sites = countSelectCountHits();
     // Pre-fix: the shape appears across content-service, media-service,
     // template-service (and listPublic, etc.) — at least 3 source files.

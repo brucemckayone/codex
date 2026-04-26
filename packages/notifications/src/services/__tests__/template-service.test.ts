@@ -48,9 +48,9 @@ describe('TemplateService API Format', () => {
       ]);
 
       // Mock count query
-      // The service uses db.select({ count: ... }).from(...).where(...)
+      // The paginatedQuery helper runs db.select({ total: count() }).from(...).where(...)
       // Since we mock the chain, we need to make the last call return the value
-      const mockWhere = vi.fn().mockResolvedValue([{ count: 10 }]);
+      const mockWhere = vi.fn().mockResolvedValue([{ total: 10 }]);
       (mockDb.from as ReturnType<typeof vi.fn>).mockReturnValue({
         where: mockWhere,
       });

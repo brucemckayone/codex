@@ -15,9 +15,9 @@
 import type { R2Service } from '@codex/cloudflare-clients';
 import { MEDIA_STATUS, MIME_TO_EXTENSION, PAGINATION } from '@codex/constants';
 import {
+  paginatedQuery,
   scopedNotDeleted,
   withCreatorScope,
-  withPagination,
 } from '@codex/database';
 import { mediaItems } from '@codex/database/schema';
 import {
@@ -37,7 +37,7 @@ import {
   createMediaItemSchema,
   updateMediaItemSchema,
 } from '@codex/validation';
-import { and, asc, count, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import { MediaNotFoundError } from '../errors';
 import type {
   MediaItem,
@@ -392,8 +392,6 @@ export class MediaItemService extends BaseService {
     }
   ): Promise<PaginatedListResponse<MediaItemWithRelations>> {
     try {
-      const { limit, offset } = withPagination(pagination);
-
       // Build WHERE conditions
       const whereConditions = [scopedNotDeleted(mediaItems, creatorId)];
 
@@ -413,41 +411,28 @@ export class MediaItemService extends BaseService {
           ? desc(mediaItems[sortColumn])
           : asc(mediaItems[sortColumn]);
 
-      // Run items + count queries concurrently (independent queries)
-      const [items, countResult] = await Promise.all([
-        this.db.query.mediaItems.findMany({
-          where: and(...whereConditions),
-          limit,
-          offset,
-          orderBy: [orderByClause],
-          with: {
-            creator: {
-              columns: {
-                id: true,
-                email: true,
-                name: true,
+      const where = and(...whereConditions);
+      return await paginatedQuery({
+        page: pagination.page,
+        limit: pagination.limit,
+        fetchItems: (limit, offset) =>
+          this.db.query.mediaItems.findMany({
+            where,
+            limit,
+            offset,
+            orderBy: [orderByClause],
+            with: {
+              creator: {
+                columns: {
+                  id: true,
+                  email: true,
+                  name: true,
+                },
               },
             },
-          },
-        }),
-        this.db
-          .select({ total: count() })
-          .from(mediaItems)
-          .where(and(...whereConditions)),
-      ]);
-
-      const totalCount = Number(countResult[0]?.total ?? 0);
-      const totalPages = Math.ceil(totalCount / limit);
-
-      return {
-        items,
-        pagination: {
-          page: pagination.page,
-          limit,
-          total: totalCount,
-          totalPages,
-        },
-      };
+          }),
+        countQuery: { db: this.db, table: mediaItems, where },
+      });
     } catch (error) {
       this.handleError(error, 'list');
     }

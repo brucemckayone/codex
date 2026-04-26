@@ -319,33 +319,46 @@ export class ContentAccessService extends BaseService {
       if (!orgId) return false;
       // Codex-xybr3: subscribers ⊇ followers. Active subscribers to the
       // content's org get followers-only access without needing a follower
-      // row. Checked BEFORE the follower row so subscribers don't require
-      // the follow action. Any active tier qualifies (null minimumTierId).
-      if (await hasSubscriptionAccess(orgId, null)) return true;
-      if (await hasFollower(orgId)) return true;
+      // row. Either a subscription OR a follower row grants access — both
+      // are independent reads so launch them in parallel (R12 hard rule).
+      // The deny path was previously 3 sequential round-trips; the cheap
+      // pair now overlaps, falling through to management only when both
+      // come back falsey. On grant either truthy result short-circuits.
+      const [subscribed, followed] = await Promise.all([
+        hasSubscriptionAccess(orgId, null),
+        hasFollower(orgId),
+      ]);
+      if (subscribed || followed) return true;
       return hasManagementMembership(orgId);
     }
 
     if (contentRecord.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS) {
       if (!orgId) return false;
-      if (await hasSubscriptionAccess(orgId, contentRecord.minimumTierId)) {
-        return true;
-      }
-      if (await this.purchaseService.verifyPurchase(contentId, userId)) {
-        return true;
-      }
+      // Subscription and purchase are independent gates — launch in parallel
+      // (R12 hard rule). Falls through to management only when both deny.
+      const [subscribed, purchased] = await Promise.all([
+        hasSubscriptionAccess(orgId, contentRecord.minimumTierId),
+        this.purchaseService.verifyPurchase(contentId, userId),
+      ]);
+      if (subscribed || purchased) return true;
       return hasManagementMembership(orgId);
     }
 
     // Paid content (priceCents > 0) — check purchase, optional tier, membership.
     if (contentRecord.priceCents && contentRecord.priceCents > 0) {
+      // Purchase + (optional) subscription gates are independent — launch in
+      // parallel when both apply (R12 hard rule). When no minimumTierId is
+      // set the subscription path doesn't apply, so only purchase runs.
+      if (orgId && contentRecord.minimumTierId) {
+        const [purchased, subscribed] = await Promise.all([
+          this.purchaseService.verifyPurchase(contentId, userId),
+          hasSubscriptionAccess(orgId, contentRecord.minimumTierId),
+        ]);
+        if (purchased || subscribed) return true;
+        return hasManagementMembership(orgId);
+      }
       if (await this.purchaseService.verifyPurchase(contentId, userId)) {
         return true;
-      }
-      if (orgId && contentRecord.minimumTierId) {
-        if (await hasSubscriptionAccess(orgId, contentRecord.minimumTierId)) {
-          return true;
-        }
       }
       if (!orgId) return false;
       return hasManagementMembership(orgId);

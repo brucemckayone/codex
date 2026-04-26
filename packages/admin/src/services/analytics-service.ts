@@ -66,21 +66,32 @@ export class AdminAnalyticsService extends BaseService {
     options?: RevenueQueryOptions
   ): Promise<RevenueStats> {
     try {
+      // Current and previous windows are disjoint date ranges with no data
+      // flow between them — launch via Promise.all when comparison is
+      // requested (R12 hard rule). Combined with the inner-block Promise.all
+      // in `computeRevenueBlock`, this collapses 4 sequential queries into
+      // a single concurrent batch.
+      if (options?.compareFrom && options?.compareTo) {
+        const [current, previous] = await Promise.all([
+          this.computeRevenueBlock(
+            organizationId,
+            options?.startDate,
+            options?.endDate
+          ),
+          this.computeRevenueBlock(
+            organizationId,
+            options.compareFrom,
+            options.compareTo
+          ),
+        ]);
+        return { ...current, previous };
+      }
+
       const current = await this.computeRevenueBlock(
         organizationId,
         options?.startDate,
         options?.endDate
       );
-
-      if (options?.compareFrom && options?.compareTo) {
-        const previous = await this.computeRevenueBlock(
-          organizationId,
-          options.compareFrom,
-          options.compareTo
-        );
-        return { ...current, previous };
-      }
-
       return current;
     } catch (error) {
       if (error instanceof NotFoundError) {
@@ -115,16 +126,30 @@ export class AdminAnalyticsService extends BaseService {
       lte(schema.purchases.purchasedAt, effectiveEnd),
     ];
 
-    const aggregateResult = await this.db
-      .select({
-        totalRevenueCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
-        totalPurchases: sql<number>`COUNT(*)::int`,
-        platformFeeCents: sql<number>`COALESCE(SUM(${schema.purchases.platformFeeCents}), 0)::int`,
-        organizationFeeCents: sql<number>`COALESCE(SUM(${schema.purchases.organizationFeeCents}), 0)::int`,
-        creatorPayoutCents: sql<number>`COALESCE(SUM(${schema.purchases.creatorPayoutCents}), 0)::int`,
-      })
-      .from(schema.purchases)
-      .where(and(...baseConditions));
+    // Independent queries — neither consumes the other's value. Launch via
+    // Promise.all so the round-trip latency overlaps (R12 hard rule).
+    const [aggregateResult, dailyRows] = await Promise.all([
+      this.db
+        .select({
+          totalRevenueCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
+          totalPurchases: sql<number>`COUNT(*)::int`,
+          platformFeeCents: sql<number>`COALESCE(SUM(${schema.purchases.platformFeeCents}), 0)::int`,
+          organizationFeeCents: sql<number>`COALESCE(SUM(${schema.purchases.organizationFeeCents}), 0)::int`,
+          creatorPayoutCents: sql<number>`COALESCE(SUM(${schema.purchases.creatorPayoutCents}), 0)::int`,
+        })
+        .from(schema.purchases)
+        .where(and(...baseConditions)),
+      this.db
+        .select({
+          date: sql<string>`DATE(${schema.purchases.purchasedAt})::text`,
+          revenueCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
+          purchaseCount: sql<number>`COUNT(*)::int`,
+        })
+        .from(schema.purchases)
+        .where(and(...baseConditions))
+        .groupBy(sql`DATE(${schema.purchases.purchasedAt})`)
+        .orderBy(desc(sql`DATE(${schema.purchases.purchasedAt})`)),
+    ]);
 
     const stats = aggregateResult[0] ?? {
       totalRevenueCents: 0,
@@ -138,17 +163,6 @@ export class AdminAnalyticsService extends BaseService {
       stats.totalPurchases > 0
         ? Math.round(stats.totalRevenueCents / stats.totalPurchases)
         : 0;
-
-    const dailyRows = await this.db
-      .select({
-        date: sql<string>`DATE(${schema.purchases.purchasedAt})::text`,
-        revenueCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
-        purchaseCount: sql<number>`COUNT(*)::int`,
-      })
-      .from(schema.purchases)
-      .where(and(...baseConditions))
-      .groupBy(sql`DATE(${schema.purchases.purchasedAt})`)
-      .orderBy(desc(sql`DATE(${schema.purchases.purchasedAt})`));
 
     const revenueByDay: DailyRevenue[] = dailyRows.map((row) => ({
       date: row.date,
@@ -181,21 +195,29 @@ export class AdminAnalyticsService extends BaseService {
     options?: SubscriberQueryOptions
   ): Promise<SubscriberStats> {
     try {
+      // Current and previous windows are disjoint date ranges — launch via
+      // Promise.all when comparison is requested (R12 hard rule).
+      if (options?.compareFrom && options?.compareTo) {
+        const [current, previous] = await Promise.all([
+          this.computeSubscriberBlock(
+            organizationId,
+            options?.startDate,
+            options?.endDate
+          ),
+          this.computeSubscriberBlock(
+            organizationId,
+            options.compareFrom,
+            options.compareTo
+          ),
+        ]);
+        return { ...current, previous };
+      }
+
       const current = await this.computeSubscriberBlock(
         organizationId,
         options?.startDate,
         options?.endDate
       );
-
-      if (options?.compareFrom && options?.compareTo) {
-        const previous = await this.computeSubscriberBlock(
-          organizationId,
-          options.compareFrom,
-          options.compareTo
-        );
-        return { ...current, previous };
-      }
-
       return current;
     } catch (error) {
       if (error instanceof NotFoundError) {
@@ -222,67 +244,70 @@ export class AdminAnalyticsService extends BaseService {
     const effectiveStart = startDate ?? defaultStart;
     const effectiveEnd = endDate ?? new Date();
 
-    // Active at end of period: alive-alive statuses and
-    //   createdAt <= end AND (cancelledAt IS NULL OR cancelledAt > end)
-    const activeResult = await this.db
-      .select({ count: sql<number>`COUNT(*)::int` })
-      .from(schema.subscriptions)
-      .where(
-        and(
-          eq(schema.subscriptions.organizationId, organizationId),
-          inArray(schema.subscriptions.status, [
-            'active',
-            'past_due',
-            'cancelling',
-          ]),
-          lte(schema.subscriptions.createdAt, effectiveEnd),
-          or(
-            isNull(schema.subscriptions.cancelledAt),
-            gt(schema.subscriptions.cancelledAt, effectiveEnd)
+    // Four independent aggregates — none consumes another's value. Launch via
+    // Promise.all so the round-trip latency overlaps (R12 hard rule). At Neon
+    // p95 this collapses ~320-480ms of sequential latency to ~100ms.
+    const [activeResult, newResult, churnedResult, dailyRows] =
+      await Promise.all([
+        // Active at end of period: alive-alive statuses and
+        //   createdAt <= end AND (cancelledAt IS NULL OR cancelledAt > end)
+        this.db
+          .select({ count: sql<number>`COUNT(*)::int` })
+          .from(schema.subscriptions)
+          .where(
+            and(
+              eq(schema.subscriptions.organizationId, organizationId),
+              inArray(schema.subscriptions.status, [
+                'active',
+                'past_due',
+                'cancelling',
+              ]),
+              lte(schema.subscriptions.createdAt, effectiveEnd),
+              or(
+                isNull(schema.subscriptions.cancelledAt),
+                gt(schema.subscriptions.cancelledAt, effectiveEnd)
+              )
+            )
+          ),
+        // New in period: createdAt within [start, end]
+        this.db
+          .select({ count: sql<number>`COUNT(*)::int` })
+          .from(schema.subscriptions)
+          .where(
+            and(
+              eq(schema.subscriptions.organizationId, organizationId),
+              gte(schema.subscriptions.createdAt, effectiveStart),
+              lte(schema.subscriptions.createdAt, effectiveEnd)
+            )
+          ),
+        // Churned in period: cancelledAt within [start, end]
+        this.db
+          .select({ count: sql<number>`COUNT(*)::int` })
+          .from(schema.subscriptions)
+          .where(
+            and(
+              eq(schema.subscriptions.organizationId, organizationId),
+              gte(schema.subscriptions.cancelledAt, effectiveStart),
+              lte(schema.subscriptions.cancelledAt, effectiveEnd)
+            )
+          ),
+        // Daily new subscribers, grouped by DATE(createdAt), most recent first
+        this.db
+          .select({
+            date: sql<string>`DATE(${schema.subscriptions.createdAt})::text`,
+            newSubscribers: sql<number>`COUNT(*)::int`,
+          })
+          .from(schema.subscriptions)
+          .where(
+            and(
+              eq(schema.subscriptions.organizationId, organizationId),
+              gte(schema.subscriptions.createdAt, effectiveStart),
+              lte(schema.subscriptions.createdAt, effectiveEnd)
+            )
           )
-        )
-      );
-
-    // New in period: createdAt within [start, end]
-    const newResult = await this.db
-      .select({ count: sql<number>`COUNT(*)::int` })
-      .from(schema.subscriptions)
-      .where(
-        and(
-          eq(schema.subscriptions.organizationId, organizationId),
-          gte(schema.subscriptions.createdAt, effectiveStart),
-          lte(schema.subscriptions.createdAt, effectiveEnd)
-        )
-      );
-
-    // Churned in period: cancelledAt within [start, end]
-    const churnedResult = await this.db
-      .select({ count: sql<number>`COUNT(*)::int` })
-      .from(schema.subscriptions)
-      .where(
-        and(
-          eq(schema.subscriptions.organizationId, organizationId),
-          gte(schema.subscriptions.cancelledAt, effectiveStart),
-          lte(schema.subscriptions.cancelledAt, effectiveEnd)
-        )
-      );
-
-    // Daily new subscribers, grouped by DATE(createdAt), most recent first
-    const dailyRows = await this.db
-      .select({
-        date: sql<string>`DATE(${schema.subscriptions.createdAt})::text`,
-        newSubscribers: sql<number>`COUNT(*)::int`,
-      })
-      .from(schema.subscriptions)
-      .where(
-        and(
-          eq(schema.subscriptions.organizationId, organizationId),
-          gte(schema.subscriptions.createdAt, effectiveStart),
-          lte(schema.subscriptions.createdAt, effectiveEnd)
-        )
-      )
-      .groupBy(sql`DATE(${schema.subscriptions.createdAt})`)
-      .orderBy(desc(sql`DATE(${schema.subscriptions.createdAt})`));
+          .groupBy(sql`DATE(${schema.subscriptions.createdAt})`)
+          .orderBy(desc(sql`DATE(${schema.subscriptions.createdAt})`)),
+      ]);
 
     const subscribersByDay: DailySubscribers[] = dailyRows.map((row) => ({
       date: row.date,
@@ -310,21 +335,29 @@ export class AdminAnalyticsService extends BaseService {
     options?: FollowerQueryOptions
   ): Promise<FollowerStats> {
     try {
+      // Current and previous windows are disjoint date ranges — launch via
+      // Promise.all when comparison is requested (R12 hard rule).
+      if (options?.compareFrom && options?.compareTo) {
+        const [current, previous] = await Promise.all([
+          this.computeFollowerBlock(
+            organizationId,
+            options?.startDate,
+            options?.endDate
+          ),
+          this.computeFollowerBlock(
+            organizationId,
+            options.compareFrom,
+            options.compareTo
+          ),
+        ]);
+        return { ...current, previous };
+      }
+
       const current = await this.computeFollowerBlock(
         organizationId,
         options?.startDate,
         options?.endDate
       );
-
-      if (options?.compareFrom && options?.compareTo) {
-        const previous = await this.computeFollowerBlock(
-          organizationId,
-          options.compareFrom,
-          options.compareTo
-        );
-        return { ...current, previous };
-      }
-
       return current;
     } catch (error) {
       if (error instanceof NotFoundError) {
@@ -360,48 +393,50 @@ export class AdminAnalyticsService extends BaseService {
     const effectiveStart = startDate ?? defaultStart;
     const effectiveEnd = endDate ?? new Date();
 
-    // Total followers at end of period: rows that exist now with
-    // createdAt <= effectiveEnd. Unfollows are hard-deletes so "was
-    // following at X" can only be approximated as "row exists AND was
-    // created by X".
-    const totalResult = await this.db
-      .select({ count: sql<number>`COUNT(*)::int` })
-      .from(schema.organizationFollowers)
-      .where(
-        and(
-          eq(schema.organizationFollowers.organizationId, organizationId),
-          lte(schema.organizationFollowers.createdAt, effectiveEnd)
+    // Three independent aggregates — none consumes another's value. Launch via
+    // Promise.all so the round-trip latency overlaps (R12 hard rule).
+    const [totalResult, newResult, dailyRows] = await Promise.all([
+      // Total followers at end of period: rows that exist now with
+      // createdAt <= effectiveEnd. Unfollows are hard-deletes so "was
+      // following at X" can only be approximated as "row exists AND was
+      // created by X".
+      this.db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(schema.organizationFollowers)
+        .where(
+          and(
+            eq(schema.organizationFollowers.organizationId, organizationId),
+            lte(schema.organizationFollowers.createdAt, effectiveEnd)
+          )
+        ),
+      // New followers in period: createdAt within [start, end]
+      this.db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(schema.organizationFollowers)
+        .where(
+          and(
+            eq(schema.organizationFollowers.organizationId, organizationId),
+            gte(schema.organizationFollowers.createdAt, effectiveStart),
+            lte(schema.organizationFollowers.createdAt, effectiveEnd)
+          )
+        ),
+      // Daily new followers, grouped by DATE(createdAt), most recent first
+      this.db
+        .select({
+          date: sql<string>`DATE(${schema.organizationFollowers.createdAt})::text`,
+          newFollowers: sql<number>`COUNT(*)::int`,
+        })
+        .from(schema.organizationFollowers)
+        .where(
+          and(
+            eq(schema.organizationFollowers.organizationId, organizationId),
+            gte(schema.organizationFollowers.createdAt, effectiveStart),
+            lte(schema.organizationFollowers.createdAt, effectiveEnd)
+          )
         )
-      );
-
-    // New followers in period: createdAt within [start, end]
-    const newResult = await this.db
-      .select({ count: sql<number>`COUNT(*)::int` })
-      .from(schema.organizationFollowers)
-      .where(
-        and(
-          eq(schema.organizationFollowers.organizationId, organizationId),
-          gte(schema.organizationFollowers.createdAt, effectiveStart),
-          lte(schema.organizationFollowers.createdAt, effectiveEnd)
-        )
-      );
-
-    // Daily new followers, grouped by DATE(createdAt), most recent first
-    const dailyRows = await this.db
-      .select({
-        date: sql<string>`DATE(${schema.organizationFollowers.createdAt})::text`,
-        newFollowers: sql<number>`COUNT(*)::int`,
-      })
-      .from(schema.organizationFollowers)
-      .where(
-        and(
-          eq(schema.organizationFollowers.organizationId, organizationId),
-          gte(schema.organizationFollowers.createdAt, effectiveStart),
-          lte(schema.organizationFollowers.createdAt, effectiveEnd)
-        )
-      )
-      .groupBy(sql`DATE(${schema.organizationFollowers.createdAt})`)
-      .orderBy(desc(sql`DATE(${schema.organizationFollowers.createdAt})`));
+        .groupBy(sql`DATE(${schema.organizationFollowers.createdAt})`)
+        .orderBy(desc(sql`DATE(${schema.organizationFollowers.createdAt})`)),
+    ]);
 
     const followersByDay: DailyFollowers[] = dailyRows.map((row) => ({
       date: row.date,

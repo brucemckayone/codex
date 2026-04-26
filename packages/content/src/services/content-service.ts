@@ -25,9 +25,9 @@ import {
 } from '@codex/constants';
 import {
   isUniqueViolation,
+  paginatedQuery,
   scopedNotDeleted,
   withCreatorScope,
-  withPagination,
 } from '@codex/database';
 import { content, mediaItems } from '@codex/database/schema';
 import {
@@ -38,7 +38,7 @@ import { BaseService } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
 import { createContentSchema, updateContentSchema } from '@codex/validation';
-import { and, asc, count, desc, eq, ilike, isNull, ne, or } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, isNull, ne, or } from 'drizzle-orm';
 import {
   BusinessLogicError,
   ContentNotFoundError,
@@ -676,8 +676,6 @@ export class ContentService extends BaseService {
     }
   ): Promise<PaginatedListResponse<ContentWithRelations>> {
     try {
-      const { limit, offset } = withPagination(pagination);
-
       // Build WHERE conditions
       const whereConditions = [scopedNotDeleted(content, creatorId)];
 
@@ -727,43 +725,30 @@ export class ContentService extends BaseService {
           ? desc(content[sortColumn])
           : asc(content[sortColumn]);
 
-      // Run items + count queries concurrently (independent queries)
-      const [items, countResult] = await Promise.all([
-        this.db.query.content.findMany({
-          where: and(...whereConditions),
-          limit,
-          offset,
-          orderBy: [orderByClause],
-          with: {
-            mediaItem: true,
-            organization: true,
-            creator: {
-              columns: {
-                id: true,
-                email: true,
-                name: true,
+      const where = and(...whereConditions);
+      return await paginatedQuery({
+        page: pagination.page,
+        limit: pagination.limit,
+        fetchItems: (limit, offset) =>
+          this.db.query.content.findMany({
+            where,
+            limit,
+            offset,
+            orderBy: [orderByClause],
+            with: {
+              mediaItem: true,
+              organization: true,
+              creator: {
+                columns: {
+                  id: true,
+                  email: true,
+                  name: true,
+                },
               },
             },
-          },
-        }),
-        this.db
-          .select({ total: count() })
-          .from(content)
-          .where(and(...whereConditions)),
-      ]);
-
-      const totalCount = Number(countResult[0]?.total ?? 0);
-      const totalPages = Math.ceil(totalCount / limit);
-
-      return {
-        items,
-        pagination: {
-          page: pagination.page,
-          limit,
-          total: totalCount,
-          totalPages,
-        },
-      };
+          }),
+        countQuery: { db: this.db, table: content, where },
+      });
     } catch (error) {
       this.handleError(error, 'list');
     }
@@ -799,11 +784,6 @@ export class ContentService extends BaseService {
     featured?: boolean;
   }): Promise<PaginatedListResponse<ContentWithRelations>> {
     try {
-      const { limit, offset } = withPagination({
-        page: params.page,
-        limit: params.limit,
-      });
-
       // Build WHERE conditions — published, not deleted, optionally scoped to org
       const whereConditions = [
         eq(content.status, CONTENT_STATUS.PUBLISHED),
@@ -855,56 +835,41 @@ export class ContentService extends BaseService {
             ? asc(content.title)
             : desc(content.publishedAt);
 
-      // Run items + count queries concurrently (independent queries)
-      const [items, countResult] = await Promise.all([
-        this.db.query.content.findMany({
-          where: and(...whereConditions),
-          limit,
-          offset,
-          orderBy: [orderByClause],
-          with: {
-            mediaItem: true,
-            creator: {
-              columns: {
-                id: true,
-                email: true,
-                name: true,
+      const where = and(...whereConditions);
+      return await paginatedQuery({
+        page: params.page,
+        limit: params.limit,
+        fetchItems: (limit, offset) =>
+          this.db.query.content.findMany({
+            where,
+            limit,
+            offset,
+            orderBy: [orderByClause],
+            with: {
+              mediaItem: true,
+              creator: {
+                columns: {
+                  id: true,
+                  email: true,
+                  name: true,
+                },
               },
+              organization: true,
             },
-            organization: true,
-          },
-        }),
-        this.db
-          .select({ total: count() })
-          .from(content)
-          .where(and(...whereConditions)),
-      ]);
-
-      const totalCount = Number(countResult[0]?.total ?? 0);
-      const totalPages = Math.ceil(totalCount / limit);
-
-      // Strip body columns for any non-free content. The public endpoint is
-      // unauthenticated and KV-cached, so it must never return the text of
-      // gated articles (followers / subscribers / team / paid). Metadata —
-      // title, description, thumbnail, accessType, minimumTierId, priceCents,
-      // creator, org, mediaItem — stays so cards and the detail page shell
-      // still render. Authorized callers fetch full rows through the
-      // authenticated `/api/content` endpoint (creator-scoped).
-      const sanitizedItems = items.map((item) =>
-        item.accessType === CONTENT_ACCESS_TYPE.FREE
-          ? item
-          : { ...item, contentBody: null, contentBodyJson: null }
-      );
-
-      return {
-        items: sanitizedItems,
-        pagination: {
-          page: params.page,
-          limit,
-          total: totalCount,
-          totalPages,
-        },
-      };
+          }),
+        countQuery: { db: this.db, table: content, where },
+        // Strip body columns for any non-free content. The public endpoint is
+        // unauthenticated and KV-cached, so it must never return the text of
+        // gated articles (followers / subscribers / team / paid). Metadata —
+        // title, description, thumbnail, accessType, minimumTierId, priceCents,
+        // creator, org, mediaItem — stays so cards and the detail page shell
+        // still render. Authorized callers fetch full rows through the
+        // authenticated `/api/content` endpoint (creator-scoped).
+        mapItem: (item) =>
+          item.accessType === CONTENT_ACCESS_TYPE.FREE
+            ? item
+            : { ...item, contentBody: null, contentBodyJson: null },
+      });
     } catch (error) {
       this.handleError(error, 'listPublic');
     }

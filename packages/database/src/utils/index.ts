@@ -8,6 +8,7 @@
 
 // Error detection utilities
 export * from './db-errors';
-
+// Paginated query helper
+export * from './paginated-query';
 // Query helper utilities
 export * from './query-helpers';
