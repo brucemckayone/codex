@@ -110,9 +110,14 @@
       "note": "NEW fingerprint. Single site (notifications/renderer.ts). Track for recurrence."
     },
     "simplification:duplicate-utility-helper": {
-      "hits": 3,
-      "iters": ["iter-009", "iter-011", "iter-012"],
-      "cycle_density": { "iter-009": 2, "iter-011": 5, "iter-012": 2 },
+      "hits": 4,
+      "iters": ["iter-009", "iter-011", "iter-012", "iter-027"],
+      "cycle_density": {
+        "iter-009": 2,
+        "iter-011": 5,
+        "iter-012": 2,
+        "iter-027": 2
+      },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": true,
@@ -123,10 +128,11 @@
         "Codex-mqyql.7",
         "Codex-mqyql.8",
         "Codex-mqyql.14",
-        "Codex-mqyql.15"
+        "Codex-mqyql.15",
+        "Codex-w30gi"
       ],
-      "severity": "mixed (4 major + 2 minor across 3 cycles)",
-      "note": "R14 APPLIED iter-012. Cumulative cycle_density=9 across 3 cycles (iter-009=2 packages, iter-011=5 workers, iter-012=2 apps/web). Endemic across all 3 scopes. iter-012 added F3 (STUDIO_ROLES copy-paste) + F5 (Stripe success-page loaders)."
+      "severity": "mixed (4 major + 2 minor across 4 cycles)",
+      "note": "R14 APPLIED iter-012. Cumulative cycle_density=11 across 4 cycles. iter-027 surfaces SidebarRail surface that Tier 2.A missed (Header surface migrated cleanly; SidebarRail.svelte + SidebarRailUserSection.svelte still inline STUDIO_ROLES triple). NOT a regression — uncovered call site. Demonstrates R14's effectiveness scope is bounded by where the helper actually gets adopted; mechanical Tier 2.A.b follow-up will close."
     },
     "simplification:dup-procedure-context-builder": {
       "hits": 2,
@@ -175,16 +181,16 @@
       "note": "NEW fingerprint. AdminVariables.perRequestDb references middleware that doesn't exist. Track for recurrence."
     },
     "simplification:dup-content-item-shape": {
-      "hits": 1,
-      "iters": ["iter-012"],
-      "cycle_density": { "iter-012": 4 },
+      "hits": 2,
+      "iters": ["iter-012", "iter-027"],
+      "cycle_density": { "iter-012": 4, "iter-027": 1 },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": false,
       "rule_id": null,
-      "beads": ["Codex-mqyql.13"],
+      "beads": ["Codex-mqyql.13", "Codex-zhe80"],
       "severity": "major",
-      "note": "NEW fingerprint. 4 inline ContentItem redeclarations of feed-types.ts canonical. Sibling shape of dup-paginated-list-shape family. 2-hit early-promotion watch in next apps/web simplification cycle."
+      "note": "RECURRENCE #2. Cumulative cycle_density=5 across 2 cycles. iter-027 surfaced 5th instance: CreatorCard.svelte:34+:41 inline-redeclares ContentItem AND SocialLinks despite sibling CreatorCard/types.ts exporting both. **QUALIFIES FOR 2-HIT EARLY PROMOTION REVIEW NEXT CYCLE** — mirrors R14's profile (R14 promoted at cycle_density=9 across 3 cycles; this fp at cycle_density=5 across 2 cycles). Candidate rule: Structural shapes consumed across ≥2 component-family files MUST resolve to a single declaration site (sibling types.ts, package barrel, or generated wire shape via NonNullable<...>); inline interface/type redeclarations exactly matching an exported sibling are blocker."
     },
     "simplification:duplicate-component": {
       "hits": 1,
@@ -221,15 +227,27 @@
       "note": "Header/MobileNav + Header/UserMenu only consumed by _creators layout after platform/org migrated to bottom-nav. Decision: delete OR generalise."
     },
     "denoise:doc-rot:05-domain-web:row-loadFromServer": {
-      "hits": 1,
-      "iters": ["iter-012"],
+      "hits": 2,
+      "iters": ["iter-012", "iter-027"],
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": false,
       "rule_id": null,
       "beads": ["Codex-mqyql.18"],
       "severity": "minor",
-      "note": "NEW doc-rot. Reference 05 §4 cites loadFromServer() — symbol renamed to hydrateIfNeeded()."
+      "note": "RECURRENCE #2 (iter-027 increment to existing bead, NOT double-filed). references/05-domain-web.md:145 still cites loadFromServer(); actual symbol is hydrateIfNeeded() per apps/web/CLAUDE.md. Round 3 didn't touch references/. Proof at apps/web/src/__denoise_proofs__/iter-027/F4-doc-rot-loadFromServer.test.ts. 1-line edit to close."
+    },
+    "simplification:dup-fetch-handler-boilerplate": {
+      "hits": 1,
+      "iters": ["iter-027"],
+      "cycle_density": { "iter-027": 1 },
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-0n26b"],
+      "severity": "major",
+      "note": "NEW fingerprint. Two content detail server loaders (org + creators subdomain) share 3 jscpd clone clusters (22L+22L+26L = ~70L) — empty subscriptionContext fallback, denied-access fallback, isPublic-authenticated return shape. Track for recurrence — if 2-hit, promotion review."
     },
     "simplification:dup-r2-key-resolution": {
       "hits": 1,

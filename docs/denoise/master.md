@@ -46,7 +46,7 @@ _None._
 | performance × apps/web | iter-021 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
 | simplification × packages | iter-022 (2026-04-26) | 6 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
 | simplification × workers | iter-023 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
-| simplification × apps/web | iter-024 (2026-04-26) | 8 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
+| simplification × apps/web | iter-027 (2026-04-26) | 11 | 0 | 2026-04-26 | reset to 0/3 (cycle produced 4 findings — 3 new beads + 1 increment) |
 
 **Cell-due algorithm** (delta mode):
 1. `git log --since=<last_run> --name-only -- <cell-paths>` produces churn list
@@ -89,12 +89,13 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | `performance:sequential-await-independent-queries` | **3** | 2026-04-26 | 2026-04-26 | **PROMOTED → R12 (APPLIED iter-008)**, hit #3 in iter-026 = drift-detection sighting (uncovered call site `getCustomerStats`, NOT regression). Round 3 Tier 4.D parallelised 8 confirmed sites — R12 effectiveness verified. Cumulative cycle_density=7 across 3 cycles (Codex-y63gl.1-5, .8, .13 + Codex-bwgfv) |
 | `performance:array-spread-and-linear-includes-per-render` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint (Codex-y63gl.6) |
 | `performance:subrequest-cap-sequential-stripe-calls` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint (Codex-y63gl.7) |
-| `simplification:duplicate-utility-helper` | **3** | 2026-04-26 | 2026-04-26 | **PROMOTED → R14 (APPLIED iter-012)**, cumulative cycle_density=9 across 3 scopes (Codex-mqyql.1, .5, .7, .8, .14, .15) |
-| `simplification:dup-content-item-shape` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint, cycle_density=4 (Codex-mqyql.13) — 2-hit watch |
+| `simplification:duplicate-utility-helper` | **4** | 2026-04-26 | 2026-04-26 | **PROMOTED → R14 (APPLIED iter-012)**, cumulative cycle_density=11 across 4 cycles. iter-027 surfaced SidebarRail surface that Tier 2.A's STUDIO_ROLES migration missed (Header migrated; SidebarRail still inline). NOT a regression — uncovered call site. (Codex-mqyql.1, .5, .7, .8, .14, .15 + Codex-w30gi) |
+| `simplification:dup-content-item-shape` | **2** | 2026-04-26 | 2026-04-26 | **RECURRENCE #2** — cycle_density=5 cumulative (4 in iter-012 + 1 in iter-027). iter-027 surfaced CreatorCard.svelte:34+:41 (5th instance + first SocialLinks dup). **QUALIFIES FOR 2-HIT EARLY PROMOTION REVIEW NEXT CYCLE** — mirrors R14's profile. Candidate rule: shapes consumed across ≥2 family files MUST resolve to single declaration site. (Codex-mqyql.13, Codex-zhe80) |
 | `simplification:duplicate-component` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint (Codex-mqyql.12) |
 | `simplification:dup-zod-schema-fragment` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint, cycle_density=2 (Codex-mqyql.16, .17) |
 | `simplification:lonely-abstraction` | 1 | 2026-04-26 | 2026-04-26 | tracked, Header/MobileNav + Header/UserMenu (Codex-mqyql.19) |
-| `denoise:doc-rot:05-domain-web:row-loadFromServer` | 1 | 2026-04-26 | 2026-04-26 | tracked, doc-rot (Codex-mqyql.18) |
+| `denoise:doc-rot:05-domain-web:row-loadFromServer` | **2** | 2026-04-26 | 2026-04-26 | RECURRENCE #2 (iter-027 increment to existing bead, NOT double-filed). 1-line edit to close. (Codex-mqyql.18) |
+| `simplification:dup-fetch-handler-boilerplate` | 1 | 2026-04-26 | 2026-04-26 | NEW fingerprint, cycle_density=1. Two content detail server loaders share ~70L of jscpd-detected clones. (Codex-0n26b) |
 | `simplification:dup-procedure-context-builder` | **2** | 2026-04-26 | 2026-04-26 | recurrence #2 of 3 (Codex-mqyql.2, .9) — 1 more triggers R7 standard 3-hit |
 | `simplification:speculative-extension-point` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint (Codex-mqyql.10) |
 | `simplification:dup-r2-key-resolution` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint (Codex-mqyql.11) |
@@ -142,6 +143,7 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-024 | 0 | 0 | 0% | clean cycle (no churn, simplification × apps/web) — **🎯 ROUND 2 FIRST PASS COMPLETE** |
 | iter-025 | 0 | 0 | 0% | clean cycle (no churn, types × apps/web) — **second pass cycle 1** — first cell at countdown 2/3 |
 | iter-026 | 1 | 0 | 0% | performance × packages drift-detection — Round 3 R12 effectiveness confirmed (8 Promise.all sites verified live); F1 = single uncovered call site `getCustomerStats:462+482` (Codex-bwgfv) |
+| iter-027 | 4 | 0 | 0% | simplification × apps/web drift-detection — Round 3 effectiveness mixed: schema .extend ✅ (close .16+.17), SubscriptionContext ✅ (close lqvw4.16), R14 fanout ✅, STUDIO_ROLES ⚠️ Header migrated but SidebarRail surface missed (F1). New: F2 dup-content-item-shape recurrence #2 (CreatorCard 5th site, promotion candidate), F3 NEW fingerprint dup-fetch-handler-boilerplate (content detail loaders ~70L), F4 doc-rot recurrence (mqyql.18 increment) |
 
 > R8 fires when rate > 15% in any cycle. The next cycle's prep includes a meta-warning and a justification audit of every testability-bug.
 
@@ -177,18 +179,19 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-024 | simplification × apps/web | 2026-04-26 | 0 (CLEAN) | — | Twelfth Round 2 cycle. Zero churn in apps/web/src/** since iter-012. **🎯 ROUND 2 FIRST PASS COMPLETE — all 12 cells at countdown 1/3.** Round 1 found 72 issues; Round 2 found 0. Drift-detection working as designed |
 | iter-025 | types × apps/web | 2026-04-26 | 0 (CLEAN) | — | Thirteenth Round 2 cycle, **second-pass cycle 1**. Zero churn in apps/web/src/** since iter-018 (only commit was 7345a106 batch-sweep, docs-only). First cell to reach **countdown 2/3** — one more clean cycle reaches fidelity per §7 |
 | iter-026 | performance × packages | 2026-04-26 | 1 (0B/0M/1m) | Codex-bwgfv | **Second-pass cycle 2 — first non-clean Round-2 cycle.** 33 churned files in packages/*/src/** since iter-019 baseline (Round 3 Tier 1–7 commits). Fabrication 22/22 live. **R12 effectiveness verification = STRONG** — 8 Promise.all sites confirmed live (computeRevenue/Subscriber/FollowerBlock + getRevenue/Subscriber/FollowerStats current+previous + getDashboardStats + getRecentActivity + hasContentAccess FOLLOWERS/SUBSCRIBERS + tier-service.createTier + paginatedQuery() helper internals). F1 (Codex-bwgfv) = single uncovered call site at analytics-service.getCustomerStats lines 462+482 (totalCustomers + newCustomers CTE) — outside iter-007 scope, NOT a regression. `performance:sequential-await-independent-queries` recurrence hit #3 (informational; R12 already promoted iter-008). Stop-criterion countdown reset 1/3 |
+| iter-027 | simplification × apps/web | 2026-04-26 | 4 (0B/3M/1m) | Codex-w30gi, Codex-zhe80, Codex-0n26b + Codex-mqyql.18 increment | **Second-pass cycle 3 — Round 3 effectiveness audit.** 16 churned files in apps/web/src/** since iter-024 baseline (12 Round-3 commits + iter-026 commit). Fabrication 23/24 live (1 stale = Codex-mqyql.18 doc-rot increment). **Round 3 effectiveness scoreboard**: schema .extend ✅ (.16+.17 closed), SubscriptionContext ✅ (lqvw4.16 closed), R14 fanout ✅ clean in apps/web, **STUDIO_ROLES ⚠️ partial** (Header migrated cleanly via Tier 2.A, SidebarRail surface missed → F1). F2 = `dup-content-item-shape` recurrence #2 (CreatorCard.svelte:34+41 inline-redeclares ContentItem+SocialLinks despite sibling types.ts; cumulative cycle_density=5 across 2 cycles → **promotion candidate next cycle**). F3 = NEW fingerprint `dup-fetch-handler-boilerplate` (org + creators content detail loaders share ~70L jscpd clones). F4 = doc-rot recurrence (mqyql.18 1-line edit). Stop-criterion countdown reset to 0/3 |
 
 ---
 
 ## Next-cycle prep — Round 2 / drift-detection mode begins
 
 - **🎯 ROUND 1 COMPLETE** after iter-012. All 12 cells have baseline iter files. Future cycles measure whether R9-R14 prevent NEW instances vs only catalogue existing ones.
-- **🎯 Round 2 progress (after iter-026)**: First pass complete (12/12). Second pass underway — 1 cell at 2/3 (types × apps/web), 1 cell reset to 1/3 (performance × packages, F1 found).
+- **🎯 Round 2 progress (after iter-027)**: First pass complete (12/12). Second pass: 1 cell at 2/3 (types × apps/web), 1 cell at 1/3 (performance × packages), 1 cell reset to 0/3 (simplification × apps/web — 4 findings). Round 3 effectiveness verified for: schema .extend ✅, SubscriptionContext ✅, R14 fanout ✅, R12 ✅ (8 sites), STUDIO_ROLES ⚠️ Header-only.
   - Round 1 (iter-001 → iter-012): 72 findings catalogued
   - Round 2 first pass (iter-013 → iter-024): 0 findings
-  - Round 2 second pass (iter-025 onward): types × apps/web at 2/3; performance × packages at 1/3 (after F1)
-- **No promotion queued for iter-027** (R12 hit #3 is informational — R12 already promoted iter-008).
-- **Suggested next cell** (§5.0 sort): tied top tier at 9 open findings — performance × packages (iter-026, 1/3 — JUST RAN), 8-tier next: simplification × apps/web (iter-024, 1/3), types × apps/web (iter-025, 2/3). Excluding the just-run cell, `last_run ASC` → **`simplification × apps/web` (iter-027)** continues second pass. Round 3 Tier 2.A+B+E commits (STUDIO_ROLES helper, schema .extend dedupes, cache-fanout helpers) are all simplification × apps/web territory and should be drift-checked.
+  - Round 2 second pass (iter-025 → iter-027): 5 findings total (1 R12, 3 simplification major, 1 doc-rot increment)
+- **PROMOTION CANDIDATE FOR iter-028**: `simplification:dup-content-item-shape` reaches 2 cycles with cumulative cycle_density=5 — mirrors R14's profile (R14 promoted at cycle_density=9 across 3 cycles). Recommend 2-hit early promotion review next cycle. Candidate rule: "Structural shapes consumed across ≥2 component-family files MUST resolve to a single declaration site (sibling `types.ts`, package barrel, or generated wire shape via `NonNullable<...>`); inline `interface`/`type` redeclarations exactly matching an exported sibling are blocker."
+- **Suggested next cell** (§5.0 sort): tied top tier — simplification × apps/web (iter-027, 11 findings, 0/3 — JUST RAN), performance × packages (iter-026, 9 findings, 1/3 — JUST RAN), types × apps/web (iter-025, 8 findings, 2/3). Excluding just-run cells, `last_run ASC` (oldest) and prioritising types/security → **`types × apps/web` (iter-028)** to confirm fidelity at 3/3 OR a different cell with higher churn. Alternative: **`security × apps/web` (iter-029)** — Tier 7.A landed CSP header (R10 effectiveness check) and HSTS work. R11 effectiveness across packages is also overdue (last cycle iter-006 found 4 type duplications; Round 3 Tier 6.A consolidated Database type across 5 packages).
 - **Round 2 stop-criterion countdown**: each cell's countdown starts at 3. A cell reaches **fidelity** at 3 consecutive zero-finding cycles. Cells producing findings reset to 3.
 - **Recurrence watches (carry-forward)**:
   - `simplification:dup-procedure-context-builder` (hits=2) — one more hit → R7 standard 3-hit
