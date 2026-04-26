@@ -12,7 +12,7 @@
  * - POST   /reorder          - Reorder tiers
  */
 
-import { CacheType, VersionedCache } from '@codex/cache';
+import { CacheType, VersionedCache, type WaitUntilFn } from '@codex/cache';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   createTierSchema,
@@ -31,7 +31,7 @@ import { z } from 'zod';
 function warmTierCache(
   ctx: {
     env: { CACHE_KV?: import('@cloudflare/workers-types').KVNamespace };
-    executionCtx: { waitUntil(p: Promise<unknown>): void };
+    executionCtx: { waitUntil: WaitUntilFn };
     services: { tier: { listTiers(orgId: string): Promise<unknown> } };
   },
   orgId: string

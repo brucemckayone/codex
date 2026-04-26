@@ -30,8 +30,18 @@
  * for letting the underlying KV writes settle after the response is sent.
  */
 
-import { CacheType, type VersionedCache } from '@codex/cache';
+import {
+  CacheType,
+  type InvalidationLogger,
+  type VersionedCache,
+  type WaitUntilFn,
+} from '@codex/cache';
 import { ValidationError } from '@codex/service-errors';
+
+// `InvalidationLogger` and `WaitUntilFn` are canonically declared in
+// `@codex/observability` and `@codex/cache` respectively (R11). They are
+// re-exported here so `@codex/subscription` consumers keep their import path.
+export type { InvalidationLogger, WaitUntilFn };
 
 /**
  * Why the invalidation fired. Used for observability only — does not affect
@@ -61,20 +71,6 @@ export interface InvalidateForUserArgs {
   orgId?: string;
   /** Observability tag — what triggered this invalidation. */
   reason: InvalidationReason;
-}
-
-/**
- * Narrow waitUntil signature. We intentionally do not depend on Hono or
- * workers-types here so this helper stays pure and easy to unit test.
- */
-export type WaitUntilFn = (promise: Promise<unknown>) => void;
-
-/**
- * Optional logger surface — matches the subset of `ObservabilityClient`
- * the helper needs. Omitted by default so the helper has no runtime deps.
- */
-export interface InvalidationLogger {
-  warn: (message: string, context?: Record<string, unknown>) => void;
 }
 
 export interface InvalidateForUserOptions {

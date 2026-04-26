@@ -40,6 +40,7 @@ import {
   MAX_IMAGE_SIZE_BYTES,
   SUPPORTED_IMAGE_MIME_TYPES,
 } from '@codex/image-processing';
+import type { Logger } from '@codex/observability';
 import type { CheckSlugResponse, HonoEnv } from '@codex/shared-types';
 import { createIdParamsSchema } from '@codex/validation';
 import {
@@ -50,11 +51,6 @@ import {
   sendEmailToWorker,
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
-
-/** Minimal logger interface to avoid direct @codex/observability dependency */
-interface Logger {
-  warn(message: string, metadata?: Record<string, unknown>): void;
-}
 
 /**
  * Bump the org content version in KV after publish/unpublish/delete.

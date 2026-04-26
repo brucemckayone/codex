@@ -488,6 +488,9 @@ importers:
       '@codex/constants':
         specifier: workspace:*
         version: link:../constants
+      '@codex/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@codex/service-errors':
         specifier: workspace:*
         version: link:../service-errors
@@ -1368,6 +1371,9 @@ importers:
       '@codex/image-processing':
         specifier: workspace:*
         version: link:../../packages/image-processing
+      '@codex/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@codex/security':
         specifier: workspace:*
         version: link:../../packages/security
@@ -1739,6 +1745,9 @@ importers:
       '@codex/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@codex/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@codex/organization':
         specifier: workspace:*
         version: link:../../packages/organization

@@ -16,12 +16,13 @@
  * - PUT    /api/organizations/:id/settings/features     - Update feature settings
  */
 
-import { VersionedCache } from '@codex/cache';
+import { VersionedCache, type WaitUntilFn } from '@codex/cache';
 import { BRAND_COLORS, CACHE_TTL } from '@codex/constants';
 import { createDbClient, eq, schema } from '@codex/database';
 
 type BrandingRow = typeof schema.brandingSettings.$inferSelect;
 
+import type { Logger } from '@codex/observability';
 import { InternalServiceError } from '@codex/service-errors';
 import type {
   AllSettingsResponse,
@@ -43,13 +44,6 @@ import {
 import { multipartProcedure, procedure } from '@codex/worker-utils';
 
 import { Hono } from 'hono';
-
-/** Minimal logger interface to avoid direct @codex/observability dependency */
-interface Logger {
-  warn(message: string, metadata?: Record<string, unknown>): void;
-  error(message: string, metadata?: Record<string, unknown>): void;
-}
-
 import { z } from 'zod';
 
 /**
@@ -156,7 +150,7 @@ export async function updateBrandCache(
       expirationTtl: CACHE_TTL.BRAND_CACHE_SECONDS,
     });
   } catch (err) {
-    obs?.error(`Failed to update cache for org ${organizationId}`, {
+    obs?.error?.(`Failed to update cache for org ${organizationId}`, {
       organizationId,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -183,7 +177,7 @@ export async function updateBrandCache(
 async function invalidateBrandAndCache(
   ctx: {
     env: Bindings;
-    executionCtx: { waitUntil(promise: Promise<unknown>): void };
+    executionCtx: { waitUntil: WaitUntilFn };
   },
   orgId: string,
   obs?: Logger

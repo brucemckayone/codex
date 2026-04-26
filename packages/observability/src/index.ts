@@ -7,6 +7,39 @@
 
 import { type RedactionOptions, redactSensitiveData } from './redact';
 
+// ── Canonical structural Logger interfaces (R11) ──────────────────────────────
+//
+// `Logger` is the structural superset of `ObservabilityClient` that callers
+// across the platform depend on. Any helper, route, or foundation client that
+// only needs to log fire-and-forget warnings/errors should accept a `Logger`
+// rather than a full `ObservabilityClient` — keeps coupling narrow and lets
+// tests pass a `{ warn: vi.fn() }` stub.
+//
+// All members are optional EXCEPT `warn` because every consumer logs at least
+// warnings on KV/HTTP failures. `info` and `error` are present where the
+// concrete consumer needs them (e.g. `updateBrandCache` calls `error` on a DB
+// failure; the content-invalidation helpers call `info` for fanout summaries).
+//
+// `ObservabilityClient` (declared below) satisfies this interface — verified
+// by structural typing at every call site.
+//
+// `InvalidationLogger` is preserved as a public alias because the cache /
+// content / subscription invalidation helpers already accept it under that
+// name. New code SHOULD prefer `Logger`; both names resolve to the same type.
+
+export interface Logger {
+  warn(message: string, metadata?: Record<string, unknown>): void;
+  info?(message: string, metadata?: Record<string, unknown>): void;
+  error?(message: string, metadata?: Record<string, unknown>): void;
+}
+
+/**
+ * Alias of {@link Logger} kept for back-compat with the cache /
+ * content-invalidation / subscription-invalidation helpers that originally
+ * declared their own copy of this shape.
+ */
+export type InvalidationLogger = Logger;
+
 // ── ANSI color helpers (dev console only) ──────────────────────────
 const LEVEL_COLORS = {
   debug: '\x1b[36m', // cyan

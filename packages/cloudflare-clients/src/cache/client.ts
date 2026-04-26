@@ -1,9 +1,5 @@
+import type { Logger } from '@codex/observability';
 import type { CachePurgeConfig, CloudflarePurgeResponse } from './types';
-
-/** Minimal logger interface to avoid coupling to @codex/observability */
-interface Logger {
-  warn(message: string, metadata?: Record<string, unknown>): void;
-}
 
 const CF_API_BASE = 'https://api.cloudflare.com/client/v4/zones';
 const MAX_URLS_PER_BATCH = 30;

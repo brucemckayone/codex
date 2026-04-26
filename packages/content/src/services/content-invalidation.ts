@@ -95,19 +95,13 @@ export type ContentInvalidationReason =
   | 'follower_removed';
 
 /**
- * Narrow waitUntil signature. We intentionally do not depend on Hono or
- * workers-types here so this helper stays portable.
+ * `WaitUntilFn` and `InvalidationLogger` are canonically declared in
+ * `@codex/cache` and `@codex/observability` respectively (R11). They are
+ * re-exported here so `@codex/content` consumers keep their import path.
  */
-export type WaitUntilFn = (promise: Promise<unknown>) => void;
+import type { InvalidationLogger, WaitUntilFn } from '@codex/cache';
 
-/**
- * Optional logger surface — matches the subset of `ObservabilityClient` the
- * helper uses. Omitted by default so the helper has no runtime deps.
- */
-export interface InvalidationLogger {
-  warn: (message: string, context?: Record<string, unknown>) => void;
-  info?: (message: string, context?: Record<string, unknown>) => void;
-}
+export type { InvalidationLogger, WaitUntilFn };
 
 /**
  * Arguments for `invalidateContentAccess` — content-scoped invalidation.

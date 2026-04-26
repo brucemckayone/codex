@@ -22,6 +22,7 @@
     "@codex/cloudflare-clients": "workspace:*",
     "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
+    "@codex/observability": "workspace:*",
     "@codex/organization": "workspace:*",
     "@codex/platform-settings": "workspace:*",
     "@codex/purchase": "workspace:*",

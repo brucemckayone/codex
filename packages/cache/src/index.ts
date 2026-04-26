@@ -5,6 +5,10 @@
  * Cache-aside pattern with version-based invalidation.
  */
 
+// `Logger` and `InvalidationLogger` (alias) are canonically declared in
+// `@codex/observability` (R11). Re-exported here so consumers of `@codex/cache`
+// keep their import path. `WaitUntilFn` is canonically declared in this package.
+export type { InvalidationLogger, Logger } from '@codex/observability';
 export {
   buildCacheKey,
   buildVersionedCacheKey,
@@ -13,7 +17,6 @@ export {
 } from './cache-keys';
 export type {
   InvalidateUserLibraryArgs,
-  InvalidationLogger,
   WaitUntilFn,
 } from './helpers/invalidate';
 export { invalidateUserLibrary } from './helpers/invalidate';

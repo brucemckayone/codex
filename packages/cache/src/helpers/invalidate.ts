@@ -20,24 +20,24 @@
  */
 
 import type { KVNamespace } from '@cloudflare/workers-types';
+import type { InvalidationLogger } from '@codex/observability';
 import { CacheType } from '../cache-keys';
 import { VersionedCache } from '../versioned-cache';
 
 /**
  * Narrow `waitUntil` signature — matches `ExecutionContext.waitUntil` without
  * pulling Hono or workers-types into the helper surface.
+ *
+ * R11 canonical declaration site for the platform — `@codex/content`,
+ * `@codex/subscription`, and worker route files all re-export or import from
+ * here so that there is a single structural source of truth.
  */
 export type WaitUntilFn = (promise: Promise<unknown>) => void;
 
-/**
- * Optional logger surface. Mirrors the structural shape used by
- * `@codex/content` `invalidateContentAccess` so the sibling fan-out helpers
- * behave identically in the face of KV outages.
- */
-export interface InvalidationLogger {
-  warn: (message: string, context?: Record<string, unknown>) => void;
-  info?: (message: string, context?: Record<string, unknown>) => void;
-}
+// `InvalidationLogger` is canonically declared in `@codex/observability`
+// (R11). Re-export so existing `@codex/cache` consumers keep their import
+// path. New code should prefer `import type { Logger } from '@codex/observability'`.
+export type { InvalidationLogger };
 
 /**
  * Arguments for {@link invalidateUserLibrary}.

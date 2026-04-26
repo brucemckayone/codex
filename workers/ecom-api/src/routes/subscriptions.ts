@@ -13,6 +13,7 @@
  */
 
 import { AccessRevocation } from '@codex/access';
+import type { WaitUntilFn } from '@codex/cache';
 import type { ObservabilityClient } from '@codex/observability';
 import type { HonoEnv } from '@codex/shared-types';
 import {
@@ -63,7 +64,7 @@ import { Hono } from 'hono';
 function clearAccessRevocation(
   ctx: {
     env: { CACHE_KV?: import('@cloudflare/workers-types').KVNamespace };
-    executionCtx: { waitUntil(p: Promise<unknown>): void };
+    executionCtx: { waitUntil: WaitUntilFn };
     user: { id: string };
     obs?: ObservabilityClient;
   },

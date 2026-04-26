@@ -59,16 +59,14 @@ import type {
 } from '../services/content-invalidation';
 
 describe('denoise proof: F3 types:type-duplicate-cross-package — WaitUntilFn / InvalidationLogger', () => {
-  it.skip('WaitUntilFn MUST resolve to a single canonical declaration across @codex/content and @codex/subscription', () => {
-    // Passes structurally today (both are `(promise: Promise<unknown>) => void`);
-    // after consolidation the two named imports resolve to the *same* file.
+  it('WaitUntilFn MUST resolve to a single canonical declaration across @codex/content and @codex/subscription', () => {
+    // Both packages re-export the canonical declaration in `@codex/cache`.
     expectTypeOf<ContentWaitUntilFn>().toEqualTypeOf<SubscriptionWaitUntilFn>();
   });
 
-  it.skip('InvalidationLogger SHOULD resolve to a single canonical declaration (today: content adds optional info)', () => {
-    // FAILS today: ContentInvalidationLogger has optional `info`, the
-    // subscription variant does not. After consolidation both should
-    // expose the same `warn`+optional-`info` shape.
+  it('InvalidationLogger MUST resolve to a single canonical declaration', () => {
+    // Both packages re-export the canonical alias declared in
+    // `@codex/observability` (via `@codex/cache`).
     expectTypeOf<ContentInvalidationLogger>().toEqualTypeOf<SubscriptionInvalidationLogger>();
   });
 });

@@ -13,11 +13,13 @@
  * - DELETE /:userId         - Remove member
  */
 
+import type { WaitUntilFn } from '@codex/cache';
 import {
   invalidateUserLibrary as invalidateUserLibraryShared,
   VersionedCache,
 } from '@codex/cache';
 import { createDbClient } from '@codex/database';
+import type { Logger } from '@codex/observability';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   inviteMemberSchema,
@@ -36,15 +38,10 @@ import {
 import { Hono } from 'hono';
 import { z } from 'zod';
 
-/** Minimal logger interface to avoid direct @codex/observability dependency */
-interface Logger {
-  warn(message: string, metadata?: Record<string, unknown>): void;
-}
-
 /** Context shape shared by cache-invalidation helpers */
 interface CacheCtx {
   env: HonoEnv['Bindings'];
-  executionCtx: { waitUntil(p: Promise<unknown>): void };
+  executionCtx: { waitUntil: WaitUntilFn };
 }
 
 /**
