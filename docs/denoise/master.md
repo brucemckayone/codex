@@ -3,11 +3,11 @@
 > Generated and maintained by the `/denoise` skill. Do not edit by hand outside of dismissing diffs.
 > See `.claude/skills/denoise/SKILL.md` for the workflow.
 
-## ⚠️ R7 promotions — both R9 and R10 applied; new endemic-pattern watch
+## ⚠️ R7 promotions — R9, R10 applied; **R11 queued (endemic 2-hit fired)**
 
 - **R9 (applied iter-003)** — `security:auth-endpoint-no-ratelimit` from iter-002 F1. Hard rule in local SKILL.md §1.
 - **R10 (applied iter-004)** — `security:missing-csp` from iter-003 F2. Hard rule in local SKILL.md §1.
-- **Endemic-pattern watch (iter-005+)** — `types:type-duplicate-cross-package` was filed 6 times in iter-004 (single fingerprint, 6 instances). Cycle-density = 6 in one cell. Per agent recommendation, if iter-005 (any scope) surfaces another instance, consider promoting on 2nd hit (instead of standard 3-hit threshold) — the SHAPE of the recurrence (multi-instance per cycle) tells us the pattern is endemic.
+- **R11 (queued for iter-006)** — `types:type-duplicate-cross-package`. **Endemic 2-hit early promotion fired** in iter-005: F2 (Logger inlined in 2 worker routes) + F3 (WaitUntilFn inlined at 5 worker call sites) bring the fingerprint to hits=2 with cumulative cycle_density=13 across iter-004 (packages, 6 instances) + iter-005 (workers, 7 instances). Per master.md endemic-pattern watch (introduced after iter-004), the dispatching skill applies 2-hit early promotion instead of waiting for the standard 3-hit threshold. Iter-006's first action MUST add **R11** to SKILL.md §1 with citation `<!-- R11 promoted from iter-005, fingerprint types:type-duplicate-cross-package (endemic 2-hit early promotion) -->`. Suggested rule text: "Type names declared in 2+ packages MUST resolve to a single canonical declaration site (in `@codex/shared-types` for cross-cutting wire shapes, or in the foundation package that owns the runtime shape). Verified by `expectTypeOf<A>().toEqualTypeOf<B>()` test that fails to compile when shapes drift." Severity: Major.
 
 ---
 
@@ -28,7 +28,7 @@ _None._
 | security × workers | iter-002 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn since iter-002) |
 | security × apps/web | iter-003 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn since iter-003) |
 | types × packages | iter-004 (2026-04-26) | 6 | 0 | 2026-04-26 | skipped (no churn since iter-004) |
-| types × workers | _never_ | 0 | 0 | _never_ | **due** ✅ |
+| types × workers | iter-005 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn since iter-005) |
 | types × apps/web | _never_ | 0 | 0 | _never_ | **due** ✅ |
 | performance × packages | _never_ | 0 | 0 | _never_ | **due** ✅ |
 | performance × workers | _never_ | 0 | 0 | _never_ | **due** ✅ |
@@ -69,7 +69,10 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | `security:missing-hsts` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint, major (Codex-ttavz.14) |
 | `web:auth-form-orphan-rpc-surface` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint, major (Codex-ttavz.15) |
 | `workers:waituntil-no-catch` | **2** | 2026-04-26 | 2026-04-26 | **recurrence #2 of 3** (Codex-ttavz.9, .16) — 1 more triggers R-rule |
-| `types:type-duplicate-cross-package` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint, **cycle_density=6** (Codex-lqvw4.1-.6) — endemic pattern, consider 2-hit early promotion if recurs |
+| `types:type-duplicate-cross-package` | **2** | 2026-04-26 | 2026-04-26 | **PROMOTED → R11 (queued for iter-006)**, cumulative cycle_density=13 (iter-004=6 packages, iter-005=7 workers); endemic 2-hit early promotion fired (Codex-lqvw4.1-8) |
+| `types:type-narrowing-incomplete-orgmanagement` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint, **BLOCKER** (Codex-lqvw4.11) — 6 silent type-system bypasses in production routes |
+| `types:as-cast-without-guard` | 1 | 2026-04-26 | 2026-04-26 | tracked, first workers-side filing (Codex-lqvw4.9) |
+| `types:as-unknown-as` | 1 | 2026-04-26 | 2026-04-26 | tracked, first finding-grade filing (Codex-lqvw4.10) — iter-004 deferred 2 pragmatic instances |
 
 **Promotion threshold**: ≥3 hits in trailing 6 cycles → promoted to a hard rule (R9+) in SKILL.md §1.
 **Single-hit security exception**: severity=blocker security findings may promote on first sighting. (Fired in iter-002 for F1, in iter-003 for F2.)
@@ -84,6 +87,7 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-002 | 5 | 0 | 0% | within budget |
 | iter-003 | 5 | 0 | 0% | within budget |
 | iter-004 | 6 | 0 | 0% | within budget |
+| iter-005 | 5 | 0 | 0% | within budget |
 
 > R8 fires when rate > 15% in any cycle. The next cycle's prep includes a meta-warning and a justification audit of every testability-bug.
 
@@ -97,12 +101,16 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-002 | security × workers | 2026-04-26 | 5 (1B/1M/3m) | Codex-ttavz.7–11 | Cycle 0 for cell; F1 BLOCKER (auth rate-limiter stale paths); R7 single-hit promotion fired for `security:auth-endpoint-no-ratelimit` → R9 queued; 2 new doc-rot in ref 06 (F4 = constructEvent vs constructEventAsync; F5 = ctx.storage.transaction / alarmInFlight) |
 | iter-003 | security × apps/web | 2026-04-26 | 5 (2B/2M/1m) | Codex-ttavz.12–16 | Cycle 0 for cell; **R9 applied at start** (security:auth-endpoint-no-ratelimit promoted to local SKILL.md §1); F1 BLOCKER (auth.remote.ts forgot/forget-password typo silently breaks reset); F2 BLOCKER (apps/web ships with NO CSP header — R10 queued for iter-004); F3 major (no HSTS); F4 major (orphan auth RPC surface — 3 .remote.ts forms with 0 consumers); F5 minor recurrence #2 of `workers:waituntil-no-catch` in apps/web/src/lib/server/brand-cache.ts |
 | iter-004 | types × packages | 2026-04-26 | 6 (1B/2M/3m) | Codex-lqvw4.1–6 | Cycle 0 for cell; **R10 applied at start** (security:missing-csp); single fingerprint `types:type-duplicate-cross-package` with cycle_density=6 (F1 Database 5 declarations, F2 RevenueSplit 2 packages, F3 WaitUntilFn/InvalidationLogger, F4 BLOCKER SessionData/UserData with divergent shapes — silent runtime undefined via index signature, F5 OrganizationMembership name collision, F6 TemplateScope/TemplateStatus/EmailCategory triple-source-of-truth); fabrication check 9/9 ref 02 + 07 cited symbols live (no new doc-rot) |
+| iter-005 | types × workers | 2026-04-26 | 5 (1B/3M/1m) | Codex-lqvw4.7–11 | Cycle 0 for cell; F1 BLOCKER (Codex-lqvw4.11): types.ts:230 narrows ctx.organizationId only on requireOrgMembership but runtime helper treats requireOrgManagement identically — 6 silent 'as string' casts in production routes; F2+F3 = `types:type-duplicate-cross-package` recurrence #2 (Logger inlined in 2 worker routes + WaitUntilFn inlined at 5 sites) → triggered ENDEMIC 2-HIT EARLY PROMOTION (R11 queued for iter-006); F4 CacheCtx narrow-then-cast (4 sites in members.ts); F5 'as unknown as' in auth + media-api entry points (createWorker<TEnv>() not used); workers:waituntil-no-catch did NOT recur (3rd instance investigated, error-contained) |
 
 ---
 
 ## Next-cycle prep
 
-- **No promotion queued for iter-005** (R10 was applied at start of iter-004; no new R7 single-hit security exception fired this cycle). `types:type-duplicate-cross-package` is at hits=1 with cycle_density=6 — track for 2-hit early promotion (not standard 3-hit) given the endemic shape.
+- **PROMOTION (highest priority)**: iter-006's first action is to add R11 to local SKILL.md §1 Hard Rules table:
+  > **R11** | Type names declared in 2+ packages MUST resolve to a single canonical declaration site (in `@codex/shared-types` for cross-cutting wire shapes, or in the foundation package that owns the runtime shape). Worker route files MUST NOT inline structural shapes that exist as canonical exports (e.g. `WaitUntilFn`, `InvalidationLogger`). Verified by `expectTypeOf<A>().toEqualTypeOf<B>()` tests that fail to compile when shapes drift, plus a grep guard that asserts no `interface Logger` / `interface WaitUntilFn` declarations exist outside the canonical site. | Major
+
+  With citation comment `<!-- R11 promoted from iter-005, fingerprint types:type-duplicate-cross-package (endemic 2-hit early promotion) -->`.
 - **Suggested next cell**: Per phase priority + recent guidance, `types × workers` (same complementary axis as iter-002, will pick up `c.env[name] as ...` patterns hinted by 3 baseline TS errors in worker-utils). Alternative: `types × apps/web` (heaviest churn 464 files; paraglide / TanStack DB / Svelte 5 props axis). Tie-break: continuity with iter-002 → `types × workers`.
 - **Fingerprint watches** (carry-forward):
   - `packages:identifier-no-shape-validation` (iter-001 F2) — add to ref 07 §7 if recurs

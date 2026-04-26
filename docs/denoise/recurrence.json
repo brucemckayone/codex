@@ -3,23 +3,58 @@
   "last_updated": "2026-04-26",
   "patterns": {
     "types:type-duplicate-cross-package": {
-      "hits": 1,
-      "iters": ["iter-004"],
-      "cycle_density": { "iter-004": 6 },
+      "hits": 2,
+      "iters": ["iter-004", "iter-005"],
+      "cycle_density": { "iter-004": 6, "iter-005": 7 },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
-      "promoted": false,
-      "rule_id": null,
+      "promoted": true,
+      "rule_id": "R11 (queued — apply in iter-006's prep, 2-hit early promotion via endemic-pattern watch)",
       "beads": [
         "Codex-lqvw4.1",
         "Codex-lqvw4.2",
         "Codex-lqvw4.3",
         "Codex-lqvw4.4",
         "Codex-lqvw4.5",
-        "Codex-lqvw4.6"
+        "Codex-lqvw4.6",
+        "Codex-lqvw4.7",
+        "Codex-lqvw4.8"
       ],
-      "severity": "blocker (F4 SessionData/UserData) + major (F1 Database, F2 RevenueSplit) + minor (F3, F5, F6)",
-      "note": "FIRST CYCLE finding. 6 distinct instances in single cycle (cycle_density=6) — strong endemic-pattern signal. Standard 3-hit threshold applies (single-hit security exception does not — phase=types). If iter-005 surfaces another instance, dispatching skill should consider 2-hit early promotion given density."
+      "severity": "mixed (1 blocker + 4 major + 4 minor across iter-004 + iter-005)",
+      "note": "RECURRENCE #2 — endemic 2-hit early promotion fires per master.md endemic-pattern watch. Cumulative cycle_density = 13 distinct instances across 2 cycles (iter-004=6 in packages, iter-005=7 in workers). Iter-006's first action is to add R11 to local SKILL.md §1 mandating canonical declaration sites for cross-cutting type shapes."
+    },
+    "types:type-narrowing-incomplete-orgmanagement": {
+      "hits": 1,
+      "iters": ["iter-005"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-lqvw4.11"],
+      "severity": "blocker",
+      "note": "BLOCKER on blast-radius grounds (6 silent type-system bypasses in production routes). NEW fingerprint. Single-hit security exception does NOT fire (phase=types not security)."
+    },
+    "types:as-cast-without-guard": {
+      "hits": 1,
+      "iters": ["iter-005"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-lqvw4.9"],
+      "severity": "major",
+      "note": "First workers-side filing. Fingerprint defined in ref 02 §7 row 8."
+    },
+    "types:as-unknown-as": {
+      "hits": 1,
+      "iters": ["iter-005"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-lqvw4.10"],
+      "severity": "minor",
+      "note": "First cycle filing as a finding (iter-004 deferred 2 instances as pragmatic; these 2 worker-side are not). Track for recurrence."
     },
     "web:auth-remote-broken-endpoint": {
       "hits": 1,
