@@ -49,11 +49,11 @@
       "cycle_density": { "iter-005": 5, "iter-006": 1, "iter-028": 1 },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
-      "promoted": false,
-      "rule_id": "R7 PROMOTION QUEUED for iter-029 prep",
+      "promoted": true,
+      "rule_id": "R15 (applied in iter-029)",
       "beads": ["Codex-lqvw4.9", "Codex-lqvw4.12", "Codex-qmrwe"],
       "severity": "major",
-      "note": "**R7 STANDARD 3-HIT THRESHOLD REACHED in iter-028.** Hits 3 in trailing 6 cycles (iter-005, iter-006, iter-028). iter-028 F5 = DatabaseTransaction cast at content-service.ts:158 — exposed by Tier 6.A's Database widening (DatabaseTransaction not similarly widened). Per SKILL.md §7, the next cycle's prep adds R-rule. Suggested rule: 'Type assertions of the form `value as Foo` where Foo is more specific than the source type MUST be guarded by a runtime check (Zod schema, type guard, or instanceof) — except for Drizzle infinite-recursion bridges, framework defaults like `{} as TPolicy`, and Proxy-target placeholders.' Exception list is non-trivial — recommend drafting first, human-reviewing before adding to §1."
+      "note": "**R15 APPLIED iter-029.** R7 standard 3-hit threshold reached in iter-028 (hits 3 across iter-005, iter-006, iter-028; cumulative cycle_density=7). Rule promoted with non-trivial exception list — 4 reason codes: drizzle-infinite-recursion, framework-default-init, proxy-target, type-test. iter-028 F5 = DatabaseTransaction cast at content-service.ts:158 (drizzle-infinite-recursion candidate; the parent type widening exposed the cast as drift). `as unknown as` is a separate fingerprint and NOT covered by R15's exceptions."
     },
     "types:as-unknown-as": {
       "hits": 2,
@@ -370,15 +370,15 @@
       "note": "First apps/web filing. Ref 02 §7 row 1 defines fingerprint."
     },
     "web:auth-remote-broken-endpoint": {
-      "hits": 1,
-      "iters": ["iter-003"],
+      "hits": 2,
+      "iters": ["iter-003", "iter-029"],
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": false,
       "rule_id": null,
       "beads": ["Codex-ttavz.12"],
       "severity": "blocker",
-      "note": "BLOCKER (feature-availability, not security exception). Forgot/forget-password typo silently breaks reset via the remote function codepath. Entangles with web:auth-form-orphan-rpc-surface — fix together."
+      "note": "RECURRENCE #2 (iter-029 increment). BLOCKER (feature-availability, not security exception). Forgot/forget-password typo silently breaks reset via the remote function codepath. Entangles with web:auth-form-orphan-rpc-surface — fix together. Live form-action codepath at routes/(auth)/forgot-password/+page.server.ts:29 already uses correct path; the typo lives only in auth.remote.ts:146 which has 0 consumers (Codex-ttavz.15) — blast radius CONTAINED today, fatal the moment anyone wires it. **3rd hit candidate for R7 promotion** — the pattern is sibling to R9 (auth endpoints rate-limit path-set must come from canonical framework names). If iter-030+ surfaces another instance, promote to a hard rule: 'Remote function literal endpoint paths must be matched against canonical framework constants (BetterAuth, etc.) — never hand-typed strings.'"
     },
     "security:missing-csp": {
       "hits": 1,
@@ -386,10 +386,13 @@
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": true,
-      "rule_id": "R10 (queued — apply in iter-004's prep)",
+      "rule_id": "R10 (applied in iter-004)",
       "beads": ["Codex-ttavz.13"],
       "severity": "blocker",
-      "note": "BLOCKER. R7 single-hit security exception applied. apps/web ships with no CSP header at all — strictly worse than ref 01 §8 row 8 (security:csp-unsafe-inline). Iter-004 first action: add R10 to SKILL.md §1."
+      "closed_via": "Round 3 Tier 7.A (commit 253ffab4)",
+      "last_seen_open": "iter-003",
+      "active_recurrence_watch": false,
+      "note": "**CLOSED via Round 3 Tier 7.A (commit 253ffab4).** R10 effectiveness audit at iter-029 confirms full closure: svelte.config.js:44-74 defines kit.csp.directives with mode='auto', strict script-src (no unsafe-inline, only 'self'), frame-ancestors: 'none', connect-src: 'self'; manual <script> blocks in app.html:12,22 carry nonce='%sveltekit.nonce%'. iter-003 proof at apps/web/src/__denoise_proofs__/iter-003/F2-missing-csp-and-hsts-headers.test.ts is now ACTIVE with 3 specs (positive CSP-or-HSTS detector + 2 negative-path: no unsafe-inline, frame-ancestors === 'none'). Codex-ttavz.13 is closed. Entry retained for historical traceability; no longer in active recurrence watch."
     },
     "security:missing-hsts": {
       "hits": 1,
@@ -400,18 +403,32 @@
       "rule_id": null,
       "beads": ["Codex-ttavz.14"],
       "severity": "major",
-      "note": "Severity major (not blocker) so single-hit exception does not fire. Track for recurrence."
+      "closed_via": "Round 3 Tier 7.A (commit 253ffab4)",
+      "last_seen_open": "iter-003",
+      "active_recurrence_watch": false,
+      "note": "**CLOSED via Round 3 Tier 7.A (commit 253ffab4).** hooks.server.ts:79-84 sets Strict-Transport-Security: max-age=63072000; includeSubDomains in production (!dev gated to allow local HTTP dev on lvh.me). Codex-ttavz.14 is closed. Entry retained for historical traceability; no longer in active recurrence watch."
     },
     "web:auth-form-orphan-rpc-surface": {
-      "hits": 1,
-      "iters": ["iter-003"],
+      "hits": 2,
+      "iters": ["iter-003", "iter-029"],
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": false,
       "rule_id": null,
       "beads": ["Codex-ttavz.15"],
       "severity": "major",
-      "note": "NEW fingerprint. Add to ref 05 §9 if recurs. Entangles with web:auth-remote-broken-endpoint."
+      "note": "RECURRENCE #2 (iter-029 increment). 3 form() remote functions in auth.remote.ts:100,140,175 (registerForm/forgotPasswordForm/resetPasswordForm) have ZERO consumers in apps/web/src/routes/**/*.{ts,svelte} — only auth.remote.test.ts references them. Live auth flow uses traditional form actions in routes/(auth)/*/+page.server.ts. Decision pending: wire OR delete. Fallow FP taxonomy row #1 protects .remote.ts exports from blanket 'unused' deletion when surface is genuinely live; these three exports meet none of the live-surface criteria. Entangled with web:auth-remote-broken-endpoint — fix together; if wire path chosen, MUST fix Codex-ttavz.12 typo first."
+    },
+    "web:streamed-promise-no-catch": {
+      "hits": 1,
+      "iters": ["iter-029"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-3hwli"],
+      "severity": "minor",
+      "note": "First-recorded hit of pre-existing fingerprint (ref 05 §9 row 2). subscription-context.svelte.ts:104 calls promise.then() inside \\$effect block without .catch(). Producer (loadOrgTiers in routes/_org/[slug]/+layout.server.ts:113) currently catches, so today this is defence-in-depth — but apps/web/CLAUDE.md streaming rule is unconditional and sibling file access-context.svelte.ts:93,102 DOES .catch() on every promise it threads through. Drift between siblings is the maintenance hazard. Track for recurrence."
     },
     "packages:throw-raw-error": {
       "hits": 1,
@@ -501,13 +518,19 @@
       "note": "NEW fingerprint not in reference 01 §8 anti-pattern table. Suggest adding as row 13 if it recurs."
     },
     "workers:waituntil-no-catch": {
-      "hits": 3,
-      "iters": ["iter-002", "iter-003", "iter-008"],
-      "cycle_density": { "iter-002": 1, "iter-003": 1, "iter-008": 5 },
+      "hits": 4,
+      "iters": ["iter-002", "iter-003", "iter-008", "iter-029"],
+      "cycle_density": {
+        "iter-002": 1,
+        "iter-003": 1,
+        "iter-008": 5,
+        "iter-029": 1
+      },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": true,
-      "rule_id": "R13 (queued — apply in iter-009's prep, R7 standard 3-hit threshold)",
+      "rule_id": "R13 (applied in iter-009)",
+      "skill_patch_queued": "Widen R13 verification recipe (SKILL.md §1 row R13) beyond 'workers/*/src/**' to also scan 'apps/web/src/lib/server/**' for platform.context.waitUntil(...) calls. Same hazard, same fix shape; R13 grep guard should walk both directories. Not a rule change, just a verification-recipe clarification — defer to next cycle's prep per R5.",
       "beads": [
         "Codex-ttavz.9",
         "Codex-ttavz.16",
