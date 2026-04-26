@@ -47,7 +47,7 @@ import type {
   ServiceRegistry,
 } from './types';
 import {
-  buildUploadBaseContext,
+  buildBaseProcedureContext,
   runUploadOrchestration,
   sendUploadResponse,
 } from './upload-shared';
@@ -227,7 +227,7 @@ export function multipartProcedure<
       const validatedFiles = await validateFiles(formData, fileSchema);
 
       const ctx: MultipartProcedureContext<TPolicy, TInput, TFiles> = {
-        ...buildUploadBaseContext<TPolicy, TInput>(
+        ...buildBaseProcedureContext<TPolicy, TInput>(
           c,
           orchestration.organizationId,
           validatedInput,

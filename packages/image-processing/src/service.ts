@@ -26,6 +26,11 @@ import {
 } from '@codex/validation';
 import type { OrphanedFileService } from './orphaned-file-service';
 import { processImageVariants } from './processor';
+import {
+  uploadImageVariants,
+  type VariantKeys,
+  withDbUpdateOrphanCleanup,
+} from './utils/upload-pipeline';
 
 export interface ImageProcessingResult {
   url: string;
@@ -95,6 +100,11 @@ async function validateImageFile(
   return { buffer, mimeType };
 }
 
+/** Helper: collect a `VariantKeys` object as a flat `string[]` in sm/md/lg order. */
+function variantKeyList(keys: VariantKeys): string[] {
+  return [keys.sm, keys.md, keys.lg];
+}
+
 /**
  * Image Processing Service
  * Coordinates image validation, R2 upload, and database updates
@@ -127,102 +137,47 @@ export class ImageProcessingService extends BaseService {
     const inputBuffer = new Uint8Array(buffer);
     const variants = processImageVariants(inputBuffer);
 
-    const keys = {
+    const keys: VariantKeys = {
       sm: getContentThumbnailKey(creatorId, contentId, 'sm'),
       md: getContentThumbnailKey(creatorId, contentId, 'md'),
       lg: getContentThumbnailKey(creatorId, contentId, 'lg'),
     };
 
-    // Upload in parallel with allSettled to handle partial failures
-    const uploadResults = await Promise.allSettled([
-      this.r2Service.put(
-        keys.sm,
-        variants.sm,
-        {},
-        {
-          contentType: 'image/webp',
-          cacheControl: 'public, max-age=31536000, immutable',
-        }
-      ),
-      this.r2Service.put(
-        keys.md,
-        variants.md,
-        {},
-        {
-          contentType: 'image/webp',
-          cacheControl: 'public, max-age=31536000, immutable',
-        }
-      ),
-      this.r2Service.put(
-        keys.lg,
-        variants.lg,
-        {},
-        {
-          contentType: 'image/webp',
-          cacheControl: 'public, max-age=31536000, immutable',
-        }
-      ),
-    ]);
-
-    const failures = uploadResults.filter((r) => r.status === 'rejected');
-    if (failures.length > 0) {
-      // Cleanup all variants (R2 delete is idempotent)
-      await Promise.allSettled([
-        this.r2Service.delete(keys.sm),
-        this.r2Service.delete(keys.md),
-        this.r2Service.delete(keys.lg),
-      ]);
-      throw new ValidationError(
-        `Thumbnail upload failed: ${failures.length} variant(s) failed`
-      );
-    }
+    await uploadImageVariants({
+      keys,
+      variants,
+      r2: this.r2Service,
+      failureLabel: 'Thumbnail',
+    });
 
     // Use LG variant as determining URL for DB
-    const r2Key = keys.lg;
-    const url = `${this.r2PublicUrlBase}/${r2Key}`;
+    const url = `${this.r2PublicUrlBase}/${keys.lg}`;
 
     // Update content record — cleanup R2 if DB fails
-    try {
-      await this.db
-        .update(schema.content)
-        .set({ thumbnailUrl: url })
-        .where(
-          and(
-            eq(schema.content.id, contentId),
-            eq(schema.content.creatorId, creatorId)
-          )
-        );
-    } catch (error) {
-      const allKeys = [keys.sm, keys.md, keys.lg];
-      const cleanupResults = await Promise.allSettled(
-        allKeys.map((key) => this.r2Service.delete(key))
-      );
-
-      // Track any failed cleanups as orphans
-      const failedKeys = allKeys.filter(
-        (_, i) => cleanupResults[i]?.status === 'rejected'
-      );
-      if (failedKeys.length > 0) {
-        if (this.orphanedFileService) {
-          await this.orphanedFileService.recordOrphanedFiles(
-            failedKeys.map((r2Key) => ({
-              r2Key,
-              imageType: 'content_thumbnail' as const,
-              entityId: contentId,
-              entityType: 'content' as const,
-            }))
+    await withDbUpdateOrphanCleanup(
+      {
+        keys: variantKeyList(keys),
+        imageType: 'content_thumbnail',
+        entityId: contentId,
+        entityType: 'content',
+        r2: this.r2Service,
+        obs: this.obs,
+        orphanedFileService: this.orphanedFileService,
+        warnContext: 'content-thumbnail',
+        warnExtras: { creatorId },
+      },
+      async () => {
+        await this.db
+          .update(schema.content)
+          .set({ thumbnailUrl: url })
+          .where(
+            and(
+              eq(schema.content.id, contentId),
+              eq(schema.content.creatorId, creatorId)
+            )
           );
-        } else {
-          this.obs.warn('R2 cleanup failed after DB error', {
-            context: 'content-thumbnail',
-            resourceId: contentId,
-            creatorId,
-            r2Keys: failedKeys,
-          });
-        }
       }
-      throw error;
-    }
+    );
 
     return {
       url,
@@ -245,97 +200,40 @@ export class ImageProcessingService extends BaseService {
     const inputBuffer = new Uint8Array(buffer);
     const variants = processImageVariants(inputBuffer);
 
-    const keys = {
+    const keys: VariantKeys = {
       sm: getUserAvatarKey(userId, 'sm'),
       md: getUserAvatarKey(userId, 'md'),
       lg: getUserAvatarKey(userId, 'lg'),
     };
 
-    // Upload in parallel with allSettled to handle partial failures
-    const avatarUploadResults = await Promise.allSettled([
-      this.r2Service.put(
-        keys.sm,
-        variants.sm,
-        {},
-        {
-          contentType: 'image/webp',
-          cacheControl: 'public, max-age=31536000, immutable',
-        }
-      ),
-      this.r2Service.put(
-        keys.md,
-        variants.md,
-        {},
-        {
-          contentType: 'image/webp',
-          cacheControl: 'public, max-age=31536000, immutable',
-        }
-      ),
-      this.r2Service.put(
-        keys.lg,
-        variants.lg,
-        {},
-        {
-          contentType: 'image/webp',
-          cacheControl: 'public, max-age=31536000, immutable',
-        }
-      ),
-    ]);
+    await uploadImageVariants({
+      keys,
+      variants,
+      r2: this.r2Service,
+      failureLabel: 'Avatar',
+    });
 
-    const avatarFailures = avatarUploadResults.filter(
-      (r) => r.status === 'rejected'
-    );
-    if (avatarFailures.length > 0) {
-      // Cleanup all variants (R2 delete is idempotent)
-      await Promise.allSettled([
-        this.r2Service.delete(keys.sm),
-        this.r2Service.delete(keys.md),
-        this.r2Service.delete(keys.lg),
-      ]);
-      throw new ValidationError(
-        `Avatar upload failed: ${avatarFailures.length} variant(s) failed`
-      );
-    }
-
-    const r2Key = keys.lg;
-    const url = `${this.r2PublicUrlBase}/${r2Key}`;
+    const url = `${this.r2PublicUrlBase}/${keys.lg}`;
 
     // Update user record — cleanup R2 if DB fails
-    try {
-      await this.db
-        .update(schema.users)
-        .set({ avatarUrl: url })
-        .where(eq(schema.users.id, userId));
-    } catch (error) {
-      const allKeys = [keys.sm, keys.md, keys.lg];
-      const cleanupResults = await Promise.allSettled(
-        allKeys.map((key) => this.r2Service.delete(key))
-      );
-
-      // Track any failed cleanups as orphans
-      const failedKeys = allKeys.filter(
-        (_, i) => cleanupResults[i]?.status === 'rejected'
-      );
-      if (failedKeys.length > 0) {
-        if (this.orphanedFileService) {
-          await this.orphanedFileService.recordOrphanedFiles(
-            failedKeys.map((r2Key) => ({
-              r2Key,
-              imageType: 'avatar' as const,
-              entityId: userId,
-              entityType: 'user' as const,
-            }))
-          );
-        } else {
-          this.obs.warn('R2 cleanup failed after DB error', {
-            context: 'user-avatar',
-            resourceId: userId,
-            r2Keys: failedKeys,
-          });
-        }
+    await withDbUpdateOrphanCleanup(
+      {
+        keys: variantKeyList(keys),
+        imageType: 'avatar',
+        entityId: userId,
+        entityType: 'user',
+        r2: this.r2Service,
+        obs: this.obs,
+        orphanedFileService: this.orphanedFileService,
+        warnContext: 'user-avatar',
+      },
+      async () => {
+        await this.db
+          .update(schema.users)
+          .set({ avatarUrl: url })
+          .where(eq(schema.users.id, userId));
       }
-      throw error;
-    }
+    );
 
     return {
       url,
@@ -421,98 +319,41 @@ export class ImageProcessingService extends BaseService {
     const inputBuffer = new Uint8Array(buffer);
     const variants = processImageVariants(inputBuffer);
 
-    const keys = {
+    const keys: VariantKeys = {
       sm: getOrgLogoKey(creatorId, 'sm'),
       md: getOrgLogoKey(creatorId, 'md'),
       lg: getOrgLogoKey(creatorId, 'lg'),
     };
 
-    // Upload in parallel with allSettled to handle partial failures
-    const logoUploadResults = await Promise.allSettled([
-      this.r2Service.put(
-        keys.sm,
-        variants.sm,
-        {},
-        {
-          contentType: 'image/webp',
-          cacheControl: 'public, max-age=31536000, immutable',
-        }
-      ),
-      this.r2Service.put(
-        keys.md,
-        variants.md,
-        {},
-        {
-          contentType: 'image/webp',
-          cacheControl: 'public, max-age=31536000, immutable',
-        }
-      ),
-      this.r2Service.put(
-        keys.lg,
-        variants.lg,
-        {},
-        {
-          contentType: 'image/webp',
-          cacheControl: 'public, max-age=31536000, immutable',
-        }
-      ),
-    ]);
+    await uploadImageVariants({
+      keys,
+      variants,
+      r2: this.r2Service,
+      failureLabel: 'Logo',
+    });
 
-    const logoFailures = logoUploadResults.filter(
-      (r) => r.status === 'rejected'
-    );
-    if (logoFailures.length > 0) {
-      // Cleanup all variants (R2 delete is idempotent)
-      await Promise.allSettled([
-        this.r2Service.delete(keys.sm),
-        this.r2Service.delete(keys.md),
-        this.r2Service.delete(keys.lg),
-      ]);
-      throw new ValidationError(
-        `Logo upload failed: ${logoFailures.length} variant(s) failed`
-      );
-    }
-
-    const r2Key = keys.lg;
-    const url = `${this.r2PublicUrlBase}/${r2Key}`;
+    const url = `${this.r2PublicUrlBase}/${keys.lg}`;
 
     // Update organization record — cleanup R2 if DB fails
-    try {
-      await this.db
-        .update(schema.organizations)
-        .set({ logoUrl: url })
-        .where(eq(schema.organizations.id, organizationId));
-    } catch (error) {
-      const allKeys = [keys.sm, keys.md, keys.lg];
-      const cleanupResults = await Promise.allSettled(
-        allKeys.map((key) => this.r2Service.delete(key))
-      );
-
-      // Track any failed cleanups as orphans
-      const failedKeys = allKeys.filter(
-        (_, i) => cleanupResults[i]?.status === 'rejected'
-      );
-      if (failedKeys.length > 0) {
-        if (this.orphanedFileService) {
-          await this.orphanedFileService.recordOrphanedFiles(
-            failedKeys.map((r2Key) => ({
-              r2Key,
-              imageType: 'logo' as const,
-              entityId: organizationId,
-              entityType: 'organization' as const,
-            }))
-          );
-        } else {
-          this.obs.warn('R2 cleanup failed after DB error', {
-            context: 'org-logo-raster',
-            resourceId: organizationId,
-            creatorId,
-            r2Keys: failedKeys,
-          });
-        }
+    await withDbUpdateOrphanCleanup(
+      {
+        keys: variantKeyList(keys),
+        imageType: 'logo',
+        entityId: organizationId,
+        entityType: 'organization',
+        r2: this.r2Service,
+        obs: this.obs,
+        orphanedFileService: this.orphanedFileService,
+        warnContext: 'org-logo-raster',
+        warnExtras: { creatorId },
+      },
+      async () => {
+        await this.db
+          .update(schema.organizations)
+          .set({ logoUrl: url })
+          .where(eq(schema.organizations.id, organizationId));
       }
-      throw error;
-    }
+    );
 
     return {
       url,

@@ -23,12 +23,7 @@ import type { ObservabilityClient } from '@codex/observability';
 import { mapErrorToResponse } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
 import type { Context } from 'hono';
-import {
-  enforcePolicyInline,
-  generateRequestId,
-  getClientIP,
-  validateInput,
-} from './helpers';
+import { enforcePolicyInline, validateInput } from './helpers';
 import { PaginatedResult } from './paginated-result';
 
 import { createServiceRegistry } from './service-registry';
@@ -39,6 +34,7 @@ import type {
   ProcedureHandler,
   ProcedurePolicy,
 } from './types';
+import { buildBaseProcedureContext } from './upload-shared';
 
 /**
  * Create a tRPC-style procedure handler
@@ -146,26 +142,10 @@ export function procedure<
       // ====================================================================
       // Step 4: Build Procedure Context
       // ====================================================================
-      const ctx: ProcedureContext<TPolicy, TInput> = {
-        user: c.get('user') as ProcedureContext<TPolicy, TInput>['user'],
-        session: c.get('session') as ProcedureContext<
-          TPolicy,
-          TInput
-        >['session'],
-        input: validatedInput as ProcedureContext<TPolicy, TInput>['input'],
-        requestId: c.get('requestId') || generateRequestId(),
-        clientIP: c.get('clientIP') || getClientIP(c),
-        userAgent: c.req.header('User-Agent') || 'unknown',
-        organizationId: organizationId as ProcedureContext<
-          TPolicy,
-          TInput
-        >['organizationId'],
-        organizationRole: c.get('organizationRole'),
-        env: c.env,
-        executionCtx: c.executionCtx,
-        obs,
-        services: registry,
-      };
+      const ctx: ProcedureContext<TPolicy, TInput> = buildBaseProcedureContext<
+        TPolicy,
+        TInput
+      >(c, organizationId, validatedInput, registry, obs);
 
       // ====================================================================
       // Step 5: Execute Handler

@@ -69,7 +69,7 @@ const SERVICE_PATH = resolve(
 );
 
 describe('denoise proof: F4 simplification:dup-image-pipeline', () => {
-  it.skip('image-variant cacheControl is declared at most once', () => {
+  it('image-variant cacheControl is declared at most once', () => {
     const src = readFileSync(SERVICE_PATH, 'utf8');
     const literal = `cacheControl: 'public, max-age=31536000, immutable'`;
     const occurrences = src.split(literal).length - 1;
@@ -78,7 +78,7 @@ describe('denoise proof: F4 simplification:dup-image-pipeline', () => {
     expect(occurrences).toBeLessThanOrEqual(1);
   });
 
-  it.skip('R2 cleanup-after-DB-error block is declared at most once', () => {
+  it('R2 cleanup-after-DB-error block is declared at most once', () => {
     const src = readFileSync(SERVICE_PATH, 'utf8');
     // The phrase 'R2 cleanup failed after DB error' tags the obs.warn that
     // currently appears in all three pipelines.

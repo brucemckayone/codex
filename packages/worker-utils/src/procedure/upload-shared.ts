@@ -62,16 +62,23 @@ export async function runUploadOrchestration(
 }
 
 /**
- * Build the shared context fields common to every upload procedure. The
- * caller adds the file-slot key (`file: ValidatedBinaryFile` for binary,
- * `files: InferFiles<TFiles>` for multipart) on top of this base.
+ * Build the shared 14-key procedure context. Used by `procedure()` and by
+ * both upload procedures (`binaryUploadProcedure`, `multipartProcedure`).
+ *
+ * The upload procedures spread the result and layer the file-slot key
+ * (`file: ValidatedBinaryFile` for binary, `files: InferFiles<TFiles>` for
+ * multipart) on top of this base. `procedure()` consumes the result
+ * directly — the return shape is structurally identical to
+ * `ProcedureContext<TPolicy, TInput>`.
  *
  * Typed as `Omit<ProcedureContext, 'services'>` with an explicit
  * `ServiceRegistry` — matching the shape each upload context extends
  * (both contexts do `extends Omit<ProcedureContext<…>, 'services'>` and
- * then redeclare `services: ServiceRegistry`).
+ * then redeclare `services: ServiceRegistry`). For `procedure()`, this is
+ * structurally a `ProcedureContext<TPolicy, TInput>` since
+ * `ProcedureContext.services` is `ServiceRegistry`.
  */
-export function buildUploadBaseContext<
+export function buildBaseProcedureContext<
   TPolicy extends ProcedurePolicy,
   TInput extends InputSchema | undefined,
 >(

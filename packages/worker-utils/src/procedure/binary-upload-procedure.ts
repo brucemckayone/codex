@@ -52,7 +52,7 @@ import type {
   ServiceRegistry,
 } from './types';
 import {
-  buildUploadBaseContext,
+  buildBaseProcedureContext,
   runUploadOrchestration,
   sendUploadResponse,
 } from './upload-shared';
@@ -168,7 +168,7 @@ export function binaryUploadProcedure<
       const validatedFile = await validateBinaryBody(c, fileConfig);
 
       const ctx: BinaryUploadContext<TPolicy, TInput> = {
-        ...buildUploadBaseContext<TPolicy, TInput>(
+        ...buildBaseProcedureContext<TPolicy, TInput>(
           c,
           orchestration.organizationId,
           validatedInput,

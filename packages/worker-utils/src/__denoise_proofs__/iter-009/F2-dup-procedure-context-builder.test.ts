@@ -68,7 +68,7 @@ const REPO_ROOT = resolve(__dirname, '../../../../..');
 const PACKAGE_ROOT = resolve(REPO_ROOT, 'packages/worker-utils/src');
 
 describe('denoise proof: F2 simplification:dup-procedure-context-builder', () => {
-  it.skip('procedure context-builder shape exists in exactly one site (canonical: upload-shared.ts)', () => {
+  it('procedure context-builder shape exists in exactly one site (canonical: upload-shared.ts)', () => {
     // The shared helper IS upload-shared.buildUploadBaseContext. The inline
     // builder in procedure.ts duplicates it. After the fix, the literal
     // body should only appear in upload-shared.ts.
