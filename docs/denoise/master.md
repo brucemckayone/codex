@@ -38,7 +38,7 @@ _None._
 | types × apps/web | iter-006 (2026-04-26) | 8 | 0 | 2026-04-26 | skipped (no churn since iter-006) |
 | performance × packages | iter-007 (2026-04-26) | 8 | 0 | 2026-04-26 | skipped (no churn since iter-007) |
 | performance × workers | iter-008 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn since iter-008) |
-| performance × apps/web | _never_ | 0 | 0 | _never_ | **due** ✅ |
+| performance × apps/web | iter-010 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn since iter-010) |
 | simplification × packages | iter-009 (2026-04-26) | 6 | 0 | 2026-04-26 | skipped (no churn since iter-009) |
 | simplification × workers | _never_ | 0 | 0 | _never_ | **due** ✅ |
 | simplification × apps/web | _never_ | 0 | 0 | _never_ | **due** ✅ |
@@ -89,6 +89,11 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | `simplification:dup-paginated-list-shape` | 1 | 2026-04-26 | 2026-04-26 | **endemic-density watch (cycle_density=6)**, R14 candidate (Codex-mqyql.3) — 2-hit early promotion if recurs |
 | `simplification:dup-image-pipeline` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint (Codex-mqyql.4) — rule of three |
 | `simplification:dup-fetch-with-without-scope` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint (Codex-mqyql.6) |
+| `performance:hot-path-shader-config-getcomputedstyle` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint (Codex-y63gl.14) |
+| `performance:hot-path-allocation-render-loop` | 1 | 2026-04-26 | 2026-04-26 | tracked, NEW fingerprint (Codex-y63gl.15) |
+| `performance:render-thrash-list-no-key` | 1 | 2026-04-26 | 2026-04-26 | tracked, first filing of ref 04 §3 row (Codex-y63gl.16) |
+| `performance:kv-get-no-cache-ttl` | 1 | 2026-04-26 | 2026-04-26 | tracked, first filing of ref 04 §4/§8 row 2 (Codex-y63gl.17) |
+| `performance:regex-recompiled-per-call` | 1 | 2026-04-26 | 2026-04-26 | tracked, first filing of ref 04 §7 row 14 (Codex-y63gl.18) |
 
 **Promotion threshold**: ≥3 hits in trailing 6 cycles → promoted to a hard rule (R9+) in SKILL.md §1.
 **Single-hit security exception**: severity=blocker security findings may promote on first sighting. (Fired in iter-002 for F1, in iter-003 for F2.)
@@ -108,6 +113,7 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-007 | 8 | 0 | 0% | within budget |
 | iter-008 | 6 | 0 | 0% | within budget |
 | iter-009 | 6 | 0 | 0% | within budget |
+| iter-010 | 5 | 0 | 0% | within budget |
 
 > R8 fires when rate > 15% in any cycle. The next cycle's prep includes a meta-warning and a justification audit of every testability-bug.
 
@@ -126,20 +132,23 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-007 | performance × packages | 2026-04-26 | 8 (0B/3M/5m) | Codex-y63gl.1–8 | Cycle 0 for cell + first beads under performance epic; F1+F2 (.1, .2) MAJOR analytics-service.ts: computeRevenueBlock/SubscriberBlock/FollowerBlock + current-vs-previous comparison blocks issue 4-8 sequential Neon queries on the studio analytics dashboard hot path (post-iter-018 redesign); F3 (.3) MAJOR ContentAccessService.hasContentAccess deny-path 3 sequential queries on every savePlaybackProgress (every 5-10s during playback); F4 (.4) org public-creators enrichment, F5 (.5) admin customer-details, F8 (.8) access listUserLibrary step 1 — all same fingerprint; F6 (.6) NEW fingerprint performance:array-spread-and-linear-includes-per-render in notifications renderer; F7 (.7) NEW fingerprint performance:subrequest-cap-sequential-stripe-calls in tier-service updateTier (5 sequential Stripe calls). 5 of 8 share NEW fingerprint performance:sequential-await-independent-queries — cycle_density=5 → ENDEMIC SINGLE-CYCLE 5-HIT PROMOTION fired (R12 queued for iter-008). Fabrication check 22/22 cited symbols live |
 | iter-008 | performance × workers | 2026-04-26 | 5 (0B/2M/3m) | Codex-y63gl.9–13 | Cycle 0 for cell; **R12 applied at start**; F1 (DUPLICATE of Codex-ttavz.9, NOT re-filed — still-open from iter-002 ecom-api checkout cache invalidation); F2 (.9) MAJOR media-api transcoding dispatchPromise no .catch (RunPod failures silenced); F3 (.10) MAJOR organization-api settings 3 sites (lines 217, 454, 499) — Promise.all+cache.invalidate in branding mutation rejects on first failure; F4 (.11) MINOR organizations.ts 3 sites — :572 raw BRAND_KV.delete is genuine hazard, :79+:577 defensive only; F5 (.12) MINOR media-api scheduled cron defensive; F6 (.13) MINOR R12 violation in auth-config dev-path KV.put + email sequential (production single-await unchanged). 5 of 6 share workers:waituntil-no-catch fingerprint (3rd cycle appearance + 4 new sites + 1 duplicate confirmation) → R7 STANDARD 3-HIT PROMOTION fires (R13 queued for iter-009). First standard-3-hit promotion (R9/R10/R11/R12 used non-standard paths). Fabrication check 14/14 cited symbols live |
 | iter-009 | simplification × packages | 2026-04-26 | 6 (0B/4M/2m) | Codex-mqyql.1–6 | Cycle 0 for cell + first beads under simplification epic; **R13 applied at start**; F1+F2 (.1, .2) MAJOR worker-utils dedupe (generateRequestId/getClientIP + procedure context builder vs buildUploadBaseContext); F3 (.3) MAJOR NEW fingerprint simplification:dup-paginated-list-shape — 6 instances across content/notifications (cycle_density=6, R12-profile, queued as 2-hit early-promotion watch for iter-010); F4 (.4) MAJOR image-processing 3 nearly-identical pipelines — cacheControl literal repeated 9 times (rule-of-three); F5 (.5) MINOR @codex/cache should host bumpWithLogger; F6 (.6) MINOR transcoding-service column projection drift. JSCPD: 508 clones cluster-wide; 60+ TS source clones, 6 actionable. Fabrication check 38/38 cited symbols live (0 stale). 0 testability-bugs (R8 budget). Agent showed strong hand-off discipline (14 unused types routed to /fallow-audit, not filed) |
+| iter-010 | performance × apps/web | 2026-04-26 | 5 (0B/1M/4m) | Codex-y63gl.14–18 | Cycle 0 for cell; **R12 EFFECTIVENESS CHECK PASSED** — first apps/web cycle since R12 promoted iter-008; zero new sequential-await-independent-queries violations across 13 SvelteKit loaders + helpers; existing parallelism correct (Promise.all for independent, guard-then-fetch for FK ordering — R12 carve-out respected). F1 (.14) MAJOR NEW fingerprint performance:hot-path-shader-config-getcomputedstyle — ImmersiveShaderPlayer + ShaderPreview hit getComputedStyle every frame (60 forced-style-recalcs/sec per active player); canonical ShaderHero already amortises with 30-frame poll counter, immersive overlay shipped without inheriting; F2 (.15) MINOR NEW fingerprint performance:hot-path-allocation-render-loop (120 alloc/sec in immersive playback); F3 (.16) MINOR keyless {#each} on org landing; F4 (.17) MINOR BRAND_KV.get without cacheTtl; F5 (.18) MINOR auth RegExp recompiled per call. Fabrication check 12/12 live |
 
 ---
 
 ## Next-cycle prep
 
-- **No promotion queued for iter-010** unless `simplification:dup-paginated-list-shape` recurs (then fire R14 endemic 2-hit early promotion).
-- **Suggested next cell**: 3 cells still untouched: `simplification × workers`, `simplification × apps/web`, `performance × apps/web`. Phase priority puts performance > simplification, so **`performance × apps/web`** wins (heaviest churn surface 464+ files, Lighthouse + bundle-size baseline due). Alternatives: `simplification × workers` (continuity with iter-008's worker focus), `simplification × apps/web` (heaviest churn).
+- **No promotion queued for iter-011**.
+- **R12 EFFECTIVENESS CONFIRMED iter-010**: zero new R12 violations in apps/web SvelteKit loaders + helpers across 13 inspected files. Hard rule R12 is genuinely preventing the sequential-await pattern at this boundary (not just cataloguing existing debt).
+- **Suggested next cell**: 2 cells still untouched: `simplification × workers`, `simplification × apps/web`. Phase priority among never-run cells: pick by churn or context. **`simplification × workers`** keeps cycle scope manageable (~31 files vs apps/web ~464). Either is acceptable.
+- **Round 1 stop-criterion review**: after iter-011 + iter-012 (the two remaining never-run cells), all 12 cells will have been cycled at least once. Round 2 begins after — focus shifts from discovery to drift-detection (cells reach fidelity per §7 stop criterion when 3 consecutive zero-finding cycles run).
 - **Recurrence watches (carry-forward)**:
-  - `simplification:dup-paginated-list-shape` (NEW iter-009, cycle_density=6) — 2-hit early-promotion watch
-  - `types:as-unknown-as` + `types:as-cast-without-guard` at hits=2 — one more cycle hit → R7 standard 3-hit promotion
+  - `simplification:dup-paginated-list-shape` (NEW iter-009, cycle_density=6) — 2-hit early-promotion watch (next simplification cycle is iter-011 candidate)
+  - `types:as-unknown-as` + `types:as-cast-without-guard` at hits=2 — one more cycle hit → R7 standard 3-hit promotion (out of phase scope this cycle, watch in next types cycle)
   - `types:redundant-cast-after-narrow` (cycle_density=6 iter-006) — endemic shape watch
-  - `performance:array-spread-and-linear-includes-per-render` + `performance:subrequest-cap-sequential-stripe-calls` (iter-007) — track for recurrence
-- **R12-effectiveness check**: iter-008 already saw a NEW R12 violation in workers (auth-config dev path). Future performance × apps/web cycle will check whether R12 prevents NEW instances in apps/web SvelteKit loaders.
-- **R13-effectiveness check**: iter-008 surfaced 5 sites pre-promotion. Future workers cycles will measure whether R13 prevents NEW waitUntil instances vs only catalogues existing ones.
+  - `performance:array-spread-and-linear-includes-per-render` + `performance:subrequest-cap-sequential-stripe-calls` (iter-007) — track for recurrence in next perf cycle
+  - 5 new performance fingerprints from iter-010 (`hot-path-shader-config-getcomputedstyle`, `hot-path-allocation-render-loop`, `render-thrash-list-no-key`, `kv-get-no-cache-ttl`, `regex-recompiled-per-call`) — track for recurrence
+- **R13 effectiveness check**: deferred to next workers cycle (iter-010 was apps/web only; no waitUntil sites in scope).
 - **Suggested next cell**: Per phase priority + recent guidance, `types × workers` (same complementary axis as iter-002, will pick up `c.env[name] as ...` patterns hinted by 3 baseline TS errors in worker-utils). Alternative: `types × apps/web` (heaviest churn 464 files; paraglide / TanStack DB / Svelte 5 props axis). Tie-break: continuity with iter-002 → `types × workers`.
 - **Fingerprint watches** (carry-forward):
   - `packages:identifier-no-shape-validation` (iter-001 F2) — add to ref 07 §7 if recurs

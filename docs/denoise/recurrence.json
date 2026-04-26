@@ -165,6 +165,61 @@
       "severity": "minor",
       "note": "NEW fingerprint. transcoding-service.ts has scoped + internal-HMAC variants sharing 22-column projection. Single-file, low blast radius."
     },
+    "performance:hot-path-shader-config-getcomputedstyle": {
+      "hits": 1,
+      "iters": ["iter-010"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-y63gl.14"],
+      "severity": "major",
+      "note": "NEW fingerprint. ImmersiveShaderPlayer + ShaderPreview both call getShaderConfig(null,...) per-frame; canonical ShaderHero uses 30-frame poll counter. Track for recurrence as new shader-consuming components appear."
+    },
+    "performance:hot-path-allocation-render-loop": {
+      "hits": 1,
+      "iters": ["iter-010"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-y63gl.15"],
+      "severity": "minor",
+      "note": "NEW fingerprint. AudioAnalyser + ImmersiveShaderPlayer allocate ~10-key object literals per frame (120 short-lived allocations/sec)."
+    },
+    "performance:render-thrash-list-no-key": {
+      "hits": 1,
+      "iters": ["iter-010"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-y63gl.16"],
+      "severity": "minor",
+      "note": "Existing fingerprint (ref 04 §3); first denoise filing. Track for recurrence in apps/web Svelte components."
+    },
+    "performance:kv-get-no-cache-ttl": {
+      "hits": 1,
+      "iters": ["iter-010"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-y63gl.17"],
+      "severity": "minor",
+      "note": "Existing fingerprint (ref 04 §4 + §8 row 2); first denoise filing. Edge cache miss on every KV.get without cacheTtl."
+    },
+    "performance:regex-recompiled-per-call": {
+      "hits": 1,
+      "iters": ["iter-010"],
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-y63gl.18"],
+      "severity": "minor",
+      "note": "Existing fingerprint (ref 04 §7 row 14); first denoise filing. Track for recurrence in higher-traffic files."
+    },
     "performance:subrequest-cap-sequential-stripe-calls": {
       "hits": 1,
       "iters": ["iter-007"],
