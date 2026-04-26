@@ -33,15 +33,13 @@ describe.skip('iter-006 F4 — form enhance result should be ActionResult', () =
     // The fix is to import `ActionResult` and use it. Once both files
     // adopt the proper typing, this assertion compiles and provides
     // the regression guard.
-    type EnhanceCallbackArg = Parameters<
-      Awaited<ReturnType<SubmitFunction>>
-    >[0];
-    expectTypeOf<EnhanceCallbackArg>().toEqualTypeOf<{
-      result: ActionResult;
-      update: (options?: {
-        reset?: boolean;
-        invalidateAll?: boolean;
-      }) => Promise<void>;
-    }>();
+    //
+    // The callback's full shape (formData/formElement/action/result/update)
+    // is owned by @sveltejs/kit and may grow over time; we only pin the
+    // `result` field's type — that's the property the bug touched.
+    type CallbackOrVoid = Awaited<ReturnType<SubmitFunction>>;
+    type Callback = Extract<CallbackOrVoid, (...args: never[]) => unknown>;
+    type EnhanceCallbackArg = Parameters<Callback>[0];
+    expectTypeOf<EnhanceCallbackArg['result']>().toEqualTypeOf<ActionResult>();
   });
 });

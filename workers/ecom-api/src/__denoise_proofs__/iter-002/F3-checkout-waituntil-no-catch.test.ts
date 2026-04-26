@@ -53,10 +53,10 @@ describe.skip('iter-002 F3 — checkout-completed waitUntil missing .catch', () 
     const offenders: string[] = [];
     const matches = Array.from(src.matchAll(waitUntilRegex));
     matches.forEach((match, i) => {
-      const argExpr = match[1];
+      const argExpr = match[1] ?? '';
       if (!/\.catch\(/.test(argExpr)) {
         offenders.push(
-          `waitUntil call #${i + 1} (offset ${match.index}): ${argExpr.slice(0, 120)}…`
+          `waitUntil call #${i + 1} (offset ${match.index ?? '?'}): ${argExpr.slice(0, 120)}…`
         );
       }
     });

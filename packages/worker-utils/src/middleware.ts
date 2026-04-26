@@ -20,14 +20,16 @@ import { generateRequestId, getClientIP } from './procedure/helpers';
 
 /** Keys in Bindings whose values are KVNamespace */
 type KVBindingKey = {
-  [K in keyof Bindings]: NonNullable<Bindings[K]> extends KVNamespace
+  [K in keyof Bindings]-?: NonNullable<Bindings[K]> extends KVNamespace
     ? K
     : never;
 }[keyof Bindings];
 
 /** Keys in Bindings whose values are R2Bucket */
 type R2BindingKey = {
-  [K in keyof Bindings]: NonNullable<Bindings[K]> extends R2Bucket ? K : never;
+  [K in keyof Bindings]-?: NonNullable<Bindings[K]> extends R2Bucket
+    ? K
+    : never;
 }[keyof Bindings];
 
 import type { Context, MiddlewareHandler, Next } from 'hono';

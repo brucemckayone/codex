@@ -125,6 +125,13 @@ export function createPackageConfig(
           '**/__test__/**',
           '**/__tests__/**',
         ],
+        // Preserve bare `@codex/*` specifiers in emitted .d.ts. Without this,
+        // tsconfig `paths` mapping rewrites them to source-relative paths
+        // (e.g. `../../../cache/src/index.ts`), which produces nominally-distinct
+        // class identities for VersionedCache et al. across consuming packages
+        // (private fields make classes nominal — same logical class, two paths,
+        // two types).
+        pathsToAliases: false,
       }) as PluginOption,
       ...plugins,
     ],
