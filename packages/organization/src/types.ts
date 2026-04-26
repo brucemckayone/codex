@@ -5,14 +5,15 @@
  * All types are inferred from database schema or explicitly defined.
  */
 
-import type { dbHttp, dbWs } from '@codex/database';
+import type { DatabaseClient } from '@codex/database';
 import type { NewOrganization, Organization } from '@codex/database/schema';
 
 /**
- * Database client type (properly typed from Drizzle)
- * Supports both HTTP (production) and WebSocket (tests) clients
+ * Database client type — re-exported from `@codex/database` so consumers
+ * see a single canonical shape. Accepts HTTP or WS clients (services
+ * read under HTTP in workers and WS in tests).
  */
-export type Database = typeof dbHttp | typeof dbWs;
+export type Database = DatabaseClient;
 
 import type {
   PaginatedListResponse,

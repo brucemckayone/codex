@@ -325,10 +325,31 @@ export async function closeDbPool(): Promise<void> {
 
 /**
  * HTTP Database client type (for production workers)
+ *
+ * Use this when a consumer is HTTP-only (no transactions). Most worker
+ * route handlers and read-only services match this shape.
  */
 export type Database = ReturnType<typeof drizzleHttp<typeof schema>>;
 
 /**
  * WebSocket Database client type (for tests and transactions)
+ *
+ * Use this for callers that *require* `db.transaction()` (e.g. test
+ * harnesses, multi-step writes via `createPerRequestDbClient`).
  */
 export type DatabaseWs = ReturnType<typeof drizzleWs<typeof schema>>;
+
+/**
+ * Canonical "either" database client type — accepts HTTP or WS clients.
+ *
+ * Use this for service constructors and repository signatures that must
+ * work with BOTH transports (e.g. read paths that run under HTTP in
+ * production and WS in tests, or services that mix queries and
+ * transactions). `BaseService.ServiceConfig['db']` matches this shape.
+ *
+ * Prefer the narrower `Database` (HTTP-only) or `DatabaseWs` (WS-only)
+ * when the caller's transport is known and fixed — they document the
+ * requirement honestly. Reach for `DatabaseClient` only when both
+ * transports must be accepted at the same call-site.
+ */
+export type DatabaseClient = Database | DatabaseWs;

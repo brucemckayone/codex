@@ -13,17 +13,17 @@
  * - Type-safe database operations
  */
 
-import type { dbHttp, dbWs } from '@codex/database';
+import type { DatabaseClient } from '@codex/database';
 import { ObservabilityClient } from '@codex/observability';
 import { isServiceError, wrapError } from './base-errors';
 
 /**
- * Database client type for services
- *
- * Supports both HTTP (production workers) and WebSocket (tests/transactions)
- * database clients from @codex/database.
+ * Database client type for services — alias for the canonical
+ * `DatabaseClient` union from `@codex/database` (HTTP | WS). Kept as a
+ * local alias to preserve the existing protected-property type without
+ * leaking the foundation name into subclass call-sites.
  */
-type ServiceDatabase = typeof dbHttp | typeof dbWs;
+type ServiceDatabase = DatabaseClient;
 
 /**
  * Configuration required by all services

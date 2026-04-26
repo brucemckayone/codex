@@ -5,7 +5,7 @@
  * All types are inferred from database schema or explicitly defined.
  */
 
-import type { dbHttp, dbWs } from '@codex/database';
+import type { DatabaseClient, dbHttp } from '@codex/database';
 import type {
   Content,
   MediaItem,
@@ -15,10 +15,11 @@ import type {
 import type { Organization } from '@codex/organization';
 
 /**
- * Database client type (properly typed from Drizzle)
- * Supports both HTTP (production) and WebSocket (tests) clients
+ * Database client type — re-exported from `@codex/database` so consumers
+ * see a single canonical shape. Accepts HTTP or WS clients (services
+ * read under HTTP in workers and WS in tests).
  */
-export type Database = typeof dbHttp | typeof dbWs;
+export type Database = DatabaseClient;
 
 /**
  * Transaction type for Drizzle ORM

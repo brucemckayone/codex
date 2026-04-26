@@ -5,7 +5,7 @@
  * All types are inferred from database schema or explicitly defined.
  */
 
-import type { dbHttp, dbWs } from '@codex/database';
+import type { DatabaseClient } from '@codex/database';
 import type {
   EmailTemplate,
   NewEmailTemplate,
@@ -33,7 +33,12 @@ export type TemplatePreviewResponse = SingleItemResponse<RenderedTemplate>;
  */
 export type TestSendResponse = SingleItemResponse<SendResult>;
 
-export type Database = typeof dbHttp | typeof dbWs;
+/**
+ * Database client type — re-exported from `@codex/database` so consumers
+ * see a single canonical shape. Accepts HTTP or WS clients (services
+ * read under HTTP in workers and WS in tests).
+ */
+export type Database = DatabaseClient;
 
 import type { ServiceConfig } from '@codex/service-errors';
 export type { ServiceConfig };
