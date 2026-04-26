@@ -70,29 +70,41 @@
  * `.CACHE_KV` access yields `KVNamespace | undefined` directly.
  * The grep guard asserts zero `as KVNamespace` casts remain.
  */
-import { describe, it } from 'vitest';
+// `?raw` baked-at-build-time import — works under workerd (no node:fs).
 
-describe.skip('iter-005 F4 — CacheCtx narrow→cast pattern (proof)', () => {
-  it('CacheCtx env yields KVNamespace | undefined without cast', () => {
-    // After fix:
-    //   import { expectTypeOf } from 'vitest';
-    //   import type { Bindings } from '@codex/shared-types';
-    //   import type { KVNamespace } from '@cloudflare/workers-types';
-    //   type FixedCacheEnv = Pick<Bindings, 'CACHE_KV'>;
-    //   expectTypeOf<FixedCacheEnv['CACHE_KV']>().toEqualTypeOf<
-    //     KVNamespace | undefined
-    //   >();
+import type { KVNamespace } from '@cloudflare/workers-types';
+import type { Bindings } from '@codex/shared-types';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import membersSrc from '../../routes/members.ts?raw';
+
+describe('iter-005 F4 — CacheCtx narrow→cast pattern (proof)', () => {
+  it('Bindings.CACHE_KV is canonically `KVNamespace | undefined`', () => {
+    // The canonical binding type is what helper signatures should propagate;
+    // any helper that re-narrows to `unknown` and re-casts is the
+    // `types:as-cast-without-guard` smell this proof guards against.
+    type FixedCacheEnv = Pick<Bindings, 'CACHE_KV'>;
+    expectTypeOf<FixedCacheEnv['CACHE_KV']>().toEqualTypeOf<
+      KVNamespace | undefined
+    >();
   });
 
   it('grep guard: no `as KVNamespace` casts in members.ts', () => {
-    // After fix:
-    //   const src = readFileSync(
-    //     'workers/organization-api/src/routes/members.ts',
-    //     'utf-8'
-    //   );
-    //   const hits = (src.match(
-    //     /as\s+import\('@cloudflare\/workers-types'\)\.KVNamespace/g
-    //   ) ?? []).length;
-    //   expect(hits).toBe(0);
+    // Pre-fix: 3+ `ctx.env.CACHE_KV as ...KVNamespace` sites in members.ts.
+    // Post-fix: helper input uses `HonoEnv['Bindings']` (full Bindings) so
+    // the binding access yields `KVNamespace | undefined` directly — no
+    // cast needed.
+    const hits = membersSrc.match(/as\s+(?:import\([^)]+\)\.)?KVNamespace/g);
+    expect(hits, 'expected zero `as KVNamespace` casts').toBeNull();
+  });
+
+  it('grep guard: no `as Parameters<typeof createDbClient>` cast', () => {
+    // Pre-fix: one site cast `ctx.env as Parameters<typeof createDbClient>[0]`
+    // which obscured the real env shape. Post-fix: `Bindings` widening makes
+    // the cast unnecessary — `createDbClient(ctx.env)` typechecks directly.
+    const hits = membersSrc.match(/as\s+Parameters<typeof\s+createDbClient>/);
+    expect(
+      hits,
+      'expected zero `as Parameters<typeof createDbClient>` casts'
+    ).toBeNull();
   });
 });
