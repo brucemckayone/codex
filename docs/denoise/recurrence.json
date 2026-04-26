@@ -3,9 +3,14 @@
   "last_updated": "2026-04-26",
   "patterns": {
     "types:type-duplicate-cross-package": {
-      "hits": 3,
-      "iters": ["iter-004", "iter-005", "iter-006"],
-      "cycle_density": { "iter-004": 6, "iter-005": 7, "iter-006": 3 },
+      "hits": 4,
+      "iters": ["iter-004", "iter-005", "iter-006", "iter-028"],
+      "cycle_density": {
+        "iter-004": 6,
+        "iter-005": 7,
+        "iter-006": 3,
+        "iter-028": 4
+      },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": true,
@@ -20,10 +25,12 @@
         "Codex-lqvw4.7",
         "Codex-lqvw4.8",
         "Codex-lqvw4.15",
-        "Codex-lqvw4.16"
+        "Codex-lqvw4.16",
+        "Codex-4mvr0",
+        "Codex-c9qyd"
       ],
-      "severity": "mixed (1 blocker + 5 major + 6 minor across 3 cycles)",
-      "note": "R11 APPLIED iter-006. Cumulative cycle_density=16 across 3 cycles (iter-004=6 packages, iter-005=7 workers, iter-006=3 apps/web). Endemic across all 3 scopes confirmed. Next types-focused cycle should validate R11 prevents NEW instances."
+      "severity": "mixed (1 blocker + 5 major + 8 minor across 4 cycles)",
+      "note": "R11 APPLIED iter-006. iter-028 R11 effectiveness audit: Round 3 closed 4 of 5 P0/P1 R11 sites (Database, RevenueSplit, Logger family, orgmanagement) — STRONG. Three R11 sites remain: lqvw4.1 (P0 SessionData/UserData STILL RED), lqvw4.5 (OrganizationMembership extended to 3 sites this cycle = F1), lqvw4.6 (TemplateScope triple). iter-028 surfaced 4 NEW R11 inline-shape sites: F1 OrganizationMembership 3rd site (extends lqvw4.5), F2 ObsWarnSink (Codex-4mvr0), F3 ObservabilityClient name collision (Codex-c9qyd), F6 SessionData recurrence (lqvw4.1 traceability only). Cumulative cycle_density=20 across 4 cycles. R11's effectiveness scope is bounded by Tier 3.A/4.B/6.A's audit reach; SessionData/UserData and inline observability projections are the next-priority gaps."
     },
     "types:type-narrowing-incomplete-orgmanagement": {
       "hits": 1,
@@ -37,16 +44,16 @@
       "note": "BLOCKER on blast-radius grounds (6 silent type-system bypasses in production routes). NEW fingerprint. Single-hit security exception does NOT fire (phase=types not security)."
     },
     "types:as-cast-without-guard": {
-      "hits": 2,
-      "iters": ["iter-005", "iter-006"],
-      "cycle_density": { "iter-005": 5, "iter-006": 1 },
+      "hits": 3,
+      "iters": ["iter-005", "iter-006", "iter-028"],
+      "cycle_density": { "iter-005": 5, "iter-006": 1, "iter-028": 1 },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": false,
-      "rule_id": null,
-      "beads": ["Codex-lqvw4.9", "Codex-lqvw4.12"],
+      "rule_id": "R7 PROMOTION QUEUED for iter-029 prep",
+      "beads": ["Codex-lqvw4.9", "Codex-lqvw4.12", "Codex-qmrwe"],
       "severity": "major",
-      "note": "RECURRENCE #2. One more cycle increment triggers standard 3-hit R7 promotion."
+      "note": "**R7 STANDARD 3-HIT THRESHOLD REACHED in iter-028.** Hits 3 in trailing 6 cycles (iter-005, iter-006, iter-028). iter-028 F5 = DatabaseTransaction cast at content-service.ts:158 — exposed by Tier 6.A's Database widening (DatabaseTransaction not similarly widened). Per SKILL.md §7, the next cycle's prep adds R-rule. Suggested rule: 'Type assertions of the form `value as Foo` where Foo is more specific than the source type MUST be guarded by a runtime check (Zod schema, type guard, or instanceof) — except for Drizzle infinite-recursion bridges, framework defaults like `{} as TPolicy`, and Proxy-target placeholders.' Exception list is non-trivial — recommend drafting first, human-reviewing before adding to §1."
     },
     "types:as-unknown-as": {
       "hits": 2,
@@ -236,6 +243,18 @@
       "beads": ["Codex-mqyql.18"],
       "severity": "minor",
       "note": "RECURRENCE #2 (iter-027 increment to existing bead, NOT double-filed). references/05-domain-web.md:145 still cites loadFromServer(); actual symbol is hydrateIfNeeded() per apps/web/CLAUDE.md. Round 3 didn't touch references/. Proof at apps/web/src/__denoise_proofs__/iter-027/F4-doc-rot-loadFromServer.test.ts. 1-line edit to close."
+    },
+    "types:literal-union-drift-vs-runtime-presets": {
+      "hits": 1,
+      "iters": ["iter-028"],
+      "cycle_density": { "iter-028": 1 },
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-825pm"],
+      "severity": "minor",
+      "note": "NEW fingerprint. ProcedurePolicy.rateLimit hand-written union ('api'|'auth'|'strict'|'public'|'webhook'|'streaming') drifts from RATE_LIMIT_PRESETS keys ('api'|'auth'|'strict'|'streaming'|'webhook'|'web'). Allows 'public' (no preset), disallows 'web' (actual preset). Track for recurrence — if recurs across packages cycles, candidate for R-rule promotion (hand-written literal unions mirroring runtime objects MUST use keyof typeof X)."
     },
     "simplification:dup-fetch-handler-boilerplate": {
       "hits": 1,
