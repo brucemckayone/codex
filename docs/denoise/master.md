@@ -40,7 +40,7 @@ _None._
 | security × apps/web | iter-015 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
 | types × packages | iter-016 (2026-04-26) | 6 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
 | types × workers | iter-017 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
-| types × apps/web | iter-006 (2026-04-26) | 8 | 0 | 2026-04-26 | skipped (no churn since iter-006) |
+| types × apps/web | iter-018 (2026-04-26) | 8 | 0 | 2026-04-26 | skipped (no churn; stop-criterion 1/3) |
 | performance × packages | iter-007 (2026-04-26) | 8 | 0 | 2026-04-26 | skipped (no churn since iter-007) |
 | performance × workers | iter-008 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn since iter-008) |
 | performance × apps/web | iter-010 (2026-04-26) | 5 | 0 | 2026-04-26 | skipped (no churn since iter-010) |
@@ -133,6 +133,7 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-015 | 0 | 0 | 0% | clean cycle (no churn, security × apps/web) — security row complete in Round 2 |
 | iter-016 | 0 | 0 | 0% | clean cycle (no churn, types × packages) — types row begins |
 | iter-017 | 0 | 0 | 0% | clean cycle (no churn, types × workers) |
+| iter-018 | 0 | 0 | 0% | clean cycle (no churn, types × apps/web) — types row complete in Round 2 |
 
 > R8 fires when rate > 15% in any cycle. The next cycle's prep includes a meta-warning and a justification audit of every testability-bug.
 
@@ -159,14 +160,16 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
 | iter-015 | security × apps/web | 2026-04-26 | 0 (CLEAN) | — | Third Round 2 cycle. Zero production code churn in apps/web/src/** since iter-003 baseline. **Security row first pass complete** — all 3 security cells at 1/3. Stop-criterion countdown 1/3 |
 | iter-016 | types × packages | 2026-04-26 | 0 (CLEAN) | — | Fourth Round 2 cycle. Zero production code churn in packages/*/src/** since iter-004 baseline. **Types row begins.** Stop-criterion countdown 1/3 |
 | iter-017 | types × workers | 2026-04-26 | 0 (CLEAN) | — | Fifth Round 2 cycle. Zero churn in workers/*/src/** since iter-005. Stop-criterion 1/3 |
+| iter-018 | types × apps/web | 2026-04-26 | 0 (CLEAN) | — | Sixth Round 2 cycle. Zero churn in apps/web/src/** since iter-006 (paraglide generated output excluded). **Types row first pass complete** — all 3 type cells at 1/3. Stop-criterion 1/3 |
 
 ---
 
 ## Next-cycle prep — Round 2 / drift-detection mode begins
 
 - **🎯 ROUND 1 COMPLETE** after iter-012. All 12 cells have baseline iter files. Future cycles measure whether R9-R14 prevent NEW instances vs only catalogue existing ones.
-- **No promotion queued for iter-013**.
-- **Suggested next cell** (Round 2): cells with most churn since their last run. By §5.0 algorithm, sort by `(open_findings DESC, last_run ASC)` — but most cells have open findings now from Round 1 baseline. Phase priority puts security > types > performance > simplification. **Pick `security × packages`** as the most-due cell of Round 2 (oldest run iter-001, all 14+ days of churn since baseline).
+- **🎯 Round 2 progress (after iter-018)**: 6 of 12 cells visited. **Security row complete** (iter-013/014/015 all clean). **Types row complete** (iter-016/017/018 all clean). Performance and simplification rows pending.
+- **No promotion queued for iter-019**.
+- **Suggested next cell** (per §5.0 algorithm): top tier on open findings = 8 each: `performance × packages` (iter-007), `simplification × apps/web` (iter-012). Phase priority breaks tie → **`performance × packages`** (begins the performance row in Round 2).
 - **Round 2 stop-criterion countdown**: each cell's countdown starts at 3. A cell reaches **fidelity** at 3 consecutive zero-finding cycles. Cells producing findings reset to 3.
 - **Recurrence watches (carry-forward)**:
   - `simplification:dup-procedure-context-builder` (hits=2) — one more hit → R7 standard 3-hit
@@ -183,4 +186,4 @@ Synced from `docs/denoise/recurrence.json` after each cycle. Patterns with `hits
   - Performance cycles: R12 (Promise.all) confirmed at apps/web in iter-010
   - Workers cycles: R13 (waitUntil .catch) spot-checked clean iter-011
   - Simplification cycles: R14 (cache-fanout) effective?
-- **Cron continuation**: cron `17bf4d34` continues every 15 min. Round 2 cycles will be smaller on average since drift-detection finds less than discovery — typical cycle yields 0-2 findings unless real regressions ship.
+- **Cron continuation**: a fresh `*/15 * * * *` cron (job `fd1728ff` this session) continues the loop. Round 2 cycles remain cheap when no committed source churn — clean-cycle exit + countdown increment, no audit-agent dispatch.
