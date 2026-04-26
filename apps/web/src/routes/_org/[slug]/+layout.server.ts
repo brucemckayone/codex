@@ -40,46 +40,18 @@ export const load: LayoutServerLoad = async ({
 
     if (org && typeof org === 'object' && 'id' in org) {
       layoutTimer.end({ slug, path: 'public' });
-      const typedOrg = org as {
-        id: string;
-        slug: string;
-        name: string;
-        description: string | null;
-        logoUrl: string | null;
-        brandColors: {
-          primary?: string;
-          secondary?: string | null;
-          accent?: string | null;
-          background?: string | null;
-        };
-        brandFonts?: { body?: string | null; heading?: string | null };
-        brandRadius?: number;
-        brandDensity?: number;
-        brandFineTune?: {
-          tokenOverrides?: string | null;
-          darkModeOverrides?: string | null;
-          shadowScale?: string | null;
-          shadowColor?: string | null;
-          textScale?: string | null;
-          headingWeight?: string | null;
-          bodyWeight?: string | null;
-        };
-        introVideoUrl?: string | null;
-        heroLayout?: string;
-        enableSubscriptions?: boolean;
-      };
 
       // Stream version keys for client-side staleness detection (non-blocking).
       // Versions don't affect first paint — only used by $effect after hydration.
-      const versions = readOrgVersions(platform, typedOrg.id, locals.user?.id);
+      const versions = readOrgVersions(platform, org.id, locals.user?.id);
 
       // Fetch tiers for "Included" badges (public, KV-cached ~10ms).
       // User subscription data is loaded client-side via subscriptionCollection.
-      const tiers = loadOrgTiers(api, typedOrg.id);
+      const tiers = loadOrgTiers(api, org.id);
 
       return {
-        org: typedOrg,
-        enableSubscriptions: typedOrg.enableSubscriptions ?? true,
+        org,
+        enableSubscriptions: org.enableSubscriptions ?? true,
         user: locals.user,
         versions,
         subscriptionContext: tiers
@@ -125,6 +97,12 @@ export const load: LayoutServerLoad = async ({
           brandDensity: org.brandDensity,
           brandFineTune: org.brandFineTune,
           introVideoUrl: org.introVideoUrl ?? null,
+          // Auth fallback doesn't carry branding/feature flags — fall back to
+          // the same defaults the public endpoint uses so consumers reading
+          // `data.org.heroLayout` / `data.org.enableSubscriptions` don't see
+          // `undefined` and silently render the wrong layout/UI.
+          heroLayout: 'default' as const,
+          enableSubscriptions: true,
         },
         // Auth fallback doesn't include feature flags — default to true
         enableSubscriptions: true,

@@ -38,7 +38,7 @@ const SITES = [
   'apps/web/src/lib/utils/access-context.svelte.ts',
 ];
 
-describe.skip('iter-006 F6 — SubscriptionContext should have one canonical declaration', () => {
+describe('iter-006 F6 — SubscriptionContext should have one canonical declaration', () => {
   it.each(
     SITES
   )('site %s does not redeclare SubscriptionContext / ResolvedSubscriptionContext', (site) => {

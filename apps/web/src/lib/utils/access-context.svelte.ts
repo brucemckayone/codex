@@ -13,17 +13,14 @@ import {
   type SubscriptionItem,
   subscriptionCollection,
 } from '$lib/collections';
-import type { SubscriptionTier } from '$lib/types';
-
-interface SubscriptionContext {
-  tiers: SubscriptionTier[];
-}
+import type { OrgTiersContext, SubscriptionTier } from '$lib/types';
 
 interface AccessContextInput {
-  subscriptionContext:
-    | Promise<SubscriptionContext>
-    | SubscriptionContext
-    | null;
+  // Renamed from `SubscriptionContext` to `OrgTiersContext` (Codex-lqvw4.16)
+  // — this is a tier list, not a full subscription context; the prior name
+  // collided with the canonical 5-field `SubscriptionContext` declared in
+  // `$lib/types`.
+  subscriptionContext: Promise<OrgTiersContext> | OrgTiersContext | null;
   isFollowing: Promise<boolean> | boolean;
   orgId: string;
 }

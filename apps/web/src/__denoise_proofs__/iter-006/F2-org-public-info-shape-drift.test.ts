@@ -24,16 +24,27 @@
  * After fix: this test (un-skipped) compiles cleanly. Before fix: the
  * properties don't exist on `OrganizationData` so the assertions fail.
  */
+import type { HeroLayout } from '@codex/validation';
 import { describe, expectTypeOf, it } from 'vitest';
 import type { OrganizationData } from '../../lib/types';
 
-describe.skip('iter-006 F2 — OrganizationData should declare server fields', () => {
+describe('iter-006 F2 — OrganizationData should declare server fields', () => {
   it('OrganizationData includes heroLayout (returned by getPublicInfo)', () => {
-    // Pre-fix: heroLayout is not declared. Type error when accessing.
+    // Pre-fix: heroLayout was not declared, so the org layout had to widen
+    // the response with an inline `as` cast. After fix: the property lives
+    // on the canonical type and the cast is gone.
     expectTypeOf<OrganizationData>().toHaveProperty('heroLayout');
+    // heroLayout is the HeroLayout enum from @codex/validation, optional
+    // because legacy/auth-fallback paths default at the consumer.
+    expectTypeOf<OrganizationData['heroLayout']>().toEqualTypeOf<
+      HeroLayout | undefined
+    >();
   });
 
   it('OrganizationData includes enableSubscriptions (returned by getPublicInfo)', () => {
     expectTypeOf<OrganizationData>().toHaveProperty('enableSubscriptions');
+    expectTypeOf<OrganizationData['enableSubscriptions']>().toEqualTypeOf<
+      boolean | undefined
+    >();
   });
 });

@@ -11,9 +11,14 @@
  */
 import type { Cookies } from '@sveltejs/kit';
 import { fail } from '@sveltejs/kit';
-import type { CurrentSubscription, SubscriptionTier } from '$lib/types';
+import type { SubscriptionContext, SubscriptionTier } from '$lib/types';
 import { createServerApi } from './api';
 import { ApiError } from './errors';
+
+// Re-export the canonical type so existing importers of
+// `SubscriptionContext` from this module keep working unchanged
+// (Codex-lqvw4.16 — type moved to `$lib/types` to be client-safe).
+export type { SubscriptionContext } from '$lib/types';
 
 /**
  * Revocation reasons surfaced from `AccessDeniedError` when a previously-
@@ -83,19 +88,6 @@ function extractRevocationReason(
   return REVOCATION_REASONS.has(reason as AccessRevocationReason)
     ? (reason as AccessRevocationReason)
     : null;
-}
-
-export interface SubscriptionContext {
-  /** Whether the content requires a subscription tier */
-  requiresSubscription: boolean;
-  /** Whether the user has an active subscription to this org */
-  hasSubscription: boolean;
-  /** Whether the user's tier is high enough for this content */
-  subscriptionCoversContent: boolean;
-  /** The user's current subscription (null if none) */
-  currentSubscription: CurrentSubscription | null;
-  /** All active tiers for this org (for the subscribe modal) */
-  tiers: SubscriptionTier[];
 }
 
 /**

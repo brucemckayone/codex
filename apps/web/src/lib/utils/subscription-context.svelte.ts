@@ -21,22 +21,24 @@
  *     overwriting content B.
  *   - When the promise is null, state resets to zeroed + null guard.
  *
- * The inline `SubscriptionContext` shape is declared locally to avoid
- * importing from `$lib/server/*` (SvelteKit rejects server imports on the
- * client). It mirrors the server interface of the same name.
+ * The narrower client view of `SubscriptionContext` (Codex-lqvw4.16) is
+ * expressed via `Pick<>` — the canonical type lives in `$lib/types` (moved
+ * out of `$lib/server/content-detail.ts` so client modules can import it
+ * without crossing the SvelteKit server boundary).
  */
 
 import { untrack } from 'svelte';
 import { browser } from '$app/environment';
 import { subscriptionCollection } from '$lib/collections';
-import type { SubscriptionTier } from '$lib/types';
+import type { SubscriptionContext, SubscriptionTier } from '$lib/types';
 
-interface ResolvedSubscriptionContext {
-  requiresSubscription: boolean;
-  hasSubscription: boolean;
-  subscriptionCoversContent: boolean;
-  tiers?: SubscriptionTier[];
-}
+type ResolvedSubscriptionContext = Pick<
+  SubscriptionContext,
+  | 'requiresSubscription'
+  | 'hasSubscription'
+  | 'subscriptionCoversContent'
+  | 'tiers'
+>;
 
 interface UseSubscriptionContextParams {
   /** Server-streamed promise from `loadSubscriptionContext()` */

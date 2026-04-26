@@ -20,6 +20,7 @@ import type {
   Subscription,
   SubscriptionTier,
 } from '@codex/database/schema';
+import type { HeroLayout } from '@codex/validation';
 
 export interface ContentWithRelations extends Content {
   creator?: {
@@ -134,6 +135,47 @@ export interface CurrentSubscription extends DateAsString<Subscription> {
 }
 
 /**
+ * Subscription context for a content detail page.
+ *
+ * Canonical declaration site (Codex-lqvw4.16) — previously declared in
+ * `lib/server/content-detail.ts`, but server modules can't be imported by
+ * client code, which forced duplicate type declarations in client utilities.
+ * Lives here so both server (`loadSubscriptionContext()` return type) and
+ * client (`useSubscriptionContext()` parameter type) can import the same
+ * shape.
+ *
+ * Narrower client views may use `Pick<SubscriptionContext, ...>` rather than
+ * redeclare a near-equivalent shape.
+ */
+export interface SubscriptionContext {
+  /** Whether the content requires a subscription tier */
+  requiresSubscription: boolean;
+  /** Whether the user has an active subscription to this org */
+  hasSubscription: boolean;
+  /** Whether the user's tier is high enough for this content */
+  subscriptionCoversContent: boolean;
+  /** The user's current subscription (null if none) */
+  currentSubscription: CurrentSubscription | null;
+  /** All active tiers for this org (for the subscribe modal) */
+  tiers: SubscriptionTier[];
+}
+
+/**
+ * Tiers-only context for org pages.
+ *
+ * Distinct from `SubscriptionContext` (Codex-lqvw4.16): this is the shape
+ * streamed by the org `+layout.server.ts` to power "Included" badges on
+ * landing/explore pages — the user's subscription state is read client-side
+ * from `subscriptionCollection`, so the layout only needs to ship the org's
+ * tier list. Previously misnamed `SubscriptionContext` in
+ * `access-context.svelte.ts`, which collided with the canonical 5-field
+ * shape.
+ */
+export interface OrgTiersContext {
+  tiers: SubscriptionTier[];
+}
+
+/**
  * Per-tier subscriber and MRR breakdown.
  */
 export interface TierBreakdown {
@@ -231,6 +273,23 @@ export interface OrgMemberItem {
 
 // ─── Organization Types ────────────────────────────────────────────────────
 
+/**
+ * Public organization shape returned by the org-api `getPublicInfo` endpoint
+ * (and the authenticated `getBySlug` fallback) — used by the org layout server
+ * load and surfaced to every page rendered under `_org/[slug]/*`.
+ *
+ * Wire shape is the single source of truth in
+ * `workers/organization-api/src/routes/organizations.ts` (`fetchPublicOrgInfo`):
+ *   - `heroLayout` is the `HeroLayout` enum from `@codex/validation`
+ *     (`HERO_LAYOUTS`); it drives the `data-hero-layout` attribute on
+ *     `.org-layout` so the wrong value silently falls back to `'default'`.
+ *   - `enableSubscriptions` comes from `FeatureSettingsResponse` and gates
+ *     the subscription UI on the public storefront.
+ *
+ * Both fields MUST be present here so the org layout doesn't need to widen
+ * the shape with a hand-written `as` cast — keeping the client and worker
+ * contracts in lockstep.
+ */
 export interface OrganizationData {
   id: string;
   slug: string;
@@ -248,4 +307,6 @@ export interface OrganizationData {
   brandDensity?: number;
   brandFineTune?: OrgBrandFineTune;
   introVideoUrl?: string | null;
+  heroLayout?: HeroLayout;
+  enableSubscriptions?: boolean;
 }
