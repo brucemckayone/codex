@@ -31,7 +31,7 @@ _None yet. Rules accumulate as recurrence patterns hit 3+ within a 6-cycle windo
 
 | Iter | Date | Rung | Bead | Action | Outcome |
 |------|------|------|------|--------|---------|
-| iter-001 | 2026-04-26 | 3 | Codex-ttavz.12 | escalated to user (4-option route) | awaiting answer; high-impact rung-2 escalation (denoise:security + P0 BLOCKER + entanglement to F4) |
+| iter-001 | 2026-04-27 | 3 | Codex-ttavz.12 | routed to /backend-dev (wire-up planned functionality) | bead remains open with labels triage:routing:backend-dev + triage:needs-design; user will invoke /backend-dev next session to wire forms + fix typo |
 
 ---
 

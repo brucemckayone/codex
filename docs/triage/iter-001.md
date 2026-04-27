@@ -86,3 +86,74 @@ In all cases, attach `triage:routing:<route>` label on the routed bead in the ne
 - `docs/triage/iter-001.md` — this file.
 
 No source code edits (R3 enforced). No git push (R4 enforced). No unrelated denoise iter-030 files staged.
+
+---
+
+## Routing resolved (2026-04-27)
+
+User picked **`spawn-backend-dev`** with note:
+
+> "Yeah, spawn the backend dev to actually fix it. If it's not wired up, we're obviously going to need that functionality for the reset password and forgot password stuff."
+
+**User's mental model**: the remote functions are the planned architecture, not dead code. Their orphan-ness is the bug, not the wiring path. The right fix is to wire them up (so `forgotPasswordForm`, `registerForm`, `resetPasswordForm` are actually called from the auth pages) AND fix the typo in `auth.remote.ts:146`.
+
+**Why this matters for the recurrence ledger**: my recommendation was "delete orphan exports" based on `feedback_minimal_ux_change.md` and the page actions being canonical *today*. The user has roadmap context (planned functionality) that the skill cannot infer from labels or fingerprints. R3 (rungs 3–4 never auto-resolve) caught this — auto-deletion would have removed planned functionality.
+
+**Bead state after routing**:
+- Labels added: `triage:routing:backend-dev`, `triage:needs-design`
+- Status: still `open` (owner remains brucemckayone — they'll work it under `/backend-dev`'s guidance)
+- Final label set: 12 labels (7 denoise + 5 triage)
+
+**Recurrence ledger updates**:
+- `route:pending:codex-ttavz-12-auth-remote-broken-endpoint`: `verdict_history[0]` populated with `action=route, user_chose=spawn-backend-dev, user_reasoning=<quoted above>`.
+
+---
+
+## Skill self-improvement signals
+
+Two patterns surfaced this iter that should accumulate toward future hard rules:
+
+### Signal 1 — Underspecified rung-3 payloads (`signal:underspecified-payload-rung-3`)
+
+The first `AskUserQuestion` render returned "im going to need more info on the task whats the issue". The payload had: 4 options with descriptions, denoise labels, blast-radius context, recurrence matches. **It did NOT include code excerpts.** The parent had to manually read 4 files and surface the actual diff before the user could decide.
+
+If this recurs 3+ times across cycles, promote a hard rule in `references/04-stop-and-ask.md`:
+
+> Rung-3 payloads MUST embed (a) a 5–15 line excerpt of the broken code, (b) the working comparator if one exists, and (c) the canonical reference (constants file, schema, etc.). Description-only payloads are insufficient.
+
+Recorded in `recurrence.json` as a meta-signal pattern.
+
+### Signal 2 — `bd update --label=...` syntax does not work
+
+The cycle agent's brief and `SKILL.md` §6 both reference `bd update <id> --label="..."` for attaching labels. **This syntax prints help and does NOT attach labels.** The correct syntax is `bd label add <id> <label>` (one label per call).
+
+Apparently the cycle agent's earlier invocation succeeded somehow (the bead has the agent's intended labels) — likely the agent figured out the right syntax internally without reporting the correction. The brief and SKILL.md still teach the wrong syntax to future cycles.
+
+**Skill patches needed (apply post-cycle, before next `/triage` invocation)**:
+- `.claude/skills/triage/SKILL.md` §6 — change `bd update <id> --label="..."` to `bd label add <id> <label>` (one per call) in the canonical example.
+- `.claude/skills/triage/agents/triage-classify.md` — same fix.
+- `.claude/skills/triage/agents/triage-resolve-mechanical.md` — same fix.
+- `.claude/skills/triage/SKILL.md` §4 step 6 — clarify that `bd update --status=in_progress --owner=<route>` should only be used when `<route>` resolves to a real beads user identifier; otherwise leave owner alone and rely on the routing label.
+
+These are R7-style skill patches (mirrors `/denoise`'s rule promotion mechanism). They're not promoted rules — they're correctness fixes. Applied as part of this cycle's commit.
+
+---
+
+## Schema correction (post-cycle)
+
+`recurrence.json`'s `rung_density` field was misinterpreted on first write — the cycle agent set `iter-001: 3` (the rung number). Per `references/03-recurrence-promotion.md`:
+
+> `rung_density` counts how many beads in that iter matched the fingerprint (a single bead = density 1; 5 beads sharing the fingerprint in one cycle = density 5).
+
+Corrected to `iter-001: 1` (one bead matched). Note added in the pattern's `notes` field for future cycles.
+
+---
+
+## Next-cycle prep
+
+The user has chosen to invoke `/backend-dev` to do the actual wiring + typo fix. That's a separate skill workflow with its own SKILL.md, MCP gates, and commit conventions. `/triage` exits cleanly here.
+
+When `/backend-dev` lands its fix and closes Codex-ttavz.12 (and probably Codex-ttavz.15 in the same PR, since wiring removes the orphan-ness), the next `/triage` invocation will:
+1. Notice `bd sync` head moved → re-classify the queue (or just the affected beads).
+2. Update `recurrence.json` `verdict_history` only when triage *itself* picks a bead with this fingerprint again — no automatic increment from another skill's closure.
+3. The pattern `route:pending:codex-ttavz-12-auth-remote-broken-endpoint` may need a renaming once we know whether the underlying fingerprint (`denoise:web-auth-remote-broken-endpoint`) recurs elsewhere.

@@ -1,18 +1,46 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-26",
+  "last_updated": "2026-04-27",
   "patterns": {
     "route:pending:codex-ttavz-12-auth-remote-broken-endpoint": {
       "hits": 1,
       "iters": ["iter-001"],
-      "rung_density": { "iter-001": 3 },
+      "rung_density": { "iter-001": 1 },
       "first_seen": "2026-04-26",
-      "last_seen": "2026-04-26",
+      "last_seen": "2026-04-27",
       "promoted": false,
       "rule_id": null,
       "beads": ["Codex-ttavz.12"],
-      "verdict_history": [],
-      "notes": "Pending — awaiting user route choice. Will populate verdict_history once the parent renders the question and the user picks. Pattern fingerprint anchors on denoise:web-auth-remote-broken-endpoint (new fingerprint, no recurrence yet)."
+      "verdict_history": [
+        {
+          "iter": "iter-001",
+          "rung": 3,
+          "action": "route",
+          "user_chose": "spawn-backend-dev",
+          "user_reasoning": "Remote functions are the planned architecture, not dead code. If the forms aren't wired up but exist by intent, /backend-dev should wire them properly + fix the typo so reset-password and forgot-password functionality works as designed."
+        }
+      ],
+      "notes": "Routed to /backend-dev on iter-001. User rejected the 'delete orphan' default in favor of 'wire up planned functionality' interpretation. Pattern fingerprint anchors on denoise:web-auth-remote-broken-endpoint. Ledger schema corrected this iter: rung_density should be a count of beads matching the fingerprint per iter, not the rung number."
+    },
+    "signal:underspecified-payload-rung-3": {
+      "hits": 1,
+      "iters": ["iter-001"],
+      "rung_density": { "iter-001": 1 },
+      "first_seen": "2026-04-27",
+      "last_seen": "2026-04-27",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-ttavz.12"],
+      "verdict_history": [
+        {
+          "iter": "iter-001",
+          "rung": null,
+          "action": "meta-signal",
+          "user_chose": "needed-more-info",
+          "user_reasoning": "First AskUserQuestion render returned 'im going to need more info on the task whats the issue'. Question payload had options + descriptions + denoise labels + blast-radius context, but no code excerpts. Parent supplied the missing context manually before re-rendering. If this recurs 3+ times, promote rule: rung-3 payloads MUST embed the relevant diff/code excerpts inline."
+        }
+      ],
+      "notes": "Meta-pattern: tracks how often the rung-3 payload format itself underspecifies the question. Distinct from a routing pattern — this is a skill-self-improvement signal."
     }
   }
 }
