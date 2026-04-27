@@ -13,15 +13,18 @@ _None yet. Rules accumulate as recurrence patterns hit 3+ within a 6-cycle windo
 
 <!-- LADDER START -->
 
-| Rung | Count | Top 5 by priority |
-|------|-------|-------------------|
-| 0 — Trivial | _not-classified_ | — |
-| 1 — Mechanical | _not-classified_ | — |
-| 2 — Scoped | _not-classified_ | — |
-| 3 — Multi-file | 1[^1] | Codex-ttavz.12 (P0) |
-| 4 — Design-needed | _not-classified_ | — |
+_Snapshot timestamp_: 2026-04-27 (iter-002 full-queue classify, eligible-only)
+_Eligibility filter_: excludes `denoise:*`, `ds-review*`, `fallow-followup` (owned by other skills) and 4 in-progress beads + Codex-ttavz.12 (routed iter-001).
 
-[^1]: `iter-001` was a `--bead=Codex-ttavz.12` cycle, not a full-queue classify. Counts above reflect ONLY the single bead routed through the classifier this iter; the rest of the open backlog is unclassified. A full-queue classify pass will run when the next `/triage` invocation has no `--bead=` flag.
+| Rung | Count | Top by priority |
+|------|-------|-------------------|
+| 0 — Trivial | 0 | — |
+| 1 — Mechanical | 1[^iter002-r1] | Codex-fcdkk (P2) → resolved iter-002 |
+| 2 — Scoped | 1 | Codex-v5bzy (P1) — needs design choice (a/b reconcile) |
+| 3 — Multi-file | 21 | Codex-x0pa (P0), Codex-6axi0 (P1), Codex-i49f (P1), Codex-u498 (P1), Codex-d3g6 (P1) |
+| 4 — Design-needed | 6 | Codex-ev3k (P1 epic), Codex-y6x9j (P2), Codex-cbbet (P2 epic), Codex-zp30d (P2), Codex-r4woq (P2 epic), Codex-84b53 (P2 epic) |
+
+[^iter002-r1]: iter-002 picked Codex-fcdkk and resolved it (5-file mechanical path correction). Remaining rung-1 candidates after this cycle: 0. Unscoped backlog (denoise/ds-review/fallow-followup) totals 22 additional beads handled by sibling skills.
 
 <!-- LADDER END -->
 
@@ -32,6 +35,7 @@ _None yet. Rules accumulate as recurrence patterns hit 3+ within a 6-cycle windo
 | Iter | Date | Rung | Bead | Action | Outcome |
 |------|------|------|------|--------|---------|
 | iter-001 | 2026-04-27 | 3 | Codex-ttavz.12 | routed to /backend-dev (wire-up planned functionality) | bead remains open with labels triage:routing:backend-dev + triage:needs-design; user will invoke /backend-dev next session to wire forms + fix typo |
+| iter-002 | 2026-04-27 | 1 | Codex-fcdkk | mechanical: corrected `repoRoot` path in 5 iter-012 proof tests (6→5 dotdot levels) | closed; tests collect cleanly + repoRoot now resolves to actual repo root (verified via node fs check) |
 
 ---
 

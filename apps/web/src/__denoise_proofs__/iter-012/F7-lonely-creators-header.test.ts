@@ -42,7 +42,7 @@ import { glob } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const repoRoot = resolve(__dirname, '../../../../../..');
+const repoRoot = resolve(__dirname, '../../../../..');
 const apps = resolve(repoRoot, 'apps/web/src');
 
 async function findConsumers(importPath: string): Promise<string[]> {

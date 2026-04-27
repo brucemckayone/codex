@@ -41,6 +41,46 @@
         }
       ],
       "notes": "Meta-pattern: tracks how often the rung-3 payload format itself underspecifies the question. Distinct from a routing pattern — this is a skill-self-improvement signal."
+    },
+    "route:self:proof-test-path-mechanical-fix": {
+      "hits": 1,
+      "iters": ["iter-002"],
+      "rung_density": { "iter-002": 1 },
+      "first_seen": "2026-04-27",
+      "last_seen": "2026-04-27",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-fcdkk"],
+      "verdict_history": [
+        {
+          "iter": "iter-002",
+          "rung": 1,
+          "action": "auto-resolve",
+          "user_chose": null,
+          "user_reasoning": "Auto mode (/loop). Pure mechanical path correction across 5 sibling test files; bead self-described as 'no proof needed (will fail loud)' — proof shape applied was filesystem-existence check that the corrected repoRoot resolves to a real package.json + apps/web."
+        }
+      ],
+      "notes": "Fingerprint: rung-1 mechanical fix on denoise proof-test infrastructure (no denoise:* label on the bead, but the touched files are __denoise_proofs__/iter-NNN/). If 3+ similar beads land, rule candidate: 'beads describing path/import/byte-mechanical fixes in __denoise_proofs__/ are auto-rung-1 even when their parent fingerprint is denoise-shaped, because they are scaffolding fixes not finding-resolutions'."
+    },
+    "signal:auto-loop-skip-rung-2-plus": {
+      "hits": 1,
+      "iters": ["iter-002"],
+      "rung_density": { "iter-002": 27 },
+      "first_seen": "2026-04-27",
+      "last_seen": "2026-04-27",
+      "promoted": false,
+      "rule_id": null,
+      "beads": [],
+      "verdict_history": [
+        {
+          "iter": "iter-002",
+          "rung": null,
+          "action": "meta-signal",
+          "user_chose": "loop-policy-override",
+          "user_reasoning": "Auto-loop policy this cycle: skip rung 2+ beads, only resolve rung 0/1. Eligible queue had 28 beads — only 1 classified as rung 1 after applying R7 (epic→4), R8 (no file:line→3), and high-impact path filter. Indicates the open backlog is dominated by reasoned/design-shaped work that genuinely needs a human."
+        }
+      ],
+      "notes": "If this signal recurs across 3+ /loop /triage iterations with the same rung-1 famine, /loop /triage becomes low-yield and the user should switch to manual /triage with --bead= overrides. Track for promotion rule: 'when rung-1 yield <2 per cycle for 3 consecutive auto-loop iters, parent should suggest pausing /loop and surfacing rung-3/4 backlog for greenlight'."
     }
   }
 }

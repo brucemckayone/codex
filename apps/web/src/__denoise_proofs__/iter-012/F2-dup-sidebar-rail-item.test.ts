@@ -41,7 +41,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const repoRoot = resolve(__dirname, '../../../../../..');
+const repoRoot = resolve(__dirname, '../../../../..');
 const sidebarRailItem = resolve(
   repoRoot,
   'apps/web/src/lib/components/layout/SidebarRail/SidebarRailItem.svelte'

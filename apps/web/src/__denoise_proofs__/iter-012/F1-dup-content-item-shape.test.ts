@@ -39,7 +39,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const repoRoot = resolve(__dirname, '../../../../../..');
+const repoRoot = resolve(__dirname, '../../../../..');
 const contentDir = resolve(repoRoot, 'apps/web/src/lib/components/content');
 
 const sites: Array<{ file: string; declaredInterface: string }> = [

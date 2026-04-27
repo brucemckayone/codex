@@ -30,7 +30,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const repoRoot = resolve(__dirname, '../../../../../..');
+const repoRoot = resolve(__dirname, '../../../../..');
 
 describe.skip('iter-012 F8 — ref 05 should cite hydrateIfNeeded, not loadFromServer', () => {
   it('hydrateIfNeeded exists at the cited site', () => {
