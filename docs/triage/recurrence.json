@@ -192,9 +192,9 @@
       "notes": "Meta-signal: tracks how often the cycle agent's filter wholesale excludes denoise:*-tagged beads instead of distinguishing 'verification phase' (denoise-owned) vs 'resolution phase' (any-skill-eligible if proof test exists). If 3+ recurrences, promote rule: 'denoise:* beads ARE triage-eligible iff (a) they cite a __denoise_proofs__/ test path AND (b) the test is currently `it.skip` or `describe.skip` — these are denoise's hand-off signal that the bead is verification-complete and awaiting code-fix.'"
     },
     "signal:cluster-defect-team-fix-eligible": {
-      "hits": 1,
-      "iters": ["iter-005"],
-      "rung_density": { "iter-005": 1 },
+      "hits": 2,
+      "iters": ["iter-005", "iter-006"],
+      "rung_density": { "iter-005": 1, "iter-006": 3 },
       "first_seen": "2026-04-27",
       "last_seen": "2026-04-27",
       "promoted": false,
@@ -207,9 +207,38 @@
           "action": "meta-signal",
           "user_chose": "skill-update-cluster-exception",
           "user_reasoning": "User pointed out: 'if we have related beads like that that are sharing a bug path an agent team would make sense to address them.' R1 (one bead per cycle) is over-rotated for clustered identical defects: the per-cycle review value of splitting an N-site fix collapses when the fix is byte-identical and the sites are independent. Skill §1 R1 amended with cluster-defect exception. iter-006 will be the first agent-team cycle, fixing F1/F3/F4 in parallel via 3 sub-agents — same mechanical fix shape, distinct files, no coordination required."
+        },
+        {
+          "iter": "iter-006",
+          "rung": 1,
+          "action": "team-resolve",
+          "team_size": 3,
+          "team_beads": ["Codex-w30gi", "Codex-0n26b", "Codex-mqyql.18"],
+          "user_chose": "execute-team",
+          "user_reasoning": "First cluster-defect agent-team cycle — protocol prototype. 3 parallel sub-agents fixed shared path-bug + per-bead recipe. All 3 returned ok=true; 14 grep-based proof assertions pass (6+4+4); 17 behavioural assertions added retroactively in studio-access.svelte.test.ts (covers F1's pure helpers per new R10 rule). Two §13 gaps surfaced: (1) need `localOnlyFilesChanged` field for gitignored fixes (Codex-mqyql.18 doc edit), (2) recipe wording 'create' should be 'ensure-or-extend' when target may already exist (Codex-0n26b extended existing content-detail.ts)."
         }
       ],
-      "notes": "Meta-signal: triggers a skill-evolution event, not a routing decision. Signature: N≥3 beads with the same denoise-fingerprint, the same proof-test path bug, and the same fix recipe. Promotion path: if 3+ further cluster-defect cycles land, codify the team-fix protocol as RT3 with concrete steps (1) detect the cluster from recurrence ledger, (2) emit one team-spawn block with N sub-agents, (3) atomic commit per agent, (4) single recurrence-ledger entry covering all N beads. iter-006 is the prototype implementation."
+      "notes": "Meta-signal: triggers a skill-evolution event, not a routing decision. Signature: N≥3 beads with the same denoise-fingerprint, the same proof-test path bug, and the same fix recipe. iter-006 was the prototype run — protocol works. Promotion path: if iter-007+ produces another team-cycle, promote to RT3 with concrete steps (1) detect the cluster from recurrence ledger, (2) emit one team-spawn block with N sub-agents, (3) atomic commit per agent, (4) single recurrence-ledger entry covering all N beads."
+    },
+    "signal:behavioral-test-gate-no-existing-coverage": {
+      "hits": 1,
+      "iters": ["iter-006"],
+      "rung_density": { "iter-006": 1 },
+      "first_seen": "2026-04-27",
+      "last_seen": "2026-04-27",
+      "promoted": true,
+      "rule_id": "R10 (codified iter-006)",
+      "beads": ["Codex-w30gi"],
+      "verdict_history": [
+        {
+          "iter": "iter-006",
+          "rung": 1,
+          "action": "skill-rule-codify",
+          "user_chose": "write-test-on-no-existing-coverage",
+          "user_reasoning": "User pointed out: 'part of this skill should be that we are writing tests when fixing things — if not that should be part of verification before closing when possible.' During iter-006 verification I confirmed NO behavioural tests existed for SidebarRail, useStudioAccess, or content-detail constants — only structural grep proof tests. F4 is doc-only (no test possible). F3 constants don't have testable behaviour beyond shape (the structural proof test covers it). F1's `useStudioAccess` composable + its pure helpers (hasStudioRole, resolveStudioHref, getInitials) DO have testable behaviour — wrote studio-access.svelte.test.ts with 17 assertions covering positive/negative/null/undefined cases for all pure helpers + STUDIO_ROLES membership. All 17 pass. Codified as hard rule R10 in SKILL.md §1."
+        }
+      ],
+      "notes": "Codified directly to R10 (hard rule) by user direction — bypasses the standard 3-hit promotion gate. The pattern: triage closes a rung-0/1 bead but the touched code has no behavioural test. R10 mandates the cycle agent EITHER run an existing test, write a new one, or document why the fix has no testable behaviour (case (c): docs, gitignored config, dead-imports). This entry exists for audit traceability — R10 was codified in iter-006's commit."
     },
     "signal:auto-loop-skip-rung-2-plus": {
       "hits": 3,

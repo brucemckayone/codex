@@ -53,7 +53,27 @@ Each agent worked in its own context window. Parent context grew by ~30 lines (3
 
 ## Aggregate proof gate
 
-All 3 proof tests pass: 6 + 4 + 4 = 14 assertions across 3 test files. The `route:self:proof-test-path-mechanical-fix` fingerprint promoted to RT2 after this cycle (3 hits across 3 distinct iters in <6-cycle window).
+All 3 proof tests pass: 6 + 4 + 4 = 14 grep-based assertions across 3 test files. The `route:self:proof-test-path-mechanical-fix` fingerprint promoted to RT2 after this cycle (3 hits across 3 distinct iters in <6-cycle window).
+
+## Behavioural test gate (R10 — added this cycle)
+
+After the team agents reported `ok: true`, the user surfaced an important skill gap: "is it tested with tests" → "part of this skill should be that we are writing tests when fixing things — if not that should be part of verification before closing when possible."
+
+That's a sharper falsifiability gate than the grep-based proof tests provided. Audit of behavioural test coverage on the touched files:
+
+| File touched | Existing test? | Action |
+|--------------|----------------|--------|
+| `SidebarRail.svelte` | None | Composable consumer — covered by `useStudioAccess` test |
+| `SidebarRailUserSection.svelte` | None | Composable consumer — covered by `useStudioAccess` test |
+| `studio-access.svelte.ts` (canonical) | None | **Wrote `studio-access.svelte.test.ts` — 17 assertions, all pass** |
+| `content-detail.ts` | None | Constants only (no testable behaviour beyond shape) — F3 grep proof covers |
+| `_org`/`_creators` content loaders | None (route-level) | Constants spread into existing return shape; no behaviour change |
+| `references/05-domain-web.md` | n/a | Pure docs — case (c) of R10 |
+| All proof tests (path-fix sidequest) | n/a | The corrected `repoRoot` resolution IS the test of the path |
+
+`studio-access.svelte.test.ts` (NEW): 17 assertions covering `STUDIO_ROLES` membership (3), `hasStudioRole` positive/negative/null/undefined/missing-role (5), `resolveStudioHref` for org-subdomain/non-creators-non-www/creators/www/no-subdomain (5), `getInitials` typical/single-word/empty/whitespace (4). All pass.
+
+**Skill update**: SKILL.md §1 R10 codified as a hard rule by user direction — bypasses standard 3-hit promotion gate because the user's reasoning ("tests when fixing things") is the load-bearing rationale and 3-hit accumulation would just cost time without adding signal. Recurrence pattern `signal:behavioral-test-gate-no-existing-coverage` recorded for audit.
 
 ## Recurrence increments
 
