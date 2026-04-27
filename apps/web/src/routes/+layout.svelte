@@ -3,6 +3,9 @@
    * Root layout - thin shell providing global styles, view transitions, and user context.
    * Each route group (platform, org, creators) owns its own header/footer chrome.
    */
+  // MUST be the first runtime import — silences a CSP violation Zod 4
+  // would otherwise emit on first object-schema parse. See zod-init.ts.
+  import '$lib/zod-init';
   import type { Snippet } from 'svelte';
   import { onMount } from 'svelte';
   import { afterNavigate, invalidate, onNavigate } from '$app/navigation';
