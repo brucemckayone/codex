@@ -15,13 +15,13 @@ _None yet. Rules accumulate as recurrence patterns hit 3+ within a 6-cycle windo
 
 | Rung | Count | Top 5 by priority |
 |------|-------|-------------------|
-| 0 — Trivial | _unclassified_ | — |
-| 1 — Mechanical | _unclassified_ | — |
-| 2 — Scoped | _unclassified_ | — |
-| 3 — Multi-file | _unclassified_ | — |
-| 4 — Design-needed | _unclassified_ | — |
+| 0 — Trivial | _not-classified_ | — |
+| 1 — Mechanical | _not-classified_ | — |
+| 2 — Scoped | _not-classified_ | — |
+| 3 — Multi-file | 1[^1] | Codex-ttavz.12 (P0) |
+| 4 — Design-needed | _not-classified_ | — |
 
-_First-run: ladder is empty. The classifier sub-agent will populate this on the first `/triage` invocation._
+[^1]: `iter-001` was a `--bead=Codex-ttavz.12` cycle, not a full-queue classify. Counts above reflect ONLY the single bead routed through the classifier this iter; the rest of the open backlog is unclassified. A full-queue classify pass will run when the next `/triage` invocation has no `--bead=` flag.
 
 <!-- LADDER END -->
 
@@ -31,7 +31,7 @@ _First-run: ladder is empty. The classifier sub-agent will populate this on the 
 
 | Iter | Date | Rung | Bead | Action | Outcome |
 |------|------|------|------|--------|---------|
-| _none_ | — | — | — | — | — |
+| iter-001 | 2026-04-26 | 3 | Codex-ttavz.12 | escalated to user (4-option route) | awaiting answer; high-impact rung-2 escalation (denoise:security + P0 BLOCKER + entanglement to F4) |
 
 ---
 

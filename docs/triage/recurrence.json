@@ -1,5 +1,18 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-27",
-  "patterns": {}
+  "last_updated": "2026-04-26",
+  "patterns": {
+    "route:pending:codex-ttavz-12-auth-remote-broken-endpoint": {
+      "hits": 1,
+      "iters": ["iter-001"],
+      "rung_density": { "iter-001": 3 },
+      "first_seen": "2026-04-26",
+      "last_seen": "2026-04-26",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-ttavz.12"],
+      "verdict_history": [],
+      "notes": "Pending — awaiting user route choice. Will populate verdict_history once the parent renders the question and the user picks. Pattern fingerprint anchors on denoise:web-auth-remote-broken-endpoint (new fingerprint, no recurrence yet)."
+    }
+  }
 }
