@@ -32,7 +32,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const repoRoot = resolve(__dirname, '../../../../../..');
+const repoRoot = resolve(__dirname, '../../../../..');
 const reference = resolve(
   repoRoot,
   '.claude/skills/denoise/references/05-domain-web.md'
@@ -42,7 +42,7 @@ const hydrationModule = resolve(
   'apps/web/src/lib/collections/hydration.ts'
 );
 
-describe.skip('iter-027 F4 — references/05-domain-web.md §4 must cite hydrateIfNeeded, not loadFromServer', () => {
+describe('iter-027 F4 — references/05-domain-web.md §4 must cite hydrateIfNeeded, not loadFromServer', () => {
   it('canonical hydration helper exists at the documented path', () => {
     expect(existsSync(hydrationModule)).toBe(true);
     const src = readFileSync(hydrationModule, 'utf8');

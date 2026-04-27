@@ -58,7 +58,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const repoRoot = resolve(__dirname, '../../../../../..');
+const repoRoot = resolve(__dirname, '../../../../..');
 const orgLoader = resolve(
   repoRoot,
   'apps/web/src/routes/_org/[slug]/(space)/content/[contentSlug]/+page.server.ts'
@@ -68,7 +68,7 @@ const creatorsLoader = resolve(
   'apps/web/src/routes/_creators/[username]/content/[contentSlug]/+page.server.ts'
 );
 
-describe.skip('iter-027 F3 — content detail loaders must share fallback constants from content-detail.ts', () => {
+describe('iter-027 F3 — content detail loaders must share fallback constants from content-detail.ts', () => {
   it('content-detail.ts module exports the shared fallback constants', () => {
     // Either (a) loadContentDetail() helper, or (b) EMPTY_SUB_CONTEXT +
     // DENIED_ACCESS_RESULT named consts. Test the (b) form (smallest fix).

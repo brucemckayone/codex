@@ -130,14 +130,20 @@
       "notes": "Meta-pattern: tracks how often the rung-3 payload format itself underspecifies the question. Distinct from a routing pattern — this is a skill-self-improvement signal."
     },
     "route:self:proof-test-path-mechanical-fix": {
-      "hits": 2,
-      "iters": ["iter-002", "iter-005"],
-      "rung_density": { "iter-002": 5, "iter-005": 1 },
+      "hits": 3,
+      "iters": ["iter-002", "iter-005", "iter-006"],
+      "rung_density": { "iter-002": 5, "iter-005": 1, "iter-006": 3 },
       "first_seen": "2026-04-27",
       "last_seen": "2026-04-27",
-      "promoted": false,
-      "rule_id": null,
-      "beads": ["Codex-fcdkk", "Codex-zhe80"],
+      "promoted": true,
+      "rule_id": "RT2 (applied iter-006)",
+      "beads": [
+        "Codex-fcdkk",
+        "Codex-zhe80",
+        "Codex-w30gi",
+        "Codex-0n26b",
+        "Codex-mqyql.18"
+      ],
       "verdict_history": [
         {
           "iter": "iter-002",
@@ -152,9 +158,18 @@
           "action": "auto-resolve",
           "user_chose": null,
           "user_reasoning": "Auto mode. Codex-zhe80 was a denoise:simplification bead (CreatorCard.svelte inline-redeclares ContentItem+SocialLinks). When the F2 proof test was un-skipped and run, it failed with ENOENT — same `repoRoot` 6→5-dotdot bug as iter-002's 5 fixes. Patched as part of the same PR. The bug recurs because iter-027's proof-test scaffolding inherited the iter-012 template's path mistake. F1/F3/F4 sibling tests confirmed to share the same defect — queued for iter-006 agent team."
+        },
+        {
+          "iter": "iter-006",
+          "rung": 1,
+          "action": "team-resolve",
+          "team_size": 3,
+          "team_beads": ["Codex-w30gi", "Codex-0n26b", "Codex-mqyql.18"],
+          "user_chose": "skill-update-cluster-exception-applied",
+          "user_reasoning": "FIRST CLUSTER-DEFECT AGENT TEAM CYCLE. User explicitly authorized R1 exception per skill §13: 'do 1 then 2a and improve the skill to handle this sort of thing'. 3 parallel sub-agents fixed the shared 6→5 dotdot bug in F1/F3/F4 proof tests + each bead's distinct rung-1 code-fix. All 3 agents returned ok=true. 14 proof assertions pass (6+4+4). Codex-mqyql.18's doc fix landed in a gitignored file (.claude/skills/denoise/references/05-domain-web.md) — surfaced as protocol gap; §13 needs a localOnlyFilesChanged field. Cluster fingerprint promoted to RT2 as a result of this cycle."
         }
       ],
-      "notes": "Fingerprint: rung-1 mechanical fix on denoise proof-test infrastructure. Hits=2 after iter-005. F1 (Codex-w30gi), F3 (Codex-0n26b), F4 (Codex-mqyql.18) of iter-027 all share the same path bug — iter-006 agent team will land 3 simultaneous fixes. After iter-006: hits=5 across 4 iters, but cluster-defect counts as a single agent-team verdict per the new R1 exception. PROMOTION CANDIDATE for RT2: 'beads describing scaffolding fixes in __denoise_proofs__/ are auto-rung-1 even when fingerprint is denoise-shaped, because they are scaffolding fixes not finding-resolutions. NEW iter cohorts of __denoise_proofs__/ tests must inherit the corrected 5-dotdot path — lint candidate.'"
+      "notes": "PROMOTED to RT2 in iter-006. Promotion gate: hits=3 in 6-cycle window ✓, all verdicts mechanical (auto-resolve / team-resolve, no contested classifications) ✓, was promoted=false going in ✓. Per skill §13's first-cycle authorization clause, the team-resolve verdict counts as a single iter for promotion threshold purposes (iter-006 contributed one verdict, not three). Lint candidate codified in RT2: grep `__denoise_proofs__/` for the 6-dotdot string and surface as auto-rung-1 sidequest in any cycle that touches such a test."
     },
     "signal:over-filter-denoise-tagged-rung-1": {
       "hits": 1,

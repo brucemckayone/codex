@@ -12,6 +12,8 @@ import { renderContentBody } from '$lib/editor/render';
 import { getPublicContent } from '$lib/remote/content.remote';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import {
+  DENIED_ACCESS_RESULT,
+  EMPTY_SUB_CONTEXT,
   handlePurchaseAction,
   isPublicAccessType,
   loadAccessAndProgress,
@@ -92,20 +94,11 @@ export const load: PageServerLoad = async ({
         cookies,
         content.accessType
       ).catch(() => ({
+        ...EMPTY_SUB_CONTEXT,
         requiresSubscription:
           content.accessType === 'subscribers' || !!content.minimumTierId,
-        hasSubscription: false,
-        subscriptionCoversContent: false,
-        currentSubscription: null,
-        tiers: [],
       }))
-    : Promise.resolve({
-        requiresSubscription: false,
-        hasSubscription: false,
-        subscriptionCoversContent: false,
-        currentSubscription: null,
-        tiers: [],
-      });
+    : Promise.resolve(EMPTY_SUB_CONTEXT);
 
   // For unauthenticated visitors — no streaming possible, but body unlocks
   // for public (free) content so visitors can read it. Gated content gets
@@ -139,14 +132,7 @@ export const load: PageServerLoad = async ({
         platform,
         cookies,
         content.accessType
-      ).catch(() => ({
-        hasAccess: isPublic,
-        streamingUrl: null,
-        waveformUrl: null,
-        expiresAt: null,
-        revocationReason: null,
-        progress: null,
-      })),
+      ).catch(() => ({ ...DENIED_ACCESS_RESULT, hasAccess: isPublic })),
       subscriptionContext,
       relatedContent: relatedPromise,
     };
@@ -161,14 +147,7 @@ export const load: PageServerLoad = async ({
     platform,
     cookies,
     content.accessType
-  ).catch(() => ({
-    hasAccess: false,
-    streamingUrl: null,
-    waveformUrl: null,
-    expiresAt: null,
-    revocationReason: null,
-    progress: null,
-  }));
+  ).catch(() => DENIED_ACCESS_RESULT);
 
   const gatedBodyHtml = accessResult.hasAccess
     ? await renderContentBody(content)

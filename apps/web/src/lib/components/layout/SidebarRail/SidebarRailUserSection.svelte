@@ -3,8 +3,8 @@
 	import { page } from '$app/state';
 	import { createTooltip, melt } from '@melt-ui/svelte';
 	import { submitFormPost } from '$lib/utils/navigation';
-	import { AUTH_ROLES } from '@codex/constants';
-	import { buildCreatorsUrl, buildPlatformUrl, extractSubdomain } from '$lib/utils/subdomain';
+	import { buildPlatformUrl } from '$lib/utils/subdomain';
+	import { useStudioAccess } from '$lib/utils/studio-access.svelte';
 	import {
 		LogInIcon,
 		UserIcon,
@@ -28,15 +28,9 @@
 
 	const { user, expanded = false }: Props = $props();
 
-	const STUDIO_ROLES = new Set([AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN, AUTH_ROLES.PLATFORM_OWNER]);
-	const canAccessStudio = $derived(!!user?.role && STUDIO_ROLES.has(user.role));
-
-	const currentSubdomain = $derived(extractSubdomain(page.url.hostname));
-	const studioHref = $derived(
-		currentSubdomain && currentSubdomain !== 'creators' && currentSubdomain !== 'www'
-			? '/studio'
-			: buildCreatorsUrl(page.url, '/studio')
-	);
+	const studioAccess = useStudioAccess(() => ({ user, url: page.url }));
+	const canAccessStudio = $derived(studioAccess.canAccessStudio);
+	const studioHref = $derived(studioAccess.studioHref);
 
 	function getInitials(name: string): string {
 		return name

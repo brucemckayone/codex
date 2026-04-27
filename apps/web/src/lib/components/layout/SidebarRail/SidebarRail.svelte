@@ -4,8 +4,7 @@
 	import { PLATFORM_RAIL_NAV, getOrgRailNav } from '$lib/config/navigation';
 	import { RAIL_ICON_MAP } from '$lib/config/rail-icons';
 	import { SearchIcon, LayoutDashboardIcon } from '$lib/components/ui/Icon';
-	import { AUTH_ROLES } from '@codex/constants';
-	import { buildCreatorsUrl, extractSubdomain } from '$lib/utils/subdomain';
+	import { useStudioAccess } from '$lib/utils/studio-access.svelte';
 	import { getInitials } from '$lib/utils/format';
 	import SidebarRailItem from './SidebarRailItem.svelte';
 	import SidebarRailUserSection from './SidebarRailUserSection.svelte';
@@ -52,15 +51,9 @@
 	}
 
 	// ── Studio access ─────────────────────────────────────────────
-	const STUDIO_ROLES = new Set([AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN, AUTH_ROLES.PLATFORM_OWNER]);
-	const canAccessStudio = $derived(!!user?.role && STUDIO_ROLES.has(user.role));
-
-	const currentSubdomain = $derived(extractSubdomain(page.url.hostname));
-	const studioHref = $derived(
-		currentSubdomain && currentSubdomain !== 'creators' && currentSubdomain !== 'www'
-			? '/studio'
-			: buildCreatorsUrl(page.url, '/studio')
-	);
+	const studioAccess = useStudioAccess(() => ({ user, url: page.url }));
+	const canAccessStudio = $derived(studioAccess.canAccessStudio);
+	const studioHref = $derived(studioAccess.studioHref);
 
 	// ── Org logo initials fallback ────────────────────────────────────
 	// Up to 2 uppercase letters derived from the org name. Rendered in a

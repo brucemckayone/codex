@@ -50,7 +50,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const repoRoot = resolve(__dirname, '../../../../../..');
+const repoRoot = resolve(__dirname, '../../../../..');
 const sites = [
   'apps/web/src/lib/components/layout/SidebarRail/SidebarRail.svelte',
   'apps/web/src/lib/components/layout/SidebarRail/SidebarRailUserSection.svelte',
@@ -60,7 +60,7 @@ const canonical = resolve(
   'apps/web/src/lib/utils/studio-access.svelte.ts'
 );
 
-describe.skip('iter-027 F1 — SidebarRail surface must use useStudioAccess helper, not inline STUDIO_ROLES', () => {
+describe('iter-027 F1 — SidebarRail surface must use useStudioAccess helper, not inline STUDIO_ROLES', () => {
   it('canonical helper exports STUDIO_ROLES + hasStudioRole + resolveStudioHref + useStudioAccess', () => {
     expect(existsSync(canonical)).toBe(true);
     const src = readFileSync(canonical, 'utf8');

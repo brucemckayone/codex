@@ -102,6 +102,52 @@ export type ContentAccessType =
   | 'team';
 
 /**
+ * Empty subscription-context fallback used by content detail loaders when
+ * the content does not require a subscription (free / paid / followers /
+ * team accessTypes with no minimum tier). Both the org and creators content
+ * detail loaders return this exact 5-field shape — extracted here so the
+ * shape can only drift in one place. Truth-source for the field set is
+ * `SubscriptionContext` in `$lib/types`.
+ *
+ * The `.catch` branch of the gated `loadSubscriptionContext()` call computes
+ * `requiresSubscription` from content state, so it stays inline rather than
+ * sharing this constant.
+ *
+ * Iter-027 F3 — see proof test
+ * `apps/web/src/__denoise_proofs__/iter-027/F3-content-detail-loader-dup.test.ts`.
+ */
+export const EMPTY_SUB_CONTEXT: SubscriptionContext = {
+  requiresSubscription: false,
+  hasSubscription: false,
+  subscriptionCoversContent: false,
+  currentSubscription: null,
+  tiers: [],
+};
+
+/**
+ * Denied-access fallback used by content detail loaders when the
+ * gated `loadAccessAndProgress()` await rejects (network error, 5xx,
+ * timeout). Returned shape matches the success-path `AccessAndProgress`
+ * with everything absent/denied — six fields, all null/false.
+ *
+ * The fast-path (free content + authenticated user) inlines a similar
+ * literal but with `hasAccess: isPublic` rather than `false`, so it can't
+ * share this constant directly without a wrapper.
+ *
+ * Iter-027 F3 — see proof test
+ * `apps/web/src/__denoise_proofs__/iter-027/F3-content-detail-loader-dup.test.ts`.
+ */
+export const DENIED_ACCESS_RESULT: AccessAndProgress = {
+  hasAccess: false,
+  streamingUrl: null,
+  waveformUrl: null,
+  readyVariants: null,
+  expiresAt: null,
+  revocationReason: null,
+  progress: null,
+};
+
+/**
  * Free content is publicly readable — the body and metadata render for
  * everyone regardless of auth. The media stream still requires an
  * authenticated user (because signed R2 URLs are issued per-user), but the
