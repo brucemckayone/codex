@@ -1,7 +1,47 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-27T23:10",
+  "last_updated": "2026-04-27T23:55",
   "patterns": {
+    "signal:type-drift-template-vs-api": {
+      "hits": 1,
+      "iters": ["iter-005a"],
+      "rung_density": { "iter-005a": 1 },
+      "first_seen": "2026-04-27",
+      "last_seen": "2026-04-27",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-v5bzy"],
+      "verdict_history": [
+        {
+          "iter": "iter-005a",
+          "rung": 2,
+          "action": "walk-only",
+          "user_chose": null,
+          "user_reasoning": "Awaiting user greenlight on option (a) vs (b). Pattern: a Svelte component declares a richer optional creator type than the API actually returns; the mismatch is hidden behind nullish-coalescing chains so runtime renders empty. Other consumers work around the gap by mapping API shape → component shape at the call site (org landing +page.svelte:551-554) — Spotlight is the lone consumer that doesn't, exposing the drift."
+        }
+      ],
+      "notes": "Meta-signal: tracks how often optional-typed component props (e.g. `creator?: { username?, displayName?, avatar? }`) silently absorb API-shape mismatches into empty-string runtime rendering. If 3+ recurrences, promote rule: 'component types that EXTEND a canonical API type must `extends ContentItem` (or equivalent) so type drift surfaces at compile time, not as silent blank renders'."
+    },
+    "signal:concurrent-cycle-suffix": {
+      "hits": 1,
+      "iters": ["iter-005a"],
+      "rung_density": { "iter-005a": 1 },
+      "first_seen": "2026-04-27",
+      "last_seen": "2026-04-27",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-v5bzy"],
+      "verdict_history": [
+        {
+          "iter": "iter-005a",
+          "rung": null,
+          "action": "meta-signal",
+          "user_chose": "use-suffix",
+          "user_reasoning": "Auto mode (parallel /loop fired by user). Two /triage agents ran on iter-005 concurrently. Concurrent-agent-safety §3 of brief mandated `iter-NNNa.md` suffix on doc-name collision. Cycle-history table updated with separate iter-005 + iter-005a rows (different beads, different rungs, different outcomes). Master.md ladder snapshot owned by the rung-1 agent (it ran first); iter-005a only added a row to cycle history, did not edit ladder counts."
+        }
+      ],
+      "notes": "Meta-signal: tracks how often concurrent /triage cycles produce overlapping iter docs. If 3+ recurrences, promote rule: 'concurrent agents must always lock the iter-NNN doc name FIRST via touch+commit (or equivalent file-creation race), and second agent always picks suffix [a-z] without coordination'. iter-005a was a clean parallel — no merge, no master.md collision, no ledger collision. Pattern works."
+    },
     "route:self:promoted-helper-missed-call-site": {
       "hits": 1,
       "iters": ["iter-003"],
