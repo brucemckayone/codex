@@ -20,7 +20,7 @@
 -->
 <script lang="ts">
   import { page } from '$app/state';
-  import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
+  import { Avatar, AvatarFallback } from '$lib/components/ui/Avatar';
   import { BrandGradientBackdrop } from '$lib/components/ui/BrandGradient';
   import { PlayIcon, MusicIcon, FileTextIcon } from '$lib/components/ui/Icon';
   import { buildContentUrl } from '$lib/utils/subdomain';
@@ -60,9 +60,7 @@
       hlsPreviewUrl?: string | null;
     } | null;
     creator?: {
-      username?: string | null;
-      displayName?: string | null;
-      avatar?: string | null;
+      name?: string | null;
     } | null;
   }
 
@@ -79,9 +77,7 @@
     item.description ? extractPlainText(item.description) : ''
   );
   const durationSeconds = $derived(item.mediaItem?.durationSeconds ?? null);
-  const creatorName = $derived(
-    item.creator?.displayName ?? item.creator?.username ?? ''
-  );
+  const creatorName = $derived(item.creator?.name ?? '');
 
   const contentType = $derived(item.contentType ?? 'video');
   const ctaLabel = $derived(
@@ -280,10 +276,6 @@
                 {#if creatorName}
                   <div class="spotlight__creator">
                     <Avatar class="spotlight__avatar">
-                      <AvatarImage
-                        src={item.creator?.avatar ?? undefined}
-                        alt={creatorName}
-                      />
                       <AvatarFallback>
                         {creatorName.charAt(0).toUpperCase()}
                       </AvatarFallback>

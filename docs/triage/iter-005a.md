@@ -166,3 +166,111 @@ Net: ~30 lines minimum, cross-package (`packages/content/src/types.ts` + content
 ```
 
 (`lineCount` reports option (a) since that's the in-cycle-applicable path; option (b) is ~30+ lines and may escalate to rung 4 on schema check.)
+
+---
+
+## Apply pass (iter-005a-apply)
+
+User greenlit option (a). Applied as a narrow, single-file fix.
+
+### Diff
+
+`apps/web/src/lib/components/content/Spotlight.svelte`:
+
+1. **Type narrow** (lines 62-64, was 62-66):
+
+```diff
+   creator?: {
+-    username?: string | null;
+-    displayName?: string | null;
+-    avatar?: string | null;
++    name?: string | null;
+   } | null;
+```
+
+2. **Derivation rewrite** (line ~80, was 82-84):
+
+```diff
+-  const creatorName = $derived(
+-    item.creator?.displayName ?? item.creator?.username ?? ''
+-  );
++  const creatorName = $derived(item.creator?.name ?? '');
+```
+
+3. **Pruned now-unreachable AvatarImage** (line ~278, was 282-285):
+
+```diff
+   <Avatar class="spotlight__avatar">
+-    <AvatarImage
+-      src={item.creator?.avatar ?? undefined}
+-      alt={creatorName}
+-    />
+     <AvatarFallback>
+       {creatorName.charAt(0).toUpperCase()}
+     </AvatarFallback>
+   </Avatar>
+```
+
+`avatar` is no longer on the type after the narrow, so this line would type-error. Removing it is the minimal next step. The `AvatarFallback` initial-letter avatar takes over — no UX regression vs pre-fix because the entire `{#if creatorName}` block was always hidden (creatorName was always `''`).
+
+4. **Unused import cleanup** (line 23):
+
+```diff
+-  import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
++  import { Avatar, AvatarFallback } from '$lib/components/ui/Avatar';
+```
+
+### Proof test
+
+Path: `apps/web/src/lib/components/content/Spotlight.svelte.test.ts` (new file, co-located convention matches `AccessRevokedOverlay.svelte.test.ts`, `Avatar.svelte.test.ts`, etc.).
+
+Three assertions:
+
+1. **Primary proof** — `creator: {name: 'Jane Doe'}` → rendered output contains `Jane Doe` and `.spotlight__creator-name` element exists with that text. This is the falsifiability gate: the test would have failed against the pre-fix code (creatorName === '' → block hidden → element absent).
+2. **Null guard** — `creator: {name: null}` → `.spotlight__creator` block omitted.
+3. **Absence guard** — no `creator` key → `.spotlight__creator` block omitted.
+
+Test framework: vitest + jsdom + Svelte 5 native `mount`/`unmount` from `$tests/utils/component-test-utils.svelte`. `$app/state` mocked via `vi.mock`.
+
+Run output:
+
+```
+✓ src/lib/components/content/Spotlight.svelte.test.ts (3 tests) 58ms
+Test Files  1 passed (1)
+     Tests  3 passed (3)
+```
+
+### Typecheck
+
+`pnpm --filter web typecheck` exited non-zero, but the only failure is a pre-existing unrelated error:
+
+```
+src/__denoise_proofs__/iter-029/F3-brand-cache-waituntil-no-catch.test.ts(23,61): error TS2304: Cannot find name 'src'.
+```
+
+Committed in `ead3f9db` (denoise iter-029, before this cycle). Filtered for `spotlight` (case-insensitive): no errors. Spotlight.svelte and the new test compile clean.
+
+### MCP gate
+
+`mcp__ide__getDiagnostics` is not registered as a deferred tool in this environment (ToolSearch returned no match for `select:mcp__ide__getDiagnostics`). Fell back to the typecheck above as the diagnostics signal — both confirm no new errors against the changed file.
+
+### Recurrence
+
+`signal:type-drift-template-vs-api` incremented to hits=2 with verdict_history entry covering the apply outcome. Promotion threshold remains 3 hits across DISTINCT beads (per the notes amendment in `recurrence.json`); this iter-005a-apply hit is on the same bead so it doesn't count toward distinct-bead promotion — it just records the resolution path.
+
+### Files staged
+
+- `apps/web/src/lib/components/content/Spotlight.svelte`
+- `apps/web/src/lib/components/content/Spotlight.svelte.test.ts` (new)
+- `docs/triage/master.md`
+- `docs/triage/iter-005a.md`
+- `docs/triage/recurrence.json`
+- `.beads/issues.jsonl` (auto-updated by `bd close`)
+
+Explicitly NOT staged (unrelated dirty paths in tree from concurrent agents): `apps/web/src/paraglide/messages/en.js`, `apps/web/svelte.config.js`, `packages/constants/src/security.ts`, all `.claude/worktrees/*`, all `__denoise_proofs__/iter-027/*`, `apps/web/src/lib/components/layout/SidebarRail/*`, `apps/web/src/lib/components/ui/ContentCard/ContentCard.svelte`, `docs/denoise/*`, `workers/auth/*`.
+
+### Bead labels
+
+- Added: `triage:iter-005a-apply` (apply-pass attribution).
+- Kept: `triage:needs-greenlight` (audit trail per brief).
+- Status: `closed` with reason `option A applied per user greenlight; SpotlightItem.creator narrowed to {name?: string | null}; proof test passes`.

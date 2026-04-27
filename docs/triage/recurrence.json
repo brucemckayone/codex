@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-27T23:55",
+  "last_updated": "2026-04-27T23:30",
   "patterns": {
     "signal:type-drift-template-vs-api": {
-      "hits": 1,
-      "iters": ["iter-005a"],
-      "rung_density": { "iter-005a": 1 },
+      "hits": 2,
+      "iters": ["iter-005a", "iter-005a-apply"],
+      "rung_density": { "iter-005a": 1, "iter-005a-apply": 1 },
       "first_seen": "2026-04-27",
       "last_seen": "2026-04-27",
       "promoted": false,
@@ -18,9 +18,16 @@
           "action": "walk-only",
           "user_chose": null,
           "user_reasoning": "Awaiting user greenlight on option (a) vs (b). Pattern: a Svelte component declares a richer optional creator type than the API actually returns; the mismatch is hidden behind nullish-coalescing chains so runtime renders empty. Other consumers work around the gap by mapping API shape → component shape at the call site (org landing +page.svelte:551-554) — Spotlight is the lone consumer that doesn't, exposing the drift."
+        },
+        {
+          "iter": "iter-005a-apply",
+          "rung": 2,
+          "action": "auto-resolve",
+          "user_chose": "apply-option-a",
+          "user_reasoning": "User greenlit option (a) narrow fix. Applied: SpotlightItem.creator narrowed to {name?: string | null}; creatorName derivation rewritten to item.creator?.name ?? ''; AvatarImage block pruned (was unreachable post-narrow because the `avatar` field is no longer on the type; the AvatarFallback initial-letter avatar takes over — no UX regression vs pre-fix because the entire creator block was hidden anyway). Proof test at apps/web/src/lib/components/content/Spotlight.svelte.test.ts asserts creator.name renders + null/undefined cases hide the block. Test passes 3/3. Typecheck clean (no Spotlight-related errors; pre-existing iter-029 F3 typecheck error is unrelated and committed in ead3f9db)."
         }
       ],
-      "notes": "Meta-signal: tracks how often optional-typed component props (e.g. `creator?: { username?, displayName?, avatar? }`) silently absorb API-shape mismatches into empty-string runtime rendering. If 3+ recurrences, promote rule: 'component types that EXTEND a canonical API type must `extends ContentItem` (or equivalent) so type drift surfaces at compile time, not as silent blank renders'."
+      "notes": "Meta-signal: tracks how often optional-typed component props (e.g. `creator?: { username?, displayName?, avatar? }`) silently absorb API-shape mismatches into empty-string runtime rendering. Hit 2 was the apply pass — same bead, same fingerprint, same iter cohort. If 3+ DISTINCT beads recur (different component, same shape), promote rule: 'component types that EXTEND a canonical API type must `extends ContentItem` (or equivalent) so type drift surfaces at compile time, not as silent blank renders'."
     },
     "signal:concurrent-cycle-suffix": {
       "hits": 1,
