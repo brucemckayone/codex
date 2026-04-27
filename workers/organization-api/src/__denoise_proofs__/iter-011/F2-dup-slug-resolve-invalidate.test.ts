@@ -4,13 +4,15 @@
  * Fingerprint: simplification:duplicate-utility-helper (sub-stem)
  * Severity: major (cross-worker drift risk on slug-keyed cache invalidation)
  *
- * Sites (both implement `db.query.organizations.findFirst({where: eq(id),
+ * Sites (all implemented `db.query.organizations.findFirst({where: eq(id),
  * columns: {slug: true}}) → cache.invalidate(slug)` inside a try/catch
  * "Non-critical — slug cache expires via TTL" swallow):
  *   - workers/content-api/src/routes/content.ts:78-91 (inside
  *     `bumpOrgContentVersion`)
  *   - workers/organization-api/src/routes/members.ts:99-114
  *     (`invalidateOrgSlugCache`)
+ *   - workers/organization-api/src/routes/settings.ts:183-218 (inside
+ *     `invalidateBrandAndCache`) — added Codex-y6x9j (triage iter-003).
  *
  * Drift risk: the two implementations could diverge on retry/timeout
  * semantics, on the swallow message, or on which orgId source is the
@@ -35,10 +37,12 @@
 import { describe, expect, it } from 'vitest';
 import contentSrc from '../../../../content-api/src/routes/content.ts?raw';
 import membersSrc from '../../routes/members.ts?raw';
+import settingsSrc from '../../routes/settings.ts?raw';
 
 const SITES: Array<{ path: string; src: string }> = [
   { path: 'workers/content-api/src/routes/content.ts', src: contentSrc },
   { path: 'workers/organization-api/src/routes/members.ts', src: membersSrc },
+  { path: 'workers/organization-api/src/routes/settings.ts', src: settingsSrc },
 ];
 
 describe('iter-011 F2 — slug-resolve-then-invalidate duplication', () => {

@@ -41,7 +41,11 @@ import {
   updateFeaturesSchema,
   uuidSchema,
 } from '@codex/validation';
-import { multipartProcedure, procedure } from '@codex/worker-utils';
+import {
+  invalidateOrgSlugCache,
+  multipartProcedure,
+  procedure,
+} from '@codex/worker-utils';
 
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -184,20 +188,12 @@ async function invalidateBrandAndCache(
 ): Promise<void> {
   // 1. Synchronous: invalidate the slug-keyed public info cache.
   //    This is the cache that `/public/:slug/info` reads on reload.
+  //    R14 (denoise iter-011): use shared `invalidateOrgSlugCache` helper
+  //    instead of inlining the slug-resolve + invalidate block.
   if (ctx.env.CACHE_KV) {
-    try {
-      const db = createDbClient(ctx.env);
-      const org = await db.query.organizations.findFirst({
-        where: eq(schema.organizations.id, orgId),
-        columns: { slug: true },
-      });
-      if (org?.slug) {
-        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
-        await cache.invalidate(org.slug);
-      }
-    } catch {
-      // Non-critical — slug cache expires via TTL if the await path fails.
-    }
+    const db = createDbClient(ctx.env);
+    const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+    await invalidateOrgSlugCache({ db, cache, orgId, logger: obs });
   }
 
   // 2. Fire-and-forget: warm BRAND_KV + bump orgId version.

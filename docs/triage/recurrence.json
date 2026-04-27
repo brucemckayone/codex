@@ -1,7 +1,47 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-27",
+  "last_updated": "2026-04-27T22:50",
   "patterns": {
+    "route:self:promoted-helper-missed-call-site": {
+      "hits": 1,
+      "iters": ["iter-003"],
+      "rung_density": { "iter-003": 1 },
+      "first_seen": "2026-04-27",
+      "last_seen": "2026-04-27",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-y6x9j"],
+      "verdict_history": [
+        {
+          "iter": "iter-003",
+          "rung": 1,
+          "action": "auto-resolve",
+          "user_chose": null,
+          "user_reasoning": "Auto mode (/loop). A denoise R-rule (R14: `invalidateOrgSlugCache` extraction from iter-011 F2) was promoted but the original F2 proof test only covered 2 of the 3 in-repo call sites (content.ts + members.ts). The third inline block in workers/organization-api/src/routes/settings.ts was filed as a follow-up bead. This iter resolves it: replaced the inline block with the helper, extended the existing F2 proof test SITES array to include settings.ts, both pass."
+        }
+      ],
+      "notes": "Fingerprint: a promoted denoise rule extracted a helper, but the proof test only covered N-1 known sites; an Nth site filed as a separate bead lands as rung-1 (mechanical apply of the same recipe). If 3+ similar beads land, rule candidate: 'when a denoise R-rule promotes, the cycle that promotes the rule SHOULD enumerate ALL in-repo sites and either fix all or file beads against all of them'. Codex-y6x9j was originally misclassified rung-4 in iter-002 because the description text mentioned `cache` and the classifier conservatively matched a `.env`-touching path — re-read of the description showed it's a pure mechanical helper-extract."
+    },
+    "signal:misclassification-keyword-false-positive": {
+      "hits": 1,
+      "iters": ["iter-003"],
+      "rung_density": { "iter-003": 1 },
+      "first_seen": "2026-04-27",
+      "last_seen": "2026-04-27",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-y6x9j"],
+      "verdict_history": [
+        {
+          "iter": "iter-003",
+          "rung": null,
+          "action": "meta-signal",
+          "user_chose": "reclassify-on-pick",
+          "user_reasoning": "iter-002 classifier rung-4'd this bead because the description string mentioned `.env`/cache patterns. iter-003 brief flagged the suspect classification, the agent re-read and re-classified rung-1, and the fix landed in <12 minutes. Suggests classifier should sample-read the cited file:line before sending a bead to rung-4 on keyword match alone."
+        }
+      ],
+      "notes": "Meta-signal: tracks how often the classifier's regex/keyword filter mistakes a description for a high-impact path when the actual cited file is in a different package. If 3+ recurrences, promote rule: 'classifier MUST read the cited file:line for any bead being routed to rung-4 on path-keyword match alone — false-positive cost is low (one extra read) and false-negative cost is high (real fixes deferred indefinitely)'."
+    },
     "route:pending:codex-ttavz-12-auth-remote-broken-endpoint": {
       "hits": 1,
       "iters": ["iter-001"],
@@ -63,9 +103,9 @@
       "notes": "Fingerprint: rung-1 mechanical fix on denoise proof-test infrastructure (no denoise:* label on the bead, but the touched files are __denoise_proofs__/iter-NNN/). If 3+ similar beads land, rule candidate: 'beads describing path/import/byte-mechanical fixes in __denoise_proofs__/ are auto-rung-1 even when their parent fingerprint is denoise-shaped, because they are scaffolding fixes not finding-resolutions'."
     },
     "signal:auto-loop-skip-rung-2-plus": {
-      "hits": 1,
-      "iters": ["iter-002"],
-      "rung_density": { "iter-002": 27 },
+      "hits": 2,
+      "iters": ["iter-002", "iter-003"],
+      "rung_density": { "iter-002": 27, "iter-003": 26 },
       "first_seen": "2026-04-27",
       "last_seen": "2026-04-27",
       "promoted": false,
@@ -78,9 +118,16 @@
           "action": "meta-signal",
           "user_chose": "loop-policy-override",
           "user_reasoning": "Auto-loop policy this cycle: skip rung 2+ beads, only resolve rung 0/1. Eligible queue had 28 beads — only 1 classified as rung 1 after applying R7 (epic→4), R8 (no file:line→3), and high-impact path filter. Indicates the open backlog is dominated by reasoned/design-shaped work that genuinely needs a human."
+        },
+        {
+          "iter": "iter-003",
+          "rung": null,
+          "action": "meta-signal",
+          "user_chose": "loop-policy-override",
+          "user_reasoning": "Auto-loop policy continues. iter-003 succeeded only because the brief explicitly flagged a misclassification (Codex-y6x9j) for re-examination; without that hint the cycle would have returned `{ok: false, no rung 0/1 beads available}`. Reinforces signal that auto-loop /triage is sustainable only as long as misclassified rung-1 candidates remain hidden in the rung-4 list."
         }
       ],
-      "notes": "If this signal recurs across 3+ /loop /triage iterations with the same rung-1 famine, /loop /triage becomes low-yield and the user should switch to manual /triage with --bead= overrides. Track for promotion rule: 'when rung-1 yield <2 per cycle for 3 consecutive auto-loop iters, parent should suggest pausing /loop and surfacing rung-3/4 backlog for greenlight'."
+      "notes": "Hits=2 of 3 needed for promotion. If iter-004 also exits with ≤1 rung-1 candidate, promote rule: 'after 3 consecutive auto-loop /triage cycles where rung-1 yield ≤1 per cycle, parent should pause /loop and ask user to greenlight rung-3/4 work or switch to a different skill'. The iter-003 verdict also adds a sub-pattern: relying on per-cycle classifier hints to surface misclassified beads is unsustainable — the classifier itself needs the upgrade tracked under signal:misclassification-keyword-false-positive."
     }
   }
 }
