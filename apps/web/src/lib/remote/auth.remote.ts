@@ -10,38 +10,14 @@
  * - Session cookies are HTTPOnly and Secure in production
  */
 
-import { COOKIES, getCookieConfig } from '@codex/constants';
-import { redirect } from '@sveltejs/kit';
 import { z } from 'zod';
-import { dev } from '$app/environment';
 import { form, getRequestEvent, query } from '$app/server';
 import { logger } from '$lib/observability';
 import { createServerApi, serverApiUrl } from '$lib/server/api';
-import { extractSessionToken } from '$lib/server/auth-utils';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Schemas for forms (use _password prefix to prevent repopulation)
 // ─────────────────────────────────────────────────────────────────────────────
-
-const registerFormSchema = z
-  .object({
-    name: z
-      .string()
-      .min(2, 'Name must be at least 2 characters')
-      .max(100)
-      .optional(),
-    email: z.string().email('Please enter a valid email address'),
-    _password: z
-      .string()
-      .min(8, 'Password must be at least 8 characters')
-      .regex(/[a-zA-Z]/, 'Password must contain at least one letter')
-      .regex(/[0-9]/, 'Password must contain at least one number'),
-    _confirmPassword: z.string(),
-  })
-  .refine((data) => data._password === data._confirmPassword, {
-    message: 'Passwords do not match',
-    path: ['_confirmPassword'],
-  });
 
 const forgotPasswordFormSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -63,74 +39,6 @@ const resetPasswordFormSchema = z
   });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper to extract and set session cookie from auth response
-// ─────────────────────────────────────────────────────────────────────────────
-
-function extractAndSetSessionCookie(
-  response: Response,
-  cookies: ReturnType<typeof getRequestEvent>['cookies'],
-  isSecure: boolean
-): boolean {
-  const token = extractSessionToken(response);
-  if (!token) return false;
-
-  // Use getCookieConfig for cross-subdomain cookie domain (matches logout)
-  const { request, platform } = getRequestEvent();
-  const host = request.headers.get('host') ?? undefined;
-  const cookieConfig = getCookieConfig(platform?.env, host);
-
-  cookies.set(COOKIES.SESSION_NAME, token, {
-    path: cookieConfig.path,
-    domain: cookieConfig.domain,
-    httpOnly: true,
-    secure: isSecure,
-    sameSite: 'lax',
-  });
-
-  return true;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Register Form
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Registration form with progressive enhancement
- */
-export const registerForm = form(
-  registerFormSchema,
-  async ({ name, email, _password }) => {
-    const { platform, cookies } = getRequestEvent();
-
-    const authUrl = serverApiUrl(platform, 'auth');
-    const response = await fetch(`${authUrl}/api/auth/sign-up/email`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password: _password }),
-    });
-
-    if (!response.ok) {
-      const error = (await response
-        .json()
-        .catch(() => ({ message: 'Registration failed' }))) as {
-        message?: string;
-      };
-      return {
-        success: false,
-        error: error.message || 'Failed to create account',
-      };
-    }
-
-    // Extract and set session cookie
-    const isSecure =
-      !dev && (!platform?.env || platform.env.ENVIRONMENT !== 'development');
-    extractAndSetSessionCookie(response, cookies, isSecure);
-
-    redirect(303, '/library');
-  }
-);
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Forgot Password Form
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -143,10 +51,10 @@ export const forgotPasswordForm = form(
     const { platform } = getRequestEvent();
 
     const authUrl = serverApiUrl(platform, 'auth');
-    const response = await fetch(`${authUrl}/api/auth/forgot-password`, {
+    const response = await fetch(`${authUrl}/api/auth/forget-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, redirectTo: '/reset-password' }),
     });
 
     // Log failures server-side for monitoring (but don't expose to user)
@@ -189,12 +97,14 @@ export const resetPasswordForm = form(
         .json()
         .catch(() => ({ message: 'Reset failed' }))) as { message?: string };
       return {
-        success: false,
-        error: error.message || 'Failed to reset password',
+        success: false as const,
+        error:
+          error.message ||
+          'Password reset failed. Token may be invalid or expired.',
       };
     }
 
-    redirect(303, '/login?reset=success');
+    return { success: true as const };
   }
 );
 

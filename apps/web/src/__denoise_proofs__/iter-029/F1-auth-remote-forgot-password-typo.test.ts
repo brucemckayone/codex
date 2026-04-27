@@ -58,7 +58,7 @@ import { describe, expect, it } from 'vitest';
 
 const AUTH_REMOTE = resolve(__dirname, '../../lib/remote/auth.remote.ts');
 
-describe.skip('iter-029 F1 — auth.remote.ts forgot-password typo', () => {
+describe('iter-029 F1 — auth.remote.ts forgot-password typo', () => {
   it('forgotPasswordForm POSTs to canonical /api/auth/forget-password (not /forgot-password)', () => {
     const source = readFileSync(AUTH_REMOTE, 'utf-8');
 

@@ -63,13 +63,15 @@ import { describe, expect, it } from 'vitest';
 
 const ROUTES_ROOT = resolve(__dirname, '../../routes');
 
-const ORPHAN_EXPORTS = [
-  'registerForm',
-  'forgotPasswordForm',
-  'resetPasswordForm',
-] as const;
+// History (2026-04-27, Codex-ttavz.15 resolution):
+//   - registerForm DELETED from auth.remote.ts (page action remains canonical
+//     for register because it requires Set-Cookie access). No orphan to assert.
+//   - forgotPasswordForm + resetPasswordForm WIRED into their respective
+//     +page.svelte files; the page actions were removed. Each must now have
+//     ≥1 consumer in routes/.
+const ORPHAN_EXPORTS = ['forgotPasswordForm', 'resetPasswordForm'] as const;
 
-describe.skip('iter-029 F2 — auth.remote.ts orphan RPC surface', () => {
+describe('iter-029 F2 — auth.remote.ts orphan RPC surface', () => {
   for (const name of ORPHAN_EXPORTS) {
     it(`${name} has at least one consumer in apps/web/src/routes (or the file is deleted)`, () => {
       // Use git grep so we can scope to routes only and exclude test files.
