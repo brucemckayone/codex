@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-27T23:30",
+  "last_updated": "2026-04-27T23:10",
   "patterns": {
     "route:self:promoted-helper-missed-call-site": {
       "hits": 1,
@@ -83,14 +83,14 @@
       "notes": "Meta-pattern: tracks how often the rung-3 payload format itself underspecifies the question. Distinct from a routing pattern — this is a skill-self-improvement signal."
     },
     "route:self:proof-test-path-mechanical-fix": {
-      "hits": 1,
-      "iters": ["iter-002"],
-      "rung_density": { "iter-002": 1 },
+      "hits": 2,
+      "iters": ["iter-002", "iter-005"],
+      "rung_density": { "iter-002": 5, "iter-005": 1 },
       "first_seen": "2026-04-27",
       "last_seen": "2026-04-27",
       "promoted": false,
       "rule_id": null,
-      "beads": ["Codex-fcdkk"],
+      "beads": ["Codex-fcdkk", "Codex-zhe80"],
       "verdict_history": [
         {
           "iter": "iter-002",
@@ -98,9 +98,56 @@
           "action": "auto-resolve",
           "user_chose": null,
           "user_reasoning": "Auto mode (/loop). Pure mechanical path correction across 5 sibling test files; bead self-described as 'no proof needed (will fail loud)' — proof shape applied was filesystem-existence check that the corrected repoRoot resolves to a real package.json + apps/web."
+        },
+        {
+          "iter": "iter-005",
+          "rung": 1,
+          "action": "auto-resolve",
+          "user_chose": null,
+          "user_reasoning": "Auto mode. Codex-zhe80 was a denoise:simplification bead (CreatorCard.svelte inline-redeclares ContentItem+SocialLinks). When the F2 proof test was un-skipped and run, it failed with ENOENT — same `repoRoot` 6→5-dotdot bug as iter-002's 5 fixes. Patched as part of the same PR. The bug recurs because iter-027's proof-test scaffolding inherited the iter-012 template's path mistake. F1/F3/F4 sibling tests confirmed to share the same defect — queued for iter-006 agent team."
         }
       ],
-      "notes": "Fingerprint: rung-1 mechanical fix on denoise proof-test infrastructure (no denoise:* label on the bead, but the touched files are __denoise_proofs__/iter-NNN/). If 3+ similar beads land, rule candidate: 'beads describing path/import/byte-mechanical fixes in __denoise_proofs__/ are auto-rung-1 even when their parent fingerprint is denoise-shaped, because they are scaffolding fixes not finding-resolutions'."
+      "notes": "Fingerprint: rung-1 mechanical fix on denoise proof-test infrastructure. Hits=2 after iter-005. F1 (Codex-w30gi), F3 (Codex-0n26b), F4 (Codex-mqyql.18) of iter-027 all share the same path bug — iter-006 agent team will land 3 simultaneous fixes. After iter-006: hits=5 across 4 iters, but cluster-defect counts as a single agent-team verdict per the new R1 exception. PROMOTION CANDIDATE for RT2: 'beads describing scaffolding fixes in __denoise_proofs__/ are auto-rung-1 even when fingerprint is denoise-shaped, because they are scaffolding fixes not finding-resolutions. NEW iter cohorts of __denoise_proofs__/ tests must inherit the corrected 5-dotdot path — lint candidate.'"
+    },
+    "signal:over-filter-denoise-tagged-rung-1": {
+      "hits": 1,
+      "iters": ["iter-005"],
+      "rung_density": { "iter-005": 1 },
+      "first_seen": "2026-04-27",
+      "last_seen": "2026-04-27",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-zhe80"],
+      "verdict_history": [
+        {
+          "iter": "iter-005",
+          "rung": null,
+          "action": "meta-signal",
+          "user_chose": "correct-eligibility-filter",
+          "user_reasoning": "Auto mode. iter-004's cycle agent applied the eligibility filter `denoise:*` → exclude wholesale, missing the nuance that denoise OWNS verification, not resolution. Once a bead has a cited proof-test path in `__denoise_proofs__/`, it is resolution-ready and any skill (including /triage) may close it. iter-005's brief explicitly over-rode this and surfaced Codex-zhe80 — a clean rung-1 candidate that iter-004 had hidden as ineligible."
+        }
+      ],
+      "notes": "Meta-signal: tracks how often the cycle agent's filter wholesale excludes denoise:*-tagged beads instead of distinguishing 'verification phase' (denoise-owned) vs 'resolution phase' (any-skill-eligible if proof test exists). If 3+ recurrences, promote rule: 'denoise:* beads ARE triage-eligible iff (a) they cite a __denoise_proofs__/ test path AND (b) the test is currently `it.skip` or `describe.skip` — these are denoise's hand-off signal that the bead is verification-complete and awaiting code-fix.'"
+    },
+    "signal:cluster-defect-team-fix-eligible": {
+      "hits": 1,
+      "iters": ["iter-005"],
+      "rung_density": { "iter-005": 1 },
+      "first_seen": "2026-04-27",
+      "last_seen": "2026-04-27",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-zhe80", "Codex-w30gi", "Codex-0n26b", "Codex-mqyql.18"],
+      "verdict_history": [
+        {
+          "iter": "iter-005",
+          "rung": null,
+          "action": "meta-signal",
+          "user_chose": "skill-update-cluster-exception",
+          "user_reasoning": "User pointed out: 'if we have related beads like that that are sharing a bug path an agent team would make sense to address them.' R1 (one bead per cycle) is over-rotated for clustered identical defects: the per-cycle review value of splitting an N-site fix collapses when the fix is byte-identical and the sites are independent. Skill §1 R1 amended with cluster-defect exception. iter-006 will be the first agent-team cycle, fixing F1/F3/F4 in parallel via 3 sub-agents — same mechanical fix shape, distinct files, no coordination required."
+        }
+      ],
+      "notes": "Meta-signal: triggers a skill-evolution event, not a routing decision. Signature: N≥3 beads with the same denoise-fingerprint, the same proof-test path bug, and the same fix recipe. Promotion path: if 3+ further cluster-defect cycles land, codify the team-fix protocol as RT3 with concrete steps (1) detect the cluster from recurrence ledger, (2) emit one team-spawn block with N sub-agents, (3) atomic commit per agent, (4) single recurrence-ledger entry covering all N beads. iter-006 is the prototype implementation."
     },
     "signal:auto-loop-skip-rung-2-plus": {
       "hits": 3,

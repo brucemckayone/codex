@@ -17,18 +17,18 @@ See `.claude/skills/triage/references/02-routing-rules.md` for full rule definit
 
 <!-- LADDER START -->
 
-_Snapshot timestamp_: 2026-04-27 (iter-004: re-scanned rung-3 P2 + P1 clusters; all 20 beads confirmed-not-rung-1)
-_Eligibility filter_: excludes `denoise:*`, `ds-review*`, `fallow-followup` (owned by other skills) and 4 in-progress beads + Codex-ttavz.12 (routed iter-001) + Codex-fcdkk + Codex-y6x9j (closed iter-002 + iter-003).
+_Snapshot timestamp_: 2026-04-27 (iter-005: corrected iter-004 over-filter; rung-1 candidates exist among denoise:*-tagged beads with proof tests)
+_Eligibility filter_: excludes `denoise:*` (only when **no** proof test path is cited — beads with cited proof tests in `__denoise_proofs__/` ARE resolution-ready and triage-eligible), `ds-review*`, `fallow-followup` (owned by other skills) and 4 in-progress beads + Codex-ttavz.12 (routed iter-001) + Codex-fcdkk + Codex-y6x9j + Codex-zhe80 (closed iter-002, iter-003, iter-005).
 
 | Rung | Count | Top by priority |
 |------|-------|-------------------|
 | 0 — Trivial | 0 | — |
-| 1 — Mechanical | 0[^iter004-r1] | — |
+| 1 — Mechanical | 3[^iter005-r1] | Codex-w30gi (P1, F1), Codex-0n26b (P1, F3), Codex-mqyql.18 (P2, F4) |
 | 2 — Scoped | 1 | Codex-v5bzy (P1) — needs design choice (a/b reconcile) |
 | 3 — Multi-file | 21 | Codex-x0pa (P0), Codex-6axi0 (P1), Codex-i49f (P1), Codex-u498 (P1), Codex-d3g6 (P1) |
 | 4 — Design-needed | 5 | Codex-ev3k (P1 epic), Codex-cbbet (P2 epic), Codex-zp30d (P2), Codex-r4woq (P2 epic), Codex-84b53 (P2 epic) |
 
-[^iter004-r1]: iter-004 ran a focused re-scan of the iter-002 rung-3 P2 cluster (15 beads) + P1 cluster (5 beads) to look for further misclassifications after the iter-003 Codex-y6x9j precedent. **Zero further rung-1 candidates found** — the queue is genuinely drained, not under-classified. The 3-cycle window of low rung-1 yield (iter-002: 1, iter-003: 1, iter-004: 0) tripped the `signal:auto-loop-skip-rung-2-plus` recurrence pattern → promoted to **RT1** (pause /loop after 3 consecutive low-yield cycles).
+[^iter005-r1]: iter-005 corrected iter-004's eligibility filter: denoise:*-tagged beads WITH a cited proof test path are resolution-ready and triage-eligible. iter-004 had over-filtered all denoise:* beads, missing 4 actually-rung-1 candidates (Codex-zhe80 — closed this iter, plus F1/F3/F4 of iter-027 still open). The 3 remaining (F1/F3/F4) all share an iter-002-shape `repoRoot` path bug in their proof tests — earmarked for an iter-006 agent team per the new R1 cluster-defect exception. Recurrence: `signal:over-filter-denoise-tagged-rung-1` filed at hits=1 this iter; if iter-006 confirms the team-fix shape works, promote to RT2.
 
 <!-- LADDER END -->
 
@@ -42,12 +42,17 @@ _Eligibility filter_: excludes `denoise:*`, `ds-review*`, `fallow-followup` (own
 | iter-002 | 2026-04-27 | 1 | Codex-fcdkk | mechanical: corrected `repoRoot` path in 5 iter-012 proof tests (6→5 dotdot levels) | closed; tests collect cleanly + repoRoot now resolves to actual repo root (verified via node fs check) |
 | iter-003 | 2026-04-27 | 1 | Codex-y6x9j | mechanical: replaced inline slug-resolve+invalidate block in `workers/organization-api/src/routes/settings.ts` with existing `invalidateOrgSlugCache` helper from `@codex/worker-utils` (R14). Re-classified from rung-4 (iter-002) to rung-1 — earlier classifier matched a `.env` regex on description text; reread shows pure mechanical helper-extract. | closed; F2-dup-slug-resolve-invalidate proof test extended to include settings.ts and passes (1/1); existing settings.test.ts passes (24/24); typecheck clean |
 | iter-004 | 2026-04-27 | n/a | (none) | re-scanned rung-3 P2 (15 beads) + P1 (5 beads) clusters per iter-003 misclassification precedent; all confirmed-not-rung-1. Recurrence `signal:auto-loop-skip-rung-2-plus` hit 3rd time → **promoted to RT1**. | `ok: false`, no rung 0/1 work auto-resolved; new hard rule codified |
+| iter-005 | 2026-04-27 | 1 | Codex-zhe80 | mechanical: replaced inline `interface SocialLinks` and `interface ContentItem` declarations in `apps/web/src/lib/components/ui/CreatorCard/CreatorCard.svelte` with `import type { ContentItem, SocialLinks } from './types'` (canonical sibling exports the identical shapes). Also fixed the proof test's `repoRoot` path (6→5 dotdots, same shape as iter-002's iter-012 fix) and un-skipped `describe.skip` → `describe`. Brief over-rode iter-004's denoise:* filter — denoise-tagged beads with cited proof tests are resolution-ready. | closed; F2 proof test passes 5/5; identified F1/F3/F4 sibling proof tests have the SAME path bug → iter-006 agent team queued |
 
 ---
 
 ## Recurrence watches
 
-_None yet. Patterns at hits=2 (one cycle from threshold) appear here for visibility before they auto-promote._
+| Pattern | Hits | First seen | Beads | Notes |
+|---------|------|-----------|-------|-------|
+| `route:self:proof-test-path-mechanical-fix` | 2 | iter-002 | Codex-fcdkk, Codex-zhe80 | Same `repoRoot` 6→5-dotdot fix recurring across iter cohorts. F1/F3/F4 of iter-027 expected to hit it 3rd time in iter-006 → promotion threshold. |
+| `signal:over-filter-denoise-tagged-rung-1` | 1 | iter-005 | Codex-zhe80 | iter-004's cycle agent filtered out all denoise:*-tagged beads, missing this rung-1 candidate. Corrected this iter. Promote to RT2 if iter-006 confirms. |
+| `signal:cluster-defect-team-fix-eligible` | 1 | iter-005 | Codex-zhe80 (parent), F1/F3/F4 (siblings) | First sighting of the "N beads sharing identical fingerprint + identical fix shape" pattern. Skill §1 R1 updated with cluster-defect exception. iter-006 will be the first agent-team cycle. |
 
 ---
 

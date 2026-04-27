@@ -19,6 +19,7 @@
 <script lang="ts">
   import type { HTMLAttributes } from 'svelte/elements';
   import type { Snippet } from 'svelte';
+  import type { ContentItem, SocialLinks } from './types';
   import * as m from '$paraglide/messages';
   import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
   import {
@@ -30,20 +31,6 @@
     MicIcon,
     FileTextIcon,
   } from '$lib/components/ui/Icon';
-
-  interface SocialLinks {
-    website?: string;
-    twitter?: string;
-    youtube?: string;
-    instagram?: string;
-  }
-
-  interface ContentItem {
-    title: string;
-    slug: string;
-    thumbnailUrl: string | null;
-    contentType: string;
-  }
 
   interface Props extends HTMLAttributes<HTMLDivElement> {
     username: string;

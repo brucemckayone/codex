@@ -40,7 +40,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const repoRoot = resolve(__dirname, '../../../../../..');
+const repoRoot = resolve(__dirname, '../../../../..');
 const cardSvelte = resolve(
   repoRoot,
   'apps/web/src/lib/components/ui/CreatorCard/CreatorCard.svelte'
@@ -50,7 +50,7 @@ const cardTypes = resolve(
   'apps/web/src/lib/components/ui/CreatorCard/types.ts'
 );
 
-describe.skip('iter-027 F2 — CreatorCard.svelte must import ContentItem + SocialLinks from sibling types.ts', () => {
+describe('iter-027 F2 — CreatorCard.svelte must import ContentItem + SocialLinks from sibling types.ts', () => {
   it('canonical types.ts exports ContentItem with the 4-field shape', () => {
     expect(existsSync(cardTypes)).toBe(true);
     const src = readFileSync(cardTypes, 'utf8');
