@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-28T01:30",
+  "last_updated": "2026-04-28T22:00",
   "patterns": {
     "route:self:large-mechanical-css-token-sweep": {
       "hits": 1,
@@ -90,14 +90,14 @@
       "notes": "Meta-signal: tracks how often concurrent /triage cycles produce overlapping iter docs. If 3+ recurrences, promote rule: 'concurrent agents must always lock the iter-NNN doc name FIRST via touch+commit (or equivalent file-creation race), and second agent always picks suffix [a-z] without coordination'. iter-005a was a clean parallel — no merge, no master.md collision, no ledger collision. Pattern works."
     },
     "route:self:promoted-helper-missed-call-site": {
-      "hits": 1,
-      "iters": ["iter-003"],
-      "rung_density": { "iter-003": 1 },
+      "hits": 2,
+      "iters": ["iter-003", "iter-009"],
+      "rung_density": { "iter-003": 1, "iter-009": 1 },
       "first_seen": "2026-04-27",
-      "last_seen": "2026-04-27",
+      "last_seen": "2026-04-28",
       "promoted": false,
       "rule_id": null,
-      "beads": ["Codex-y6x9j"],
+      "beads": ["Codex-y6x9j", "Codex-y63gl.14"],
       "verdict_history": [
         {
           "iter": "iter-003",
@@ -105,9 +105,16 @@
           "action": "auto-resolve",
           "user_chose": null,
           "user_reasoning": "Auto mode (/loop). A denoise R-rule (R14: `invalidateOrgSlugCache` extraction from iter-011 F2) was promoted but the original F2 proof test only covered 2 of the 3 in-repo call sites (content.ts + members.ts). The third inline block in workers/organization-api/src/routes/settings.ts was filed as a follow-up bead. This iter resolves it: replaced the inline block with the helper, extended the existing F2 proof test SITES array to include settings.ts, both pass."
+        },
+        {
+          "iter": "iter-009",
+          "rung": 1,
+          "action": "auto-resolve",
+          "user_chose": null,
+          "user_reasoning": "Auto mode (/loop). ShaderHero.svelte:135-146 had already promoted the 30-frame poll-counter pattern that amortises getShaderConfig (forced style recalc on getComputedStyle) across animation frames, but two later-arriving consumers — ImmersiveShaderPlayer.svelte (Codex-03rh audio-shader-mode entry, 2026-04-14) and ShaderPreview.svelte (studio shader-picker preview) — shipped without inheriting the optimisation. Both were calling getShaderConfig per-frame at 60Hz. Lifted the cadence into a shared closure-factory helper at apps/web/src/lib/components/ui/ShaderHero/use-poll-config.ts (createPollConfig); both consumers now build their own closure and call pollConfig() per frame. ShaderHero.svelte intentionally NOT migrated (its inline block has tight coupling to the local `presetOverride` prop and pollEveryNFrames is documented inline; migrating would be a no-op functionally). Proof test rewritten from describe.skip sketch into 4 behavioural assertions on createPollConfig directly (R10 case b — pure-function helper, consumers correct by construction). Test covers default cadence (≤6 fetcher calls in 120 frames), cache identity between refreshes, custom cadence, and lexical-state pickup on switchPreset (the ShaderPreview case)."
         }
       ],
-      "notes": "Fingerprint: a promoted denoise rule extracted a helper, but the proof test only covered N-1 known sites; an Nth site filed as a separate bead lands as rung-1 (mechanical apply of the same recipe). If 3+ similar beads land, rule candidate: 'when a denoise R-rule promotes, the cycle that promotes the rule SHOULD enumerate ALL in-repo sites and either fix all or file beads against all of them'. Codex-y6x9j was originally misclassified rung-4 in iter-002 because the description text mentioned `cache` and the classifier conservatively matched a `.env`-touching path — re-read of the description showed it's a pure mechanical helper-extract."
+      "notes": "Fingerprint: a promoted/established pattern in one component is missed by later-arriving consumers, surfacing as a per-frame perf hot path or a duplicated inline block. iter-003 case was a denoise R-rule helper with an Nth call site; iter-009 case was an in-component pattern that wasn't extracted at promotion time. Hit 2 — if a 3rd recurrence lands, promote rule: 'when a perf/structural pattern is amortised inline in component A and component B/C are introduced later that share the underlying expensive call (getShaderConfig, audio.getAnalysis(), etc.), the introducing PR MUST extract the cadence into a shared helper before merge — denoise filters that flag the bare expensive call in render loops would catch this earlier'. Codex-y6x9j was originally misclassified rung-4 in iter-002 because the description text mentioned `cache` and the classifier conservatively matched a `.env`-touching path — re-read of the description showed it's a pure mechanical helper-extract."
     },
     "signal:misclassification-keyword-false-positive": {
       "hits": 1,
