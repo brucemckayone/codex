@@ -139,7 +139,7 @@
               <span class="rank">{formatRank(index)}</span>
             </td>
             <td class="col-thumb">
-              <a class="thumb" {href} tabindex="-1" aria-hidden="true">
+              <div class="thumb">
                 {#if item.thumbnailUrl}
                   <img
                     class="thumb-img"
@@ -155,7 +155,7 @@
                     </span>
                   </span>
                 {/if}
-              </a>
+              </div>
             </td>
             <td class="col-title">
               <a class="title" {href} title={item.contentTitle}>
@@ -305,7 +305,7 @@
     letter-spacing: var(--tracking-wider);
   }
 
-  /* ── Thumbnail ────────────────────────────────────────────── */
+  /* ── Thumbnail (decorative — title cell carries the link) ──── */
   .thumb {
     position: relative;
     display: block;
@@ -314,7 +314,6 @@
     border-radius: var(--radius-sm);
     overflow: hidden;
     background-color: var(--color-surface-secondary);
-    text-decoration: none;
   }
 
   .thumb-img {

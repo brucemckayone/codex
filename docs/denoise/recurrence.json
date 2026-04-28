@@ -44,25 +44,38 @@
       "note": "BLOCKER on blast-radius grounds (6 silent type-system bypasses in production routes). NEW fingerprint. Single-hit security exception does NOT fire (phase=types not security)."
     },
     "types:as-cast-without-guard": {
-      "hits": 3,
-      "iters": ["iter-005", "iter-006", "iter-028"],
-      "cycle_density": { "iter-005": 5, "iter-006": 1, "iter-028": 1 },
+      "hits": 4,
+      "iters": ["iter-005", "iter-006", "iter-028", "iter-030"],
+      "cycle_density": {
+        "iter-005": 5,
+        "iter-006": 1,
+        "iter-028": 1,
+        "iter-030": 3
+      },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": true,
       "rule_id": "R15 (applied in iter-029)",
-      "beads": ["Codex-lqvw4.9", "Codex-lqvw4.12", "Codex-qmrwe"],
+      "beads": [
+        "Codex-lqvw4.9",
+        "Codex-lqvw4.12",
+        "Codex-qmrwe",
+        "Codex-upi3i",
+        "Codex-hv7ld",
+        "Codex-e387g"
+      ],
       "severity": "major",
-      "note": "**R15 APPLIED iter-029.** R7 standard 3-hit threshold reached in iter-028 (hits 3 across iter-005, iter-006, iter-028; cumulative cycle_density=7). Rule promoted with non-trivial exception list — 4 reason codes: drizzle-infinite-recursion, framework-default-init, proxy-target, type-test. iter-028 F5 = DatabaseTransaction cast at content-service.ts:158 (drizzle-infinite-recursion candidate; the parent type widening exposed the cast as drift). `as unknown as` is a separate fingerprint and NOT covered by R15's exceptions."
+      "carveout_decision_pending": "F2 surfaced 18-site Stripe webhook discriminated-union pattern (Codex-hv7ld). Option A (mechanical inline annotations) vs Option B (RECOMMENDED — promote 5th R15 reason code 'stripe-event-discriminated-union' with verification recipe). Queued for iter-031 prep.",
+      "note": "**R15 APPLIED iter-029.** Rule promoted with 4 reason codes (drizzle-infinite-recursion, framework-default-init, proxy-target, type-test). iter-030 first scope-specific audit at workers: 23 cast hits inventoried, 3 NEW R15 violations + 1 carveout decision queued. F1 (Codex-upi3i, P2): identity-api membership.role narrowing across worker→hooks boundary — security-adjacent. F2 (Codex-hv7ld, P3): 18-site Stripe webhook discriminated-union pattern — needs 5th carve-out OR inline annotations. F3 (Codex-e387g, P3): 3-site err-as-Error cluster in ecom-api — sibling pattern already in-repo. Cumulative cycle_density=10 across 4 cycles."
     },
     "types:as-unknown-as": {
-      "hits": 2,
-      "iters": ["iter-005", "iter-006"],
-      "cycle_density": { "iter-005": 2, "iter-006": 3 },
+      "hits": 3,
+      "iters": ["iter-005", "iter-006", "iter-030"],
+      "cycle_density": { "iter-005": 2, "iter-006": 3, "iter-030": 1 },
       "first_seen": "2026-04-26",
       "last_seen": "2026-04-26",
       "promoted": false,
-      "rule_id": null,
+      "rule_id": "R7 STANDARD 3-HIT THRESHOLD REACHED iter-030 — R16 PROMOTION QUEUED for iter-031 prep",
       "beads": [
         "Codex-lqvw4.10",
         "Codex-lqvw4.17",
@@ -70,7 +83,7 @@
         "Codex-lqvw4.19"
       ],
       "severity": "mixed (minor + major)",
-      "note": "RECURRENCE #2. One more cycle increment triggers standard 3-hit R7 promotion."
+      "note": "**🚨 R7 STANDARD 3-HIT THRESHOLD REACHED iter-030** (hits 3 across iter-005, iter-006, iter-030; cumulative cycle_density 6). R-rule promotion (R16 candidate) queued for iter-031 prep. Suggested rule: 'value as unknown as Foo (the double-cast that bypasses TypeScript entirely) is forbidden in production code. Permitted only in: (a) Type-test scaffolding in *.test.ts files (reason: type-test); (b) Pragmatic framework-interop bridges where the third-party type system genuinely cannot express the relationship (reason: framework-interop-cast) — case-by-case review with documented external-issue link.' Under R16: workers/auth/src/index.ts:135 + workers/media-api/src/index.ts:129 are missing-generic-shortcut violations (use createWorker<TEnv>() instead). packages/test-utils/src/stripe-mock.ts:165 + packages/worker-utils/src/procedure/multipart-procedure.ts:279 likely qualify for reason: framework-interop-cast."
     },
     "types:redundant-cast-after-narrow": {
       "hits": 1,

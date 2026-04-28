@@ -16,6 +16,7 @@
   import { browser } from '$app/environment';
   import { loadRenderer } from '$lib/components/ui/ShaderHero/load-renderer';
   import { getShaderConfig, type ShaderPresetId } from '$lib/components/ui/ShaderHero/shader-config';
+  import { createPollConfig } from '$lib/components/ui/ShaderHero/use-poll-config';
   import type { ShaderRenderer, MouseState } from '$lib/components/ui/ShaderHero/renderer-types';
 
   interface Props {
@@ -32,6 +33,12 @@
   let gl: WebGL2RenderingContext | null = null;
   let renderer: ShaderRenderer | null = null;
   let currentPreset: ShaderPresetId | null = null;
+  // Closure reads `currentPreset` lexically — switchPreset() updates the
+  // variable, the next 30-frame tick picks it up. Amortises getShaderConfig
+  // (forced style recalc) per ShaderHero.svelte:135-146.
+  const pollConfig = createPollConfig(() =>
+    getShaderConfig(null, currentPreset as ShaderPresetId)
+  );
   let animFrameId = 0;
   let startTime = 0;
   let isReducedMotion = false;
@@ -77,7 +84,7 @@
     if (mouse.burstStrength > 0.01) mouse.burstStrength *= 0.85;
     else mouse.burstStrength = 0;
 
-    const config = getShaderConfig(null, currentPreset as ShaderPresetId);
+    const config = pollConfig();
     renderer.render(gl, time, mouse, config, canvasEl.width, canvasEl.height);
     hasRenderedStaticFrame = true;
     animFrameId = requestAnimationFrame(renderFrame);

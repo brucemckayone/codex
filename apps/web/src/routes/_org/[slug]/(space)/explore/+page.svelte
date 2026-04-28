@@ -332,6 +332,8 @@
     <form class="explore__search" onsubmit={handleSearchSubmit}>
       <SearchIcon size={18} class="explore__search-icon" />
       <input
+        id="explore-search"
+        name="q"
         type="search"
         class="explore__search-input"
         placeholder={m.explore_search_placeholder()}

@@ -1,4 +1,4 @@
-import { COOKIES } from '@codex/constants';
+import { BETTERAUTH_RATE_LIMITED_PATHS_SET, COOKIES } from '@codex/constants';
 import type { Context, Next } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -112,28 +112,42 @@ describe('Auth Worker Middleware - Unit Tests', () => {
   });
 
   describe('Rate Limiter Logic', () => {
-    it('should identify login endpoint correctly', () => {
-      const path = '/api/auth/email/login';
-      const method = 'POST';
-
-      const isLoginEndpoint =
-        path === '/api/auth/email/login' && method === 'POST';
-
-      expect(isLoginEndpoint).toBe(true);
+    // The canonical BetterAuth POST endpoints — sourced from
+    // `@codex/constants` so this test fails loudly if the path Set is
+    // ever truncated or stale literals creep back in.
+    // See Codex-ttavz.7 / denoise iter-002 F1.
+    it('matches the four canonical BetterAuth POST surfaces', () => {
+      const canonical = [
+        '/api/auth/sign-up/email',
+        '/api/auth/sign-in/email',
+        '/api/auth/forget-password',
+        '/api/auth/reset-password',
+      ];
+      for (const path of canonical) {
+        const isRateLimited =
+          BETTERAUTH_RATE_LIMITED_PATHS_SET.has(path) && true; // POST gating handled in middleware
+        expect(isRateLimited, `${path} must be rate-limited`).toBe(true);
+      }
     });
 
-    it('should not match non-login endpoints', () => {
-      const testCases = [
-        { path: '/api/auth/session', method: 'GET' },
-        { path: '/api/auth/email/login', method: 'GET' },
-        { path: '/api/other', method: 'POST' },
+    it('does NOT match unrelated or non-POST surfaces', () => {
+      const negatives = [
+        '/api/auth/session',
+        '/api/auth/sign-out',
+        '/api/auth/verify-email',
+        '/api/other',
+        // Stale legacy paths that used to be hard-coded here:
+        '/api/auth/email/login',
+        '/api/auth/email/register',
+        '/api/auth/email/send-reset-password-email',
+        '/api/auth/email/reset-password',
       ];
-
-      testCases.forEach(({ path, method }) => {
-        const isLoginEndpoint =
-          path === '/api/auth/email/login' && method === 'POST';
-        expect(isLoginEndpoint).toBe(false);
-      });
+      for (const path of negatives) {
+        expect(
+          BETTERAUTH_RATE_LIMITED_PATHS_SET.has(path),
+          `${path} must NOT be in the rate-limit set`
+        ).toBe(false);
+      }
     });
 
     it('should calculate TTL correctly from expiration date', () => {

@@ -695,7 +695,7 @@ export const account_payments_billing = () => `Billing Information`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const account_payments_billing_description = () => `Manage your payment methods and view billing history via the Stripe Customer Portal.`
+export const account_payments_billing_description = () => `Manage all your Codex subscriptions, payment methods and invoices in one place via the Stripe Customer Portal.`
 
 
 /**
@@ -2671,7 +2671,7 @@ export const billing_manage_stripe = () => `Manage Billing`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const billing_manage_stripe_description = () => `Manage your subscription, payment methods and invoices via the Stripe portal.`
+export const billing_manage_stripe_description = () => `Manage your subscriptions, payment methods and invoices via the Stripe portal. One portal covers every organisation you subscribe to.`
 
 
 /**
@@ -3223,7 +3223,7 @@ export const subscription_badge = () => `Subscriber`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const subscription_manage = () => `Manage Subscription`
+export const subscription_manage = () => `Manage Subscriptions`
 
 
 /**
@@ -3248,6 +3248,134 @@ export const subscription_cancel_reason = () => `Reason for cancelling (optional
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const subscription_cancel_confirm = () => `Cancel at end of period`
+
+
+/**
+ * @param {{ orgName: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_cancel_follow_notice = (params) => `Cancelling won't unfollow you. If you follow ${params.orgName}, you'll keep receiving their updates — unfollow from their page if you'd rather not.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_churn_reason_label = () => `What made you cancel? (optional)`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_churn_reason_too_expensive = () => `Too expensive`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_churn_reason_not_enough_content = () => `Not enough content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_churn_reason_found_alternative = () => `Found an alternative`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_churn_reason_not_using_it = () => `Not using it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_churn_reason_technical_issues = () => `Technical issues`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_churn_reason_other = () => `Other`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_churn_reason_other_required = () => `Tell us more so we can improve.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_health_banner_past_due_single = () => `A subscription needs attention — update your payment method to restore access.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_health_banner_paused_single = () => `A subscription is paused. Resume to restore access.`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_health_banner_multiple = (params) => `${params.count} subscriptions need attention.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_health_banner_cta_manage = () => `Manage subscriptions`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_health_banner_cta_update_payment = () => `Update payment`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_health_banner_cta_resume = () => `Resume`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const subscription_health_banner_dismiss = () => `Dismiss notice`
 
 
 /**

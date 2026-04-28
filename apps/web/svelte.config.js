@@ -40,10 +40,17 @@ const config = {
     // already covered by `font-src 'https://fonts.gstatic.com'`. Other
     // external stylesheet origins remain disallowed.
     //
-    // `connect-src 'self'` is sufficient because all worker traffic is
+    // `connect-src` is `self` in production because all worker traffic is
     // server-to-server (apps/web -> workers via createServerApi). The
     // browser only ever fetches from its own origin (SvelteKit endpoints,
     // remote functions, /__data.json).
+    //
+    // The dev-only `localhost:4100` / `*.nip.io:4100` entries on
+    // `connect-src` cover the AudioPlayer's `fetch(waveform.json)` sidecar.
+    // The waveform is rendered as a separate JSON file alongside the HLS
+    // playlist, and `fetch()` is governed by `connect-src` (not
+    // `media-src`). The same origins on `media-src` cover the
+    // `<audio src=master.m3u8>` (HLS) playback path.
     //
     // `frame-ancestors 'none'` is the modern equivalent of X-Frame-Options
     // DENY (the hooks.server.ts header still says SAMEORIGIN — keep both
@@ -150,12 +157,22 @@ const config = {
           'http://*.nip.io:4100',
         ],
         'font-src': ['self', 'data:', 'https://fonts.gstatic.com'],
-        'connect-src': ['self'],
+        'connect-src': [
+          'self',
+          // Dev-only — AudioPlayer fetches waveform.json from dev-cdn.
+          // See header comment above on `connect-src`. Inert in production.
+          'http://localhost:4100',
+          'http://*.nip.io:4100',
+        ],
         'media-src': [
           'self',
           'blob:',
           'https://*.r2.cloudflarestorage.com',
           'https://*.r2.dev',
+          // Dev-only — HLS playback (master.m3u8 + segments) served from
+          // dev-cdn (Miniflare R2). Inert in production.
+          'http://localhost:4100',
+          'http://*.nip.io:4100',
         ],
         'object-src': ['none'],
         'base-uri': ['self'],

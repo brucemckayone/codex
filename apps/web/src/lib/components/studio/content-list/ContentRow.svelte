@@ -74,7 +74,7 @@
 </script>
 
 <article class="row" data-status={statusVariant}>
-  <a class="row-thumb" href="/studio/content/{item.id}/edit" tabindex="-1" aria-hidden="true">
+  <div class="row-thumb">
     {#if item.thumbnailUrl}
       <img src={item.thumbnailUrl} alt="" class="thumb-img" loading="lazy" />
     {:else}
@@ -85,7 +85,7 @@
     <span class="thumb-type" aria-hidden="true">
       <typeMeta.icon size={12} />
     </span>
-  </a>
+  </div>
 
   <span class="row-ordinal" aria-hidden="true">{ordinal}</span>
 
@@ -147,6 +147,7 @@
 
 <style>
   .row {
+    position: relative;
     display: grid;
     grid-template-columns:
       /* thumb */ minmax(9rem, 12rem)
@@ -205,7 +206,6 @@
         color-mix(in srgb, var(--color-brand-primary, var(--color-interactive)) 14%, var(--color-surface-secondary)),
         var(--color-surface-secondary)
       );
-    text-decoration: none;
   }
 
   .thumb-img {
@@ -284,6 +284,17 @@
     color: inherit;
     text-decoration: none;
     transition: color var(--duration-fast) var(--ease-out);
+  }
+
+  /* Full-row click target — title link expands via ::after to cover the
+     row. Single anchor, single focus target, no aria-hidden hack. The
+     publish toggle button and edit link escape via position: relative +
+     z-index above this overlay. */
+  .row-title-link::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1;
   }
 
   .row-title-link:hover { color: var(--color-interactive); }
@@ -398,6 +409,10 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
+    /* Lift above .row-title-link::after so toggle and edit remain
+       interactive over the row-wide click overlay. */
+    position: relative;
+    z-index: 2;
   }
 
   .row-toggle {

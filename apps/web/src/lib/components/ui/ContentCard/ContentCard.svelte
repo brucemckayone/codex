@@ -310,11 +310,6 @@
       <Skeleton width="60%" height="1rem" />
     </div>
   {:else}
-    <!-- Full-card click overlay (invisible, not focusable) -->
-    <a href={href} class="cc__link" tabindex="-1" aria-hidden="true">
-      <span class="sr-only">{m.content_view({ title })}</span>
-    </a>
-
     <!-- Thumbnail -->
     <div class="cc__thumb">
       {#if thumbnail}
@@ -574,8 +569,12 @@
     pointer-events: none;
   }
 
-  /* Full-card click overlay */
-  .cc__link {
+  /* Full-card click target — title link expands via ::after to cover the
+     whole card. Single anchor, single focus target, no aria-hidden hack.
+     Sibling links (.cc__creator-link, .cc__access-cta) escape via their
+     own position: relative + higher z-index. */
+  .cc__title a::after {
+    content: '';
     position: absolute;
     inset: 0;
     z-index: 1;
@@ -743,9 +742,10 @@
     opacity: var(--opacity-60);
   }
 
-  /* Hover/tap CTA — sits above .cc__link so the CTA route wins when the
-     card is dimmed. Visible on hover/focus-within (or tap — the CTA has
-     pointer-events even when visually hidden, so taps work on touch). */
+  /* Hover/tap CTA — sits above the title-link card overlay (z-index: 3 vs
+     1) so the CTA route wins when the card is dimmed. Visible on
+     hover/focus-within (or tap — the CTA has pointer-events even when
+     visually hidden, so taps work on touch). */
   .cc__access-cta {
     position: absolute;
     inset: auto 0 0 0;
@@ -851,8 +851,6 @@
   .cc__title a {
     color: inherit;
     text-decoration: none;
-    position: relative;
-    z-index: 2;
   }
 
   .cc__title a:hover {
@@ -996,7 +994,7 @@
     min-height: calc(var(--space-24) * 3 + var(--space-12) + var(--space-6));
   }
 
-  .cc[data-variant='featured'] .cc__link {
+  .cc[data-variant='featured'] .cc__title a::after {
     z-index: 3;
   }
 

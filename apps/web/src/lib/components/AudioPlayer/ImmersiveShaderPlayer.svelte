@@ -17,6 +17,7 @@
   import { createAudioAnalyser, type AudioAnalyserHandle } from './audio-analyser';
   import { loadRenderer } from '$lib/components/ui/ShaderHero/load-renderer';
   import { getShaderConfig, type ShaderPresetId, type ShaderConfig } from '$lib/components/ui/ShaderHero/shader-config';
+  import { createPollConfig } from '$lib/components/ui/ShaderHero/use-poll-config';
   import type { ShaderRenderer, MouseState, AudioState } from '$lib/components/ui/ShaderHero/renderer-types';
   import { PlayIcon, PauseIcon, Volume2Icon, VolumeXIcon, XIcon } from '$lib/components/ui/Icon';
   import {
@@ -46,6 +47,9 @@
   let analyser: AudioAnalyserHandle | null = null;
   let animFrameId = 0;
   let startTime = 0;
+  // Lazy-initialised in onMount once `shaderPreset` is captured. Amortises
+  // getShaderConfig (forced style recalc) across ~30 frames per ShaderHero pattern.
+  let pollConfig: (() => ShaderConfig) | null = null;
   let controlsVisible = $state(true);
   let controlsTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -167,8 +171,12 @@
       };
     }
 
-    // Build config with the immersive preset (not the org's hero preset)
-    const config = getShaderConfig(null, shaderPreset as ShaderPresetId);
+    // Build config with the immersive preset (not the org's hero preset).
+    // Polled at ~30-frame cadence (see use-poll-config.ts) — getShaderConfig
+    // forces a style recalc, so per-frame calls dominate render-loop cost.
+    const config = pollConfig
+      ? pollConfig()
+      : getShaderConfig(null, shaderPreset as ShaderPresetId);
 
     renderer.render(gl, time, mouse, config, w, h, audioState);
     animFrameId = requestAnimationFrame(renderFrame);
@@ -192,6 +200,7 @@
 
     // Load shader renderer
     const preset = shaderPreset as ShaderPresetId;
+    pollConfig = createPollConfig(() => getShaderConfig(null, preset));
     renderer = await loadRenderer(preset);
     if (!renderer) {
       rendererError = 'Unable to load shader preset. Exiting immersive mode.';
