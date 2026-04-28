@@ -11,7 +11,7 @@
 **Mode**: auto (user-directed pick at rung 3+)
 **Bead**: Codex-d3g6 — "IMPORTANT: Write missing critical tests"
 **Rung**: 3 (Multi-file / Reasoned)
-**Outcome**: AWAITING USER GREENLIGHT — see master.md cycle history row
+**Outcome**: USER CHOSE **Option A — One PR** (Recommended). Apply phase queued as `iter-009a-apply` — single sub-agent writes ~29 missing test cases across 4 files in one PR, then `bd close Codex-d3g6` after tests pass. Routing label `triage:routing:backend-dev` applied for audit trail (the apply phase is executed in-cycle by a backend-dev-style sub-agent rather than waiting for a user-invoked `/backend-dev` session).
 
 ---
 
