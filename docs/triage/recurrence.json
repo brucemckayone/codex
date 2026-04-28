@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-28T22:35",
+  "last_updated": "2026-04-28T23:30",
   "patterns": {
     "route:self:large-mechanical-css-token-sweep": {
       "hits": 1,
@@ -98,8 +98,8 @@
     },
     "signal:bead-description-partially-stale": {
       "hits": 1,
-      "iters": ["iter-009a"],
-      "rung_density": { "iter-009a": 1 },
+      "iters": ["iter-009a", "iter-009a-apply"],
+      "rung_density": { "iter-009a": 1, "iter-009a-apply": 1 },
       "first_seen": "2026-04-28",
       "last_seen": "2026-04-28",
       "promoted": false,
@@ -112,9 +112,16 @@
           "action": "walk-only-with-staleness-flag",
           "user_chose": "one-pr-recommended",
           "user_reasoning": "Codex-d3g6 (filed 2026-03-29) cited 6 missing-test areas. Pre-flight grep verification found sub-item (1) `enforcePolicyInline()` query-param coverage was already partially closed by post-March commits to packages/worker-utils/src/procedure/__tests__/enforce-policy-inline.test.ts (line 430: `it('falls back to organizationId query param when subdomain yields nothing', ...)` plus related membership-check + platform-owner-bypass tests). Sub-items (2)–(6) confirmed gaps. Bead description was not contradictory (vs `signal:bead-description-self-contradicts-codebase`) but was OUTDATED: a real gap when filed, a partial gap now. Surfaced in iter-009a's question payload so the user can choose between (a) one PR for the remaining 5.5 gaps, (b) split-into-children, (c) split-by-package, (d) spawn-backend-dev. iter-005a precedent: pre-flight verification ALWAYS runs even on user-directed picks; described coverage is verified against grep before approach options are enumerated. **User chose Option A (One PR)** — single sub-agent writes ~29 tests across the 4 files; bead closes after tests pass. Apply phase: iter-009a-apply."
+        },
+        {
+          "iter": "iter-009a-apply",
+          "rung": 3,
+          "action": "auto-resolve",
+          "user_chose": "apply-option-a",
+          "user_reasoning": "User greenlit Option A from iter-009a walk. Single sub-agent wrote 31 tests across the 4 files (target was ~29, range 25–35): enforce-policy-inline.test.ts +3 invalid-UUID rejection tests on the query-param path (sub-item 1 narrow gap — closes the negative-path coverage that was missing per the 'Security work deeply tested' standing memory); transcoding-service.test.ts +12 tests across handleProgressWebhook (5), triggerJobInternal async-refactor (4), and handleWebhook fallback-mediaId+progress-clearing (3); subdomain.test.ts +10 tests on buildOrgUrl (6) + buildCreatorsUrl (4) covering lvh.me/localhost/production host environments; validation/transcoding.test.ts +6 tests on runpodWebhookUnionSchema discriminated-union dispatch (plus 1 bonus range-check, 7 in block). All 4 test files run independently with 100% pass: 34/34 + 21/21 + 21/21 + 25/25 = 101/101 total tests. Pre-existing tests in each file unchanged. Strict no-touch rule honoured — zero production-code edits. R10 case (b) — every test added IS the behavioural-test gate. All 6 sub-items closed. Bead closed."
         }
       ],
-      "notes": "Meta-signal: distinct from `signal:bead-description-self-contradicts-codebase` (where the cited symbol does not exist) — this fingerprint is for beads where the cited symbol DOES exist but coverage has shifted between filing and pickup. Common shape: a multi-sub-item bead filed early in a feature's life (often as a 'follow-up' to a fix epic) accumulates partial closure as sibling work lands, but no one re-files or shrinks the parent. If 3+ recurrences, promote rule: 'when a bead lists N sub-items and any of them is partially stale at pickup, the cycle MUST surface the staleness in the iter doc + question payload + propose split-into-N-children as a default option so future cycles can drain the genuinely-open sub-items as rung-1 mechanical work without re-investigating the resolved ones'."
+      "notes": "Meta-signal: distinct from `signal:bead-description-self-contradicts-codebase` (where the cited symbol does not exist) — this fingerprint is for beads where the cited symbol DOES exist but coverage has shifted between filing and pickup. Common shape: a multi-sub-item bead filed early in a feature's life (often as a 'follow-up' to a fix epic) accumulates partial closure as sibling work lands, but no one re-files or shrinks the parent. iter-009a-apply hit is the resolution path on the same bead (apply phase after walk-only); does NOT increment hit count toward 3-distinct-bead promotion threshold (per signal:type-drift-template-vs-api precedent). If 3+ DISTINCT bead recurrences, promote rule: 'when a bead lists N sub-items and any of them is partially stale at pickup, the cycle MUST surface the staleness in the iter doc + question payload + propose split-into-N-children as a default option so future cycles can drain the genuinely-open sub-items as rung-1 mechanical work without re-investigating the resolved ones'."
     },
     "route:self:promoted-helper-missed-call-site": {
       "hits": 2,
