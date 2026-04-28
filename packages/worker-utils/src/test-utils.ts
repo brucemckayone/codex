@@ -11,7 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import { COOKIES } from '@codex/constants';
 import { dbHttp, schema } from '@codex/database';
-import type { SessionData, UserData } from '@codex/security';
+import type { SessionData, UserData } from '@codex/shared-types';
 import { eq } from 'drizzle-orm';
 
 /**

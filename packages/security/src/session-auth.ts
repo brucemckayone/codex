@@ -10,9 +10,18 @@ import { and, eq, gt } from 'drizzle-orm';
 import type { Context, Next } from 'hono';
 
 /**
- * Session data stored in KV cache and Hono context
+ * Auth-row shape: the session record as joined from the database during
+ * authentication. Internal to @codex/security — populated by the Hono
+ * middleware then projected to the canonical `SessionData` from
+ * @codex/shared-types via `c.set('session', ...)`.
+ *
+ * This is NOT the same as the wire/Variables `SessionData` — that lives in
+ * @codex/shared-types and is the single source of truth for what handlers see
+ * on `ctx.session`. Renaming here (vs the old `SessionData`) prevents the
+ * cross-package divergence trap where two same-named types describe different
+ * shapes — see iter-004 F4 proof test for the historical bug.
  */
-export interface SessionData {
+export interface SessionAuthRow {
   id: string;
   userId: string;
   token: string;
@@ -24,12 +33,17 @@ export interface SessionData {
 }
 
 /**
- * User data stored in KV cache and Hono context
+ * Auth-row shape: the user record as joined alongside the session. Internal
+ * to @codex/security. See `SessionAuthRow` for why this isn't named `UserData`.
+ *
+ * Note: `name` is `string | null` — BetterAuth allows accounts before profile
+ * completion, so the column is nullable. The canonical wire `UserData` from
+ * @codex/shared-types reflects the same.
  */
-export interface UserData {
+export interface UserAuthRow {
   id: string;
   email: string;
-  name: string;
+  name: string | null;
   emailVerified: boolean;
   image: string | null;
   role: string;
@@ -38,11 +52,13 @@ export interface UserData {
 }
 
 /**
- * Cached session data structure stored in KV
+ * Cached session data structure stored in KV.
+ * Uses the auth-row shapes since this is internal to the security package's
+ * cache layer (not the canonical wire shape consumers see on `ctx.session`).
  */
 export interface CachedSessionData {
-  session: SessionData;
-  user: UserData;
+  session: SessionAuthRow;
+  user: UserAuthRow;
 }
 
 function isCachedSessionData(value: unknown): value is CachedSessionData {
@@ -296,8 +312,8 @@ async function getSessionFromCache(
  * app.use('*', optionalAuth({ kv: c.env.AUTH_SESSION_KV }));
  *
  * // Later in route handlers:
- * const user = c.get('user'); // UserData | undefined
- * const session = c.get('session'); // SessionData | undefined
+ * const user = c.get('user'); // UserAuthRow | undefined
+ * const session = c.get('session'); // SessionAuthRow | undefined
  * ```
  *
  * @param config - Session authentication configuration
@@ -439,7 +455,7 @@ export function optionalAuth(config?: SessionAuthConfig) {
  *
  * // User is guaranteed to exist in protected routes
  * app.get('/api/protected/profile', (c) => {
- *   const user = c.get('user'); // UserData (guaranteed)
+ *   const user = c.get('user'); // UserAuthRow (guaranteed)
  *   return c.json({ profile: user });
  * });
  * ```

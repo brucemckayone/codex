@@ -19,12 +19,22 @@ import { and, eq, gt } from 'drizzle-orm';
 import type { Context, MiddlewareHandler } from 'hono';
 
 /**
- * Cached session data structure stored in KV
- */
-/**
- * Session cache includes username, bio, and socialLinks for SSR profile rendering.
- * This is intentional — these fields are needed to render user profiles without
- * additional API calls. They are public-facing profile data, not sensitive PII.
+ * Cached session data structure stored in KV.
+ *
+ * Mirrors the canonical `SessionData` / `UserData` shapes from
+ * @codex/shared-types — auth-row only, no profile fields. Code needing
+ * `username` / `bio` / `socialLinks` MUST fetch them from identity-api
+ * (`getProfile()`); they are NOT cached alongside the session.
+ *
+ * History: the cache previously included those profile fields with a comment
+ * justifying it as "SSR profile rendering perf." That created the silent-
+ * undefined bug iter-004 F4 caught — the canonical Hono `Variables.user`
+ * never claimed those fields would be populated, so handlers reading them
+ * got undefined at runtime. Aligning the cache with the canonical wire shape
+ * is the structural fix.
+ *
+ * `name: string | null` mirrors the DB column (BetterAuth allows pre-profile
+ * accounts).
  */
 interface CachedSessionData {
   session: {
@@ -40,20 +50,12 @@ interface CachedSessionData {
   user: {
     id: string;
     email: string;
-    name: string;
+    name: string | null;
     emailVerified: boolean;
     image: string | null;
     role: string;
     createdAt: string;
     updatedAt: string;
-    username: string | null;
-    bio: string | null;
-    socialLinks: {
-      website?: string;
-      twitter?: string;
-      youtube?: string;
-      instagram?: string;
-    } | null;
   };
 }
 
@@ -338,9 +340,6 @@ export function createSessionMiddleware(
                   sessionData.user.updatedAt instanceof Date
                     ? sessionData.user.updatedAt.toISOString()
                     : sessionData.user.updatedAt,
-                username: sessionData.user.username ?? null,
-                bio: sessionData.user.bio ?? null,
-                socialLinks: sessionData.user.socialLinks ?? null,
               },
             };
             // Fire and forget - don't wait for cache

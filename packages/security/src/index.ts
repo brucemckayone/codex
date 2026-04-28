@@ -28,8 +28,8 @@ export {
   optionalAuth,
   requireAuth,
   type SessionAuthConfig,
-  type SessionData,
-  type UserData,
+  type SessionAuthRow,
+  type UserAuthRow,
 } from './session-auth';
 export {
   generateWorkerSignature,

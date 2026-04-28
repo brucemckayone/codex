@@ -75,23 +75,51 @@ import type {
   UserData as SharedUserData,
 } from '@codex/shared-types';
 import { describe, expectTypeOf, it } from 'vitest';
-import type {
-  SessionData as SecuritySessionData,
-  UserData as SecurityUserData,
-} from '../session-auth';
+import type { SessionAuthRow, UserAuthRow } from '../session-auth';
 
-describe('denoise proof: F4 types:type-duplicate-cross-package — SessionData/UserData', () => {
-  it.skip('@codex/security.SessionData MUST be assignable to @codex/shared-types.SessionData (the Hono Variables shape)', () => {
-    // FAILS today because security.SessionData requires `token: string` but
-    // shared-types.SessionData makes it optional, AND shared-types adds
-    // `[key: string]: unknown` which security does not. After unification
-    // the two named imports resolve to the same declaration site.
-    expectTypeOf<SecuritySessionData>().toEqualTypeOf<SharedSessionData>();
+describe('denoise proof: F4 types:type-duplicate-cross-package — SessionData/UserData (RESOLVED)', () => {
+  // Post-fix (Codex-lqvw4.1, triage iter-X):
+  //   - @codex/security renamed its internal types `SessionData`/`UserData`
+  //     to `SessionAuthRow`/`UserAuthRow` — they describe DB rows, not the
+  //     Hono context shape, and are no longer publicly exported.
+  //   - @codex/shared-types narrowed `SessionData`/`UserData` to the canonical
+  //     wire shape: index-signature-free, no profile fields. This is what
+  //     `requireAuth` populates via `c.set('user', ...)`.
+  //   - The two shapes (security's `*AuthRow` and shared-types' `*Data`) are
+  //     now structurally equivalent for all required fields. The proof of
+  //     the fix is that the AuthRow shape is assignable to the canonical
+  //     wire shape — projecting one to the other is byte-identical.
+
+  it('SessionAuthRow (security internal) is assignable to canonical SessionData (shared-types wire shape)', () => {
+    expectTypeOf<SessionAuthRow>().toMatchTypeOf<SharedSessionData>();
   });
 
-  it.skip('@codex/security.UserData MUST be assignable to @codex/shared-types.UserData (the Hono Variables shape)', () => {
-    // FAILS today: security has 8 required fields; shared-types adds
-    // username/bio/socialLinks via UserProfile and allows name: null.
-    expectTypeOf<SecurityUserData>().toEqualTypeOf<SharedUserData>();
+  it('UserAuthRow (security internal) is assignable to canonical UserData (shared-types wire shape)', () => {
+    expectTypeOf<UserAuthRow>().toMatchTypeOf<SharedUserData>();
+  });
+
+  it('canonical SessionData has no `[key: string]: unknown` index signature (no silent-undefined trap)', () => {
+    // Pre-fix, shared-types had `[key: string]: unknown`, which let any
+    // misnamed access typecheck. Post-fix, the type is closed — accessing
+    // a non-existent field is a compile error.
+    type AccessNonExistent = SharedSessionData extends { unknownField: unknown }
+      ? true
+      : false;
+    expectTypeOf<AccessNonExistent>().toEqualTypeOf<false>();
+  });
+
+  it('canonical UserData has NO profile fields (username/bio/socialLinks come from identity-api)', () => {
+    // Profile fields live on UserProfile, fetched separately via
+    // identity-api `getProfile()`. They are NOT on `ctx.user`.
+    type HasUsername = SharedUserData extends { username: unknown }
+      ? true
+      : false;
+    type HasBio = SharedUserData extends { bio: unknown } ? true : false;
+    type HasSocialLinks = SharedUserData extends { socialLinks: unknown }
+      ? true
+      : false;
+    expectTypeOf<HasUsername>().toEqualTypeOf<false>();
+    expectTypeOf<HasBio>().toEqualTypeOf<false>();
+    expectTypeOf<HasSocialLinks>().toEqualTypeOf<false>();
   });
 });

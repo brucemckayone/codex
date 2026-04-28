@@ -364,15 +364,26 @@ export interface Variables {
 }
 
 /**
- * User session data
- * Minimal session information from auth system
+ * User session data — canonical wire shape for `ctx.session` (Hono Variables).
+ *
+ * Matches what `requireAuth`/`optionalAuth` in @codex/security populate via
+ * `c.set('session', ...)`. Narrow + index-signature-free so handlers reading
+ * `ctx.session.<field>` get real type checking (no silent-undefined trap).
+ *
+ * History: this type previously declared `token?: string` and a
+ * `[key: string]: unknown` index signature, which masked the divergence with
+ * @codex/security's strict `SessionAuthRow` shape. iter-004 F4 documented
+ * the bug; the canonical shape narrowing is the fix.
  */
 export type SessionData = {
   id: string;
   userId: string;
+  token: string;
   expiresAt: Date | string;
-  token?: string;
-  [key: string]: unknown;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
 };
 
 /**
@@ -401,19 +412,30 @@ export type UserProfile = {
 };
 
 /**
- * User data
- * User information needed for API operations
- * Extends UserProfile with auth-related fields
+ * User data — canonical wire shape for `ctx.user` (Hono Variables).
+ *
+ * Matches what `requireAuth`/`optionalAuth` in @codex/security populate via
+ * `c.set('user', ...)` from the sessions/users join. Narrow + index-signature-free
+ * so handlers reading `ctx.user.<field>` get real type checking.
+ *
+ * Profile fields (`username`, `bio`, `socialLinks`) are NOT on this type by
+ * design — they live on `UserProfile` and come from the identity-api
+ * `getProfile()` endpoint, not from session auth. Code needing those fields
+ * MUST fetch them explicitly. (Pre-fix this type included them via
+ * `UserProfile & ...` plus a `[key: string]: unknown` index signature; that
+ * was the silent-undefined trap iter-004 F4 caught.)
  */
-export type UserData = UserProfile & {
+export type UserData = {
+  id: string;
+  email: string;
   /** Name can be null in some auth contexts before profile is complete */
   name: string | null;
-  /** User role */
+  emailVerified: boolean;
+  image: string | null;
+  /** User role (e.g., 'creator', 'admin', 'platform_owner', 'customer') */
   role: string;
-  /** Account creation timestamp */
   createdAt: Date | string;
-  /** Allow additional properties */
-  [key: string]: unknown;
+  updatedAt: Date | string;
 };
 
 /**
