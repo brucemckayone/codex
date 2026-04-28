@@ -1,7 +1,27 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-27T23:30",
+  "last_updated": "2026-04-28T00:30",
   "patterns": {
+    "signal:bead-description-self-contradicts-codebase": {
+      "hits": 1,
+      "iters": ["iter-007"],
+      "rung_density": { "iter-007": 1 },
+      "first_seen": "2026-04-28",
+      "last_seen": "2026-04-28",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-tj03p"],
+      "verdict_history": [
+        {
+          "iter": "iter-007",
+          "rung": 0,
+          "action": "auto-resolve-with-reinterpretation",
+          "user_chose": null,
+          "user_reasoning": "Auto mode. Codex-tj03p's description claimed `routes/_org/[slug]/studio/settings/+layout.svelte:15` imports `SETTINGS_NAV` from `$lib/config/navigation.ts:79` and that the doc's 'unused' claim was therefore stale. Verification: grep `SETTINGS_NAV` across the entire repo returns ZERO matches — the symbol does not exist. The doc's reference to an 'unused SETTINGS_NAV array' was itself a phantom (a non-existent symbol cannot be 'unused'). Cycle agent reinterpreted the bead's intent as 'remove the misleading SETTINGS_NAV reference from the doc' (the achievable directional fix that matches the bead's outcome — doc no longer contains the stale claim). Closed with case-(c) R10 exception (pure docs)."
+        }
+      ],
+      "notes": "Meta-signal: tracks how often a bead's description is self-contradictory or cites a file:line that doesn't match the actual code. The verification step (grep before edit) caught this in <30s. If 3+ recurrences, promote rule: 'cycle agent MUST grep for the cited symbol/string before applying any rung-0/1 fix; if zero matches, treat the bead as needing reinterpretation and document the deviation in the iter doc.' Distinct from `signal:misclassification-keyword-false-positive` — that pattern is about classifier over-reaction to keywords; this pattern is about bead-author error caught at resolve time."
+    },
     "signal:type-drift-template-vs-api": {
       "hits": 2,
       "iters": ["iter-005a", "iter-005a-apply"],
@@ -272,7 +292,7 @@
           "user_reasoning": "Auto-loop policy continues. iter-004 ran a focused re-scan of the rung-3 P2 (15 beads) + P1 (5 beads) clusters per the iter-003 misclassification precedent. ZERO further rung-1 candidates surfaced. Cycle exits ok: false. Three consecutive low-yield cycles = promotion gate met. RT1 codified in references/02-routing-rules.md."
         }
       ],
-      "notes": "PROMOTED to RT1 in iter-004 after 3rd hit. Promotion gate: hits=3 in 6-cycle window ✓, verdict_history consistent (action: meta-signal, user_chose: loop-policy-override across all 3 hits) ✓, was promoted=false going in ✓, third hit is current cycle ✓. Per skill §promotion procedure step 1, promotion normally requires AskUserQuestion confirmation — auto-loop policy R9 (no AskUserQuestion mid-cycle) + brief's explicit promotion authorization waived the consultation gate. User retains demote-via-counter-example route. The iter-003 verdict's sub-pattern (classifier upgrade) tracked separately under signal:misclassification-keyword-false-positive."
+      "notes": "PROMOTED to RT1 in iter-004 after 3rd hit. Promotion gate: hits=3 in 6-cycle window ✓, verdict_history consistent (action: meta-signal, user_chose: loop-policy-override across all 3 hits) ✓, was promoted=false going in ✓, third hit is current cycle ✓. Per skill §promotion procedure step 1, promotion normally requires AskUserQuestion confirmation — auto-loop policy R9 (no AskUserQuestion mid-cycle) + brief's explicit promotion authorization waived the consultation gate. User retains demote-via-counter-example route. The iter-003 verdict's sub-pattern (classifier upgrade) tracked separately under signal:misclassification-keyword-false-positive. **Counter-example logged iter-007**: cycle picked Codex-tj03p (rung-0 P4 stale-doc fix) without any brief hint or misclassification re-flag. Suggests the rung-3+ ladder (post iter-006) still hides rung-0/1 candidates — the iter-006 ladder snapshot was incomplete because no cycle had pushed below P3-priority beads. RT1 hits stays at 3; this counter-example does not undo the rule but reduces its stated certainty."
     }
   }
 }

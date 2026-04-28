@@ -151,7 +151,7 @@ import { toast } from '$lib/components/ui/Toast/toast-store';
 
 ### Navigation
 
-The settings nav is **hardcoded in the layout** (NOT from the unused `SETTINGS_NAV` array in `navigation.ts`).
+The settings nav is **hardcoded in the layout** as a `$derived` `tabs` array. It is not driven from `$lib/config/navigation.ts` — the settings tab list is intentionally local to the settings layout because each tab has i18n-keyed labels and bespoke `value`/`href` pairs that don't fit the shared `NavLink` shape used by `SIDEBAR_*_LINKS` / `ACCOUNT_NAV`.
 
 ### File: `apps/web/src/routes/_org/[slug]/studio/settings/+layout.svelte`
 
