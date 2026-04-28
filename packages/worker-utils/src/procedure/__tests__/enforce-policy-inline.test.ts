@@ -450,6 +450,60 @@ describe('enforcePolicyInline · requireOrgMembership', () => {
     expect(vars.organizationId).toBe(UUID_A);
   });
 
+  // ----- Invalid-UUID rejection on query-param path (Codex-d3g6 sub-item 1) -----
+  // The query-param fallback must reject malformed UUIDs the same way the path-
+  // param fallback does — otherwise an attacker could bypass scope by injecting
+  // an arbitrary string. The current implementation falls through to the
+  // ValidationError ('ORG_CONTEXT_REQUIRED') when no valid UUID is resolvable.
+
+  it('rejects non-UUID query-param value with ValidationError when no other resolution path', async () => {
+    const { extractOrganizationFromSubdomain } = await import('../org-helpers');
+    vi.mocked(extractOrganizationFromSubdomain).mockResolvedValue(null);
+
+    const { ctx } = makeCtx({
+      vars: { user: { id: 'u1', role: 'user' } },
+      query: { organizationId: 'not-a-uuid' },
+    });
+    await expect(
+      enforcePolicyInline(ctx, {
+        auth: 'required',
+        requireOrgMembership: true,
+      })
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('rejects numeric-string query-param value (123) with ValidationError', async () => {
+    const { extractOrganizationFromSubdomain } = await import('../org-helpers');
+    vi.mocked(extractOrganizationFromSubdomain).mockResolvedValue(null);
+
+    const { ctx } = makeCtx({
+      vars: { user: { id: 'u1', role: 'user' } },
+      query: { organizationId: '123' },
+    });
+    await expect(
+      enforcePolicyInline(ctx, {
+        auth: 'required',
+        requireOrgMembership: true,
+      })
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('rejects empty-string query-param value with ValidationError', async () => {
+    const { extractOrganizationFromSubdomain } = await import('../org-helpers');
+    vi.mocked(extractOrganizationFromSubdomain).mockResolvedValue(null);
+
+    const { ctx } = makeCtx({
+      vars: { user: { id: 'u1', role: 'user' } },
+      query: { organizationId: '' },
+    });
+    await expect(
+      enforcePolicyInline(ctx, {
+        auth: 'required',
+        requireOrgMembership: true,
+      })
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
   it('throws ValidationError (ORG_CONTEXT_REQUIRED) when no org can be resolved', async () => {
     const { extractOrganizationFromSubdomain } = await import('../org-helpers');
     vi.mocked(extractOrganizationFromSubdomain).mockResolvedValue(null);

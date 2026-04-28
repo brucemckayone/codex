@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   runpodWebhookOutputSchema,
+  runpodWebhookUnionSchema,
   THUMBNAIL_SIZES,
   thumbnailSizeSchema,
 } from '../transcoding';
@@ -202,5 +203,100 @@ describe('RunPod Webhook Output Schema — Audio Payloads', () => {
     };
     const result = runpodWebhookOutputSchema.safeParse(pythonPayload);
     expect(result.success).toBe(true);
+  });
+});
+
+// ============================================================================
+// Codex-d3g6 sub-item 6: runpodWebhookUnionSchema (discriminated union)
+// ============================================================================
+describe('runpodWebhookUnionSchema', () => {
+  const validOutput = {
+    mediaId: '550e8400-e29b-41d4-a716-446655440000',
+    type: 'video' as const,
+    hlsMasterKey: 'user-123/hls/media-456/master.m3u8',
+    durationSeconds: 300,
+    width: 1920,
+    height: 1080,
+    readyVariants: ['1080p', '720p'] as const,
+  };
+
+  it("should accept 'completed' status branch with valid output", () => {
+    const result = runpodWebhookUnionSchema.safeParse({
+      jobId: 'runpod-job-1',
+      status: 'completed',
+      output: validOutput,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.status).toBe('completed');
+    }
+  });
+
+  it("should accept 'failed' status branch with error message and optional mediaId", () => {
+    const result = runpodWebhookUnionSchema.safeParse({
+      jobId: 'runpod-job-2',
+      status: 'failed',
+      error: 'Transcoding failed',
+      mediaId: '550e8400-e29b-41d4-a716-446655440000',
+    });
+    expect(result.success).toBe(true);
+    if (result.success && result.data.status === 'failed') {
+      expect(result.data.error).toBe('Transcoding failed');
+      expect(result.data.mediaId).toBe('550e8400-e29b-41d4-a716-446655440000');
+    }
+  });
+
+  it("should accept 'failed' status branch without mediaId (cloud flow)", () => {
+    // RunPod cloud failures arrive after runpodJobId is stored, so the
+    // top-level mediaId is optional on the failed branch.
+    const result = runpodWebhookUnionSchema.safeParse({
+      jobId: 'runpod-job-3',
+      status: 'failed',
+      error: 'GPU OOM',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("should accept 'progress' status branch with step + progress integer", () => {
+    const result = runpodWebhookUnionSchema.safeParse({
+      jobId: 'runpod-job-4',
+      status: 'progress',
+      progress: 50,
+      step: 'encoding_variants',
+      mediaId: '550e8400-e29b-41d4-a716-446655440000',
+    });
+    expect(result.success).toBe(true);
+    if (result.success && result.data.status === 'progress') {
+      expect(result.data.progress).toBe(50);
+      expect(result.data.step).toBe('encoding_variants');
+    }
+  });
+
+  it('should reject payload with invalid status value', () => {
+    const result = runpodWebhookUnionSchema.safeParse({
+      jobId: 'runpod-job-5',
+      status: 'unknown-status', // not one of completed/failed/progress
+      error: 'something',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject payload missing the discriminator (status field)', () => {
+    const result = runpodWebhookUnionSchema.safeParse({
+      jobId: 'runpod-job-6',
+      // status omitted entirely
+      output: validOutput,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("should reject 'progress' branch when progress is out of [0, 100] range", () => {
+    const result = runpodWebhookUnionSchema.safeParse({
+      jobId: 'runpod-job-7',
+      status: 'progress',
+      progress: 150, // out of range
+      step: 'finalizing',
+    });
+    expect(result.success).toBe(false);
   });
 });

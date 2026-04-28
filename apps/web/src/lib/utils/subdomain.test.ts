@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { extractSubdomain, getSubdomainContext } from './subdomain';
+import {
+  buildCreatorsUrl,
+  buildOrgUrl,
+  extractSubdomain,
+  getSubdomainContext,
+} from './subdomain';
 
 describe('Subdomain Utilities', () => {
   describe('extractSubdomain', () => {
@@ -88,6 +93,83 @@ describe('Subdomain Utilities', () => {
         type: 'reserved',
         subdomain: 'api',
       });
+    });
+  });
+
+  // ============================================================================
+  // Codex-d3g6 sub-item 5: buildOrgUrl + buildCreatorsUrl
+  // ============================================================================
+  describe('buildOrgUrl', () => {
+    it('builds full URL on lvh.me dev host', () => {
+      const currentUrl = new URL('http://lvh.me:3000/explore');
+      expect(buildOrgUrl(currentUrl, 'bruce-studio', '/studio')).toBe(
+        'http://bruce-studio.lvh.me:3000/studio'
+      );
+    });
+
+    it('builds full URL on production revelations.studio', () => {
+      const currentUrl = new URL('https://revelations.studio/discover');
+      expect(buildOrgUrl(currentUrl, 'yoga-studio', '/explore')).toBe(
+        'https://yoga-studio.revelations.studio/explore'
+      );
+    });
+
+    it('builds full URL on localhost (no port suffix when port absent)', () => {
+      // localhost without port is unusual but the function should still
+      // produce a syntactically valid URL.
+      const currentUrl = new URL('http://localhost/account');
+      expect(buildOrgUrl(currentUrl, 'test-org', '/library')).toBe(
+        'http://test-org.localhost/library'
+      );
+    });
+
+    it('builds full URL on localhost with port', () => {
+      const currentUrl = new URL('http://test-org.localhost:3000/explore');
+      expect(buildOrgUrl(currentUrl, 'other-org', '/studio')).toBe(
+        'http://other-org.localhost:3000/studio'
+      );
+    });
+
+    it('defaults to "/" when path is omitted', () => {
+      const currentUrl = new URL('http://lvh.me:3000/');
+      expect(buildOrgUrl(currentUrl, 'bruce-studio')).toBe(
+        'http://bruce-studio.lvh.me:3000/'
+      );
+    });
+
+    it('preserves protocol from current URL (https stays https)', () => {
+      const currentUrl = new URL('https://lvh.me:3000/');
+      expect(buildOrgUrl(currentUrl, 'bruce-studio', '/library')).toBe(
+        'https://bruce-studio.lvh.me:3000/library'
+      );
+    });
+  });
+
+  describe('buildCreatorsUrl', () => {
+    it('builds creators subdomain URL on lvh.me', () => {
+      const currentUrl = new URL('http://lvh.me:3000/');
+      expect(buildCreatorsUrl(currentUrl, '/profile/bruce')).toBe(
+        'http://creators.lvh.me:3000/profile/bruce'
+      );
+    });
+
+    it('builds creators subdomain URL on production', () => {
+      const currentUrl = new URL('https://revelations.studio/discover');
+      expect(buildCreatorsUrl(currentUrl, '/profile/jane')).toBe(
+        'https://creators.revelations.studio/profile/jane'
+      );
+    });
+
+    it('builds creators subdomain URL on localhost with port', () => {
+      const currentUrl = new URL('http://localhost:3000/');
+      expect(buildCreatorsUrl(currentUrl, '/profile/bob')).toBe(
+        'http://creators.localhost:3000/profile/bob'
+      );
+    });
+
+    it('defaults to "/" when path is omitted', () => {
+      const currentUrl = new URL('http://lvh.me:3000/');
+      expect(buildCreatorsUrl(currentUrl)).toBe('http://creators.lvh.me:3000/');
     });
   });
 });
