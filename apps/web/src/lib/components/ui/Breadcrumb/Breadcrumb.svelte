@@ -82,7 +82,7 @@
 
   .breadcrumb__link:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
     border-radius: var(--radius-sm);
   }
 

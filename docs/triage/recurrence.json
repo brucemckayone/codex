@@ -1,7 +1,27 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-28T00:30",
+  "last_updated": "2026-04-28T01:30",
   "patterns": {
+    "route:self:large-mechanical-css-token-sweep": {
+      "hits": 1,
+      "iters": ["iter-008"],
+      "rung_density": { "iter-008": 1 },
+      "first_seen": "2026-04-28",
+      "last_seen": "2026-04-28",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-mm0z9"],
+      "verdict_history": [
+        {
+          "iter": "iter-008",
+          "rung": 1,
+          "action": "auto-resolve",
+          "user_chose": null,
+          "user_reasoning": "Auto mode (cycle policy: 'easiest fixes that don't require human intervention'). Bead described a 120-site sweep of `outline-offset: 2px` → `var(--space-0-5)` across apps/web/src/. Pre-flight verification: (1) grep returns exactly 120 sites in 71 files (matches bead claim), (2) sampled 4 sites confirmed all in `:focus-visible` rules, (3) preceding line in 100% of sampled sites is `outline: var(--border-width-thick) solid var(--color-focus)` (uniform context), (4) `--space-0-5` token resolves to `2px * density` (byte-identical at default density=1, density-aware otherwise). Recipe is unambiguous byte-identical: sed pattern `outline-offset: 2px;` → `outline-offset: var(--space-0-5);` plus !important variant for 2 StudioSidebar/StudioSwitcher cases. Stash-and-clean executed because user had pre-existing concurrent work in some target files; final diff is 71 files / 120 insertions / 120 deletions (1:1 mapping, zero collateral). Grep guard PASS: 0 occurrences of `outline-offset: 2px` remain. R10 case (c): CSS token swap with no testable behaviour beyond the grep guard (visual equivalence at default density is mathematical, not behavioural). Pre-existing typecheck errors in iter-029 F3 + studio-access.svelte.test.ts are unrelated to CSS sweep."
+        }
+      ],
+      "notes": "Meta-signal: tracks whether 'large mechanical sweep' (N≥50 sites with byte-identical recipe) is a sustainable rung-1 pattern. iter-007 reclassified Codex-mm0z9 from implicit rung-3 to rung-1 because the recipe is genuinely byte-identical. iter-008 confirmed the reclassification was correct: pre-flight verification took ~3 minutes (grep + 4 sample reads + 1 token-existence check), execution took ~10 seconds (single sed + !important sed), proof took ~5 seconds (grep guard). Total cycle: ~6 minutes. If 3+ similar beads land (large-N CSS token migrations), promote rule: 'CSS token sweeps with byte-identical recipes and N≥50 sites auto-classify as rung-1 if (a) cited token exists in apps/web/src/lib/styles/tokens/, (b) sampled sites confirm uniform context, (c) replacement preserves visual equivalence at canonical density/scale.' Distinct from `route:self:proof-test-path-mechanical-fix` (RT2) because that's about scaffolding fixes inside test files; this is about production code mechanical refactors."
+    },
     "signal:bead-description-self-contradicts-codebase": {
       "hits": 1,
       "iters": ["iter-007"],

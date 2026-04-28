@@ -198,7 +198,7 @@
 
   .studio-topbar__menu:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .studio-topbar__brand {
@@ -212,7 +212,7 @@
 
   .studio-topbar__brand:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
     border-radius: var(--radius-sm);
   }
 
@@ -296,7 +296,7 @@
 
   .studio-drawer__close:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   @media (prefers-reduced-motion: reduce) {

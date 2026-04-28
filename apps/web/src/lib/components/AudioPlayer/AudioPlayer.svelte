@@ -777,7 +777,7 @@
 
   .audio-player:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   /* Immersive body — all content sits over the shader background */
@@ -853,7 +853,7 @@
 
   .audio-player__btn:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .audio-player__btn:disabled {
@@ -885,7 +885,7 @@
 
   .audio-player__btn--play:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   /* Shrink + fade when playing (Disney: secondary action) */
@@ -932,7 +932,7 @@
 
   .audio-player__volume:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .audio-player__volume::-webkit-slider-thumb {
@@ -990,7 +990,7 @@
 
   .audio-player__speed-current:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .audio-player__speed-options {
@@ -1030,7 +1030,7 @@
 
   .audio-player__speed-btn:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .audio-player__speed-btn.active {
@@ -1052,7 +1052,7 @@
 
   .audio-player__btn--immersive:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .audio-player__error {
@@ -1082,7 +1082,7 @@
 
   .audio-player__error-retry:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   /* Mini-player — floating, bottom-centered card.
@@ -1219,7 +1219,7 @@
 
   .audio-mini-player__btn:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   /* Close button — positioned over the shader, top-right of card.
@@ -1254,7 +1254,7 @@
 
   .audio-mini-player__close:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   /* Responsive */

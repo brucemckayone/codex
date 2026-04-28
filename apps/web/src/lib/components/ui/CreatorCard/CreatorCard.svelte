@@ -294,7 +294,7 @@
 
   .showcase:focus-visible {
     outline: 2px solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   /* ── Photo area — inset with rounded corners ── */

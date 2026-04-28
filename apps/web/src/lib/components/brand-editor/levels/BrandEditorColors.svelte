@@ -124,7 +124,7 @@
 
   .colors-level__header:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .colors-level__header--expanded {
@@ -181,7 +181,7 @@
 
   .colors-level__clear:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .colors-level__picker {
@@ -208,6 +208,6 @@
 
   .colors-level__drill:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 </style>

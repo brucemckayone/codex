@@ -1106,7 +1106,7 @@
      ring for keyboard users satisfies WCAG 2.4.7 — R14 of the design system. */
   .content-detail__player:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   /* Cinema mode — break out to fill the main content area (viewport minus
@@ -1437,7 +1437,7 @@
 
   .content-detail__purchase-error-escalation a:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
     border-radius: var(--radius-sm);
   }
 
@@ -1464,7 +1464,7 @@
 
   .content-detail__purchase-error-dismiss:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   /* Info banner (409 "already owned" happy-path — Codex-mmju5) */
@@ -1512,7 +1512,7 @@
 
   .content-detail__purchase-info-action:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .content-detail__or-divider {
@@ -1552,7 +1552,7 @@
 
   :global(.content-detail__purchase-btn:focus-visible) {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .content-detail__purchase-btn--link {

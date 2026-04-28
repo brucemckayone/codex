@@ -238,7 +238,7 @@
 
   .home__colors-row:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .home__color-swatches {
@@ -305,7 +305,7 @@
 
   .home__palette-btn:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .home__palette-grid {
@@ -335,7 +335,7 @@
 
   .home__palette-card:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .home__palette-bars {
@@ -390,7 +390,7 @@
 
   .home__category:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .home__category-left {
@@ -447,7 +447,7 @@
 
   .home__presets-link:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .home__presets-link:hover .home__presets-link-text,

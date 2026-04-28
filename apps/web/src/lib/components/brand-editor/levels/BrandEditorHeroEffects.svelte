@@ -1685,7 +1685,7 @@
 
   .hero-fx__preset-card:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .hero-fx__preset-card--active {
@@ -1740,7 +1740,7 @@
 
   .hero-fx__color-input:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .hero-fx__color-input::-webkit-color-swatch-wrapper {
@@ -1785,7 +1785,7 @@
 
   .hero-fx__toggle:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .hero-fx__toggle--on {

@@ -184,7 +184,7 @@
 
   :global(.studio-switcher-trigger:focus-visible) {
     outline: var(--border-width-thick) solid var(--color-focus) !important;
-    outline-offset: 2px !important;
+    outline-offset: var(--space-0-5) !important;
   }
 
   :global(.studio-switcher-trigger[data-state='open']) {

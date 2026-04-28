@@ -480,7 +480,7 @@
 
   .studio-rail__brand-link:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .studio-rail__brand-image,
@@ -697,7 +697,7 @@
 
   :global(.studio-rail__user-trigger:focus-visible) {
     outline: var(--border-width-thick) solid var(--color-focus) !important;
-    outline-offset: 2px !important;
+    outline-offset: var(--space-0-5) !important;
   }
 
   :global(.studio-rail__user-trigger[data-state='open']) {

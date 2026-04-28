@@ -292,7 +292,7 @@
 
   .layout-editor__card:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .layout-editor__card--active {
@@ -349,7 +349,7 @@
 
   .layout-editor__toggle:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .layout-editor__toggle--hidden {

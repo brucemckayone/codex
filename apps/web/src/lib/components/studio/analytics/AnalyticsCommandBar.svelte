@@ -451,7 +451,7 @@
 
   .breadcrumb:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
     border-radius: var(--radius-sm);
   }
 
@@ -545,7 +545,7 @@
 
   .filter-tab:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   /* ── Actions (compare toggle + customise link) ──────────── */
@@ -596,7 +596,7 @@
 
   .compare-custom-link:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   /* ─── Range popovers ─────────────────────────────────────────────── */
@@ -643,7 +643,7 @@
 
   .range-popover__input:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
     border-color: var(--color-interactive);
   }
 
@@ -673,7 +673,7 @@
 
   .apply-btn:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--space-0-5);
   }
 
   .apply-btn:disabled {
