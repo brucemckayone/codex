@@ -91,7 +91,7 @@
     id="studio-drawer"
     class="studio-layout__rail studio-layout__rail--mobile"
     class:studio-layout__rail--open={mobileMenuOpen}
-    aria-hidden={!mobileMenuOpen}
+    inert={!mobileMenuOpen}
   >
     <StudioSidebar
       role="owner"

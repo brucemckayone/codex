@@ -153,7 +153,7 @@
 </script>
 
 <article class="tile" data-status={statusMeta.variant}>
-  <div class="tile-thumb" aria-hidden={true}>
+  <div class="tile-thumb">
     {#if media.thumbnailUrl}
       <img src={media.thumbnailUrl} alt="" class="thumb-img" loading="lazy" />
     {:else}
