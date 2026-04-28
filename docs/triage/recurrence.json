@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-28T22:00",
+  "last_updated": "2026-04-28T22:30",
   "patterns": {
     "route:self:large-mechanical-css-token-sweep": {
       "hits": 1,
@@ -70,14 +70,14 @@
       "notes": "Meta-signal: tracks how often optional-typed component props (e.g. `creator?: { username?, displayName?, avatar? }`) silently absorb API-shape mismatches into empty-string runtime rendering. Hit 2 was the apply pass — same bead, same fingerprint, same iter cohort. If 3+ DISTINCT beads recur (different component, same shape), promote rule: 'component types that EXTEND a canonical API type must `extends ContentItem` (or equivalent) so type drift surfaces at compile time, not as silent blank renders'."
     },
     "signal:concurrent-cycle-suffix": {
-      "hits": 1,
-      "iters": ["iter-005a"],
-      "rung_density": { "iter-005a": 1 },
+      "hits": 2,
+      "iters": ["iter-005a", "iter-009a"],
+      "rung_density": { "iter-005a": 1, "iter-009a": 1 },
       "first_seen": "2026-04-27",
-      "last_seen": "2026-04-27",
+      "last_seen": "2026-04-28",
       "promoted": false,
       "rule_id": null,
-      "beads": ["Codex-v5bzy"],
+      "beads": ["Codex-v5bzy", "Codex-d3g6"],
       "verdict_history": [
         {
           "iter": "iter-005a",
@@ -85,9 +85,36 @@
           "action": "meta-signal",
           "user_chose": "use-suffix",
           "user_reasoning": "Auto mode (parallel /loop fired by user). Two /triage agents ran on iter-005 concurrently. Concurrent-agent-safety §3 of brief mandated `iter-NNNa.md` suffix on doc-name collision. Cycle-history table updated with separate iter-005 + iter-005a rows (different beads, different rungs, different outcomes). Master.md ladder snapshot owned by the rung-1 agent (it ran first); iter-005a only added a row to cycle history, did not edit ladder counts."
+        },
+        {
+          "iter": "iter-009a",
+          "rung": null,
+          "action": "meta-signal",
+          "user_chose": "use-suffix",
+          "user_reasoning": "Second sighting. iter-009 was claimed by a parallel /triage agent that picked Codex-y63gl.14 (rung-1 perf hot-path) and had already landed working-tree edits to apps/web (use-poll-config.ts), master.md (added iter-009 ladder snapshot footnote + cycle-history row), and recurrence.json (incremented route:self:promoted-helper-missed-call-site to hits=2) by the time iter-009a's brief was issued. iter-009a (this cycle) adopted suffix per iter-005a precedent, picked next-highest-impact item per user direction (rung 3+), surfaced Codex-d3g6 as a rung-3 routing question, appended cycle-history row only (did not touch ladder snapshot — the rung-1 agent already edited the rung-1 count). Pattern repeats cleanly: no merge conflicts, no overlapping bead claims, no ledger collisions. The iter-005a precedent generalised."
         }
       ],
-      "notes": "Meta-signal: tracks how often concurrent /triage cycles produce overlapping iter docs. If 3+ recurrences, promote rule: 'concurrent agents must always lock the iter-NNN doc name FIRST via touch+commit (or equivalent file-creation race), and second agent always picks suffix [a-z] without coordination'. iter-005a was a clean parallel — no merge, no master.md collision, no ledger collision. Pattern works."
+      "notes": "Meta-signal: tracks how often concurrent /triage cycles produce overlapping iter docs. Hit 2 confirms the suffix protocol works in practice (iter-005a precedent + iter-009a application). If 3+ recurrences, promote rule: 'concurrent agents must always lock the iter-NNN doc name FIRST via touch+commit (or equivalent file-creation race), and second agent always picks suffix [a-z] without coordination. The second agent never touches the ladder snapshot — only appends to cycle history.'"
+    },
+    "signal:bead-description-partially-stale": {
+      "hits": 1,
+      "iters": ["iter-009a"],
+      "rung_density": { "iter-009a": 1 },
+      "first_seen": "2026-04-28",
+      "last_seen": "2026-04-28",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-d3g6"],
+      "verdict_history": [
+        {
+          "iter": "iter-009a",
+          "rung": 3,
+          "action": "walk-only-with-staleness-flag",
+          "user_chose": null,
+          "user_reasoning": "Codex-d3g6 (filed 2026-03-29) cited 6 missing-test areas. Pre-flight grep verification found sub-item (1) `enforcePolicyInline()` query-param coverage was already partially closed by post-March commits to packages/worker-utils/src/procedure/__tests__/enforce-policy-inline.test.ts (line 430: `it('falls back to organizationId query param when subdomain yields nothing', ...)` plus related membership-check + platform-owner-bypass tests). Sub-items (2)–(6) confirmed gaps. Bead description was not contradictory (vs `signal:bead-description-self-contradicts-codebase`) but was OUTDATED: a real gap when filed, a partial gap now. Surfaced in iter-009a's question payload so the user can choose between (a) one PR for the remaining 5.5 gaps, (b) split-into-children, (c) split-by-package, (d) spawn-backend-dev. iter-005a precedent: pre-flight verification ALWAYS runs even on user-directed picks; described coverage is verified against grep before approach options are enumerated."
+        }
+      ],
+      "notes": "Meta-signal: distinct from `signal:bead-description-self-contradicts-codebase` (where the cited symbol does not exist) — this fingerprint is for beads where the cited symbol DOES exist but coverage has shifted between filing and pickup. Common shape: a multi-sub-item bead filed early in a feature's life (often as a 'follow-up' to a fix epic) accumulates partial closure as sibling work lands, but no one re-files or shrinks the parent. If 3+ recurrences, promote rule: 'when a bead lists N sub-items and any of them is partially stale at pickup, the cycle MUST surface the staleness in the iter doc + question payload + propose split-into-N-children as a default option so future cycles can drain the genuinely-open sub-items as rung-1 mechanical work without re-investigating the resolved ones'."
     },
     "route:self:promoted-helper-missed-call-site": {
       "hits": 2,
