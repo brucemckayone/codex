@@ -70,6 +70,14 @@ const securityHook: Handle = async ({ event, resolve }) => {
   response.headers.set('X-Frame-Options', 'SAMEORIGIN');
   response.headers.set('X-Content-Type-Options', 'nosniff');
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  // Take ownership of Permissions-Policy so platform/edge defaults (Cloudflare's
+  // auto-injected `browsing-topics=()`) don't leak into the response and trigger
+  // "Unrecognized feature" warnings in browsers without Topics API. Mirrors the
+  // value `packages/security` emits for workers.
+  response.headers.set(
+    'Permissions-Policy',
+    'geolocation=(), microphone=(), camera=(), payment=()'
+  );
   response.headers.set('X-Request-Id', event.locals.requestId);
 
   // HSTS: 2-year max-age + subdomains. Production-only — pinning HTTPS on

@@ -687,7 +687,13 @@
           <button
             type="button"
             class="audio-player__btn audio-player__btn--immersive"
-            onclick={() => { showImmersive = true; }}
+            onclick={() => {
+              showImmersive = true;
+              // Fullscreen API requires fresh transient activation — must be
+              // requested synchronously from a user gesture, not from the
+              // overlay's onMount (which runs after several awaits).
+              document.documentElement.requestFullscreen().catch(() => {});
+            }}
             aria-label="Enter immersive mode"
             title="Immersive shader mode"
           >

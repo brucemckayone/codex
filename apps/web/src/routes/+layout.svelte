@@ -62,11 +62,13 @@
   // 'page-content' view transition. Decision logic lives in
   // $lib/auth/scroll-reset-on-nav (unit-tested pure function).
   afterNavigate((navigation) => {
+    // Defensive optional chains on `.url` — TS types claim it's non-null but
+    // first-load / HMR edge cases hit this code with `from.url`/`to.url` null.
     const reset = shouldScrollToTopOnNav({
       type: navigation.type,
-      fromPathname: navigation.from?.url.pathname,
-      toPathname: navigation.to?.url.pathname,
-      toHash: navigation.to?.url.hash,
+      fromPathname: navigation.from?.url?.pathname,
+      toPathname: navigation.to?.url?.pathname,
+      toHash: navigation.to?.url?.hash,
     });
     if (reset) requestAnimationFrame(() => window.scrollTo(0, 0));
   });
@@ -76,7 +78,7 @@
     if (!document.startViewTransition) return;
 
     // Skip view transition for same-path navigations (query/hash changes)
-    if (navigation.from?.url.pathname === navigation.to.url.pathname) return;
+    if (navigation.from?.url?.pathname === navigation.to.url?.pathname) return;
 
     return new Promise((resolve) => {
       try {

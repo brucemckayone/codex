@@ -47,6 +47,9 @@
   let analyser: AudioAnalyserHandle | null = null;
   let animFrameId = 0;
   let startTime = 0;
+  // Set true in onDestroy so async work resuming after an `await` can bail out
+  // before touching `bind:this` refs that Svelte nulls on unmount.
+  let cancelled = false;
   // Lazy-initialised in onMount once `shaderPreset` is captured. Amortises
   // getShaderConfig (forced style recalc) across ~30 frames per ShaderHero pattern.
   let pollConfig: (() => ShaderConfig) | null = null;
@@ -202,6 +205,9 @@
     const preset = shaderPreset as ShaderPresetId;
     pollConfig = createPollConfig(() => getShaderConfig(null, preset));
     renderer = await loadRenderer(preset);
+    // Race guard: dynamic import is the long await — user may have closed the
+    // overlay in the meantime, in which case canvasEl/gl have been nulled.
+    if (cancelled || !canvasEl || !gl) return;
     if (!renderer) {
       rendererError = 'Unable to load shader preset. Exiting immersive mode.';
       setTimeout(() => onclose(), 1200);
@@ -225,6 +231,7 @@
       rendererError = 'Audio analyser failed to start. Visuals will play without audio reactivity.';
       // Not fatal — continue rendering.
     }
+    if (cancelled) return;
 
     rendererReady = true;
 
@@ -232,12 +239,9 @@
     startTime = performance.now();
     animFrameId = requestAnimationFrame(renderFrame);
 
-    // Try fullscreen
-    try {
-      await document.documentElement.requestFullscreen();
-    } catch {
-      // Fullscreen denied — fixed overlay fallback is fine
-    }
+    // Fullscreen is requested by the parent's click handler (AudioPlayer.svelte)
+    // because the Fullscreen API requires fresh transient activation, which is
+    // gone by the time we reach this post-await branch.
 
     // Event listeners
     audioElement.addEventListener('play', onPlay);
@@ -253,6 +257,8 @@
   });
 
   onDestroy(() => {
+    // Signal first so any pending awaits bail before touching nulled refs.
+    cancelled = true;
     cancelAnimationFrame(animFrameId);
 
     if (gl && renderer) {
