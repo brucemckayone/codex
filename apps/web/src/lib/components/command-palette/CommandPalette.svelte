@@ -185,6 +185,8 @@
       <input
         bind:this={inputEl}
         type="text"
+        id="command-palette-input"
+        name="command-palette-query"
         class="palette__input"
         placeholder={m.command_palette_search_placeholder()}
         bind:value={query}

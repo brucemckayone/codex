@@ -207,6 +207,9 @@
         <SearchIcon size={14} />
         <input
           bind:this={searchInputEl}
+          id="font-picker-search"
+          name="font-search"
+          autocomplete="off"
           class="font-picker__search-input"
           type="text"
           placeholder="Search fonts..."

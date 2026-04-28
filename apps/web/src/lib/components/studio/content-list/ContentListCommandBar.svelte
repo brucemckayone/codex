@@ -107,6 +107,9 @@
       </span>
       <input
         type="search"
+        id="content-list-search"
+        name="q"
+        autocomplete="off"
         class="search-input"
         placeholder={m.studio_content_search_placeholder()}
         value={searchValue}

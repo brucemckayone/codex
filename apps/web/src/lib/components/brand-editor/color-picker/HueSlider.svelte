@@ -27,6 +27,8 @@
        root carries the class forward so callers can adjust. -->
   <input
     type="range"
+    id="hue-slider"
+    name="hue"
     min="0"
     max="360"
     step="1"

@@ -197,6 +197,9 @@
         >
           <input
             type="search"
+            id="filter-bar-search-{filter.key}"
+            name={filter.key}
+            autocomplete="off"
             class="filter-bar__search-input"
             placeholder={filter.placeholder}
             value={searchValues[filter.key] ?? ''}

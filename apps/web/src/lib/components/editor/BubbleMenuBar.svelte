@@ -62,6 +62,9 @@
       bind:this={linkInput}
       bind:value={linkUrl}
       type="url"
+      id="bubble-menu-link"
+      name="link-url"
+      autocomplete="url"
       class="bubble-link-input"
       placeholder="https://..."
       onkeydown={handleLinkKeydown}

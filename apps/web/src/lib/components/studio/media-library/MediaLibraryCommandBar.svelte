@@ -150,6 +150,9 @@
       </span>
       <input
         type="search"
+        id="media-library-search"
+        name="q"
+        autocomplete="off"
         class="search-input"
         placeholder={searchPlaceholder}
         value={searchValue}

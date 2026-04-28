@@ -19,6 +19,8 @@
     onCheckedChange,
     class: className,
     id,
+    name,
+    value,
     ...restProps
   }: Props = $props();
 
@@ -56,7 +58,7 @@
         <div class="indeterminate-bar"></div>
       {/if}
     </div>
-    <input {...$input} use:input id={generatedId} {required} />
+    <input {...$input} use:input id={generatedId} {name} {value} {required} />
   </button>
 
   {#if label}

@@ -142,7 +142,10 @@
 
   <div class="search-row">
     <input
-      type="text"
+      type="search"
+      id="library-search"
+      name="q"
+      autocomplete="off"
       class="search-input"
       placeholder={m.library_search_placeholder()}
       bind:value={searchInput}

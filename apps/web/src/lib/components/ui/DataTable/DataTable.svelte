@@ -104,6 +104,8 @@
             <th class="data-table__th data-table__th--checkbox">
               <input
                 type="checkbox"
+                id="data-table-select-all"
+                name="select-all"
                 checked={allSelected}
                 indeterminate={someSelected}
                 onchange={toggleAll}
@@ -151,6 +153,9 @@
               <td class="data-table__td data-table__td--checkbox">
                 <input
                   type="checkbox"
+                  id="data-table-select-{rowId}"
+                  name="select-row"
+                  value={rowId}
                   checked={selectedIds.has(rowId)}
                   onchange={() => toggleRow(rowId)}
                   aria-label={m.table_select_row()}

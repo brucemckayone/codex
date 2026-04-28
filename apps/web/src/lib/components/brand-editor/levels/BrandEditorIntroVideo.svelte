@@ -223,6 +223,8 @@
     <div class="intro-video__actions">
       <input
         bind:this={fileInput}
+        id="intro-video-upload"
+        name="introVideo"
         type="file"
         accept="video/mp4,video/webm,video/quicktime"
         hidden
@@ -277,6 +279,8 @@
     <div class="intro-video__actions">
       <input
         bind:this={fileInput}
+        id="intro-video-replace"
+        name="introVideo"
         type="file"
         accept="video/mp4,video/webm,video/quicktime"
         hidden

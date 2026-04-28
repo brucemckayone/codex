@@ -278,8 +278,11 @@
                   <span class="fine-tune__token-name">{token.name}</span>
                 </div>
                 <select
+                  id="fine-tune-{token.key}"
+                  name={token.key}
                   class="fine-tune__select"
                   value={override ?? ''}
+                  aria-label={token.name}
                   onchange={(e) => {
                     const v = (e.target as HTMLSelectElement).value;
                     if (v === '') clearOverride(token.key);

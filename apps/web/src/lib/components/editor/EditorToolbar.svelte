@@ -199,6 +199,9 @@
           bind:this={linkInput}
           bind:value={linkUrl}
           type="url"
+          id="editor-toolbar-link"
+          name="link-url"
+          autocomplete="url"
           class="link-input"
           placeholder="https://example.com"
           onkeydown={handleLinkKeydown}

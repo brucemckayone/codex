@@ -53,6 +53,9 @@
   <form class="search-bar" onsubmit={handleSearch}>
     <input
       type="search"
+      id="discover-search"
+      name="q"
+      autocomplete="off"
       bind:value={searchValue}
       placeholder={m.explore_search_placeholder()}
       class="search-input"

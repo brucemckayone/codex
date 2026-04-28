@@ -646,6 +646,8 @@
           </button>
           <input
             type="range"
+            id="audio-player-volume"
+            name="volume"
             class="audio-player__volume"
             min="0"
             max="1"

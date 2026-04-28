@@ -220,6 +220,9 @@
 			<input
 				bind:this={inputEl}
 				type="search"
+				id="command-palette-search-input"
+				name="q"
+				autocomplete="off"
 				class="palette__input"
 				placeholder={m.command_palette_placeholder()}
 				bind:value={query}
@@ -230,7 +233,6 @@
 				aria-expanded={allItems.length > 0}
 				aria-autocomplete="list"
 				aria-activedescendant={activeIndex >= 0 ? `palette-item-${activeIndex}` : undefined}
-				autocomplete="off"
 			/>
 			{#if query}
 				<button

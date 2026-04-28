@@ -99,6 +99,9 @@
     <form class="search-form" onsubmit={handleSearch}>
       <input
         type="search"
+        id="creator-content-search"
+        name="q"
+        autocomplete="off"
         class="search-input"
         placeholder={m.creator_content_search_placeholder()}
         bind:value={searchInput}

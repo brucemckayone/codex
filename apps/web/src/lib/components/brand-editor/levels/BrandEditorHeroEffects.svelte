@@ -1015,9 +1015,12 @@
           <span class="hero-fx__color-label">Surface Color</span>
           <input
             type="color"
+            id="shader-pulse-color"
+            name="shader-pulse-color"
             value={pulseColor}
             oninput={(e) => updateOverride('shader-pulse-color', (e.target as HTMLInputElement).value)}
             class="hero-fx__color-input"
+            aria-label="Pulse surface colour"
           />
         </div>
 
