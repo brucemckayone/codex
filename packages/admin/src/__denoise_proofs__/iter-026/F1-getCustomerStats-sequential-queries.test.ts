@@ -119,7 +119,7 @@ function makeMockDb(tracker: InFlightTracker) {
 }
 
 describe('denoise proof: F1 performance:sequential-await-independent-queries — getCustomerStats', () => {
-  it.skip('issues totalCustomers + newCustomers queries in parallel (peak in-flight >= 2)', async () => {
+  it('issues totalCustomers + newCustomers queries in parallel (peak in-flight >= 2)', async () => {
     // The fix should wrap the two existing awaits in a single Promise.all
     // so totalResult + newCustomersResult fire concurrently. Then peak
     // in-flight will be >= 2.

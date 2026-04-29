@@ -458,18 +458,6 @@ export class AdminAnalyticsService extends BaseService {
   async getCustomerStats(organizationId: string): Promise<CustomerStats> {
     try {
       // Note: Organization existence is validated by middleware via organizationMemberships FK constraint
-      // Count distinct customers with completed purchases
-      const totalResult = await this.db
-        .select({
-          totalCustomers: countDistinct(schema.purchases.customerId),
-        })
-        .from(schema.purchases)
-        .where(
-          and(
-            eq(schema.purchases.organizationId, organizationId),
-            eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED)
-          )
-        );
 
       // Count new customers in default trend period
       // A "new customer" is one whose FIRST purchase was in that period
@@ -478,21 +466,38 @@ export class AdminAnalyticsService extends BaseService {
         trendPeriodStartDate.getDate() - ANALYTICS.TREND_DAYS_DEFAULT
       );
 
-      // Subquery to find first purchase date per customer
-      const newCustomersResult = await this.db.execute(sql`
-        WITH first_purchases AS (
-          SELECT
-            customer_id,
-            MIN(purchased_at) as first_purchase_at
-          FROM purchases
-          WHERE organization_id = ${organizationId}
-            AND status = ${PURCHASE_STATUS.COMPLETED}
-          GROUP BY customer_id
-        )
-        SELECT COUNT(*) as count
-        FROM first_purchases
-        WHERE first_purchase_at >= ${trendPeriodStartDate}
-      `);
+      // R12: parallelise independent reads — totalResult and newCustomersResult
+      // are both aggregates over `purchases (organization_id, status=completed)`
+      // with no FK resolution between them, so they MUST fire concurrently.
+      const [totalResult, newCustomersResult] = await Promise.all([
+        // Count distinct customers with completed purchases
+        this.db
+          .select({
+            totalCustomers: countDistinct(schema.purchases.customerId),
+          })
+          .from(schema.purchases)
+          .where(
+            and(
+              eq(schema.purchases.organizationId, organizationId),
+              eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED)
+            )
+          ),
+        // Subquery to find first purchase date per customer
+        this.db.execute(sql`
+          WITH first_purchases AS (
+            SELECT
+              customer_id,
+              MIN(purchased_at) as first_purchase_at
+            FROM purchases
+            WHERE organization_id = ${organizationId}
+              AND status = ${PURCHASE_STATUS.COMPLETED}
+            GROUP BY customer_id
+          )
+          SELECT COUNT(*) as count
+          FROM first_purchases
+          WHERE first_purchase_at >= ${trendPeriodStartDate}
+        `),
+      ]);
 
       const newCustomersLast30Days = Number(
         (newCustomersResult.rows[0] as { count: string })?.count ?? 0
