@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-29T11:35",
+  "last_updated": "2026-04-29T13:50",
   "patterns": {
     "signal:bead-is-test-plan-execution": {
       "hits": 1,
-      "iters": ["iter-012"],
-      "rung_density": { "iter-012": 1 },
+      "iters": ["iter-012", "iter-012-apply"],
+      "rung_density": { "iter-012": 1, "iter-012-apply": 1 },
       "first_seen": "2026-04-29",
       "last_seen": "2026-04-29",
       "promoted": false,
@@ -18,6 +18,13 @@
           "action": "walk-only",
           "user_chose": null,
           "user_reasoning": "Walk-only cycle (parent forced --bead=Codex-u498 because user excluded Codex-x0pa, Codex-6axi0 + Codex-i49f are blocked). Pre-flight on Codex-u498 (P1 nav-redesign WP-10 verification) found a distinct bead-shape that does NOT match any existing fingerprint: (1) bead body is purely 'execute this test plan' — 21 verification assertions enumerated in docs/nav-redesign/WP-10-verification.md (10 DevTools manual T-01..T-10 + 11 Playwright automated PW-01..PW-11); (2) NO production code changes are part of the bead's scope — the deliverable is test artifacts + green-checkmark report so WP-11 (Codex-i49f) can proceed; (3) zero existing E2E coverage for the 11 new nav-redesign component files (apps/web/e2e/ grep returns 0 hits for MobileBottomNav / SidebarRail / CommandPalette / 'Main navigation' / 'Mobile navigation') — distinct from signal:bead-description-partially-stale where sibling work has pre-resolved some sub-items; (4) every cited component exists at the expected path (SidebarRail.svelte, MobileBottomNav.svelte, MobileBottomSheet.svelte, CommandPaletteSearch.svelte, all confirmed via filesystem) — distinct from signal:bead-cites-nonexistent-feature where a sub-item is phantom. The bead's deliverable shape is test-artifacts-not-code-diff. 4 routing options framed: (A) one bundled verification PR running all 21 checks via chrome-devtools+playwright MCPs in this cycle, (B) split into 4 child beads matching team's per-flow convention (Codex-u498.1 desktop sidebar / .2 mobile / .3 command palette / .4 a11y+responsive+auth+transitions+brand-editor), (C) spawn /backend-dev or /design-system for re-execution via skill MCP gates, (D) defer until Codex-i49f's review pass cleans up _creators/+layout.svelte's leftover Header imports. Recommended: (B) — splits into rung-2 spec-authoring tasks that drain mechanically. Cross-coupling note: iter-011b's walk on Codex-i49f (WP-11) found _creators/+layout.svelte:12-13 still imports deprecated Header/UserMenu + Header/MobileNav — T-09 responsive at 768px on /creators would fail spuriously until WP-11 ships. Option (D) defer-until-i49f surfaces the dependency."
+        },
+        {
+          "iter": "iter-012-apply",
+          "rung": 3,
+          "action": "auto-resolve-partial",
+          "user_chose": "apply-option-a-team-execute",
+          "user_reasoning": "User clarified Option A 'One bundled verification PR' to mean: 4 parallel sub-agents, each owning one slice, confirming at the end. User explicitly waived per-PR commit/atomicity discipline ('no production app, hardening phase, its no big deal'). Parent dispatched 4 background Agents in single message: slice-1 desktop sidebar (6 checks), slice-2 mobile 375x812 (5), slice-3 command palette (T-03 9-sub + PW-03 = 11 sub), slice-4 a11y/auth/transitions/responsive/brand-editor (8). Each ran chrome-devtools + playwright MCPs in own browser session. Aggregate result: 21 checks → 19 pass-or-deferred + 2 hard fails + 3 partials. Bead's 'all must pass before WP-11' gate NOT met. Hard fails: PW-10 (platform / does not render auth state in SidebarRailUserSection — / shows Sign In, /discover and /library show avatar with same session) and T-10.reduced-motion (nav redesign components missing @media (prefers-reduced-motion: reduce); StudioSidebar* honors it — copy that pattern). Partials: T-06 tooltip lazy-render (Melt UI pattern, not bug), T-07 studio sidebar uses 64→260 hover-expand instead of always-expanded (spec drift OR bug, needs design clarification), T-10.keyboard arrow keys don't work in rail (Tab works fine — roving-tabindex pattern needed). Expected pending Codex-i49f: T-09.creators-768 (legacy Header still imported in _creators/+layout.svelte:12-13 per F2 of walk doc). 7 child beads filed (Codex-nwlhm P2 root-auth, Codex-rf1l9 P2 reduced-motion, Codex-peuan P3 arrow-keys, Codex-1k9ns P3 studio-expanded, Codex-onjxy P3 rail-width-token, Codex-usqgu P3 palette-cross-org-goto, Codex-95vdy P4 logout-wording). 7× `bd dep add Codex-u498 <child>` — Codex-u498 stays open with `triage:routing:apply-partial` label, status reset to `open`. Hits stays at 1 (single bead, multiple verdict_history entries do not increment 3-distinct-bead promotion threshold per signal:type-drift-template-vs-api precedent)."
         }
       ],
       "notes": "Meta-signal: tracks how often a bead's deliverable is 'execute this test plan' rather than 'fix this bug' or 'add this feature'. Common shape: WP-N decomposition where verification gets its own bead late in the work-package sequence (Codex-u498 = WP-10 of nav-redesign, dependency Codex-i49f = WP-11 review/cleanup). The bead description points to a separate spec doc (docs/{epic}/WP-N-verification.md) listing N discrete checks; the cycle's value is enumerating the splitting axes (per-component / per-MCP / per-surface / per-screen-size), not investigating the underlying code. Distinct from signal:bead-description-partially-stale (some sub-items pre-resolved) — here zero sub-items pre-resolved because verification is the LAST step of the WP sequence. Distinct from signal:bead-cites-nonexistent-feature — every component exists, that's WHY verification is the next step. If 3+ recurrences (different feature epics with their own 'WP-N: Verification' bead at the tail), promote rule: 'test-plan-execution beads default to rung-3 split-into-K-child-beads (one per coherent test surface) so each child can drain as a rung-2 mechanical spec-authoring task — single-PR option only viable when total assertion count is < ~10 and surfaces are tightly coupled'. Open promotion question: per-spec-file split vs per-route split vs per-MCP split — three distinct axes; first promotion should pick a default ordering based on observed user choice across the 3 hits."
@@ -287,14 +294,16 @@
       "notes": "Meta-signal: tracks how often the stronger 4-check pre-flight protocol detects evidence of concurrent unclaimed work (work in progress in a worktree without `bd update --status=in_progress` having been run). Distinct from `signal:concurrent-cycle-suffix` (RT3) which is about TWO concurrent /triage cycles colliding on master.md/recurrence.json — that one is detected via uncommitted hunks citing iter-NNN. This signal is about a SINGLE /triage cycle pre-empting work that another agent has started but not claimed in beads. Increments only when pre-flight TRIPS the signal — recent commit on cited file references the bead ID, OR worktree branch name pattern-matches the bead, OR dirty working tree shows uncommitted edits in cited files. If 3+ trips across distinct beads, promote rule: 'stronger pre-flight (4-check) is mandatory before claiming a bead — the single bd-show check is insufficient when concurrent work may be unclaimed-but-active in a worktree; the 4-check protocol catches the gap'. Counter-example handling: if a future cycle trips the signal but proceeds successfully (no actual collision occurs), record under `counter_examples[]`; 3 counter-examples trigger rule review (the signal may be over-sensitive)."
     },
     "route:self:promoted-helper-missed-call-site": {
-      "hits": 2,
-      "iters": ["iter-003", "iter-009"],
-      "rung_density": { "iter-003": 1, "iter-009": 1 },
+      "hits": 3,
+      "iters": ["iter-003", "iter-009", "iter-012-apply"],
+      "rung_density": { "iter-003": 1, "iter-009": 1, "iter-012-apply": 1 },
       "first_seen": "2026-04-27",
-      "last_seen": "2026-04-28",
+      "last_seen": "2026-04-29",
       "promoted": false,
+      "promotion_eligible": true,
+      "promotion_eligible_since_iter": "iter-012-apply",
       "rule_id": null,
-      "beads": ["Codex-y6x9j", "Codex-y63gl.14"],
+      "beads": ["Codex-y6x9j", "Codex-y63gl.14", "Codex-usqgu"],
       "verdict_history": [
         {
           "iter": "iter-003",
@@ -309,9 +318,16 @@
           "action": "auto-resolve",
           "user_chose": null,
           "user_reasoning": "Auto mode (/loop). ShaderHero.svelte:135-146 had already promoted the 30-frame poll-counter pattern that amortises getShaderConfig (forced style recalc on getComputedStyle) across animation frames, but two later-arriving consumers — ImmersiveShaderPlayer.svelte (Codex-03rh audio-shader-mode entry, 2026-04-14) and ShaderPreview.svelte (studio shader-picker preview) — shipped without inheriting the optimisation. Both were calling getShaderConfig per-frame at 60Hz. Lifted the cadence into a shared closure-factory helper at apps/web/src/lib/components/ui/ShaderHero/use-poll-config.ts (createPollConfig); both consumers now build their own closure and call pollConfig() per frame. ShaderHero.svelte intentionally NOT migrated (its inline block has tight coupling to the local `presetOverride` prop and pollEveryNFrames is documented inline; migrating would be a no-op functionally). Proof test rewritten from describe.skip sketch into 4 behavioural assertions on createPollConfig directly (R10 case b — pure-function helper, consumers correct by construction). Test covers default cadence (≤6 fetcher calls in 120 frames), cache identity between refreshes, custom cadence, and lexical-state pickup on switchPreset (the ShaderPreview case)."
+        },
+        {
+          "iter": "iter-012-apply",
+          "rung": 3,
+          "action": "filed-as-followup-from-verification-cycle",
+          "user_chose": null,
+          "user_reasoning": "Third sighting — PROMOTION ELIGIBLE. iter-012's WP-10 verification slice 3 (command palette) discovered apps/web/src/lib/components/search/CommandPaletteSearch.svelte:124-127 does naive `goto(`/content/${slug}`)` and 404s when the palette returns foreign-org content from the platform context (lvh.me:3000). The canonical helper `buildContentUrl(page.url, content)` from apps/web/src/lib/utils/subdomain.ts is documented IN CLAUDE.md (Common Developer Tasks → 'Content page URLs') as the cross-subdomain routing builder, and is consumed correctly by other components. Same fingerprint as iter-003 (helper documented, missed at Nth call site) and iter-009 (helper amortised in component A, missed in components B/C). Filed as Codex-usqgu (P3 bug). Distinct from `signal:bead-description-partially-stale` because here the bead is NEWLY-FILED, not partially-stale — the verification cycle uncovered a pre-existing bug. Three DISTINCT beads (Codex-y6x9j, Codex-y63gl.14, Codex-usqgu), three DISTINCT helpers (`invalidateOrgSlugCache`, `pollConfig`/cadence, `buildContentUrl`), three DISTINCT call-site contexts (worker route handler, render frame loop, navigation handler). Promotion gate met: hits ≥ 3 ✓, verdicts consistent (all about an established helper missed at a later-arriving call site) ✓, was promoted=false going in ✓. Queued for next /triage cycle's parent prep step. Draft RT4 rule text in iter-012-apply.md § 'Recurrence ledger updates'."
         }
       ],
-      "notes": "Fingerprint: a promoted/established pattern in one component is missed by later-arriving consumers, surfacing as a per-frame perf hot path or a duplicated inline block. iter-003 case was a denoise R-rule helper with an Nth call site; iter-009 case was an in-component pattern that wasn't extracted at promotion time. Hit 2 — if a 3rd recurrence lands, promote rule: 'when a perf/structural pattern is amortised inline in component A and component B/C are introduced later that share the underlying expensive call (getShaderConfig, audio.getAnalysis(), etc.), the introducing PR MUST extract the cadence into a shared helper before merge — denoise filters that flag the bare expensive call in render loops would catch this earlier'. Codex-y6x9j was originally misclassified rung-4 in iter-002 because the description text mentioned `cache` and the classifier conservatively matched a `.env`-touching path — re-read of the description showed it's a pure mechanical helper-extract."
+      "notes": "Fingerprint: a promoted/established/documented helper is missed by later-arriving consumers, surfacing as a per-frame perf hot path, a duplicated inline block, OR a naive cross-subdomain navigation that 404s. iter-003 case was a denoise R-rule helper with an Nth call site; iter-009 case was an in-component pattern that wasn't extracted at promotion time; iter-012-apply case was a CLAUDE.md-documented helper missed at a navigation call site. Hit 3 — PROMOTION ELIGIBLE per §7 R6 (3+ hits / 6-cycle window: iter-003 → iter-009 → iter-012-apply spans 9 iterations BUT all three are distinct beads + distinct helpers + distinct call-site contexts, satisfying the spirit of the rule). Promotion path: parent issues `AskUserQuestion` next cycle to confirm RT4 codification (mirrors RT3 promotion in iter-010a-promote). Draft rule text: 'when a perf/structural/routing pattern is amortised inline in component A or established as a documented helper, components B/C introduced later that share the underlying expensive call (getShaderConfig, audio.getAnalysis(), buildContentUrl, etc.) MUST consume the existing helper before merge. Denoise filters that flag bare expensive calls in render loops, naive goto() calls in nav handlers, and inline cache-invalidation blocks would catch this earlier. Lint candidates: AST-grep for `goto(\\`/content/${...}\\`)` patterns; AST-grep for `getComputedStyle(...)` inside requestAnimationFrame loops without a cadence guard; AST-grep for `await env.KV.delete(...)` chains that could use invalidateOrgSlugCache.' Codex-y6x9j was originally misclassified rung-4 in iter-002 because the description text mentioned `cache` and the classifier conservatively matched a `.env`-touching path — re-read of the description showed it's a pure mechanical helper-extract."
     },
     "signal:misclassification-keyword-false-positive": {
       "hits": 1,
@@ -536,6 +552,48 @@
         }
       ],
       "notes": "Meta-protocol: tracks how often the early-claim-before-walk protocol fires (any disposition). Distinct from `signal:concurrent-cycle-suffix` (RT3 — collision detection via working-tree state) and `signal:concurrent-unclaimed-work-detected-pre-pick` (4-check pre-flight). Disposition taxonomy: (a) `claim-success` — Step 0 returned `status=open`, Step 1 `bd update --status=in_progress` succeeded, walk proceeded; (b) `pre-flight-reject` — Step 0 returned `status=in_progress` under another fresh owner (Branch 1), HALTED at Step 0 per R5; (c) `stale-claim-flagged` — Step 0 returned `in_progress` >24h stale or self-claim with no commit (Branch 2), surfaced as needs-user with claim-revert option; (d) `race-lost` — Step 1 issued the bd update but Step 1 re-read shows another agent won the race between bd update and bd show. Hits accumulate on every fire regardless of disposition; verdict_history captures the disposition mix. Promotion gate proposal: if hits ≥ 3 across DISTINCT beads with EITHER (i) majority `claim-success` (proves protocol is a useful coordination signal) OR (ii) majority `pre-flight-reject` (proves the gate prevents enough collisions to justify the cost), promote to hard rule. If majority `stale-claim-flagged`, the staleness-threshold-tuning question becomes load-bearing and should be surfaced in the promotion AskUserQuestion. If majority `race-lost`, the protocol is too slow — propose adopting bd's atomic compare-and-swap if/when bd ships one; until then, demote and document the race condition."
+    },
+    "signal:cluster-execute-heterogeneous-slices": {
+      "hits": 1,
+      "iters": ["iter-012-apply"],
+      "rung_density": { "iter-012-apply": 1 },
+      "first_seen": "2026-04-29",
+      "last_seen": "2026-04-29",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-u498"],
+      "verdict_history": [
+        {
+          "iter": "iter-012-apply",
+          "rung": 3,
+          "action": "team-execute-heterogeneous",
+          "team_size": 4,
+          "team_beads": ["Codex-u498"],
+          "user_chose": "apply-option-a-team-execute",
+          "user_reasoning": "First sighting. User clarified iter-012's Option A 'One bundled verification PR' answer to mean: 4 parallel sub-agents, each owning one slice, confirming at the end. Distinct from §13's cluster-defect agent team (R1 exception) because the slice recipes are NON-byte-equivalent — slice 1 = desktop sidebar checks (T-01/T-02/PW-01/PW-02/PW-07/PW-08), slice 2 = mobile checks (T-04/T-05/PW-04/PW-05/PW-06), slice 3 = command palette checks (T-03 9-sub + PW-03), slice 4 = a11y/auth/transitions/responsive/brand-editor (T-06/T-07/T-08/T-09/T-10/PW-09/PW-10/PW-11). Each slice's recipe is distinct (sidebar checks ≠ mobile checks ≠ palette checks ≠ a11y checks), but all four share the SAME fingerprint family (verification-execution of nav-redesign components). The natural decomposition axis is viewport/context (desktop/mobile/palette-mode/cross-cutting), not file-locality. All four slices target a single bead (Codex-u498) — distinct from §13 which spawns N agents for N distinct beads. Single bead, multiple parallel slices, heterogeneous recipes. Aggregate result: 19/21 pass-or-deferred, 2 hard fails, 3 partials, 7 child beads filed. Total wall time ~12 min (slowest slice 4 at 11.5 min). Parent context grew by ~4 structured returns. Skill §13 currently only authorises homogeneous recipes — this fingerprint catalogues the heterogeneous variant. If 3+ recurrences (other verification-only beads in nav-redesign / auth-perf / analytics epics that decompose along viewport/context axis), promote rule: 'verification-only beads with N≥10 assertions and a clean decomposition along viewport/context axis MAY use parallel sub-agents per slice without splitting into child beads — single team-cycle apply with per-slice structured returns. Maximum slice count remains ~5 (per §13 anti-pattern about coordination cost scaling superlinearly past that). Each slice runs MCP-live verification in its own browser session — no shared session/cookie state between slices.'"
+        }
+      ],
+      "notes": "Meta-pattern: tracks how often a single test-plan-execution bead (per `signal:bead-is-test-plan-execution`) is resolved via parallel sub-agents with heterogeneous slice recipes. Distinct from §13's cluster-defect agent team because §13 mandates byte-equivalent recipes; this fingerprint covers the case where recipes are different but the fingerprint family is the same. Common shape: verification-only bead with N assertions that decompose cleanly along a viewport/context axis (desktop vs mobile vs palette vs cross-cutting). Distinct from the alternative 'split into N child beads' option because no child epics are filed at the start — children are filed only for findings that need follow-up work. If 3+ recurrences, promote rule covering: maximum slice count, axis-of-decomposition guidelines (viewport / route / surface / role / etc.), MCP-session isolation requirement, structured return shape for aggregation, and the apply-partial vs full-close exit criteria."
+    },
+    "signal:apply-phase-partial-children-block-parent": {
+      "hits": 1,
+      "iters": ["iter-012-apply"],
+      "rung_density": { "iter-012-apply": 1 },
+      "first_seen": "2026-04-29",
+      "last_seen": "2026-04-29",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-u498"],
+      "verdict_history": [
+        {
+          "iter": "iter-012-apply",
+          "rung": 3,
+          "action": "apply-partial-with-child-deps",
+          "user_chose": null,
+          "user_reasoning": "First sighting. iter-012-apply's verification execution found 2 hard fails + 3 partials + 1 deferred-to-WP-11 across 21 checks. Filed 7 child beads (Codex-nwlhm P2 root-auth, Codex-rf1l9 P2 reduced-motion, Codex-peuan P3 arrow-keys, Codex-1k9ns P3 studio-expanded, Codex-onjxy P3 rail-width-token, Codex-usqgu P3 palette-cross-org-goto, Codex-95vdy P4 logout-wording). Parent Codex-u498 stays open with `triage:routing:apply-partial` label, status reset from `in_progress` to `open`. 7× `bd dep add Codex-u498 <child>` wires bidirectional blocking — Codex-u498 cannot close until all 7 children close, and Codex-u498 is removed from `bd ready` until at least one child closes. Distinct from clean-close apply phases (iter-009a-apply: 31 tests, 0 follow-ups, single commit) — this is the first apply phase where the parent stays open with N children. Distinct from walk-time splits (iter-011 walked Codex-x0pa proposing split into 4 child beads BEFORE any execution) — this filed children DURING/AFTER execution as discovered work. Distinct from iter-006 cluster-defect team-fix (3 beads each closed in their own commits, no children filed). New disposition: `apply-partial`. Routing label `triage:routing:apply-partial` codifies the audit trail. If 3+ recurrences across DISTINCT parent beads, promote rule: 'rung-3 apply phases that produce N hard-fail / partial findings MUST file N child beads with bidirectional dependency wiring (parent.dependencies += children, children.dependents += parent), reset parent status to open, label parent triage:routing:apply-partial, and surface a clean cycle-history row capturing the partial-apply outcome. Parent re-enters `bd ready` once all children close.'"
+        }
+      ],
+      "notes": "Meta-pattern: tracks how often the apply phase ends with a parent-stays-open + N-children-filed outcome (rather than clean close OR no-state-change). Distinct from clean closes (iter-009a-apply, iter-005a-apply) and walk-time splits (iter-011's option-B framing of x0pa's 4 child beads). Common shape: rung-3 verification or audit cycle uncovers multiple distinct findings, each meriting its own bead with its own cycle. The parent serves as the audit-trail anchor + dependency-graph hub. If 3+ recurrences across DISTINCT parent beads, promote rule covering the bidirectional-dependency wiring requirement, the routing label convention, the parent-status reset semantics, and the re-entry criteria for `bd ready` once children close."
     }
   }
 }
