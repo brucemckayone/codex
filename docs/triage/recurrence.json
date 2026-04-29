@@ -1,7 +1,27 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-29T10:30",
+  "last_updated": "2026-04-29T11:30",
   "patterns": {
+    "signal:bead-is-test-plan-execution": {
+      "hits": 1,
+      "iters": ["iter-012"],
+      "rung_density": { "iter-012": 1 },
+      "first_seen": "2026-04-29",
+      "last_seen": "2026-04-29",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-u498"],
+      "verdict_history": [
+        {
+          "iter": "iter-012",
+          "rung": 3,
+          "action": "walk-only",
+          "user_chose": null,
+          "user_reasoning": "Walk-only cycle (parent forced --bead=Codex-u498 because user excluded Codex-x0pa, Codex-6axi0 + Codex-i49f are blocked). Pre-flight on Codex-u498 (P1 nav-redesign WP-10 verification) found a distinct bead-shape that does NOT match any existing fingerprint: (1) bead body is purely 'execute this test plan' — 21 verification assertions enumerated in docs/nav-redesign/WP-10-verification.md (10 DevTools manual T-01..T-10 + 11 Playwright automated PW-01..PW-11); (2) NO production code changes are part of the bead's scope — the deliverable is test artifacts + green-checkmark report so WP-11 (Codex-i49f) can proceed; (3) zero existing E2E coverage for the 11 new nav-redesign component files (apps/web/e2e/ grep returns 0 hits for MobileBottomNav / SidebarRail / CommandPalette / 'Main navigation' / 'Mobile navigation') — distinct from signal:bead-description-partially-stale where sibling work has pre-resolved some sub-items; (4) every cited component exists at the expected path (SidebarRail.svelte, MobileBottomNav.svelte, MobileBottomSheet.svelte, CommandPaletteSearch.svelte, all confirmed via filesystem) — distinct from signal:bead-cites-nonexistent-feature where a sub-item is phantom. The bead's deliverable shape is test-artifacts-not-code-diff. 4 routing options framed: (A) one bundled verification PR running all 21 checks via chrome-devtools+playwright MCPs in this cycle, (B) split into 4 child beads matching team's per-flow convention (Codex-u498.1 desktop sidebar / .2 mobile / .3 command palette / .4 a11y+responsive+auth+transitions+brand-editor), (C) spawn /backend-dev or /design-system for re-execution via skill MCP gates, (D) defer until Codex-i49f's review pass cleans up _creators/+layout.svelte's leftover Header imports. Recommended: (B) — splits into rung-2 spec-authoring tasks that drain mechanically. Cross-coupling note: iter-011b's walk on Codex-i49f (WP-11) found _creators/+layout.svelte:12-13 still imports deprecated Header/UserMenu + Header/MobileNav — T-09 responsive at 768px on /creators would fail spuriously until WP-11 ships. Option (D) defer-until-i49f surfaces the dependency."
+        }
+      ],
+      "notes": "Meta-signal: tracks how often a bead's deliverable is 'execute this test plan' rather than 'fix this bug' or 'add this feature'. Common shape: WP-N decomposition where verification gets its own bead late in the work-package sequence (Codex-u498 = WP-10 of nav-redesign, dependency Codex-i49f = WP-11 review/cleanup). The bead description points to a separate spec doc (docs/{epic}/WP-N-verification.md) listing N discrete checks; the cycle's value is enumerating the splitting axes (per-component / per-MCP / per-surface / per-screen-size), not investigating the underlying code. Distinct from signal:bead-description-partially-stale (some sub-items pre-resolved) — here zero sub-items pre-resolved because verification is the LAST step of the WP sequence. Distinct from signal:bead-cites-nonexistent-feature — every component exists, that's WHY verification is the next step. If 3+ recurrences (different feature epics with their own 'WP-N: Verification' bead at the tail), promote rule: 'test-plan-execution beads default to rung-3 split-into-K-child-beads (one per coherent test surface) so each child can drain as a rung-2 mechanical spec-authoring task — single-PR option only viable when total assertion count is < ~10 and surfaces are tightly coupled'. Open promotion question: per-spec-file split vs per-route split vs per-MCP split — three distinct axes; first promotion should pick a default ordering based on observed user choice across the 3 hits."
+    },
     "signal:bead-cites-nonexistent-feature": {
       "hits": 1,
       "iters": ["iter-011"],
@@ -185,14 +205,21 @@
       "notes": "Meta-signal: tracks how often concurrent /triage cycles produce overlapping iter docs. Hit 3 (iter-010a) tripped the promotion gate — protocol succeeded across 3 distinct cycles with zero observed friction. Promoted iter-010a-promote → RT3 hard rule. Hit 4 (iter-011a) is a POST-PROMOTION audit-only sighting; hits stays at 3 because promoted patterns no longer accumulate hits the same way. iter-011a surfaced a NEW sub-pattern within RT3: second-agent declined fresh-bead pick because first-agent's walk strictly dominated and reconciliation value > parallel-walk value. Sub-pattern fingerprint: `signal:concurrent-cycle-second-agent-no-fresh-pick-when-first-walk-dominates`. If it recurs, RT3 may need an exception clause: 'second agent MAY decline a fresh pick when first agent's walk strictly dominates and the first agent's deferred-ledger writes are still pending — instead reconcile-only'. Original draft rule (RT3): 'Concurrent /triage cycles MUST detect collision via working-tree state inspection (untracked iter-NNN.md OR uncommitted master.md/recurrence.json hunk citing iter-NNN). On collision, the SECOND agent adopts suffix [a-z] (iter-NNNa, iter-NNNb, …), picks the next-highest rung 0-3 candidate that the first agent has not claimed, does NOT touch master.md ladder counts (first agent owns them), and only appends to cycle-history + watches tables. Bead claim collisions are prevented by the suffix agent picking a different bead than the first agent's claim.'"
     },
     "signal:bead-description-partially-stale": {
-      "hits": 2,
-      "iters": ["iter-009a", "iter-009a-apply", "iter-011"],
-      "rung_density": { "iter-009a": 1, "iter-009a-apply": 1, "iter-011": 1 },
+      "hits": 3,
+      "iters": ["iter-009a", "iter-009a-apply", "iter-011", "iter-011b"],
+      "rung_density": {
+        "iter-009a": 1,
+        "iter-009a-apply": 1,
+        "iter-011": 1,
+        "iter-011b": 1
+      },
       "first_seen": "2026-04-28",
       "last_seen": "2026-04-29",
       "promoted": false,
+      "promotion_eligible": true,
+      "promotion_eligible_since_iter": "iter-011b",
       "rule_id": null,
-      "beads": ["Codex-d3g6", "Codex-x0pa"],
+      "beads": ["Codex-d3g6", "Codex-x0pa", "Codex-i49f"],
       "verdict_history": [
         {
           "iter": "iter-009a",
