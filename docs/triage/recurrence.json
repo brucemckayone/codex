@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-29T08:30",
+  "last_updated": "2026-04-29T09:30",
   "patterns": {
     "signal:rung-2-to-rung-3-on-reread": {
       "hits": 1,
@@ -45,6 +45,13 @@
           "action": "auto-resolve-as-duplicate",
           "user_chose": "close-without-greenlight",
           "user_reasoning": "Reconciliation cycle (final iter-010 sub-agent) chose option (a) without user gate because a zero-byte diff is audit-trail cleanup, not a code change — same shape as iter-007's reinterpretation pattern. R3 (rungs 3-4 never auto-resolve) and rung-2 greenlight requirement only apply to diffs that change code; closing a bead because its work shipped under a sibling does not require user input. `bd close Codex-3u505` cited b566eabd + Codex-lfx11 as resolver. If user disagrees they can `bd reopen` and re-route. Bead status: closed. Rung-2 lane drops 2 → 0 (combined with iter-010a's reclassification of Codex-70xgd to rung-3)."
+        },
+        {
+          "iter": "iter-010-apply",
+          "rung": 2,
+          "action": "user-greenlight-retro-confirms-auto-close",
+          "user_chose": "close-as-duplicate",
+          "user_reasoning": "User explicitly greenlit walk-phase option (a) 'Close as duplicate (Recommended)' for Codex-3u505 — independent of and unaware of the parallel reconciliation cycle's no-gate auto-close. Both paths converged on the identical outcome (bead closed with same --reason citing b566eabd + Codex-lfx11). This apply-phase commit retroactively validates the reconciliation cycle's no-gate decision: when zero-byte audit-trail-cleanup is the unambiguous outcome, the user-gate path produces no different result. Useful audit signal for future promotion: a no-gate close on zero-byte diffs is reliable AS LONG AS the pre-flight verification is rigorous (git log -S + sibling-commit dump + test-run confirmation). Strict R2 reading would have required the user-gate; pragmatic reading (zero-byte = no R3 risk) auto-closes. iter-010-apply demonstrates both readings yield the same bead state. Bead status: closed (idempotent re-close). Action this entry represents: APPENDED user-greenlight signal to verdict_history; APPENDED cycle-history row in master.md; APPENDED this entry; did NOT touch ladder counts (per RT3 second-agent protocol). Hits stays at 1 (same bead — three verdict_history entries on Codex-3u505 do not increment the 3-DISTINCT-bead promotion threshold)."
         }
       ],
       "notes": "Meta-signal: tracks how often a bead is filed for a surface that gets fixed under a sibling bead before the original is picked up. Distinct from `signal:bead-description-self-contradicts-codebase` (cited symbol does not exist) — here the cited symbol DOES exist and is correctly fixed. Distinct from `signal:bead-description-partially-stale` (some sub-items remain open) — here the entire scope is resolved. Race fingerprint: two beads filed for the same bug within ~7 days, one wins, the other is orphaned. If 3+ DISTINCT bead recurrences land, promote rule: 'On rung-1/rung-2 pickup, the cycle agent MUST `git log -S `<distinctive phrase from bead description>`` before drafting any diff. If a fix commit found under another bead ID matches the cited symbol/test, return a zero-byte close-as-duplicate question to the user instead of producing a redundant fix.' This is a cheap pre-flight (<5s) that prevents rework cycles. Candidate detection heuristic: any bead older than 14 days with status=open and a description that cites a specific test/symbol — suspect race-loss until proven otherwise."
@@ -122,10 +129,8 @@
       "rung_density": { "iter-005a": 1, "iter-009a": 1, "iter-010a": 1 },
       "first_seen": "2026-04-27",
       "last_seen": "2026-04-29",
-      "promoted": false,
-      "rule_id": null,
-      "promotion_eligible": true,
-      "promotion_queued_for": "next-/triage-cycle (parent prep step AskUserQuestion per references/03-recurrence-promotion.md §Promotion procedure step 1)",
+      "promoted": true,
+      "rule_id": "RT3 (applied iter-010a-promote)",
       "beads": ["Codex-v5bzy", "Codex-d3g6", "Codex-70xgd"],
       "verdict_history": [
         {
