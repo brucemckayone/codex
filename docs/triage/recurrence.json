@@ -1,7 +1,27 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-28T23:30",
+  "last_updated": "2026-04-29T06:30",
   "patterns": {
+    "signal:bead-fully-stale-already-resolved-by-sibling": {
+      "hits": 1,
+      "iters": ["iter-010"],
+      "rung_density": { "iter-010": 1 },
+      "first_seen": "2026-04-29",
+      "last_seen": "2026-04-29",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-3u505"],
+      "verdict_history": [
+        {
+          "iter": "iter-010",
+          "rung": 2,
+          "action": "walk-only",
+          "user_chose": null,
+          "user_reasoning": "Pre-flight verification (per iter-005a / iter-009a precedent) ran `git log -S` on the bead's distinctive test name ('should grant access to org paid content for active members (fallback)') and found commit b566eabd (2026-04-25, 'fix(access): align paid-content fallback test with management-only role narrowing (Codex-lfx11)') had already applied option (a) of Codex-3u505's described fix byte-for-byte. Test renamed to '…for management members (fallback)', fixture changed `role: 'member'` → `role: 'creator'`, comment block added citing the f585f835/8b40f190 members→team narrowing. `pnpm --filter @codex/access test` confirms 148/148 passing (4 skipped unrelated). Codex-3u505 was filed 2026-04-24, the sibling fix landed 2026-04-25 — one day later — but Codex-3u505 was never closed. The candidate diff this cycle is therefore zero-byte. Surfaced as NO-OP close question to parent with options: (a) close-as-duplicate of Codex-lfx11 (Recommended), (b) reroute as the bead's option (b) member-bypass-policy decision (rung-3/4 to /backend-dev), (c) skip-defer."
+        }
+      ],
+      "notes": "Meta-signal: tracks how often a bead is filed for a surface that gets fixed under a sibling bead before the original is picked up. Distinct from `signal:bead-description-self-contradicts-codebase` (cited symbol does not exist) — here the cited symbol DOES exist and is correctly fixed. Distinct from `signal:bead-description-partially-stale` (some sub-items remain open) — here the entire scope is resolved. Race fingerprint: two beads filed for the same bug within ~7 days, one wins, the other is orphaned. If 3+ DISTINCT bead recurrences land, promote rule: 'On rung-1/rung-2 pickup, the cycle agent MUST `git log -S `<distinctive phrase from bead description>`` before drafting any diff. If a fix commit found under another bead ID matches the cited symbol/test, return a zero-byte close-as-duplicate question to the user instead of producing a redundant fix.' This is a cheap pre-flight (<5s) that prevents rework cycles. Candidate detection heuristic: any bead older than 14 days with status=open and a description that cites a specific test/symbol — suspect race-loss until proven otherwise."
+    },
     "route:self:large-mechanical-css-token-sweep": {
       "hits": 1,
       "iters": ["iter-008"],
