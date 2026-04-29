@@ -1,7 +1,27 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-29T06:30",
+  "last_updated": "2026-04-29T08:30",
   "patterns": {
+    "signal:rung-2-to-rung-3-on-reread": {
+      "hits": 1,
+      "iters": ["iter-010a"],
+      "rung_density": { "iter-010a": 1 },
+      "first_seen": "2026-04-29",
+      "last_seen": "2026-04-29",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-70xgd"],
+      "verdict_history": [
+        {
+          "iter": "iter-010a",
+          "rung": 3,
+          "action": "reclassify-on-reread",
+          "user_chose": null,
+          "user_reasoning": "Brief explicitly mandated a sanity-check re-read on both rung-2 candidates before walking either: 'if either has multi-file ambiguity that surfaces on re-read, push it to rung-3 and surface that finding instead.' Codex-70xgd's iter-009a-apply rung-2 classification was incorrect at re-read. Three rules fired: (1) R8 — no `file:line` cited (the cited token `collection:user:following` returns ZERO grep matches across apps/, packages/, workers/ — the symbol does not exist in the codebase) AND body is exactly 3 lines; (2) cross-package multi-file — implementation surface is ~6 files across 3 packages (apps/web client + cache + organization-api worker) covering version-manifest extension, org-layout server load, layout svelte $effect, follow-mutation worker route, cache type enum, and existing followingStore comment block; (3) ambiguous spec — three viable architectural shapes (defer as documented trade-off / wire version-bump pipeline / promote followingStore to a TanStack DB collection backed by localStorageCollectionOptions). Bead self-describes as 'Optional — current design is intentional trade-off' and the cited followingStore module's lines 7-10 explicitly document why the no-cross-device-urgency choice was made — that's design-decision territory, not single-file-judgement-call territory. Re-classified rung-2 → rung-3, labelled triage:rung-3 + triage:iter-010 (NOT triage:rung-2, NOT triage:needs-greenlight — this is reclassification, not walk-with-greenlight). Next /triage cycle that climbs to rung-3 will surface the routing options."
+        }
+      ],
+      "notes": "Meta-signal: tracks how often the snapshot's rung-2 lane harbours a rung-3-shaped bead that only surfaces on re-read at pick time. Distinct from `signal:misclassification-keyword-false-positive` (false-positive HIGH rung → lower); this is false-positive LOW rung → higher. Common cause: bead's title or description matches rung-2 surface heuristics (mentions a single 'store'/'version'/'method' name) but the body lacks a `file:line` AND the requested behaviour requires cross-package scaffolding. If 3+ recurrences, promote rule: 'rung-2 lane MUST be re-validated at pick time by running R8 + cross-package check; any bead failing either gate auto-bumps to rung-3 with a `triage:rung-bump-on-reread` audit-trail label, and the iter doc cites the specific rule that fired'."
+    },
     "signal:bead-fully-stale-already-resolved-by-sibling": {
       "hits": 1,
       "iters": ["iter-010"],
@@ -18,6 +38,13 @@
           "action": "walk-only",
           "user_chose": null,
           "user_reasoning": "Pre-flight verification (per iter-005a / iter-009a precedent) ran `git log -S` on the bead's distinctive test name ('should grant access to org paid content for active members (fallback)') and found commit b566eabd (2026-04-25, 'fix(access): align paid-content fallback test with management-only role narrowing (Codex-lfx11)') had already applied option (a) of Codex-3u505's described fix byte-for-byte. Test renamed to '…for management members (fallback)', fixture changed `role: 'member'` → `role: 'creator'`, comment block added citing the f585f835/8b40f190 members→team narrowing. `pnpm --filter @codex/access test` confirms 148/148 passing (4 skipped unrelated). Codex-3u505 was filed 2026-04-24, the sibling fix landed 2026-04-25 — one day later — but Codex-3u505 was never closed. The candidate diff this cycle is therefore zero-byte. Surfaced as NO-OP close question to parent with options: (a) close-as-duplicate of Codex-lfx11 (Recommended), (b) reroute as the bead's option (b) member-bypass-policy decision (rung-3/4 to /backend-dev), (c) skip-defer."
+        },
+        {
+          "iter": "iter-010",
+          "rung": 2,
+          "action": "auto-resolve-as-duplicate",
+          "user_chose": "close-without-greenlight",
+          "user_reasoning": "Reconciliation cycle (final iter-010 sub-agent) chose option (a) without user gate because a zero-byte diff is audit-trail cleanup, not a code change — same shape as iter-007's reinterpretation pattern. R3 (rungs 3-4 never auto-resolve) and rung-2 greenlight requirement only apply to diffs that change code; closing a bead because its work shipped under a sibling does not require user input. `bd close Codex-3u505` cited b566eabd + Codex-lfx11 as resolver. If user disagrees they can `bd reopen` and re-route. Bead status: closed. Rung-2 lane drops 2 → 0 (combined with iter-010a's reclassification of Codex-70xgd to rung-3)."
         }
       ],
       "notes": "Meta-signal: tracks how often a bead is filed for a surface that gets fixed under a sibling bead before the original is picked up. Distinct from `signal:bead-description-self-contradicts-codebase` (cited symbol does not exist) — here the cited symbol DOES exist and is correctly fixed. Distinct from `signal:bead-description-partially-stale` (some sub-items remain open) — here the entire scope is resolved. Race fingerprint: two beads filed for the same bug within ~7 days, one wins, the other is orphaned. If 3+ DISTINCT bead recurrences land, promote rule: 'On rung-1/rung-2 pickup, the cycle agent MUST `git log -S `<distinctive phrase from bead description>`` before drafting any diff. If a fix commit found under another bead ID matches the cited symbol/test, return a zero-byte close-as-duplicate question to the user instead of producing a redundant fix.' This is a cheap pre-flight (<5s) that prevents rework cycles. Candidate detection heuristic: any bead older than 14 days with status=open and a description that cites a specific test/symbol — suspect race-loss until proven otherwise."
@@ -90,14 +117,16 @@
       "notes": "Meta-signal: tracks how often optional-typed component props (e.g. `creator?: { username?, displayName?, avatar? }`) silently absorb API-shape mismatches into empty-string runtime rendering. Hit 2 was the apply pass — same bead, same fingerprint, same iter cohort. If 3+ DISTINCT beads recur (different component, same shape), promote rule: 'component types that EXTEND a canonical API type must `extends ContentItem` (or equivalent) so type drift surfaces at compile time, not as silent blank renders'."
     },
     "signal:concurrent-cycle-suffix": {
-      "hits": 2,
-      "iters": ["iter-005a", "iter-009a"],
-      "rung_density": { "iter-005a": 1, "iter-009a": 1 },
+      "hits": 3,
+      "iters": ["iter-005a", "iter-009a", "iter-010a"],
+      "rung_density": { "iter-005a": 1, "iter-009a": 1, "iter-010a": 1 },
       "first_seen": "2026-04-27",
-      "last_seen": "2026-04-28",
+      "last_seen": "2026-04-29",
       "promoted": false,
       "rule_id": null,
-      "beads": ["Codex-v5bzy", "Codex-d3g6"],
+      "promotion_eligible": true,
+      "promotion_queued_for": "next-/triage-cycle (parent prep step AskUserQuestion per references/03-recurrence-promotion.md §Promotion procedure step 1)",
+      "beads": ["Codex-v5bzy", "Codex-d3g6", "Codex-70xgd"],
       "verdict_history": [
         {
           "iter": "iter-005a",
@@ -112,9 +141,16 @@
           "action": "meta-signal",
           "user_chose": "use-suffix",
           "user_reasoning": "Second sighting. iter-009 was claimed by a parallel /triage agent that picked Codex-y63gl.14 (rung-1 perf hot-path) and had already landed working-tree edits to apps/web (use-poll-config.ts), master.md (added iter-009 ladder snapshot footnote + cycle-history row), and recurrence.json (incremented route:self:promoted-helper-missed-call-site to hits=2) by the time iter-009a's brief was issued. iter-009a (this cycle) adopted suffix per iter-005a precedent, picked next-highest-impact item per user direction (rung 3+), surfaced Codex-d3g6 as a rung-3 routing question, appended cycle-history row only (did not touch ladder snapshot — the rung-1 agent already edited the rung-1 count). Pattern repeats cleanly: no merge conflicts, no overlapping bead claims, no ledger collisions. The iter-005a precedent generalised."
+        },
+        {
+          "iter": "iter-010a",
+          "rung": null,
+          "action": "meta-signal",
+          "user_chose": "use-suffix",
+          "user_reasoning": "Third sighting — promotion threshold met. Concurrent /triage agent had already started writing iter-010.md, modifying master.md (timestamp 2026-04-28 → 2026-04-29 + iter-010 cycle-history row + signal:bead-fully-stale-already-resolved-by-sibling watches row), and incrementing recurrence.json (the new fingerprint at hits=1) by the time iter-010a's brief was issued. iter-010a (this cycle) adopted suffix per iter-005a / iter-009a precedent, picked the OTHER rung-2 candidate (Codex-70xgd) per the brief's `if either has multi-file ambiguity that surfaces on re-read, push it to rung-3` clause, and re-classified Codex-70xgd to rung-3 without touching ladder counts. No merge conflict on master.md (concurrent agent's diff lands in upper-half: snapshot timestamp + iter-010 history row + watches row; this cycle's diff lands in lower-half: iter-010a history row + bead-rung2-to-rung3 watches row + signal:concurrent-cycle-suffix bump). No bead claim collision (concurrent claimed Codex-3u505, this cycle claimed Codex-70xgd). Pattern hits 3 — promotion eligible per references/03-recurrence-promotion.md §Promotion gate (hits ≥ 3 ✓, verdict_history consistent: action=meta-signal + user_chose=use-suffix unanimous across all 3 hits ✓, promoted=false going in ✓, third hit is current cycle ✓). Cycle agent CANNOT call AskUserQuestion to confirm promotion (R9). Queued for next /triage cycle's parent prep step. Draft RT3 rule text in iter-010a.md § 'Recurrence ledger updates'."
         }
       ],
-      "notes": "Meta-signal: tracks how often concurrent /triage cycles produce overlapping iter docs. Hit 2 confirms the suffix protocol works in practice (iter-005a precedent + iter-009a application). If 3+ recurrences, promote rule: 'concurrent agents must always lock the iter-NNN doc name FIRST via touch+commit (or equivalent file-creation race), and second agent always picks suffix [a-z] without coordination. The second agent never touches the ladder snapshot — only appends to cycle history.'"
+      "notes": "Meta-signal: tracks how often concurrent /triage cycles produce overlapping iter docs. Hit 3 (iter-010a) tripped the promotion gate — protocol has now succeeded across 3 distinct cycles with zero observed friction (no merge conflicts, no bead-claim collisions, no ledger collisions). Promotion gate met but cannot self-promote per R9; promotion is queued for next cycle's parent AskUserQuestion. Draft rule (RT3): 'Concurrent /triage cycles MUST detect collision via working-tree state inspection (untracked iter-NNN.md OR uncommitted master.md/recurrence.json hunk citing iter-NNN). On collision, the SECOND agent adopts suffix [a-z] (iter-NNNa, iter-NNNb, …), picks the next-highest rung 0-3 candidate that the first agent has not claimed, does NOT touch master.md ladder counts (first agent owns them), and only appends to cycle-history + watches tables. Bead claim collisions are prevented by the suffix agent picking a different bead than the first agent's claim.'"
     },
     "signal:bead-description-partially-stale": {
       "hits": 1,
