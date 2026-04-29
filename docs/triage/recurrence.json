@@ -1,11 +1,15 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-29T13:50",
+  "last_updated": "2026-04-29T15:30",
   "patterns": {
     "signal:bead-is-test-plan-execution": {
       "hits": 1,
-      "iters": ["iter-012", "iter-012-apply"],
-      "rung_density": { "iter-012": 1, "iter-012-apply": 1 },
+      "iters": ["iter-012", "iter-012-apply", "iter-012-apply-split"],
+      "rung_density": {
+        "iter-012": 1,
+        "iter-012-apply": 1,
+        "iter-012-apply-split": 1
+      },
       "first_seen": "2026-04-29",
       "last_seen": "2026-04-29",
       "promoted": false,
@@ -25,9 +29,50 @@
           "action": "auto-resolve-partial",
           "user_chose": "apply-option-a-team-execute",
           "user_reasoning": "User clarified Option A 'One bundled verification PR' to mean: 4 parallel sub-agents, each owning one slice, confirming at the end. User explicitly waived per-PR commit/atomicity discipline ('no production app, hardening phase, its no big deal'). Parent dispatched 4 background Agents in single message: slice-1 desktop sidebar (6 checks), slice-2 mobile 375x812 (5), slice-3 command palette (T-03 9-sub + PW-03 = 11 sub), slice-4 a11y/auth/transitions/responsive/brand-editor (8). Each ran chrome-devtools + playwright MCPs in own browser session. Aggregate result: 21 checks → 19 pass-or-deferred + 2 hard fails + 3 partials. Bead's 'all must pass before WP-11' gate NOT met. Hard fails: PW-10 (platform / does not render auth state in SidebarRailUserSection — / shows Sign In, /discover and /library show avatar with same session) and T-10.reduced-motion (nav redesign components missing @media (prefers-reduced-motion: reduce); StudioSidebar* honors it — copy that pattern). Partials: T-06 tooltip lazy-render (Melt UI pattern, not bug), T-07 studio sidebar uses 64→260 hover-expand instead of always-expanded (spec drift OR bug, needs design clarification), T-10.keyboard arrow keys don't work in rail (Tab works fine — roving-tabindex pattern needed). Expected pending Codex-i49f: T-09.creators-768 (legacy Header still imported in _creators/+layout.svelte:12-13 per F2 of walk doc). 7 child beads filed (Codex-nwlhm P2 root-auth, Codex-rf1l9 P2 reduced-motion, Codex-peuan P3 arrow-keys, Codex-1k9ns P3 studio-expanded, Codex-onjxy P3 rail-width-token, Codex-usqgu P3 palette-cross-org-goto, Codex-95vdy P4 logout-wording). 7× `bd dep add Codex-u498 <child>` — Codex-u498 stays open with `triage:routing:apply-partial` label, status reset to `open`. Hits stays at 1 (single bead, multiple verdict_history entries do not increment 3-distinct-bead promotion threshold per signal:type-drift-template-vs-api precedent)."
+        },
+        {
+          "iter": "iter-012-apply-split",
+          "rung": 3,
+          "action": "apply-as-split",
+          "user_chose": "B",
+          "team_size": 4,
+          "team_beads": [
+            "Codex-fofch",
+            "Codex-pf1ob",
+            "Codex-s5uy1",
+            "Codex-i8y7k"
+          ],
+          "user_reasoning": "SECOND apply pass on Codex-u498 — user explicitly chose Option B (split into 4 child beads) from iter-012's walk this turn, distinct from the first apply pass's clarified-Option-A 4-agent execute team. User reasoning per brief: 'Matches team's per-flow E2E convention; insulates blast radius; only .4 gates on i49f.' Filed 4 NEW P2 verification-slice tracker beads matching the walk's WP-10.1/.2/.3/.4 decomposition: Codex-fofch (desktop sidebar, 6 assertions T-01/T-02/PW-01/PW-02/PW-07/PW-08), Codex-pf1ob (mobile, 5 assertions T-04/T-05/PW-04/PW-05/PW-06), Codex-s5uy1 (command palette, T-03 9-sub + PW-03), Codex-i8y7k (a11y/responsive/auth/transitions/brand-editor, 8 assertions T-06/T-07/T-08/T-09/T-10/PW-09/PW-10/PW-11). All 4 dep-wired bidirectionally as `bd dep add Codex-u498 <child>`. The 5th edge `bd dep add Codex-i8y7k Codex-i49f` was REJECTED by `bd dep add` cycle-detection (Codex-i49f is already blocked by Codex-u498, so adding `i8y7k → i49f` would close the loop u498 → i8y7k → i49f → u498). Resolution: applied label `triage:soft-dep-codex-i49f` to Codex-i8y7k + documented coupling in child's description (T-09 at 768px on /creators is expected-pending until Codex-i49f's WP-11 cleanup lands; mark expected-pending NOT a child-fail). This preserves audit trail without graph cycle — the soft-dep label may surface in future cycles for `bd ready` filtering refinements. Codex-u498 re-claimed status `open` → `in_progress` as TRACKER bead per split-variant disposition; eligibility filter on /triage picker excludes in_progress beads, so parent automatically disappears from pick list and re-emerges (via `bd ready`) once all 11 children close (7 §A bug children + 4 §B verification-slice tracker children). Labels: `triage:routing:split-into-4` (load-bearing) + `triage:tracker` + `triage:iter-012-apply` (idempotent re-add); `triage:routing:apply-partial` from §A preserved for audit history. Hits stays at 1 (single bead, multiple verdict_history entries do not increment 3-distinct-bead promotion threshold per signal:type-drift-template-vs-api precedent). Note iter ID labelled `iter-012-apply-split` in this entry to disambiguate from the §A apply pass's `iter-012-apply` entry, even though the actual cycle ID and label is `iter-012-apply` — both apply passes used the same canonical iter ID."
         }
       ],
       "notes": "Meta-signal: tracks how often a bead's deliverable is 'execute this test plan' rather than 'fix this bug' or 'add this feature'. Common shape: WP-N decomposition where verification gets its own bead late in the work-package sequence (Codex-u498 = WP-10 of nav-redesign, dependency Codex-i49f = WP-11 review/cleanup). The bead description points to a separate spec doc (docs/{epic}/WP-N-verification.md) listing N discrete checks; the cycle's value is enumerating the splitting axes (per-component / per-MCP / per-surface / per-screen-size), not investigating the underlying code. Distinct from signal:bead-description-partially-stale (some sub-items pre-resolved) — here zero sub-items pre-resolved because verification is the LAST step of the WP sequence. Distinct from signal:bead-cites-nonexistent-feature — every component exists, that's WHY verification is the next step. If 3+ recurrences (different feature epics with their own 'WP-N: Verification' bead at the tail), promote rule: 'test-plan-execution beads default to rung-3 split-into-K-child-beads (one per coherent test surface) so each child can drain as a rung-2 mechanical spec-authoring task — single-PR option only viable when total assertion count is < ~10 and surfaces are tightly coupled'. Open promotion question: per-spec-file split vs per-route split vs per-MCP split — three distinct axes; first promotion should pick a default ordering based on observed user choice across the 3 hits."
+    },
+    "signal:user-chose-split-into-children": {
+      "hits": 1,
+      "iters": ["iter-012-apply"],
+      "rung_density": { "iter-012-apply": 1 },
+      "first_seen": "2026-04-29",
+      "last_seen": "2026-04-29",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-u498"],
+      "verdict_history": [
+        {
+          "iter": "iter-012-apply",
+          "rung": 3,
+          "action": "user-greenlit-split",
+          "user_chose": "B",
+          "team_size": 4,
+          "team_beads": [
+            "Codex-fofch",
+            "Codex-pf1ob",
+            "Codex-s5uy1",
+            "Codex-i8y7k"
+          ],
+          "user_reasoning": "Matches team's per-flow E2E convention; insulates blast radius; only .4 gates on i49f."
+        }
+      ],
+      "notes": "Meta-signal: tracks how often the user, when offered a split-into-N-children option in a walk's routing question, deliberately picks the split path over the in-session execute path. Distinct from `signal:cluster-execute-heterogeneous-slices` (which captures 4-agent verification team executing in-session as a single cycle) — this fingerprint captures the user's preference for splitting work into separate tracker beads that drain as future cycles. Common shape: walk frames Option B as 'split into N child beads matching team's per-flow convention'; user picks B because the per-flow convention is already established and the children can drain as rung-2 mechanical spec-authoring tasks without keeping the parent open for hours of in-session execution. iter-011 walked Codex-x0pa with the same Option B framing but the user has not yet answered iter-011's question; if iter-011's eventual user answer also chooses split, this fingerprint reaches hits=2. If 3+ recurrences (3 distinct beads where user chose split-into-children over in-session execute), promote rule: 'when a walk surfaces a split-into-N-children option for a test-plan-execution / multi-step / multi-flow bead AND the team's existing convention organises this kind of work as N specs/PRs, default the recommended option to split with rung-2 mechanical-children classification — only fall back to in-session execute when total assertion count is < ~10 OR surfaces are tightly coupled.'"
     },
     "signal:bead-cites-nonexistent-feature": {
       "hits": 1,
@@ -221,6 +266,13 @@
           "action": "meta-signal-post-promotion-audit",
           "user_chose": "use-suffix-abort-at-step-0-fresh-claim",
           "user_reasoning": "Sixth sighting — POST-PROMOTION (RT3 codified). Hits stays at 3 per promotion-freezing semantics; this entry is verdict_history-only audit traceability. iter-011c's brief introduced a NEW protocol (`protocol:early-claim-before-walk` — see separate fingerprint) that begins with a Step 0 hard-gate: `bd show <id> --json` with three branches (in_progress-other-owner → STOP, stale-claim → flag, open → proceed). For Codex-u498, Step 0 returned status=in_progress, owner=current user, label `triage:iter-012`, updated_at 2026-04-29T08:34:37+01:00 (~9 min before pre-flight). iter-012's commit `fbf4ff87 triage(iter-012): rung-3 — Codex-u498 walk + claim` had landed 5 minutes earlier with a complete walk doc + 4-option routing question. Branch 1 fired → iter-011c HALTED (no claim, no walk, no labels, no master.md ladder edit, no bead-state mutation). RT3 sub-pattern surfaced this cycle: **suffix-aborts-at-step-0-due-to-fresh-claim**. Distinct from iter-011a (reconcile-only because first-agent walk dominated) and iter-011b (fresh pick on different bead because cleared by 4-check pre-flight) — iter-011c's protocol forced a HARD-STOP because the brief's new Step 0 gate is stricter than RT3's working-tree fingerprint check. iter-011 + iter-011a + iter-011b + iter-011c = FOUR concurrent /triage cycles on the same iter base. RT3 still holds at this concurrency level — confirmed by zero merge conflicts, zero overlapping bead claims (iter-011c didn't claim u498 because Step 0 caught the collision), zero ledger collisions (iter-011c only appends new fingerprint + verdict_history audit row). Append-only contract honoured. Six consecutive successful sightings (iter-005a, iter-009a, iter-010a, iter-011a, iter-011b, iter-011c) — RT3's evidence base continues to grow."
+        },
+        {
+          "iter": "iter-012-apply-split",
+          "rung": null,
+          "action": "meta-signal-post-promotion-audit",
+          "user_chose": "use-suffix-not-applicable",
+          "user_reasoning": "Seventh sighting — POST-PROMOTION (RT3 codified). Hits stays at 3 per promotion-freezing semantics; this entry is verdict_history-only audit traceability. iter-012-apply (split variant) is the SECOND apply pass on Codex-u498 in the same calendar day. The earlier apply pass (commit `8444d82c`, AM session) ran the user-clarified Option A 4-agent execute team. This second apply pass (PM session) implements the user's explicit Option B greenlight — split into 4 verification-slice tracker beads. NEITHER apply pass triggered a true RT3 collision: the same agent (this brief's owner) ran both passes, master.md and recurrence.json were already committed cleanly between passes, no other concurrent /triage cycle was on Codex-u498 in the bead-pickup window. RT3 still holds across the iter-011/a/b/c + iter-012/apply concurrent storm — zero merge conflicts, zero overlapping bead claims, zero ledger collisions across SEVEN consecutive successful sightings (iter-005a, iter-009a, iter-010a, iter-011a, iter-011b, iter-011c, iter-012-apply-split). The apply-as-split sub-shape is captured separately under `signal:user-chose-split-into-children` (NEW fingerprint at hits=1 this cycle). Append-only contract honoured."
         }
       ],
       "notes": "Meta-signal: tracks how often concurrent /triage cycles produce overlapping iter docs. Hit 3 (iter-010a) tripped the promotion gate — protocol succeeded across 3 distinct cycles with zero observed friction. Promoted iter-010a-promote → RT3 hard rule. Hit 4 (iter-011a) is a POST-PROMOTION audit-only sighting; hits stays at 3 because promoted patterns no longer accumulate hits the same way. iter-011a surfaced a NEW sub-pattern within RT3: second-agent declined fresh-bead pick because first-agent's walk strictly dominated and reconciliation value > parallel-walk value. Sub-pattern fingerprint: `signal:concurrent-cycle-second-agent-no-fresh-pick-when-first-walk-dominates`. If it recurs, RT3 may need an exception clause: 'second agent MAY decline a fresh pick when first agent's walk strictly dominates and the first agent's deferred-ledger writes are still pending — instead reconcile-only'. Original draft rule (RT3): 'Concurrent /triage cycles MUST detect collision via working-tree state inspection (untracked iter-NNN.md OR uncommitted master.md/recurrence.json hunk citing iter-NNN). On collision, the SECOND agent adopts suffix [a-z] (iter-NNNa, iter-NNNb, …), picks the next-highest rung 0-3 candidate that the first agent has not claimed, does NOT touch master.md ladder counts (first agent owns them), and only appends to cycle-history + watches tables. Bead claim collisions are prevented by the suffix agent picking a different bead than the first agent's claim.'"
