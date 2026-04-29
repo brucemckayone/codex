@@ -48,7 +48,7 @@ type ObsWarnSinkShape = {
 };
 
 describe('denoise proof: F2 types:type-duplicate-cross-package — ObsWarnSink inlines Pick<Logger, "warn">', () => {
-  it.skip('ObsWarnSink MUST equal Pick<Logger, "warn"> (R11 — inline structural shape)', () => {
+  it('ObsWarnSink MUST equal Pick<Logger, "warn"> (R11 — inline structural shape)', () => {
     // PASSES today because the shapes are structurally compatible; the bug
     // is that ObsWarnSink should not exist as a separate declaration. The
     // fix replaces it with `Pick<Logger, 'warn'>` from @codex/observability.

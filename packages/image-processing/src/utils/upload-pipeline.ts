@@ -21,20 +21,9 @@
  */
 import type { R2Service } from '@codex/cloudflare-clients';
 import type { OrphanedEntityType, OrphanedImageType } from '@codex/database';
+import type { Logger } from '@codex/observability';
 import { ValidationError } from '@codex/service-errors';
 import type { OrphanedFileService } from '../orphaned-file-service';
-
-/**
- * Minimal structural type for the observability `warn` channel.
- *
- * We avoid a direct dependency on `@codex/observability` here because this
- * package doesn't otherwise import it (`BaseService` owns the concrete
- * `ObservabilityClient`). The structural type matches the relevant slice of
- * `ObservabilityClient.warn(message, context)`.
- */
-interface ObsWarnSink {
-  warn(message: string, context?: Record<string, unknown>): void;
-}
 
 /** R2 keys for the three size variants of a raster image. */
 export interface VariantKeys {
@@ -116,7 +105,7 @@ export async function withDbUpdateOrphanCleanup<T>(
     entityId: string;
     entityType: OrphanedEntityType;
     r2: R2Service;
-    obs: ObsWarnSink;
+    obs: Pick<Logger, 'warn'>;
     orphanedFileService: OrphanedFileService | undefined;
     warnContext: string;
     /** Extra fields to include in the warn payload (e.g. creatorId). */
