@@ -1,7 +1,27 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-04-29T09:30",
+  "last_updated": "2026-04-29T10:30",
   "patterns": {
+    "signal:bead-cites-nonexistent-feature": {
+      "hits": 1,
+      "iters": ["iter-011"],
+      "rung_density": { "iter-011": 1 },
+      "first_seen": "2026-04-29",
+      "last_seen": "2026-04-29",
+      "promoted": false,
+      "rule_id": null,
+      "beads": ["Codex-x0pa"],
+      "verdict_history": [
+        {
+          "iter": "iter-011",
+          "rung": 3,
+          "action": "walk-only",
+          "user_chose": null,
+          "user_reasoning": "Walk-only cycle (parent forced --rung=3). Pre-flight repo-wide grep for sub-item 8 of Codex-x0pa's 10 verification steps — 'Free for me toggle' — returned ZERO matches across `apps/`, `packages/`, `workers/` for `Free for me`, `free-for-me`, `freeForMe`, `FreeForMe`, `allowFree`, `freeAccess`. The bead is the only place this concept appears in the codebase. The bead's framing 'all 10 steps must pass' implies the feature was either (a) planned but never implemented, (b) lives under a different name, or (c) is stale spec from a pre-implementation product brief. Surfaced as the load-bearing constraint of the rung-3 routing question — every framed option had to address whether step 8 is deferred (Option A monolithic with test.skip), split out as a child bead for product decision (Option B), or punted to /backend-dev (Option C). Distinct from sibling stale fingerprints because here an entire SUB-ITEM (not a whole bead, not a partial sub-item, not a stale doc claim) refers to a feature that has no footprint anywhere."
+        }
+      ],
+      "notes": "Meta-signal: tracks how often a bead's description enumerates sub-items where AT LEAST ONE sub-item refers to a feature that does not exist in the codebase. Distinct from `signal:bead-description-self-contradicts-codebase` (cited symbol exists but doc claim is stale) — here the cited concept has zero codebase footprint. Distinct from `signal:bead-description-partially-stale` (sub-items shipped under siblings) — here the sub-item never shipped at all. Distinct from `signal:bead-fully-stale-already-resolved-by-sibling` (entire scope resolved under another bead) — here only one sub-item is missing-feature; rest of bead is genuine work. Common root cause: bead authored from a product spec / PRD before implementation, then implementation diverged or descoped the named feature without a doc/bead reconciliation pass. If 3+ DISTINCT bead recurrences, promote rule: 'for any bead whose description enumerates discrete sub-items/steps, cycle agent MUST grep each sub-item distinctive phrase against `apps/`, `packages/`, `workers/` BEFORE framing options; sub-items returning 0 matches must be surfaced as an explicit missing-feature sub-question rather than absorbed into the generic split-vs-one-PR axis'."
+    },
     "signal:rung-2-to-rung-3-on-reread": {
       "hits": 1,
       "iters": ["iter-010a"],
@@ -153,19 +173,26 @@
           "action": "meta-signal",
           "user_chose": "use-suffix",
           "user_reasoning": "Third sighting — promotion threshold met. Concurrent /triage agent had already started writing iter-010.md, modifying master.md (timestamp 2026-04-28 → 2026-04-29 + iter-010 cycle-history row + signal:bead-fully-stale-already-resolved-by-sibling watches row), and incrementing recurrence.json (the new fingerprint at hits=1) by the time iter-010a's brief was issued. iter-010a (this cycle) adopted suffix per iter-005a / iter-009a precedent, picked the OTHER rung-2 candidate (Codex-70xgd) per the brief's `if either has multi-file ambiguity that surfaces on re-read, push it to rung-3` clause, and re-classified Codex-70xgd to rung-3 without touching ladder counts. No merge conflict on master.md (concurrent agent's diff lands in upper-half: snapshot timestamp + iter-010 history row + watches row; this cycle's diff lands in lower-half: iter-010a history row + bead-rung2-to-rung3 watches row + signal:concurrent-cycle-suffix bump). No bead claim collision (concurrent claimed Codex-3u505, this cycle claimed Codex-70xgd). Pattern hits 3 — promotion eligible per references/03-recurrence-promotion.md §Promotion gate (hits ≥ 3 ✓, verdict_history consistent: action=meta-signal + user_chose=use-suffix unanimous across all 3 hits ✓, promoted=false going in ✓, third hit is current cycle ✓). Cycle agent CANNOT call AskUserQuestion to confirm promotion (R9). Queued for next /triage cycle's parent prep step. Draft RT3 rule text in iter-010a.md § 'Recurrence ledger updates'."
+        },
+        {
+          "iter": "iter-011a",
+          "rung": null,
+          "action": "meta-signal-post-promotion-audit",
+          "user_chose": "use-suffix-decline-fresh-pick",
+          "user_reasoning": "Fourth sighting — POST-PROMOTION (RT3 already codified iter-010a-promote). Hits stays at 3 per RT3 promotion-freezing semantics; this entry is verdict_history-only audit traceability. Concurrent /triage agent on iter-011 (this cycle, the second agent) detected: (1) `docs/triage/iter-011.md` written by first agent at 08:22, (2) uncommitted master.md hunk citing `[^iter011-r3]`, (3) `Codex-x0pa` already labelled `triage:iter-011` (additive). RT3 step 2 → adopted suffix `iter-011a`. **NEW SUB-PATTERN**: RT3 step 3 says 'pick a non-conflicting bead', but iter-011a DECLINED the fresh pick because first agent's walk strictly dominated (per-step coverage map, surface map, prior-art search, 4 framed options — exhaustive). Reconciliation-only role provided more value than parallel walk on Codex-i49f. iter-011a planned to persist the first agent's deferred ledger updates (`signal:bead-cites-nonexistent-feature` NEW + `signal:bead-description-partially-stale` bumped) but the first agent ended up persisting them itself; iter-011a.md remains as audit-trail evidence of the concurrent observation. New sub-pattern surfaced: `signal:concurrent-cycle-second-agent-no-fresh-pick-when-first-walk-dominates` — if it recurs, RT3 may need an exception clause permitting reconciliation-only when the first agent's walk dominates. RT3 protocol still validated: zero merge conflicts, no bead claim collisions, no ledger collisions, append-only contract honoured."
         }
       ],
-      "notes": "Meta-signal: tracks how often concurrent /triage cycles produce overlapping iter docs. Hit 3 (iter-010a) tripped the promotion gate — protocol has now succeeded across 3 distinct cycles with zero observed friction (no merge conflicts, no bead-claim collisions, no ledger collisions). Promotion gate met but cannot self-promote per R9; promotion is queued for next cycle's parent AskUserQuestion. Draft rule (RT3): 'Concurrent /triage cycles MUST detect collision via working-tree state inspection (untracked iter-NNN.md OR uncommitted master.md/recurrence.json hunk citing iter-NNN). On collision, the SECOND agent adopts suffix [a-z] (iter-NNNa, iter-NNNb, …), picks the next-highest rung 0-3 candidate that the first agent has not claimed, does NOT touch master.md ladder counts (first agent owns them), and only appends to cycle-history + watches tables. Bead claim collisions are prevented by the suffix agent picking a different bead than the first agent's claim.'"
+      "notes": "Meta-signal: tracks how often concurrent /triage cycles produce overlapping iter docs. Hit 3 (iter-010a) tripped the promotion gate — protocol succeeded across 3 distinct cycles with zero observed friction. Promoted iter-010a-promote → RT3 hard rule. Hit 4 (iter-011a) is a POST-PROMOTION audit-only sighting; hits stays at 3 because promoted patterns no longer accumulate hits the same way. iter-011a surfaced a NEW sub-pattern within RT3: second-agent declined fresh-bead pick because first-agent's walk strictly dominated and reconciliation value > parallel-walk value. Sub-pattern fingerprint: `signal:concurrent-cycle-second-agent-no-fresh-pick-when-first-walk-dominates`. If it recurs, RT3 may need an exception clause: 'second agent MAY decline a fresh pick when first agent's walk strictly dominates and the first agent's deferred-ledger writes are still pending — instead reconcile-only'. Original draft rule (RT3): 'Concurrent /triage cycles MUST detect collision via working-tree state inspection (untracked iter-NNN.md OR uncommitted master.md/recurrence.json hunk citing iter-NNN). On collision, the SECOND agent adopts suffix [a-z] (iter-NNNa, iter-NNNb, …), picks the next-highest rung 0-3 candidate that the first agent has not claimed, does NOT touch master.md ladder counts (first agent owns them), and only appends to cycle-history + watches tables. Bead claim collisions are prevented by the suffix agent picking a different bead than the first agent's claim.'"
     },
     "signal:bead-description-partially-stale": {
-      "hits": 1,
-      "iters": ["iter-009a", "iter-009a-apply"],
-      "rung_density": { "iter-009a": 1, "iter-009a-apply": 1 },
+      "hits": 2,
+      "iters": ["iter-009a", "iter-009a-apply", "iter-011"],
+      "rung_density": { "iter-009a": 1, "iter-009a-apply": 1, "iter-011": 1 },
       "first_seen": "2026-04-28",
-      "last_seen": "2026-04-28",
+      "last_seen": "2026-04-29",
       "promoted": false,
       "rule_id": null,
-      "beads": ["Codex-d3g6"],
+      "beads": ["Codex-d3g6", "Codex-x0pa"],
       "verdict_history": [
         {
           "iter": "iter-009a",
@@ -180,9 +207,16 @@
           "action": "auto-resolve",
           "user_chose": "apply-option-a",
           "user_reasoning": "User greenlit Option A from iter-009a walk. Single sub-agent wrote 31 tests across the 4 files (target was ~29, range 25–35): enforce-policy-inline.test.ts +3 invalid-UUID rejection tests on the query-param path (sub-item 1 narrow gap — closes the negative-path coverage that was missing per the 'Security work deeply tested' standing memory); transcoding-service.test.ts +12 tests across handleProgressWebhook (5), triggerJobInternal async-refactor (4), and handleWebhook fallback-mediaId+progress-clearing (3); subdomain.test.ts +10 tests on buildOrgUrl (6) + buildCreatorsUrl (4) covering lvh.me/localhost/production host environments; validation/transcoding.test.ts +6 tests on runpodWebhookUnionSchema discriminated-union dispatch (plus 1 bonus range-check, 7 in block). All 4 test files run independently with 100% pass: 34/34 + 21/21 + 21/21 + 25/25 = 101/101 total tests. Pre-existing tests in each file unchanged. Strict no-touch rule honoured — zero production-code edits. R10 case (b) — every test added IS the behavioural-test gate. All 6 sub-items closed. Bead closed."
+        },
+        {
+          "iter": "iter-011",
+          "rung": 3,
+          "action": "walk-only-with-staleness-flag",
+          "user_chose": null,
+          "user_reasoning": "Codex-x0pa (filed 2026-04-05) is a 10-step E2E subscription verification with sub-items 9 (manage subscription) and 10 (cancel subscription) ALREADY covered by `apps/web/e2e/account-subscription-cancel.spec.ts` (291 LOC, landed in PR 1 of subscription-cache-audit on 2026-04-22 — 17 days AFTER the bead was filed). Same shape as Codex-d3g6 sub-item (1) at iter-009a: bead lists N sub-items, M of them shipped under sibling work between filing and pickup. Pre-flight grep verified `apps/web/e2e/` has 8 subscription-relevant specs (~2k LOC) covering steps 9 + 10 (`account-subscription-cancel.spec.ts`), partial coverage of 4-5 (test.skip behind Codex-z1wuz blocker — `pricing-reactivate.spec.ts`, `subscription-paused-resumed.spec.ts`, `subscription-cross-device.spec.ts`), and step 6 (`streaming-revocation.spec.ts`, `progress-save-access-gate.spec.ts`). Surfaced in iter-011's question payload as part of the load-bearing constraint: Option B (split into 4 child beads) is RECOMMENDED specifically because it lets the cycle drain genuinely-open sub-items (steps 1, 2 + 3, 4 + 5 + 6 + 7) without re-investigating the 9 + 10 work. Two DISTINCT bead recurrences (Codex-d3g6, Codex-x0pa) — fingerprint now 1 bead away from the 3-distinct-bead promotion threshold."
         }
       ],
-      "notes": "Meta-signal: distinct from `signal:bead-description-self-contradicts-codebase` (where the cited symbol does not exist) — this fingerprint is for beads where the cited symbol DOES exist but coverage has shifted between filing and pickup. Common shape: a multi-sub-item bead filed early in a feature's life (often as a 'follow-up' to a fix epic) accumulates partial closure as sibling work lands, but no one re-files or shrinks the parent. iter-009a-apply hit is the resolution path on the same bead (apply phase after walk-only); does NOT increment hit count toward 3-distinct-bead promotion threshold (per signal:type-drift-template-vs-api precedent). If 3+ DISTINCT bead recurrences, promote rule: 'when a bead lists N sub-items and any of them is partially stale at pickup, the cycle MUST surface the staleness in the iter doc + question payload + propose split-into-N-children as a default option so future cycles can drain the genuinely-open sub-items as rung-1 mechanical work without re-investigating the resolved ones'."
+      "notes": "Meta-signal: distinct from `signal:bead-description-self-contradicts-codebase` (where the cited symbol does not exist) — this fingerprint is for beads where the cited symbol DOES exist but coverage has shifted between filing and pickup. Common shape: a multi-sub-item bead filed early in a feature's life (often as a 'follow-up' to a fix epic) accumulates partial closure as sibling work lands, but no one re-files or shrinks the parent. iter-009a-apply hit is the resolution path on the same bead (apply phase after walk-only); does NOT increment hit count toward 3-distinct-bead promotion threshold (per signal:type-drift-template-vs-api precedent). iter-011 is the second DISTINCT bead recurrence (Codex-x0pa) — increments hit count to 2. If a 3rd distinct bead recurs, promote rule: 'when a bead lists N sub-items and any of them is partially stale at pickup, the cycle MUST surface the staleness in the iter doc + question payload + propose split-into-N-children as a default option so future cycles can drain the genuinely-open sub-items as rung-1 mechanical work without re-investigating the resolved ones'."
     },
     "route:self:promoted-helper-missed-call-site": {
       "hits": 2,
