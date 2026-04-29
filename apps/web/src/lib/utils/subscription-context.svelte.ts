@@ -101,16 +101,22 @@ export function useSubscriptionContext(
     untrack(() => {
       if (promise && promise !== resolvedSubPromise) {
         resolvedSubPromise = promise;
-        promise.then((ctx) => {
-          if (resolvedSubPromise === promise) {
-            promiseSubCtx = {
-              requiresSubscription: ctx.requiresSubscription,
-              hasSubscription: ctx.hasSubscription,
-              subscriptionCoversContent: ctx.subscriptionCoversContent,
-            };
-            resolvedTiers = ctx.tiers ?? [];
-          }
-        });
+        promise
+          .then((ctx) => {
+            if (resolvedSubPromise === promise) {
+              promiseSubCtx = {
+                requiresSubscription: ctx.requiresSubscription,
+                hasSubscription: ctx.hasSubscription,
+                subscriptionCoversContent: ctx.subscriptionCoversContent,
+              };
+              resolvedTiers = ctx.tiers ?? [];
+            }
+          })
+          .catch(() => {
+            if (resolvedSubPromise === promise) {
+              resolvedTiers = [];
+            }
+          });
       } else if (!promise) {
         promiseSubCtx = {
           requiresSubscription: accessType === 'subscribers' || !!minimumTierId,

@@ -52,7 +52,7 @@ const SUB_CONTEXT = resolve(
   '../../lib/utils/subscription-context.svelte.ts'
 );
 
-describe.skip('iter-029 F4 — subscription-context.svelte.ts promise.then without .catch', () => {
+describe('iter-029 F4 — subscription-context.svelte.ts promise.then without .catch', () => {
   it('every promise.then(...) on the streamed subscriptionContext is paired with a .catch(...)', () => {
     const source = readFileSync(SUB_CONTEXT, 'utf-8');
 
