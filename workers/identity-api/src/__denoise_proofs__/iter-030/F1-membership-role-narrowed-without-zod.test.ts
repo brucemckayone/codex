@@ -94,35 +94,36 @@
  */
 
 import type { MembershipLookupResponse } from '@codex/shared-types';
+import type { orgMemberRoleSchema } from '@codex/validation';
 
 import type { OrganizationMembership } from '@codex/worker-utils';
 import { describe, expectTypeOf, it } from 'vitest';
+import type { z } from 'zod';
 
-describe.skip('iter-030 F1 — membership.role narrowed without Zod (R15)', () => {
+describe('iter-030 F1 — membership.role narrowed without Zod (R15)', () => {
   it('source type is broader: OrganizationMembership.role is string', () => {
-    // Today: helpers.ts:174 declares role: string
+    // helpers.ts:174 declares role: string — broad source proves the
+    // call-site cast was narrowing (R15-scoped), not widening.
     expectTypeOf<OrganizationMembership['role']>().toEqualTypeOf<string>();
   });
 
   it('target type is a strict 5-member union | null', () => {
-    // Today: api-responses.ts:150 declares the union
+    // api-responses.ts:150 declares the union
     type Target = MembershipLookupResponse['role'];
     expectTypeOf<Target>().toEqualTypeOf<
       'owner' | 'admin' | 'creator' | 'subscriber' | 'member' | null
     >();
   });
 
-  it('after fix: orgMemberRoleSchema.parse(role) produces narrowed type structurally', () => {
-    // Pseudo (depends on @codex/validation export):
-    //   import { orgMemberRoleSchema } from '@codex/validation';
-    //   type Parsed = z.infer<typeof orgMemberRoleSchema>;
-    //   expectTypeOf<Parsed>().toEqualTypeOf<
-    //     Exclude<MembershipLookupResponse['role'], null>
-    //   >();
-    //
-    // The proof here is "the cast can be replaced by a parse
-    // and the resulting type is identical" — which is exactly
-    // R15's intent: trade a compile-time-only assertion for a
-    // runtime-checked one.
+  it('after fix: orgMemberRoleSchema.parse(role) produces a type structurally identical to the non-null branch of MembershipLookupResponse.role', () => {
+    // The Zod schema in @codex/validation is the runtime owner; its inferred
+    // type must remain structurally equal to MembershipLookupResponse['role']
+    // minus null. Drift between the two surfaces here as a type-equality
+    // failure — converting the previous human "keep these in sync" comment
+    // into a compiler-checked invariant.
+    type Parsed = z.infer<typeof orgMemberRoleSchema>;
+    expectTypeOf<Parsed>().toEqualTypeOf<
+      Exclude<MembershipLookupResponse['role'], null>
+    >();
   });
 });

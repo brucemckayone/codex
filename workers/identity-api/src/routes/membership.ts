@@ -11,7 +11,11 @@
  */
 
 import type { HonoEnv, MembershipLookupResponse } from '@codex/shared-types';
-import { userIdSchema, uuidSchema } from '@codex/validation';
+import {
+  orgMemberRoleSchema,
+  userIdSchema,
+  uuidSchema,
+} from '@codex/validation';
 import { checkOrganizationMembership, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -49,7 +53,7 @@ app.get(
       }
 
       return {
-        role: membership.role as MembershipLookupResponse['role'],
+        role: orgMemberRoleSchema.parse(membership.role),
         joinedAt: membership.joinedAt.toISOString(),
       };
     },

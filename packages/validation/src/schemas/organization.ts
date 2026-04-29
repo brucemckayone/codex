@@ -6,6 +6,21 @@ import { paginationSchema } from '../shared/pagination-schema';
  */
 
 /**
+ * Runtime guard for organization member roles. Mirrors the
+ * `organizationMembers.role` CHECK constraint in @codex/database and the
+ * `OrgMemberRole` type in @codex/shared-types/member-types.ts. Used to
+ * narrow `string`-typed role values flowing across worker boundaries
+ * (e.g. identity-api membership lookup) without an unguarded `as` cast.
+ */
+export const orgMemberRoleSchema = z.enum([
+  'owner',
+  'admin',
+  'creator',
+  'member',
+  'subscriber',
+]);
+
+/**
  * Schema for inviting a member to an organization
  */
 export const inviteMemberSchema = z.object({
