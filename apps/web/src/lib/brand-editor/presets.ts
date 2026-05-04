@@ -315,6 +315,7 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
     description: 'Clean and understated — sharp corners, neutral palette',
     heroLayout: 'default',
     tokenOverrides: {
+      'shader-preset': 'none',
       'card-hover-scale': '1.0',
       'card-image-hover-scale': '1.0',
       'text-transform-label': 'none',
@@ -364,6 +365,7 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
     description: 'Pure black and white — maximum contrast, no colour',
     heroLayout: 'default',
     tokenOverrides: {
+      'shader-preset': 'none',
       'heading-color': '#000000',
       'hero-title-blend': 'normal',
       'hero-title-color': '#000000',
