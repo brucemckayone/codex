@@ -14,6 +14,11 @@
   --text-2xl: clamp(1.5rem, 1.3rem + 1vw, 1.875rem);
   --text-3xl: clamp(1.875rem, 1.5rem + 1.875vw, 2.5rem);
   --text-4xl: clamp(2.25rem, 1.8rem + 2.25vw, 3rem);
+  /* Editorial display sizes — for hero headlines + masthead titles where
+     4xl is too tame. Re-declared in org-brand.css so --brand-text-scale
+     applies at org scope. */
+  --text-5xl: clamp(1.75rem, 1rem + 2.5vw, 2.75rem);
+  --text-display: clamp(2.75rem, 1rem + 4.5vw, 5rem);
 
   /* Font Weights */
   --font-normal: 400;
