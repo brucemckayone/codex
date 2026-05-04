@@ -49,6 +49,21 @@
 		browser ? JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') : []
 	);
 
+	// ── Reduced-motion preference (WCAG 2.3.3) ────────────────
+	// Svelte JS transitions bypass CSS media queries — gate fly translate
+	// reactively so the panel slides only when the user opts in to motion.
+	let prefersReducedMotion = $state(false);
+	$effect(() => {
+		if (!browser) return;
+		const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+		prefersReducedMotion = mq.matches;
+		const handler = (e: MediaQueryListEvent) => {
+			prefersReducedMotion = e.matches;
+		};
+		mq.addEventListener('change', handler);
+		return () => mq.removeEventListener('change', handler);
+	});
+
 	// ── Derived ───────────────────────────────────────────────
 	const searchUrl = $derived(scope === 'org' ? '/explore' : '/discover');
 
@@ -204,7 +219,7 @@
 		onclick={() => {
 			open = false;
 		}}
-		transition:fade={{ duration: 150 }}
+		transition:fade={{ duration: prefersReducedMotion ? 0 : 150 }}
 	></div>
 
 	<!-- Panel -->
@@ -212,7 +227,10 @@
 		class="palette"
 		role="dialog"
 		aria-label="Search"
-		transition:fly={{ y: -20, duration: 200 }}
+		transition:fly={{
+			y: prefersReducedMotion ? 0 : -20,
+			duration: prefersReducedMotion ? 0 : 200,
+		}}
 	>
 		<!-- Input -->
 		<div class="palette__input-wrapper">

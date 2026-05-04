@@ -171,4 +171,22 @@
 		box-shadow: var(--shadow-sm),
 			0 0 0 var(--space-0-5) color-mix(in oklch, var(--color-interactive) 30%, transparent);
 	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.bottom-nav__tab {
+			transition: color var(--duration-normal) var(--ease-default);
+		}
+
+		.bottom-nav__tab:active {
+			transform: none;
+		}
+
+		.bottom-nav__search-circle {
+			transition: box-shadow var(--duration-normal) var(--ease-default);
+		}
+
+		.bottom-nav__tab--search:active .bottom-nav__search-circle {
+			transform: none;
+		}
+	}
 </style>
