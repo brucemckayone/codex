@@ -13,7 +13,9 @@ import type { R2Service } from '@codex/cloudflare-clients';
 import { MIME_TYPES } from '@codex/constants';
 import { schema } from '@codex/database';
 import {
+  createTestMediaItemInput,
   type Database,
+  seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
 } from '@codex/test-utils';
@@ -571,6 +573,183 @@ describe('BrandingSettingsService', () => {
       const result = await service.deleteLogo();
 
       expect(result.logoUrl).toBeNull();
+    });
+  });
+
+  describe('deleteIntroVideo()', () => {
+    /**
+     * Helper to seed a media item linked as the org's intro video.
+     * Returns { creatorId, mediaItemId, hlsPrefix }.
+     */
+    async function seedLinkedIntroVideo() {
+      const [creatorId] = await seedTestUsers(db, 1);
+      // Insert in `uploaded` state so we don't trigger the
+      // `status_ready_requires_keys` check constraint. deleteIntroVideo()
+      // only reads creatorId; the media's status is irrelevant for cleanup.
+      const [media] = await db
+        .insert(schema.mediaItems)
+        .values(
+          createTestMediaItemInput(creatorId, { status: 'uploaded' })
+        )
+        .returning();
+
+      await db.insert(schema.platformSettings).values({ organizationId });
+      await db.insert(schema.brandingSettings).values({
+        organizationId,
+        introVideoMediaItemId: media.id,
+        introVideoUrl: `https://cdn.example.com/${creatorId}/hls/${media.id}/master.m3u8`,
+        primaryColorHex: DEFAULT_BRANDING.primaryColorHex,
+      });
+
+      return {
+        creatorId,
+        mediaItemId: media.id,
+        hlsPrefix: `${creatorId}/hls/${media.id}/`,
+      };
+    }
+
+    it('soft-deletes the media item and clears branding references', async () => {
+      const mockR2 = createMockR2();
+      mockR2.list.mockResolvedValue({ objects: [], truncated: false });
+      const service = createService(mockR2);
+
+      const { mediaItemId } = await seedLinkedIntroVideo();
+
+      const result = await service.deleteIntroVideo();
+
+      // Branding references cleared
+      expect(result.introVideoMediaItemId).toBeNull();
+      expect(result.introVideoUrl).toBeNull();
+
+      // Media item soft-deleted
+      const [media] = await db
+        .select()
+        .from(schema.mediaItems)
+        .where(eq(schema.mediaItems.id, mediaItemId));
+      expect(media.deletedAt).not.toBeNull();
+    });
+
+    it('hard-deletes every HLS object under the intro video prefix from R2', async () => {
+      const mockR2 = createMockR2();
+      const service = createService(mockR2);
+      const { mediaItemId, hlsPrefix } = await seedLinkedIntroVideo();
+
+      // Simulate R2 returning a manifest + a few segment files for the prefix
+      const objects = [
+        { key: `${hlsPrefix}master.m3u8` },
+        { key: `${hlsPrefix}1080p/index.m3u8` },
+        { key: `${hlsPrefix}1080p/segment_001.ts` },
+        { key: `${hlsPrefix}1080p/segment_002.ts` },
+        { key: `${hlsPrefix}preview/preview.m3u8` },
+      ];
+      mockR2.list.mockResolvedValue({ objects, truncated: false });
+
+      await service.deleteIntroVideo();
+
+      // list() was called with the correct HLS prefix
+      expect(mockR2.list).toHaveBeenCalledWith(
+        expect.objectContaining({ prefix: hlsPrefix })
+      );
+
+      // Every listed object was deleted
+      for (const obj of objects) {
+        expect(mockR2.delete).toHaveBeenCalledWith(obj.key);
+      }
+      expect(mockR2.delete).toHaveBeenCalledTimes(objects.length);
+
+      // Suppress unused-var lint
+      void mediaItemId;
+    });
+
+    it('paginates list results when R2 returns truncated pages', async () => {
+      const mockR2 = createMockR2();
+      const service = createService(mockR2);
+      const { hlsPrefix } = await seedLinkedIntroVideo();
+
+      // Page 1: truncated with cursor
+      mockR2.list
+        .mockResolvedValueOnce({
+          objects: [
+            { key: `${hlsPrefix}1080p/segment_001.ts` },
+            { key: `${hlsPrefix}1080p/segment_002.ts` },
+          ],
+          truncated: true,
+          cursor: 'next-page',
+        })
+        // Page 2: final page
+        .mockResolvedValueOnce({
+          objects: [{ key: `${hlsPrefix}1080p/segment_003.ts` }],
+          truncated: false,
+        });
+
+      await service.deleteIntroVideo();
+
+      // Two list calls — first without cursor, second with cursor
+      expect(mockR2.list).toHaveBeenCalledTimes(2);
+      expect(mockR2.list).toHaveBeenNthCalledWith(1, {
+        prefix: hlsPrefix,
+        cursor: undefined,
+      });
+      expect(mockR2.list).toHaveBeenNthCalledWith(2, {
+        prefix: hlsPrefix,
+        cursor: 'next-page',
+      });
+
+      // All three objects across both pages were deleted
+      expect(mockR2.delete).toHaveBeenCalledTimes(3);
+    });
+
+    it('does not throw when R2 list fails — DB writes still complete', async () => {
+      const mockR2 = createMockR2();
+      mockR2.list.mockRejectedValue(new Error('R2 list error'));
+      const service = createService(mockR2);
+
+      const { mediaItemId } = await seedLinkedIntroVideo();
+
+      // Should not throw — orphaned HLS files are an acceptable tradeoff
+      const result = await service.deleteIntroVideo();
+      expect(result.introVideoMediaItemId).toBeNull();
+      expect(result.introVideoUrl).toBeNull();
+
+      // Soft-delete still happened despite R2 failure
+      const [media] = await db
+        .select()
+        .from(schema.mediaItems)
+        .where(eq(schema.mediaItems.id, mediaItemId));
+      expect(media.deletedAt).not.toBeNull();
+    });
+
+    it('does not throw when an individual R2 delete fails', async () => {
+      const mockR2 = createMockR2();
+      const service = createService(mockR2);
+      const { hlsPrefix } = await seedLinkedIntroVideo();
+
+      mockR2.list.mockResolvedValue({
+        objects: [
+          { key: `${hlsPrefix}master.m3u8` },
+          { key: `${hlsPrefix}1080p/segment_001.ts` },
+        ],
+        truncated: false,
+      });
+      // First delete succeeds, second fails
+      mockR2.delete
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('R2 delete error'));
+
+      await expect(service.deleteIntroVideo()).resolves.not.toThrow();
+      expect(mockR2.delete).toHaveBeenCalledTimes(2);
+    });
+
+    it('is a no-op when no intro video is linked', async () => {
+      const mockR2 = createMockR2();
+      const service = createService(mockR2);
+
+      // No branding row, no media item linked
+      const result = await service.deleteIntroVideo();
+
+      expect(result.introVideoMediaItemId).toBeNull();
+      expect(mockR2.list).not.toHaveBeenCalled();
+      expect(mockR2.delete).not.toHaveBeenCalled();
     });
   });
 });

@@ -662,7 +662,8 @@ export class BrandingSettingsService extends BaseService {
 
   /**
    * Delete the intro video.
-   * Soft-deletes the media item and clears branding references.
+   * Soft-deletes the media item, clears branding references, and hard-deletes
+   * the HLS manifest + segments from R2 so they don't accumulate as orphans.
    */
   async deleteIntroVideo(): Promise<BrandingSettingsResponse> {
     // Get the linked media item ID
@@ -676,8 +677,17 @@ export class BrandingSettingsService extends BaseService {
 
     const mediaItemId = brandingResult[0]?.introVideoMediaItemId;
 
-    // Soft-delete the media item if it exists
+    // Capture the media item's creatorId BEFORE soft-deleting so we can
+    // build the HLS R2 prefix (`{creatorId}/hls/{mediaId}/`) for cleanup.
+    let mediaCreatorId: string | null = null;
     if (mediaItemId) {
+      const mediaResult = await this.db
+        .select({ creatorId: schema.mediaItems.creatorId })
+        .from(schema.mediaItems)
+        .where(eq(schema.mediaItems.id, mediaItemId))
+        .limit(1);
+      mediaCreatorId = mediaResult[0]?.creatorId ?? null;
+
       await this.db
         .update(schema.mediaItems)
         .set({ deletedAt: new Date() })
@@ -704,7 +714,74 @@ export class BrandingSettingsService extends BaseService {
       })
       .where(eq(schema.brandingSettings.organizationId, this.organizationId));
 
+    // Hard-delete HLS objects from R2. Run AFTER the DB writes succeed so
+    // the soft-delete + reference clearing remain consistent if R2 fails.
+    // Mirrors deleteLogo's swallow-and-log pattern: orphaned files are an
+    // acceptable tradeoff vs failing the user's delete operation.
+    if (mediaItemId && mediaCreatorId && this.r2) {
+      await this.deleteHlsObjects(mediaCreatorId, mediaItemId);
+    }
+
     return this.get();
+  }
+
+  /**
+   * Hard-delete every R2 object under the HLS prefix for an intro video.
+   * Lists with pagination (HLS folders contain manifest + per-variant
+   * playlists + many .ts segments), then deletes each key. R2 has no
+   * "delete folder" primitive, so list + delete is the canonical approach.
+   *
+   * Errors are logged but never thrown — orphaned files are recoverable
+   * via background cleanup; failing the user's delete is not.
+   *
+   * Layout: `{creatorId}/hls/{mediaItemId}/master.m3u8`,
+   *         `{creatorId}/hls/{mediaItemId}/{variant}/index.m3u8`,
+   *         `{creatorId}/hls/{mediaItemId}/{variant}/segment_*.ts`,
+   *         `{creatorId}/hls/{mediaItemId}/preview/preview.m3u8`
+   */
+  private async deleteHlsObjects(
+    creatorId: string,
+    mediaItemId: string
+  ): Promise<void> {
+    if (!this.r2) return;
+
+    const prefix = `${creatorId}/hls/${mediaItemId}/`;
+    let cursor: string | undefined;
+    let totalDeleted = 0;
+
+    try {
+      do {
+        const page = await this.r2.list({ prefix, cursor });
+        for (const object of page.objects) {
+          try {
+            await this.r2.delete(object.key);
+            totalDeleted++;
+          } catch (error) {
+            this.obs.warn('Failed to delete intro video HLS object from R2', {
+              organizationId: this.organizationId,
+              mediaItemId,
+              r2Key: object.key,
+              error: String(error),
+            });
+          }
+        }
+        cursor = page.truncated ? page.cursor : undefined;
+      } while (cursor);
+
+      this.obs.info('Deleted intro video HLS objects from R2', {
+        organizationId: this.organizationId,
+        mediaItemId,
+        prefix,
+        deleted: totalDeleted,
+      });
+    } catch (error) {
+      this.obs.warn('Failed to list intro video HLS objects for cleanup', {
+        organizationId: this.organizationId,
+        mediaItemId,
+        prefix,
+        error: String(error),
+      });
+    }
   }
 
   // ── Private Helpers ─────────────────────────────────────────────

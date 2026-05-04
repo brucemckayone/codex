@@ -466,6 +466,11 @@ export function injectBrandVars(state: BrandEditorState): void {
   const overrides = state.tokenOverrides ?? {};
   for (const [key, value] of Object.entries(overrides)) {
     if (value == null) continue;
+    // hero-hide-* drives data-hero-hide-* attributes on the org layout, not
+    // CSS custom properties — emitting --color-hero-hide-* would just pollute
+    // inline style for no consumer (Codex-rwci4). Future attribute-only key
+    // families should be added here.
+    if (key.startsWith('hero-hide-')) continue;
     const prop = BRAND_PREFIX_KEYS.has(key)
       ? `--brand-${key}`
       : `--color-${key}`;
@@ -513,6 +518,8 @@ export function tokenOverridesToCssVars(
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(overrides)) {
     if (value == null) continue;
+    // Skip attribute-only keys — same filter as injectBrandVars (Codex-rwci4).
+    if (key.startsWith('hero-hide-')) continue;
     const prop = BRAND_PREFIX_KEYS.has(key)
       ? `--brand-${key}`
       : `--color-${key}`;

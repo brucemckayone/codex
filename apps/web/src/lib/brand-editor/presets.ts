@@ -612,7 +612,7 @@ export const BRAND_PRESETS: readonly CategorizedPreset[] = [
       'hero-border-tint': '#D4A843',
       'player-text': '#D4A843',
       'glass-tint': '#B8860B',
-      'card-hover-scale': '1.01',
+      'card-hover-scale': '1.015',
       'text-transform-label': 'uppercase',
     },
     values: {

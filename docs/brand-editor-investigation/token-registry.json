@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-04-23",
-  "iteration": "020",
+  "generatedAt": "2026-05-04",
+  "iteration": "022 (correction of iter-020 zero-consumer misclassifications, see findings.zero_consumers_corrections_iter022)",
   "summary": {
     "totalTokens": 118,
     "tokensByCategory": {
@@ -162,35 +162,40 @@
     {
       "name": "--color-brand-primary-hover",
       "category": "brand-color-derived",
-      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:21"],
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:21", "apps/web/src/lib/styles/themes/light.css:48", "apps/web/src/lib/styles/themes/dark.css:48"],
       "editableIn": null,
       "persistedAs": null,
-      "consumedBy": [],
+      "consumedBy": [
+        {"file": "apps/web/src/routes/_org/[slug]/(space)/pricing/+page.svelte", "line": 2162, "context": "pricing CTA hover state"}
+      ],
       "orgBrandable": true,
       "darkModeAware": true,
-      "derivedFrom": "--brand-color lightness -0.08 OKLCH"
+      "derivedFrom": "--brand-color lightness -0.08 OKLCH (org), --color-primary-{600|300} (theme fallback)"
     },
     {
       "name": "--color-brand-primary-active",
       "category": "brand-color-derived",
-      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:22"],
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:22", "apps/web/src/lib/styles/themes/light.css:49", "apps/web/src/lib/styles/themes/dark.css:49"],
       "editableIn": null,
       "persistedAs": null,
       "consumedBy": [],
       "orgBrandable": true,
       "darkModeAware": true,
-      "derivedFrom": "--brand-color lightness -0.15 OKLCH"
+      "derivedFrom": "--brand-color lightness -0.15 OKLCH (org), --color-primary-{700|200} (theme fallback)",
+      "note": "iter-021 best DEAD candidate but intentionally part of base palette (themes/{light,dark}.css:49). Likely consumed via fallback chain. Do NOT remove without broader audit."
     },
     {
       "name": "--color-brand-primary-subtle",
       "category": "brand-color-derived",
-      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:23"],
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:23", "apps/web/src/lib/styles/themes/light.css:50", "apps/web/src/lib/styles/themes/dark.css:50"],
       "editableIn": null,
       "persistedAs": null,
-      "consumedBy": [],
+      "consumedBy": [
+        {"file": "apps/web/src/lib/components/AudioPlayer/Waveform.svelte", "line": 86, "context": "JS getPropertyValue() read for canvas — NOT var() so grep-by-var() misses this"}
+      ],
       "orgBrandable": true,
-      "darkModeAware": false,
-      "derivedFrom": "--brand-color at lightness 0.96, 20% chroma"
+      "darkModeAware": true,
+      "derivedFrom": "--brand-color at lightness 0.96, 20% chroma (org), --color-primary-{100|900} (theme fallback)"
     },
     {
       "name": "--color-interactive",
@@ -206,35 +211,45 @@
     {
       "name": "--color-interactive-hover",
       "category": "brand-color-derived",
-      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:27"],
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:27", "apps/web/src/lib/styles/themes/light.css:32", "apps/web/src/lib/styles/themes/dark.css:32"],
       "editableIn": null,
       "persistedAs": null,
-      "consumedBy": [],
+      "consumedBy": [
+        {"file": "apps/web/src/lib/components/ui/Button/Button.svelte", "line": 117, "context": "primary button hover state"},
+        {"file": "apps/web/src/lib/components/ui/FilterBar/FilterBar.svelte", "line": null, "context": "filter chip hover"},
+        {"file": "apps/web/src/lib/components/ui/CheckoutSuccess/CheckoutSuccess.svelte", "line": null, "context": "CTA hover"},
+        {"file": "apps/web/src/lib/components/ui/AccountErrorPage/AccountErrorPage.svelte", "line": null, "context": "retry button hover"},
+        {"file": "apps/web/src/lib/components/studio/MemberTable.svelte", "line": null, "context": "row action hover"}
+      ],
       "orgBrandable": true,
       "darkModeAware": true,
-      "derivedFrom": "--brand-color lightness -0.08 OKLCH"
+      "derivedFrom": "--brand-color lightness -0.08 OKLCH (org), --color-primary-{600|300} (theme fallback)"
     },
     {
       "name": "--color-interactive-active",
       "category": "brand-color-derived",
-      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:28"],
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:28", "apps/web/src/lib/styles/themes/light.css:33", "apps/web/src/lib/styles/themes/dark.css:33"],
       "editableIn": null,
       "persistedAs": null,
-      "consumedBy": [],
+      "consumedBy": [
+        {"file": "apps/web/src/lib/components/ui/Button/Button.svelte", "line": null, "context": "primary button active state"}
+      ],
       "orgBrandable": true,
       "darkModeAware": true,
-      "derivedFrom": "--brand-color lightness -0.15 OKLCH"
+      "derivedFrom": "--brand-color lightness -0.15 OKLCH (org), --color-primary-{700|200} (theme fallback)"
     },
     {
       "name": "--color-interactive-subtle",
       "category": "brand-color-derived",
-      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:29"],
+      "definedIn": ["apps/web/src/lib/theme/tokens/org-brand.css:29", "apps/web/src/lib/styles/themes/light.css:34", "apps/web/src/lib/styles/themes/dark.css:34"],
       "editableIn": null,
       "persistedAs": null,
-      "consumedBy": [],
+      "consumedBy": [
+        {"file": "*", "line": null, "context": "46 occurrences across pricing, account, studio, editor, brand-editor panels, layout components — heavily consumed"}
+      ],
       "orgBrandable": true,
       "darkModeAware": true,
-      "derivedFrom": "--brand-color at lightness 0.97, 15% chroma"
+      "derivedFrom": "--brand-color at lightness 0.97, 15% chroma (org), --color-primary-{50|900} (theme fallback)"
     },
     {
       "name": "--color-focus",
@@ -1971,32 +1986,18 @@
       "consumers": 4,
       "explanation": "Primary input that drives OKLCH derivation of primary, interactive, focus, and text-on-brand palettes in org-brand.css"
     },
-    "zero_consumers": [
-      {
-        "name": "--color-brand-primary-hover",
-        "reason": "Defined but not directly consumed; used via relative color math in hover states"
-      },
-      {
-        "name": "--color-brand-primary-active",
-        "reason": "Defined but not directly consumed; used via relative color math in active states"
-      },
-      {
-        "name": "--color-brand-primary-subtle",
-        "reason": "Defined for palette completeness but no current CSS rule consumes it"
-      },
-      {
-        "name": "--color-interactive-hover",
-        "reason": "Defined but not directly consumed"
-      },
-      {
-        "name": "--color-interactive-active",
-        "reason": "Defined but not directly consumed"
-      },
-      {
-        "name": "--color-interactive-subtle",
-        "reason": "Defined but not directly consumed"
-      }
-    ],
+    "zero_consumers": [],
+    "zero_consumers_corrections_iter022": {
+      "context": "iter-020 Agent E (haiku) reported 6 zero-consumer tokens. iter-021 Agent H + iter-022 verification proved ALL 6 have live consumers. Lesson: feedback_verify_before_declaring_unused.md — Haiku-only sweeps miss consumers. Future audits MUST grep var(--X) AND getPropertyValue('--X') AND theme-fallback chains.",
+      "reclassified": [
+        {"name": "--color-brand-primary-hover", "previousClassification": "zero-consumer", "actualConsumers": "pricing/+page.svelte:2162; theme palette fallback in light.css:48 + dark.css:48"},
+        {"name": "--color-brand-primary-active", "previousClassification": "zero-consumer", "actualConsumers": "Defined in light.css:49 + dark.css:49 base palette; consumed via fallback chain — DO NOT REMOVE"},
+        {"name": "--color-brand-primary-subtle", "previousClassification": "zero-consumer", "actualConsumers": "AudioPlayer/Waveform.svelte:86 via JS getPropertyValue (grep-by-var() invisible); palette base in themes"},
+        {"name": "--color-interactive-hover", "previousClassification": "zero-consumer", "actualConsumers": "Button.svelte:117 + FilterBar/CheckoutSuccess/AccountErrorPage/MemberTable; palette base in themes"},
+        {"name": "--color-interactive-active", "previousClassification": "zero-consumer", "actualConsumers": "Button.svelte (active state); palette base in themes"},
+        {"name": "--color-interactive-subtle", "previousClassification": "zero-consumer", "actualConsumers": "46 occurrences across UI surfaces (pricing, account, studio, editor, brand-editor); heavily consumed"}
+      ]
+    },
     "conflicting_definitions": [
       {
         "token": "--color-brand-secondary-hover",
