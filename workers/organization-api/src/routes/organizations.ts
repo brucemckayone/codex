@@ -49,7 +49,6 @@ import {
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { updateBrandCache } from './settings';
 
 const app = new Hono<HonoEnv>();
 
@@ -73,11 +72,6 @@ app.post(
         ctx.input.body,
         ctx.user.id
       );
-
-      // Issue 4: Warm cache with default branding for new org
-      if (ctx.env.BRAND_KV) {
-        ctx.executionCtx.waitUntil(updateBrandCache(ctx.env, org.id, ctx.obs));
-      }
 
       return org;
     },
@@ -565,20 +559,6 @@ app.patch(
         ctx.input.body
       );
 
-      // Handle slug change: invalidate old cache, new cache warmed on first access
-      // FIX: Warm new cache immediately using updateBrandCache
-      if (ctx.env.BRAND_KV) {
-        if (oldSlug && updated.slug !== oldSlug) {
-          ctx.executionCtx.waitUntil(
-            ctx.env.BRAND_KV.delete(`brand:${oldSlug}`)
-          );
-        }
-        // Always refresh cache on update (in case slug changed OR other relevant fields)
-        ctx.executionCtx.waitUntil(
-          updateBrandCache(ctx.env, updated.id, ctx.obs)
-        );
-      }
-
       // Invalidate VersionedCache for public org info (keyed by slug)
       if (ctx.env.CACHE_KV) {
         const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
@@ -644,12 +624,9 @@ app.delete(
 
       await ctx.services.organization.delete(ctx.input.params.id);
 
-      // Invalidate brand cache and slug-keyed VersionedCache
+      // Invalidate slug-keyed VersionedCache for public org info
       if (org) {
         const invalidations: Promise<unknown>[] = [];
-        if (ctx.env.BRAND_KV) {
-          invalidations.push(ctx.env.BRAND_KV.delete(`brand:${org.slug}`));
-        }
         if (ctx.env.CACHE_KV) {
           const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
           invalidations.push(cache.invalidate(org.slug));

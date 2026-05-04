@@ -17,10 +17,7 @@
  */
 
 import { VersionedCache, type WaitUntilFn } from '@codex/cache';
-import { BRAND_COLORS, CACHE_TTL } from '@codex/constants';
-import { createDbClient, eq, schema } from '@codex/database';
-
-type BrandingRow = typeof schema.brandingSettings.$inferSelect;
+import { createDbClient } from '@codex/database';
 
 import type { Logger } from '@codex/observability';
 import { InternalServiceError } from '@codex/service-errors';
@@ -51,128 +48,15 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 
 /**
- * Update the branding cache in KV with fresh data from DB
- *
- * FIXES:
- * 1. Race conditions: Always fetches latest state from DB
- * 2. Performance: runs in background (waitUntil), removing DB fetch from request path
- * 3. Error reporting: Logs errors properly
- */
-/**
- * Pure branding-response builder. Prefers `branding` fields, falls back to
- * `orgLogoUrl` for logo, then to null / sensible defaults for everything
- * else. Keeping this pure makes `updateBrandCache` straight-line code.
- */
-function buildBrandingResponse(
-  branding: BrandingRow | null | undefined,
-  orgLogoUrl: string | null
-): BrandingSettingsResponse {
-  return {
-    logoUrl: branding?.logoUrl ?? orgLogoUrl ?? null,
-    primaryColorHex: branding?.primaryColorHex ?? BRAND_COLORS.DEFAULT_BLUE,
-    secondaryColorHex: branding?.secondaryColorHex ?? null,
-    accentColorHex: branding?.accentColorHex ?? null,
-    backgroundColorHex: branding?.backgroundColorHex ?? null,
-    fontBody: branding?.fontBody ?? null,
-    fontHeading: branding?.fontHeading ?? null,
-    radiusValue: Number(branding?.radiusValue ?? 0.5),
-    densityValue: Number(branding?.densityValue ?? 1),
-    introVideoMediaItemId: branding?.introVideoMediaItemId ?? null,
-    introVideoUrl: branding?.introVideoUrl ?? null,
-    tokenOverrides: branding?.tokenOverrides ?? null,
-    darkModeOverrides: branding?.darkModeOverrides ?? null,
-    textColorHex: branding?.textColorHex ?? null,
-    shadowScale: branding?.shadowScale ?? null,
-    shadowColor: branding?.shadowColor ?? null,
-    textScale: branding?.textScale ?? null,
-    headingWeight: branding?.headingWeight ?? null,
-    bodyWeight: branding?.bodyWeight ?? null,
-    heroLayout: branding?.heroLayout ?? 'default',
-    pricingFaq: branding?.pricingFaq ?? null,
-  };
-}
-
-export async function updateBrandCache(
-  env: Bindings,
-  organizationId: string,
-  obs?: Logger
-): Promise<void> {
-  const kv = env.BRAND_KV;
-  if (!kv) return;
-
-  try {
-    const db = createDbClient(env);
-
-    // Try to fetch settings with branding and organization info
-    // We query platformSettings because it has relations to both branding and organization
-    const settings = await db.query.platformSettings.findFirst({
-      where: eq(schema.platformSettings.organizationId, organizationId),
-      with: {
-        branding: true,
-        organization: {
-          columns: { slug: true, logoUrl: true },
-        },
-      },
-    });
-
-    let slug: string;
-    let branding: BrandingSettingsResponse;
-
-    if (settings?.organization) {
-      slug = settings.organization.slug;
-      branding = buildBrandingResponse(
-        settings.branding,
-        settings.organization.logoUrl
-      );
-    } else {
-      // Fallback: Settings not created yet, fetch org directly
-      const org = await db.query.organizations.findFirst({
-        where: eq(schema.organizations.id, organizationId),
-        columns: {
-          slug: true,
-          logoUrl: true,
-        },
-      });
-
-      if (!org) {
-        obs?.warn(`Skip update - Org not found: ${organizationId}`, {
-          organizationId,
-        });
-        return;
-      }
-
-      slug = org.slug;
-      branding = buildBrandingResponse(null, org.logoUrl);
-    }
-
-    const cacheData = {
-      updatedAt: new Date().toISOString(),
-      branding,
-    };
-
-    await kv.put(`brand:${slug}`, JSON.stringify(cacheData), {
-      expirationTtl: CACHE_TTL.BRAND_CACHE_SECONDS,
-    });
-  } catch (err) {
-    obs?.error?.(`Failed to update cache for org ${organizationId}`, {
-      organizationId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-}
-
-/**
- * Invalidate brand cache and bump org version for client staleness detection.
- * Also invalidates the slug-keyed VersionedCache for the public org info endpoint.
- * Extracts duplicated cache invalidation logic used by branding mutation handlers.
+ * Invalidate the slug-keyed public info cache (read by `/public/:slug/info`)
+ * and bump the org-id version key for client staleness detection.
  *
  * Codex-ja9zp: the SLUG-keyed CACHE_KV invalidation runs INLINE (awaited)
  * because that is the key the org layout reads via `/public/:slug/info`.
  * If it stayed in waitUntil, a user reloading fast enough after save would
  * hit the stale pre-save cached branding (the race that made font/color
- * changes appear to "not persist"). BRAND_KV warm + orgId-version bump
- * stay fire-and-forget via waitUntil — they are belt-and-suspenders for
- * other consumers and not on the reload-critical path.
+ * changes appear to "not persist"). The orgId-keyed version bump stays
+ * fire-and-forget via waitUntil — clients detect staleness via polling.
  *
  * Caller contract: awaited. Every call site is inside an async procedure
  * handler, so `await invalidateBrandAndCache(...)` blocks the response
@@ -186,48 +70,20 @@ async function invalidateBrandAndCache(
   orgId: string,
   obs?: Logger
 ): Promise<void> {
+  if (!ctx.env.CACHE_KV) return;
+
   // 1. Synchronous: invalidate the slug-keyed public info cache.
   //    This is the cache that `/public/:slug/info` reads on reload.
   //    R14 (denoise iter-011): use shared `invalidateOrgSlugCache` helper
   //    instead of inlining the slug-resolve + invalidate block.
-  if (ctx.env.CACHE_KV) {
-    const db = createDbClient(ctx.env);
-    const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
-    await invalidateOrgSlugCache({ db, cache, orgId, logger: obs });
-  }
+  const db = createDbClient(ctx.env);
+  const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+  await invalidateOrgSlugCache({ db, cache, orgId, logger: obs });
 
-  // 2. Fire-and-forget: warm BRAND_KV + bump orgId version.
-  //    These are not on the reload-critical path; clients that care about
-  //    the orgId-keyed version detect staleness via client-side polling.
-  //
-  //    Each task gets its own `.catch()` so a KV reject on cache.invalidate
-  //    can't cancel the BRAND_KV warm. updateBrandCache is internally
-  //    try/caught, so `.catch()` here is belt-and-suspenders.
-  const tasks: Promise<unknown>[] = [
-    updateBrandCache(ctx.env, orgId, obs).catch((err: unknown) => {
-      obs?.warn(`Background BRAND_KV warm failed for org ${orgId}`, {
-        orgId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }),
-  ];
-  if (ctx.env.CACHE_KV) {
-    const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
-    tasks.push(
-      cache.invalidate(orgId).catch((err: unknown) => {
-        obs?.warn(`Background CACHE_KV invalidate failed for org ${orgId}`, {
-          orgId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      })
-    );
-  }
-  // Per-task `.catch()` above prevents Promise.all from rejecting; the
-  // wrapper `.catch()` is belt-and-suspenders for the workers:
-  // waitUntil-no-catch contract (and surfaces a final-fallback warn).
+  // 2. Fire-and-forget: bump orgId-keyed version for client staleness polling.
   ctx.executionCtx.waitUntil(
-    Promise.all(tasks).catch((err: unknown) => {
-      obs?.warn(`Background brand/version tasks failed for org ${orgId}`, {
+    cache.invalidate(orgId).catch((err: unknown) => {
+      obs?.warn(`Background CACHE_KV invalidate failed for org ${orgId}`, {
         orgId,
         error: err instanceof Error ? err.message : String(err),
       });

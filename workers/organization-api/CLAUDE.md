@@ -75,7 +75,6 @@ Organization CRUD, membership management, subscription tiers, follower relations
 | `DATABASE_URL` | Yes | Neon DB connection |
 | `RATE_LIMIT_KV` | Yes | Rate limiting |
 | `AUTH_SESSION_KV` | Yes | Session auth (KV check on startup) |
-| `BRAND_KV` | No | Branding cache (`brand:{slug}` keys); used by org layout |
 | `CACHE_KV` | No | `VersionedCache` for public endpoints (org info, stats, creators) |
 | `MEDIA_BUCKET` | No | R2 bucket for logo storage |
 | `WORKER_SHARED_SECRET` | No | Used by `sendEmailToWorker` for member invite emails |
@@ -101,14 +100,15 @@ Organization CRUD, membership management, subscription tiers, follower relations
 
 ## Cache Invalidation
 
-Two cache layers are maintained and must be invalidated on mutations:
+Branding and org-info reads go through a single cache layer (`CACHE_KV` via `VersionedCache`). The org layout calls `api.org.getPublicInfo(slug)` → `/public/:slug/info`, which reads `CACHE_KV` keyed by org slug.
 
 | Layer | Key Pattern | Invalidated By |
 |---|---|---|
-| **`BRAND_KV`** | `brand:{slug}` | `updateBrandCache()` — re-fetches from DB and writes fresh value |
 | **`CACHE_KV` (VersionedCache)** | org slug or org ID | `cache.invalidate(slug)` / `cache.invalidate(orgId)` |
 
-All invalidation is fire-and-forget via `ctx.executionCtx.waitUntil(...)`. The `updateBrandCache()` helper in `settings.ts` is exported and also called by `organizations.ts` on create/update/delete.
+`invalidateBrandAndCache()` in `settings.ts` runs the slug-keyed invalidation INLINE (awaited) — that is the read-critical path. The orgId-keyed version bump is fire-and-forget via `ctx.executionCtx.waitUntil(...)`. The PATCH /:id and DELETE /:id handlers in `organizations.ts` invalidate the slug cache via `waitUntil`.
+
+> **Removed (Codex-fopbo):** A second KV namespace `BRAND_KV` (`brand:{slug}` keys) was previously written on every branding mutation by `updateBrandCache()` and `BRAND_KV.delete()` calls. The `apps/web` reader (`brand-cache.ts`) was never wired to a real consumer — only its own tests imported it. The binding, the writer, and the dead reader module were removed because nothing read the cache.
 
 ## Gotchas
 
