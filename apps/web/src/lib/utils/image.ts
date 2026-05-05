@@ -6,7 +6,7 @@
  * The size is the filename, not a suffix — e.g. .../media-thumbnails/{id}/sm.webp
  */
 
-export type ThumbnailSize = 'sm' | 'md' | 'lg';
+type ThumbnailSize = 'sm' | 'md' | 'lg';
 
 const THUMBNAIL_WIDTHS: Record<ThumbnailSize, number> = {
   sm: 200,

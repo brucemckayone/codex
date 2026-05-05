@@ -75,6 +75,10 @@
     {
       "file": "apps/web/src/lib/components/ui/ShaderHero/index.ts",
       "exports": ["*"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/ShaderHero/webgl-utils.ts",
+      "exports": ["FBO"]
     }
   ],
   "ignorePatterns": [
