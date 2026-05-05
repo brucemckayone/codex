@@ -1,13 +1,16 @@
 <script lang="ts">
   import { brandEditor } from '$lib/brand-editor';
   import {
-    ALL_HERO_FX_SHADER_KEYS,
     HERO_FX_DEFAULTS,
     HERO_FX_PRESETS,
     HERO_FX_SHARED_CONTROLS,
     HERO_FX_PRESET_CONTROLS,
     type ControlConfig,
   } from '$lib/brand-editor/hero-fx-presets';
+  import {
+    selectPreset as selectPresetHelper,
+    updateOverride as updateOverrideHelper,
+  } from '$lib/brand-editor/hero-fx-helpers';
   import ControlField from './ControlField.svelte';
 
   // ── Read current overrides ─────────────────────────────────────────────
@@ -62,32 +65,24 @@
   // theme's bucket so it falls back to either the light value (when dark)
   // or the ShaderHero compiled-in default (when light).
   //
-  // GOTCHA #2 (Codex-6itei §4.2): MUST remove the override entry when
-  // value === HERO_FX_DEFAULTS[key] so pending.tokenOverrides stays minimal.
+  // Codex-bies6: the gotcha-bearing logic now lives in hero-fx-helpers.ts so
+  // it can be unit-tested without mounting this component. These thin
+  // wrappers bind brandEditor.setThemeTokenOverride as the writer; the
+  // helpers themselves are pure.
+  //
+  // GOTCHA #2 (Codex-6itei §4.2): updateOverride MUST remove the override
+  // entry when value === HERO_FX_DEFAULTS[key] so pending.tokenOverrides
+  // stays minimal. Tested in hero-fx-helpers.test.ts.
   function updateOverride(key: string, value: string) {
-    if (!value || value === HERO_FX_DEFAULTS[key]) {
-      brandEditor.setThemeTokenOverride(key, null);
-    } else {
-      brandEditor.setThemeTokenOverride(key, value);
-    }
+    updateOverrideHelper(key, value, brandEditor.setThemeTokenOverride);
   }
 
   // GOTCHA #1 (Codex-6itei §4.2): selectPreset('none') MUST iterate
   // ALL_HERO_FX_SHADER_KEYS — the union of every shader-* key across every
   // preset plus 'shader-preset' itself — so no stale overrides linger when
-  // the user picks "None".
+  // the user picks "None". Tested in hero-fx-helpers.test.ts.
   function selectPreset(presetId: string) {
-    if (presetId === 'none') {
-      // Clear ALL shader-* overrides on the active theme so no stale
-      // config lingers. setThemeTokenOverride(null) removes the key from
-      // whichever bucket (light/dark) corresponds to editingTheme.
-      for (const key of ALL_HERO_FX_SHADER_KEYS) {
-        brandEditor.setThemeTokenOverride(key, null);
-      }
-    } else {
-      // Set the preset on the active theme; keep existing slider values.
-      brandEditor.setThemeTokenOverride('shader-preset', presetId);
-    }
+    selectPresetHelper(presetId, brandEditor.setThemeTokenOverride);
   }
 </script>
 
