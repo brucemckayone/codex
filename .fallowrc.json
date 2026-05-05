@@ -16,6 +16,36 @@
     "apps/web/e2e/**/*.spec.ts"
   ],
   "ignoreDependencies": ["vite-plugin-dts"],
+  "ignoreExports": [
+    {
+      "file": "apps/web/src/lib/components/ui/CreatorCard/index.ts",
+      "exports": ["CreatorProfileDrawer"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/Feedback/Spinner/index.ts",
+      "exports": ["Spinner"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/Icon/index.ts",
+      "exports": ["MinusCircleIcon"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/ShaderHero/index.ts",
+      "exports": ["ShaderHero"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/Table/index.ts",
+      "exports": [
+        "Table",
+        "TableHeader",
+        "TableBody",
+        "TableFooter",
+        "TableRow",
+        "TableHead",
+        "TableCell"
+      ]
+    }
+  ],
   "dynamicallyLoaded": [
     "**/*.stories.svelte",
     "**/*.stories.ts",
@@ -32,7 +62,10 @@
     "apps/web/src/hooks.ts",
     "apps/web/src/hooks.server.ts",
     "apps/web/src/hooks.client.ts",
-    "apps/web/src/app.html"
+    "apps/web/src/app.html",
+    "apps/web/src/lib/components/ui/ShaderHero/renderers/*-renderer.ts",
+    "apps/web/src/lib/styles/tokens/breakpoints.css",
+    "scripts/denoise/**/*.ts"
   ],
   "ignorePatterns": [
     "test-media/**",
