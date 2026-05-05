@@ -43,7 +43,13 @@
     "apps/web/src/hooks.ts",
     "apps/web/src/hooks.server.ts",
     "apps/web/src/hooks.client.ts",
-    "apps/web/src/app.html"
+    "apps/web/src/app.html",
+    "apps/web/src/tests/utils/component-test-utils.svelte.ts",
+    "scripts/denoise/index.ts",
+    "scripts/denoise/consumer-graph.ts",
+    "scripts/denoise/extract-api.ts",
+    "scripts/denoise/find-consumers.ts",
+    "scripts/denoise/jscpd-budget.ts"
   ],
   "ignorePatterns": [
     "test-media/**",
@@ -54,7 +60,8 @@
     "**/dist/**",
     "**/build/**",
     "**/.svelte-kit/**",
-    "apps/web/src/paraglide/**"
+    "apps/web/src/paraglide/**",
+    "apps/web/src/lib/styles/tokens/breakpoints.css"
   ],
   "duplicates": {
     "enabled": true,
