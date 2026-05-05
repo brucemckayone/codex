@@ -78,14 +78,14 @@ export const brandingSettings = pgTable(
     introVideoUrl: text('intro_video_url'),
 
     // Brand Editor — Level 2 fine-tune fields
+    // tokenOverrides JSON is the single source of truth for fine-tune overrides
+    // (text scale, heading/body weight, shadow scale/color, heading colour,
+    // shader preset, hero visibility flags, etc.). The previously broken-out
+    // columns (textColorHex, shadowScale, shadowColor, textScale, headingWeight,
+    // bodyWeight) were dropped in Codex-g49b4 — values were backfilled into
+    // tokenOverrides JSON via migration 0059_backfill_branding_token_overrides.
     tokenOverrides: text('token_overrides'), // JSON: Record<string, string>
     darkModeOverrides: text('dark_mode_overrides'), // JSON: Partial<ThemeColors>
-    textColorHex: varchar('text_color_hex', { length: 7 }),
-    shadowScale: varchar('shadow_scale', { length: 10 }).default('1'),
-    shadowColor: varchar('shadow_color', { length: 20 }),
-    textScale: varchar('text_scale', { length: 10 }).default('1'),
-    headingWeight: varchar('heading_weight', { length: 10 }),
-    bodyWeight: varchar('body_weight', { length: 10 }),
 
     // Hero layout variant (brand editor "Header Layout" section)
     heroLayout: varchar('hero_layout', { length: 20 }).default('default'),

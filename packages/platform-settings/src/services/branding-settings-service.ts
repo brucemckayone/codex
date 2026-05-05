@@ -79,12 +79,6 @@ export class BrandingSettingsService extends BaseService {
         introVideoUrl: schema.brandingSettings.introVideoUrl,
         tokenOverrides: schema.brandingSettings.tokenOverrides,
         darkModeOverrides: schema.brandingSettings.darkModeOverrides,
-        textColorHex: schema.brandingSettings.textColorHex,
-        shadowScale: schema.brandingSettings.shadowScale,
-        shadowColor: schema.brandingSettings.shadowColor,
-        textScale: schema.brandingSettings.textScale,
-        headingWeight: schema.brandingSettings.headingWeight,
-        bodyWeight: schema.brandingSettings.bodyWeight,
         heroLayout: schema.brandingSettings.heroLayout,
         pricingFaq: schema.brandingSettings.pricingFaq,
       })
@@ -172,12 +166,6 @@ export class BrandingSettingsService extends BaseService {
     introVideoUrl: string | null;
     tokenOverrides: string | null;
     darkModeOverrides: string | null;
-    textColorHex: string | null;
-    shadowScale: string | null;
-    shadowColor: string | null;
-    textScale: string | null;
-    headingWeight: string | null;
-    bodyWeight: string | null;
     heroLayout: string | null;
     pricingFaq: string | null;
   }): BrandingSettingsResponse {
@@ -195,12 +183,6 @@ export class BrandingSettingsService extends BaseService {
       introVideoUrl: row.introVideoUrl,
       tokenOverrides: row.tokenOverrides,
       darkModeOverrides: row.darkModeOverrides,
-      textColorHex: row.textColorHex,
-      shadowScale: row.shadowScale,
-      shadowColor: row.shadowColor,
-      textScale: row.textScale,
-      headingWeight: row.headingWeight,
-      bodyWeight: row.bodyWeight,
       heroLayout: row.heroLayout ?? 'default',
       pricingFaq: row.pricingFaq,
     };
@@ -214,7 +196,10 @@ export class BrandingSettingsService extends BaseService {
     // Ensure hub row exists first
     await this.ensurePlatformSettingsExists();
 
-    // Build update values from input (only include fields that were provided)
+    // Build update values from input (only include fields that were provided).
+    // Fine-tune fields (text/heading/body weight, shadow scale/color, etc.) are
+    // routed exclusively through tokenOverrides JSON since Codex-g49b4 dropped
+    // the broken-out columns.
     const updateValues: Record<string, unknown> = {};
     const fieldMap: Record<string, keyof UpdateBrandingInput> = {
       primaryColorHex: 'primaryColorHex',
@@ -227,12 +212,6 @@ export class BrandingSettingsService extends BaseService {
       densityValue: 'densityValue',
       tokenOverrides: 'tokenOverrides',
       darkModeOverrides: 'darkModeOverrides',
-      textColorHex: 'textColorHex',
-      shadowScale: 'shadowScale',
-      shadowColor: 'shadowColor',
-      textScale: 'textScale',
-      headingWeight: 'headingWeight',
-      bodyWeight: 'bodyWeight',
       heroLayout: 'heroLayout',
       pricingFaq: 'pricingFaq',
     };

@@ -178,17 +178,10 @@ const updateBrandingCommandSchema = z.object({
     .optional(),
   radiusValue: z.number().min(0).max(2).optional(),
   densityValue: z.number().min(0.75).max(1.25).optional(),
-  // Fine-tune fields — all optional: tokenOverrides JSON is the single source
-  // of truth for new saves; the broken-out columns still exist on the DB row
-  // for legacy read compatibility (iter-04 Codex-2nl7) but are no longer
-  // written by the editor.
+  // Fine-tune fields — text/heading/body weight, shadow scale/color, heading
+  // colour, etc. are all stored as keys inside tokenOverrides JSON. The
+  // previously broken-out columns were dropped in Codex-g49b4.
   tokenOverrides: nullableString.optional(), // JSON string of Record<string, string | null>
-  textColorHex: hexColorNullable.optional(),
-  shadowScale: nullableString.optional(),
-  shadowColor: nullableString.optional(),
-  textScale: nullableString.optional(),
-  headingWeight: nullableString.optional(),
-  bodyWeight: nullableString.optional(),
   // Dark mode overrides
   darkModeOverrides: nullableString.optional(), // JSON string of Partial<ThemeColors>
   // Hero layout — HERO_LAYOUTS is the single source of truth (@codex/validation).
@@ -214,12 +207,6 @@ export const updateBrandingCommand = command(
     radiusValue,
     densityValue,
     tokenOverrides,
-    textColorHex,
-    shadowScale,
-    shadowColor,
-    textScale,
-    headingWeight,
-    bodyWeight,
     darkModeOverrides,
     heroLayout,
   }) => {
@@ -236,12 +223,6 @@ export const updateBrandingCommand = command(
       radiusValue,
       densityValue,
       tokenOverrides,
-      textColorHex,
-      shadowScale,
-      shadowColor,
-      textScale,
-      headingWeight,
-      bodyWeight,
       darkModeOverrides,
       heroLayout,
     });

@@ -62,13 +62,11 @@ export interface LayoutOrganization {
  * Includes UI-specific fields not present in backend Organization type
  */
 export interface OrgBrandFineTune {
+  // Fine-tune values (text/heading/body weight, shadow scale/color, heading
+  // colour, etc.) are stored as keys inside tokenOverrides JSON. The
+  // previously broken-out columns were dropped in Codex-g49b4.
   tokenOverrides?: string | null;
   darkModeOverrides?: string | null;
-  shadowScale?: string | null;
-  shadowColor?: string | null;
-  textScale?: string | null;
-  headingWeight?: string | null;
-  bodyWeight?: string | null;
 }
 
 // ─── Wire-Shape Helpers ────────────────────────────────────────────────────

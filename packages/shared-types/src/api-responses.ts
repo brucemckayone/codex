@@ -198,15 +198,11 @@ export interface BrandingSettingsResponse {
   // Intro video
   introVideoMediaItemId: string | null;
   introVideoUrl: string | null;
-  // Brand Editor fine-tune fields
+  // Brand Editor fine-tune fields — text/heading/body weight, shadow scale/color,
+  // etc. are stored as keys inside tokenOverrides JSON. The previously
+  // broken-out columns were dropped in Codex-g49b4.
   tokenOverrides: string | null;
   darkModeOverrides: string | null;
-  textColorHex: string | null;
-  shadowScale: string | null;
-  shadowColor: string | null;
-  textScale: string | null;
-  headingWeight: string | null;
-  bodyWeight: string | null;
   // Hero layout
   heroLayout: string;
   // Pricing FAQ (JSON string: PricingFaqItem[])

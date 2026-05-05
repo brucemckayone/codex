@@ -122,12 +122,12 @@
     return typeof preset === 'string' && preset.length > 0 && preset !== 'none';
   });
 
-  // Fine-tune branding fields — injected as CSS vars alongside core branding
-  const brandShadowScale = $derived(data.org?.brandFineTune?.shadowScale ?? undefined);
-  const brandShadowColor = $derived(data.org?.brandFineTune?.shadowColor ?? undefined);
-  const brandTextScale = $derived(data.org?.brandFineTune?.textScale ?? undefined);
-  const brandHeadingWeight = $derived(data.org?.brandFineTune?.headingWeight ?? undefined);
-  const brandBodyWeight = $derived(data.org?.brandFineTune?.bodyWeight ?? undefined);
+  // Fine-tune branding fields — text/heading/body weight, shadow scale/color,
+  // heading colour, etc. are now read exclusively from the tokenOverrides JSON
+  // below and injected via injectTokenOverrides()/serverTokenOverrideStyle.
+  // The previously broken-out columns (and corresponding $derived bindings to
+  // --brand-shadow-scale / --brand-text-scale / --brand-heading-weight /
+  // --brand-body-weight / --brand-shadow-color) were dropped in Codex-g49b4.
 
   // Token overrides from server — includes shader-* keys, color overrides, etc.
   // Parsed from the JSON string stored in branding_settings.tokenOverrides.
@@ -320,18 +320,15 @@
   $effect(() => {
     if (!browser) return;
     if (showBrandEditor && brandEditor.isClosed && data.org) {
-      // Reconstruct saved tokenOverrides from fine-tune fields
+      // Reconstruct saved tokenOverrides from server JSON. Codex-g49b4 dropped
+      // the per-field columns (shadow_scale, shadow_color, text_scale,
+      // heading_weight, body_weight, text_color_hex); their values are now
+      // backfilled into tokenOverrides JSON, so this single parse is enough.
       const ft = data.org.brandFineTune;
       const savedOverrides: Record<string, string> = {};
       if (ft?.tokenOverrides) {
         try { Object.assign(savedOverrides, JSON.parse(ft.tokenOverrides)); } catch { /* ignore parse errors */ }
       }
-      // Also populate from individual fields (they may exist even without tokenOverrides JSON)
-      if (ft?.shadowScale) savedOverrides['shadow-scale'] = ft.shadowScale;
-      if (ft?.shadowColor) savedOverrides['shadow-color'] = ft.shadowColor;
-      if (ft?.textScale) savedOverrides['text-scale'] = ft.textScale;
-      if (ft?.headingWeight) savedOverrides['heading-weight'] = ft.headingWeight;
-      if (ft?.bodyWeight) savedOverrides['body-weight'] = ft.bodyWeight;
 
       // Parse saved dark mode overrides
       let savedDarkOverrides = null;
@@ -437,11 +434,6 @@
   style:--brand-radius={brandRadius}
   style:--brand-font-body={brandFontBody ? `'${brandFontBody}', var(--font-sans)` : undefined}
   style:--brand-font-heading={brandFontHeading ? `'${brandFontHeading}', var(--font-sans)` : undefined}
-  style:--brand-shadow-scale={brandShadowScale}
-  style:--brand-shadow-color={brandShadowColor}
-  style:--brand-text-scale={brandTextScale}
-  style:--brand-heading-weight={brandHeadingWeight}
-  style:--brand-body-weight={brandBodyWeight}
   style:--brand-shader-logo-url={brandLogoUrl}
   style={serverTokenOverrideStyle}
 >

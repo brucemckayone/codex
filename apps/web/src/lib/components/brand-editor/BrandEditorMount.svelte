@@ -47,11 +47,9 @@
       const overrides = payload.tokenOverrides ?? {};
       const hasOverrides = Object.keys(overrides).length > 0;
 
-      // tokenOverrides JSON is the single source of truth for fine-tune fields.
-      // The broken-out columns (textColorHex, shadowScale, etc.) still exist on
-      // the DB row and are read by the layout for backward compatibility with
-      // pre-JSON rows, but we no longer double-write them here — the JSON blob
-      // is authoritative for new saves (iter-04 Codex-2nl7).
+      // tokenOverrides JSON is the sole source of truth for fine-tune fields
+      // (text/heading/body weight, shadow scale/color, heading colour, etc.).
+      // The previously broken-out columns were dropped in Codex-g49b4.
       await updateBrandingCommand({
         orgId: brandEditor.orgId,
         primaryColorHex: payload.primaryColor,

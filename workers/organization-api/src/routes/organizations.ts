@@ -239,11 +239,6 @@ async function fetchPublicOrgInfo(
     introVideoUrl: string | null;
     tokenOverrides: string | null;
     darkModeOverrides: string | null;
-    shadowScale: string | null;
-    shadowColor: string | null;
-    textScale: string | null;
-    headingWeight: string | null;
-    bodyWeight: string | null;
     heroLayout: string;
   };
 
@@ -260,11 +255,6 @@ async function fetchPublicOrgInfo(
     introVideoUrl: null,
     tokenOverrides: null,
     darkModeOverrides: null,
-    shadowScale: null,
-    shadowColor: null,
-    textScale: null,
-    headingWeight: null,
-    bodyWeight: null,
     heroLayout: 'default',
   };
 
@@ -284,11 +274,6 @@ async function fetchPublicOrgInfo(
       introVideoUrl: b.introVideoUrl ?? null,
       tokenOverrides: b.tokenOverrides ?? null,
       darkModeOverrides: b.darkModeOverrides ?? null,
-      shadowScale: b.shadowScale ?? null,
-      shadowColor: b.shadowColor ?? null,
-      textScale: b.textScale ?? null,
-      headingWeight: b.headingWeight ?? null,
-      bodyWeight: b.bodyWeight ?? null,
       heroLayout: b.heroLayout ?? 'default',
     };
   }
@@ -320,13 +305,11 @@ async function fetchPublicOrgInfo(
     introVideoUrl: branding.introVideoUrl,
     heroLayout: branding.heroLayout,
     brandFineTune: {
+      // Fine-tune values (text/heading/body weight, shadow scale/color,
+      // heading colour, etc.) are stored as keys inside tokenOverrides JSON.
+      // The previously broken-out columns were dropped in Codex-g49b4.
       tokenOverrides: branding.tokenOverrides,
       darkModeOverrides: branding.darkModeOverrides,
-      shadowScale: branding.shadowScale,
-      shadowColor: branding.shadowColor,
-      textScale: branding.textScale,
-      headingWeight: branding.headingWeight,
-      bodyWeight: branding.bodyWeight,
     },
     enableSubscriptions,
   };

@@ -1,7 +1,8 @@
 <!--
   @component BrandEditorFineTuneTypography
   Level 2 — Text scale and font weight overrides.
-  Depends on textScale/headingWeight/bodyWeight DB columns (now complete).
+  Reads/writes via tokenOverrides JSON keys: 'text-scale', 'heading-weight',
+  'body-weight'. The previously broken-out columns were dropped in Codex-g49b4.
 -->
 <script lang="ts">
   import { brandEditor } from '$lib/brand-editor';

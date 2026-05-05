@@ -142,15 +142,11 @@ export const updateBrandingSchema = z.object({
   fontHeading: fontNameSchema.nullable().optional(),
   radiusValue: radiusValueSchema.optional(),
   densityValue: densityValueSchema.optional(),
-  // Brand Editor fine-tune fields
+  // Brand Editor fine-tune fields — text/heading/body weight, shadow scale/color,
+  // and heading colour are stored as keys inside tokenOverrides JSON. The
+  // previously broken-out columns were dropped in Codex-g49b4.
   tokenOverrides: z.string().nullable().optional(), // JSON string
   darkModeOverrides: z.string().nullable().optional(), // JSON string: Partial<ThemeColors>
-  textColorHex: hexColorSchema.nullable().optional(),
-  shadowScale: z.string().max(10).nullable().optional(),
-  shadowColor: z.string().max(20).nullable().optional(),
-  textScale: z.string().max(10).nullable().optional(),
-  headingWeight: z.string().max(10).nullable().optional(),
-  bodyWeight: z.string().max(10).nullable().optional(),
   heroLayout: z.enum(HERO_LAYOUTS).optional(),
   pricingFaq: z.union([z.literal(null), z.string().min(1)]).optional(),
 });
@@ -215,12 +211,6 @@ export const brandingSettingsSchema: z.ZodType<BrandingSettingsResponse> = z
     introVideoUrl: z.string().url().nullable(),
     tokenOverrides: z.string().nullable(),
     darkModeOverrides: z.string().nullable(),
-    textColorHex: hexColorSchema.nullable(),
-    shadowScale: z.string().nullable(),
-    shadowColor: z.string().nullable(),
-    textScale: z.string().nullable(),
-    headingWeight: z.string().nullable(),
-    bodyWeight: z.string().nullable(),
     heroLayout: z.string(),
     pricingFaq: z.string().nullable(),
   })
@@ -239,12 +229,6 @@ export const brandingSettingsSchema: z.ZodType<BrandingSettingsResponse> = z
       introVideoUrl: z.string().url().nullable(),
       tokenOverrides: z.string().nullable(),
       darkModeOverrides: z.string().nullable(),
-      textColorHex: z.string().nullable(),
-      shadowScale: z.string().nullable(),
-      shadowColor: z.string().nullable(),
-      textScale: z.string().nullable(),
-      headingWeight: z.string().nullable(),
-      bodyWeight: z.string().nullable(),
       heroLayout: z.string(),
       pricingFaq: z.string().nullable(),
     })
@@ -304,12 +288,6 @@ export const DEFAULT_BRANDING: BrandingSettingsResponse = {
   introVideoUrl: null,
   tokenOverrides: null,
   darkModeOverrides: null,
-  textColorHex: null,
-  shadowScale: null,
-  shadowColor: null,
-  textScale: null,
-  headingWeight: null,
-  bodyWeight: null,
   heroLayout: 'default',
   densityValue: 1,
   pricingFaq: null,

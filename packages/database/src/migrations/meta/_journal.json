@@ -414,6 +414,20 @@
       "when": 1777061298728,
       "tag": "0058_chubby_wrecker",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1778025600000,
+      "tag": "0059_backfill_branding_token_overrides",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1777965766323,
+      "tag": "0060_green_sasquatch",
+      "breakpoints": true
     }
   ]
 }
