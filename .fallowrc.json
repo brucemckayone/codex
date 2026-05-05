@@ -13,7 +13,9 @@
     "apps/web/playwright.config.ts",
     "apps/web/.storybook/**/*.ts",
     "apps/web/src/tests/setup.ts",
-    "apps/web/e2e/**/*.spec.ts"
+    "apps/web/e2e/**/*.spec.ts",
+    "**/*.test.ts",
+    "**/*.svelte.test.ts"
   ],
   "ignoreDependencies": [
     "vite-plugin-dts",
@@ -45,11 +47,35 @@
     "apps/web/src/hooks.client.ts",
     "apps/web/src/app.html",
     "apps/web/src/tests/utils/component-test-utils.svelte.ts",
+    "apps/web/src/lib/components/ui/ShaderHero/renderers/*-renderer.ts",
+    "apps/web/src/lib/remote/*.remote.ts",
     "scripts/denoise/index.ts",
     "scripts/denoise/consumer-graph.ts",
     "scripts/denoise/extract-api.ts",
     "scripts/denoise/find-consumers.ts",
     "scripts/denoise/jscpd-budget.ts"
+  ],
+  "ignoreExports": [
+    {
+      "file": "apps/web/src/lib/components/ui/Table/index.ts",
+      "exports": ["*"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/CreatorCard/index.ts",
+      "exports": ["*"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/Feedback/Spinner/index.ts",
+      "exports": ["*"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/Icon/index.ts",
+      "exports": ["*"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/ShaderHero/index.ts",
+      "exports": ["*"]
+    }
   ],
   "ignorePatterns": [
     "test-media/**",
