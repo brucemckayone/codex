@@ -468,7 +468,7 @@
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    .upload-btn:hover { transform: translateY(-1px); }
+    .upload-btn:hover { transform: translateY(calc(-1 * var(--border-width))); }
   }
 
   @media (--below-sm) {

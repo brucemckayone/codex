@@ -294,7 +294,7 @@
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    .tile:hover { transform: translateY(-2px); }
+    .tile:hover { transform: translateY(calc(-1 * var(--space-0-5))); }
   }
 
   /* ── Thumbnail frame ──────────────────────────────────── */
@@ -457,7 +457,7 @@
     display: inline-flex;
     gap: var(--space-1);
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(calc(-1 * var(--space-1)));
     transition:
       opacity var(--duration-fast) var(--ease-out),
       transform var(--duration-fast) var(--ease-out);
