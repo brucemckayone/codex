@@ -9,9 +9,8 @@
  * - Connect account management
  */
 
-import { isRedirect, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
-import { command, form, getRequestEvent, query } from '$app/server';
+import { command, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -42,70 +41,6 @@ export const getCurrentSubscription = query(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
     return api.subscription.getCurrent(organizationId);
-  }
-);
-
-/**
- * Get all of the user's active subscriptions across orgs.
- * Used on the account subscriptions page.
- */
-export const getMySubscriptions = query(z.void(), async () => {
-  const { platform, cookies } = getRequestEvent();
-  const api = createServerApi(platform, cookies);
-  return api.subscription.getMine();
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Subscription Checkout (form — progressive enhancement)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const subscriptionCheckoutFormSchema = z.object({
-  tierId: z.string().uuid(),
-  billingInterval: z.enum(['month', 'year']),
-  organizationId: z.string().uuid(),
-  successUrl: z.string().url().optional(),
-  cancelUrl: z.string().url().optional(),
-});
-
-/**
- * Create subscription checkout session via form submission.
- * Redirects to Stripe Checkout page (works without JS).
- */
-export const createSubscriptionCheckout = form(
-  subscriptionCheckoutFormSchema,
-  async ({
-    tierId,
-    billingInterval,
-    organizationId,
-    successUrl,
-    cancelUrl,
-  }) => {
-    const { platform, cookies, url } = getRequestEvent();
-    const api = createServerApi(platform, cookies);
-
-    try {
-      const result = await api.subscription.checkout({
-        organizationId,
-        tierId,
-        billingInterval,
-        // Stripe expands `{CHECKOUT_SESSION_ID}` to the real session id on
-        // redirect. The /subscription/success page polls the verify endpoint
-        // until the `checkout.session.completed` webhook has landed, then
-        // hands the user off to /library — otherwise they'd land on /library
-        // before the subscription row exists and see an empty page.
-        successUrl:
-          successUrl ||
-          `${url.origin}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
-        cancelUrl: cancelUrl || `${url.origin}/pricing`,
-      });
-
-      redirect(303, result.sessionUrl);
-    } catch (error) {
-      if (isRedirect(error)) throw error;
-      const message =
-        error instanceof Error ? error.message : 'Subscription checkout failed';
-      return { success: false as const, error: message };
-    }
   }
 );
 
@@ -159,24 +94,6 @@ export const createSubscriptionCheckoutSession = command(
 // ─────────────────────────────────────────────────────────────────────────────
 // Subscription Lifecycle Commands
 // ─────────────────────────────────────────────────────────────────────────────
-
-const changeTierCommandSchema = z.object({
-  organizationId: z.string().uuid(),
-  newTierId: z.string().uuid(),
-  billingInterval: z.enum(['month', 'year']),
-});
-
-/**
- * Change (upgrade/downgrade) subscription tier.
- */
-export const changeSubscriptionTier = command(
-  changeTierCommandSchema,
-  async (input) => {
-    const { platform, cookies } = getRequestEvent();
-    const api = createServerApi(platform, cookies);
-    return api.subscription.changeTier(input);
-  }
-);
 
 const cancelCommandSchema = z.object({
   organizationId: z.string().uuid(),
@@ -302,24 +219,6 @@ export const deleteTier = command(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
     await api.tiers.delete(orgId, tierId);
-    return { success: true as const };
-  }
-);
-
-const reorderTiersCommandSchema = z.object({
-  orgId: z.string().uuid(),
-  tierIds: z.array(z.string().uuid()).min(1),
-});
-
-/**
- * Reorder subscription tiers.
- */
-export const reorderTiers = command(
-  reorderTiersCommandSchema,
-  async ({ orgId, tierIds }) => {
-    const { platform, cookies } = getRequestEvent();
-    const api = createServerApi(platform, cookies);
-    await api.tiers.reorder(orgId, tierIds);
     return { success: true as const };
   }
 );
