@@ -15,15 +15,9 @@
  * router, DOM, or requestAnimationFrame.
  */
 
-export type NavigationType =
-  | 'enter'
-  | 'form'
-  | 'leave'
-  | 'link'
-  | 'goto'
-  | 'popstate';
+type NavigationType = 'enter' | 'form' | 'leave' | 'link' | 'goto' | 'popstate';
 
-export interface ScrollResetInput {
+interface ScrollResetInput {
   type: NavigationType | undefined;
   fromPathname: string | null | undefined;
   toPathname: string | null | undefined;
