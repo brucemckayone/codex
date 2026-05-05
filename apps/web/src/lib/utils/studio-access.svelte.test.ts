@@ -32,7 +32,7 @@ describe('studio-access', () => {
     });
 
     test('does not contain customer', () => {
-      expect(STUDIO_ROLES.has(AUTH_ROLES.CUSTOMER)).toBe(false);
+      expect(STUDIO_ROLES.has(AUTH_ROLES.USER)).toBe(false);
     });
 
     test('does not contain arbitrary unknown role', () => {
@@ -54,9 +54,9 @@ describe('studio-access', () => {
     });
 
     test('returns false for non-studio roles', () => {
-      expect(
-        hasStudioRole({ id: '1', role: AUTH_ROLES.CUSTOMER } as never)
-      ).toBe(false);
+      expect(hasStudioRole({ id: '1', role: AUTH_ROLES.USER } as never)).toBe(
+        false
+      );
     });
 
     test('returns false for null user (unauthenticated)', () => {
