@@ -27,7 +27,16 @@
  * ```
  */
 
-export * from './binary-upload-procedure';
+export type {
+  BinaryFileConfig,
+  BinaryUploadContext,
+  BinaryUploadProcedureConfig,
+  ValidatedBinaryFile,
+} from './binary-upload-procedure';
+// Binary upload procedure (raw ArrayBuffer body). Exported via named
+// re-exports rather than `export *` so fallow's reachability analysis can
+// follow each value/type through the barrel chain (Codex-taith).
+export { binaryUploadProcedure } from './binary-upload-procedure';
 export type { OrganizationMembership } from './helpers';
 // Helper exports (for advanced use cases)
 export {
@@ -37,7 +46,24 @@ export {
   getClientIP,
   validateInput,
 } from './helpers';
-export * from './multipart-procedure';
+export type {
+  FileFieldConfig,
+  FileSchema,
+  InferFiles,
+  MultipartProcedureConfig,
+  MultipartProcedureContext,
+  ValidatedFile,
+} from './multipart-procedure';
+// Multipart procedure (FormData uploads). Same rationale as
+// binary-upload-procedure above re: named re-exports vs `export *`. Error
+// classes are runtime values — re-exported as values so consumers can
+// `throw new` and `instanceof` them.
+export {
+  FileTooLargeError,
+  InvalidFileTypeError,
+  MissingFileError,
+  multipartProcedure,
+} from './multipart-procedure';
 // org-helpers: dynamically imported in helpers.ts for code-splitting inside procedure().
 // Re-exported here for direct use by route handlers.
 export { checkOrganizationMembership, membershipCacheKey } from './org-helpers';

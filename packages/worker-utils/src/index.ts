@@ -77,15 +77,20 @@ export {
   enforcePolicyInline,
   type FileFieldConfig,
   type FileSchema,
-  type FileTooLargeError,
+  // FileTooLargeError, InvalidFileTypeError, MissingFileError are runtime
+  // classes (not just types) — exported as values so consumers can `throw new
+  // FileTooLargeError(...)` and use `instanceof FileTooLargeError`. Using
+  // `export type` here previously broke fallow's reachability across the
+  // export-* chain in ./procedure (Codex-taith).
+  FileTooLargeError,
   // Helper utilities (for advanced use cases)
   generateRequestId,
   getClientIP,
   type InferFiles,
   type InferInput,
   type InputSchema,
-  type InvalidFileTypeError,
-  type MissingFileError,
+  InvalidFileTypeError,
+  MissingFileError,
   type MultipartProcedureConfig,
   type MultipartProcedureContext,
   membershipCacheKey,
