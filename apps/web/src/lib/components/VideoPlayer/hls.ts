@@ -32,12 +32,12 @@ import type { ErrorData } from 'hls.js';
  * - Native Safari branch: `hls` is null, `cleanup` detaches the `'error'`
  *   listener the factory attached to the `<video>` element.
  */
-export interface HlsPlayerHandle {
+interface HlsPlayerHandle {
   hls: Hls | null;
   cleanup: () => void;
 }
 
-export interface HlsPlayerOptions {
+interface HlsPlayerOptions {
   media: HTMLMediaElement;
   src: string;
   onError?: (message: string) => void;
