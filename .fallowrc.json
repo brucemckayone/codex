@@ -56,6 +56,7 @@
     "**/.svelte-kit/**",
     "apps/web/src/paraglide/**"
   ],
+  "usedClassMembers": ["recoverStuckTranscoding"],
   "duplicates": {
     "enabled": true,
     "mode": "mild",
