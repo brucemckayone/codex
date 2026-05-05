@@ -12,7 +12,7 @@
 
 import { browser } from '$app/environment';
 
-export type ViewMode = 'grid' | 'list';
+type ViewMode = 'grid' | 'list';
 
 export function useViewMode(
   storageKey = 'codex-view-mode',

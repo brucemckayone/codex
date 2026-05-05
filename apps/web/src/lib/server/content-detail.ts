@@ -94,12 +94,7 @@ function extractRevocationReason(
  * `accessType` values recognised by the content schema. Mirrors the DB CHECK
  * constraint in packages/database/src/schema/content.ts.
  */
-export type ContentAccessType =
-  | 'free'
-  | 'paid'
-  | 'followers'
-  | 'subscribers'
-  | 'team';
+type ContentAccessType = 'free' | 'paid' | 'followers' | 'subscribers' | 'team';
 
 /**
  * Empty subscription-context fallback used by content detail loaders when
