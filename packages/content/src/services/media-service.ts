@@ -28,7 +28,7 @@ import {
   ValidationError,
 } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
-import { getOriginalKey, isValidR2Key } from '@codex/transcoding';
+import { getHlsPrefix, getOriginalKey, isValidR2Key } from '@codex/transcoding';
 import type {
   CreateMediaItemInput,
   UpdateMediaItemInput,
@@ -328,6 +328,16 @@ export class MediaItemService extends BaseService {
    * - Preserves data for content references
    * - Scoped to creator ownership
    *
+   * Side effect: hard-deletes every R2 object under the media item's four
+   * known prefixes (originals, hls, thumbnails, waveforms). R2 cleanup runs
+   * AFTER the soft-delete transaction commits — R2 has no rollback semantics,
+   * so failing inside the DB transaction would leave half-deleted state worse
+   * than no cleanup at all. Errors during the R2 sweep are swallowed and
+   * logged; orphans are recoverable, failed user-deletes are not.
+   *
+   * Mirrors the pattern landed in branding-settings-service.deleteIntroVideo
+   * for HLS cleanup, scaled to four prefixes via a shared helper.
+   *
    * Note: Content referencing this media will still exist but cannot be published
    *
    * @param id - Media item ID
@@ -336,6 +346,7 @@ export class MediaItemService extends BaseService {
    */
   async delete(id: string, creatorId: string): Promise<void> {
     try {
+      // Verify-and-soft-delete inside transaction
       await this.db.transaction(async (tx) => {
         const existing = await tx.query.mediaItems.findFirst({
           where: and(
@@ -358,11 +369,76 @@ export class MediaItemService extends BaseService {
             and(eq(mediaItems.id, id), withCreatorScope(mediaItems, creatorId))
           );
       });
+
+      // After commit: hard-delete R2 objects across all four prefixes.
+      // The helper swallows internally so a list/delete failure on one
+      // prefix doesn't prevent sweeps of the other three.
+      if (this.r2) {
+        await this.deletePrefixObjects(`${creatorId}/originals/${id}/`, id);
+        await this.deletePrefixObjects(getHlsPrefix(creatorId, id), id);
+        await this.deletePrefixObjects(`${creatorId}/thumbnails/${id}/`, id);
+        await this.deletePrefixObjects(`${creatorId}/waveforms/${id}/`, id);
+      }
     } catch (error) {
       if (error instanceof MediaNotFoundError) {
         throw error;
       }
       this.handleError(error, 'delete');
+    }
+  }
+
+  /**
+   * Hard-delete every R2 object under the given prefix.
+   *
+   * Lists with pagination (HLS folders contain manifest + per-variant
+   * playlists + many .ts segments; originals/thumbnails/waveforms are
+   * usually small, but the same loop handles all four). R2 has no
+   * "delete folder" primitive, so list + delete is the canonical approach.
+   *
+   * Errors are logged but never thrown — both the outer list() call and
+   * each per-key delete() call are caught individually so a single failure
+   * cannot prevent cleanup of the remaining objects (or other prefixes).
+   * Orphaned files are recoverable via background cleanup; failing the
+   * user's delete is not.
+   */
+  private async deletePrefixObjects(
+    prefix: string,
+    mediaItemId: string
+  ): Promise<void> {
+    if (!this.r2) return;
+
+    let cursor: string | undefined;
+    let totalDeleted = 0;
+
+    try {
+      do {
+        const page = await this.r2.list({ prefix, cursor });
+        for (const object of page.objects) {
+          try {
+            await this.r2.delete(object.key);
+            totalDeleted++;
+          } catch (error) {
+            this.obs.warn('Failed to delete media R2 object', {
+              mediaItemId,
+              r2Key: object.key,
+              error: String(error),
+            });
+          }
+        }
+        cursor = page.truncated ? page.cursor : undefined;
+      } while (cursor);
+
+      this.obs.info('Deleted media R2 objects', {
+        mediaItemId,
+        prefix,
+        deleted: totalDeleted,
+      });
+    } catch (error) {
+      this.obs.warn('Failed to list media R2 objects for cleanup', {
+        mediaItemId,
+        prefix,
+        error: String(error),
+      });
     }
   }
 
