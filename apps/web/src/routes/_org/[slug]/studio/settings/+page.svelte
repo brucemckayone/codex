@@ -374,9 +374,9 @@
     width: 100%;
   }
 
-  .field-input:focus {
+  .field-input:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: -1px;
+    outline-offset: calc(-1 * var(--border-width));
     border-color: var(--color-border-focus);
   }
 
