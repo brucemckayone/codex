@@ -1,320 +1,11 @@
 <script lang="ts">
   import { brandEditor } from '$lib/brand-editor';
-  import { SHADER_DEFAULT_PULSE_COLOR } from '$lib/brand-editor/defaults';
+  import {
+    ALL_HERO_FX_SHADER_KEYS,
+    HERO_FX_DEFAULTS,
+    HERO_FX_PRESETS,
+  } from '$lib/brand-editor/hero-fx-presets';
   import BrandSliderField from '../BrandSliderField.svelte';
-
-  // ── Preset definitions ─────────────────────────────────────────────────
-  interface PresetOption {
-    id: string;
-    label: string;
-    description: string;
-  }
-
-  const PRESETS: PresetOption[] = [
-    { id: 'none', label: 'None', description: 'Default gradient' },
-    { id: 'suture', label: 'Suture Fluid', description: 'Organic flowing fluid' },
-    { id: 'ether', label: 'Ether', description: 'Ethereal glowing forms' },
-    { id: 'warp', label: 'Domain Warp', description: 'Marble textures' },
-    { id: 'ripple', label: 'Water Ripple', description: 'Rippling water surface' },
-    { id: 'pulse', label: 'Pulse', description: '3D liquid wave surface' },
-    { id: 'ink', label: 'Ink Dispersion', description: 'Colored ink in liquid' },
-    { id: 'topo', label: 'Topo', description: 'Topographic contour lines' },
-    { id: 'nebula', label: 'Nebula', description: 'Cosmic dust clouds' },
-    { id: 'turing', label: 'Turing Patterns', description: 'Reaction-diffusion organisms' },
-    { id: 'silk', label: 'Silk Fabric', description: 'Flowing luxury fabric' },
-    { id: 'glass', label: 'Stained Glass', description: 'Voronoi stained glass cells' },
-    { id: 'film', label: 'Oil Film', description: 'Iridescent thin-film shimmer' },
-    { id: 'flux', label: 'Flux', description: 'Magnetic field lines' },
-    { id: 'lava', label: 'Lava', description: 'Molten crust with glowing cracks' },
-    { id: 'caustic', label: 'Caustics', description: 'Underwater light patterns' },
-    { id: 'physarum', label: 'Physarum', description: 'Slime mould network' },
-    { id: 'rain', label: 'Rain', description: 'Raindrops on glass' },
-    { id: 'frost', label: 'Frost', description: 'Ice crystal growth' },
-    { id: 'glow', label: 'Glow', description: 'Bioluminescent deep sea' },
-    { id: 'life', label: 'SmoothLife', description: 'Continuous cellular automata' },
-    { id: 'mycelium', label: 'Mycelium', description: 'Fungal network growth' },
-    { id: 'aurora', label: 'Aurora', description: 'Northern lights curtains' },
-    { id: 'tendrils', label: 'Tendrils', description: 'Flowing curl noise' },
-    { id: 'growth', label: 'Growth', description: 'Organic edge expansion' },
-    { id: 'lenia', label: 'Lenia', description: 'Artificial lifeforms' },
-    { id: 'ocean', label: 'Ocean', description: 'Caustics over sand' },
-    { id: 'bismuth', label: 'Bismuth', description: 'Crystal terraces' },
-    { id: 'pearl', label: 'Pearl', description: 'Iridescent raymarched sphere' },
-    { id: 'vortex', label: 'Vortex', description: 'Polar volumetric spirals' },
-    { id: 'gyroid', label: 'Gyroid', description: 'Organic gyroid structure' },
-    { id: 'waves', label: 'Waves', description: 'Gerstner ocean surface' },
-    { id: 'clouds', label: 'Clouds', description: 'Procedural sky clouds' },
-    { id: 'fracture', label: 'Fracture', description: 'Geometric polygon cuts' },
-    { id: 'julia', label: 'Julia', description: 'Animated fractal set' },
-    { id: 'vapor', label: 'Vapor', description: 'Volumetric aurora clouds' },
-    { id: 'tunnel', label: 'Tunnel', description: 'Apollonian fractal tunnel' },
-    { id: 'plasma', label: 'Plasma', description: 'Iridescent fluid streams' },
-    { id: 'flow', label: 'Flow', description: 'Curl-noise paint streaks' },
-    { id: 'spore', label: 'Spore', description: 'Agent-based slime network' },
-  ];
-
-  // ── Default values ─────────────────────────────────────────────────────
-  const DEFAULTS: Record<string, string> = {
-    'shader-intensity': '0.65',
-    'shader-grain': '0.025',
-    'shader-vignette': '0.20',
-    // Suture
-    'shader-curl': '30',
-    'shader-dissipation': '0.985',
-    'shader-advection': '6.0',
-    'shader-force': '1.00',
-    // Ether
-    'shader-rotation-speed': '0.40',
-    'shader-complexity': '6',
-    'shader-zoom': '5.0',
-    'shader-glow': '0.50',
-    'shader-scale': '2.00',
-    'shader-aberration': '0.003',
-    // Warp
-    'shader-warp-strength': '1.50',
-    'shader-light-angle': '135',
-    'shader-speed': '0.30',
-    'shader-detail': '4',
-    'shader-contrast': '1.10',
-    'shader-invert': '1',
-    // Ripple
-    'shader-wave-speed': '0.80',
-    'shader-damping': '0.995',
-    'shader-ripple-size': '0.030',
-    'shader-refraction': '0.50',
-    // Pulse
-    'shader-pulse-damping': '0.97',
-    'shader-wave-scale': '4.0',
-    'shader-cam-height': '30',
-    'shader-cam-target': '-30',
-    'shader-specular': '0.60',
-    'shader-impulse-size': '0.040',
-    'shader-pulse-color': SHADER_DEFAULT_PULSE_COLOR,
-    // Ink
-    'shader-ink-diffusion': '1.50',
-    'shader-ink-advection': '0.80',
-    'shader-ink-drop-size': '0.050',
-    'shader-ink-evaporation': '0.997',
-    'shader-ink-curl': '15',
-    // Topo
-    'shader-topo-line-count': '12',
-    'shader-topo-line-width': '1.2',
-    'shader-topo-speed': '0.15',
-    'shader-topo-scale': '2.5',
-    'shader-topo-elevation': '1.0',
-    'shader-topo-octaves': '3',
-    // Nebula
-    'shader-nebula-density': '0.80',
-    'shader-nebula-speed': '0.12',
-    'shader-nebula-scale': '2.0',
-    'shader-nebula-depth': '8',
-    'shader-nebula-wind': '0.50',
-    'shader-nebula-stars': '0.30',
-    // Turing
-    'shader-turing-feed': '0.055',
-    'shader-turing-kill': '0.062',
-    'shader-turing-da': '1.00',
-    'shader-turing-db': '0.50',
-    'shader-turing-speed': '4',
-    // Silk
-    'shader-silk-fold-scale': '2.5',
-    'shader-silk-fold-depth': '1.5',
-    'shader-silk-speed': '0.10',
-    'shader-silk-softness': '0.70',
-    'shader-silk-sheen': '0.15',
-    'shader-silk-lining': '0.10',
-    // Glass
-    'shader-glass-cell-size': '5.0',
-    'shader-glass-border': '0.04',
-    'shader-glass-drift': '0.10',
-    'shader-glass-glow': '0.20',
-    'shader-glass-light': '0.15',
-    // Film
-    'shader-film-scale': '2.5',
-    'shader-film-speed': '0.10',
-    'shader-film-bands': '4.0',
-    'shader-film-shift': '0.30',
-    'shader-film-ripple': '1.50',
-    // Flux
-    'shader-flux-poles': '3',
-    'shader-flux-line-density': '10.0',
-    'shader-flux-line-width': '1.00',
-    'shader-flux-strength': '1.50',
-    'shader-flux-speed': '0.10',
-    // Lava
-    'shader-lava-crack-scale': '4.0',
-    'shader-lava-crack-width': '0.04',
-    'shader-lava-glow': '1.50',
-    'shader-lava-speed': '0.08',
-    'shader-lava-crust': '0.60',
-    'shader-lava-heat': '1.00',
-    // Caustic
-    'shader-caustic-scale': '2.5',
-    'shader-caustic-speed': '0.10',
-    'shader-caustic-iterations': '3',
-    'shader-caustic-brightness': '1.20',
-    'shader-caustic-ripple': '1.50',
-    // Physarum
-    'shader-physarum-diffusion': '1.00',
-    'shader-physarum-decay': '0.980',
-    'shader-physarum-deposit': '1.00',
-    'shader-physarum-sensor': '0.030',
-    'shader-physarum-turn': '0.25',
-    // Rain
-    'shader-rain-density': '0.60',
-    'shader-rain-speed': '1.00',
-    'shader-rain-size': '1.00',
-    'shader-rain-refraction': '0.30',
-    'shader-rain-blur': '1.00',
-    // Frost
-    'shader-frost-growth': '0.60',
-    'shader-frost-branch': '0.30',
-    'shader-frost-symmetry': '6',
-    'shader-frost-melt': '1.00',
-    'shader-frost-glow': '0.80',
-    // Glow
-    'shader-glow-count': '10',
-    'shader-glow-pulse': '0.70',
-    'shader-glow-size': '1.00',
-    'shader-glow-drift': '0.10',
-    'shader-glow-trail': '0.40',
-    'shader-glow-depth': '3',
-    // SmoothLife
-    'shader-life-inner': '5.0',
-    'shader-life-outer': '12.0',
-    'shader-life-birth': '0.28',
-    'shader-life-death': '0.45',
-    'shader-life-speed': '2',
-    // Mycelium
-    'shader-mycelium-growth': '0.50',
-    'shader-mycelium-branch': '0.25',
-    'shader-mycelium-spread': '1.00',
-    'shader-mycelium-pulse': '0.70',
-    'shader-mycelium-thickness': '1.00',
-    // Aurora
-    'shader-aurora-layers': '5',
-    'shader-aurora-speed': '0.10',
-    'shader-aurora-height': '0.40',
-    'shader-aurora-spread': '0.25',
-    'shader-aurora-shimmer': '0.80',
-    // Tendrils
-    'shader-tendrils-scale': '2.5',
-    'shader-tendrils-speed': '0.12',
-    'shader-tendrils-steps': '5',
-    'shader-tendrils-curl': '1.0',
-    'shader-tendrils-fade': '0.6',
-    // Pollen
-    'shader-pollen-density': '0.60',
-    'shader-pollen-size': '1.00',
-    'shader-pollen-fibres': '5',
-    'shader-pollen-drift': '0.10',
-    'shader-pollen-depth': '3',
-    'shader-pollen-bokeh': '0.50',
-    // Growth
-    'shader-growth-speed': '0.20',
-    'shader-growth-noise': '0.80',
-    'shader-growth-scale': '2.00',
-    'shader-growth-width': '1.00',
-    'shader-growth-glow': '0.80',
-    // Geode
-    'shader-geode-bands': '8',
-    'shader-geode-warp': '0.80',
-    'shader-geode-cavity': '0.20',
-    'shader-geode-speed': '0.06',
-    'shader-geode-sparkle': '0.80',
-    // Lenia
-    'shader-lenia-radius': '13.0',
-    'shader-lenia-growth': '0.14',
-    'shader-lenia-width': '0.015',
-    'shader-lenia-speed': '2',
-    'shader-lenia-dt': '0.2',
-    // Ocean
-    'shader-ocean-caustic-scale': '2.0',
-    'shader-ocean-sand-scale': '3.0',
-    'shader-ocean-speed': '0.10',
-    'shader-ocean-shadow': '0.25',
-    'shader-ocean-ripple': '1.00',
-    // Bismuth
-    'shader-bismuth-terraces': '8',
-    'shader-bismuth-warp': '0.80',
-    'shader-bismuth-iridescence': '0.80',
-    'shader-bismuth-speed': '0.06',
-    'shader-bismuth-edge': '0.80',
-    // Pearl
-    'shader-pearl-displacement': '0.15',
-    'shader-pearl-speed': '0.70',
-    'shader-pearl-fresnel': '3.00',
-    'shader-pearl-specular': '1.25',
-    // Vortex
-    'shader-vortex-speed': '0.20',
-    'shader-vortex-density': '40',
-    'shader-vortex-twist': '1.00',
-    'shader-vortex-rings': '1.00',
-    'shader-vortex-spiral': '0.60',
-    // Gyroid
-    'shader-gyroid-scale1': '5.23',
-    'shader-gyroid-scale2': '10.76',
-    'shader-gyroid-speed': '0.20',
-    'shader-gyroid-density': '3.50',
-    'shader-gyroid-thickness': '0.030',
-    // Waves
-    'shader-waves-height': '1.0',
-    'shader-waves-speed': '1.0',
-    'shader-waves-chop': '0.70',
-    'shader-waves-foam': '0.30',
-    'shader-waves-depth': '0.60',
-    // Clouds
-    'shader-clouds-cover': '0.20',
-    'shader-clouds-speed': '0.03',
-    'shader-clouds-scale': '1.10',
-    'shader-clouds-dark': '0.50',
-    'shader-clouds-light': '0.30',
-    // Fracture
-    'shader-fracture-cuts': '8',
-    'shader-fracture-speed': '0.17',
-    'shader-fracture-border': '0.010',
-    'shader-fracture-shadow': '0.05',
-    'shader-fracture-fill': '0.85',
-    // Julia
-    'shader-julia-zoom': '1.3',
-    'shader-julia-speed': '0.33',
-    'shader-julia-iterations': '75',
-    'shader-julia-radius': '0.79',
-    'shader-julia-saturation': '0.50',
-    // Vapor
-    'shader-vapor-density': '1.00',
-    'shader-vapor-speed': '1.50',
-    'shader-vapor-scale': '5.0',
-    'shader-vapor-warmth': '0.50',
-    'shader-vapor-glow': '0.80',
-    // Tunnel
-    'shader-tunnel-speed': '2.0',
-    'shader-tunnel-fractal': '6',
-    'shader-tunnel-radius': '2.0',
-    'shader-tunnel-brightness': '1.00',
-    'shader-tunnel-twist': '0.07',
-    // Plasma
-    'shader-plasma-speed': '0.80',
-    'shader-plasma-bands': '25.0',
-    'shader-plasma-pressure': '0.90',
-    'shader-plasma-turn': '0.11',
-    'shader-plasma-diffusion': '1.20',
-    // Flow
-    'shader-flow-curl': '0.60',
-    'shader-flow-advection': '6.0',
-    'shader-flow-smoothing': '0.80',
-    'shader-flow-contrast': '12.0',
-    'shader-flow-field-speed': '1.00',
-    // Spore
-    'shader-spore-sensor-angle': '12.5',
-    'shader-spore-sensor-offset': '3.0',
-    'shader-spore-step-size': '6.0',
-    'shader-spore-rotation': '22.5',
-    'shader-spore-decay': '0.998',
-  };
-
-  /** All shader-* token override keys. */
-  const ALL_SHADER_KEYS = Object.keys(DEFAULTS).concat('shader-preset');
 
   // ── Read current overrides ─────────────────────────────────────────────
   // Codex-wwedk: when editing the dark theme, prefer darkTokenOverrides;
@@ -333,9 +24,9 @@
   /** Read a numeric override, falling back to its default. Handles 0 correctly. */
   function readNum(key: string): number {
     const raw = overrides[key];
-    if (raw == null) return Number(DEFAULTS[key]);
+    if (raw == null) return Number(HERO_FX_DEFAULTS[key]);
     const n = Number(raw);
-    return Number.isFinite(n) ? n : Number(DEFAULTS[key]);
+    return Number.isFinite(n) ? n : Number(HERO_FX_DEFAULTS[key]);
   }
 
   // Shared
@@ -378,7 +69,7 @@
   const camTarget = $derived(readNum('shader-cam-target'));
   const specular = $derived(readNum('shader-specular'));
   const impulseSize = $derived(readNum('shader-impulse-size'));
-  const pulseColor = $derived(overrides['shader-pulse-color'] ?? DEFAULTS['shader-pulse-color']);
+  const pulseColor = $derived(overrides['shader-pulse-color'] ?? HERO_FX_DEFAULTS['shader-pulse-color']);
 
   // Ink
   const inkDiffusion = $derived(readNum('shader-ink-diffusion'));
@@ -644,7 +335,7 @@
   // theme's bucket so it falls back to either the light value (when dark)
   // or the ShaderHero compiled-in default (when light).
   function updateOverride(key: string, value: string) {
-    if (!value || value === DEFAULTS[key]) {
+    if (!value || value === HERO_FX_DEFAULTS[key]) {
       brandEditor.setThemeTokenOverride(key, null);
     } else {
       brandEditor.setThemeTokenOverride(key, value);
@@ -656,7 +347,7 @@
       // Clear ALL shader-* overrides on the active theme so no stale
       // config lingers. setThemeTokenOverride(null) removes the key from
       // whichever bucket (light/dark) corresponds to editingTheme.
-      for (const key of ALL_SHADER_KEYS) {
+      for (const key of ALL_HERO_FX_SHADER_KEYS) {
         brandEditor.setThemeTokenOverride(key, null);
       }
     } else {
@@ -679,7 +370,7 @@
   <section class="hero-fx__section">
     <span class="hero-fx__section-label">Shader Preset</span>
     <div class="hero-fx__preset-grid">
-      {#each PRESETS as preset (preset.id)}
+      {#each HERO_FX_PRESETS as preset (preset.id)}
         <button
           type="button"
           class="hero-fx__preset-card"
