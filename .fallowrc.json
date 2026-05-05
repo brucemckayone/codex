@@ -34,6 +34,10 @@
       "exports": ["ShaderHero"]
     },
     {
+      "file": "apps/web/src/lib/components/ui/ShaderHero/webgl-utils.ts",
+      "exports": ["FBO"]
+    },
+    {
       "file": "apps/web/src/lib/components/ui/Table/index.ts",
       "exports": [
         "Table",
@@ -44,6 +48,10 @@
         "TableHead",
         "TableCell"
       ]
+    },
+    {
+      "file": "apps/web/src/lib/server/content-detail.ts",
+      "exports": ["SubscriptionContext"]
     }
   ],
   "dynamicallyLoaded": [
