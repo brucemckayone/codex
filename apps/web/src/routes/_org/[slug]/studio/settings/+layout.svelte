@@ -129,10 +129,11 @@
     font-weight: var(--font-medium);
     color: var(--color-text-secondary);
     text-decoration: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
-    transition: color var(--transition-duration) var(--transition-timing),
-      border-color var(--transition-duration) var(--transition-timing);
+    border-bottom: var(--border-width-thick) var(--border-style) transparent;
+    margin-bottom: calc(-1 * var(--border-width));
+    transition:
+      color var(--duration-fast) var(--ease-default),
+      border-color var(--duration-fast) var(--ease-default);
   }
 
   .tab-trigger:hover {
