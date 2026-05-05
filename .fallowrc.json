@@ -16,6 +16,44 @@
     "apps/web/e2e/**/*.spec.ts"
   ],
   "ignoreDependencies": ["vite-plugin-dts"],
+  "ignoreExports": [
+    {
+      "file": "apps/web/src/lib/components/ui/CreatorCard/index.ts",
+      "exports": ["CreatorProfileDrawer"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/Feedback/Spinner/index.ts",
+      "exports": ["Spinner"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/Icon/index.ts",
+      "exports": ["MinusCircleIcon"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/ShaderHero/index.ts",
+      "exports": ["ShaderHero"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/Table/index.ts",
+      "exports": [
+        "Table",
+        "TableHeader",
+        "TableBody",
+        "TableFooter",
+        "TableRow",
+        "TableHead",
+        "TableCell"
+      ]
+    },
+    {
+      "file": "packages/subscription/src/services/subscription-service.ts",
+      "exports": ["TierPriceChangeMailer"]
+    },
+    {
+      "file": "packages/subscription/src/services/tier-service.ts",
+      "exports": ["TierServiceConfig"]
+    }
+  ],
   "dynamicallyLoaded": [
     "**/*.stories.svelte",
     "**/*.stories.ts",
