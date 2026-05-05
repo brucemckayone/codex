@@ -11,7 +11,7 @@ import type { Bindings, Variables } from '@codex/shared-types';
  * Extended Variables for admin-api that includes organizationId
  * cached after platform owner authentication.
  */
-export interface AdminVariables extends Variables {
+interface AdminVariables extends Variables {
   /** Platform owner's organization ID, set by middleware */
   organizationId: string;
   /** Per-request database client for transaction support, set by withPerRequestDb middleware */

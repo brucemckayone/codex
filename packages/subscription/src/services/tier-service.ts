@@ -86,7 +86,7 @@ export type TierPricePropagator = (args: {
  * the fan-out to existing subscriptions is no-op'd). Narrow unit tests
  * that do not exercise propagation can omit this injection entirely.
  */
-export interface TierServiceConfig extends ServiceConfig {
+interface TierServiceConfig extends ServiceConfig {
   /**
    * WebSocket Drizzle client used by every transaction in this service.
    * Required (X7 — Codex-z9fzv): in production this is the same client

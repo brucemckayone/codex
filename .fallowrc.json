@@ -79,6 +79,34 @@
     {
       "file": "apps/web/src/lib/components/ui/ShaderHero/webgl-utils.ts",
       "exports": ["FBO"]
+    },
+    {
+      "file": "packages/cache/src/helpers/invalidate.ts",
+      "exports": ["InvalidationLogger"]
+    },
+    {
+      "file": "packages/security/src/kv-secondary-storage.ts",
+      "exports": ["ObservabilityClient"]
+    },
+    {
+      "file": "packages/worker-utils/src/procedure/binary-upload-procedure.ts",
+      "exports": [
+        "BinaryFileConfig",
+        "ValidatedBinaryFile",
+        "BinaryUploadContext",
+        "BinaryUploadProcedureConfig"
+      ]
+    },
+    {
+      "file": "packages/worker-utils/src/procedure/multipart-procedure.ts",
+      "exports": [
+        "FileFieldConfig",
+        "FileSchema",
+        "ValidatedFile",
+        "InferFiles",
+        "MultipartProcedureContext",
+        "MultipartProcedureConfig"
+      ]
     }
   ],
   "ignorePatterns": [

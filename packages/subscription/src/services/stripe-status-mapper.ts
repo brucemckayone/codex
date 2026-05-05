@@ -14,7 +14,7 @@ type SubscriptionStatus =
   (typeof SUBSCRIPTION_STATUS)[keyof typeof SUBSCRIPTION_STATUS];
 type BillingInterval = 'month' | 'year';
 
-export interface MappedStripeSubscription {
+interface MappedStripeSubscription {
   status: SubscriptionStatus;
   cancelAtPeriodEnd: boolean;
   billingInterval: BillingInterval | null;

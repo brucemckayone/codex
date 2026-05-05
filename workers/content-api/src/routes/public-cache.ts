@@ -27,7 +27,7 @@ const PUBLIC_CONTENT_CACHE_TTL = 300;
  * Public content list query shape accepted by the cache wiring.
  * Kept narrow so callers can pass the worker's validated input directly.
  */
-export interface PublicContentCacheQuery {
+interface PublicContentCacheQuery {
   orgId?: string;
   sort?: string | null;
   limit?: number | null;

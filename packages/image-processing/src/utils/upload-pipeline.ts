@@ -33,7 +33,7 @@ export interface VariantKeys {
 }
 
 /** WebP buffers for the three size variants. */
-export interface VariantBuffers {
+interface VariantBuffers {
   sm: Uint8Array;
   md: Uint8Array;
   lg: Uint8Array;
