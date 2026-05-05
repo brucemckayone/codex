@@ -419,6 +419,9 @@
 
   /* ── Option list ─────────────────────────────────────────────────────── */
   .font-picker__list {
+    /* 18rem ≈ 288px — sized to ~9 rows of options; matches peer Select.svelte
+       pattern (15rem). No list-max-height token in the design system; left as
+       a literal pending a shared token (Codex-ul0mt). */
     max-height: 18rem;
     overflow-y: auto;
     padding: var(--space-1);

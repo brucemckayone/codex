@@ -296,7 +296,7 @@
     border: var(--border-width-thick) solid var(--color-surface);
     box-shadow:
       var(--shadow-sm),
-      0 0 0 1px color-mix(in srgb, var(--color-text) 30%, transparent);
+      0 0 0 var(--border-width) color-mix(in srgb, var(--color-text) 30%, transparent);
     transform: translate(-50%, -50%);
     background: transparent;
   }
