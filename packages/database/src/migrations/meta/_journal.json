@@ -428,6 +428,13 @@
       "when": 1777965766323,
       "tag": "0060_green_sasquatch",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1777977376432,
+      "tag": "0061_swift_swordsman",
+      "breakpoints": true
     }
   ]
 }
