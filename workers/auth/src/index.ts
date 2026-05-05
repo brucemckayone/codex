@@ -64,7 +64,10 @@ app.use(
  */
 const authHandler = async (c: Context<AuthEnv>, _next: Next) => {
   try {
-    const auth = createAuthInstance({ env: c.env });
+    const auth = createAuthInstance({
+      env: c.env,
+      executionCtx: c.executionCtx,
+    });
     const response = await auth.handler(c.req.raw);
 
     // BetterAuth might return null/undefined for unrecognized routes
@@ -152,7 +155,7 @@ app.post('/api/test/fast-register', async (c) => {
 
   try {
     const db = createDbClient(env);
-    const auth = createAuthInstance({ env });
+    const auth = createAuthInstance({ env, executionCtx: c.executionCtx });
 
     // Use BetterAuth's internal API to create user + session in one go.
     // This calls signUpEmail which handles password hashing and user creation.

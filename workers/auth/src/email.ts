@@ -10,7 +10,9 @@
  */
 
 import { getServiceUrl } from '@codex/constants';
+import { and, type Database, eq, schema } from '@codex/database';
 import { workerFetch } from '@codex/security';
+import { sendEmailToWorker } from '@codex/worker-utils';
 import type { AuthBindings } from './types';
 
 interface SendParams {
@@ -112,23 +114,52 @@ export async function sendPasswordChangedEmail(
 }
 
 /**
- * Send a welcome email after verification.
+ * Send a welcome email after first-time email verification.
+ *
+ * Fires-and-forgets via executionCtx.waitUntil so the verification response
+ * is not delayed by the email send. Caller is responsible for the
+ * "first-time only" guard — see wasWelcomeEmailSent below.
  */
-export async function sendWelcomeEmail(
+export function sendWelcomeEmail(
   env: AuthBindings,
+  executionCtx: ExecutionContext,
   user: { name?: string | null; email: string }
-): Promise<void> {
+): void {
   const webAppUrl = env.WEB_APP_URL || '';
 
-  await sendViaNotificationsApi(env, {
+  sendEmailToWorker(env, executionCtx, {
     to: user.email,
     toName: user.name ?? undefined,
     templateName: 'welcome',
-    category: 'marketing',
+    category: 'transactional',
     data: {
       userName: user.name || 'there',
       loginUrl: `${webAppUrl}/login`,
       exploreUrl: webAppUrl,
     },
   });
+}
+
+/**
+ * Returns true if the welcome email was already sent to this address.
+ *
+ * Dedupe key is `recipientEmail` because notifications-api always populates it
+ * (creatorId is optional). Idempotent across afterEmailVerification re-fires
+ * (BetterAuth retries, change-email-confirmation flow at line 207).
+ */
+export async function wasWelcomeEmailSent(
+  db: Database,
+  email: string
+): Promise<boolean> {
+  const existing = await db
+    .select({ id: schema.emailAuditLogs.id })
+    .from(schema.emailAuditLogs)
+    .where(
+      and(
+        eq(schema.emailAuditLogs.recipientEmail, email),
+        eq(schema.emailAuditLogs.templateName, 'welcome')
+      )
+    )
+    .limit(1);
+  return existing.length > 0;
 }

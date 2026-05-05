@@ -15,12 +15,9 @@ import { organizations } from './organizations';
 import { users } from './users';
 
 /**
- * NOTE: This is a placeholder schema based on the needs of P1-ACCESS-001.
- * The full schema should be defined in P1-ECOM-001.
- *
- * Tracks user access to content, granted via purchase, subscription, etc.
- *
- * Aligned with database-schema.md v2.0 (lines 418-448)
+ * Content-access grants. One row per (user, content); access granted via
+ * purchase / subscription / complimentary / preview (see CHECK constraint).
+ * Soft-deleted (`deletedAt`) on refund, dispute, or revocation.
  */
 export const contentAccess = pgTable(
   'content_access',
