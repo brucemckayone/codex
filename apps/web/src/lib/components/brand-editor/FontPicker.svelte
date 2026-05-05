@@ -423,7 +423,7 @@
     font-weight: var(--font-semibold);
     color: var(--color-text-muted);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: var(--tracking-wider);
     padding: var(--space-3) var(--space-3) var(--space-1);
     user-select: none;
   }
