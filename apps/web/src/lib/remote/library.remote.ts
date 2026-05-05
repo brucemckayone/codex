@@ -91,7 +91,7 @@ export const getStreamingUrl = query(z.string().uuid(), async (contentId) => {
  * minus `contentType` — callers already know the content type from their
  * page data; the player only needs the URLs + expiry.
  */
-export interface RefreshStreamingUrlResult {
+interface RefreshStreamingUrlResult {
   streamingUrl: string;
   waveformUrl: string | null;
   expiresAt: string;
@@ -133,7 +133,7 @@ export const refreshStreamingUrl = query(
 /**
  * Normalized progress data returned from getPlaybackProgress
  */
-export interface NormalizedProgress {
+interface NormalizedProgress {
   positionSeconds: number;
   durationSeconds: number;
   completed: boolean;
