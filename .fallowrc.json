@@ -44,6 +44,14 @@
         "TableHead",
         "TableCell"
       ]
+    },
+    {
+      "file": "packages/subscription/src/services/subscription-service.ts",
+      "exports": ["TierPriceChangeMailer"]
+    },
+    {
+      "file": "packages/subscription/src/services/tier-service.ts",
+      "exports": ["TierServiceConfig"]
     }
   ],
   "dynamicallyLoaded": [
