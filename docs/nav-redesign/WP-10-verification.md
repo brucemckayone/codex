@@ -100,15 +100,15 @@ Use the Chrome DevTools MCP tools for visual inspection and interactive testing.
 3. **Authenticated** — verify:
    - Desktop: avatar with initials at bottom of rail
    - Desktop expanded: avatar + name + email
-   - Click avatar: dropdown with Account, Library, Studio, Sign Out
-   - Mobile: "More" sheet shows user info + Account + Sign Out
+   - Click avatar: dropdown with Account, Library, Studio, Log out
+   - Mobile: "More" sheet shows user info + Account + Log out
 
 ### T-07: Studio Transition
 
 1. **On org subdomain**, click "Studio" link (from sidebar dropdown or bottom sheet)
 2. **Observe** view transition — sidebar rail morphs into studio sidebar
 3. **Navigate back** to org page — verify reverse morph
-4. **Check** that studio sidebar is always expanded (not collapsed rail)
+4. **Check** that studio sidebar adopts the same hover-expand pattern as the public rail (collapsed by default, expands to ~240px on hover/focus). A future iteration may add a pin toggle to keep it expanded.
 
 ### T-08: Brand Editor Coexistence
 
