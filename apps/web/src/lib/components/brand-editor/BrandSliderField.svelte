@@ -113,7 +113,7 @@
     font-size: var(--text-xs);
     color: var(--color-text-muted);
     flex-shrink: 0;
-    width: 52px;
+    width: var(--space-12);
   }
 
   .slider-field__hint--end {

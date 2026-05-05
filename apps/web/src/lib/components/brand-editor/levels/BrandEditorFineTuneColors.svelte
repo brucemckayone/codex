@@ -8,6 +8,7 @@
   import { srgbToHex } from '$lib/brand-editor/oklch-math';
   import OklchColorPicker from '../color-picker/OklchColorPicker.svelte';
   import BrandSliderField from '../BrandSliderField.svelte';
+  import { ChevronDownIcon } from '$lib/components/ui/Icon';
   import * as m from '$paraglide/messages';
 
   interface TokenDef {
@@ -229,9 +230,7 @@
         {/if}
         <span class="fine-tune__group-count">{group.tokens.length}</span>
         <span class="fine-tune__group-chevron" class:fine-tune__group-chevron--open={isExpanded}>
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
+          <ChevronDownIcon size={12} />
         </span>
       </button>
 
@@ -540,7 +539,7 @@
     border-color: var(--color-border-hover);
   }
 
-  .fine-tune__select:focus {
+  .fine-tune__select:focus-visible {
     outline: none;
     border-color: var(--color-focus);
     box-shadow: 0 0 0 var(--space-0-5) var(--color-focus-ring);

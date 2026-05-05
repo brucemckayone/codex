@@ -34,8 +34,8 @@
   }
 
   .swatch {
-    width: 24px;
-    height: 24px;
+    width: var(--space-6); /* 24px */
+    height: var(--space-6);
     border-radius: var(--radius-full);
     border: var(--border-width) var(--border-style) var(--color-border);
     cursor: pointer;
@@ -50,7 +50,7 @@
 
   .swatch--active {
     border-color: var(--color-interactive);
-    box-shadow: 0 0 0 2px var(--color-interactive);
+    box-shadow: 0 0 0 var(--border-width-thick) var(--color-interactive);
   }
 
   .swatch:focus-visible {
