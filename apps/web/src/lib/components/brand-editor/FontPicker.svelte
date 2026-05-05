@@ -44,9 +44,17 @@
     label: string;
     value: string;
     onValueChange: (value: string) => void;
+    /** Optional class forwarded to root — composition seam per R13 inverse. */
+    class?: string;
   }
 
-  const { mode, label, value, onValueChange }: Props = $props();
+  const {
+    mode,
+    label,
+    value,
+    onValueChange,
+    class: className,
+  }: Props = $props();
 
   // ── Search ──────────────────────────────────────────────────────────────
   let searchQuery = $state('');
@@ -173,7 +181,7 @@
   });
 </script>
 
-<div class="font-picker">
+<div class="font-picker {className ?? ''}">
   <Label>{label}</Label>
 
   <button {...$trigger} use:trigger class="font-picker__trigger">

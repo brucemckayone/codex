@@ -6,12 +6,14 @@
     selected?: string;
     /** Called when a swatch is clicked. */
     onselect?: (hex: string) => void;
+    /** Optional class forwarded to root — composition seam per R13 inverse. */
+    class?: string;
   }
 
-  const { colors, selected, onselect }: Props = $props();
+  const { colors, selected, onselect, class: className }: Props = $props();
 </script>
 
-<div class="swatch-row" role="radiogroup" aria-label="Color presets">
+<div class="swatch-row {className ?? ''}" role="radiogroup" aria-label="Color presets">
   {#each colors as color}
     <button
       type="button"

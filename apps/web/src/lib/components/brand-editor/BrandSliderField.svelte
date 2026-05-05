@@ -29,6 +29,8 @@
     maxLabel?: string;
     ariaValueText?: string;
     oninput: (e: Event) => void;
+    /** Optional class forwarded to root — composition seam per R13 inverse. */
+    class?: string;
   }
 
   const {
@@ -43,6 +45,7 @@
     maxLabel,
     ariaValueText,
     oninput,
+    class: className,
   }: Props = $props();
 
   // Build aria-describedby from any hint ids that are actually rendered.
@@ -54,7 +57,7 @@
   );
 </script>
 
-<div class="slider-field">
+<div class="slider-field {className ?? ''}">
   <label class="slider-field__label" for={id}>
     {label}
     <span class="slider-field__value">{value}</span>
