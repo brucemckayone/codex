@@ -239,6 +239,7 @@ async function fetchPublicOrgInfo(
     introVideoUrl: string | null;
     tokenOverrides: string | null;
     darkModeOverrides: string | null;
+    darkTokenOverrides: string | null;
     heroLayout: string;
   };
 
@@ -255,6 +256,7 @@ async function fetchPublicOrgInfo(
     introVideoUrl: null,
     tokenOverrides: null,
     darkModeOverrides: null,
+    darkTokenOverrides: null,
     heroLayout: 'default',
   };
 
@@ -274,6 +276,7 @@ async function fetchPublicOrgInfo(
       introVideoUrl: b.introVideoUrl ?? null,
       tokenOverrides: b.tokenOverrides ?? null,
       darkModeOverrides: b.darkModeOverrides ?? null,
+      darkTokenOverrides: b.darkTokenOverrides ?? null,
       heroLayout: b.heroLayout ?? 'default',
     };
   }
@@ -310,6 +313,7 @@ async function fetchPublicOrgInfo(
       // The previously broken-out columns were dropped in Codex-g49b4.
       tokenOverrides: branding.tokenOverrides,
       darkModeOverrides: branding.darkModeOverrides,
+      darkTokenOverrides: branding.darkTokenOverrides,
     },
     enableSubscriptions,
   };

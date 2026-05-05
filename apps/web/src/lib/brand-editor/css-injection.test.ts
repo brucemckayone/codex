@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { tokenOverridesToCssVars } from './css-injection';
+import {
+  darkTokenOverridesToCssVars,
+  tokenOverridesToCssVars,
+} from './css-injection';
 
 /**
  * Unit tests for the token-overrides → CSS-vars mapping used by both
@@ -72,5 +75,66 @@ describe('tokenOverridesToCssVars', () => {
     expect(result['--brand-shader-preset']).toBeUndefined();
     expect(result['--brand-glass-tint']).toBeUndefined();
     expect(result['--brand-shader-intensity']).toBe('0.8');
+  });
+});
+
+/**
+ * Codex-wwedk: dark-theme tokenOverrides emit alongside their light
+ * counterparts as `${prop}-dark`. CSS gates in org-brand.css read them
+ * via fallback chains so an absent dark value gracefully inherits light.
+ */
+describe('darkTokenOverridesToCssVars', () => {
+  it('suffixes --brand-* keys with -dark for BRAND_PREFIX_KEYS', () => {
+    const result = darkTokenOverridesToCssVars({
+      'shader-preset': 'ink',
+      'glass-tint': '#000000',
+    });
+
+    expect(result['--brand-shader-preset-dark']).toBe('ink');
+    expect(result['--brand-glass-tint-dark']).toBe('#000000');
+    // Light keys MUST NOT be emitted.
+    expect(result['--brand-shader-preset']).toBeUndefined();
+    expect(result['--brand-glass-tint']).toBeUndefined();
+  });
+
+  it('suffixes --color-* keys with -dark for non-BRAND_PREFIX_KEYS', () => {
+    const result = darkTokenOverridesToCssVars({
+      'surface-secondary': '#0a0a0a',
+    });
+
+    expect(result['--color-surface-secondary-dark']).toBe('#0a0a0a');
+    expect(result['--color-surface-secondary']).toBeUndefined();
+  });
+
+  it('skips hero-hide-* keys (attribute-only, no CSS consumer)', () => {
+    const result = darkTokenOverridesToCssVars({
+      'hero-hide-title': '1',
+      'hero-hide-stats': '1',
+    });
+
+    expect(Object.keys(result)).toHaveLength(0);
+  });
+
+  it('skips null and undefined values', () => {
+    const result = darkTokenOverridesToCssVars({
+      'shader-preset': null,
+      'glass-tint': undefined,
+      'shader-intensity': '0.5',
+    });
+
+    expect(result['--brand-shader-preset-dark']).toBeUndefined();
+    expect(result['--brand-glass-tint-dark']).toBeUndefined();
+    expect(result['--brand-shader-intensity-dark']).toBe('0.5');
+  });
+
+  it('emits a parallel set when paired with light overrides', () => {
+    const light = tokenOverridesToCssVars({ 'shader-preset': 'ether' });
+    const dark = darkTokenOverridesToCssVars({ 'shader-preset': 'ink' });
+
+    // Both are emitted independently — together the org layout exposes
+    // `--brand-shader-preset` (light) AND `--brand-shader-preset-dark`,
+    // and the dark CSS gate uses the dark variant.
+    expect(light['--brand-shader-preset']).toBe('ether');
+    expect(dark['--brand-shader-preset-dark']).toBe('ink');
   });
 });

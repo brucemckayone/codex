@@ -46,6 +46,10 @@
     try {
       const overrides = payload.tokenOverrides ?? {};
       const hasOverrides = Object.keys(overrides).length > 0;
+      // Codex-wwedk: dark tokenOverrides serialise alongside the light JSON.
+      // null/empty maps send '' so the worker clears the column.
+      const darkOverrides = payload.darkTokenOverrides ?? null;
+      const hasDarkOverrides = darkOverrides && Object.keys(darkOverrides).length > 0;
 
       // tokenOverrides JSON is the sole source of truth for fine-tune fields
       // (text/heading/body weight, shadow scale/color, heading colour, etc.).
@@ -62,6 +66,7 @@
         densityValue: payload.density,
         tokenOverrides: hasOverrides ? JSON.stringify(overrides) : '',
         darkModeOverrides: payload.darkOverrides ? JSON.stringify(payload.darkOverrides) : '',
+        darkTokenOverrides: hasDarkOverrides ? JSON.stringify(darkOverrides) : '',
         heroLayout: payload.heroLayout as HeroLayout,
       });
       brandEditor.markSaved();

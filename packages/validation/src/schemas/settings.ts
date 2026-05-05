@@ -147,6 +147,8 @@ export const updateBrandingSchema = z.object({
   // previously broken-out columns were dropped in Codex-g49b4.
   tokenOverrides: z.string().nullable().optional(), // JSON string
   darkModeOverrides: z.string().nullable().optional(), // JSON string: Partial<ThemeColors>
+  // Codex-wwedk: dark-theme tokenOverrides JSON, parallel to tokenOverrides.
+  darkTokenOverrides: z.string().nullable().optional(), // JSON string: Record<string, string | null>
   heroLayout: z.enum(HERO_LAYOUTS).optional(),
   pricingFaq: z.union([z.literal(null), z.string().min(1)]).optional(),
 });
@@ -211,6 +213,7 @@ export const brandingSettingsSchema: z.ZodType<BrandingSettingsResponse> = z
     introVideoUrl: z.string().url().nullable(),
     tokenOverrides: z.string().nullable(),
     darkModeOverrides: z.string().nullable(),
+    darkTokenOverrides: z.string().nullable(),
     heroLayout: z.string(),
     pricingFaq: z.string().nullable(),
   })
@@ -229,6 +232,7 @@ export const brandingSettingsSchema: z.ZodType<BrandingSettingsResponse> = z
       introVideoUrl: z.string().url().nullable(),
       tokenOverrides: z.string().nullable(),
       darkModeOverrides: z.string().nullable(),
+      darkTokenOverrides: z.string().nullable(),
       heroLayout: z.string(),
       pricingFaq: z.string().nullable(),
     })
@@ -288,6 +292,7 @@ export const DEFAULT_BRANDING: BrandingSettingsResponse = {
   introVideoUrl: null,
   tokenOverrides: null,
   darkModeOverrides: null,
+  darkTokenOverrides: null,
   heroLayout: 'default',
   densityValue: 1,
   pricingFaq: null,

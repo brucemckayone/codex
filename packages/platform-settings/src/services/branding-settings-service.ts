@@ -79,6 +79,7 @@ export class BrandingSettingsService extends BaseService {
         introVideoUrl: schema.brandingSettings.introVideoUrl,
         tokenOverrides: schema.brandingSettings.tokenOverrides,
         darkModeOverrides: schema.brandingSettings.darkModeOverrides,
+        darkTokenOverrides: schema.brandingSettings.darkTokenOverrides,
         heroLayout: schema.brandingSettings.heroLayout,
         pricingFaq: schema.brandingSettings.pricingFaq,
       })
@@ -166,6 +167,7 @@ export class BrandingSettingsService extends BaseService {
     introVideoUrl: string | null;
     tokenOverrides: string | null;
     darkModeOverrides: string | null;
+    darkTokenOverrides: string | null;
     heroLayout: string | null;
     pricingFaq: string | null;
   }): BrandingSettingsResponse {
@@ -183,6 +185,7 @@ export class BrandingSettingsService extends BaseService {
       introVideoUrl: row.introVideoUrl,
       tokenOverrides: row.tokenOverrides,
       darkModeOverrides: row.darkModeOverrides,
+      darkTokenOverrides: row.darkTokenOverrides,
       heroLayout: row.heroLayout ?? 'default',
       pricingFaq: row.pricingFaq,
     };
@@ -212,6 +215,7 @@ export class BrandingSettingsService extends BaseService {
       densityValue: 'densityValue',
       tokenOverrides: 'tokenOverrides',
       darkModeOverrides: 'darkModeOverrides',
+      darkTokenOverrides: 'darkTokenOverrides',
       heroLayout: 'heroLayout',
       pricingFaq: 'pricingFaq',
     };

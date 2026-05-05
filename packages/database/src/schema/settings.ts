@@ -86,6 +86,10 @@ export const brandingSettings = pgTable(
     // tokenOverrides JSON via migration 0059_backfill_branding_token_overrides.
     tokenOverrides: text('token_overrides'), // JSON: Record<string, string>
     darkModeOverrides: text('dark_mode_overrides'), // JSON: Partial<ThemeColors>
+    // Codex-wwedk: parallel JSON column mirroring tokenOverrides for the
+    // dark theme. When data-theme='dark', any key present here wins over
+    // tokenOverrides; absent keys fall back to the light value via CSS.
+    darkTokenOverrides: text('dark_token_overrides'), // JSON: Record<string, string | null>
 
     // Hero layout variant (brand editor "Header Layout" section)
     heroLayout: varchar('hero_layout', { length: 20 }).default('default'),

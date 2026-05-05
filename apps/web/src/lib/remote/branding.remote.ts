@@ -184,6 +184,8 @@ const updateBrandingCommandSchema = z.object({
   tokenOverrides: nullableString.optional(), // JSON string of Record<string, string | null>
   // Dark mode overrides
   darkModeOverrides: nullableString.optional(), // JSON string of Partial<ThemeColors>
+  // Codex-wwedk: dark-theme tokenOverrides JSON (parallel to tokenOverrides).
+  darkTokenOverrides: nullableString.optional(), // JSON string of Record<string, string | null>
   // Hero layout — HERO_LAYOUTS is the single source of truth (@codex/validation).
   heroLayout: z.enum(HERO_LAYOUTS).optional(),
 });
@@ -208,6 +210,7 @@ export const updateBrandingCommand = command(
     densityValue,
     tokenOverrides,
     darkModeOverrides,
+    darkTokenOverrides,
     heroLayout,
   }) => {
     const { platform, cookies } = getRequestEvent();
@@ -224,6 +227,7 @@ export const updateBrandingCommand = command(
       densityValue,
       tokenOverrides,
       darkModeOverrides,
+      darkTokenOverrides,
       heroLayout,
     });
 

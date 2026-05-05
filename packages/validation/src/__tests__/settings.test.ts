@@ -435,6 +435,7 @@ describe('default constants', () => {
       introVideoUrl: null,
       tokenOverrides: null,
       darkModeOverrides: null,
+      darkTokenOverrides: null,
       heroLayout: 'default',
       pricingFaq: null,
     });

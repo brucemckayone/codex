@@ -3,6 +3,10 @@ export { brandEditor } from './brand-editor-store.svelte';
 // Brand Editor - CSS Injection
 export {
   clearTokenOverrides,
+  // Codex-wwedk: per-theme dark tokenOverrides helpers (parallel to the
+  // light versions). Used by the org layout SSR injection path.
+  darkTokenOverridesToCssVars,
+  injectDarkTokenOverrides,
   injectTokenOverrides,
   tokenOverridesToCssVars,
 } from './css-injection';

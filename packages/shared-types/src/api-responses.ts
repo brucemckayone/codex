@@ -203,6 +203,8 @@ export interface BrandingSettingsResponse {
   // broken-out columns were dropped in Codex-g49b4.
   tokenOverrides: string | null;
   darkModeOverrides: string | null;
+  /** Codex-wwedk: dark-theme tokenOverrides JSON (parallel to tokenOverrides). */
+  darkTokenOverrides: string | null;
   // Hero layout
   heroLayout: string;
   // Pricing FAQ (JSON string: PricingFaqItem[])
