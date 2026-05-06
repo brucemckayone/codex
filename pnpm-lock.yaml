@@ -66,9 +66,6 @@ importers:
       lint-staged:
         specifier: ^16.2.6
         version: 16.2.7
-      neon-testing:
-        specifier: ^2.2.0
-        version: 2.2.0(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)
       tslib:
         specifier: ^2.8.1
         version: 2.8.1
@@ -181,9 +178,6 @@ importers:
       '@csstools/postcss-global-data':
         specifier: ^4.0.0
         version: 4.0.0(postcss@8.5.6)
-      '@floating-ui/dom':
-        specifier: ^1.7.6
-        version: 1.7.6
       '@inlang/paraglide-js':
         specifier: ^1.11.8
         version: 1.11.8
@@ -199,18 +193,12 @@ importers:
       '@storybook/addon-a11y':
         specifier: ^8.6.15
         version: 8.6.15(storybook@8.6.15(prettier@3.6.2))
-      '@storybook/addon-docs':
-        specifier: ^8.6.15
-        version: 8.6.15(@types/react@19.2.9)(storybook@8.6.15(prettier@3.6.2))
       '@storybook/addon-essentials':
         specifier: ^8.6.15
         version: 8.6.15(@types/react@19.2.9)(storybook@8.6.15(prettier@3.6.2))
       '@storybook/addon-interactions':
         specifier: ^8.6.15
         version: 8.6.15(storybook@8.6.15(prettier@3.6.2))
-      '@storybook/addon-links':
-        specifier: ^8.6.15
-        version: 8.6.15(react@19.2.3)(storybook@8.6.15(prettier@3.6.2))
       '@storybook/addon-svelte-csf':
         specifier: ^5.0.10
         version: 5.0.10(@storybook/svelte@8.6.15(storybook@8.6.15(prettier@3.6.2))(svelte@5.55.0))(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.55.0)(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)))(storybook@8.6.15(prettier@3.6.2))(svelte@5.55.0)(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
@@ -229,9 +217,6 @@ importers:
       '@storybook/test-runner':
         specifier: ^0.19.1
         version: 0.19.1(@swc/helpers@0.5.18)(@types/node@22.13.0)(storybook@8.6.15(prettier@3.6.2))
-      '@storybook/types':
-        specifier: ^8.6.15
-        version: 8.6.15(storybook@8.6.15(prettier@3.6.2))
       '@sveltejs/adapter-cloudflare':
         specifier: ^7.2.8
         version: 7.2.8(@sveltejs/kit@2.55.0(@opentelemetry/api@1.9.0)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.55.0)(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)))(svelte@5.55.0)(typescript@5.9.3)(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)))(wrangler@4.76.0(@cloudflare/workers-types@4.20251121.0))
@@ -247,9 +232,6 @@ importers:
       '@tiptap/extension-character-count':
         specifier: ^3.22.0
         version: 3.22.0(@tiptap/extensions@3.22.0(@tiptap/core@3.22.0(@tiptap/pm@3.22.0))(@tiptap/pm@3.22.0))
-      '@tiptap/extension-image':
-        specifier: ^3.22.0
-        version: 3.22.0(@tiptap/core@3.22.0(@tiptap/pm@3.22.0))
       '@tiptap/extension-link':
         specifier: ^3.22.0
         version: 3.22.0(@tiptap/core@3.22.0(@tiptap/pm@3.22.0))(@tiptap/pm@3.22.0)
@@ -262,9 +244,6 @@ importers:
       '@tiptap/html':
         specifier: ^3.22.0
         version: 3.22.0(@tiptap/core@3.22.0(@tiptap/pm@3.22.0))(@tiptap/pm@3.22.0)(happy-dom@20.8.9)
-      '@tiptap/markdown':
-        specifier: ^3.22.0
-        version: 3.22.0(@tiptap/core@3.22.0(@tiptap/pm@3.22.0))(@tiptap/pm@3.22.0)
       '@tiptap/pm':
         specifier: ^3.22.0
         version: 3.22.0
@@ -599,24 +578,15 @@ importers:
       '@better-auth/cli':
         specifier: ^1.3.34
         version: 1.4.1(@better-fetch/fetch@1.1.21)(@cloudflare/workers-types@4.20251121.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@sveltejs/kit@2.55.0(@opentelemetry/api@1.9.0)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.55.0)(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)))(svelte@5.55.0)(typescript@5.9.3)(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)))(@types/react@19.2.9)(better-call@1.1.7(zod@4.3.6))(jose@6.1.2)(kysely@0.28.8)(magicast@0.5.1)(mysql2@3.15.3)(nanostores@1.1.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(solid-js@1.6.12)(svelte@5.55.0)
-      '@types/bcryptjs':
-        specifier: ^3.0.0
-        version: 3.0.0
       '@types/node':
         specifier: ^22.0.0
         version: 22.13.0
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
-      bcryptjs:
-        specifier: ^3.0.3
-        version: 3.0.3
       drizzle-kit:
         specifier: ^0.31.6
         version: 0.31.7
-      miniflare:
-        specifier: ^4.20250508.2
-        version: 4.20260128.0
       stripe:
         specifier: ^19.3.1
         version: 19.3.1(@types/node@22.13.0)
@@ -732,7 +702,7 @@ importers:
         version: 3.5.0(vite@7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
       vitest:
         specifier: ^2.1.8
-        version: 2.1.9(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.8.9)(jsdom@27.4.0)
+        version: 2.1.9(@types/node@22.13.0)(@vitest/ui@4.0.13(vitest@4.0.13))(happy-dom@20.8.9)(jsdom@27.4.0)
 
   packages/notifications:
     dependencies:
@@ -1069,9 +1039,6 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
-      neon-testing:
-        specifier: ^2.2.0
-        version: 2.2.0(vite@7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
@@ -1277,9 +1244,6 @@ importers:
       '@vitest/ui':
         specifier: ~3.2.4
         version: 3.2.4(vitest@3.2.4)
-      cloudflare:
-        specifier: ^4.0.0
-        version: 4.5.0
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@22.13.0)(@vitest/ui@3.2.4)(happy-dom@20.8.9)(jiti@2.6.1)(jsdom@27.4.0)(tsx@4.20.6)(yaml@2.8.1)
@@ -1344,9 +1308,6 @@ importers:
       '@vitest/ui':
         specifier: ~3.2.4
         version: 3.2.4(vitest@3.2.4)
-      cloudflare:
-        specifier: ^4.0.0
-        version: 4.5.0
       vitest:
         specifier: ~3.2.4
         version: 3.2.4(@types/node@22.13.0)(@vitest/ui@3.2.4)(happy-dom@20.8.9)(jiti@2.6.1)(jsdom@27.4.0)(tsx@4.20.6)(yaml@2.8.1)
@@ -1414,9 +1375,6 @@ importers:
       '@vitest/ui':
         specifier: ~3.2.4
         version: 3.2.4(vitest@3.2.4)
-      cloudflare:
-        specifier: ^4.0.0
-        version: 4.5.0
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
@@ -1508,9 +1466,6 @@ importers:
       '@vitest/ui':
         specifier: ~3.2.4
         version: 3.2.4(vitest@3.2.4)
-      cloudflare:
-        specifier: ^4.0.0
-        version: 4.5.0
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@22.13.0)(@vitest/ui@3.2.4)(happy-dom@20.8.9)(jiti@2.6.1)(jsdom@27.4.0)(tsx@4.20.6)(yaml@2.8.1)
@@ -1569,9 +1524,6 @@ importers:
       '@vitest/ui':
         specifier: ~3.2.4
         version: 3.2.4(vitest@3.2.4)
-      cloudflare:
-        specifier: ^4.0.0
-        version: 4.5.0
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
@@ -1648,9 +1600,6 @@ importers:
       '@vitest/ui':
         specifier: ~3.2.4
         version: 3.2.4(vitest@3.2.4)
-      cloudflare:
-        specifier: ^4.0.0
-        version: 4.5.0
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
@@ -1718,9 +1667,6 @@ importers:
       '@vitest/ui':
         specifier: ~3.2.4
         version: 3.2.4(vitest@3.2.4)
-      cloudflare:
-        specifier: ^4.0.0
-        version: 4.5.0
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
@@ -1803,9 +1749,6 @@ importers:
       '@vitest/ui':
         specifier: ~3.2.4
         version: 3.2.4(vitest@3.2.4)
-      cloudflare:
-        specifier: ^4.0.0
-        version: 4.5.0
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
@@ -4071,9 +4014,6 @@ packages:
   '@napi-rs/wasm-runtime@1.1.0':
     resolution: {integrity: sha512-Fq6DJW+Bb5jaWE69/qOE0D1TUN9+6uWhCeZpdnSBk14pjLcCWR7Q8n49PTSPHazM37JqrsdpEthXy2xn6jWWiA==}
 
-  '@neondatabase/api-client@2.2.0':
-    resolution: {integrity: sha512-KP7NWn2gdrcXmB6xtrU+RZNGbgkUm5AwIv6B78XvdTKX+jFEkYznNfWUUbFCMehH4N0x/plErIeuMh75pk0KiQ==}
-
   '@neondatabase/serverless@0.10.4':
     resolution: {integrity: sha512-2nZuh3VUO9voBauuh+IGYRhGU/MskWHt1IuZvHcJw6GLjDgtqj/KViKo7SIrLdGLdot7vFbiRRw+BgEy3wT9HA==}
 
@@ -4817,15 +4757,6 @@ packages:
     peerDependencies:
       storybook: ^8.6.15
 
-  '@storybook/addon-links@8.6.15':
-    resolution: {integrity: sha512-abRWnDPBTwnj6sQYfAjUnYCNuUQbrVLLOyuormbDUqOcvZ+OqehNYo4BKXx0/lz61h0A2dOD1IuDo40uWyYVFQ==}
-    peerDependencies:
-      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0-beta
-      storybook: ^8.6.15
-    peerDependenciesMeta:
-      react:
-        optional: true
-
   '@storybook/addon-measure@8.6.15':
     resolution: {integrity: sha512-F78fJlmuXMulTphFp9Iqx7I1GsbmNLboChnW/VqR6nRZx5o9cdGjc8IaEyXVFXZ7k1pnSvdaP5ndFmzkcPxQdg==}
     peerDependencies:
@@ -4980,11 +4911,6 @@ packages:
 
   '@storybook/theming@8.6.15':
     resolution: {integrity: sha512-dAbL0XOekyT6XsF49R6Etj3WxQ/LpdJDIswUUeHgVJ6/yd2opZOGbPxnwA3zlmAh1c0tvpPyhSDXxSG79u8e4Q==}
-    peerDependencies:
-      storybook: ^8.2.0 || ^8.3.0-0 || ^8.4.0-0 || ^8.5.0-0 || ^8.6.0-0
-
-  '@storybook/types@8.6.15':
-    resolution: {integrity: sha512-XZKcn8Y8P7pEMK8f+oBrilGCWGdzNTR4jc4EQjrp9ERbo4J9MsoVifnFW+bddRYdCxznCQ/5W7wDdoD6esyRkA==}
     peerDependencies:
       storybook: ^8.2.0 || ^8.3.0-0 || ^8.4.0-0 || ^8.5.0-0 || ^8.6.0-0
 
@@ -5253,11 +5179,6 @@ packages:
       '@tiptap/core': ^3.22.0
       '@tiptap/pm': ^3.22.0
 
-  '@tiptap/extension-image@3.22.0':
-    resolution: {integrity: sha512-b3n86lWF3thywUrWmZv27EzTGhCBTjifXY/NzPfri3D22cKkxardrJi2WZIc0J65je91oTzqY7SkdQnyIrZksw==}
-    peerDependencies:
-      '@tiptap/core': ^3.22.0
-
   '@tiptap/extension-italic@3.22.0':
     resolution: {integrity: sha512-+qq9QZF44O1MRqk6w1AMDZ8oDBs5AtdDdNEcdXpzVU54cJAtWyEPEfXtD0B68hOUp/RdZjMdL27fp+4Id7C1YA==}
     peerDependencies:
@@ -5333,12 +5254,6 @@ packages:
       '@tiptap/pm': ^3.22.0
       happy-dom: ^20.8.9
 
-  '@tiptap/markdown@3.22.0':
-    resolution: {integrity: sha512-lvYqID2ui4+HEgh/zULQJoKfb7ILe6ahB9IeaJ5R48mrVyeudciqoJV6VmNOaucm/UpKExlDC3I+QlA9sLpYPw==}
-    peerDependencies:
-      '@tiptap/core': ^3.22.0
-      '@tiptap/pm': ^3.22.0
-
   '@tiptap/pm@3.22.0':
     resolution: {integrity: sha512-O9kpzNnFX5837kFevwAM8yr7ImLHu8noIwIpoci0AwfJjiBMzfZBejhbzxnKEfTpFWnkvZ8rWohlb6CQdJ6Crg==}
 
@@ -5374,10 +5289,6 @@ packages:
 
   '@types/babel__traverse@7.28.0':
     resolution: {integrity: sha512-8PvcXf70gTDZBgt9ptxJ8elBeBjcLOAcOtoO/mPJjtji1+CdGbHgm77om1GrsPxsiE+uXIpNSK64UYaIwQXd4Q==}
-
-  '@types/bcryptjs@3.0.0':
-    resolution: {integrity: sha512-WRZOuCuaz8UcZZE4R5HXTco2goQSI2XxjGY3hbM/xDvwmqFWd4ivooImsMx65OKM6CtNKbnZ5YL+YwAwK7c1dg==}
-    deprecated: This is a stub types definition. bcryptjs provides its own type definitions, so you do not need this installed.
 
   '@types/btoa-lite@1.0.2':
     resolution: {integrity: sha512-ZYbcE2x7yrvNFJiU7xJGrpF/ihpkM7zKgw8bha3LNJSesvTtUNxbpzaT7WXBIryf6jovisrxTBvymxMeLLj1Mg==}
@@ -5427,12 +5338,6 @@ packages:
 
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
-
-  '@types/node-fetch@2.6.13':
-    resolution: {integrity: sha512-QGpRVpzSaUs30JBSGPjOg4Uveu384erbHBoT1zeONvyCfwQxIkUshLAOqN/k9EjGviPRmWTTe6aH2qySWKTVSw==}
-
-  '@types/node@18.19.130':
-    resolution: {integrity: sha512-GRaXQx6jGfL8sKfaIDD6OupbIHBr9jv7Jnaml9tB7l4v068PAOXqfcujMMo5PhbIs6ggR1XODELqahT2R8v0fg==}
 
   '@types/node@20.19.25':
     resolution: {integrity: sha512-ZsJzA5thDQMSQO788d7IocwwQbI8B5OPzmqNvpf3NY/+MHDAS759Wo0gd2WQeXYt5AAAQjzcrTVC6SKCuYgoCQ==}
@@ -5631,10 +5536,6 @@ packages:
     resolution: {integrity: sha512-BgYZfL2ADCXKOw2wJtkM3slhHotawWkgIRRxq4wEybnZQPjvAp71SPX35xepMykTw8gXlzWcWPTY31hlbnRsDA==}
     engines: {node: 18 >=18.20 || 20 || >=22}
 
-  abort-controller@3.0.0:
-    resolution: {integrity: sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg==}
-    engines: {node: '>=6.5'}
-
   acorn-jsx@5.3.2:
     resolution: {integrity: sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ==}
     peerDependencies:
@@ -5657,10 +5558,6 @@ packages:
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
-
-  agentkeepalive@4.6.0:
-    resolution: {integrity: sha512-kja8j7PjmncONqaTsB8fQ+wE2mSU2DJ9D4XKoJ5PFWIdRMa6SLSN1ff4mOr4jCbfRSsxR4keIiySJU0N9T5hIQ==}
-    engines: {node: '>= 8.0.0'}
 
   aggregate-error@3.1.0:
     resolution: {integrity: sha512-4I7Td01quW/RpocfNayFdFVk1qSuoh0E7JrbRJ16nH01HhKFQ88INq9Sd+nd72zqRySlr9BmDA8xlEJ6vJMrYA==}
@@ -5837,10 +5734,6 @@ packages:
 
   baseline-browser-mapping@2.8.30:
     resolution: {integrity: sha512-aTUKW4ptQhS64+v2d6IkPzymEzzhw+G0bA1g3uBRV3+ntkH+svttKseW5IOR4Ed6NUVKqnY7qT3dKvzQ7io4AA==}
-    hasBin: true
-
-  bcryptjs@3.0.3:
-    resolution: {integrity: sha512-GlF5wPWnSa/X5LKM1o0wz0suXIINz1iHRLvTS+sLyi7XPbe5ycmYI3DlZqVGZZtDgl4DmasFg7gOB3JYbphV5g==}
     hasBin: true
 
   before-after-hook@2.2.3:
@@ -6147,9 +6040,6 @@ packages:
   cliui@8.0.1:
     resolution: {integrity: sha512-BSeNnyus75C4//NQ9gQt1/csTXyo/8Sb+afLAkzAptFuMsod9HFokGNudZpi/oQV73hnVK+sR+5PVRMd+Dr7YQ==}
     engines: {node: '>=12'}
-
-  cloudflare@4.5.0:
-    resolution: {integrity: sha512-fPcbPKx4zF45jBvQ0z7PCdgejVAPBBCZxwqk1k7krQNfpM07Cfj97/Q6wBzvYqlWXx/zt1S9+m8vnfCe06umbQ==}
 
   clsx@2.1.1:
     resolution: {integrity: sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==}
@@ -6895,10 +6785,6 @@ packages:
   event-stream@3.3.4:
     resolution: {integrity: sha512-QHpkERcGsR0T7Qm3HNJSyXKEEj8AHNxkY3PK8TS2KJvQ7NiSHe3DDpwVKKtoYprL/AreyzFBeIkBIWChAqn60g==}
 
-  event-target-shim@5.0.1:
-    resolution: {integrity: sha512-i/2XbnSz/uxRCU6+NdVJgKWDTM427+MqYbkQzD321DuCQJUqOuJKIA0IM2+W2xtYHdKOmZ4dR6fExsd4SXL+WQ==}
-    engines: {node: '>=6'}
-
   eventemitter3@5.0.1:
     resolution: {integrity: sha512-GWkBvjiSZK87ELrYOSESUYeVIc9mvLLf/nXalMOS5dYrgZq9o5OVkbZAVM06CVxYsCwH9BDZFPlQTlPA1j4ahA==}
 
@@ -7036,9 +6922,6 @@ packages:
     resolution: {integrity: sha512-dCIq9FpEcyQyXKCkyzmlPTFNgrCzPudOe+mhvJU5zAtlBnGVy2yKxtfsxK2tQBThwq225jcvBjpw1Gr40uzZCA==}
     engines: {node: '>=8.0.0'}
 
-  form-data-encoder@1.7.2:
-    resolution: {integrity: sha512-qfqtYan3rxrnCk1VYaA4H+Ms9xdpPqvLZa6xmMgFvhO32x7/3J/ExcTd6qpxM0vH2GdMI+poehyBZvqfMTto8A==}
-
   form-data@4.0.5:
     resolution: {integrity: sha512-8RipRLol37bNs2bhoV67fiTEvdTrbMUYcFTiy3+wuuOnUog2QBHCZWXDRijWQfAkhBj2Uf5UnVaiWwA5vdd82w==}
     engines: {node: '>= 6'}
@@ -7047,10 +6930,6 @@ packages:
     resolution: {integrity: sha512-9XNj/o4wrRFyhSMJOvsuyMwy8aUfBaZ1VrqHVfohyXf0Sw0e+yfKG+xZaY3arGCOMdwFsqObtzVOc1gU9KiT9w==}
     engines: {node: '>=18.3.0'}
     hasBin: true
-
-  formdata-node@4.4.1:
-    resolution: {integrity: sha512-0iirZp3uVDjVGt9p49aTaqjk84TrglENEDuqfdlZQ1roC9CWlPk6Avf8EEnZNcAqPonwkG35x4n3ww/1THYAeQ==}
-    engines: {node: '>= 12.20'}
 
   fractional-indexing@3.2.0:
     resolution: {integrity: sha512-PcOxmqwYCW7O2ovKRU8OoQQj2yqTfEB/yeTYk4gPid6dN5ODRfU1hXd9tTVZzax/0NkO7AxpHykvZnT1aYp/BQ==}
@@ -7150,7 +7029,7 @@ packages:
 
   glob@7.2.3:
     resolution: {integrity: sha512-nFR0zLpU2YCaRxwoCJvL6UvCH2JFyFVIvwTLsIf21AuHlMskA1hhTdk+LlYJtOlYt9v6dvszD2BGRqBL+iQK9Q==}
-    deprecated: Glob versions prior to v9 are no longer supported
+    deprecated: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
 
   global-modules@0.2.3:
     resolution: {integrity: sha512-JeXuCbvYzYXcwE6acL9V2bAOeSIGl4dD+iwLY9iUx2VBJJ80R18HCn+JCwHM9Oegdfya3lEkGCdaRkSyc10hDA==}
@@ -7253,9 +7132,6 @@ packages:
   human-signals@2.1.0:
     resolution: {integrity: sha512-B4FFZ6q/T2jhhksgkbEW3HBvWIfDW85snkQgawt07S7J5QXTk6BkNV+0yAeZrM5QpMAdYlocGoljn0sJ/WQkFw==}
     engines: {node: '>=10.17.0'}
-
-  humanize-ms@1.2.1:
-    resolution: {integrity: sha512-Fl70vYtsAFb/C06PTS9dZBo7ihau+Tu/DNCk/OyHhea07S+aeMWpFFkUaXRa8fI+ScZbEI8dfSxwY7gxZ9SAVQ==}
 
   husky@9.1.7:
     resolution: {integrity: sha512-5gs5ytaNjBrh5Ow3zrvdUUY+0VxIuWVL4i9irt6friV+BqdCfmV11CQTWMiBYWHbXhco+J1kHfTOUkePhCDvMA==}
@@ -8037,32 +7913,12 @@ packages:
   natural-compare@1.4.0:
     resolution: {integrity: sha512-OWND8ei3VtNC9h7V60qff3SVobHr996CTwgxubgyQYEpg290h9J0buyECNNJexkFm5sOajh5G116RYA1c8ZMSw==}
 
-  neon-testing@2.2.0:
-    resolution: {integrity: sha512-j304fCwgZSLU7kV0tf8T1mrGyttcGQD+xSGiEVd1JKAmAN36F4PjBBgf5VcOxw6f6eU3caxXP1dpkYvEkTLSzA==}
-    peerDependencies:
-      vite: ^7
-      vitest: ^3 || ^4
-
   node-abi@3.85.0:
     resolution: {integrity: sha512-zsFhmbkAzwhTft6nd3VxcG0cvJsT70rL+BIGHWVq5fi6MwGrHwzqKaxXE+Hl2GmnGItnDKPPkO5/LQqjVkIdFg==}
     engines: {node: '>=10'}
 
-  node-domexception@1.0.0:
-    resolution: {integrity: sha512-/jKZoMpw0F8GRwl4/eLROPA3cfcXtLApP0QzLmUT/HuPCZWyB7IY9ZrMeKw2O/nFIqPQB3PVM9aYm0F312AXDQ==}
-    engines: {node: '>=10.5.0'}
-    deprecated: Use your platform's native DOMException instead
-
   node-fetch-native@1.6.7:
     resolution: {integrity: sha512-g9yhqoedzIUm0nTnTqAQvueMPVOuIY16bqgAJJC8XOOubYFNwz6IER9qs0Gq2Xd0+CecCKFjtdDTMA4u4xG06Q==}
-
-  node-fetch@2.7.0:
-    resolution: {integrity: sha512-c4FRfUm/dbcWZ7U+1Wq0AwCyFL+3nt2bEw05wfxSz+DWpWsitgmSgYmy2dQdWyKC1694ELPqMs/YzUSNozLt8A==}
-    engines: {node: 4.x || >=6.0.0}
-    peerDependencies:
-      encoding: ^0.1.0
-    peerDependenciesMeta:
-      encoding:
-        optional: true
 
   node-int64@0.4.0:
     resolution: {integrity: sha512-O5lz91xSOeoXP6DulyHfllpq+Eg00MWitZIbtPfoSEvqIHdl5gfcY6hYzDWnj0qD5tz52PI08u9qUvSVeUBeHw==}
@@ -9117,9 +8973,6 @@ packages:
     resolution: {integrity: sha512-kXuRi1mtaKMrsLUxz3sQYvVl37B0Ns6MzfrtV5DvJceE9bPyspOqk9xxv7XbZWcfLWbFmm997vl83qUWVJA64w==}
     engines: {node: '>=16'}
 
-  tr46@0.0.3:
-    resolution: {integrity: sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw==}
-
   tr46@6.0.0:
     resolution: {integrity: sha512-bLVMLPtstlZ4iMQHpFHTR7GAGj2jxi8Dg0s2h2MafAE4uSWF98FC/3MomU51iQAMf8/qDUbKWf5GxuvvVcXEhw==}
     engines: {node: '>=20'}
@@ -9224,9 +9077,6 @@ packages:
 
   ufo@1.6.1:
     resolution: {integrity: sha512-9a4/uxlTWJ4+a5i0ooc1rU7C7YOw3wT+UGqdeNNHWnOF9qcMBgLRS+4IYUqbczewFx4mLEig6gawh7X6mFlEkA==}
-
-  undici-types@5.26.5:
-    resolution: {integrity: sha512-JlCMO+ehdEIKqlFxk6IfVoAUVmgz7cU7zD/h9XZ0qzeosSHmUJVOzSQvvYSYWXkFXC+IfLKSIffhv0sVZup6pA==}
 
   undici-types@6.20.0:
     resolution: {integrity: sha512-Ny6QZ2Nju20vw1SRHe3d9jVu6gJ+4e3+MMpqu7pqE5HT6WsTSlce++GQmK5UXS8mzV8DSYHrQH+Xrf2jVcuKNg==}
@@ -9570,13 +9420,6 @@ packages:
   walker@1.0.8:
     resolution: {integrity: sha512-ts/8E8l5b7kY0vlWLewOkDXMmPdLcVV4GmOQLyxuSswIJsweeFZtAsMF7k1Nszz+TYBQrlYRmzOnr398y1JemQ==}
 
-  web-streams-polyfill@4.0.0-beta.3:
-    resolution: {integrity: sha512-QW95TCTaHmsYfHDybGMwO5IJIM93I/6vTRk+daHTWFPhwh+C8Cg7j7XyKrwrj8Ib6vYXe0ocYNrmzY4xAAN6ug==}
-    engines: {node: '>= 14'}
-
-  webidl-conversions@3.0.1:
-    resolution: {integrity: sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ==}
-
   webidl-conversions@8.0.0:
     resolution: {integrity: sha512-n4W4YFyz5JzOfQeA8oN7dUYpR+MBP3PIUsn2jLjWXwK5ASUzt0Jc/A5sAUZoCYFJRGF0FBKJ+1JjN43rNdsQzA==}
     engines: {node: '>=20'}
@@ -9599,9 +9442,6 @@ packages:
   whatwg-url@15.1.0:
     resolution: {integrity: sha512-2ytDk0kiEj/yu90JOAp44PVPUkO9+jVhyf+SybKlRHSDlvOOZhdPIrr7xTH64l4WixO2cP+wQIcgujkGBPPz6g==}
     engines: {node: '>=20'}
-
-  whatwg-url@5.0.0:
-    resolution: {integrity: sha512-saE57nupxk6v3HY35+jzBwYa0rKSy0XR8JSxZPwgLr7ys0IBzhGviA1/TUGJLmSVqs8pb9AnvICXEuOHLprYTw==}
 
   which-module@2.0.1:
     resolution: {integrity: sha512-iBdZ57RDvnOR9AGBhML2vFZf7h8vmBjhoaZqODJBFWHVtKkDmKuHai3cx5PgVMrX5YDNp27AofYbAwctSS+vhQ==}
@@ -12209,12 +12049,6 @@ snapshots:
       '@tybys/wasm-util': 0.10.1
     optional: true
 
-  '@neondatabase/api-client@2.2.0':
-    dependencies:
-      axios: 1.13.2(debug@4.4.3)
-    transitivePeerDependencies:
-      - debug
-
   '@neondatabase/serverless@0.10.4':
     dependencies:
       '@types/pg': 8.11.6
@@ -13068,14 +12902,6 @@ snapshots:
       storybook: 8.6.15(prettier@3.6.2)
       ts-dedent: 2.2.0
 
-  '@storybook/addon-links@8.6.15(react@19.2.3)(storybook@8.6.15(prettier@3.6.2))':
-    dependencies:
-      '@storybook/global': 5.0.0
-      storybook: 8.6.15(prettier@3.6.2)
-      ts-dedent: 2.2.0
-    optionalDependencies:
-      react: 19.2.3
-
   '@storybook/addon-measure@8.6.15(storybook@8.6.15(prettier@3.6.2))':
     dependencies:
       '@storybook/global': 5.0.0
@@ -13318,10 +13144,6 @@ snapshots:
       storybook: 8.6.15(prettier@3.6.2)
 
   '@storybook/theming@8.6.15(storybook@8.6.15(prettier@3.6.2))':
-    dependencies:
-      storybook: 8.6.15(prettier@3.6.2)
-
-  '@storybook/types@8.6.15(storybook@8.6.15(prettier@3.6.2))':
     dependencies:
       storybook: 8.6.15(prettier@3.6.2)
 
@@ -13635,10 +13457,6 @@ snapshots:
       '@tiptap/core': 3.22.0(@tiptap/pm@3.22.0)
       '@tiptap/pm': 3.22.0
 
-  '@tiptap/extension-image@3.22.0(@tiptap/core@3.22.0(@tiptap/pm@3.22.0))':
-    dependencies:
-      '@tiptap/core': 3.22.0(@tiptap/pm@3.22.0)
-
   '@tiptap/extension-italic@3.22.0(@tiptap/core@3.22.0(@tiptap/pm@3.22.0))':
     dependencies:
       '@tiptap/core': 3.22.0(@tiptap/pm@3.22.0)
@@ -13700,12 +13518,6 @@ snapshots:
       '@tiptap/core': 3.22.0(@tiptap/pm@3.22.0)
       '@tiptap/pm': 3.22.0
       happy-dom: 20.8.9
-
-  '@tiptap/markdown@3.22.0(@tiptap/core@3.22.0(@tiptap/pm@3.22.0))(@tiptap/pm@3.22.0)':
-    dependencies:
-      '@tiptap/core': 3.22.0(@tiptap/pm@3.22.0)
-      '@tiptap/pm': 3.22.0
-      marked: 17.0.5
 
   '@tiptap/pm@3.22.0':
     dependencies:
@@ -13792,10 +13604,6 @@ snapshots:
     dependencies:
       '@babel/types': 7.28.5
 
-  '@types/bcryptjs@3.0.0':
-    dependencies:
-      bcryptjs: 3.0.3
-
   '@types/btoa-lite@1.0.2': {}
 
   '@types/chai@5.2.3':
@@ -13844,15 +13652,6 @@ snapshots:
   '@types/mdx@2.0.13': {}
 
   '@types/ms@2.1.0': {}
-
-  '@types/node-fetch@2.6.13':
-    dependencies:
-      '@types/node': 22.13.0
-      form-data: 4.0.5
-
-  '@types/node@18.19.130':
-    dependencies:
-      undici-types: 5.26.5
 
   '@types/node@20.19.25':
     dependencies:
@@ -14060,7 +13859,7 @@ snapshots:
       sirv: 3.0.2
       tinyglobby: 0.2.15
       tinyrainbow: 3.0.3
-      vitest: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.8.9)(jiti@2.6.1)(jsdom@27.4.0)(tsx@4.20.6)(yaml@2.8.1)
+      vitest: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jiti@2.6.1)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.1)
 
   '@vitest/utils@2.0.5':
     dependencies:
@@ -14133,10 +13932,6 @@ snapshots:
 
   '@wolfy1339/lru-cache@11.0.2-patch.1': {}
 
-  abort-controller@3.0.0:
-    dependencies:
-      event-target-shim: 5.0.1
-
   acorn-jsx@5.3.2(acorn@8.15.0):
     dependencies:
       acorn: 8.15.0
@@ -14148,10 +13943,6 @@ snapshots:
   acorn@8.15.0: {}
 
   agent-base@7.1.4: {}
-
-  agentkeepalive@4.6.0:
-    dependencies:
-      humanize-ms: 1.2.1
 
   aggregate-error@3.1.0:
     dependencies:
@@ -14341,8 +14132,6 @@ snapshots:
   base64-js@1.5.1: {}
 
   baseline-browser-mapping@2.8.30: {}
-
-  bcryptjs@3.0.3: {}
 
   before-after-hook@2.2.3: {}
 
@@ -14657,18 +14446,6 @@ snapshots:
       string-width: 4.2.3
       strip-ansi: 6.0.1
       wrap-ansi: 7.0.0
-
-  cloudflare@4.5.0:
-    dependencies:
-      '@types/node': 18.19.130
-      '@types/node-fetch': 2.6.13
-      abort-controller: 3.0.0
-      agentkeepalive: 4.6.0
-      form-data-encoder: 1.7.2
-      formdata-node: 4.4.1
-      node-fetch: 2.7.0
-    transitivePeerDependencies:
-      - encoding
 
   clsx@2.1.1: {}
 
@@ -15369,8 +15146,6 @@ snapshots:
       stream-combiner: 0.0.4
       through: 2.3.8
 
-  event-target-shim@5.0.1: {}
-
   eventemitter3@5.0.1: {}
 
   execa@5.1.1:
@@ -15508,8 +15283,6 @@ snapshots:
       cross-spawn: 7.0.6
       signal-exit: 3.0.7
 
-  form-data-encoder@1.7.2: {}
-
   form-data@4.0.5:
     dependencies:
       asynckit: 0.4.0
@@ -15521,11 +15294,6 @@ snapshots:
   formatly@0.3.0:
     dependencies:
       fd-package-json: 2.0.0
-
-  formdata-node@4.4.1:
-    dependencies:
-      node-domexception: 1.0.0
-      web-streams-polyfill: 4.0.0-beta.3
 
   fractional-indexing@3.2.0: {}
 
@@ -15740,10 +15508,6 @@ snapshots:
       - supports-color
 
   human-signals@2.1.0: {}
-
-  humanize-ms@1.2.1:
-    dependencies:
-      ms: 2.1.3
 
   husky@9.1.7: {}
 
@@ -16780,33 +16544,11 @@ snapshots:
 
   natural-compare@1.4.0: {}
 
-  neon-testing@2.2.0(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13):
-    dependencies:
-      '@neondatabase/api-client': 2.2.0
-      vite: 6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
-      vitest: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jiti@2.6.1)(jsdom@27.2.0)(tsx@4.20.6)(yaml@2.8.1)
-    transitivePeerDependencies:
-      - debug
-
-  neon-testing@2.2.0(vite@7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13):
-    dependencies:
-      '@neondatabase/api-client': 2.2.0
-      vite: 7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
-      vitest: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.8.9)(jiti@2.6.1)(jsdom@27.4.0)(tsx@4.20.6)(yaml@2.8.1)
-    transitivePeerDependencies:
-      - debug
-
   node-abi@3.85.0:
     dependencies:
       semver: 7.7.3
 
-  node-domexception@1.0.0: {}
-
   node-fetch-native@1.6.7: {}
-
-  node-fetch@2.7.0:
-    dependencies:
-      whatwg-url: 5.0.0
 
   node-int64@0.4.0: {}
 
@@ -17987,8 +17729,6 @@ snapshots:
     dependencies:
       tldts: 7.0.18
 
-  tr46@0.0.3: {}
-
   tr46@6.0.0:
     dependencies:
       punycode: 2.3.1
@@ -18064,8 +17804,6 @@ snapshots:
   uc.micro@2.1.0: {}
 
   ufo@1.6.1: {}
-
-  undici-types@5.26.5: {}
 
   undici-types@6.20.0: {}
 
@@ -18293,7 +18031,7 @@ snapshots:
       vite: 7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
     optional: true
 
-  vitest@2.1.9(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.8.9)(jsdom@27.4.0):
+  vitest@2.1.9(@types/node@22.13.0)(@vitest/ui@4.0.13(vitest@4.0.13))(happy-dom@20.8.9)(jsdom@27.4.0):
     dependencies:
       '@vitest/expect': 2.1.9
       '@vitest/mocker': 2.1.9(vite@5.4.21(@types/node@22.13.0))
@@ -18501,10 +18239,6 @@ snapshots:
     dependencies:
       makeerror: 1.0.12
 
-  web-streams-polyfill@4.0.0-beta.3: {}
-
-  webidl-conversions@3.0.1: {}
-
   webidl-conversions@8.0.0: {}
 
   webpack-virtual-modules@0.6.2: {}
@@ -18521,11 +18255,6 @@ snapshots:
     dependencies:
       tr46: 6.0.0
       webidl-conversions: 8.0.0
-
-  whatwg-url@5.0.0:
-    dependencies:
-      tr46: 0.0.3
-      webidl-conversions: 3.0.1
 
   which-module@2.0.1: {}
 
