@@ -32,7 +32,9 @@
     "apps/web/src/hooks.ts",
     "apps/web/src/hooks.server.ts",
     "apps/web/src/hooks.client.ts",
-    "apps/web/src/app.html"
+    "apps/web/src/app.html",
+    "apps/web/src/lib/remote/**/*.remote.ts",
+    "apps/web/src/lib/components/ui/ShaderHero/renderers/**/*.ts"
   ],
   "ignorePatterns": [
     "test-media/**",
@@ -43,7 +45,8 @@
     "**/dist/**",
     "**/build/**",
     "**/.svelte-kit/**",
-    "apps/web/src/paraglide/**"
+    "apps/web/src/paraglide/**",
+    "apps/web/src/lib/styles/tokens/breakpoints.css"
   ],
   "duplicates": {
     "enabled": true,
