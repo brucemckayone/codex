@@ -10,6 +10,12 @@
   --border-style: solid;
   --border-style-dashed: dashed;
 
+  /* Focus Ring Offsets
+   * Two-token approach for the most common :focus-visible patterns.
+   * Outliers (e.g. -2px deep inset, 3px recessed) stay literal with inline comments. */
+  --focus-offset: 1px;        /* canonical outer focus-ring offset */
+  --focus-offset-inset: -1px; /* inset focus ring for clipped/bordered parents (overflow: hidden, bordered inputs) */
+
   /* Compound Tokens (Optional but helpful for consistency) */
   --border-default: var(--border-width) var(--border-style) var(--color-border);
   --border-focus: var(--border-width-thick) var(--border-style) var(--color-border-focus);
