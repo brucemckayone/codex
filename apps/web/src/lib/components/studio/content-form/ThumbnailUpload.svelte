@@ -308,16 +308,24 @@
     border-radius: var(--radius-md);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    border: var(--border-width) var(--border-style) color-mix(in srgb, white 50%, transparent);
-    background: color-mix(in srgb, black 40%, transparent);
-    color: var(--color-text-inverse);
+    /* Always-light-on-dark veil over arbitrary user-uploaded thumbnail.
+       Literal hsl() is correct here: --color-text-inverse flips dark in dark
+       theme (becomes invisible on a dark veil), --color-text-on-brand only
+       applies to brand-coloured backgrounds, and --color-player-* is
+       org-overridable (could collapse to brand colour). The dark veil + fixed
+       white text is a stable semantic with no token that captures it reliably.
+       See feedback_player_tokens_for_dark_overlays.md. */
+    border: var(--border-width) var(--border-style) hsl(0 0% 100% / 0.5);
+    background: hsl(0 0% 0% / 0.4);
+    color: hsl(0 0% 100%);
     cursor: pointer;
     transition: var(--transition-colors);
   }
 
   .overlay-btn:hover {
-    background: color-mix(in srgb, black 60%, transparent);
-    border-color: var(--color-text-inverse);
+    /* Same rationale as .overlay-btn — fixed dark veil over arbitrary thumbnail. */
+    background: hsl(0 0% 0% / 0.6);
+    border-color: hsl(0 0% 100%);
   }
 
   .overlay-btn-danger:hover {

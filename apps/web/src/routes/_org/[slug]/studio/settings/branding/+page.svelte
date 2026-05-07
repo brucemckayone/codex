@@ -122,7 +122,7 @@
               <div class="brand-summary__swatch" style="background-color: {branding.accentColorHex}" title="Accent: {branding.accentColorHex}"></div>
             {/if}
             {#if branding.backgroundColorHex}
-              <div class="brand-summary__swatch" style="background-color: {branding.backgroundColorHex}; border: 1px solid var(--color-border)" title="Background: {branding.backgroundColorHex}"></div>
+              <div class="brand-summary__swatch brand-summary__swatch--bordered" style="background-color: {branding.backgroundColorHex}" title="Background: {branding.backgroundColorHex}"></div>
             {/if}
           </div>
         </div>
@@ -188,10 +188,15 @@
   }
 
   .brand-summary__swatch {
-    width: 32px;
-    height: 32px;
+    width: var(--space-8);
+    height: var(--space-8);
     border-radius: var(--radius-md);
     cursor: default;
+  }
+
+  /* Background-colour swatch needs a visible edge against neutral surfaces. */
+  .brand-summary__swatch--bordered {
+    border: var(--border-width) var(--border-style) var(--color-border);
   }
 
   .brand-summary__value {

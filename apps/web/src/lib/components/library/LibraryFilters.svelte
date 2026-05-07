@@ -66,6 +66,8 @@
     { value: 'purchased', label: m.library_filter_purchased() },
     { value: 'subscription', label: m.library_filter_subscription() },
     { value: 'membership', label: m.library_filter_membership() },
+    { value: 'free', label: m.library_filter_free() },
+    { value: 'followers', label: m.library_filter_followers() },
   ];
 
   // Debounce search input by 300ms

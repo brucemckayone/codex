@@ -292,7 +292,7 @@
 
   .picker-trigger:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: -1px;
+    outline-offset: var(--focus-offset-inset);
     border-color: var(--color-border-focus);
   }
 
@@ -478,7 +478,7 @@
 
   .option.highlighted {
     outline: 2px solid var(--color-brand-primary-subtle);
-    outline-offset: -2px;
+    outline-offset: -2px; /* deeper inset for highlighted dropdown option (sits inside option padding) */
   }
 
   .option.selected {

@@ -39,6 +39,13 @@
     type: 'search';
     key: string;
     placeholder: string;
+    /**
+     * Accessible label for the search input. Defaults to `placeholder` for
+     * back-compat, but providing an explicit label is preferred — placeholder
+     * text disappears as soon as the user types, leaving screen readers
+     * without context.
+     */
+    label?: string;
     mode?: 'debounce' | 'submit';
     debounceMs?: number;
   }
@@ -159,7 +166,7 @@
       {#if filter.type === 'pills'}
         <div
           class="filter-bar__pills"
-          class:filter-bar__pills--connected={filter.variant === 'connected'}
+          data-variant={filter.variant ?? 'separated'}
           role="radiogroup"
           aria-label={filter.label}
           onkeydown={(e) => handlePillKey(e, filter)}
@@ -169,7 +176,7 @@
             <button
               type="button"
               class="filter-bar__pill"
-              class:filter-bar__pill--active={isChecked}
+              data-active={isChecked}
               onclick={() => onFilterChange(filter.key, option.value || null)}
               role="radio"
               aria-checked={isChecked}
@@ -195,6 +202,9 @@
           class="filter-bar__search"
           onsubmit={(e) => { e.preventDefault(); handleSearchSubmit(filter); }}
         >
+          <label class="filter-bar__sr-only" for="filter-bar-search-{filter.key}">
+            {filter.label ?? filter.placeholder}
+          </label>
           <input
             type="search"
             id="filter-bar-search-{filter.key}"
@@ -204,7 +214,6 @@
             placeholder={filter.placeholder}
             value={searchValues[filter.key] ?? ''}
             oninput={(e) => handleSearchInput(filter, (e.target as HTMLInputElement).value)}
-            aria-label={filter.placeholder}
           />
           {#if searchValues[filter.key]}
             <button
@@ -259,7 +268,7 @@
     gap: var(--space-2);
   }
 
-  .filter-bar__pills--connected {
+  .filter-bar__pills[data-variant='connected'] {
     gap: var(--space-0);
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-md);
@@ -279,7 +288,7 @@
       color var(--duration-fast) var(--ease-default);
   }
 
-  .filter-bar__pills:not(.filter-bar__pills--connected) .filter-bar__pill {
+  .filter-bar__pills[data-variant='separated'] .filter-bar__pill {
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-full);
   }
@@ -288,12 +297,12 @@
     background: var(--color-surface-secondary);
   }
 
-  .filter-bar__pill--active {
+  .filter-bar__pill[data-active='true'] {
     background: var(--color-interactive);
     color: var(--color-text-on-brand);
   }
 
-  .filter-bar__pill--active:hover {
+  .filter-bar__pill[data-active='true']:hover {
     background: var(--color-interactive-hover);
   }
 
@@ -307,8 +316,23 @@
     flex-shrink: 0;
   }
 
+  /* Visually hidden label — keeps the input accessible without consuming
+     layout space. Pattern matches the platform-wide .sr-only utility. */
+  .filter-bar__sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
   /* Search */
   .filter-bar__search {
+    position: relative;
     display: flex;
     align-items: center;
     gap: var(--space-2);

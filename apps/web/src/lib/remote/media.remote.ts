@@ -83,31 +83,6 @@ export const createMedia = command(createMediaSchema, async (data) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Upload Media File Command (fallback for local dev without presigned URLs)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const uploadMediaSchema = z.object({
-  mediaId: z.string().uuid(),
-  file: z.instanceof(File),
-});
-
-/**
- * Upload a media file to R2 via the content-api worker.
- *
- * Used as a fallback when presigned URLs are unavailable (local dev).
- * In production, the client PUTs directly to the presigned R2 URL instead.
- */
-export const uploadMedia = command(
-  uploadMediaSchema,
-  async ({ mediaId, file }) => {
-    const { platform, cookies } = getRequestEvent();
-    const api = createServerApi(platform, cookies);
-
-    return api.media.upload(mediaId, file);
-  }
-);
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Update Media Command
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -103,4 +103,8 @@
     background-color: var(--color-surface-secondary);
   }
 
+  .back-link:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+  }
 </style>

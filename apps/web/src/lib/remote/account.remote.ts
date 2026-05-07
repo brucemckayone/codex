@@ -9,7 +9,6 @@
  * - Backend: workers/identity-api/src/routes/users.ts
  */
 
-import { uuidSchema } from '@codex/validation';
 import { invalid, isRedirect, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
@@ -316,23 +315,6 @@ const getNotificationPreferences = query(async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Purchase History Query
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Purchase history query schema
- *
- * Validates parameters for fetching user's purchase history.
- * Extends standard pagination with optional status and contentId filters.
- */
-const purchaseHistoryQuerySchema = z.object({
-  page: z.coerce.number().min(1).optional().default(1),
-  limit: z.coerce.number().min(1).max(100).optional().default(20),
-  status: z.enum(['pending', 'completed', 'refunded', 'failed']).optional(),
-  contentId: uuidSchema.optional(),
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Portal Session Form
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -387,25 +369,3 @@ export const openBillingPortal = command(billingPortalSchema, async (input) => {
   const api = createServerApi(platform, cookies);
   return api.checkout.createPortalSession({ returnUrl: input.returnUrl });
 });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Purchase History Query
-// ─────────────────────────────────────────────────────────────────────────────
-
-export const getPurchaseHistory = query(
-  purchaseHistoryQuerySchema,
-  async (params) => {
-    const { platform, cookies } = getRequestEvent();
-    const api = createServerApi(platform, cookies);
-
-    const searchParams = new URLSearchParams();
-    searchParams.set('page', String(params.page));
-    searchParams.set('limit', String(params.limit));
-    if (params.status) searchParams.set('status', params.status);
-    if (params.contentId) searchParams.set('contentId', params.contentId);
-
-    return api.account.getPurchaseHistory(
-      searchParams.toString() ? searchParams : undefined
-    );
-  }
-);

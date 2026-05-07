@@ -104,6 +104,11 @@
     background: var(--color-surface-secondary);
   }
 
+  .presets-level__card:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+  }
+
   .presets-level__swatches {
     display: flex;
     gap: var(--space-1);

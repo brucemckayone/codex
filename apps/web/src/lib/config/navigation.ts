@@ -5,7 +5,7 @@
  * are defined here as the single source of truth.
  */
 
-export interface NavLink {
+interface NavLink {
   href: string;
   label: string;
 }
