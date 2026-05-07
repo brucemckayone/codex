@@ -285,7 +285,7 @@ interface SubscriptionServiceConfig extends ServiceConfig {
  * into this slot. Returns `void` — failures are the mailer's concern
  * (notifications-api audit log on the remote side).
  */
-export type TierPriceChangeMailer = (params: {
+type TierPriceChangeMailer = (params: {
   to: string;
   toName?: string;
   templateName: 'subscription-tier-price-change';

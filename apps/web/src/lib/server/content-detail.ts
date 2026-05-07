@@ -15,11 +15,6 @@ import type { SubscriptionContext, SubscriptionTier } from '$lib/types';
 import { createServerApi } from './api';
 import { ApiError } from './errors';
 
-// Re-export the canonical type so existing importers of
-// `SubscriptionContext` from this module keep working unchanged
-// (Codex-lqvw4.16 — type moved to `$lib/types` to be client-safe).
-export type { SubscriptionContext } from '$lib/types';
-
 /**
  * Revocation reasons surfaced from `AccessDeniedError` when a previously-
  * authorised user lost access (subscription cancelled, payment failed,

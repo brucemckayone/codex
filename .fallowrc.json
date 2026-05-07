@@ -116,18 +116,31 @@
       "exports": ["*"]
     },
     {
-      "comment": "Public API surface of @codex/worker-utils. binaryUploadProcedure is consumed by workers/content-api/src/routes/media.ts via the package barrel; fallow can't trace through `export *` + dual-barrel re-export chain (Codex-t22xm).",
-      "file": "packages/worker-utils/src/procedure/binary-upload-procedure.ts",
-      "exports": ["binaryUploadProcedure"]
+      "file": "apps/web/src/lib/components/ui/ShaderHero/webgl-utils.ts",
+      "exports": ["FBO"]
     },
     {
-      "comment": "Public API surface of @codex/worker-utils. multipartProcedure is consumed by content-api, identity-api, organization-api workers; the 3 error classes are part of the public error vocabulary and re-exported as types from the package barrel (Codex-t22xm).",
+      "file": "packages/cache/src/helpers/invalidate.ts",
+      "exports": ["InvalidationLogger"]
+    },
+    {
+      "file": "packages/worker-utils/src/procedure/binary-upload-procedure.ts",
+      "exports": [
+        "BinaryFileConfig",
+        "ValidatedBinaryFile",
+        "BinaryUploadContext",
+        "BinaryUploadProcedureConfig"
+      ]
+    },
+    {
       "file": "packages/worker-utils/src/procedure/multipart-procedure.ts",
       "exports": [
-        "multipartProcedure",
-        "FileTooLargeError",
-        "InvalidFileTypeError",
-        "MissingFileError"
+        "FileFieldConfig",
+        "FileSchema",
+        "ValidatedFile",
+        "InferFiles",
+        "MultipartProcedureContext",
+        "MultipartProcedureConfig"
       ]
     }
   ],
