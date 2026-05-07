@@ -367,7 +367,7 @@
 
   .search-clear:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 1px;
+    outline-offset: var(--focus-offset);
   }
 
   /* ── Actions ────────────────────────────────────────────── */

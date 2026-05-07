@@ -263,7 +263,7 @@
 
   .field-input:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: calc(-1 * var(--border-width));
+    outline-offset: var(--focus-offset-inset);
     border-color: var(--color-border-focus);
   }
 
@@ -290,7 +290,7 @@
 
   .field-textarea:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: calc(-1 * var(--border-width));
+    outline-offset: var(--focus-offset-inset);
     border-color: var(--color-border-focus);
   }
 

@@ -93,7 +93,7 @@
 
   .danger-trigger:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: -2px;
+    outline-offset: -2px; /* deeper inset for full-width danger trigger (large padded button) */
     border-radius: var(--radius-lg);
   }
 

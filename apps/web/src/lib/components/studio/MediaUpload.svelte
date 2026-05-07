@@ -741,7 +741,7 @@
   .rejection-dismiss:hover { background-color: var(--color-error-100); }
   .rejection-dismiss:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 1px;
+    outline-offset: var(--focus-offset);
   }
 
   /* ── Queue ────────────────────────────────────────────── */
@@ -853,7 +853,7 @@
 
   .queue-item-remove:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 1px;
+    outline-offset: var(--focus-offset);
   }
 
   .progress-bar {

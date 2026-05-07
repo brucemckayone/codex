@@ -197,7 +197,7 @@
 
   .slab-thumb:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 3px;
+    outline-offset: 3px; /* recessed/looser focus ring for featured slab thumbnail (visual breathing room around hero asset) */
   }
 
   @media (prefers-reduced-motion: no-preference) {
