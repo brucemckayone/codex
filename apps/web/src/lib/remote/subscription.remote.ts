@@ -12,7 +12,32 @@
 import { isRedirect, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
+import { ApiError } from '$lib/api/errors';
 import { createServerApi } from '$lib/server/api';
+
+type SubscriptionCommandFailure = {
+  success: false;
+  code: string | undefined;
+  message: string;
+  status: number;
+};
+
+function toCommandFailure(error: unknown): SubscriptionCommandFailure {
+  if (ApiError.isApiError(error)) {
+    return {
+      success: false,
+      code: error.code,
+      message: error.message,
+      status: error.status,
+    };
+  }
+  return {
+    success: false,
+    code: undefined,
+    message: error instanceof Error ? error.message : 'Unexpected error',
+    status: 500,
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tier Queries (public)
@@ -137,22 +162,26 @@ export const createSubscriptionCheckoutSession = command(
     const { platform, cookies, url } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
-    const result = await api.subscription.checkout({
-      organizationId,
-      tierId,
-      billingInterval,
-      // Stripe expands `{CHECKOUT_SESSION_ID}` to the real session id on
-      // redirect. The /subscription/success page polls the verify endpoint
-      // until the `checkout.session.completed` webhook has landed, then
-      // hands the user off to /library — otherwise they'd land on /library
-      // before the subscription row exists and see an empty page.
-      successUrl:
-        successUrl ||
-        `${url.origin}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl: cancelUrl || `${url.origin}/pricing`,
-    });
+    try {
+      const result = await api.subscription.checkout({
+        organizationId,
+        tierId,
+        billingInterval,
+        // Stripe expands `{CHECKOUT_SESSION_ID}` to the real session id on
+        // redirect. The /subscription/success page polls the verify endpoint
+        // until the `checkout.session.completed` webhook has landed, then
+        // hands the user off to /library — otherwise they'd land on /library
+        // before the subscription row exists and see an empty page.
+        successUrl:
+          successUrl ||
+          `${url.origin}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancelUrl: cancelUrl || `${url.origin}/pricing`,
+      });
 
-    return { sessionUrl: result.sessionUrl };
+      return { success: true as const, sessionUrl: result.sessionUrl };
+    } catch (error) {
+      return toCommandFailure(error);
+    }
   }
 );
 
@@ -164,7 +193,32 @@ const changeTierCommandSchema = z.object({
   organizationId: z.string().uuid(),
   newTierId: z.string().uuid(),
   billingInterval: z.enum(['month', 'year']),
+  /**
+   * Unix timestamp (seconds) — pass through from `previewSubscriptionTierChange()`
+   * so the commit-time charge matches the dialog preview exactly.
+   * Omitted by `previewSubscriptionTierChange` itself (preview computes its own).
+   */
+  prorationDate: z.number().int().positive().optional(),
 });
+
+/**
+ * Preview the proration a tier change would produce. Powers the confirmation
+ * dialog. The returned `prorationDate` MUST be threaded back into
+ * `changeSubscriptionTier()` so the commit-time charge matches the preview.
+ */
+export const previewSubscriptionTierChange = command(
+  changeTierCommandSchema,
+  async (input) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    try {
+      const result = await api.subscription.previewTierChange(input);
+      return { success: true as const, data: result };
+    } catch (error) {
+      return toCommandFailure(error);
+    }
+  }
+);
 
 /**
  * Change (upgrade/downgrade) subscription tier.
@@ -174,7 +228,12 @@ export const changeSubscriptionTier = command(
   async (input) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.subscription.changeTier(input);
+    try {
+      const result = await api.subscription.changeTier(input);
+      return { success: true as const, data: result };
+    } catch (error) {
+      return toCommandFailure(error);
+    }
   }
 );
 
@@ -201,7 +260,12 @@ export const cancelSubscription = command(
   async (input) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.subscription.cancel(input);
+    try {
+      const result = await api.subscription.cancel(input);
+      return { success: true as const, data: result };
+    } catch (error) {
+      return toCommandFailure(error);
+    }
   }
 );
 
@@ -217,7 +281,12 @@ export const reactivateSubscription = command(
   async (input) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.subscription.reactivate(input);
+    try {
+      const result = await api.subscription.reactivate(input);
+      return { success: true as const, data: result };
+    } catch (error) {
+      return toCommandFailure(error);
+    }
   }
 );
 
@@ -237,7 +306,12 @@ export const resumeSubscription = command(
   async (input) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.subscription.resume(input);
+    try {
+      const result = await api.subscription.resume(input);
+      return { success: true as const, data: result };
+    } catch (error) {
+      return toCommandFailure(error);
+    }
   }
 );
 

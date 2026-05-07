@@ -11,6 +11,7 @@ const __dirname = path.dirname(__filename);
 config({ path: path.resolve(__dirname, '../../../.env.dev') });
 
 import { dbWs } from '../src';
+import { flushDevKv } from './seed/cache-flush';
 import { seedCommerce } from './seed/commerce';
 import { SEED_PASSWORD } from './seed/constants';
 import { seedContent } from './seed/content';
@@ -91,6 +92,11 @@ async function seedData() {
   const tableList = TABLES_TO_TRUNCATE.join(', ');
   await dbWs.execute(sql.raw(`TRUNCATE TABLE ${tableList} CASCADE`));
   console.log(`  Truncated ${TABLES_TO_TRUNCATE.length} tables`);
+
+  // Flush dev KV so the storefront doesn't keep serving cached tier IDs,
+  // org info, or sessions tied to users that no longer exist. Best-effort:
+  // logs and continues if the worker isn't running.
+  await flushDevKv();
 
   // Step 2: Re-seed email templates
   console.log('\n  [2/5] Seeding email templates...');

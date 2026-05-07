@@ -136,8 +136,12 @@
       }
       inFlight = true;
       try {
-        await reactivateSubscription({ organizationId });
-        onreactivated?.();
+        const result = await reactivateSubscription({ organizationId });
+        if (!result.success) {
+          toast.error('Reactivate failed', result.message || undefined);
+        } else {
+          onreactivated?.();
+        }
       } catch (err) {
         toast.error(
           'Reactivate failed',

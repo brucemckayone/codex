@@ -119,6 +119,13 @@ export const changeTierSchema = z.object({
   organizationId: uuidSchema,
   newTierId: uuidSchema,
   billingInterval: billingIntervalEnum,
+  /**
+   * Unix timestamp (seconds) returned by `previewTierChange()`. Threading
+   * it back to `changeTier()` guarantees the commit-time charge matches
+   * the dialog preview to the penny — Stripe re-runs the proration
+   * calculation against `Date.now()` if omitted.
+   */
+  prorationDate: z.number().int().positive().optional(),
 });
 
 export const cancelSubscriptionSchema = z.object({
