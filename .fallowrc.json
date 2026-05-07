@@ -79,6 +79,18 @@
       "exports": ["TierServiceConfig"]
     }
   ],
+  "ignoreDependencies": [
+    "vite-plugin-dts",
+    "@inlang/paraglide-js",
+    "@storybook/addon-a11y",
+    "@storybook/addon-essentials",
+    "@storybook/addon-interactions",
+    "@storybook/test-runner",
+    "@tiptap/pm",
+    "@rollup/rollup-darwin-arm64",
+    "tslib",
+    "@better-auth/cli"
+  ],
   "dynamicallyLoaded": [
     "**/*.stories.svelte",
     "**/*.stories.ts",
