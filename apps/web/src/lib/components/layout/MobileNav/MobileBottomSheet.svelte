@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { LayoutUser, LayoutOrganization } from '$lib/types';
 	import { page } from '$app/state';
+	import { browser } from '$app/environment';
 	import { fade, fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { buildPlatformUrl } from '$lib/utils/subdomain';
@@ -28,6 +29,21 @@
 	}
 
 	let { open = $bindable(false), variant, user, org }: Props = $props();
+
+	// ── Reduced-motion preference (WCAG 2.3.3) ────────────────
+	// Svelte JS transitions bypass CSS media queries, so we must gate
+	// the fly translate reactively. Fade is kept (opacity is not motion).
+	let prefersReducedMotion = $state(false);
+	$effect(() => {
+		if (!browser) return;
+		const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+		prefersReducedMotion = mq.matches;
+		const handler = (e: MediaQueryListEvent) => {
+			prefersReducedMotion = e.matches;
+		};
+		mq.addEventListener('change', handler);
+		return () => mq.removeEventListener('change', handler);
+	});
 
 	const studioAccess = useStudioAccess(() => ({ user, url: page.url }));
 
@@ -98,7 +114,11 @@
 		role="dialog"
 		tabindex="-1"
 		aria-label="More options"
-		transition:fly={{ y: 400, duration: 300, easing: cubicOut }}
+		transition:fly={{
+			y: prefersReducedMotion ? 0 : 400,
+			duration: prefersReducedMotion ? 0 : 300,
+			easing: cubicOut,
+		}}
 		ontouchstart={handleTouchStart}
 		ontouchmove={handleTouchMove}
 		ontouchend={handleTouchEnd}

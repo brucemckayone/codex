@@ -435,12 +435,9 @@ describe('default constants', () => {
       introVideoUrl: null,
       tokenOverrides: null,
       darkModeOverrides: null,
-      textColorHex: null,
-      shadowScale: null,
-      shadowColor: null,
-      textScale: null,
-      headingWeight: null,
-      bodyWeight: null,
+      darkTokenOverrides: null,
+      heroLayout: 'default',
+      pricingFaq: null,
     });
     expect(brandingSettingsSchema.parse(DEFAULT_BRANDING)).toEqual(
       DEFAULT_BRANDING

@@ -242,18 +242,19 @@ export async function seedOrganizations(db: typeof DbClient) {
       organizationId: ORGS.bones.id,
       primaryColorHex: ORGS.bones.primaryColor,
       backgroundColorHex: '#F3F0E7',
-      textColorHex: '#A62B0C',
       fontHeading: 'Cardo',
       fontBody: null,
       radiusValue: '0.33',
       densityValue: '1',
-      headingWeight: '400',
-      bodyWeight: '400',
-      shadowScale: '0.5',
       logoUrl: `http://localhost:4100/${getOrgLogoKey(ORGS.bones.id, 'md')}`,
+      // Fine-tune fields (heading colour, weights, shadow scale, etc.) live as
+      // keys inside tokenOverrides JSON since Codex-g49b4 dropped the
+      // broken-out columns.
       tokenOverrides: JSON.stringify({
+        'heading-color': '#A62B0C',
         'heading-weight': '400',
         'body-weight': '400',
+        'shadow-scale': '0.5',
       }),
       createdAt: now,
       updatedAt: now,

@@ -35,6 +35,7 @@
 
   // Always use server load data — it's fetched by slug for this specific page.
   // Collection state.get() returns wrong items after hydration from explore/browse.
+  // Tracked: Codex-s2k54.
   const content = $derived(data.content);
 
   let purchasing = $state(false);

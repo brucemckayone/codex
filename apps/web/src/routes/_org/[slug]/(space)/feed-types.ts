@@ -25,7 +25,7 @@ export type ContentItem = NonNullable<
  *   editorial  — 60/40 split: lead article spread + vertical list (articles)
  *   bento      — varied-tile grid with 2 hero + 4 minor items (Discover Mix)
  */
-export type FeedLayout =
+type FeedLayout =
   | 'spotlight'
   | 'spread'
   | 'carousel'

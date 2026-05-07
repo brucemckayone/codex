@@ -46,12 +46,14 @@
     try {
       const overrides = payload.tokenOverrides ?? {};
       const hasOverrides = Object.keys(overrides).length > 0;
+      // Codex-wwedk: dark tokenOverrides serialise alongside the light JSON.
+      // null/empty maps send '' so the worker clears the column.
+      const darkOverrides = payload.darkTokenOverrides ?? null;
+      const hasDarkOverrides = darkOverrides && Object.keys(darkOverrides).length > 0;
 
-      // tokenOverrides JSON is the single source of truth for fine-tune fields.
-      // The broken-out columns (textColorHex, shadowScale, etc.) still exist on
-      // the DB row and are read by the layout for backward compatibility with
-      // pre-JSON rows, but we no longer double-write them here — the JSON blob
-      // is authoritative for new saves (iter-04 Codex-2nl7).
+      // tokenOverrides JSON is the sole source of truth for fine-tune fields
+      // (text/heading/body weight, shadow scale/color, heading colour, etc.).
+      // The previously broken-out columns were dropped in Codex-g49b4.
       await updateBrandingCommand({
         orgId: brandEditor.orgId,
         primaryColorHex: payload.primaryColor,
@@ -64,6 +66,7 @@
         densityValue: payload.density,
         tokenOverrides: hasOverrides ? JSON.stringify(overrides) : '',
         darkModeOverrides: payload.darkOverrides ? JSON.stringify(payload.darkOverrides) : '',
+        darkTokenOverrides: hasDarkOverrides ? JSON.stringify(darkOverrides) : '',
         heroLayout: payload.heroLayout as HeroLayout,
       });
       brandEditor.markSaved();

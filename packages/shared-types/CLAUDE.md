@@ -30,7 +30,6 @@ type Bindings = {
   AUTH_SESSION_KV?: KVNamespace;
   RATE_LIMIT_KV?: KVNamespace;
   CACHE_KV?: KVNamespace;
-  BRAND_KV?: KVNamespace;
   MEDIA_BUCKET?: R2Bucket;
   ASSETS_BUCKET?: R2Bucket;
   STRIPE_SECRET_KEY?: string;

@@ -22,7 +22,7 @@
   import CommandPaletteSearch from '$lib/components/search/CommandPaletteSearch.svelte';
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
   import HealthBanner from '$lib/components/subscription/HealthBanner.svelte';
-  import { brandEditor, injectTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars } from '$lib/brand-editor';
+  import { brandEditor, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
   import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection, loadSubscriptionFromServer, subscriptionCollection } from '$lib/collections';
@@ -122,12 +122,12 @@
     return typeof preset === 'string' && preset.length > 0 && preset !== 'none';
   });
 
-  // Fine-tune branding fields — injected as CSS vars alongside core branding
-  const brandShadowScale = $derived(data.org?.brandFineTune?.shadowScale ?? undefined);
-  const brandShadowColor = $derived(data.org?.brandFineTune?.shadowColor ?? undefined);
-  const brandTextScale = $derived(data.org?.brandFineTune?.textScale ?? undefined);
-  const brandHeadingWeight = $derived(data.org?.brandFineTune?.headingWeight ?? undefined);
-  const brandBodyWeight = $derived(data.org?.brandFineTune?.bodyWeight ?? undefined);
+  // Fine-tune branding fields — text/heading/body weight, shadow scale/color,
+  // heading colour, etc. are now read exclusively from the tokenOverrides JSON
+  // below and injected via injectTokenOverrides()/serverTokenOverrideStyle.
+  // The previously broken-out columns (and corresponding $derived bindings to
+  // --brand-shadow-scale / --brand-text-scale / --brand-heading-weight /
+  // --brand-body-weight / --brand-shadow-color) were dropped in Codex-g49b4.
 
   // Token overrides from server — includes shader-* keys, color overrides, etc.
   // Parsed from the JSON string stored in branding_settings.tokenOverrides.
@@ -144,11 +144,29 @@
     }
   });
 
+  // Codex-wwedk: parallel parse for the dark-theme tokenOverrides JSON.
+  // Same shape as serverTokenOverrides, but emitted as `--brand-{key}-dark`
+  // / `--color-{key}-dark` so org-brand.css's dark gate can pick them up.
+  const serverDarkTokenOverrides = $derived.by(() => {
+    const raw = data.org?.brandFineTune?.darkTokenOverrides;
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, string | null>;
+      return Object.keys(parsed).length > 0 ? parsed : null;
+    } catch {
+      return null;
+    }
+  });
+
   // Server-render tokenOverrides as an inline style attribute on .org-layout
   // so shader-preset, shader-intensity, player/card/glass CSS vars etc. are
   // present in the initial SSR HTML — ShaderHero reads these via
   // getComputedStyle on mount and would otherwise initialise with the default
   // preset and flicker (fix for Codex-wcwpw).
+  //
+  // Codex-wwedk: also emits `${prop}-dark` variants for each darkTokenOverrides
+  // entry so dark-mode visitors get the correct values on first paint without
+  // a JS round-trip. CSS gates in org-brand.css read both via fallback chains.
   //
   // Gated on brandEditor.isClosed to avoid fighting the editor's imperative
   // injectBrandVars / removeOverrideVars calls during live preview. When the
@@ -156,9 +174,12 @@
   // below idempotently re-injects to match.
   const serverTokenOverrideStyle = $derived.by(() => {
     if (!brandEditor.isClosed) return undefined;
-    const overrides = serverTokenOverrides;
-    if (!overrides) return undefined;
-    const vars = tokenOverridesToCssVars(overrides);
+    const lightOverrides = serverTokenOverrides;
+    const darkOverrides = serverDarkTokenOverrides;
+    if (!lightOverrides && !darkOverrides) return undefined;
+    const vars: Record<string, string> = {};
+    if (lightOverrides) Object.assign(vars, tokenOverridesToCssVars(lightOverrides));
+    if (darkOverrides) Object.assign(vars, darkTokenOverridesToCssVars(darkOverrides));
     const entries = Object.entries(vars);
     if (entries.length === 0) return undefined;
     return entries.map(([prop, value]) => `${prop}: ${value}`).join('; ');
@@ -173,6 +194,7 @@
   $effect(() => {
     if (!browser) return;
     const overrides = serverTokenOverrides;
+    const darkOverrides = serverDarkTokenOverrides;
     const editorOpen = !brandEditor.isClosed;
 
     const el = document.querySelector('.org-layout') as HTMLElement | null;
@@ -180,12 +202,11 @@
 
     if (editorOpen) return; // Brand editor manages its own CSS injection
 
-    if (overrides) {
-      clearTokenOverrides(el);
-      injectTokenOverrides(el, overrides);
-    } else {
-      clearTokenOverrides(el);
-    }
+    // clearTokenOverrides drops every --brand-* / --color-* (including
+    // -dark suffixed) override, so re-injection below restores both buckets.
+    clearTokenOverrides(el);
+    if (overrides) injectTokenOverrides(el, overrides);
+    if (darkOverrides) injectDarkTokenOverrides(el, darkOverrides);
   });
 
   // Build Google Fonts URL from selected font families
@@ -320,23 +341,33 @@
   $effect(() => {
     if (!browser) return;
     if (showBrandEditor && brandEditor.isClosed && data.org) {
-      // Reconstruct saved tokenOverrides from fine-tune fields
+      // Reconstruct saved tokenOverrides from server JSON. Codex-g49b4 dropped
+      // the per-field columns (shadow_scale, shadow_color, text_scale,
+      // heading_weight, body_weight, text_color_hex); their values are now
+      // backfilled into tokenOverrides JSON, so this single parse is enough.
       const ft = data.org.brandFineTune;
       const savedOverrides: Record<string, string> = {};
       if (ft?.tokenOverrides) {
         try { Object.assign(savedOverrides, JSON.parse(ft.tokenOverrides)); } catch { /* ignore parse errors */ }
       }
-      // Also populate from individual fields (they may exist even without tokenOverrides JSON)
-      if (ft?.shadowScale) savedOverrides['shadow-scale'] = ft.shadowScale;
-      if (ft?.shadowColor) savedOverrides['shadow-color'] = ft.shadowColor;
-      if (ft?.textScale) savedOverrides['text-scale'] = ft.textScale;
-      if (ft?.headingWeight) savedOverrides['heading-weight'] = ft.headingWeight;
-      if (ft?.bodyWeight) savedOverrides['body-weight'] = ft.bodyWeight;
 
       // Parse saved dark mode overrides
       let savedDarkOverrides = null;
       if (ft?.darkModeOverrides) {
         try { savedDarkOverrides = JSON.parse(ft.darkModeOverrides); } catch { /* ignore */ }
+      }
+
+      // Codex-wwedk: parse the parallel darkTokenOverrides JSON. Null when
+      // unset so the editor's getThemeTokenOverride falls back to the light
+      // value — matches the visitor-facing CSS fallback chain.
+      let savedDarkTokenOverrides: Record<string, string | null> | null = null;
+      if (ft?.darkTokenOverrides) {
+        try {
+          const parsed = JSON.parse(ft.darkTokenOverrides) as Record<string, string | null>;
+          if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+            savedDarkTokenOverrides = parsed;
+          }
+        } catch { /* ignore parse errors */ }
       }
 
       const saved: BrandEditorState = {
@@ -351,6 +382,7 @@
         logoUrl: data.org.logoUrl ?? null,
         tokenOverrides: Object.keys(savedOverrides).length > 0 ? savedOverrides : {},
         darkOverrides: savedDarkOverrides,
+        darkTokenOverrides: savedDarkTokenOverrides,
         heroLayout: data.org?.heroLayout ?? 'default',
       };
       brandEditor.open(data.org.id, saved);
@@ -437,11 +469,6 @@
   style:--brand-radius={brandRadius}
   style:--brand-font-body={brandFontBody ? `'${brandFontBody}', var(--font-sans)` : undefined}
   style:--brand-font-heading={brandFontHeading ? `'${brandFontHeading}', var(--font-sans)` : undefined}
-  style:--brand-shadow-scale={brandShadowScale}
-  style:--brand-shadow-color={brandShadowColor}
-  style:--brand-text-scale={brandTextScale}
-  style:--brand-heading-weight={brandHeadingWeight}
-  style:--brand-body-weight={brandBodyWeight}
   style:--brand-shader-logo-url={brandLogoUrl}
   style={serverTokenOverrideStyle}
 >

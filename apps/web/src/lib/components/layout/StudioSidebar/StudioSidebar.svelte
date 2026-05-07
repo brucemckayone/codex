@@ -398,10 +398,11 @@
      Rail shell
      ──────────────────────────────────────────────────────────────── */
   .studio-rail {
-    /* Width tokens are component-local because no other sidebar shares
-       this exact footprint — matching SidebarRail's 64/260 split. */
-    --rail-width-collapsed: var(--space-16);
-    --rail-width-expanded: 260px /* px */;
+    /* Width matches SidebarRail (collapsed/expanded tokens) so the
+       view-transition morph between public rail and studio rail keeps
+       the same footprint. Tokens defined in tokens/layout.css. */
+    --rail-width-collapsed: var(--app-sidebar-width);
+    --rail-width-expanded: var(--app-sidebar-width-expanded);
     --rail-glass-bg: color-mix(in oklch, var(--color-surface) 85%, transparent);
     --rail-glass-border: color-mix(in oklch, var(--color-border) 60%, transparent);
 

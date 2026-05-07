@@ -39,6 +39,7 @@
   // Previously used contentCollection?.state.get(data.content.id) as an optimistic
   // lookup, but TanStack DB's internal state.get() returns wrong items after
   // collection hydration from explore, causing stale content on client-side navigation.
+  // Tracked: Codex-s2k54.
   const content = $derived(data.content);
 
   let purchasing = $state(false);

@@ -49,7 +49,6 @@ import {
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { updateBrandCache } from './settings';
 
 const app = new Hono<HonoEnv>();
 
@@ -73,11 +72,6 @@ app.post(
         ctx.input.body,
         ctx.user.id
       );
-
-      // Issue 4: Warm cache with default branding for new org
-      if (ctx.env.BRAND_KV) {
-        ctx.executionCtx.waitUntil(updateBrandCache(ctx.env, org.id, ctx.obs));
-      }
 
       return org;
     },
@@ -245,11 +239,7 @@ async function fetchPublicOrgInfo(
     introVideoUrl: string | null;
     tokenOverrides: string | null;
     darkModeOverrides: string | null;
-    shadowScale: string | null;
-    shadowColor: string | null;
-    textScale: string | null;
-    headingWeight: string | null;
-    bodyWeight: string | null;
+    darkTokenOverrides: string | null;
     heroLayout: string;
   };
 
@@ -266,11 +256,7 @@ async function fetchPublicOrgInfo(
     introVideoUrl: null,
     tokenOverrides: null,
     darkModeOverrides: null,
-    shadowScale: null,
-    shadowColor: null,
-    textScale: null,
-    headingWeight: null,
-    bodyWeight: null,
+    darkTokenOverrides: null,
     heroLayout: 'default',
   };
 
@@ -290,11 +276,7 @@ async function fetchPublicOrgInfo(
       introVideoUrl: b.introVideoUrl ?? null,
       tokenOverrides: b.tokenOverrides ?? null,
       darkModeOverrides: b.darkModeOverrides ?? null,
-      shadowScale: b.shadowScale ?? null,
-      shadowColor: b.shadowColor ?? null,
-      textScale: b.textScale ?? null,
-      headingWeight: b.headingWeight ?? null,
-      bodyWeight: b.bodyWeight ?? null,
+      darkTokenOverrides: b.darkTokenOverrides ?? null,
       heroLayout: b.heroLayout ?? 'default',
     };
   }
@@ -326,13 +308,12 @@ async function fetchPublicOrgInfo(
     introVideoUrl: branding.introVideoUrl,
     heroLayout: branding.heroLayout,
     brandFineTune: {
+      // Fine-tune values (text/heading/body weight, shadow scale/color,
+      // heading colour, etc.) are stored as keys inside tokenOverrides JSON.
+      // The previously broken-out columns were dropped in Codex-g49b4.
       tokenOverrides: branding.tokenOverrides,
       darkModeOverrides: branding.darkModeOverrides,
-      shadowScale: branding.shadowScale,
-      shadowColor: branding.shadowColor,
-      textScale: branding.textScale,
-      headingWeight: branding.headingWeight,
-      bodyWeight: branding.bodyWeight,
+      darkTokenOverrides: branding.darkTokenOverrides,
     },
     enableSubscriptions,
   };
@@ -565,20 +546,6 @@ app.patch(
         ctx.input.body
       );
 
-      // Handle slug change: invalidate old cache, new cache warmed on first access
-      // FIX: Warm new cache immediately using updateBrandCache
-      if (ctx.env.BRAND_KV) {
-        if (oldSlug && updated.slug !== oldSlug) {
-          ctx.executionCtx.waitUntil(
-            ctx.env.BRAND_KV.delete(`brand:${oldSlug}`)
-          );
-        }
-        // Always refresh cache on update (in case slug changed OR other relevant fields)
-        ctx.executionCtx.waitUntil(
-          updateBrandCache(ctx.env, updated.id, ctx.obs)
-        );
-      }
-
       // Invalidate VersionedCache for public org info (keyed by slug)
       if (ctx.env.CACHE_KV) {
         const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
@@ -644,12 +611,9 @@ app.delete(
 
       await ctx.services.organization.delete(ctx.input.params.id);
 
-      // Invalidate brand cache and slug-keyed VersionedCache
+      // Invalidate slug-keyed VersionedCache for public org info
       if (org) {
         const invalidations: Promise<unknown>[] = [];
-        if (ctx.env.BRAND_KV) {
-          invalidations.push(ctx.env.BRAND_KV.delete(`brand:${org.slug}`));
-        }
         if (ctx.env.CACHE_KV) {
           const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
           invalidations.push(cache.invalidate(org.slug));

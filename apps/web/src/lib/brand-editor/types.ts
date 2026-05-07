@@ -34,12 +34,21 @@ export interface BrandEditorState {
   tokenOverrides: Record<string, string | null>;
   /** Dark theme color overrides. null = auto-derive from light values. */
   darkOverrides: Partial<ThemeColors> | null;
+  /**
+   * Codex-wwedk: dark-theme overrides for any tokenOverrides key.
+   * Parallel JSON to tokenOverrides. When editingTheme === 'dark', writes
+   * route here; reads fall back to tokenOverrides for keys not yet set.
+   */
+  darkTokenOverrides: Record<string, string | null> | null;
   /** Selected hero layout variant. */
   heroLayout: string;
 }
 
 /** The subset of BrandEditorState that gets saved to the API. */
-type BrandEditorPayload = Omit<BrandEditorState, 'tokenOverrides' | 'logoUrl'>;
+type BrandEditorPayload = Omit<
+  BrandEditorState,
+  'tokenOverrides' | 'darkTokenOverrides' | 'logoUrl'
+>;
 
 // ── Presets ───────────────────────────────────────────────────────────────
 
@@ -51,6 +60,11 @@ export interface BrandPreset {
   values: BrandEditorPayload;
   /** Optional token overrides bundled with the preset (hero, player, glass, cards, etc.) */
   tokenOverrides?: Record<string, string>;
+  /**
+   * Codex-wwedk: optional dark-theme token overrides (parallel to tokenOverrides).
+   * When the user applies the preset, light goes to tokenOverrides, dark goes here.
+   */
+  darkTokenOverrides?: Record<string, string>;
   /** Optional hero layout variant ('default' | 'centered' | 'logo-hero') */
   heroLayout?: string;
 }

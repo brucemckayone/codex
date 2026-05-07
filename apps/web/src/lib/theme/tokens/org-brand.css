@@ -270,3 +270,59 @@
   --color-surface-overlay: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0, (0.5 - l) * 2, 0.15) 0 0 / 0.75);
   --color-surface-variant: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.06) calc(c * 0.4) h);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * DARK MODE — Per-theme tokenOverrides (Codex-wwedk)
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * The brand editor stores parallel light/dark tokenOverrides JSON. The light
+ * value lands in `--brand-{key}` / `--color-{key}` (consumed everywhere); the
+ * dark value lands in `--brand-{key}-dark` / `--color-{key}-dark`.
+ *
+ * Two-layer redefinition under the dark gate:
+ *
+ * 1. Consumer-facing `--color-*` tokens are redefined to read the dark
+ *    variant first, falling back to the light variant when unset. This
+ *    handles the bulk of consumers (Spotlight player chrome, headings,
+ *    shadows, glass) without touching their CSS.
+ *
+ * 2. The raw `--brand-*` vars themselves are also rebound under dark for
+ *    consumers that read them directly via `getPropertyValue('--brand-*')`
+ *    (notably ShaderHero in shader-config.ts:786). The CSS fallback chain
+ *    `var(--brand-foo-dark, var(--brand-foo))` means an absent dark value
+ *    transparently inherits the light value.
+ *
+ * Shared keys (text-scale, weights, hero-hide-*, card hover scales, shadow
+ * scale, text-transform-label) are deliberately NOT redefined here — they
+ * are single-valued across themes per design doc §1.
+ */
+.dark [data-org-brand],
+[data-theme='dark'] [data-org-brand],
+[data-editing-theme='dark'][data-org-brand] {
+  /* Heading color — consumer reads --color-heading. */
+  --color-heading: var(--brand-heading-color-dark, var(--brand-heading-color, var(--color-text-primary)));
+
+  /* Glass tint — consumer reads --color-glass-tint. */
+  --color-glass-tint: var(--brand-glass-tint-dark, var(--brand-glass-tint, white));
+
+  /* Player chrome — consumer-facing --color-player-* vars. */
+  --color-player-text: var(--brand-player-text-dark, var(--brand-player-text, white));
+  --color-player-text-secondary: var(--brand-player-text-secondary-dark, var(--brand-player-text-secondary, hsl(0 0% 100% / var(--opacity-80, 0.8))));
+  --color-player-text-muted: var(--brand-player-text-muted-dark, var(--brand-player-text-muted, hsl(0 0% 100% / var(--opacity-60, 0.6))));
+  --color-player-surface: var(--brand-player-surface-dark, var(--brand-player-surface, hsl(0 0% 100% / var(--opacity-10, 0.1))));
+  --color-player-surface-hover: var(--brand-player-surface-hover-dark, var(--brand-player-surface-hover, hsl(0 0% 100% / var(--opacity-20, 0.2))));
+  --color-player-surface-active: var(--brand-player-surface-active-dark, var(--brand-player-surface-active, hsl(0 0% 100% / var(--opacity-30, 0.3))));
+  --color-player-border: var(--brand-player-border-dark, var(--brand-player-border, hsl(0 0% 100% / var(--opacity-20, 0.2))));
+  --color-player-overlay: var(--brand-player-overlay-dark, var(--brand-player-overlay, hsl(0 0% 0% / var(--opacity-60, 0.6))));
+  --color-player-overlay-heavy: var(--brand-player-overlay-heavy-dark, var(--brand-player-overlay-heavy, hsl(0 0% 0% / var(--opacity-80, 0.8))));
+
+  /* Shadow color — consumer reads --shadow-color. */
+  --shadow-color: var(--brand-shadow-color-dark, var(--brand-shadow-color, 220 3% 15%));
+
+  /* Shader preset + intensity — ShaderHero reads --brand-shader-preset and
+     --brand-shader-intensity directly via getPropertyValue (shader-config.ts).
+     Rebind the raw vars under the dark gate so a dark-only shader (e.g. ink)
+     activates without touching ShaderHero. */
+  --brand-shader-preset: var(--brand-shader-preset-dark, var(--brand-shader-preset));
+  --brand-shader-intensity: var(--brand-shader-intensity-dark, var(--brand-shader-intensity));
+}

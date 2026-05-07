@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
+	import { page } from '$app/state';
 	import { fade, fly } from 'svelte/transition';
 	import { SearchIcon, XIcon } from '$lib/components/ui/Icon';
 	import { Spinner } from '$lib/components/ui/Feedback/Spinner';
+	import { buildContentUrl } from '$lib/utils/subdomain';
 	import * as m from '$paraglide/messages';
 
 	interface Props {
@@ -48,6 +50,21 @@
 	let recentSearches = $state<string[]>(
 		browser ? JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') : []
 	);
+
+	// ── Reduced-motion preference (WCAG 2.3.3) ────────────────
+	// Svelte JS transitions bypass CSS media queries — gate fly translate
+	// reactively so the panel slides only when the user opts in to motion.
+	let prefersReducedMotion = $state(false);
+	$effect(() => {
+		if (!browser) return;
+		const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+		prefersReducedMotion = mq.matches;
+		const handler = (e: MediaQueryListEvent) => {
+			prefersReducedMotion = e.matches;
+		};
+		mq.addEventListener('change', handler);
+		return () => mq.removeEventListener('change', handler);
+	});
 
 	// ── Derived ───────────────────────────────────────────────
 	const searchUrl = $derived(scope === 'org' ? '/explore' : '/discover');
@@ -122,8 +139,17 @@
 		} else if (item.type === 'content') {
 			saveRecent(query.trim());
 			open = false;
-			const slug = item.item.slug ?? item.item.id;
-			goto(`/content/${slug}`);
+			// buildContentUrl handles cross-org subdomain hops — when the
+			// content lives on a different org than the current host, it
+			// returns a full URL via buildOrgUrl so goto navigates correctly
+			// instead of 404ing on `/content/{slug}` of the wrong subdomain.
+			goto(
+				buildContentUrl(page.url, {
+					slug: item.item.slug,
+					id: item.item.id,
+					organizationSlug: item.item.organizationSlug,
+				})
+			);
 		} else if (item.type === 'creator') {
 			saveRecent(query.trim());
 			open = false;
@@ -204,7 +230,7 @@
 		onclick={() => {
 			open = false;
 		}}
-		transition:fade={{ duration: 150 }}
+		transition:fade={{ duration: prefersReducedMotion ? 0 : 150 }}
 	></div>
 
 	<!-- Panel -->
@@ -212,7 +238,10 @@
 		class="palette"
 		role="dialog"
 		aria-label="Search"
-		transition:fly={{ y: -20, duration: 200 }}
+		transition:fly={{
+			y: prefersReducedMotion ? 0 : -20,
+			duration: prefersReducedMotion ? 0 : 200,
+		}}
 	>
 		<!-- Input -->
 		<div class="palette__input-wrapper">

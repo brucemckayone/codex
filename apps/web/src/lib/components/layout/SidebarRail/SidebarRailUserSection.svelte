@@ -182,6 +182,13 @@
 		transform: translateX(0);
 	}
 
+	@media (prefers-reduced-motion: reduce) {
+		.user-trigger__details {
+			transition: opacity var(--duration-fast) var(--ease-default);
+			transform: none;
+		}
+	}
+
 	.user-trigger__name {
 		font-size: var(--text-sm);
 		font-weight: var(--font-medium);
@@ -325,6 +332,13 @@
 	:global([data-expanded='true']) .sign-in-link__label {
 		opacity: 1;
 		transform: translateX(0);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.sign-in-link__label {
+			transition: opacity var(--duration-fast) var(--ease-default);
+			transform: none;
+		}
 	}
 
 	.register-link {

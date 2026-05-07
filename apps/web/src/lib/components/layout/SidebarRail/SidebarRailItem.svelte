@@ -106,6 +106,14 @@
 		transform: translateX(0);
 	}
 
+	@media (prefers-reduced-motion: reduce) {
+		.rail-item__label {
+			transition-delay: 0ms;
+			transition: opacity var(--duration-fast) var(--ease-default);
+			transform: none;
+		}
+	}
+
 	.rail-item__tooltip {
 		background: var(--color-surface-secondary);
 		color: var(--color-text);

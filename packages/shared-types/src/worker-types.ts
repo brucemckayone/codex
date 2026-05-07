@@ -75,12 +75,6 @@ export type Bindings = {
   CACHE_KV?: import('@cloudflare/workers-types').KVNamespace;
 
   /**
-   * Branding cache KV namespace
-   * Used for zero-latency organization branding
-   */
-  BRAND_KV?: import('@cloudflare/workers-types').KVNamespace;
-
-  /**
    * R2 bucket binding for media storage (PRIVATE)
    * Used for HLS streams, original uploads, and other protected content
    * Access requires presigned URLs

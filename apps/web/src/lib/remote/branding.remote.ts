@@ -47,7 +47,7 @@ export const getBrandingSettings = query(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Update Branding Form (Primary Color)
+// Branding Schema Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Form-data helpers: input stays as string (compatible with RemoteFormInput)
@@ -71,86 +71,6 @@ const hexColorNullable = z
   );
 
 const nullableString = z.string().transform((v) => (v === '' ? null : v));
-
-const formNumber = z.string().transform((v) => Number(v));
-
-const updateBrandingFormSchema = z.object({
-  orgId: z.string().uuid(),
-  primaryColorHex: hexColorOptional,
-  secondaryColorHex: hexColorNullable,
-  accentColorHex: hexColorNullable,
-  backgroundColorHex: hexColorNullable,
-  fontBody: nullableString.pipe(z.string().max(50).nullable().optional()),
-  fontHeading: nullableString.pipe(z.string().max(50).nullable().optional()),
-  radiusValue: formNumber.pipe(z.number().min(0).max(2)).optional(),
-  densityValue: formNumber.pipe(z.number().min(0.75).max(1.25)).optional(),
-});
-
-/**
- * Update branding settings form (primary color)
- *
- * Uses progressive enhancement: works without JS, enhances with JS.
- * Sends PUT to /api/organizations/:id/settings/branding
- *
- * Usage:
- * ```svelte
- * <form {...updateBrandingForm}>
- *   <input type="hidden" name="orgId" value={orgId} />
- *   <input type="color" name="primaryColorHex" value={color} />
- *   <button disabled={updateBrandingForm.pending > 0}>Save</button>
- * </form>
- * ```
- */
-export const updateBrandingForm = form(
-  updateBrandingFormSchema,
-  async ({
-    orgId,
-    primaryColorHex,
-    secondaryColorHex,
-    accentColorHex,
-    backgroundColorHex,
-    fontBody,
-    fontHeading,
-    radiusValue,
-    densityValue,
-  }) => {
-    const { platform, cookies } = getRequestEvent();
-    const api = createServerApi(platform, cookies);
-
-    try {
-      const result = await api.org.updateBranding(orgId, {
-        primaryColorHex,
-        secondaryColorHex,
-        accentColorHex,
-        backgroundColorHex,
-        fontBody,
-        fontHeading,
-        radiusValue,
-        densityValue,
-      });
-
-      // Invalidate cache so layout picks up the new color
-      await invalidateCache(platform, orgId);
-
-      try {
-        await getBrandingSettings(orgId).refresh();
-      } catch {
-        /* non-critical */
-      }
-
-      return {
-        success: true,
-        data: result,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error:
-          error instanceof Error ? error.message : 'Failed to update branding',
-      };
-    }
-  }
-);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Update Branding Command (programmatic — for brand editor panel)
@@ -178,19 +98,14 @@ const updateBrandingCommandSchema = z.object({
     .optional(),
   radiusValue: z.number().min(0).max(2).optional(),
   densityValue: z.number().min(0.75).max(1.25).optional(),
-  // Fine-tune fields — all optional: tokenOverrides JSON is the single source
-  // of truth for new saves; the broken-out columns still exist on the DB row
-  // for legacy read compatibility (iter-04 Codex-2nl7) but are no longer
-  // written by the editor.
+  // Fine-tune fields — text/heading/body weight, shadow scale/color, heading
+  // colour, etc. are all stored as keys inside tokenOverrides JSON. The
+  // previously broken-out columns were dropped in Codex-g49b4.
   tokenOverrides: nullableString.optional(), // JSON string of Record<string, string | null>
-  textColorHex: hexColorNullable.optional(),
-  shadowScale: nullableString.optional(),
-  shadowColor: nullableString.optional(),
-  textScale: nullableString.optional(),
-  headingWeight: nullableString.optional(),
-  bodyWeight: nullableString.optional(),
   // Dark mode overrides
   darkModeOverrides: nullableString.optional(), // JSON string of Partial<ThemeColors>
+  // Codex-wwedk: dark-theme tokenOverrides JSON (parallel to tokenOverrides).
+  darkTokenOverrides: nullableString.optional(), // JSON string of Record<string, string | null>
   // Hero layout — HERO_LAYOUTS is the single source of truth (@codex/validation).
   heroLayout: z.enum(HERO_LAYOUTS).optional(),
 });
@@ -214,13 +129,8 @@ export const updateBrandingCommand = command(
     radiusValue,
     densityValue,
     tokenOverrides,
-    textColorHex,
-    shadowScale,
-    shadowColor,
-    textScale,
-    headingWeight,
-    bodyWeight,
     darkModeOverrides,
+    darkTokenOverrides,
     heroLayout,
   }) => {
     const { platform, cookies } = getRequestEvent();
@@ -236,13 +146,8 @@ export const updateBrandingCommand = command(
       radiusValue,
       densityValue,
       tokenOverrides,
-      textColorHex,
-      shadowScale,
-      shadowColor,
-      textScale,
-      headingWeight,
-      bodyWeight,
       darkModeOverrides,
+      darkTokenOverrides,
       heroLayout,
     });
 

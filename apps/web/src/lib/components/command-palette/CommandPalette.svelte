@@ -261,6 +261,14 @@
     max-height: 60vh;
   }
 
+  @media (prefers-reduced-motion: reduce) {
+    .palette,
+    .palette-backdrop {
+      animation: none;
+      transition: none;
+    }
+  }
+
   .palette__input-wrapper {
     display: flex;
     align-items: center;

@@ -142,6 +142,22 @@ function open(orgId: string, saved: BrandEditorState): void {
           if (saved.darkOverrides && !restored.pending.darkOverrides) {
             restored.pending.darkOverrides = saved.darkOverrides;
           }
+          // Codex-wwedk: same merge pattern for darkTokenOverrides — preserve
+          // server values for keys the in-flight session hasn't touched.
+          if (
+            saved.darkTokenOverrides &&
+            Object.keys(saved.darkTokenOverrides).length > 0
+          ) {
+            restored.pending.darkTokenOverrides = {
+              ...saved.darkTokenOverrides,
+              ...(restored.pending.darkTokenOverrides ?? {}),
+            };
+          } else if (
+            !restored.pending.darkTokenOverrides &&
+            saved.darkTokenOverrides
+          ) {
+            restored.pending.darkTokenOverrides = saved.darkTokenOverrides;
+          }
           state.pending = restored.pending;
           state.level = restored.level ?? 'home';
           state.panel = 'open';
@@ -228,6 +244,16 @@ function applyPreset(preset: BrandPreset): void {
     ...(preset.tokenOverrides ?? {}),
   };
 
+  // Codex-wwedk: same merge pattern for darkTokenOverrides. Presets can
+  // bundle a parallel dark map so a single click sets both light and dark
+  // token values without clobbering keys the preset doesn't touch.
+  if (preset.darkTokenOverrides) {
+    state.pending.darkTokenOverrides = {
+      ...(state.pending.darkTokenOverrides ?? {}),
+      ...preset.darkTokenOverrides,
+    };
+  }
+
   // Hero layout (presets can set the hero layout variant)
   if (preset.heroLayout) {
     state.pending.heroLayout = preset.heroLayout;
@@ -278,6 +304,51 @@ function setThemeColor(field: ThemeColorField, value: string | null): void {
       Object.keys(overrides).length > 0 ? overrides : null;
   } else {
     state.pending[field] = value as BrandEditorState[ThemeColorField];
+  }
+}
+
+/**
+ * Codex-wwedk: get the effective token-override value, respecting the
+ * editing theme. Falls back to the light value when the dark map has no
+ * entry for the key — matches the CSS fallback chain so the editor preview
+ * mirrors what visitors see.
+ */
+function getThemeTokenOverride(key: string): string | null | undefined {
+  if (!state.pending) return undefined;
+  if (state.editingTheme === 'dark') {
+    const dark = state.pending.darkTokenOverrides?.[key];
+    if (dark !== undefined) return dark;
+  }
+  return state.pending.tokenOverrides?.[key];
+}
+
+/**
+ * Codex-wwedk: set a token-override value, routing to darkTokenOverrides
+ * when editing the dark theme. When editing light, writes to tokenOverrides.
+ *
+ * Setting `value === null` or a value equal to the light value while editing
+ * dark removes the dark override (lets the CSS fallback inherit from light).
+ */
+function setThemeTokenOverride(key: string, value: string | null): void {
+  if (!state.pending) return;
+  if (state.editingTheme === 'dark') {
+    const overrides = { ...(state.pending.darkTokenOverrides ?? {}) };
+    const lightValue = state.pending.tokenOverrides?.[key] ?? null;
+    if (value === null || value === lightValue) {
+      delete overrides[key];
+    } else {
+      overrides[key] = value;
+    }
+    state.pending.darkTokenOverrides =
+      Object.keys(overrides).length > 0 ? overrides : null;
+  } else {
+    const overrides = { ...(state.pending.tokenOverrides ?? {}) };
+    if (value === null) {
+      delete overrides[key];
+    } else {
+      overrides[key] = value;
+    }
+    state.pending.tokenOverrides = overrides;
   }
 }
 
@@ -362,6 +433,9 @@ export const brandEditor = {
   setEditingTheme,
   getThemeColor,
   setThemeColor,
+  // Codex-wwedk: per-theme tokenOverride routing (parallel to setThemeColor).
+  getThemeTokenOverride,
+  setThemeTokenOverride,
   discard,
   getSavePayload,
   markSaved,

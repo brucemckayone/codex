@@ -32,8 +32,10 @@ export interface VariantKeys {
   lg: string;
 }
 
-/** WebP buffers for the three size variants. */
-export interface VariantBuffers {
+/** WebP buffers for the three size variants. Internal helper — service.ts
+ * passes a structurally-matching object literal to `uploadImageVariants`
+ * and never imports the named type, so this stays unexported. */
+interface VariantBuffers {
   sm: Uint8Array;
   md: Uint8Array;
   lg: Uint8Array;

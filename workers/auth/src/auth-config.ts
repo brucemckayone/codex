@@ -11,15 +11,19 @@ import { createDbClient, schema } from '@codex/database';
 import { createKVSecondaryStorage } from '@codex/security';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { createAuthMiddleware } from 'better-auth/api';
 import {
   sendPasswordResetEmail,
   sendVerificationEmail,
   sendWelcomeEmail,
+  wasWelcomeEmailSent,
 } from './email';
+import { handlePasswordChangedHook } from './password-changed-hook';
 import type { AuthBindings } from './types';
 
 interface AuthConfigOptions {
   env: AuthBindings;
+  executionCtx: ExecutionContext;
 }
 
 /**
@@ -49,7 +53,7 @@ function getDevCookieDomain(env: AuthBindings): string {
  * @returns Configured BetterAuth instance
  */
 export function createAuthInstance(options: AuthConfigOptions) {
-  const { env } = options;
+  const { env, executionCtx } = options;
 
   // Create database client with explicit environment
   // This ensures DB_METHOD and DATABASE_URL are available when Better-auth initializes
@@ -127,6 +131,22 @@ export function createAuthInstance(options: AuthConfigOptions) {
         // Send the actual verification email
         await sendVerificationEmail(env, user, token);
       },
+      // Fires after BetterAuth flips emailVerified=true (api/routes/email-verification.mjs:265).
+      // The dedupe query awaits — verification response is delayed by ~10-50ms.
+      // The send itself is fire-and-forget via waitUntil and never blocks.
+      // ALL errors are caught — a thrown error here would propagate out of BetterAuth's
+      // handler and turn a successful verification into a 500.
+      afterEmailVerification: async (user) => {
+        try {
+          if (await wasWelcomeEmailSent(db, user.email)) return;
+          sendWelcomeEmail(env, executionCtx, {
+            name: user.name,
+            email: user.email,
+          });
+        } catch {
+          // Never let welcome-email plumbing fail a successful verification.
+        }
+      },
       autoSignInAfterVerification: true,
       sendOnSignUp: true,
       // Re-sends the verification email when an unverified user attempts sign-in,
@@ -155,6 +175,15 @@ export function createAuthInstance(options: AuthConfigOptions) {
           defaultValue: AUTH_ROLES.USER,
         },
       },
+    },
+    // Top-level after-hook fires once per successful auth endpoint. The handler
+    // path-matches /change-password (excludes /reset-password and all other
+    // routes) and sends the password-changed confirmation email. See
+    // password-changed-hook.ts for the full mechanism note.
+    hooks: {
+      after: createAuthMiddleware(async (ctx) => {
+        await handlePasswordChangedHook(env, ctx);
+      }),
     },
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.WEB_APP_URL,

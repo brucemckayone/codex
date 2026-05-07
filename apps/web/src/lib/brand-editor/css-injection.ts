@@ -368,6 +368,14 @@ const DARK_VAR_PROPS = new Set([
   '--brand-bg-dark',
 ]);
 
+/**
+ * Codex-wwedk: dark-mode tokenOverride suffix. When darkTokenOverrides[key]
+ * is set, we emit `${prefix}{key}-dark` alongside the base `${prefix}{key}`
+ * so org-brand.css can pick the correct value via CSS fallback chains
+ * (`var(--brand-foo-dark, var(--brand-foo))`).
+ */
+const DARK_TOKEN_SUFFIX = '-dark';
+
 /** Find the org layout element that holds the brand CSS variables. */
 function getOrgLayoutElement(): HTMLElement | null {
   if (!browser) return null;
@@ -480,6 +488,20 @@ export function injectBrandVars(state: BrandEditorState): void {
     el.style.setProperty(prop, value);
   }
 
+  // Codex-wwedk: dark-theme tokenOverrides emit alongside their light
+  // counterparts as `${prop}-dark`. CSS gates in org-brand.css read them
+  // via `var(--brand-foo-dark, var(--brand-foo))` so an absent dark value
+  // gracefully inherits the light value.
+  const darkOverrides = state.darkTokenOverrides ?? {};
+  for (const [key, value] of Object.entries(darkOverrides)) {
+    if (value == null) continue;
+    if (key.startsWith('hero-hide-')) continue;
+    const baseProp = BRAND_PREFIX_KEYS.has(key)
+      ? `--brand-${key}`
+      : `--color-${key}`;
+    el.style.setProperty(`${baseProp}${DARK_TOKEN_SUFFIX}`, value);
+  }
+
   // Inject dark mode overrides (consumed by dark-mode rules in org-brand.css)
   const darkVarMap: Record<string, string> = {
     primaryColor: '--brand-color-dark',
@@ -548,6 +570,47 @@ export function injectTokenOverrides(
   overrides: Record<string, string | null>
 ): void {
   const vars = tokenOverridesToCssVars(overrides);
+  for (const [prop, value] of Object.entries(vars)) {
+    el.style.setProperty(prop, value);
+  }
+}
+
+/**
+ * Codex-wwedk: pure helper for dark-theme tokenOverrides. Mirrors
+ * tokenOverridesToCssVars but suffixes every emitted property with `-dark`.
+ *
+ * The CSS in org-brand.css gates on `[data-theme='dark'] [data-org-brand]`
+ * and pulls the dark variant via `var(--brand-foo-dark, var(--brand-foo))`,
+ * so an absent dark value gracefully inherits the light value with no JS.
+ *
+ * Used by the org layout's SSR injection path (alongside the existing
+ * light injection) so dark-mode visitors get the right tokens on first
+ * paint without flicker.
+ */
+export function darkTokenOverridesToCssVars(
+  overrides: Record<string, string | null | undefined>
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value == null) continue;
+    if (key.startsWith('hero-hide-')) continue;
+    const baseProp = BRAND_PREFIX_KEYS.has(key)
+      ? `--brand-${key}`
+      : `--color-${key}`;
+    out[`${baseProp}${DARK_TOKEN_SUFFIX}`] = value;
+  }
+  return out;
+}
+
+/**
+ * Codex-wwedk: server-side render dark token overrides as CSS vars on the
+ * given element. Counterpart to injectTokenOverrides for the dark theme.
+ */
+export function injectDarkTokenOverrides(
+  el: HTMLElement,
+  overrides: Record<string, string | null>
+): void {
+  const vars = darkTokenOverridesToCssVars(overrides);
   for (const [prop, value] of Object.entries(vars)) {
     el.style.setProperty(prop, value);
   }

@@ -317,7 +317,17 @@
   const ALL_SHADER_KEYS = Object.keys(DEFAULTS).concat('shader-preset');
 
   // ── Read current overrides ─────────────────────────────────────────────
-  const overrides = $derived(brandEditor.pending?.tokenOverrides ?? {});
+  // Codex-wwedk: when editing the dark theme, prefer darkTokenOverrides;
+  // fall back to the light tokenOverrides for keys not yet diverged. This
+  // mirrors the visitor-facing CSS fallback chain so the preview matches.
+  const overrides = $derived.by<Record<string, string | null>>(() => {
+    const light = brandEditor.pending?.tokenOverrides ?? {};
+    if (brandEditor.editingTheme === 'dark') {
+      const dark = brandEditor.pending?.darkTokenOverrides ?? {};
+      return { ...light, ...dark };
+    }
+    return light;
+  });
   const activePreset = $derived(overrides['shader-preset'] ?? 'none');
 
   /** Read a numeric override, falling back to its default. Handles 0 correctly. */
@@ -628,31 +638,31 @@
   const sporeDecay = $derived(readNum('shader-spore-decay'));
 
   // ── Update helpers ─────────────────────────────────────────────────────
+  // Codex-wwedk: route writes through setThemeTokenOverride so they land in
+  // darkTokenOverrides when editing dark, tokenOverrides when editing light.
+  // Default-clearing semantics: passing null removes the key from the active
+  // theme's bucket so it falls back to either the light value (when dark)
+  // or the ShaderHero compiled-in default (when light).
   function updateOverride(key: string, value: string) {
-    const current = { ...(brandEditor.pending?.tokenOverrides ?? {}) };
-    // Remove if the value matches the default (so it falls back to ShaderHero defaults)
     if (!value || value === DEFAULTS[key]) {
-      delete current[key];
+      brandEditor.setThemeTokenOverride(key, null);
     } else {
-      current[key] = value;
+      brandEditor.setThemeTokenOverride(key, value);
     }
-    brandEditor.updateField('tokenOverrides', current);
   }
 
   function selectPreset(presetId: string) {
-    const current = { ...(brandEditor.pending?.tokenOverrides ?? {}) };
-
     if (presetId === 'none') {
-      // Clear ALL shader-* overrides so no stale config lingers
+      // Clear ALL shader-* overrides on the active theme so no stale
+      // config lingers. setThemeTokenOverride(null) removes the key from
+      // whichever bucket (light/dark) corresponds to editingTheme.
       for (const key of ALL_SHADER_KEYS) {
-        delete current[key];
+        brandEditor.setThemeTokenOverride(key, null);
       }
     } else {
-      // Set the preset, keep existing slider values
-      current['shader-preset'] = presetId;
+      // Set the preset on the active theme; keep existing slider values.
+      brandEditor.setThemeTokenOverride('shader-preset', presetId);
     }
-
-    brandEditor.updateField('tokenOverrides', current);
   }
 
   // ── Slider input handlers ──────────────────────────────────────────────
