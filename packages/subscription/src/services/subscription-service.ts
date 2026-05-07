@@ -47,7 +47,7 @@ import {
   subscriptionTiers,
   users,
 } from '@codex/database/schema';
-import { resolveOrCreateCustomer } from '@codex/purchase';
+import { withStaleCustomerRecovery } from '@codex/purchase';
 import {
   BaseService,
   InternalServiceError,
@@ -436,32 +436,45 @@ export class SubscriptionService extends BaseService {
         });
       }
 
-      const stripeCustomerId = await resolveOrCreateCustomer(
+      // `withStaleCustomerRecovery` resolves the unified Stripe Customer id
+      // and self-heals when `users.stripe_customer_id` is stale. Two
+      // real-world causes for the stale state:
+      //   1. Operator deleted the customer in the Stripe dashboard.
+      //   2. (Dev only) A seed wrote a synthetic id that never existed.
+      // The helper clears the cache, mints a fresh customer, and retries the
+      // session create exactly once. A second `resource_missing` propagates.
+      const session = await withStaleCustomerRecovery(
         { db: this.db, stripe: this.stripe },
-        { userId, email: user.email }
+        { userId, email: user.email },
+        (stripeCustomerId) =>
+          this.stripe.checkout.sessions.create({
+            mode: 'subscription',
+            customer: stripeCustomerId,
+            line_items: [{ price: stripePriceId, quantity: 1 }],
+            success_url: successUrl,
+            cancel_url: cancelUrl,
+            metadata: {
+              codex_user_id: userId,
+              codex_organization_id: orgId,
+              codex_tier_id: tierId,
+              codex_billing_interval: billingInterval,
+            },
+            subscription_data: {
+              metadata: {
+                codex_user_id: userId,
+                codex_organization_id: orgId,
+                codex_tier_id: tierId,
+              },
+            },
+          }),
+        {
+          onStaleRecovery: (info) =>
+            this.obs.warn(
+              'Stale users.stripe_customer_id detected; clearing and retrying',
+              { ...info, orgId, tierId, billingInterval }
+            ),
+        }
       );
-
-      // Create Stripe Checkout Session
-      const session = await this.stripe.checkout.sessions.create({
-        mode: 'subscription',
-        customer: stripeCustomerId,
-        line_items: [{ price: stripePriceId, quantity: 1 }],
-        success_url: successUrl,
-        cancel_url: cancelUrl,
-        metadata: {
-          codex_user_id: userId,
-          codex_organization_id: orgId,
-          codex_tier_id: tierId,
-          codex_billing_interval: billingInterval,
-        },
-        subscription_data: {
-          metadata: {
-            codex_user_id: userId,
-            codex_organization_id: orgId,
-            codex_tier_id: tierId,
-          },
-        },
-      });
 
       if (!session.url) {
         throw new SubscriptionCheckoutError(
