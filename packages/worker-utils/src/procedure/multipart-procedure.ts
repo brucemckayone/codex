@@ -143,7 +143,7 @@ export interface MultipartProcedureConfig<
 // File Validation Errors
 // ============================================================================
 
-export class FileTooLargeError extends ValidationError {
+class FileTooLargeError extends ValidationError {
   constructor(
     public fieldName: string,
     public actualSize: number,
@@ -156,7 +156,7 @@ export class FileTooLargeError extends ValidationError {
   }
 }
 
-export class InvalidFileTypeError extends ValidationError {
+class InvalidFileTypeError extends ValidationError {
   constructor(
     public fieldName: string,
     public actualType: string,
@@ -169,7 +169,7 @@ export class InvalidFileTypeError extends ValidationError {
   }
 }
 
-export class MissingFileError extends ValidationError {
+class MissingFileError extends ValidationError {
   constructor(public fieldName: string) {
     super(`Required file '${fieldName}' is missing`);
     this.name = 'MissingFileError';
