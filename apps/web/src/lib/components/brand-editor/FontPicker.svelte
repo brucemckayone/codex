@@ -345,7 +345,7 @@
   :global(.font-picker__chevron) {
     color: var(--color-text-muted);
     flex-shrink: 0;
-    transition: transform var(--duration-fast);
+    transition: transform var(--duration-fast) var(--ease-default);
   }
 
   .font-picker__trigger:global([data-state='open']) :global(.font-picker__chevron) {
@@ -439,7 +439,7 @@
     cursor: pointer;
     font-size: var(--text-base);
     color: var(--color-text);
-    transition: background-color var(--duration-fast);
+    transition: background-color var(--duration-fast) var(--ease-default);
     background: transparent;
     border: none;
     text-align: left;
