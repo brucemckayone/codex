@@ -159,6 +159,10 @@
       "exports": ["InvalidationLogger"]
     },
     {
+      "file": "packages/security/src/kv-secondary-storage.ts",
+      "exports": ["ObservabilityClient"]
+    },
+    {
       "file": "packages/worker-utils/src/procedure/binary-upload-procedure.ts",
       "exports": [
         "BinaryFileConfig",
