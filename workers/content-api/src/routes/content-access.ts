@@ -12,6 +12,7 @@ import {
 } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
+import { bumpUserLibraryOnFirstEngagement } from './progress-cache';
 
 const app = new Hono<HonoEnv>();
 
@@ -82,9 +83,22 @@ app.post(
     handler: async (ctx): Promise<UpdatePlaybackProgressResponse> => {
       const { params, body } = ctx.input;
 
-      await ctx.services.access.savePlaybackProgress(ctx.user.id, {
-        contentId: params.id,
-        ...body,
+      const { firstEngagement } =
+        await ctx.services.access.savePlaybackProgress(ctx.user.id, {
+          contentId: params.id,
+          ...body,
+        });
+
+      // First engagement creates a new library row in the engaged-free /
+      // engaged-followers buckets. Bump the user's library cache version so
+      // other devices/tabs reconcile on next staleness check. Heartbeat saves
+      // skip this — see `progress-cache.ts` for the conditional contract.
+      bumpUserLibraryOnFirstEngagement({
+        firstEngagement,
+        kv: ctx.env.CACHE_KV,
+        waitUntil: ctx.executionCtx.waitUntil.bind(ctx.executionCtx),
+        userId: ctx.user.id,
+        logger: ctx.obs,
       });
 
       return null; // 204 returns no body

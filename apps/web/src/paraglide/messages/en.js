@@ -8496,3 +8496,35 @@ export const command_palette_content = () => `Content`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const command_palette_creators = () => `Creators`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_filter_free = () => `Free`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_filter_followers = () => `Following`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_access_badge_free = () => `Free`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_access_badge_followers = () => `Following`

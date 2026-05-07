@@ -46,6 +46,10 @@ interface QueryMocks {
   organizationFollowers: { findFirst: FindFirstFn };
   subscriptions: { findFirst: FindFirstFn };
   subscriptionTiers: { findFirst: FindFirstFn };
+  // Used by `savePlaybackProgress` to detect first engagement before the
+  // upsert. Defaults to `null` (no prior row) so existing access-gate tests
+  // continue to assert "first engagement" semantics for free saves.
+  videoPlayback: { findFirst: FindFirstFn };
 }
 
 interface InsertSpy {
@@ -66,6 +70,7 @@ function createStubDb(): StubDb {
     organizationFollowers: { findFirst: vi.fn() },
     subscriptions: { findFirst: vi.fn() },
     subscriptionTiers: { findFirst: vi.fn() },
+    videoPlayback: { findFirst: vi.fn(async () => null) },
   };
 
   // `.insert(table).values(...).onConflictDoUpdate(...)` — chainable,
@@ -170,9 +175,11 @@ describe('ContentAccessService.savePlaybackProgress — access gate', () => {
 
     const { service } = buildService(stub);
 
+    // Save resolves with `{ firstEngagement: true }` because the stub default
+    // returns `null` from `videoPlayback.findFirst` (no prior row).
     await expect(
       service.savePlaybackProgress(userId, progressInput)
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ firstEngagement: true });
 
     // The upsert must run exactly once — access gate passed.
     expect(stub.insert).toHaveBeenCalledTimes(1);
@@ -317,7 +324,7 @@ describe('ContentAccessService.savePlaybackProgress — access gate', () => {
 
       await expect(
         service.savePlaybackProgress(userId, progressInput)
-      ).resolves.toBeUndefined();
+      ).resolves.toEqual({ firstEngagement: true });
 
       // Upsert ran — subscription alone now grants followers-only access.
       expect(stub.insert).toHaveBeenCalledTimes(1);
@@ -335,7 +342,7 @@ describe('ContentAccessService.savePlaybackProgress — access gate', () => {
 
       await expect(
         service.savePlaybackProgress(userId, progressInput)
-      ).resolves.toBeUndefined();
+      ).resolves.toEqual({ firstEngagement: true });
 
       expect(stub.insert).toHaveBeenCalledTimes(1);
     });

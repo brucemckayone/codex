@@ -117,8 +117,22 @@ interface UserLibraryItem {
     organizationId: string | null;
     organizationSlug: string | null;
   };
-  /** How the user has access: 'purchased', 'membership', or 'subscription' */
-  accessType: 'purchased' | 'membership' | 'subscription';
+  /**
+   * How the user has access:
+   * - `'purchased'`     — completed (or pending-webhook) purchase row exists
+   * - `'membership'`    — user holds an org management role (owner/admin/creator)
+   * - `'subscription'`  — active subscription gates `subscribers`/tier-paid content
+   * - `'free'`          — `accessType='free'` content the user has *engaged with*
+   *                       (a `videoPlayback` row exists)
+   * - `'followers'`     — `accessType='followers'` content the user can access
+   *                       (follower row OR active subscription) AND has engaged with
+   */
+  accessType:
+    | 'purchased'
+    | 'membership'
+    | 'subscription'
+    | 'free'
+    | 'followers';
   purchase: {
     purchasedAt: string;
     priceCents: number;
@@ -1061,12 +1075,17 @@ export class ContentAccessService extends BaseService {
    *
    * @param userId - Authenticated user ID
    * @param input - Content ID, position, duration, completed flag
+   * @returns `{ firstEngagement: true }` when this save inserted the first
+   *   `videoPlayback` row for `(userId, contentId)` — the route handler uses
+   *   this to bump the user's library cache version (because the engaged-free
+   *   and engaged-followers arms now treat first engagement as a library
+   *   membership event). Subsequent heartbeats return `firstEngagement: false`.
    * @throws {ForbiddenError} Access revoked, or user lacks access to content
    */
   async savePlaybackProgress(
     userId: string,
     input: SavePlaybackProgressInput
-  ): Promise<void> {
+  ): Promise<{ firstEngagement: boolean }> {
     // ── Access gate ────────────────────────────────────────────────────
     // (1) KV revocation check — if revocation helper is wired, fetch the
     // content's orgId and check the block list before doing any DB writes.
@@ -1126,6 +1145,19 @@ export class ContentAccessService extends BaseService {
       completed: isCompleted,
     });
 
+    // Detect first engagement BEFORE the upsert so we can signal back to the
+    // route handler whether to bump the library cache version. Read uses the
+    // composite-unique `(user_id, content_id)` index — single-row indexed
+    // lookup, same round-trip cost as the existing access checks above.
+    const existing = await this.db.query.videoPlayback.findFirst({
+      where: and(
+        eq(videoPlayback.userId, userId),
+        eq(videoPlayback.contentId, input.contentId)
+      ),
+      columns: { id: true },
+    });
+    const firstEngagement = !existing;
+
     // Upsert using unique constraint with optimistic concurrency control
     // Only update if new position is greater (prevents backwards seeking overwrites)
     await this.db
@@ -1151,7 +1183,10 @@ export class ContentAccessService extends BaseService {
       userId,
       contentId: input.contentId,
       completed: isCompleted,
+      firstEngagement,
     });
+
+    return { firstEngagement };
   }
 
   /**
@@ -1229,6 +1264,10 @@ export class ContentAccessService extends BaseService {
       ORGANIZATION_ROLES.CREATOR,
     ];
 
+    // Skip the membership lookup when the caller filters to a bucket that
+    // doesn't need it. The membership arm needs it; engaged-free and
+    // engaged-followers also reference `managementOrgIds` for cross-arm
+    // exclusion, so they must NOT skip.
     const activeMemberships =
       input.accessType === 'purchased' || input.accessType === 'subscription'
         ? []
@@ -1247,8 +1286,15 @@ export class ContentAccessService extends BaseService {
     const managementOrgIds = activeMemberships.map((m) => m.organizationId);
 
     // ── Step 1b: Resolve active subscriptions with tier info ─────────
+    // Skip when filtering to a bucket that doesn't need subscription tier
+    // info. The engaged-followers arm uses an `EXISTS subscription` predicate
+    // inline (cheaper than reading + serialising tier rows here), so it can
+    // skip too. Engaged-free also doesn't reference subscriptions.
     const activeSubscriptions =
-      input.accessType === 'purchased' || input.accessType === 'membership'
+      input.accessType === 'purchased' ||
+      input.accessType === 'membership' ||
+      input.accessType === 'free' ||
+      input.accessType === 'followers'
         ? []
         : await this.db.query.subscriptions.findMany({
             where: and(
@@ -1334,7 +1380,9 @@ export class ContentAccessService extends BaseService {
     const queryPurchased = async () => {
       if (
         input.accessType === 'membership' ||
-        input.accessType === 'subscription'
+        input.accessType === 'subscription' ||
+        input.accessType === 'free' ||
+        input.accessType === 'followers'
       ) {
         return { items: [] as UserLibraryItem[], count: 0 };
       }
@@ -1444,6 +1492,8 @@ export class ContentAccessService extends BaseService {
       if (
         input.accessType === 'purchased' ||
         input.accessType === 'subscription' ||
+        input.accessType === 'free' ||
+        input.accessType === 'followers' ||
         managementOrgIds.length === 0
       ) {
         return { items: [] as UserLibraryItem[], count: 0 };
@@ -1553,6 +1603,8 @@ export class ContentAccessService extends BaseService {
       if (
         input.accessType === 'purchased' ||
         input.accessType === 'membership' ||
+        input.accessType === 'free' ||
+        input.accessType === 'followers' ||
         activeSubscriptions.length === 0
       ) {
         return { items: [] as UserLibraryItem[], count: 0 };
@@ -1709,17 +1761,276 @@ export class ContentAccessService extends BaseService {
       return { items, count: countResult[0]?.count ?? 0 };
     };
 
+    // ── Step 4c: Query engaged-free items ───────────────────────────
+    // Surfaces `accessType='free'` content from any org the user has actually
+    // touched (a `videoPlayback` row exists for the content). The INNER JOIN
+    // makes engagement the membership criterion — without it, every published
+    // free item from every org would dump into every user's library.
+    //
+    // Engagement signal is `videoPlayback`. Written ('article') content has
+    // no equivalent progress table yet, so free articles do not surface here
+    // until article-read tracking lands. Documented limitation; not a bug.
+    const queryEngagedFree = async () => {
+      if (input.accessType !== 'all' && input.accessType !== 'free') {
+        return { items: [] as UserLibraryItem[], count: 0 };
+      }
+
+      const conditions = [
+        eq(content.accessType, CONTENT_ACCESS_TYPE.FREE),
+        eq(content.status, CONTENT_STATUS.PUBLISHED),
+        isNull(content.deletedAt),
+        sql`${content.organizationId} IS NOT NULL`,
+        // Exclude content already covered by the purchased arm. Free content
+        // shouldn't have purchases, but a content row whose accessType was
+        // changed from paid → free after a sale could overlap; keep the
+        // priority contract explicit.
+        sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING}))`,
+        // Exclude orgs the user manages — membership arm covers those.
+        ...(managementOrgIds.length > 0
+          ? [
+              sql`${content.organizationId} NOT IN (${sql.join(
+                managementOrgIds.map((id) => sql`${id}`),
+                sql`, `
+              )})`,
+            ]
+          : []),
+        ...(input.organizationId
+          ? [eq(content.organizationId, input.organizationId)]
+          : []),
+        ...contentFilters,
+        ...progressFilters,
+      ];
+
+      const sortClause =
+        input.sortBy === 'title'
+          ? content.title
+          : input.sortBy === 'duration'
+            ? sql`COALESCE(${mediaItems.durationSeconds}, 0)`
+            : videoPlayback.updatedAt;
+
+      const baseFrom = this.db
+        .select({
+          contentId: content.id,
+          contentSlug: content.slug,
+          contentTitle: content.title,
+          contentDescription: content.description,
+          contentThumbnailUrl: content.thumbnailUrl,
+          contentType: content.contentType,
+          mediaThumbnailKey: mediaItems.thumbnailKey,
+          mediaDurationSeconds: mediaItems.durationSeconds,
+          orgId: content.organizationId,
+          orgSlug: organizations.slug,
+          progressPositionSeconds: videoPlayback.positionSeconds,
+          progressDurationSeconds: videoPlayback.durationSeconds,
+          progressCompleted: videoPlayback.completed,
+          progressUpdatedAt: videoPlayback.updatedAt,
+        })
+        .from(content)
+        .innerJoin(
+          videoPlayback,
+          and(
+            eq(videoPlayback.contentId, content.id),
+            eq(videoPlayback.userId, userId)
+          )
+        )
+        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+        .leftJoin(organizations, eq(organizations.id, content.organizationId));
+
+      const countQuery = this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(content)
+        .innerJoin(
+          videoPlayback,
+          and(
+            eq(videoPlayback.contentId, content.id),
+            eq(videoPlayback.userId, userId)
+          )
+        )
+        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+        .where(and(...conditions));
+
+      const dataQuery = baseFrom
+        .where(and(...conditions))
+        .orderBy(input.sortBy === 'title' ? sortClause : desc(sortClause))
+        .limit(input.limit)
+        .offset(offset);
+
+      const [countResult, rows] = await Promise.all([countQuery, dataQuery]);
+
+      const items: UserLibraryItem[] = rows.map((row) => ({
+        content: {
+          id: row.contentId,
+          slug: row.contentSlug,
+          title: row.contentTitle,
+          description: row.contentDescription || '',
+          thumbnailUrl:
+            row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
+          contentType: row.contentType ?? 'video',
+          durationSeconds: row.mediaDurationSeconds ?? 0,
+          organizationId: row.orgId,
+          organizationSlug: row.orgSlug ?? null,
+        },
+        accessType: 'free' as const,
+        purchase: null,
+        progress: mapProgress(row),
+      }));
+
+      return { items, count: countResult[0]?.count ?? 0 };
+    };
+
+    // ── Step 4d: Query engaged-followers items ──────────────────────
+    // Surfaces `accessType='followers'` content from orgs where the user has
+    // either an `organizationFollowers` row OR an active subscription. Mirrors
+    // the access-decision contract in `getStreamingUrl` (subscribers ⊇ followers).
+    //
+    // Engagement is required (INNER JOIN videoPlayback) for the same reason as
+    // queryEngagedFree — without it, every followers-only item across every
+    // followed org would dump into the library.
+    const queryEngagedFollowers = async () => {
+      if (input.accessType !== 'all' && input.accessType !== 'followers') {
+        return { items: [] as UserLibraryItem[], count: 0 };
+      }
+
+      const followerOrSubscriberPredicate = or(
+        sql`EXISTS (SELECT 1 FROM ${organizationFollowers}
+                    WHERE ${organizationFollowers.organizationId} = ${content.organizationId}
+                      AND ${organizationFollowers.userId} = ${userId})`,
+        sql`EXISTS (SELECT 1 FROM ${subscriptions}
+                    WHERE ${subscriptions.userId} = ${userId}
+                      AND ${subscriptions.organizationId} = ${content.organizationId}
+                      AND ${subscriptions.status} IN (${SUBSCRIPTION_STATUS.ACTIVE}, ${SUBSCRIPTION_STATUS.CANCELLING})
+                      AND ${subscriptions.currentPeriodEnd} > NOW())`
+      );
+
+      const conditions = [
+        eq(content.accessType, CONTENT_ACCESS_TYPE.FOLLOWERS),
+        eq(content.status, CONTENT_STATUS.PUBLISHED),
+        isNull(content.deletedAt),
+        sql`${content.organizationId} IS NOT NULL`,
+        followerOrSubscriberPredicate!,
+        // Defensive purchase exclusion (followers content shouldn't be priced;
+        // mirror the rule used by other arms so priority stays predictable).
+        sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING}))`,
+        // Exclude orgs the user manages — membership arm covers those.
+        ...(managementOrgIds.length > 0
+          ? [
+              sql`${content.organizationId} NOT IN (${sql.join(
+                managementOrgIds.map((id) => sql`${id}`),
+                sql`, `
+              )})`,
+            ]
+          : []),
+        ...(input.organizationId
+          ? [eq(content.organizationId, input.organizationId)]
+          : []),
+        ...contentFilters,
+        ...progressFilters,
+      ];
+
+      const sortClause =
+        input.sortBy === 'title'
+          ? content.title
+          : input.sortBy === 'duration'
+            ? sql`COALESCE(${mediaItems.durationSeconds}, 0)`
+            : videoPlayback.updatedAt;
+
+      const baseFrom = this.db
+        .select({
+          contentId: content.id,
+          contentSlug: content.slug,
+          contentTitle: content.title,
+          contentDescription: content.description,
+          contentThumbnailUrl: content.thumbnailUrl,
+          contentType: content.contentType,
+          mediaThumbnailKey: mediaItems.thumbnailKey,
+          mediaDurationSeconds: mediaItems.durationSeconds,
+          orgId: content.organizationId,
+          orgSlug: organizations.slug,
+          progressPositionSeconds: videoPlayback.positionSeconds,
+          progressDurationSeconds: videoPlayback.durationSeconds,
+          progressCompleted: videoPlayback.completed,
+          progressUpdatedAt: videoPlayback.updatedAt,
+        })
+        .from(content)
+        .innerJoin(
+          videoPlayback,
+          and(
+            eq(videoPlayback.contentId, content.id),
+            eq(videoPlayback.userId, userId)
+          )
+        )
+        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+        .leftJoin(organizations, eq(organizations.id, content.organizationId));
+
+      const countQuery = this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(content)
+        .innerJoin(
+          videoPlayback,
+          and(
+            eq(videoPlayback.contentId, content.id),
+            eq(videoPlayback.userId, userId)
+          )
+        )
+        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+        .where(and(...conditions));
+
+      const dataQuery = baseFrom
+        .where(and(...conditions))
+        .orderBy(input.sortBy === 'title' ? sortClause : desc(sortClause))
+        .limit(input.limit)
+        .offset(offset);
+
+      const [countResult, rows] = await Promise.all([countQuery, dataQuery]);
+
+      const items: UserLibraryItem[] = rows.map((row) => ({
+        content: {
+          id: row.contentId,
+          slug: row.contentSlug,
+          title: row.contentTitle,
+          description: row.contentDescription || '',
+          thumbnailUrl:
+            row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
+          contentType: row.contentType ?? 'video',
+          durationSeconds: row.mediaDurationSeconds ?? 0,
+          organizationId: row.orgId,
+          organizationSlug: row.orgSlug ?? null,
+        },
+        accessType: 'followers' as const,
+        purchase: null,
+        progress: mapProgress(row),
+      }));
+
+      return { items, count: countResult[0]?.count ?? 0 };
+    };
+
     // ── Step 5: Execute all queries in parallel ──────────────────────
-    const [purchaseResult, membershipResult, subscriptionResult] =
-      await Promise.all([
-        queryPurchased(),
-        queryMembership(),
-        querySubscription(),
-      ]);
+    const [
+      purchaseResult,
+      membershipResult,
+      subscriptionResult,
+      engagedFreeResult,
+      engagedFollowersResult,
+    ] = await Promise.all([
+      queryPurchased(),
+      queryMembership(),
+      querySubscription(),
+      queryEngagedFree(),
+      queryEngagedFollowers(),
+    ]);
 
     // ── Step 6: Merge, sort, and paginate ─────────────────────────────
-    // Collect all sources that contributed items.
-    const sources = [purchaseResult, membershipResult, subscriptionResult];
+    // Source priority (first-match-wins on overlap):
+    //   purchased > membership > subscription > free > followers
+    // Cross-arm exclusion clauses already minimise overlap; the explicit
+    // dedup-by-contentId step below hardens this contract for future arms.
+    const sources = [
+      purchaseResult,
+      membershipResult,
+      subscriptionResult,
+      engagedFreeResult,
+      engagedFollowersResult,
+    ];
     const activeSources = sources.filter((s) => s.count > 0);
 
     // When a specific accessType filter is applied or only one source has
@@ -1727,7 +2038,9 @@ export class ContentAccessService extends BaseService {
     const filteredAccessType =
       input.accessType === 'purchased' ||
       input.accessType === 'membership' ||
-      input.accessType === 'subscription';
+      input.accessType === 'subscription' ||
+      input.accessType === 'free' ||
+      input.accessType === 'followers';
 
     if (filteredAccessType || activeSources.length <= 1) {
       const result = filteredAccessType
@@ -1735,7 +2048,11 @@ export class ContentAccessService extends BaseService {
           ? purchaseResult
           : input.accessType === 'membership'
             ? membershipResult
-            : subscriptionResult
+            : input.accessType === 'subscription'
+              ? subscriptionResult
+              : input.accessType === 'free'
+                ? engagedFreeResult
+                : engagedFollowersResult
         : (activeSources[0] ?? purchaseResult);
       return {
         items: result.items,
@@ -1749,19 +2066,33 @@ export class ContentAccessService extends BaseService {
     }
 
     // Multiple sources have items — merge sort (each fetched with LIMIT/OFFSET
-    // from their own source, so we merge and trim to page size)
+    // from their own source, so we merge and trim to page size). Cross-arm
+    // exclusion clauses (`NOT IN purchases`, `NOT IN management orgs`, etc.)
+    // already make arms disjoint at the DB layer, so summed counts are honest.
+    // The dedup pass below preserves the priority contract defensively for
+    // any future arm that forgets an exclusion clause.
     const totalCount = sources.reduce((sum, s) => sum + s.count, 0);
-    const allItems = sources.flatMap((s) => s.items);
+    const seen = new Set<string>();
+    const dedupedItems: UserLibraryItem[] = [];
+    for (const source of sources) {
+      for (const item of source.items) {
+        if (seen.has(item.content.id)) continue;
+        seen.add(item.content.id);
+        dedupedItems.push(item);
+      }
+    }
 
     if (input.sortBy === 'title') {
-      allItems.sort((a, b) => a.content.title.localeCompare(b.content.title));
+      dedupedItems.sort((a, b) =>
+        a.content.title.localeCompare(b.content.title)
+      );
     } else if (input.sortBy === 'duration') {
-      allItems.sort(
+      dedupedItems.sort(
         (a, b) =>
           (b.content.durationSeconds ?? 0) - (a.content.durationSeconds ?? 0)
       );
     } else {
-      allItems.sort((a, b) => {
+      dedupedItems.sort((a, b) => {
         const dateA = a.purchase?.purchasedAt ?? '';
         const dateB = b.purchase?.purchasedAt ?? '';
         return dateB.localeCompare(dateA);
@@ -1769,7 +2100,7 @@ export class ContentAccessService extends BaseService {
     }
 
     // Trim to page size (each source may have returned up to limit items)
-    const items = allItems.slice(0, input.limit);
+    const items = dedupedItems.slice(0, input.limit);
 
     return {
       items,
