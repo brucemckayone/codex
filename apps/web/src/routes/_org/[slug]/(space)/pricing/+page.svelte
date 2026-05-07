@@ -1498,7 +1498,7 @@
 
   .pricing-hero__title {
     font-family: var(--font-heading);
-    font-size: clamp(2.75rem, 4.5vw + 1rem, 5rem);
+    font-size: var(--text-display);
     font-weight: var(--font-bold);
     line-height: var(--leading-none);
     letter-spacing: var(--tracking-tighter);
@@ -1537,11 +1537,11 @@
     .pricing-hero__rule {
       animation: heroRuleExpand var(--duration-slower) var(--ease-smooth) forwards;
     }
-    .pricing-hero__eyebrow        { animation-delay: 40ms; }
-    .pricing-hero__rule           { animation-delay: 140ms; }
-    .pricing-hero__title          { animation-delay: 200ms; }
-    .pricing-hero__subtitle       { animation-delay: 320ms; }
-    .billing-toggle-wrapper       { animation-delay: 440ms; }
+    .pricing-hero__eyebrow        { animation-delay: calc(var(--duration-fast) * 0.4); }
+    .pricing-hero__rule           { animation-delay: calc(var(--duration-fast) * 1.4); }
+    .pricing-hero__title          { animation-delay: var(--duration-normal); }
+    .pricing-hero__subtitle       { animation-delay: calc(var(--duration-normal) * 1.6); }
+    .billing-toggle-wrapper       { animation-delay: calc(var(--duration-normal) * 2.2); }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -1731,7 +1731,7 @@
   @media (prefers-reduced-motion: no-preference) {
     .card {
       animation: cardReveal calc(var(--duration-slower) * 1.1) var(--ease-smooth) forwards;
-      animation-delay: calc(120ms * var(--card-index));
+      animation-delay: calc(var(--duration-fast) * 1.2 * var(--card-index));
     }
   }
 
@@ -1757,7 +1757,7 @@
     background: color-mix(in srgb, var(--color-surface) 85%, transparent);
     backdrop-filter: blur(var(--blur-xl));
     -webkit-backdrop-filter: blur(var(--blur-xl));
-    border: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 60%, transparent);
     border-radius: var(--radius-lg);
     box-shadow:
       var(--shadow-lg),
@@ -1812,10 +1812,10 @@
       color-mix(in oklch, var(--color-brand-primary) 22%, transparent),
       color-mix(in oklch, var(--color-brand-primary) 70%, transparent)
     );
-    opacity: 0.55;
+    opacity: var(--opacity-55);
     filter: blur(var(--blur-sm));
     z-index: 0;
-    animation: glowPulse 3.2s var(--ease-smooth) infinite alternate;
+    animation: glowPulse calc(var(--duration-slower) * 6.4) var(--ease-smooth) infinite alternate;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -1823,12 +1823,12 @@
   }
 
   @keyframes glowPulse {
-    from { opacity: 0.4; transform: scale(1); }
+    from { opacity: var(--opacity-40); transform: scale(1); }
     to   { opacity: 0.75; transform: scale(1.005); }
   }
 
   .card--featured:hover .card__glow {
-    opacity: 0.9;
+    opacity: var(--opacity-90);
     filter: blur(var(--blur-md));
   }
 
@@ -1850,7 +1850,7 @@
     color: var(--color-text-on-brand);
     background: linear-gradient(
       180deg,
-      color-mix(in oklch, var(--color-brand-primary) 92%, white),
+      color-mix(in oklch, var(--color-brand-primary) 92%, var(--color-neutral-0)),
       var(--color-brand-primary)
     );
     border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-brand-primary) 60%, transparent);
@@ -1873,12 +1873,12 @@
       background: linear-gradient(
         120deg,
         transparent 25%,
-        color-mix(in srgb, white 38%, transparent) 50%,
+        color-mix(in srgb, var(--color-neutral-0) 38%, transparent) 50%,
         transparent 75%
       );
       mix-blend-mode: overlay;
       transform: translateX(-160%);
-      animation: ribbonShine 2.2s var(--ease-smooth) 1.2s 1 forwards;
+      animation: ribbonShine calc(var(--duration-slower) * 4.4) var(--ease-smooth) calc(var(--duration-slower) * 2.4) 1 forwards;
       pointer-events: none;
       border-radius: inherit;
     }
@@ -2027,7 +2027,7 @@
 
   .card__price-amount {
     font-family: var(--font-heading);
-    font-size: clamp(2.25rem, 2vw + 1.5rem, 3rem);
+    font-size: var(--text-4xl);
     font-weight: var(--font-bold);
     color: var(--color-text);
     font-variant-numeric: tabular-nums;
@@ -2132,7 +2132,7 @@
   @media (prefers-reduced-motion: no-preference) {
     :global(.tier-cta:active) {
       transform: scale(0.96);
-      transition: transform 80ms;
+      transition: transform calc(var(--duration-fast) * 0.8);
     }
   }
 
@@ -2161,7 +2161,7 @@
   .reveal .trust__rule {
     transform: scaleX(0.3);
     transform-origin: center;
-    transition: transform var(--duration-slower) var(--ease-smooth) 150ms;
+    transition: transform var(--duration-slower) var(--ease-smooth) calc(var(--duration-fast) * 1.5);
   }
 
   :global(.reveal.reveal--visible) .preview__rule,
@@ -2227,7 +2227,7 @@
 
   .preview__title {
     font-family: var(--font-heading);
-    font-size: clamp(1.75rem, 2.5vw + 1rem, 2.75rem);
+    font-size: var(--text-5xl);
     font-weight: var(--font-bold);
     line-height: var(--leading-tight);
     letter-spacing: var(--tracking-tighter);
@@ -2362,9 +2362,9 @@
       180deg,
       transparent 0%,
       transparent 42%,
-      color-mix(in oklch, var(--color-brand-primary) 18%, black) 100%
+      color-mix(in oklch, var(--color-brand-primary) 18%, var(--color-neutral-900)) 100%
     );
-    opacity: 0.55;
+    opacity: var(--opacity-55);
     mix-blend-mode: multiply;
   }
 
@@ -2379,11 +2379,11 @@
     font-weight: var(--font-semibold);
     letter-spacing: var(--tracking-wider);
     text-transform: var(--text-transform-label);
-    color: white;
-    background: color-mix(in srgb, black 40%, transparent);
+    color: var(--color-neutral-0);
+    background: color-mix(in srgb, var(--color-neutral-900) 40%, transparent);
     backdrop-filter: blur(var(--blur-md));
     -webkit-backdrop-filter: blur(var(--blur-md));
-    border: var(--border-width) var(--border-style) color-mix(in srgb, white 28%, transparent);
+    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-neutral-0) 28%, transparent);
     border-radius: var(--radius-full);
     z-index: 2;
   }
@@ -2399,12 +2399,12 @@
     font-family: var(--font-heading);
     font-size: var(--text-lg);
     font-weight: var(--font-semibold);
-    color: white;
+    color: var(--color-neutral-0);
     letter-spacing: var(--tracking-tight);
     line-height: var(--leading-snug);
     text-shadow:
-      0 var(--border-width) var(--space-2) color-mix(in srgb, black 70%, transparent),
-      0 0 var(--space-1) color-mix(in srgb, black 50%, transparent);
+      0 var(--border-width) var(--space-2) color-mix(in srgb, var(--color-neutral-900) 70%, transparent),
+      0 0 var(--space-1) color-mix(in srgb, var(--color-neutral-900) 50%, transparent);
     text-wrap: balance;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -2461,7 +2461,7 @@
 
   .preview__stat-number {
     font-family: var(--font-heading);
-    font-size: clamp(2rem, 2.2vw + 1rem, 2.75rem);
+    font-size: var(--text-5xl);
     font-weight: var(--font-bold);
     color: var(--color-text);
     line-height: var(--leading-none);
@@ -2587,7 +2587,7 @@
 
   .faq__title {
     font-family: var(--font-heading);
-    font-size: clamp(1.75rem, 2.5vw + 1rem, 2.75rem);
+    font-size: var(--text-5xl);
     font-weight: var(--font-bold);
     line-height: var(--leading-tight);
     letter-spacing: var(--tracking-tighter);
@@ -2895,7 +2895,7 @@
 
   .sticky-bar__sep {
     color: var(--color-text-muted);
-    opacity: 0.5;
+    opacity: var(--opacity-50);
     line-height: var(--leading-none);
   }
 
@@ -3019,7 +3019,7 @@
     color: var(--color-error-700);
     line-height: var(--leading-snug);
     text-wrap: pretty;
-    opacity: 0.9;
+    opacity: var(--opacity-90);
   }
 
   .checkout-error__retry {
@@ -3203,7 +3203,7 @@
       background: color-mix(in srgb, var(--color-brand-primary) 6%, var(--color-surface));
     }
     .preview__badge {
-      background: color-mix(in srgb, black 70%, transparent);
+      background: color-mix(in srgb, var(--color-neutral-900) 70%, transparent);
     }
   }
 
@@ -3267,7 +3267,7 @@
       background: color-mix(in srgb, var(--color-brand-primary) 6%, var(--color-surface));
     }
     .preview__badge {
-      background: color-mix(in srgb, black 78%, transparent);
+      background: color-mix(in srgb, var(--color-neutral-900) 78%, transparent);
       backdrop-filter: none;
       -webkit-backdrop-filter: none;
     }
