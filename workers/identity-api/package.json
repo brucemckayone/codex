@@ -20,9 +20,9 @@
   "dependencies": {
     "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
-    "@codex/security": "workspace:*",
     "@codex/identity": "workspace:*",
     "@codex/image-processing": "workspace:*",
+    "@codex/security": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/validation": "workspace:*",
     "@codex/worker-utils": "workspace:*",

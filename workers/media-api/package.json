@@ -18,20 +18,20 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@codex/cloudflare-clients": "workspace:*",
     "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
+    "@codex/image-processing": "workspace:*",
+    "@codex/observability": "workspace:*",
     "@codex/security": "workspace:*",
     "@codex/service-errors": "workspace:*",
-    "@codex/cloudflare-clients": "workspace:*",
-    "@codex/image-processing": "workspace:*",
     "@codex/shared-types": "workspace:*",
     "@codex/transcoding": "workspace:*",
-    "@codex/observability": "workspace:*",
     "@codex/validation": "workspace:*",
     "@codex/worker-utils": "workspace:*",
     "hono": "^4.7.8",
-    "zod": "^4.3.5",
-    "vite-plugin-dts": "^4.5.4"
+    "vite-plugin-dts": "^4.5.4",
+    "zod": "^4.3.5"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.10.0",

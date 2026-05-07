@@ -53,6 +53,7 @@
     "@axe-core/playwright": "^4.11.0",
     "@cloudflare/workers-types": "^4.20251014.0",
     "@csstools/postcss-global-data": "^4.0.0",
+    "@inlang/paraglide-js": "^1.11.8",
     "@melt-ui/pp": "^0.3.2",
     "@playwright/test": "^1.56.1",
     "@rollup/rollup-darwin-arm64": "^4.55.1",

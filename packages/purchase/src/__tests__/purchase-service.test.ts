@@ -8,9 +8,8 @@
  * - Purchase history queries
  *
  * Database Isolation:
- * - Uses neon-testing for ephemeral branch per test file
+ * - Workflow-level Neon branching provides test domain isolation in CI
  * - Each test creates its own data (idempotent tests)
- * - No cleanup needed - fresh database for this file
  *
  * Stripe Integration:
  * - Mocks Stripe client to avoid real API calls

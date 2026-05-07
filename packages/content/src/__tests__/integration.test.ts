@@ -11,9 +11,8 @@
  * Test Count: 15+ tests
  *
  * Database Isolation:
- * - Uses neon-testing for ephemeral branch per test file
+ * - Workflow-level Neon branching provides test domain isolation in CI
  * - Each test creates its own data (idempotent tests)
- * - No cleanup needed - fresh database for this file
  */
 
 import { CONTENT_STATUS, MEDIA_STATUS } from '@codex/constants';
@@ -48,8 +47,6 @@ describe('Integration Tests', () => {
     const userIds = await seedTestUsers(db, 2);
     [creatorId, otherCreatorId] = userIds;
   });
-
-  // No cleanup needed - neon-testing provides fresh database per file
 
   afterAll(async () => {
     await teardownTestDatabase();
