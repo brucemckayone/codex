@@ -56,7 +56,7 @@ import {
   PaymentProcessingError,
   PurchaseNotFoundError,
 } from '../errors';
-import { resolveOrCreateCustomer } from './resolve-customer';
+import { withStaleCustomerRecovery } from './resolve-customer';
 
 /**
  * Type guard for Stripe errors
@@ -264,55 +264,82 @@ export class PurchaseService extends BaseService {
         });
       }
 
-      const stripeCustomerId = await resolveOrCreateCustomer(
-        { db: this.db, stripe: this.stripe },
-        { userId: customerId, email: user.email }
-      );
+      // Hoist captured non-null fields BEFORE the closure. TypeScript loses
+      // narrowing of property accesses (`contentRecord.priceCents`,
+      // `contentRecord.organizationId`) across closure boundaries — locals
+      // preserve the narrowed `number` / `string` types we already validated
+      // earlier in this function.
+      const priceCents = contentRecord.priceCents;
+      const organizationId = contentRecord.organizationId;
+      if (priceCents === null || organizationId === null) {
+        // Already validated upstream; this guards the type narrowing only.
+        throw new PaymentProcessingError(
+          'Content missing price or organization at checkout',
+          { contentId: validated.contentId }
+        );
+      }
 
-      const session = await this.stripe.checkout.sessions.create({
-        mode: 'payment',
-        payment_method_types: ['card'],
-        customer: stripeCustomerId,
-        line_items: [
-          {
-            price_data: {
-              currency: CURRENCY.GBP,
-              unit_amount: contentRecord.priceCents,
-              product_data: {
-                name: contentRecord.title,
-                description: plainDescription
-                  ? plainDescription.slice(0, 500)
-                  : undefined,
-                images: contentRecord.thumbnailUrl
-                  ? [contentRecord.thumbnailUrl]
-                  : undefined,
-              },
-            },
-            quantity: 1,
-          },
-        ],
-        // Destination charges: Stripe routes payment to creator, platform keeps fee
-        ...(creatorConnect?.chargesEnabled && applicationFeeCents !== undefined
-          ? {
-              payment_intent_data: {
-                application_fee_amount: applicationFeeCents,
-                transfer_data: {
-                  destination: creatorConnect.stripeAccountId,
+      // `withStaleCustomerRecovery` resolves a customer id and self-heals
+      // a stale `users.stripe_customer_id` (deleted-in-Stripe or seed-only
+      // synthetic) by clearing the cache and recreating once. Same pattern
+      // as `SubscriptionService.createCheckoutSession`.
+      const session = await withStaleCustomerRecovery(
+        { db: this.db, stripe: this.stripe },
+        { userId: customerId, email: user.email },
+        (resolvedCustomerId) =>
+          this.stripe.checkout.sessions.create({
+            mode: 'payment',
+            payment_method_types: ['card'],
+            customer: resolvedCustomerId,
+            line_items: [
+              {
+                price_data: {
+                  currency: CURRENCY.GBP,
+                  unit_amount: priceCents,
+                  product_data: {
+                    name: contentRecord.title,
+                    description: plainDescription
+                      ? plainDescription.slice(0, 500)
+                      : undefined,
+                    images: contentRecord.thumbnailUrl
+                      ? [contentRecord.thumbnailUrl]
+                      : undefined,
+                  },
                 },
+                quantity: 1,
               },
-            }
-          : {}),
-        success_url: validated.successUrl,
-        cancel_url: validated.cancelUrl,
-        metadata: {
-          contentId: validated.contentId,
-          customerId,
-          organizationId: contentRecord.organizationId, // Must exist (validated above)
-          creatorId: contentRecord.creatorId,
-          contentTitle: contentRecord.title,
-        },
-        client_reference_id: customerId,
-      });
+            ],
+            // Destination charges: Stripe routes payment to creator, platform keeps fee
+            ...(creatorConnect?.chargesEnabled &&
+            applicationFeeCents !== undefined
+              ? {
+                  payment_intent_data: {
+                    application_fee_amount: applicationFeeCents,
+                    transfer_data: {
+                      destination: creatorConnect.stripeAccountId,
+                    },
+                  },
+                }
+              : {}),
+            success_url: validated.successUrl,
+            cancel_url: validated.cancelUrl,
+            metadata: {
+              contentId: validated.contentId,
+              customerId,
+              organizationId,
+              creatorId: contentRecord.creatorId,
+              contentTitle: contentRecord.title,
+            },
+            client_reference_id: customerId,
+          }),
+        {
+          onStaleRecovery: (info) =>
+            this.obs.warn(
+              'Stale users.stripe_customer_id detected; clearing and retrying',
+              { ...info, contentId: validated.contentId }
+            ),
+        }
+      );
 
       if (!session.url) {
         throw new PaymentProcessingError('Checkout session URL not generated', {
@@ -1075,20 +1102,27 @@ export class PurchaseService extends BaseService {
     const validated = createPortalSessionSchema.parse({ returnUrl });
 
     try {
-      // Step 1: Resolve the unified Customer id (cached on the user row,
-      // reused by every checkout + portal across every org). NotFoundError
-      // and PaymentProcessingError propagate untouched — the catch below
-      // only wraps raw Stripe errors from billingPortal.sessions.create.
-      const stripeCustomerId = await resolveOrCreateCustomer(
+      // Resolve the unified Customer id (cached on the user row, reused by
+      // every checkout + portal across every org) and self-heal if the cache
+      // is stale. NotFoundError and PaymentProcessingError from the
+      // resolution step propagate untouched — the catch below only wraps
+      // raw Stripe errors from billingPortal.sessions.create.
+      const session = await withStaleCustomerRecovery(
         { db: this.db, stripe: this.stripe },
-        { userId, email }
+        { userId, email },
+        (stripeCustomerId) =>
+          this.stripe.billingPortal.sessions.create({
+            customer: stripeCustomerId,
+            return_url: validated.returnUrl,
+          }),
+        {
+          onStaleRecovery: (info) =>
+            this.obs.warn(
+              'Stale users.stripe_customer_id detected; clearing and retrying',
+              { ...info }
+            ),
+        }
       );
-
-      // Step 2: Create billing portal session
-      const session = await this.stripe.billingPortal.sessions.create({
-        customer: stripeCustomerId,
-        return_url: validated.returnUrl,
-      });
 
       return { url: session.url };
     } catch (error) {

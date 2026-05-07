@@ -39,7 +39,6 @@
     "@vitest/snapshot": "~3.2.4",
     "@vitest/ui": "~3.2.4",
     "vitest": "^3.2.4",
-    "wrangler": "^4.47.0",
-    "cloudflare": "^4.0.0"
+    "wrangler": "^4.47.0"
   }
 }

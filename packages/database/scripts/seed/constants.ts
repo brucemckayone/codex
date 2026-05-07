@@ -790,6 +790,10 @@ export const CONNECT_ACCOUNTS = {
     id: seedUuid('seed-connect-alpha-creator'),
     // stripeAccountId is created dynamically via Stripe API during seeding
   },
+  bonesLuzura: {
+    id: seedUuid('seed-connect-bones-luzura'),
+    // stripeAccountId is created dynamically via Stripe API during seeding
+  },
 } as const;
 
 // ── Platform Fee Config ──────────────────────────────────────
