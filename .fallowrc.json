@@ -29,7 +29,18 @@
     "tslib",
     "@better-auth/cli"
   ],
-  "ignoreDependencies": ["vite-plugin-dts"],
+  "ignoreDependencies": [
+    "vite-plugin-dts",
+    "@inlang/paraglide-js",
+    "@storybook/addon-a11y",
+    "@storybook/addon-essentials",
+    "@storybook/addon-interactions",
+    "@storybook/test-runner",
+    "@tiptap/pm",
+    "@rollup/rollup-darwin-arm64",
+    "tslib",
+    "@better-auth/cli"
+  ],
   "ignoreExports": [
     {
       "file": "apps/web/src/lib/components/ui/CreatorCard/index.ts",
@@ -268,6 +279,7 @@
     "upgradeToCreator",
     "upload"
   ],
+  "usedClassMembers": ["recoverStuckTranscoding"],
   "duplicates": {
     "enabled": true,
     "mode": "mild",
