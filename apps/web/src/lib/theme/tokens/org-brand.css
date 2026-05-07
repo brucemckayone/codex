@@ -116,6 +116,8 @@
   --text-2xl: calc(clamp(1.5rem, 1.3rem + 1vw, 1.875rem) * var(--text-scale));
   --text-3xl: calc(clamp(1.875rem, 1.5rem + 1.875vw, 2.5rem) * var(--text-scale));
   --text-4xl: calc(clamp(2.25rem, 1.8rem + 2.25vw, 3rem) * var(--text-scale));
+  --text-5xl: calc(clamp(1.75rem, 1rem + 2.5vw, 2.75rem) * var(--text-scale));
+  --text-display: calc(clamp(2.75rem, 1rem + 4.5vw, 5rem) * var(--text-scale));
 
   /* ─── SHADOW OVERRIDES (from brand editor fine-tune) ───────────────── */
   --shadow-strength: calc(1% * var(--brand-shadow-scale, 1));

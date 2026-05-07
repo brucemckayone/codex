@@ -81,7 +81,14 @@ export const listUserLibrarySchema = paginationSchema.extend({
     .optional()
     .default('all'),
   accessType: z
-    .enum(['all', 'purchased', 'membership', 'subscription'])
+    .enum([
+      'all',
+      'purchased',
+      'membership',
+      'subscription',
+      'free',
+      'followers',
+    ])
     .optional()
     .default('all'),
   search: z.string().max(200).optional().default(''),

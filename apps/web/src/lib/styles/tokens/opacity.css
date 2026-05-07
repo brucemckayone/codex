@@ -14,6 +14,9 @@
   --opacity-30: 0.3;
   --opacity-40: 0.4;
   --opacity-50: 0.5;
+  /* Used by editorial overlays (pricing card glow, content tile shade)
+     where 50% feels too thin and 60% too heavy. */
+  --opacity-55: 0.55;
   --opacity-60: 0.6;
   --opacity-70: 0.7;
   --opacity-80: 0.8;

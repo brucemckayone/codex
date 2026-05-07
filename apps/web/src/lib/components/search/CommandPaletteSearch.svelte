@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
+	import { page } from '$app/state';
 	import { fade, fly } from 'svelte/transition';
 	import { SearchIcon, XIcon } from '$lib/components/ui/Icon';
 	import { Spinner } from '$lib/components/ui/Feedback/Spinner';
+	import { buildContentUrl } from '$lib/utils/subdomain';
 	import * as m from '$paraglide/messages';
 
 	interface Props {
@@ -137,8 +139,17 @@
 		} else if (item.type === 'content') {
 			saveRecent(query.trim());
 			open = false;
-			const slug = item.item.slug ?? item.item.id;
-			goto(`/content/${slug}`);
+			// buildContentUrl handles cross-org subdomain hops — when the
+			// content lives on a different org than the current host, it
+			// returns a full URL via buildOrgUrl so goto navigates correctly
+			// instead of 404ing on `/content/{slug}` of the wrong subdomain.
+			goto(
+				buildContentUrl(page.url, {
+					slug: item.item.slug,
+					id: item.item.id,
+					organizationSlug: item.item.organizationSlug,
+				})
+			);
 		} else if (item.type === 'creator') {
 			saveRecent(query.trim());
 			open = false;

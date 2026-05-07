@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   flushSync,
   mount,
+  screen,
   textSnippet,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
@@ -30,6 +31,10 @@ describe('Button', () => {
     const button = document.body.querySelector('button');
     expect(button).toBeTruthy();
     expect(button?.textContent).toContain('Click me');
+    // Canonical example of the screen.getByRole helper from
+    // $tests/utils/component-test-utils.svelte — matches a native <button>
+    // element via the `button` semantic role and filters by accessible name.
+    expect(screen.getByRole('button', { name: 'Click me' })).toBe(button);
   });
 
   test('applies variant and size data attributes', () => {
