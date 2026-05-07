@@ -31,6 +31,7 @@ import {
 } from '@codex/worker-utils';
 
 // Import route modules
+import devRoutes from './routes/dev';
 import followerRoutes from './routes/followers';
 import memberRoutes from './routes/members';
 import organizationRoutes from './routes/organizations';
@@ -98,6 +99,11 @@ app.route('/api/organizations/:id/tiers', tierRoutes);
 // Mount follower routes under /api/organizations/:id/followers
 // Free audience relationships (follow/unfollow, follower count)
 app.route('/api/organizations/:id/followers', followerRoutes);
+
+// Dev-only: KV flush utility for seed scripts. Each handler self-gates on
+// ENVIRONMENT === 'development' and returns 404 otherwise, so this mount
+// is inert in production builds.
+app.route('/__dev__', devRoutes);
 
 // ============================================================================
 // Export

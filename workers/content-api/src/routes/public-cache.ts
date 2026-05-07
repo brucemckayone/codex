@@ -26,8 +26,13 @@ const PUBLIC_CONTENT_CACHE_TTL = 300;
 /**
  * Public content list query shape accepted by the cache wiring.
  * Kept narrow so callers can pass the worker's validated input directly.
+ *
+ * Unexported — `public.ts` calls `getCachedPublicContent` / `shouldCachePublicContentQuery`
+ * with object literals and never imports the named type. Tests likewise pass
+ * literals. If an external consumer needs this shape, re-export and add a
+ * barrel entry.
  */
-export interface PublicContentCacheQuery {
+interface PublicContentCacheQuery {
   orgId?: string;
   sort?: string | null;
   limit?: number | null;

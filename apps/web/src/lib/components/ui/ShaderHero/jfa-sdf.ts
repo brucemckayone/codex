@@ -15,12 +15,12 @@
 import { JFA_DISTANCE_FRAG } from './shaders/jfa-distance.frag';
 import { JFA_SEED_FRAG } from './shaders/jfa-seed.frag';
 import { JFA_STEP_FRAG } from './shaders/jfa-step.frag';
+import type { FBO } from './webgl-utils';
 import {
   createFBOWithFormat,
   createProgram,
   destroyFBO,
   drawQuad,
-  type FBO,
   getUniforms,
   VERTEX_SHADER,
 } from './webgl-utils';

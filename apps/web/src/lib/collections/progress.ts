@@ -23,7 +23,7 @@ import {
 /**
  * Playback progress data structure
  */
-export interface PlaybackProgress {
+interface PlaybackProgress {
   contentId: string;
   positionSeconds: number;
   durationSeconds: number;

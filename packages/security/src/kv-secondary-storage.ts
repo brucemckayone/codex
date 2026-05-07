@@ -42,18 +42,12 @@ export interface SecondaryStorage {
   delete: (key: string) => Promise<void>;
 }
 
-import { ObservabilityClient as ObsClientImpl } from '@codex/observability';
+import {
+  type Logger,
+  ObservabilityClient as ObsClientImpl,
+} from '@codex/observability';
 
-/**
- * ObservabilityClient interface for logging
- */
-export interface ObservabilityClient {
-  warn: (message: string, context?: Record<string, unknown>) => void;
-}
-
-const fallbackObs: ObservabilityClient = new ObsClientImpl(
-  'kv-secondary-storage'
-);
+const fallbackObs: Logger = new ObsClientImpl('kv-secondary-storage');
 
 /**
  * Create a KV-backed secondary storage adapter for Better Auth
@@ -80,7 +74,7 @@ const fallbackObs: ObservabilityClient = new ObsClientImpl(
  */
 export function createKVSecondaryStorage(
   kv: KVNamespace,
-  obs?: ObservabilityClient
+  obs?: Logger
 ): SecondaryStorage {
   return {
     async get(key: string): Promise<unknown> {

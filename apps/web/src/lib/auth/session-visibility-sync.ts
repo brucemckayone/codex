@@ -22,14 +22,14 @@
 
 export type VisibilityState = 'visible' | 'hidden' | 'prerender';
 
-export type AuthRevalidationDecision =
+type AuthRevalidationDecision =
   | { action: 'none' }
   | {
       action: 'invalidate';
       reason: 'cookie-diff' | 'unauthenticated-recheck';
     };
 
-export interface AuthRevalidationInput {
+interface AuthRevalidationInput {
   visibilityState: VisibilityState;
   /** Whether the session cookie is present RIGHT NOW. */
   nowHasCookie: boolean;

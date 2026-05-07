@@ -68,7 +68,7 @@ export function isReservedSubdomain(subdomain: string): boolean {
 /**
  * Determine the context type from a subdomain
  */
-export type SubdomainContext =
+type SubdomainContext =
   | { type: 'platform' }
   | { type: 'creators' }
   | { type: 'organization'; slug: string }

@@ -51,6 +51,7 @@ import {
   ConnectAccountNotReadyError,
   SubscriptionCheckoutError,
   SubscriptionNotFoundError,
+  SubscriptionPaymentRequiredError,
   TierNotFoundError,
 } from '../../errors';
 import { SubscriptionService } from '../subscription-service';
@@ -1289,25 +1290,148 @@ describe('SubscriptionService', () => {
     });
   });
 
-  // ─── changeTier ───────────────────────────────────────────────────
+  // ─── previewTierChange ────────────────────────────────────────────
 
-  describe('changeTier', () => {
-    it('should update subscription tier with proration', async () => {
-      const { org, tier1, tier2 } = await createFullOrg('change-tier');
+  describe('previewTierChange', () => {
+    /**
+     * Stub `stripe.invoices.createPreview` for this test.
+     * Returns a preview shape compatible with what previewTierChange reads:
+     * `amount_due` and `lines.data[].parent.subscription_item_details.proration`.
+     */
+    function stubCreatePreview(
+      amountDueCents: number,
+      prorationLines: Array<{ description: string; amount: number }> = []
+    ) {
+      (stripe as unknown as { invoices: unknown }).invoices = {
+        createPreview: vi.fn().mockResolvedValue({
+          amount_due: amountDueCents,
+          lines: {
+            data: prorationLines.map((line) => ({
+              description: line.description,
+              amount: line.amount,
+              parent: { subscription_item_details: { proration: true } },
+            })),
+          },
+        }),
+      };
+    }
+
+    it('returns amountDueCents > 0 with proration lines for an upgrade', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('preview-up');
+      // Factory default amountCents=499 + matching split already matches
+      // tier1.priceMonthly — no override needed (CHECK constraint
+      // amount_cents = platform_fee + org_fee + creator_payout).
       await db
         .insert(subscriptions)
         .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
 
+      stubCreatePreview(500, [
+        { description: 'Unused time on Basic (credit)', amount: -250 },
+        { description: 'Remaining time on Pro (charge)', amount: 750 },
+      ]);
+
+      const preview = await service.previewTierChange(
+        otherCreatorId,
+        org.id,
+        tier2.id,
+        'month'
+      );
+
+      expect(preview.amountDueCents).toBe(500);
+      expect(preview.prorationLineItems).toHaveLength(2);
+      expect(preview.prorationLineItems[0].amountCents).toBe(-250);
+      expect(preview.prorationLineItems[1].amountCents).toBe(750);
+      expect(preview.newRecurringAmountCents).toBe(tier2.priceMonthly);
+      expect(preview.newRecurringInterval).toBe('month');
+      expect(preview.isUpgrade).toBe(true);
+      expect(preview.prorationDate).toBeGreaterThan(0);
+    });
+
+    it('returns amountDueCents = 0 / negative credit for a downgrade', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('preview-down');
+      // Subscriber currently on Pro (tier2 = 999p) — split must sum to 999
+      // (10% platform / 15% post-platform org / remainder to creator pool).
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier2.id, {
+          amountCents: tier2.priceMonthly,
+          platformFeeCents: 100,
+          organizationFeeCents: 134,
+          creatorPayoutCents: 765,
+          billingInterval: 'month',
+        })
+      );
+
+      // Downgrade to Basic — Stripe issues credit (no charge today)
+      stubCreatePreview(0, [
+        { description: 'Unused time on Pro (credit)', amount: -500 },
+      ]);
+
+      const preview = await service.previewTierChange(
+        otherCreatorId,
+        org.id,
+        tier1.id,
+        'month'
+      );
+
+      expect(preview.amountDueCents).toBe(0);
+      expect(preview.newRecurringAmountCents).toBe(tier1.priceMonthly);
+      expect(preview.isUpgrade).toBe(false);
+    });
+
+    it('throws TierNotFoundError for an unknown tier', async () => {
+      const { org, tier1 } = await createFullOrg('preview-bad-tier');
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
+
+      stubCreatePreview(0);
+
+      await expect(
+        service.previewTierChange(
+          otherCreatorId,
+          org.id,
+          '00000000-0000-0000-0000-000000000000',
+          'month'
+        )
+      ).rejects.toThrow(TierNotFoundError);
+    });
+
+    it('throws SubscriptionNotFoundError when caller has no active subscription', async () => {
+      const { org, tier2 } = await createFullOrg('preview-no-sub');
+      stubCreatePreview(0);
+
+      await expect(
+        service.previewTierChange(thirdUserId, org.id, tier2.id, 'month')
+      ).rejects.toThrow(SubscriptionNotFoundError);
+    });
+  });
+
+  // ─── changeTier ───────────────────────────────────────────────────
+
+  describe('changeTier', () => {
+    it('upgrade: invoices the proration immediately with payment_behavior=error_if_incomplete', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('change-tier-up');
+      // Subscribe on tier1 (priceMonthly=499, default split sums correctly).
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
+
+      // tier1 (499) → tier2 (999) is an UPGRADE.
       await service.changeTier(otherCreatorId, org.id, tier2.id, 'month');
 
       expect(stripe.subscriptions.update).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
-          proration_behavior: 'create_prorations',
+          proration_behavior: 'always_invoice',
+          payment_behavior: 'error_if_incomplete',
+          proration_date: expect.any(Number),
+        }),
+        expect.objectContaining({
+          idempotencyKey: expect.stringMatching(/^upgrade_.+_\d+$/),
         })
       );
 
-      // Verify local DB updated
+      // Verify local DB mirrored — tier swapped + amount + split aligned.
       const { eq, and } = await import('drizzle-orm');
       const [updated] = await db
         .select()
@@ -1319,6 +1443,100 @@ describe('SubscriptionService', () => {
           )
         );
       expect(updated.tierId).toBe(tier2.id);
+      expect(updated.amountCents).toBe(tier2.priceMonthly);
+    });
+
+    it('downgrade (Phase 1 fallback): keeps create_prorations, NO payment_behavior, NO idempotency key', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('change-tier-down');
+      // Subscribe on tier2 (priceMonthly=999) — split must sum to 999.
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier2.id, {
+          amountCents: tier2.priceMonthly,
+          platformFeeCents: 100,
+          organizationFeeCents: 134,
+          creatorPayoutCents: 765,
+        })
+      );
+
+      // tier2 (999) → tier1 (499) is a DOWNGRADE.
+      await service.changeTier(otherCreatorId, org.id, tier1.id, 'month');
+
+      const updateCall = (
+        stripe.subscriptions.update as unknown as {
+          mock: { calls: unknown[][] };
+        }
+      ).mock.calls[0];
+      const params = updateCall[1] as Record<string, unknown>;
+      expect(params.proration_behavior).toBe('create_prorations');
+      expect(params.payment_behavior).toBeUndefined();
+      // Phase 1 downgrade still updates the local row immediately —
+      // Phase 2 replaces this with a scheduled change.
+      expect(params.proration_date).toEqual(expect.any(Number));
+      // No options arg (idempotency key) for downgrade — proration is
+      // deferred to the next invoice, no risk of double-charging on retry.
+      expect(updateCall[2]).toBeUndefined();
+    });
+
+    it('upgrade payment failure: maps Stripe 402 to SubscriptionPaymentRequiredError, leaves DB untouched', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('change-tier-402');
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
+
+      // Simulate Stripe rejecting the proration invoice with HTTP 402.
+      const stripeError = Object.assign(new Error('Card declined'), {
+        statusCode: 402,
+        type: 'StripeCardError',
+      });
+      (
+        stripe.subscriptions.update as unknown as {
+          mockRejectedValueOnce: (e: unknown) => void;
+        }
+      ).mockRejectedValueOnce(stripeError);
+
+      await expect(
+        service.changeTier(otherCreatorId, org.id, tier2.id, 'month')
+      ).rejects.toThrow(SubscriptionPaymentRequiredError);
+
+      // Local row must remain on tier1 with the original amount — Stripe
+      // reverted the price update and we mustn't write the new tier.
+      const { eq, and } = await import('drizzle-orm');
+      const [unchanged] = await db
+        .select()
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.userId, otherCreatorId),
+            eq(subscriptions.organizationId, org.id)
+          )
+        );
+      expect(unchanged.tierId).toBe(tier1.id);
+      expect(unchanged.amountCents).toBe(tier1.priceMonthly);
+    });
+
+    it('passes through preview prorationDate so commit-time charge matches preview', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('change-tier-pdate');
+      const [insertedSub] = await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id))
+        .returning();
+
+      const previewProrationDate = 1700000000;
+      await service.changeTier(
+        otherCreatorId,
+        org.id,
+        tier2.id,
+        'month',
+        previewProrationDate
+      );
+
+      expect(stripe.subscriptions.update).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ proration_date: previewProrationDate }),
+        expect.objectContaining({
+          idempotencyKey: `upgrade_${insertedSub.id}_${previewProrationDate}`,
+        })
+      );
     });
 
     it('should throw SubscriptionNotFoundError without subscription', async () => {
@@ -1342,6 +1560,56 @@ describe('SubscriptionService', () => {
           'month'
         )
       ).rejects.toThrow(TierNotFoundError);
+    });
+
+    it('mirrors the new tier price into amountCents synchronously (no webhook needed)', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('change-tier-amount');
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          amountCents: tier1.priceMonthly,
+          billingInterval: 'month',
+        })
+      );
+
+      await service.changeTier(otherCreatorId, org.id, tier2.id, 'month');
+
+      const { eq, and } = await import('drizzle-orm');
+      const [updated] = await db
+        .select()
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.userId, otherCreatorId),
+            eq(subscriptions.organizationId, org.id)
+          )
+        );
+      expect(updated.amountCents).toBe(tier2.priceMonthly);
+      expect(updated.billingInterval).toBe('month');
+    });
+
+    it('mirrors the annual price when switching to annual billing', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('change-tier-annual');
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          amountCents: tier1.priceMonthly,
+          billingInterval: 'month',
+        })
+      );
+
+      await service.changeTier(otherCreatorId, org.id, tier2.id, 'year');
+
+      const { eq, and } = await import('drizzle-orm');
+      const [updated] = await db
+        .select()
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.userId, otherCreatorId),
+            eq(subscriptions.organizationId, org.id)
+          )
+        );
+      expect(updated.amountCents).toBe(tier2.priceAnnual);
+      expect(updated.billingInterval).toBe('year');
     });
 
     // Codex-0g6yq: return shape carries { userId, orgId } so the route handler

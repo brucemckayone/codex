@@ -347,11 +347,13 @@ const CSS_VAR_MAPPINGS: CssVarMapping[] = [
   },
   {
     property: '--brand-font-body',
-    getValue: (s) => (s.fontBody ? `'${s.fontBody}'` : undefined),
+    getValue: (s) =>
+      s.fontBody ? `'${s.fontBody}', var(--font-sans)` : undefined,
   },
   {
     property: '--brand-font-heading',
-    getValue: (s) => (s.fontHeading ? `'${s.fontHeading}'` : undefined),
+    getValue: (s) =>
+      s.fontHeading ? `'${s.fontHeading}', var(--font-sans)` : undefined,
   },
 ];
 
@@ -389,7 +391,7 @@ export function previewFont(mode: 'body' | 'heading', family: string): void {
   if (!el) return;
   const prop =
     mode === 'heading' ? '--brand-font-heading' : '--brand-font-body';
-  el.style.setProperty(prop, `'${family}'`);
+  el.style.setProperty(prop, `'${family}', var(--font-sans)`);
   loadGoogleFont(family);
 }
 
@@ -406,7 +408,7 @@ export function revertFontPreview(
   const prop =
     mode === 'heading' ? '--brand-font-heading' : '--brand-font-body';
   if (currentValue) {
-    el.style.setProperty(prop, `'${currentValue}'`);
+    el.style.setProperty(prop, `'${currentValue}', var(--font-sans)`);
   } else {
     el.style.removeProperty(prop);
   }
@@ -474,10 +476,11 @@ export function injectBrandVars(state: BrandEditorState): void {
   const overrides = state.tokenOverrides ?? {};
   for (const [key, value] of Object.entries(overrides)) {
     if (value == null) continue;
-    // hero-hide-* drives data-hero-hide-* attributes on the org layout, not
-    // CSS custom properties — emitting --color-hero-hide-* would just pollute
-    // inline style for no consumer (Codex-rwci4). Future attribute-only key
-    // families should be added here.
+    // Skip keys that drive attribute-only behaviour (e.g. hero-hide-* are
+    // applied as data-hero-hide-* attributes by the org layout, NOT as CSS
+    // custom properties — emitting --color-hero-hide-* would just pollute
+    // the inline style for no consumer). Future attribute-only key families
+    // (e.g. data-layout-*) should be added here.
     if (key.startsWith('hero-hide-')) continue;
     const prop = BRAND_PREFIX_KEYS.has(key)
       ? `--brand-${key}`
@@ -540,7 +543,8 @@ export function tokenOverridesToCssVars(
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(overrides)) {
     if (value == null) continue;
-    // Skip attribute-only keys — same filter as injectBrandVars (Codex-rwci4).
+    // Skip attribute-only keys — these are consumed via data-* attributes,
+    // not CSS custom properties (see injectBrandVars for the same filter).
     if (key.startsWith('hero-hide-')) continue;
     const prop = BRAND_PREFIX_KEYS.has(key)
       ? `--brand-${key}`
