@@ -132,6 +132,11 @@ export function createPackageConfig(
         // (private fields make classes nominal — same logical class, two paths,
         // two types).
         pathsToAliases: false,
+        // Treat broken .d.ts generation as a build failure rather than a
+        // silent warning. Without this, malformed types ship to consumers
+        // unnoticed (worker-utils + test-utils have shipped broken .d.ts
+        // in past iterations because failOnError defaults to false).
+        failOnError: true,
       }) as PluginOption,
       ...plugins,
     ],

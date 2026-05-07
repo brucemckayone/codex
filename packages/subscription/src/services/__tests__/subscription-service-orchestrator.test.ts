@@ -410,6 +410,8 @@ describe('SubscriptionService orchestrator hook — changeTier', () => {
       isActive: true,
       stripePriceMonthlyId: 'price_mo',
       stripePriceAnnualId: 'price_yr',
+      priceMonthly: 999,
+      priceAnnual: 9990,
     };
     const bundle = withTier([[sub], [newTier]]);
 
@@ -464,6 +466,8 @@ describe('SubscriptionService orchestrator hook — changeTier', () => {
       isActive: true,
       stripePriceMonthlyId: 'price_mo',
       stripePriceAnnualId: 'price_yr',
+      priceMonthly: 999,
+      priceAnnual: 9990,
     };
     // Temporarily swap in a no-cache service by rebuilding manually.
     let callIdx = 0;

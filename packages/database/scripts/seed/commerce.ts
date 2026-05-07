@@ -74,21 +74,29 @@ async function cleanupStripeSeedObjects(stripe: Stripe): Promise<void> {
 // Bypass onboarding requirements in test mode by providing all required fields.
 // See: https://docs.stripe.com/connect/custom/onboarding#test-mode
 
+interface ConnectIdentity {
+  firstName: string;
+  lastName: string;
+  email: string;
+  businessUrl: string;
+}
+
 async function activateConnectAccount(
   stripe: Stripe,
-  accountId: string
+  accountId: string,
+  identity: ConnectIdentity
 ): Promise<{ chargesEnabled: boolean; payoutsEnabled: boolean }> {
   // Pre-fill all required fields for a GB Express account
   await stripe.accounts.update(accountId, {
     business_type: 'individual',
     business_profile: {
       mcc: '5815', // Digital goods — matches content streaming platform
-      url: 'https://studioalpha.test',
+      url: identity.businessUrl,
     },
     individual: {
-      first_name: 'Alex',
-      last_name: 'Creator',
-      email: 'creator@test.com',
+      first_name: identity.firstName,
+      last_name: identity.lastName,
+      email: identity.email,
       phone: '+44 7700 900000', // Stripe-valid UK test number
       dob: { day: 1, month: 1, year: 1990 },
       address: {
@@ -117,6 +125,85 @@ async function activateConnectAccount(
     chargesEnabled: updated.charges_enabled ?? false,
     payoutsEnabled: updated.payouts_enabled ?? false,
   };
+}
+
+interface SeededConnectAccountConfig {
+  orgId: string;
+  userId: string;
+  identity: ConnectIdentity;
+}
+
+interface SeededConnectAccountResult {
+  accountId: string;
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+}
+
+/**
+ * Reuse an existing seed Connect account for the given org, or create + activate
+ * a new one. Idempotent — safe to re-run `pnpm db:seed`.
+ *
+ * Pre-existing accounts are matched by `metadata.codex_seed === 'true'` AND
+ * `metadata.codex_organization_id === config.orgId`. Older Express seed accounts
+ * (`requirement_collection: 'stripe'`) cannot be programmatically activated, so
+ * we ignore them and create a fresh Custom one.
+ */
+async function ensureSeededConnectAccount(
+  stripe: Stripe,
+  existingAccounts: Stripe.Account[],
+  config: SeededConnectAccountConfig
+): Promise<SeededConnectAccountResult> {
+  const existingSeed = existingAccounts.find(
+    (a) =>
+      a.metadata?.codex_seed === 'true' &&
+      a.metadata?.codex_organization_id === config.orgId
+  );
+
+  let accountId: string;
+  if (
+    existingSeed &&
+    existingSeed.controller?.requirement_collection === 'application'
+  ) {
+    accountId = existingSeed.id;
+    console.log(
+      `  ♻ Reusing existing seed Connect account for org ${config.orgId} (${accountId})`
+    );
+  } else {
+    // Create a Custom account (requirement_collection: 'application') so we can
+    // programmatically accept TOS and pre-fill all fields. Production uses Express
+    // (requirement_collection: 'stripe'), but seed needs full control for activation.
+    // Transfer functionality (destination charges) works identically for both types.
+    const account = await stripe.accounts.create({
+      controller: {
+        stripe_dashboard: { type: 'none' },
+        fees: { payer: 'application' },
+        losses: { payments: 'application' },
+        requirement_collection: 'application',
+      },
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true },
+      },
+      country: 'GB',
+      metadata: {
+        codex_organization_id: config.orgId,
+        codex_user_id: config.userId,
+        codex_seed: 'true',
+      },
+    });
+    accountId = account.id;
+    console.log(
+      `  ✓ Created new Connect account for org ${config.orgId} (${accountId})`
+    );
+  }
+
+  const { chargesEnabled, payoutsEnabled } = await activateConnectAccount(
+    stripe,
+    accountId,
+    config.identity
+  );
+
+  return { accountId, chargesEnabled, payoutsEnabled };
 }
 
 export async function seedCommerce(db: typeof DbClient) {
@@ -696,87 +783,100 @@ export async function seedCommerce(db: typeof DbClient) {
     },
   ]);
 
-  // ── Stripe Connect account for Studio Alpha ─────────────────────
-  // Reuses an existing seed account if found, otherwise creates a new one.
-  // Pre-fills all onboarding requirements so the account is genuinely active in Stripe
-  // (charges_enabled + payouts_enabled = true) — checkout with transfer_data works.
+  // ── Stripe Connect accounts for monetised seed orgs ─────────────
+  // Every org with subscription tiers needs a fully-active Connect account, or
+  // SubscriptionService.createCheckoutSession throws ConnectAccountNotReadyError
+  // (subscription-service.ts:401) before checkout can run. Seed both Studio Alpha
+  // (Alex Creator) and Of Blood and Bones (Luzura) — both have tiers in TIERS.
   if (stripeKey) {
     // Re-assert test mode (cheap, defensive — key could have rotated mid-seed).
     assertTestModeKey(stripeKey);
     const stripe = new Stripe(stripeKey);
 
-    // Try to reuse an existing seed Connect account
-    const existingAccounts = await stripe.accounts.list({ limit: 20 });
-    const existingSeed = existingAccounts.data.find(
-      (a) =>
-        a.metadata?.codex_seed === 'true' &&
-        a.metadata?.codex_organization_id === ORGS.alpha.id
-    );
+    const existingAccounts = (await stripe.accounts.list({ limit: 20 })).data;
 
-    let accountId: string;
+    const seededOrgs: Array<{
+      label: string;
+      connectId: string;
+      orgId: string;
+      userId: string;
+      identity: ConnectIdentity;
+    }> = [
+      {
+        label: 'Studio Alpha',
+        connectId: CONNECT_ACCOUNTS.alphaCreator.id,
+        orgId: ORGS.alpha.id,
+        userId: USERS.creator.id,
+        identity: {
+          firstName: 'Alex',
+          lastName: 'Creator',
+          email: USERS.creator.email,
+          businessUrl: 'https://studioalpha.test',
+        },
+      },
+      {
+        label: 'Of Blood and Bones',
+        connectId: CONNECT_ACCOUNTS.bonesLuzura.id,
+        orgId: ORGS.bones.id,
+        userId: USERS.luzura.id,
+        identity: {
+          firstName: 'Luzura',
+          lastName: 'Peralta',
+          email: USERS.luzura.email,
+          businessUrl: 'https://ofbloodandbones.test',
+        },
+      },
+    ];
 
-    if (
-      existingSeed &&
-      existingSeed.controller?.requirement_collection === 'application'
-    ) {
-      // Reuse existing seed account (must be application-managed for pre-fill)
-      accountId = existingSeed.id;
-      console.log(`  ♻ Reusing existing seed Connect account (${accountId})`);
-    } else {
-      // Create a Custom account (requirement_collection: 'application') so we can
-      // programmatically accept TOS and pre-fill all fields. Production uses Express
-      // (requirement_collection: 'stripe'), but seed needs full control for activation.
-      // Transfer functionality (destination charges) works identically for both types.
-      const account = await stripe.accounts.create({
-        controller: {
-          stripe_dashboard: { type: 'none' },
-          fees: { payer: 'application' },
-          losses: { payments: 'application' },
-          requirement_collection: 'application',
-        },
-        capabilities: {
-          card_payments: { requested: true },
-          transfers: { requested: true },
-        },
-        country: 'GB',
-        metadata: {
-          codex_organization_id: ORGS.alpha.id,
-          codex_user_id: USERS.creator.id,
-          codex_seed: 'true',
-        },
-      });
-      accountId = account.id;
-      console.log(`  ✓ Created new Connect account (${accountId})`);
+    for (const seed of seededOrgs) {
+      const { accountId, chargesEnabled, payoutsEnabled } =
+        await ensureSeededConnectAccount(stripe, existingAccounts, {
+          orgId: seed.orgId,
+          userId: seed.userId,
+          identity: seed.identity,
+        });
+
+      // Heal stale rows on re-seed: if an earlier seed run (or a failed live
+      // onboarding attempt by the org owner in dev) left an inactive row for
+      // (userId, orgId), upsert points it at the freshly-activated Stripe
+      // account so subscription checkout passes the readiness gate.
+      await db
+        .insert(schema.stripeConnectAccounts)
+        .values({
+          id: seed.connectId,
+          organizationId: seed.orgId,
+          userId: seed.userId,
+          stripeAccountId: accountId,
+          status: chargesEnabled ? 'active' : 'onboarding',
+          chargesEnabled,
+          payoutsEnabled,
+          onboardingCompletedAt: chargesEnabled ? now : null,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: [
+            schema.stripeConnectAccounts.userId,
+            schema.stripeConnectAccounts.organizationId,
+          ],
+          set: {
+            stripeAccountId: accountId,
+            status: chargesEnabled ? 'active' : 'onboarding',
+            chargesEnabled,
+            payoutsEnabled,
+            onboardingCompletedAt: chargesEnabled ? now : null,
+            updatedAt: now,
+          },
+        });
+
+      const statusIcon = chargesEnabled ? '✓' : '⚠';
+      console.log(
+        `  ${statusIcon} ${seed.label} Connect ${accountId} — charges: ${chargesEnabled}, payouts: ${payoutsEnabled}`
+      );
     }
 
-    // Pre-fill onboarding requirements to activate the account in test mode
-    const { chargesEnabled, payoutsEnabled } = await activateConnectAccount(
-      stripe,
-      accountId
-    );
-
-    await db
-      .insert(schema.stripeConnectAccounts)
-      .values({
-        id: CONNECT_ACCOUNTS.alphaCreator.id,
-        organizationId: ORGS.alpha.id,
-        userId: USERS.creator.id,
-        stripeAccountId: accountId,
-        status: chargesEnabled ? 'active' : 'onboarding',
-        chargesEnabled,
-        payoutsEnabled,
-        onboardingCompletedAt: chargesEnabled ? now : null,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoNothing();
-
-    const statusIcon = chargesEnabled ? '✓' : '⚠';
     console.log(
-      `  ${statusIcon} Connect account ${accountId} — charges: ${chargesEnabled}, payouts: ${payoutsEnabled}`
-    );
-    console.log(
-      `  Seeded platform fee, 14 purchases, 15 content access, 4 tiers, 1 subscription`
+      `  Seeded platform fee, 14 purchases, 15 content access, 4 tiers, 1 subscription, 2 Connect accounts`
     );
   } else {
     console.log(

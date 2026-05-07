@@ -11,6 +11,7 @@ const __dirname = path.dirname(__filename);
 config({ path: path.resolve(__dirname, '../../../.env.dev') });
 
 import { dbWs } from '../src';
+import { flushDevKv } from './seed/cache-flush';
 import { seedTemplates } from './seed-email-templates';
 
 /**
@@ -90,6 +91,10 @@ async function resetData() {
   console.log('\n  Truncating tables...');
   await dbWs.execute(sql.raw(`TRUNCATE TABLE ${tableList} CASCADE`));
   console.log(`  Truncated ${TABLES_TO_TRUNCATE.length} tables`);
+
+  // Flush dev KV so workers stop serving cached tier IDs, sessions, and
+  // org info that point at rows that no longer exist.
+  await flushDevKv();
 
   // Step 2: Re-seed global email templates
   console.log('\n  Re-seeding email templates...');

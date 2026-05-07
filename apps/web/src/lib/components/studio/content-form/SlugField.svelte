@@ -102,7 +102,7 @@
     placeholder={m.studio_content_form_slug_placeholder()}
     oninput={handleSlugInput}
   />
-  {#each form.fields.slug.issues() as issue}
+  {#each form.fields.slug.issues() as issue (issue)}
     <p class="field-error">{issue.message}</p>
   {/each}
   {#if slugCheckStatus === 'checking'}

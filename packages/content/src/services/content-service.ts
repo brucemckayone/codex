@@ -14,7 +14,7 @@
 
 import type { R2Bucket } from '@cloudflare/workers-types';
 import { CacheType, type VersionedCache } from '@codex/cache';
-import { type CachePurgeClient, R2Service } from '@codex/cloudflare-clients';
+import { R2Service } from '@codex/cloudflare-clients';
 import {
   CONTENT_ACCESS_TYPE,
   CONTENT_STATUS,
@@ -47,7 +47,6 @@ import {
   MediaNotFoundError,
   MediaNotReadyError,
   SlugConflictError,
-  ValidationError,
 } from '../errors';
 import type {
   Content,
@@ -68,8 +67,6 @@ import type {
  * - List content with filters
  */
 export class ContentService extends BaseService {
-  private cachePurge?: CachePurgeClient;
-  private webAppUrl?: string;
   private cache?: VersionedCache;
 
   setCache(cache: VersionedCache): void {
@@ -96,34 +93,6 @@ export class ContentService extends BaseService {
       }
     }
     return { contentBody: raw, contentBodyJson: null };
-  }
-
-  setCachePurge(client: CachePurgeClient, webAppUrl: string): void {
-    if (!webAppUrl) {
-      throw new ValidationError('webAppUrl must be a non-empty string', {
-        field: 'webAppUrl',
-        providedValue: webAppUrl,
-      });
-    }
-    this.cachePurge = client;
-    this.webAppUrl = webAppUrl;
-  }
-
-  /**
-   * Purge cached content pages by slug.
-   * Awaited to ensure completion (critical for takedowns/unpublish).
-   * Errors are logged but not rethrown to avoid failing the main operation.
-   */
-  private async purgeContentCache(slug: string): Promise<void> {
-    if (!this.cachePurge || !slug) return;
-    try {
-      await this.cachePurge.purgeByUrls([`${this.webAppUrl}/content/${slug}`]);
-    } catch (error) {
-      this.obs.warn('Cache purge failed', {
-        slug,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
   }
 
   /**
@@ -527,9 +496,6 @@ export class ContentService extends BaseService {
         throw new ContentNotFoundError(id);
       }
 
-      // Purge cached content pages after publish
-      await this.purgeContentCache(result.slug);
-
       // Bump content catalogue version keys (fire-and-forget; invalidate swallows errors)
       void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);
       if (result.organizationId) {
@@ -588,9 +554,6 @@ export class ContentService extends BaseService {
 
         return unpublished;
       });
-
-      // Purge cached content pages after unpublish (critical for takedowns)
-      await this.purgeContentCache(result.slug);
 
       // Bump content catalogue version keys (fire-and-forget; invalidate swallows errors)
       void this.cache?.invalidate(CacheType.COLLECTION_CONTENT_PUBLISHED);

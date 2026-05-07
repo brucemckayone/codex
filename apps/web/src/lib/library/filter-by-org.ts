@@ -15,7 +15,7 @@
  * the slug-based filter.
  */
 
-export interface LibraryItemLike {
+interface LibraryItemLike {
   content?: {
     organizationId?: string | null;
   };

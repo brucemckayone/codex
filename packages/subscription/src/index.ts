@@ -73,6 +73,7 @@ export {
 export type {
   PropagateTierPriceOptions,
   PropagateTierPriceResult,
+  TierChangePreview,
   WebhookEmailPayload,
   WebhookHandlerResult,
 } from './services/subscription-service';

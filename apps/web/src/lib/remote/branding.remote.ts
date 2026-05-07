@@ -47,7 +47,7 @@ export const getBrandingSettings = query(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Update Branding Form (Primary Color)
+// Branding Schema Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Form-data helpers: input stays as string (compatible with RemoteFormInput)
@@ -71,86 +71,6 @@ const hexColorNullable = z
   );
 
 const nullableString = z.string().transform((v) => (v === '' ? null : v));
-
-const formNumber = z.string().transform((v) => Number(v));
-
-const updateBrandingFormSchema = z.object({
-  orgId: z.string().uuid(),
-  primaryColorHex: hexColorOptional,
-  secondaryColorHex: hexColorNullable,
-  accentColorHex: hexColorNullable,
-  backgroundColorHex: hexColorNullable,
-  fontBody: nullableString.pipe(z.string().max(50).nullable().optional()),
-  fontHeading: nullableString.pipe(z.string().max(50).nullable().optional()),
-  radiusValue: formNumber.pipe(z.number().min(0).max(2)).optional(),
-  densityValue: formNumber.pipe(z.number().min(0.75).max(1.25)).optional(),
-});
-
-/**
- * Update branding settings form (primary color)
- *
- * Uses progressive enhancement: works without JS, enhances with JS.
- * Sends PUT to /api/organizations/:id/settings/branding
- *
- * Usage:
- * ```svelte
- * <form {...updateBrandingForm}>
- *   <input type="hidden" name="orgId" value={orgId} />
- *   <input type="color" name="primaryColorHex" value={color} />
- *   <button disabled={updateBrandingForm.pending > 0}>Save</button>
- * </form>
- * ```
- */
-export const updateBrandingForm = form(
-  updateBrandingFormSchema,
-  async ({
-    orgId,
-    primaryColorHex,
-    secondaryColorHex,
-    accentColorHex,
-    backgroundColorHex,
-    fontBody,
-    fontHeading,
-    radiusValue,
-    densityValue,
-  }) => {
-    const { platform, cookies } = getRequestEvent();
-    const api = createServerApi(platform, cookies);
-
-    try {
-      const result = await api.org.updateBranding(orgId, {
-        primaryColorHex,
-        secondaryColorHex,
-        accentColorHex,
-        backgroundColorHex,
-        fontBody,
-        fontHeading,
-        radiusValue,
-        densityValue,
-      });
-
-      // Invalidate cache so layout picks up the new color
-      await invalidateCache(platform, orgId);
-
-      try {
-        await getBrandingSettings(orgId).refresh();
-      } catch {
-        /* non-critical */
-      }
-
-      return {
-        success: true,
-        data: result,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error:
-          error instanceof Error ? error.message : 'Failed to update branding',
-      };
-    }
-  }
-);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Update Branding Command (programmatic — for brand editor panel)

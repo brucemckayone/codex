@@ -16,8 +16,10 @@ const PADDING_FRACTION = 0.15;
 /**
  * Ensure an SVG string has explicit width/height attributes.
  * Some browsers render SVGs at 0×0 when only a viewBox is present.
+ *
+ * Exported for unit testing — pure DOMParser logic with no WebGL deps.
  */
-function ensureSVGDimensions(svgText: string, targetSize: number): string {
+export function ensureSVGDimensions(svgText: string, targetSize: number): string {
   const parser = new DOMParser();
   const doc = parser.parseFromString(svgText, 'image/svg+xml');
   const svg = doc.documentElement;

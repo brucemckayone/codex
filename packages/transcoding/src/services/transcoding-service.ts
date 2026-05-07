@@ -39,10 +39,8 @@ import {
   TranscodingJobNotFoundError,
   TranscodingMediaNotFoundError,
 } from '../errors';
-import { getTranscodingOutputKeys } from '../paths';
 import type {
   HlsVariant,
-  MediaType,
   RunPodJobRequest,
   RunPodJobResponse,
   TranscodingMediaItem,
@@ -637,25 +635,6 @@ export class TranscodingService extends BaseService {
     }
 
     return result.length;
-  }
-
-  /**
-   * Get expected output keys for a transcoding job
-   *
-   * Utility method to get all expected R2 paths for transcoding outputs.
-   * Uses paths.ts as the single source of truth.
-   *
-   * @param creatorId - Creator ID
-   * @param mediaId - Media item UUID
-   * @param mediaType - Type of media (video or audio)
-   * @returns Object with all expected output keys
-   */
-  getExpectedOutputKeys(
-    creatorId: string,
-    mediaId: string,
-    mediaType: MediaType
-  ) {
-    return getTranscodingOutputKeys(creatorId, mediaId, mediaType);
   }
 
   /**

@@ -191,5 +191,19 @@ describe('Content Access Validation Schemas', () => {
       const result = listUserLibrarySchema.parse(input);
       expect(result.limit).toBe(100);
     });
+
+    it.each([
+      'free',
+      'followers',
+    ] as const)("should accept accessType='%s'", (accessType) => {
+      const result = listUserLibrarySchema.parse({ accessType });
+      expect(result.accessType).toBe(accessType);
+    });
+
+    it('should reject unknown accessType values', () => {
+      expect(() => listUserLibrarySchema.parse({ accessType: 'team' })).toThrow(
+        ZodError
+      );
+    });
   });
 });
