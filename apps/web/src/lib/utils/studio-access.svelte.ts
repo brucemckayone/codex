@@ -1,15 +1,14 @@
 /**
- * Reactive studio-access helper for layout/header components.
+ * Reactive studio-access helper for layout components.
  *
- * Centralises three pieces of derived state that were previously inlined in
- * `Header/UserMenu`, `Header/MobileNav`, and `MobileNav/MobileBottomSheet`:
+ * Centralises three pieces of derived state used across the SidebarRail,
+ * SidebarRailUserSection, MobileBottomSheet, and the creators-subdomain
+ * layout:
  *
  *   1. `STUDIO_ROLES` — the role allowlist for the studio surface.
  *   2. `canAccessStudio` — whether the current user holds a studio role.
  *   3. `studioHref` — the cross-subdomain studio link (root-relative on org
  *      subdomains, full URL on platform/creators).
- *
- * Plus a duplicated `getInitials(name)` avatar fallback helper.
  *
  * Consumers pass a getter function so this module stays SSR-safe and
  * reactive — mirrors `useAccessContext` in `access-context.svelte.ts`.

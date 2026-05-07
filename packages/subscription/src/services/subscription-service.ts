@@ -47,7 +47,7 @@ import {
   subscriptionTiers,
   users,
 } from '@codex/database/schema';
-import { resolveOrCreateCustomer } from '@codex/purchase';
+import { withStaleCustomerRecovery } from '@codex/purchase';
 import {
   BaseService,
   InternalServiceError,
@@ -63,6 +63,7 @@ import {
   ForbiddenError,
   SubscriptionCheckoutError,
   SubscriptionNotFoundError,
+  SubscriptionPaymentRequiredError,
   TierNotFoundError,
 } from '../errors';
 import { calculateRevenueSplit } from './revenue-split';
@@ -199,6 +200,33 @@ export interface WebhookHandlerResult {
 }
 
 /**
+ * Result of `previewTierChange()` — drives the proration confirmation dialog.
+ *
+ * `prorationDate` is the canonical timestamp the preview was computed at.
+ * Callers MUST pass it back into `changeTier()` so the actual proration
+ * matches the preview exactly (Stripe re-runs the calculation otherwise).
+ */
+export interface TierChangePreview {
+  /** Net amount the customer pays NOW (proration delta, in pence). */
+  amountDueCents: number;
+  /** Proration line items (charges and credits) the customer sees. */
+  prorationLineItems: Array<{
+    description: string | null;
+    amountCents: number;
+  }>;
+  /** Recurring price after the switch (next-period charge, in pence). */
+  newRecurringAmountCents: number;
+  /** Recurring billing interval after the switch. */
+  newRecurringInterval: 'month' | 'year';
+  /** Unix timestamp — pass back to `changeTier()` to lock in the same proration. */
+  prorationDate: number;
+  /** True if the new recurring amount exceeds the current subscription amount. */
+  isUpgrade: boolean;
+  /** End of the current billing period — used in "next charge on" copy. */
+  currentPeriodEnd: Date;
+}
+
+/**
  * Extended configuration for `SubscriptionService`.
  *
  * Adds optional `cache` + `waitUntil` injection so every public mutation
@@ -257,7 +285,7 @@ interface SubscriptionServiceConfig extends ServiceConfig {
  * into this slot. Returns `void` — failures are the mailer's concern
  * (notifications-api audit log on the remote side).
  */
-export type TierPriceChangeMailer = (params: {
+type TierPriceChangeMailer = (params: {
   to: string;
   toName?: string;
   templateName: 'subscription-tier-price-change';
@@ -436,32 +464,45 @@ export class SubscriptionService extends BaseService {
         });
       }
 
-      const stripeCustomerId = await resolveOrCreateCustomer(
+      // `withStaleCustomerRecovery` resolves the unified Stripe Customer id
+      // and self-heals when `users.stripe_customer_id` is stale. Two
+      // real-world causes for the stale state:
+      //   1. Operator deleted the customer in the Stripe dashboard.
+      //   2. (Dev only) A seed wrote a synthetic id that never existed.
+      // The helper clears the cache, mints a fresh customer, and retries the
+      // session create exactly once. A second `resource_missing` propagates.
+      const session = await withStaleCustomerRecovery(
         { db: this.db, stripe: this.stripe },
-        { userId, email: user.email }
+        { userId, email: user.email },
+        (stripeCustomerId) =>
+          this.stripe.checkout.sessions.create({
+            mode: 'subscription',
+            customer: stripeCustomerId,
+            line_items: [{ price: stripePriceId, quantity: 1 }],
+            success_url: successUrl,
+            cancel_url: cancelUrl,
+            metadata: {
+              codex_user_id: userId,
+              codex_organization_id: orgId,
+              codex_tier_id: tierId,
+              codex_billing_interval: billingInterval,
+            },
+            subscription_data: {
+              metadata: {
+                codex_user_id: userId,
+                codex_organization_id: orgId,
+                codex_tier_id: tierId,
+              },
+            },
+          }),
+        {
+          onStaleRecovery: (info) =>
+            this.obs.warn(
+              'Stale users.stripe_customer_id detected; clearing and retrying',
+              { ...info, orgId, tierId, billingInterval }
+            ),
+        }
       );
-
-      // Create Stripe Checkout Session
-      const session = await this.stripe.checkout.sessions.create({
-        mode: 'subscription',
-        customer: stripeCustomerId,
-        line_items: [{ price: stripePriceId, quantity: 1 }],
-        success_url: successUrl,
-        cancel_url: cancelUrl,
-        metadata: {
-          codex_user_id: userId,
-          codex_organization_id: orgId,
-          codex_tier_id: tierId,
-          codex_billing_interval: billingInterval,
-        },
-        subscription_data: {
-          metadata: {
-            codex_user_id: userId,
-            codex_organization_id: orgId,
-            codex_tier_id: tierId,
-          },
-        },
-      });
 
       if (!session.url) {
         throw new SubscriptionCheckoutError(
@@ -1516,14 +1557,134 @@ export class SubscriptionService extends BaseService {
   // ─── Subscription Management ───────────────────────────────────────────────
 
   /**
+   * Preview the proration that a tier change would produce, WITHOUT mutating
+   * the subscription. Powers the confirmation dialog on the org pricing page.
+   *
+   * The returned `prorationDate` MUST be passed back to `changeTier()` so the
+   * commit-time proration calculation matches the preview to the penny —
+   * otherwise Stripe re-runs the calc against `Date.now()` and the user gets
+   * charged a different amount than they confirmed.
+   *
+   * Reuses the same tier-existence + price-configured guards as `changeTier()`
+   * so a preview that succeeds is a strong signal the commit will too.
+   */
+  async previewTierChange(
+    userId: string,
+    orgId: string,
+    newTierId: string,
+    billingInterval: 'month' | 'year'
+  ): Promise<TierChangePreview> {
+    try {
+      const sub = await this.getSubscriptionOrThrow(userId, orgId);
+
+      const [newTier] = await this.db
+        .select()
+        .from(subscriptionTiers)
+        .where(
+          and(
+            eq(subscriptionTiers.id, newTierId),
+            eq(subscriptionTiers.organizationId, orgId),
+            eq(subscriptionTiers.isActive, true),
+            isNull(subscriptionTiers.deletedAt)
+          )
+        )
+        .limit(1);
+
+      if (!newTier) {
+        throw new TierNotFoundError(newTierId, { organizationId: orgId });
+      }
+
+      const newPriceId =
+        billingInterval === BILLING_INTERVAL.MONTH
+          ? newTier.stripePriceMonthlyId
+          : newTier.stripePriceAnnualId;
+
+      if (!newPriceId) {
+        throw new SubscriptionCheckoutError('Price not configured for tier', {
+          tierId: newTierId,
+          billingInterval,
+        });
+      }
+
+      const stripeSub = await this.stripe.subscriptions.retrieve(
+        sub.stripeSubscriptionId
+      );
+      const itemId = stripeSub.items.data[0]?.id;
+
+      if (!itemId) {
+        throw new SubscriptionCheckoutError('No subscription item found');
+      }
+
+      const newRecurringAmountCents =
+        billingInterval === BILLING_INTERVAL.MONTH
+          ? newTier.priceMonthly
+          : newTier.priceAnnual;
+
+      const prorationDate = Math.floor(Date.now() / 1000);
+
+      const preview = await this.stripe.invoices.createPreview({
+        subscription: sub.stripeSubscriptionId,
+        subscription_details: {
+          items: [{ id: itemId, price: newPriceId }],
+          proration_date: prorationDate,
+          proration_behavior: 'always_invoice',
+        },
+      });
+
+      const prorationLineItems = preview.lines.data
+        .filter(
+          (line) => line.parent?.subscription_item_details?.proration === true
+        )
+        .map((line) => ({
+          description: line.description,
+          amountCents: line.amount,
+        }));
+
+      return {
+        amountDueCents: preview.amount_due,
+        prorationLineItems,
+        newRecurringAmountCents,
+        newRecurringInterval: billingInterval,
+        prorationDate,
+        isUpgrade: newRecurringAmountCents > sub.amountCents,
+        currentPeriodEnd: sub.currentPeriodEnd,
+      };
+    } catch (error) {
+      this.handleError(error, 'previewTierChange');
+    }
+  }
+
+  /**
    * Change subscription tier (upgrade or downgrade).
-   * Uses Stripe proration to handle billing adjustments.
+   *
+   * Branches on direction:
+   *
+   * - **Upgrade** (new recurring price > current `amountCents`): Stripe is
+   *   asked to invoice the prorated difference IMMEDIATELY
+   *   (`proration_behavior: 'always_invoice'` +
+   *   `payment_behavior: 'error_if_incomplete'`). If the charge fails
+   *   (declined card, 3DS challenge), Stripe REVERTS the price update on
+   *   its side — we throw `SubscriptionPaymentRequiredError` (HTTP 402)
+   *   and the local row is untouched. Stripe is authoritative; the
+   *   subscription stays on the old tier with no reconciliation needed.
+   *
+   * - **Downgrade** (Phase 1 fallback): keeps existing
+   *   `proration_behavior: 'create_prorations'` — credit applied to next
+   *   invoice, immediate effect. Phase 2 replaces this with a scheduled
+   *   change via `stripe.subscriptionSchedules.create` so the higher tier
+   *   stays active until the current period ends.
+   *
+   * `prorationDate` should be the Unix timestamp returned by
+   * `previewTierChange()` so the commit-time charge matches the preview to
+   * the penny. Stripe re-runs the proration calculation against
+   * `Date.now()` if omitted.
    */
   async changeTier(
     userId: string,
     orgId: string,
     newTierId: string,
-    billingInterval: 'month' | 'year'
+    billingInterval: 'month' | 'year',
+    prorationDate?: number
   ): Promise<{ userId: string; orgId: string; subscription: Subscription }> {
     try {
       const sub = await this.getSubscriptionOrThrow(userId, orgId);
@@ -1568,27 +1729,98 @@ export class SubscriptionService extends BaseService {
         throw new SubscriptionCheckoutError('No subscription item found');
       }
 
-      await this.stripe.subscriptions.update(sub.stripeSubscriptionId, {
-        items: [{ id: itemId, price: newPriceId }],
-        proration_behavior: 'create_prorations',
-        metadata: {
-          codex_tier_id: newTierId,
-          codex_user_id: userId,
-          codex_organization_id: orgId,
-        },
-      });
+      const newRecurringAmount =
+        billingInterval === BILLING_INTERVAL.MONTH
+          ? newTier.priceMonthly
+          : newTier.priceAnnual;
+      const isUpgrade = newRecurringAmount > sub.amountCents;
+      const effectiveProrationDate =
+        prorationDate ?? Math.floor(Date.now() / 1000);
+
+      try {
+        await this.stripe.subscriptions.update(
+          sub.stripeSubscriptionId,
+          {
+            items: [{ id: itemId, price: newPriceId }],
+            proration_behavior: isUpgrade
+              ? 'always_invoice'
+              : 'create_prorations',
+            // Pin proration to the preview's timestamp so the customer
+            // pays exactly what the dialog showed them.
+            proration_date: effectiveProrationDate,
+            // Upgrade-only: require the proration invoice to clear before
+            // the subscription transitions. On 402, Stripe reverts the
+            // price update; we map to SubscriptionPaymentRequiredError so
+            // the route surfaces a friendly "card declined" toast and
+            // the local row stays untouched.
+            ...(isUpgrade && {
+              payment_behavior: 'error_if_incomplete' as const,
+            }),
+            metadata: {
+              codex_tier_id: newTierId,
+              codex_user_id: userId,
+              codex_organization_id: orgId,
+            },
+          },
+          isUpgrade
+            ? {
+                idempotencyKey: `upgrade_${sub.id}_${effectiveProrationDate}`,
+              }
+            : undefined
+        );
+      } catch (stripeError) {
+        const statusCode = (stripeError as { statusCode?: number })?.statusCode;
+        if (isUpgrade && statusCode === 402) {
+          // Stripe rejected the proration invoice. The price update was
+          // reverted on Stripe's side — the subscription stays on the
+          // old tier. Throw the typed 402 so the route returns a clean
+          // "payment required" response and the UI prompts the user to
+          // update their payment method.
+          throw new SubscriptionPaymentRequiredError(
+            'Payment for the upgrade was declined. Update your payment method and try again.',
+            {
+              userId,
+              organizationId: orgId,
+              newTierId,
+              billingInterval,
+              stripeMessage: (stripeError as Error).message,
+            }
+          );
+        }
+        throw stripeError;
+      }
 
       // BUG-020: Stripe update succeeded — now update local record.
       // If this DB write fails, the Stripe subscription is already changed.
       // The customer.subscription.updated webhook (handleSubscriptionUpdated)
       // will reconcile local state from Stripe's metadata, so eventual
       // consistency is guaranteed. We log the failure for observability.
+      //
+      // amountCents is mirrored synchronously from the chosen tier's stored
+      // price so the account/subscriptions UI reflects the new price the
+      // moment changeTier returns. The webhook still reconciles as a safety
+      // net, but we don't depend on it (e.g. dev envs without stripe listen
+      // forwarding would otherwise show a stale price indefinitely).
+      //
+      // The three split fields are recomputed alongside amountCents because
+      // the row carries a CHECK constraint:
+      //   amount_cents = platform_fee + org_fee + creator_payout
+      // Updating amountCents alone would silently violate it.
+      const newSplit = calculateRevenueSplit(
+        newRecurringAmount,
+        FEES.PLATFORM_PERCENT,
+        FEES.SUBSCRIPTION_ORG_PERCENT
+      );
       try {
         await this.db
           .update(subscriptions)
           .set({
             tierId: newTierId,
             billingInterval,
+            amountCents: newRecurringAmount,
+            platformFeeCents: newSplit.platformFeeCents,
+            organizationFeeCents: newSplit.organizationFeeCents,
+            creatorPayoutCents: newSplit.creatorPayoutCents,
             updatedAt: new Date(),
           })
           .where(eq(subscriptions.id, sub.id));

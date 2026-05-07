@@ -29,7 +29,7 @@ import { getEffectiveStatus } from './status';
  * The shape consumers need from a library item.
  * Deliberately narrow so we can test without the full `LibraryItem` type.
  */
-export interface LibraryAccessInput {
+interface LibraryAccessInput {
   /** The library item's accessType — only 'subscription' triggers joins. */
   accessType: 'purchased' | 'membership' | 'subscription';
   /** Slug of the owning org (join key against subscriptionCollection). */
@@ -44,7 +44,7 @@ export interface LibraryAccessInput {
  *   revoked    — dimmed card + hover CTA "Subscription ended — reactivate"
  *   past_due   — dimmed card + hover CTA "Payment failed — update payment"
  */
-export type LibraryAccessState =
+type LibraryAccessState =
   | { kind: 'active' }
   | { kind: 'cancelling'; periodEnd: string }
   | { kind: 'revoked' }

@@ -87,27 +87,6 @@ if (process.env.DB_METHOD === 'LOCAL_PROXY') {
 export type Database = DatabaseWs;
 
 /**
- * DEPRECATED: withNeonTestBranch() is now a no-op.
- *
- * Neon branch creation has moved to GitHub Actions workflow level.
- * Each test domain gets a dedicated shared branch instead of
- * ephemeral per-file branches:
- * - ci-unit-tests (shared by all package tests)
- * - ci-auth-tests, ci-content-api-tests, etc. (per worker)
- * - ci-e2e-api-tests, ci-e2e-web-tests (E2E tests)
- *
- * Tests automatically use DATABASE_URL from:
- * - Local: .env.test (LOCAL_PROXY method)
- * - CI: GitHub Actions (NEON_BRANCH method, workflow-created branch)
- *
- * @deprecated Remove calls to this function from test files
- */
-export function withNeonTestBranch(): void {
-  // No-op - branch created at workflow level
-  // Keeping function for backwards compatibility during migration
-}
-
-/**
  * Validate database connection health
  *
  * Tests that the database Pool connection is working properly before running tests.
@@ -200,10 +179,10 @@ export function setupTestDatabase(): Database {
  *
  * Deletes test data from content tables while preserving users.
  *
- * With neon-testing (ephemeral branches per test file):
- * - This function is optional - each test file gets a fresh database
- * - Use only if you need to clean up between tests within the same file
- * - No retry logic needed - ephemeral branches ensure complete isolation
+ * Test isolation is provided at the workflow level via dedicated Neon
+ * branches per CI domain (ci-unit-tests, ci-content-api-tests, etc.) — each
+ * branch is fresh per workflow run. Use this helper only when you need to
+ * reset state between tests within the same file.
  *
  * Deletion order (respects foreign keys):
  * 1. video_playback (references content, users)
