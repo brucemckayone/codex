@@ -64,9 +64,13 @@ export {
 export { PurchaseService } from './services/purchase-service';
 // Customer resolution (Codex-49gev)
 export {
+  isStaleCustomerError,
   type ResolveCustomerDeps,
   type ResolveCustomerInput,
   resolveOrCreateCustomer,
+  type StaleCustomerRecoveryEvent,
+  type WithStaleCustomerRecoveryOptions,
+  withStaleCustomerRecovery,
 } from './services/resolve-customer';
 // Revenue calculator
 export {

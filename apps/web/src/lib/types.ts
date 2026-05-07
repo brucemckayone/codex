@@ -135,6 +135,29 @@ export interface CurrentSubscription extends DateAsString<Subscription> {
 }
 
 /**
+ * Wire shape for the proration confirmation dialog.
+ *
+ * Mirrors `TierChangePreview` from `@codex/subscription`, with `currentPeriodEnd`
+ * as an ISO string (server serialises Date over JSON). The `prorationDate`
+ * (Unix timestamp in seconds) MUST be threaded back into the change-tier
+ * commit so Stripe re-uses the exact proration calculation that produced
+ * `amountDueCents` — otherwise the user gets charged a different amount than
+ * they confirmed.
+ */
+export interface TierChangePreview {
+  amountDueCents: number;
+  prorationLineItems: Array<{
+    description: string | null;
+    amountCents: number;
+  }>;
+  newRecurringAmountCents: number;
+  newRecurringInterval: 'month' | 'year';
+  prorationDate: number;
+  isUpgrade: boolean;
+  currentPeriodEnd: string;
+}
+
+/**
  * Subscription context for a content detail page.
  *
  * Canonical declaration site (Codex-lqvw4.16) — previously declared in

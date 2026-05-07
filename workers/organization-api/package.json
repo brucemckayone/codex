@@ -42,7 +42,6 @@
     "@vitest/runner": "~3.2.4",
     "@vitest/snapshot": "~3.2.4",
     "@vitest/ui": "~3.2.4",
-    "cloudflare": "^4.0.0",
     "typescript": "^5.7.3",
     "vite": "^5.4.11",
     "vitest": "^3.2.4",

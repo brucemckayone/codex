@@ -88,6 +88,7 @@ import type {
   SubscriptionCheckoutResponse,
   SubscriptionStats,
   SubscriptionTier,
+  TierChangePreview,
   UserOrgSubscription,
 } from '../types';
 import { ApiError } from './errors';
@@ -1530,6 +1531,20 @@ export function createServerApi(
        */
       getMine: () =>
         request<UserOrgSubscription[]>('ecom', '/subscriptions/mine'),
+
+      /**
+       * Preview the proration that a tier change would produce, without
+       * mutating the subscription. Powers the confirmation dialog.
+       */
+      previewTierChange: (data: ChangeTierInput) =>
+        request<TierChangePreview>(
+          'ecom',
+          '/subscriptions/preview-tier-change',
+          {
+            method: 'POST',
+            body: JSON.stringify(data),
+          }
+        ),
 
       /**
        * Change subscription tier (upgrade/downgrade)
