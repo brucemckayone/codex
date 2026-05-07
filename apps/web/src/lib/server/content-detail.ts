@@ -86,6 +86,12 @@ function extractRevocationReason(
 }
 
 /**
+ * `accessType` values recognised by the content schema. Mirrors the DB CHECK
+ * constraint in packages/database/src/schema/content.ts.
+ */
+type ContentAccessType = 'free' | 'paid' | 'followers' | 'subscribers' | 'team';
+
+/**
  * Empty subscription-context fallback used by content detail loaders when
  * the content does not require a subscription (free / paid / followers /
  * team accessTypes with no minimum tier). Both the org and creators content

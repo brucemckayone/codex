@@ -35,6 +35,7 @@
    * below, since the rail is display:none on narrow viewports.
    */
   --app-sidebar-width: var(--space-16);  /* 64px collapsed rail */
+  --app-sidebar-width-expanded: 15rem;   /* 240px hover-expanded rail */
 
   /* ========================================
    * PLAYER HEIGHTS

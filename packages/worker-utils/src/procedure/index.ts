@@ -27,7 +27,14 @@
  * ```
  */
 
-export * from './binary-upload-procedure';
+export type {
+  BinaryFileConfig,
+  BinaryUploadContext,
+  BinaryUploadProcedureConfig,
+  ValidatedBinaryFile,
+} from './binary-upload-procedure';
+// Binary upload procedure (raw ArrayBuffer body)
+export { binaryUploadProcedure } from './binary-upload-procedure';
 export type { OrganizationMembership } from './helpers';
 // Helper exports (for advanced use cases)
 export {
@@ -37,7 +44,18 @@ export {
   getClientIP,
   validateInput,
 } from './helpers';
-export * from './multipart-procedure';
+export type {
+  FileFieldConfig,
+  FileSchema,
+  InferFiles,
+  MultipartProcedureConfig,
+  MultipartProcedureContext,
+  ValidatedFile,
+} from './multipart-procedure';
+// Multipart procedure (FormData uploads). Error classes (FileTooLargeError,
+// InvalidFileTypeError, MissingFileError) are intentionally NOT re-exported —
+// they're internal to validateFiles() and surface to callers via mapErrorToResponse().
+export { multipartProcedure } from './multipart-procedure';
 // org-helpers: dynamically imported in helpers.ts for code-splitting inside procedure().
 // Re-exported here for direct use by route handlers.
 export { checkOrganizationMembership, membershipCacheKey } from './org-helpers';

@@ -36,11 +36,6 @@ export const themeState = $state<{ theme: Theme }>({
     : 'light',
 });
 
-/** Read the current theme from the DOM attribute. Kept for legacy callers. */
-export function getTheme(): Theme {
-  return themeState.theme;
-}
-
 /** Apply a theme to the DOM and persist it; updates the reactive state. */
 function setTheme(theme: Theme): void {
   document.documentElement.setAttribute('data-theme', theme);

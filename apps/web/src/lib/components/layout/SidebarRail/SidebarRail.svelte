@@ -39,6 +39,43 @@
 		expanded = false;
 	}
 
+	// ── Keyboard navigation (WCAG 2.1) ─────────────────────────────────
+	// Arrow keys move focus between focusable elements within the rail's
+	// nav landmark. Tab still works for forward-only navigation; arrows
+	// add the bidirectional shortcut expected of a list-style menu.
+	function handleNavKeydown(e: KeyboardEvent) {
+		if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+		const nav = e.currentTarget as HTMLElement;
+		const focusables = Array.from(
+			nav.querySelectorAll<HTMLElement>('a, button, [tabindex]')
+		).filter(
+			(el) => !el.hasAttribute('disabled') && el.tabIndex >= 0
+		);
+		if (focusables.length === 0) return;
+		const currentIdx = focusables.findIndex((el) => el === document.activeElement);
+		if (currentIdx === -1) return;
+
+		e.preventDefault();
+		let nextIdx: number;
+		switch (e.key) {
+			case 'ArrowDown':
+				nextIdx = (currentIdx + 1) % focusables.length;
+				break;
+			case 'ArrowUp':
+				nextIdx = (currentIdx - 1 + focusables.length) % focusables.length;
+				break;
+			case 'Home':
+				nextIdx = 0;
+				break;
+			case 'End':
+				nextIdx = focusables.length - 1;
+				break;
+			default:
+				return;
+		}
+		focusables[nextIdx].focus();
+	}
+
 	// ── Derived nav items ─────────────────────────────────────────────
 	const navItems = $derived(
 		variant === 'platform' ? PLATFORM_RAIL_NAV : getOrgRailNav()
@@ -61,12 +98,18 @@
 	const orgInitials = $derived(getInitials(org?.name));
 </script>
 
+<!--
+  svelte-ignore a11y_no_noninteractive_element_interactions
+  The keydown handler implements WCAG-compliant arrow-key roving focus
+  between rail items — it augments Tab navigation, not replaces it.
+-->
 <nav
 	class="sidebar-rail"
 	data-expanded={expanded}
 	aria-label={variant === 'platform' ? 'Main navigation' : 'Organization navigation'}
 	onmouseenter={handleMouseEnter}
 	onmouseleave={handleMouseLeave}
+	onkeydown={handleNavKeydown}
 >
 	<!-- Logo section -->
 	<div class="rail-logo">
@@ -151,7 +194,7 @@
 		   rail width — consumed by any component that offsets from it (cinema
 		   mode, full-bleed containers). Defined in tokens/layout.css. */
 		--rail-width-collapsed: var(--app-sidebar-width);
-		--rail-width-expanded: 240px;
+		--rail-width-expanded: var(--app-sidebar-width-expanded);
 		--rail-glass-bg: color-mix(in oklch, var(--color-surface) 75%, transparent);
 		--rail-glass-border: color-mix(in oklch, var(--color-border) 50%, transparent);
 

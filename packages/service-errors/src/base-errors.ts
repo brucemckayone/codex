@@ -14,7 +14,7 @@ interface ErrorConstructorWithStackTrace {
 /**
  * Valid HTTP error status codes for API responses
  */
-export type ErrorStatusCode = 400 | 401 | 403 | 404 | 409 | 422 | 500;
+export type ErrorStatusCode = 400 | 401 | 402 | 403 | 404 | 409 | 422 | 500;
 
 /**
  * Base error class for all service errors

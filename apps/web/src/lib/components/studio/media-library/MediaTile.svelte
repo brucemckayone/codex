@@ -345,11 +345,11 @@
     font-weight: var(--font-semibold);
     color: var(--color-text);
     background: color-mix(in srgb, var(--color-surface) 82%, transparent);
-    backdrop-filter: blur(var(--blur-lg, 12px));
-    -webkit-backdrop-filter: blur(var(--blur-lg, 12px));
+    backdrop-filter: blur(var(--blur-lg));
+    -webkit-backdrop-filter: blur(var(--blur-lg));
     border: var(--border-width) var(--border-style)
       color-mix(in srgb, var(--color-border) 60%, transparent);
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     pointer-events: none;
   }
 
@@ -389,8 +389,8 @@
     gap: var(--space-1);
     padding: var(--space-2) var(--space-2-5);
     background: color-mix(in srgb, var(--color-surface) 86%, transparent);
-    backdrop-filter: blur(var(--blur-lg, 12px));
-    -webkit-backdrop-filter: blur(var(--blur-lg, 12px));
+    backdrop-filter: blur(var(--blur-lg));
+    -webkit-backdrop-filter: blur(var(--blur-lg));
     border-radius: var(--radius-md);
     border: var(--border-width) var(--border-style)
       color-mix(in srgb, var(--color-border) 60%, transparent);
@@ -428,14 +428,14 @@
   .thumb-progress-bar {
     height: var(--space-1);
     background-color: color-mix(in srgb, var(--color-text) 8%, transparent);
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     overflow: hidden;
   }
 
   .thumb-progress-fill {
     height: 100%;
     background-color: var(--color-warning-500, var(--color-warning));
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     transition: width var(--duration-slower) var(--ease-default);
   }
 
@@ -491,10 +491,10 @@
     border: var(--border-width) var(--border-style)
       color-mix(in srgb, var(--color-border) 60%, transparent);
     background: color-mix(in srgb, var(--color-surface) 88%, transparent);
-    backdrop-filter: blur(var(--blur-lg, 12px));
-    -webkit-backdrop-filter: blur(var(--blur-lg, 12px));
+    backdrop-filter: blur(var(--blur-lg));
+    -webkit-backdrop-filter: blur(var(--blur-lg));
     color: var(--color-text);
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     cursor: pointer;
     transition:
       background-color var(--duration-fast) var(--ease-out),
@@ -558,7 +558,7 @@
     font-weight: var(--font-semibold);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     border: var(--border-width) var(--border-style) var(--color-border);
     background: var(--color-surface);
     color: var(--color-text-secondary);
@@ -572,7 +572,7 @@
     justify-content: center;
     width: var(--space-1-5);
     height: var(--space-1-5);
-    border-radius: var(--radius-full, 9999px);
+    border-radius: var(--radius-full);
     background-color: currentColor;
   }
 

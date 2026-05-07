@@ -35,9 +35,10 @@ import { VersionedCache } from '../versioned-cache';
 export type WaitUntilFn = (promise: Promise<unknown>) => void;
 
 // `InvalidationLogger` is canonically declared in `@codex/observability`
-// (R11). Re-export so existing `@codex/cache` consumers keep their import
-// path. New code should prefer `import type { Logger } from '@codex/observability'`.
-export type { InvalidationLogger };
+// and re-exported by the `@codex/cache` barrel (`index.ts`) directly from
+// `@codex/observability` — no helper-level re-export needed here. The type
+// is still imported above so the `logger?: InvalidationLogger` parameter
+// keeps its symbolic name in IDE tooling.
 
 /**
  * Arguments for {@link invalidateUserLibrary}.
