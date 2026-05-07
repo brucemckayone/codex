@@ -193,7 +193,32 @@ const changeTierCommandSchema = z.object({
   organizationId: z.string().uuid(),
   newTierId: z.string().uuid(),
   billingInterval: z.enum(['month', 'year']),
+  /**
+   * Unix timestamp (seconds) — pass through from `previewSubscriptionTierChange()`
+   * so the commit-time charge matches the dialog preview exactly.
+   * Omitted by `previewSubscriptionTierChange` itself (preview computes its own).
+   */
+  prorationDate: z.number().int().positive().optional(),
 });
+
+/**
+ * Preview the proration a tier change would produce. Powers the confirmation
+ * dialog. The returned `prorationDate` MUST be threaded back into
+ * `changeSubscriptionTier()` so the commit-time charge matches the preview.
+ */
+export const previewSubscriptionTierChange = command(
+  changeTierCommandSchema,
+  async (input) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    try {
+      const result = await api.subscription.previewTierChange(input);
+      return { success: true as const, data: result };
+    } catch (error) {
+      return toCommandFailure(error);
+    }
+  }
+);
 
 /**
  * Change (upgrade/downgrade) subscription tier.
