@@ -6,6 +6,7 @@
     BRAND_DEFAULT_SECONDARY,
     brandEditor,
   } from '$lib/brand-editor';
+  import { MinusIcon, PlusIcon } from '$lib/components/ui/Icon';
   import OklchColorPicker from '../color-picker/OklchColorPicker.svelte';
 
   type ColorField = 'primaryColor' | 'secondaryColor' | 'accentColor' | 'backgroundColor';
@@ -51,7 +52,13 @@
           <span class="colors-level__swatch" style:background={currentValue} aria-hidden="true"></span>
           <span class="colors-level__label">{section.label}</span>
           <span class="colors-level__hex">{currentValue}</span>
-          <span class="colors-level__chevron" aria-hidden="true">{isExpanded ? '−' : '+'}</span>
+          <span class="colors-level__chevron" aria-hidden="true">
+            {#if isExpanded}
+              <MinusIcon size={14} />
+            {:else}
+              <PlusIcon size={14} />
+            {/if}
+          </span>
         </button>
         {#if section.clearable && brandEditor.pending?.backgroundColor}
           <button
@@ -155,10 +162,11 @@
   }
 
   .colors-level__chevron {
-    font-size: var(--text-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     color: var(--color-text-muted);
     width: var(--space-4);
-    text-align: center;
     flex-shrink: 0;
   }
 

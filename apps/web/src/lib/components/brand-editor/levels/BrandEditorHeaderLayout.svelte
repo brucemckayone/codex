@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { HeroLayout } from '@codex/validation';
   import { brandEditor } from '$lib/brand-editor';
+  import { EyeIcon, EyeOffIcon } from '$lib/components/ui/Icon';
   import BrandSliderField from '../BrandSliderField.svelte';
 
   interface LayoutOption {
@@ -216,8 +217,15 @@
           class:layout-editor__toggle--hidden={!visible}
           onclick={() => toggleElement(toggle.key)}
           aria-pressed={visible}
+          aria-label={visible ? `Hide ${toggle.label}` : `Show ${toggle.label}`}
         >
-          <span class="layout-editor__toggle-icon">{visible ? '●' : '○'}</span>
+          <span class="layout-editor__toggle-icon">
+            {#if visible}
+              <EyeIcon size={16} />
+            {:else}
+              <EyeOffIcon size={16} />
+            {/if}
+          </span>
           <span class="layout-editor__toggle-label">{toggle.label}</span>
         </button>
       {/each}
@@ -279,8 +287,7 @@
     border-radius: var(--radius-lg);
     background: var(--color-surface);
     cursor: pointer;
-    transition: border-color var(--duration-fast) var(--ease-default),
-      background var(--duration-fast) var(--ease-default);
+    transition: var(--transition-colors);
     text-align: center;
     width: 100%;
   }
@@ -361,11 +368,12 @@
   }
 
   .layout-editor__toggle-icon {
-    font-size: var(--text-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     color: var(--color-interactive);
     flex-shrink: 0;
     width: var(--space-4);
-    text-align: center;
   }
 
   .layout-editor__toggle--hidden .layout-editor__toggle-icon {

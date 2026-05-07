@@ -236,7 +236,7 @@ describe('SubscribeButton', () => {
     const mockResume = resumeSubscription as unknown as ReturnType<
       typeof vi.fn
     >;
-    mockResume.mockResolvedValueOnce(undefined);
+    mockResume.mockResolvedValueOnce({ success: true, data: undefined });
 
     seed({ status: 'paused' });
     component = mount(SubscribeButton, {
