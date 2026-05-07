@@ -72,21 +72,22 @@ const SOCIAL_LINKS: Record<
 export async function seedUsers(db: typeof DbClient) {
   // Users — with avatar URLs pointing to dev-cdn.
   //
-  // stripeCustomerId is seeded with a synthetic `cus_test_<username>` value so
-  // the unified-customer column (Codex-cmhnv) is exercised in local dev and
-  // E2E tests. These IDs don't resolve against Stripe — the real
-  // `resolveOrCreateCustomer` helper (Codex-49gev) will overwrite them on
-  // first real checkout for the `fresh` user. We leave `fresh` NULL on purpose
-  // so the "never transacted" path stays covered.
+  // stripeCustomerId is intentionally left NULL for every seeded user. The
+  // unified-customer column (Codex-cmhnv) is populated lazily by
+  // `resolveOrCreateCustomer` (Codex-49gev) on first real checkout — that
+  // path creates a customer in Stripe via API + persists the returned id, so
+  // the cached id is always guaranteed to exist on the Stripe side. Seeding
+  // synthetic `cus_test_<username>` ids was incorrect: the helper trusts the
+  // cache unconditionally, so the fake id flowed straight into
+  // `stripe.checkout.sessions.create({ customer })` and Stripe replied
+  // `resource_missing`, breaking dev subscriptions silently.
   await db.insert(schema.users).values(
     Object.values(USERS).map((u) => {
       const daysAgo = USER_JOINED_DAYS_AGO[u.id];
       const userCreatedAt = daysAgo
         ? new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000)
         : now;
-      // `fresh` is our "no commerce history" fixture — leave NULL.
-      const stripeCustomerId =
-        u.username === USERS.fresh.username ? null : `cus_test_${u.username}`;
+      const stripeCustomerId = null;
       return {
         id: u.id,
         name: u.name,

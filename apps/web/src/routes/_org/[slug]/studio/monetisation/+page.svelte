@@ -127,15 +127,32 @@
 
   // Auto-sync Connect status when returning from Stripe onboarding.
   // Without a webhook tunnel, the account.updated event never arrives in local dev.
+  //
+  // Two important constraints on this handler:
+  //   1. The studio sub-tree is `ssr=false`, so this `onMount` runs DURING
+  //      first client paint over an empty <main> SSR'd by the org layout.
+  //      `invalidateAll()` here would re-fire every parent server load
+  //      (auth, org public-info, studio membership/draft-count, …) racing
+  //      with hydration — the visible result is the fullpage ShaderHero
+  //      canvas painting alone behind a stalled studio shell ("blank black
+  //      page"). Refresh ONLY the Connect status query.
+  //   2. Strip `?connect=success` after sync resolves so a refresh /
+  //      back-button doesn't re-trigger the sync (and the same race) on
+  //      every visit.
   onMount(() => {
     const connectParam = page.url.searchParams.get('connect');
-    if (connectParam === 'success' && orgId) {
-      connectSyncing = true;
-      syncConnectStatus({ organizationId: orgId })
-        .then(() => invalidateAll())
-        .catch(() => {})
-        .finally(() => { connectSyncing = false; });
-    }
+    if (connectParam !== 'success' || !orgId) return;
+
+    connectSyncing = true;
+    syncConnectStatus({ organizationId: orgId })
+      .then(() => getConnectStatus(orgId).refresh())
+      .catch(() => {})
+      .finally(() => {
+        connectSyncing = false;
+        const url = new URL(page.url);
+        url.searchParams.delete('connect');
+        window.history.replaceState({}, '', url.toString());
+      });
   });
 
   // ─── Helpers ────────────────────────────────────────────────────────────
@@ -367,13 +384,13 @@
             <Button onclick={handleConnectOnboard} loading={connectLoading}>
               {m.monetisation_connect_start()}
             </Button>
-          {:else if connectStatus.status === 'onboarding'}
-            <Button onclick={handleConnectOnboard} loading={connectLoading} variant="secondary">
-              {m.monetisation_connect_continue()}
-            </Button>
-          {:else}
+          {:else if connectStatus.chargesEnabled && connectStatus.payoutsEnabled}
             <Button onclick={handleConnectDashboard} loading={connectLoading} variant="secondary">
               {m.monetisation_connect_dashboard()}
+            </Button>
+          {:else}
+            <Button onclick={handleConnectOnboard} loading={connectLoading} variant="secondary">
+              {m.monetisation_connect_continue()}
             </Button>
           {/if}
         </div>
