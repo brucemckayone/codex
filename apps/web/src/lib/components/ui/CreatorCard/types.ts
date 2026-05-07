@@ -22,7 +22,7 @@ export interface ContentItem {
   contentType: string;
 }
 
-export interface OrgMembership {
+interface OrgMembership {
   name: string;
   slug: string;
   logoUrl: string | null;

@@ -36,7 +36,7 @@ export const COLLECTION_KEYS = {
   subscription: ['subscription'] as const,
 } as const;
 
-export type CollectionKey = keyof typeof COLLECTION_KEYS;
+type CollectionKey = keyof typeof COLLECTION_KEYS;
 
 /**
  * Hydrate a collection with server-side data
