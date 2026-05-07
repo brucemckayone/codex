@@ -5,7 +5,8 @@
   import { cubicOut } from 'svelte/easing';
   import * as m from '$paraglide/messages';
   import Button from '$lib/components/ui/Button/Button.svelte';
-  import { Badge, EmptyState } from '$lib/components/ui';
+  import { Alert, Badge, EmptyState } from '$lib/components/ui';
+  import * as Dialog from '$lib/components/ui/Dialog';
   import {
     AlertTriangleIcon,
     CheckIcon,
@@ -19,13 +20,14 @@
   import {
     changeSubscriptionTier,
     createSubscriptionCheckoutSession,
+    previewSubscriptionTierChange,
     reactivateSubscription,
     resumeSubscription,
   } from '$lib/remote/subscription.remote';
   import { openBillingPortal } from '$lib/remote/account.remote';
   import { invalidateCollection } from '$lib/collections';
   import { getPricingFaq } from '$lib/remote/branding.remote';
-  import type { SubscriptionTier } from '$lib/types';
+  import type { SubscriptionTier, TierChangePreview } from '$lib/types';
   import type { PricingFaqItem } from '@codex/validation';
   import { formatDate, formatPrice } from '$lib/utils/format';
   import { buildPlatformUrl } from '$lib/utils/subdomain';
@@ -48,6 +50,15 @@
         return "This creator hasn't finished setting up payments yet. Please try again later.";
       case 'TIER_NOT_FOUND':
         return 'This plan is no longer available. Please refresh the page to see current options.';
+      case 'PAYMENT_REQUIRED':
+        // Stripe declined the proration invoice during an upgrade. The
+        // price update was reverted on Stripe's side — the user is still
+        // on their existing tier. Prompt them to update their payment
+        // method and try again.
+        return (
+          message ||
+          'Payment was declined. Update your payment method and try again.'
+        );
       case 'SUBSCRIPTION_CHECKOUT_ERROR':
         return message || m.subscription_checkout_error();
       default:
@@ -97,13 +108,19 @@
   let resumeLoading = $state(false);
   let resumeError = $state('');
 
-  // Tier-switch flow state. `confirmSwitchTierId` powers the two-step
-  // inline confirmation: first click arms the confirm; second commits.
-  // Avoids a Dialog dependency while still preventing accidental swaps
-  // (which trigger Stripe proration charges).
+  // Tier-switch flow state. The confirmation dialog opens preview-first:
+  // we call `previewSubscriptionTierChange` to show the user the exact
+  // proration charge BEFORE they commit, then thread the same
+  // `prorationDate` into `changeSubscriptionTier` so Stripe charges
+  // exactly what the dialog showed.
   let switchTierLoading = $state<string | null>(null);
   let switchTierError = $state('');
-  let confirmSwitchTierId = $state<string | null>(null);
+  // Dialog state.
+  let tierChangeDialogOpen = $state(false);
+  let tierChangeDialogTier = $state<SubscriptionTier | null>(null);
+  let tierChangePreview = $state<TierChangePreview | null>(null);
+  let tierChangePreviewLoading = $state(false);
+  let tierChangePreviewError = $state('');
 
   let resolvedTiersPromise: Promise<unknown> | null = null;
   $effect(() => {
@@ -415,23 +432,61 @@
     }
   }
 
-  // Tier switch (upgrade/downgrade or interval swap). Two-step:
-  //   1) First click arms confirmation (sets confirmSwitchTierId).
-  //   2) Second click commits — calls changeSubscriptionTier remote which
-  //      hits POST /subscriptions/change-tier on ecom-api. Stripe applies
-  //      `create_prorations` so the user is charged/credited for the
-  //      remaining period. The DB row is updated synchronously by the
-  //      service; a customer.subscription.updated webhook reconciles if
-  //      the DB write fails after Stripe succeeds.
-  // Optimistic flip pattern matches handleReactivate / handleResume.
-  function armSwitchTier(tier: SubscriptionTier) {
-    confirmSwitchTierId = tier.id;
+  /**
+   * Open the tier-change confirmation dialog and fetch a fresh proration
+   * preview from Stripe. The dialog stays open while loading so the user
+   * sees a skeleton instead of a flash; the preview's `prorationDate` is
+   * pinned and threaded back into the commit so Stripe charges exactly
+   * the amount we display.
+   */
+  async function openTierChangeDialog(tier: SubscriptionTier) {
+    tierChangeDialogTier = tier;
+    tierChangeDialogOpen = true;
+    tierChangePreview = null;
+    tierChangePreviewError = '';
+    tierChangePreviewLoading = true;
     switchTierError = '';
+
+    try {
+      const result = await previewSubscriptionTierChange({
+        organizationId: data.org.id,
+        newTierId: tier.id,
+        billingInterval,
+      });
+      // Guard against a stale preview landing after the user closed the
+      // dialog or opened a different tier — drop the result silently.
+      if (!tierChangeDialogOpen || tierChangeDialogTier?.id !== tier.id) {
+        return;
+      }
+      if (!result.success) {
+        tierChangePreviewError = mapSubscriptionErrorMessage(
+          result.code,
+          result.message
+        );
+        return;
+      }
+      tierChangePreview = result.data;
+    } catch (err) {
+      if (!tierChangeDialogOpen || tierChangeDialogTier?.id !== tier.id) {
+        return;
+      }
+      tierChangePreviewError =
+        err instanceof Error
+          ? err.message
+          : 'Could not load price preview. Try again.';
+    } finally {
+      if (tierChangeDialogTier?.id === tier.id) {
+        tierChangePreviewLoading = false;
+      }
+    }
   }
 
-  function cancelSwitchTier() {
-    confirmSwitchTierId = null;
-    switchTierError = '';
+  function closeTierChangeDialog() {
+    tierChangeDialogOpen = false;
+    tierChangeDialogTier = null;
+    tierChangePreview = null;
+    tierChangePreviewError = '';
+    tierChangePreviewLoading = false;
   }
 
   async function handleSwitchTier(tier: SubscriptionTier) {
@@ -458,6 +513,11 @@
         organizationId: data.org.id,
         newTierId: tier.id,
         billingInterval,
+        // Thread the preview's prorationDate through so Stripe charges
+        // exactly what the dialog displayed. Stripe re-runs the calc
+        // against Date.now() if omitted — meaning a slow-clicking user
+        // could be charged a different amount than they confirmed.
+        prorationDate: tierChangePreview?.prorationDate,
       });
       if (!result.success) {
         currentTierId = previousTierId;
@@ -473,7 +533,7 @@
         }
         return;
       }
-      confirmSwitchTierId = null;
+      closeTierChangeDialog();
       await Promise.all([
         invalidate('account:subscriptions'),
         invalidateCollection('library'),
@@ -927,29 +987,10 @@
                   {@const intervalMismatch =
                     currentBillingInterval !== null &&
                     currentBillingInterval !== billingInterval}
-                  {#if intervalMismatch && confirmSwitchTierId === tier.id}
+                  {#if intervalMismatch}
                     <Button
                       variant="primary"
-                      onclick={() => handleSwitchTier(tier)}
-                      loading={switchTierLoading === tier.id}
-                      class="tier-cta"
-                      data-testid="tier-cta-switch-confirm"
-                      aria-label="Confirm switch to {billingInterval === 'year' ? 'annual' : 'monthly'} billing"
-                    >
-                      Confirm switch
-                    </Button>
-                    <button
-                      type="button"
-                      class="tier-secondary"
-                      onclick={cancelSwitchTier}
-                      data-testid="tier-cta-switch-cancel"
-                    >
-                      Cancel
-                    </button>
-                  {:else if intervalMismatch}
-                    <Button
-                      variant="primary"
-                      onclick={() => armSwitchTier(tier)}
+                      onclick={() => openTierChangeDialog(tier)}
                       class="tier-cta"
                       data-testid="tier-cta-switch-interval"
                       aria-label="Switch to {billingInterval === 'year' ? 'annual' : 'monthly'} billing"
@@ -988,40 +1029,19 @@
                   {@const isDowngrade = currentTier
                     ? tierPrice(tier) < tierPrice(currentTier)
                     : false}
-                  {#if confirmSwitchTierId === tier.id}
-                    <Button
-                      variant="primary"
-                      onclick={() => handleSwitchTier(tier)}
-                      loading={switchTierLoading === tier.id}
-                      class="tier-cta"
-                      data-testid="tier-cta-switch-confirm"
-                      aria-label="Confirm switch to {tier.name}"
-                    >
-                      Confirm switch
-                    </Button>
-                    <button
-                      type="button"
-                      class="tier-secondary"
-                      onclick={cancelSwitchTier}
-                      data-testid="tier-cta-switch-cancel"
-                    >
-                      Cancel
-                    </button>
-                  {:else}
-                    <Button
-                      variant={isRecommended ? 'primary' : 'secondary'}
-                      onclick={() => armSwitchTier(tier)}
-                      class="tier-cta"
-                      data-testid="tier-cta-switch"
-                      aria-label="Switch to {tier.name}"
-                    >
-                      {isUpgrade
-                        ? `Upgrade to ${tier.name}`
-                        : isDowngrade
-                          ? `Downgrade to ${tier.name}`
-                          : `Switch to ${tier.name}`}
-                    </Button>
-                  {/if}
+                  <Button
+                    variant={isRecommended ? 'primary' : 'secondary'}
+                    onclick={() => openTierChangeDialog(tier)}
+                    class="tier-cta"
+                    data-testid="tier-cta-switch"
+                    aria-label="Switch to {tier.name}"
+                  >
+                    {isUpgrade
+                      ? `Upgrade to ${tier.name}`
+                      : isDowngrade
+                        ? `Downgrade to ${tier.name}`
+                        : `Switch to ${tier.name}`}
+                  </Button>
                 {:else if currentTierId}
                   <!--
                     Cross-tier swap blocked while the current subscription is
@@ -1073,21 +1093,6 @@
                   data-testid="tier-resume-error"
                 >
                   {resumeError}
-                </p>
-              {/if}
-              {#if confirmSwitchTierId === tier.id && switchTierLoading !== tier.id}
-                <p class="card__switch-note" data-testid="tier-switch-note">
-                  Stripe will charge or credit a prorated amount for the
-                  remaining billing period.
-                </p>
-              {/if}
-              {#if switchTierError && (confirmSwitchTierId === tier.id || switchTierLoading === tier.id)}
-                <p
-                  class="card__status-error"
-                  role="alert"
-                  data-testid="tier-switch-error"
-                >
-                  {switchTierError}
                 </p>
               {/if}
             </div>
@@ -1262,6 +1267,103 @@
     </div>
   </div>
 {/if}
+
+<!-- ═══ TIER-CHANGE CONFIRMATION DIALOG ═══════════════════════════════
+     Preview-first flow: opens with a skeleton, fetches the proration via
+     stripe.invoices.createPreview, shows the exact charge/credit, then
+     commits using the same prorationDate so Stripe charges what we displayed.
+     ═══════════════════════════════════════════════════════════════════ -->
+<Dialog.Root bind:open={tierChangeDialogOpen}>
+  <Dialog.Content size="sm">
+    <Dialog.Header>
+      <Dialog.Title>
+        {#if tierChangeDialogTier}
+          {tierChangePreview?.isUpgrade
+            ? `Upgrade to ${tierChangeDialogTier.name}`
+            : tierChangePreview && !tierChangePreview.isUpgrade
+              ? `Switch to ${tierChangeDialogTier.name}`
+              : `Switch to ${tierChangeDialogTier.name}`}
+        {/if}
+      </Dialog.Title>
+    </Dialog.Header>
+
+    <Dialog.Body>
+      {#if tierChangePreviewLoading}
+        <div class="tier-change-skeleton" aria-busy="true">
+          <div class="tier-change-skeleton__row"></div>
+          <div class="tier-change-skeleton__row tier-change-skeleton__row--short"></div>
+          <div class="tier-change-skeleton__row"></div>
+        </div>
+      {:else if tierChangePreviewError}
+        <Alert variant="error">{tierChangePreviewError}</Alert>
+      {:else if tierChangePreview && tierChangeDialogTier}
+        <dl class="tier-change-summary">
+          <div class="tier-change-summary__line tier-change-summary__line--head">
+            <dt>Charged today</dt>
+            <dd class="tier-change-summary__amount">
+              {formatPrice(tierChangePreview.amountDueCents)}
+            </dd>
+          </div>
+          {#if tierChangePreview.prorationLineItems.length > 0}
+            <ul class="tier-change-summary__lines">
+              {#each tierChangePreview.prorationLineItems as line, idx (idx)}
+                <li>
+                  <span>{line.description ?? 'Proration adjustment'}</span>
+                  <span
+                    class:tier-change-summary__credit={line.amountCents < 0}
+                  >
+                    {line.amountCents < 0 ? '−' : '+'}{formatPrice(Math.abs(line.amountCents))}
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+          <div class="tier-change-summary__line tier-change-summary__line--recurring">
+            <dt>
+              Then {formatPrice(tierChangePreview.newRecurringAmountCents)}/{tierChangePreview.newRecurringInterval === 'month' ? 'mo' : 'yr'}
+            </dt>
+            <dd class="tier-change-summary__period">
+              starting {formatDate(tierChangePreview.currentPeriodEnd)}
+            </dd>
+          </div>
+        </dl>
+        {#if !tierChangePreview.isUpgrade && tierChangePreview.amountDueCents <= 0}
+          <p class="tier-change-summary__note">
+            No charge today. The credit above will apply to your next invoice.
+          </p>
+        {/if}
+        {#if switchTierError}
+          <Alert variant="error">{switchTierError}</Alert>
+        {/if}
+      {/if}
+    </Dialog.Body>
+
+    <Dialog.Footer>
+      <Button variant="ghost" onclick={closeTierChangeDialog}>
+        Cancel
+      </Button>
+      {#if tierChangePreview && tierChangeDialogTier}
+        <Button
+          variant="primary"
+          onclick={() => tierChangeDialogTier && handleSwitchTier(tierChangeDialogTier)}
+          loading={switchTierLoading === tierChangeDialogTier.id}
+          data-testid="tier-change-dialog-confirm"
+        >
+          {tierChangePreview.amountDueCents > 0
+            ? `Confirm and pay ${formatPrice(tierChangePreview.amountDueCents)}`
+            : 'Confirm switch'}
+        </Button>
+      {:else if tierChangePreviewError}
+        <Button
+          variant="primary"
+          onclick={() => tierChangeDialogTier && openTierChangeDialog(tierChangeDialogTier)}
+        >
+          Try again
+        </Button>
+      {/if}
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
 
 <style>
   /* ══════════════════════════════════════════════════════════════════
@@ -1872,13 +1974,6 @@
     text-align: center;
   }
 
-  .card__switch-note {
-    margin: var(--space-2) 0 0;
-    font-size: var(--text-xs);
-    color: var(--color-text-secondary);
-    text-align: center;
-    line-height: var(--leading-snug);
-  }
 
   /* ── CARD CONTENT ──────────────────────────────────────────────── */
 
@@ -3176,5 +3271,112 @@
       backdrop-filter: none;
       -webkit-backdrop-filter: none;
     }
+  }
+
+  /* ── Tier-change confirmation dialog ────────────────────────────── */
+
+  .tier-change-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-2) 0;
+  }
+
+  .tier-change-skeleton__row {
+    height: var(--space-5);
+    border-radius: var(--radius-sm);
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-secondary) 0%,
+      var(--color-surface-tertiary, var(--color-surface-secondary)) 50%,
+      var(--color-surface-secondary) 100%
+    );
+    background-size: 200% 100%;
+    animation: tier-change-shimmer 1.4s ease-in-out infinite;
+  }
+
+  .tier-change-skeleton__row--short {
+    width: 60%;
+  }
+
+  @keyframes tier-change-shimmer {
+    0% {
+      background-position: 100% 0;
+    }
+    100% {
+      background-position: -100% 0;
+    }
+  }
+
+  .tier-change-summary {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    margin: 0;
+  }
+
+  .tier-change-summary__line {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+
+  .tier-change-summary__line--head dt {
+    font-size: var(--text-base);
+    font-weight: var(--font-medium);
+    color: var(--color-text);
+  }
+
+  .tier-change-summary__amount {
+    font-size: var(--text-2xl);
+    font-weight: var(--font-bold);
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tier-change-summary__lines {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  .tier-change-summary__lines li {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tier-change-summary__credit {
+    color: var(--color-success-700, var(--color-text-secondary));
+  }
+
+  .tier-change-summary__line--recurring {
+    padding-top: var(--space-3);
+    border-top: var(--border-width) var(--border-style) var(--color-border-subtle);
+  }
+
+  .tier-change-summary__line--recurring dt {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text);
+  }
+
+  .tier-change-summary__period {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+
+  .tier-change-summary__note {
+    margin: var(--space-3) 0 0;
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    line-height: var(--leading-relaxed);
   }
 </style>
