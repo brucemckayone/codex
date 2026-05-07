@@ -44,9 +44,17 @@
     label: string;
     value: string;
     onValueChange: (value: string) => void;
+    /** Optional class forwarded to root — composition seam per R13 inverse. */
+    class?: string;
   }
 
-  const { mode, label, value, onValueChange }: Props = $props();
+  const {
+    mode,
+    label,
+    value,
+    onValueChange,
+    class: className,
+  }: Props = $props();
 
   // ── Search ──────────────────────────────────────────────────────────────
   let searchQuery = $state('');
@@ -173,7 +181,7 @@
   });
 </script>
 
-<div class="font-picker">
+<div class="font-picker {className ?? ''}">
   <Label>{label}</Label>
 
   <button {...$trigger} use:trigger class="font-picker__trigger">
@@ -411,6 +419,9 @@
 
   /* ── Option list ─────────────────────────────────────────────────────── */
   .font-picker__list {
+    /* 18rem ≈ 288px — sized to ~9 rows of options; matches peer Select.svelte
+       pattern (15rem). No list-max-height token in the design system; left as
+       a literal pending a shared token (Codex-ul0mt). */
     max-height: 18rem;
     overflow-y: auto;
     padding: var(--space-1);
@@ -423,7 +434,7 @@
     font-weight: var(--font-semibold);
     color: var(--color-text-muted);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: var(--tracking-wider);
     padding: var(--space-3) var(--space-3) var(--space-1);
     user-select: none;
   }
