@@ -73,9 +73,11 @@
 		margin: 0 0 var(--space-3);
 		color: var(--color-text-secondary);
 		font-size: var(--text-sm);
+		/* 480px copy width — narrower than --container-sm (640px) and --breakpoint-sm.
+		   Tracked in bead [ds-review-iter-026] error/empty-state copy width clustering. */
 		max-width: 480px;
 		margin-inline: auto;
-		line-height: 1.6;
+		line-height: var(--leading-relaxed);
 	}
 
 	.empty-state .hint {
