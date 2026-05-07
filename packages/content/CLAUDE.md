@@ -21,12 +21,11 @@ All validation schemas are re-exported from `@codex/validation` for convenience.
 | `uploadThumbnail` | `(id: string, creatorId: string, file: File)` | Processes image via `@codex/image-processing`, updates thumbnailUrl. |
 | `isSlugAvailable` | `(slug: string, creatorId: string, excludeId?: string)` | Checks slug uniqueness within creator scope. |
 | `publish` | `(id: string, creatorId: string)` | Transaction. ALL attached media MUST be `status === 'ready'`. |
-| `unpublish` | `(id: string, creatorId: string)` | Reverts published → draft. Purges CDN cache. |
+| `unpublish` | `(id: string, creatorId: string)` | Reverts published → draft. |
 | `delete` | `(id: string, creatorId: string)` | Soft delete via `deletedAt`. |
 | `list` | `(creatorId: string, filters: ContentFilters, pagination?)` | Paginated. Supports status/search/type filters. |
 | `listPublic` | `(params)` | Public-facing list — only published, non-deleted content. |
 | `setCache` | `(cache: VersionedCache)` | Inject `VersionedCache` for cache invalidation on mutations. |
-| `setCachePurge` | `(client: CachePurgeClient, webAppUrl: string)` | Inject CDN purge client for publish/unpublish. |
 
 ### Constructor
 
@@ -54,7 +53,7 @@ Draft → Published → Draft (unpublish) → Deleted (soft)
 ```
 
 - **Draft → Published**: ALL attached media MUST be `status: 'ready'` (enforced)
-- **Published → Draft**: Allowed. CDN cache purged automatically.
+- **Published → Draft**: Allowed.
 
 ## Media Status Lifecycle
 

@@ -61,7 +61,7 @@ export interface LayoutOrganization {
  * Organization data for org context (web app extended version)
  * Includes UI-specific fields not present in backend Organization type
  */
-export interface OrgBrandFineTune {
+interface OrgBrandFineTune {
   // Fine-tune values (text/heading/body weight, shadow scale/color, heading
   // colour, etc.) are stored as keys inside tokenOverrides JSON. The
   // previously broken-out columns were dropped in Codex-g49b4.
@@ -90,7 +90,7 @@ export interface OrgBrandFineTune {
  * API call or `+page.server.ts` load — never reach for `as unknown as` to
  * paper over the mismatch in components.
  */
-export type DateAsString<T> = {
+type DateAsString<T> = {
   [K in keyof T]: T[K] extends Date
     ? string
     : T[K] extends Date | null
@@ -132,6 +132,29 @@ export interface UserOrgSubscription extends DateAsString<Subscription> {
  */
 export interface CurrentSubscription extends DateAsString<Subscription> {
   tier: DateAsString<SubscriptionTier>;
+}
+
+/**
+ * Wire shape for the proration confirmation dialog.
+ *
+ * Mirrors `TierChangePreview` from `@codex/subscription`, with `currentPeriodEnd`
+ * as an ISO string (server serialises Date over JSON). The `prorationDate`
+ * (Unix timestamp in seconds) MUST be threaded back into the change-tier
+ * commit so Stripe re-uses the exact proration calculation that produced
+ * `amountDueCents` — otherwise the user gets charged a different amount than
+ * they confirmed.
+ */
+export interface TierChangePreview {
+  amountDueCents: number;
+  prorationLineItems: Array<{
+    description: string | null;
+    amountCents: number;
+  }>;
+  newRecurringAmountCents: number;
+  newRecurringInterval: 'month' | 'year';
+  prorationDate: number;
+  isUpgrade: boolean;
+  currentPeriodEnd: string;
 }
 
 /**
@@ -178,7 +201,7 @@ export interface OrgTiersContext {
 /**
  * Per-tier subscriber and MRR breakdown.
  */
-export interface TierBreakdown {
+interface TierBreakdown {
   tierId: string;
   tierName: string;
   subscriberCount: number;

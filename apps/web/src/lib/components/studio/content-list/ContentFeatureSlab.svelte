@@ -202,7 +202,7 @@
 
   @media (prefers-reduced-motion: no-preference) {
     .slab-thumb:hover {
-      transform: translateY(-2px);
+      transform: translateY(calc(-1 * var(--space-0-5)));
       box-shadow:
         0 var(--space-2) var(--space-6) color-mix(in srgb, var(--color-text) 10%, transparent);
     }
@@ -336,13 +336,13 @@
       currentColor
     );
     background-repeat: no-repeat;
-    background-size: 0% 1px;
+    background-size: 0% var(--border-width);
     background-position: 0 100%;
     transition: background-size var(--duration-normal) var(--ease-out);
   }
 
   .slab-title-link:hover {
-    background-size: 100% 1px;
+    background-size: 100% var(--border-width);
     color: var(--color-interactive);
   }
 

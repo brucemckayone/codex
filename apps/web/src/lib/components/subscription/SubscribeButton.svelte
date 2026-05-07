@@ -140,7 +140,20 @@
     }
 
     try {
-      await reactivateSubscription({ organizationId });
+      const result = await reactivateSubscription({ organizationId });
+      if (!result.success) {
+        try {
+          subscriptionCollection.update(organizationId, (draft) => {
+            draft.status = previous.status;
+            draft.cancelAtPeriodEnd = previous.cancelAtPeriodEnd;
+          });
+        } catch {
+          // Best-effort; the version-based invalidation will re-reconcile.
+        }
+        reactivateError =
+          result.message || 'Failed to reactivate subscription';
+        return;
+      }
       await Promise.all([
         invalidate('account:subscriptions'),
         invalidateCollection('library'),
@@ -196,7 +209,18 @@
     }
 
     try {
-      await resumeSubscription({ organizationId });
+      const result = await resumeSubscription({ organizationId });
+      if (!result.success) {
+        try {
+          subscriptionCollection.update(organizationId, (draft) => {
+            draft.status = previous.status;
+          });
+        } catch {
+          // Best-effort; the version-based invalidation will re-reconcile.
+        }
+        resumeError = result.message || 'Failed to resume subscription';
+        return;
+      }
       await Promise.all([
         invalidate('account:subscriptions'),
         invalidateCollection('library'),

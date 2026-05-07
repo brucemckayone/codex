@@ -375,7 +375,7 @@
     font-family: inherit;
   }
 
-  .field-input:focus {
+  .field-input:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--focus-offset-inset);
     border-color: var(--color-border-focus, var(--color-focus));

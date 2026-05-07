@@ -17,7 +17,6 @@ Integration testing helpers: database setup, entity factories, mock factories, S
 | `validateDatabaseConnection(db, retries?, delayMs?)` | Checks DB is reachable (useful in CI) |
 | `withTransaction(db, testFn)` | Wraps test in a transaction — auto-rollback on throw |
 | `executeRawSQL(db, query)` | Run raw SQL for complex test setup |
-| `withNeonTestBranch()` | DEPRECATED no-op — Neon branching is now at workflow level |
 | `type Database` | Re-export of `DatabaseWs` type |
 
 ### `factories.ts` — Entity Factories
@@ -113,8 +112,6 @@ test('creates content', async () => {
 |---|---|---|
 | **Local** | `DATABASE_URL` from `.env.test`, `DB_METHOD=LOCAL_PROXY` | Shared DB, use `createUniqueSlug()` to avoid conflicts |
 | **CI** | Workflow-created Neon branch per domain | `DATABASE_URL` injected by GitHub Actions; branch deleted after run |
-
-`withNeonTestBranch()` is a deprecated no-op — remove calls to it.
 
 ## Strict Rules
 

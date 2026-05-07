@@ -31,7 +31,7 @@ export function filterAttentionSubs(
   return subs.filter((s) => isAttentionStatus(s.status));
 }
 
-export type BannerVariant = 'error' | 'warning';
+type BannerVariant = 'error' | 'warning';
 
 /**
  * Pick the banner's severity paint.

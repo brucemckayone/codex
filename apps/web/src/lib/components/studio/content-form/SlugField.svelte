@@ -102,7 +102,7 @@
     placeholder={m.studio_content_form_slug_placeholder()}
     oninput={handleSlugInput}
   />
-  {#each form.fields.slug.issues() as issue}
+  {#each form.fields.slug.issues() as issue (issue)}
     <p class="field-error">{issue.message}</p>
   {/each}
   {#if slugCheckStatus === 'checking'}
@@ -144,7 +144,7 @@
     font-family: inherit;
   }
 
-  .field-input:focus {
+  .field-input:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--focus-offset-inset);
     border-color: var(--color-border-focus);

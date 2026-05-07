@@ -27,7 +27,7 @@ export type SubscriptionStatus =
   | 'past_due'
   | 'paused';
 
-export interface SubscriptionStatusInput {
+interface SubscriptionStatusInput {
   /** tierId present = user has a current subscription on this org */
   currentTierId: string | null;
   /** Raw lifecycle status from the API (may be unknown/future values) */
@@ -64,7 +64,7 @@ export function getEffectiveStatus(
  * service method + remote fn now shipped), so the placeholder disabled
  * state has been removed.
  */
-export interface TierCtaDescriptor {
+interface TierCtaDescriptor {
   primary:
     | { kind: 'current'; disabled: true }
     | { kind: 'reactivate'; disabled: false }

@@ -13,7 +13,7 @@
  * Canonical consumer: `apps/web/src/routes/_org/[slug]/+layout.svelte`.
  * Fix for Codex-lqvyy (dark colors were never reaching non-editor visitors).
  */
-export interface DarkColorOverrides {
+interface DarkColorOverrides {
   primaryColor?: string;
   secondaryColor?: string | null;
   accentColor?: string | null;

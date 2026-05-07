@@ -56,8 +56,18 @@ const config = {
     // DENY (the hooks.server.ts header still says SAMEORIGIN — keep both
     // for defence in depth; modern browsers prefer the CSP directive).
     //
-    // `form-action` permits Stripe Checkout / Customer Portal redirects
-    // (server-side 303 redirects from our endpoints land at *.stripe.com).
+    // `form-action` permits:
+    //   1. Stripe Checkout / Customer Portal redirects — server-side 303
+    //      redirects from our endpoints land at *.stripe.com.
+    //   2. Cross-subdomain redirects within our own platform — `'self'`
+    //      matches scheme+host+port, so a redirect from
+    //      `org.revelations.studio/logout` → `revelations.studio/login`
+    //      crosses an origin boundary and fails `'self'` even though both
+    //      share the registrable domain. CSP `form-action` is enforced over
+    //      the entire navigation chain (including redirect targets), so the
+    //      platform domain must be allow-listed alongside org subdomains.
+    //   The dev-only `lvh.me` / `*.nip.io` entries cover local development
+    //   and LAN mobile testing; they are inert in production.
     csp: {
       mode: 'auto',
       directives: {
@@ -181,6 +191,15 @@ const config = {
           'self',
           'https://checkout.stripe.com',
           'https://billing.stripe.com',
+          // Production: cross-subdomain redirects (e.g. logout from
+          // org subdomain → platform login).
+          'https://revelations.studio',
+          'https://*.revelations.studio',
+          // Dev-only — `lvh.me` (cross-subdomain cookies) and `*.nip.io`
+          // (LAN mobile testing). Inert in production.
+          'http://lvh.me:3000',
+          'http://*.lvh.me:3000',
+          'http://*.nip.io:3000',
         ],
       },
     },

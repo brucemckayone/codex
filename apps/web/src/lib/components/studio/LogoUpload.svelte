@@ -200,8 +200,10 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 160px;
-    height: 160px;
+    /* 10rem (160px) — fixed media preview frame; sits above --space-24 (6rem)
+       and below --container-sm (40rem). No matching spacing/container token. */
+    width: 10rem;
+    height: 10rem;
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-lg);
     background-color: var(--color-surface);
@@ -227,12 +229,14 @@
     justify-content: center;
     gap: var(--space-2);
     padding: var(--space-6) var(--space-4);
-    border: 2px dashed var(--color-border);
+    border: var(--border-width-thick) dashed var(--color-border);
     border-radius: var(--radius-lg);
     background-color: var(--color-surface);
     cursor: pointer;
     transition: var(--transition-colors);
-    max-width: 320px;
+    /* 20rem (320px) — drop-zone width sized to roughly twice the preview frame.
+       Sits between --container-xs (no token) and --container-sm (40rem). */
+    max-width: 20rem;
   }
 
   .drop-zone:hover,

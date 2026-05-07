@@ -9,6 +9,7 @@ import {
   BusinessLogicError,
   ConflictError,
   NotFoundError,
+  ServiceError,
 } from '@codex/service-errors';
 
 // Re-export base error classes for convenience
@@ -87,6 +88,21 @@ export class SubscriptionCheckoutError extends BusinessLogicError {
       code: 'SUBSCRIPTION_CHECKOUT_ERROR',
       ...context,
     });
+  }
+}
+
+/**
+ * Stripe rejected the proration invoice payment during a tier upgrade.
+ *
+ * Maps to HTTP 402 (Payment Required). Stripe's `payment_behavior:
+ * 'error_if_incomplete'` reverts the price update on failure, so the
+ * subscription stays on the old tier — no reconciliation needed. The
+ * frontend surfaces this as a "card declined, please update your payment
+ * method" toast.
+ */
+export class SubscriptionPaymentRequiredError extends ServiceError {
+  constructor(message: string, context?: Record<string, unknown>) {
+    super(message, 'PAYMENT_REQUIRED', 402, context);
   }
 }
 

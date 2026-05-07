@@ -15,7 +15,7 @@
 
 import { browser } from '$app/environment';
 
-export type Theme = 'light' | 'dark';
+type Theme = 'light' | 'dark';
 
 const STORAGE_KEY = 'theme';
 const COOKIE_NAME = 'theme';
@@ -35,11 +35,6 @@ export const themeState = $state<{ theme: Theme }>({
       : 'light'
     : 'light',
 });
-
-/** Read the current theme from the DOM attribute. Kept for legacy callers. */
-export function getTheme(): Theme {
-  return themeState.theme;
-}
 
 /** Apply a theme to the DOM and persist it; updates the reactive state. */
 function setTheme(theme: Theme): void {

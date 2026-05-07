@@ -13,9 +13,84 @@
     "apps/web/playwright.config.ts",
     "apps/web/.storybook/**/*.ts",
     "apps/web/src/tests/setup.ts",
-    "apps/web/e2e/**/*.spec.ts"
+    "apps/web/e2e/**/*.spec.ts",
+    "**/*.test.ts",
+    "**/*.svelte.test.ts"
   ],
-  "ignoreDependencies": ["vite-plugin-dts"],
+  "ignoreDependencies": [
+    "vite-plugin-dts",
+    "@inlang/paraglide-js",
+    "@storybook/addon-a11y",
+    "@storybook/addon-essentials",
+    "@storybook/addon-interactions",
+    "@storybook/test-runner",
+    "@tiptap/pm",
+    "@rollup/rollup-darwin-arm64",
+    "tslib",
+    "@better-auth/cli"
+  ],
+  "ignoreDependencies": [
+    "vite-plugin-dts",
+    "@inlang/paraglide-js",
+    "@storybook/addon-a11y",
+    "@storybook/addon-essentials",
+    "@storybook/addon-interactions",
+    "@storybook/test-runner",
+    "@tiptap/pm",
+    "@rollup/rollup-darwin-arm64",
+    "tslib",
+    "@better-auth/cli"
+  ],
+  "ignoreExports": [
+    {
+      "file": "apps/web/src/lib/components/ui/CreatorCard/index.ts",
+      "exports": ["CreatorProfileDrawer"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/Feedback/Spinner/index.ts",
+      "exports": ["Spinner"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/Icon/index.ts",
+      "exports": ["MinusCircleIcon"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/ShaderHero/index.ts",
+      "exports": ["ShaderHero"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/Table/index.ts",
+      "exports": [
+        "Table",
+        "TableHeader",
+        "TableBody",
+        "TableFooter",
+        "TableRow",
+        "TableHead",
+        "TableCell"
+      ]
+    },
+    {
+      "file": "packages/subscription/src/services/subscription-service.ts",
+      "exports": ["TierPriceChangeMailer"]
+    },
+    {
+      "file": "packages/subscription/src/services/tier-service.ts",
+      "exports": ["TierServiceConfig"]
+    }
+  ],
+  "ignoreDependencies": [
+    "vite-plugin-dts",
+    "@inlang/paraglide-js",
+    "@storybook/addon-a11y",
+    "@storybook/addon-essentials",
+    "@storybook/addon-interactions",
+    "@storybook/test-runner",
+    "@tiptap/pm",
+    "@rollup/rollup-darwin-arm64",
+    "tslib",
+    "@better-auth/cli"
+  ],
   "dynamicallyLoaded": [
     "**/*.stories.svelte",
     "**/*.stories.ts",
@@ -32,7 +107,69 @@
     "apps/web/src/hooks.ts",
     "apps/web/src/hooks.server.ts",
     "apps/web/src/hooks.client.ts",
-    "apps/web/src/app.html"
+    "apps/web/src/app.html",
+    "apps/web/src/tests/utils/component-test-utils.svelte.ts",
+    "apps/web/src/lib/components/ui/ShaderHero/renderers/*-renderer.ts",
+    "apps/web/src/lib/remote/*.remote.ts",
+    "scripts/denoise/index.ts",
+    "scripts/denoise/consumer-graph.ts",
+    "scripts/denoise/extract-api.ts",
+    "scripts/denoise/find-consumers.ts",
+    "scripts/denoise/jscpd-budget.ts"
+  ],
+  "ignoreExports": [
+    {
+      "file": "apps/web/src/lib/components/ui/Table/index.ts",
+      "exports": ["*"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/CreatorCard/index.ts",
+      "exports": ["*"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/Feedback/Spinner/index.ts",
+      "exports": ["*"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/Icon/index.ts",
+      "exports": ["*"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/ShaderHero/index.ts",
+      "exports": ["*"]
+    },
+    {
+      "file": "apps/web/src/lib/components/ui/ShaderHero/webgl-utils.ts",
+      "exports": ["FBO"]
+    },
+    {
+      "file": "packages/cache/src/helpers/invalidate.ts",
+      "exports": ["InvalidationLogger"]
+    },
+    {
+      "file": "packages/security/src/kv-secondary-storage.ts",
+      "exports": ["ObservabilityClient"]
+    },
+    {
+      "file": "packages/worker-utils/src/procedure/binary-upload-procedure.ts",
+      "exports": [
+        "BinaryFileConfig",
+        "ValidatedBinaryFile",
+        "BinaryUploadContext",
+        "BinaryUploadProcedureConfig"
+      ]
+    },
+    {
+      "file": "packages/worker-utils/src/procedure/multipart-procedure.ts",
+      "exports": [
+        "FileFieldConfig",
+        "FileSchema",
+        "ValidatedFile",
+        "InferFiles",
+        "MultipartProcedureContext",
+        "MultipartProcedureConfig"
+      ]
+    }
   ],
   "ignorePatterns": [
     "test-media/**",
@@ -43,8 +180,122 @@
     "**/dist/**",
     "**/build/**",
     "**/.svelte-kit/**",
-    "apps/web/src/paraglide/**"
+    "apps/web/src/paraglide/**",
+    "apps/web/src/lib/styles/tokens/breakpoints.css"
   ],
+  "usedClassMembers": [
+    "alarm",
+    "clearMessages",
+    "createCreatorTemplate",
+    "createGlobalTemplate",
+    "createMultipartUpload",
+    "createOrgTemplate",
+    "delete",
+    "deleteCreatorTemplate",
+    "deleteGlobalTemplate",
+    "deleteIntroVideo",
+    "deleteOrgTemplate",
+    "fetch",
+    "followOrganization",
+    "formatPurchasesForClient",
+    "free",
+    "generateSignedUploadUrl",
+    "generateSignedUrl",
+    "get",
+    "getBytesWebP",
+    "getExpectedOutputKeys",
+    "getFollowerCount",
+    "getIntroVideoStatus",
+    "getMessages",
+    "getProfile",
+    "getPublicStats",
+    "getTemplateById",
+    "getTranscodingStatus",
+    "getUserOrganizations",
+    "get_height",
+    "get_width",
+    "handleAccountDeauthorized",
+    "isFollowing",
+    "isSlugAvailable",
+    "linkIntroVideo",
+    "list",
+    "listCreatorTemplates",
+    "listOrgTemplates",
+    "name",
+    "previewTemplateById",
+    "putJson",
+    "recoverStuckTranscoding",
+    "resize",
+    "resolvePendingPayouts",
+    "resumeMultipartUpload",
+    "retryTranscoding",
+    "setCache",
+    "setCachePurge",
+    "syncAccountStatus",
+    "unfollowOrganization",
+    "updateCreatorTemplate",
+    "updateGlobalTemplate",
+    "updateOrgTemplate",
+    "upgradeToCreator",
+    "upload"
+  ],
+  "usedClassMembers": [
+    "alarm",
+    "clearMessages",
+    "createCreatorTemplate",
+    "createGlobalTemplate",
+    "createMultipartUpload",
+    "createOrgTemplate",
+    "delete",
+    "deleteCreatorTemplate",
+    "deleteGlobalTemplate",
+    "deleteIntroVideo",
+    "deleteOrgTemplate",
+    "fetch",
+    "followOrganization",
+    "formatPurchasesForClient",
+    "free",
+    "generateSignedUploadUrl",
+    "generateSignedUrl",
+    "get",
+    "getBytesWebP",
+    "getExpectedOutputKeys",
+    "getFollowerCount",
+    "getIntroVideoStatus",
+    "getMessages",
+    "getProfile",
+    "getPublicStats",
+    "getTemplateById",
+    "getTranscodingStatus",
+    "getUserOrganizations",
+    "get_height",
+    "get_width",
+    "handleAccountDeauthorized",
+    "isFollowing",
+    "isSlugAvailable",
+    "linkIntroVideo",
+    "list",
+    "listCreatorTemplates",
+    "listOrgTemplates",
+    "name",
+    "previewTemplateById",
+    "putJson",
+    "recoverStuckTranscoding",
+    "resize",
+    "resolvePendingPayouts",
+    "resumeMultipartUpload",
+    "retryTranscoding",
+    "setCache",
+    "setCachePurge",
+    "syncAccountStatus",
+    "unfollowOrganization",
+    "updateCreatorTemplate",
+    "updateGlobalTemplate",
+    "updateOrgTemplate",
+    "upgradeToCreator",
+    "upload"
+  ],
+  "usedClassMembers": ["recoverStuckTranscoding"],
   "duplicates": {
     "enabled": true,
     "mode": "mild",

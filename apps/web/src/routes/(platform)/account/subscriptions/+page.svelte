@@ -123,7 +123,19 @@
     const churnReason = cancelChurnReason || undefined;
 
     try {
-      await cancelSubscription({ organizationId, reason, churnReason });
+      const result = await cancelSubscription({
+        organizationId,
+        reason,
+        churnReason,
+      });
+      if (!result.success) {
+        if (existing && previousStatus !== undefined) {
+          existing.status = previousStatus;
+          existing.cancelAtPeriodEnd = previousCancelAtPeriodEnd ?? false;
+        }
+        cancelError = result.message || 'Failed to cancel subscription';
+        return;
+      }
       cancelDialogOpen = false;
       cancellingSubscription = null;
       await Promise.all([
@@ -160,7 +172,20 @@
     }
 
     try {
-      await reactivateSubscription({ organizationId: sub.organizationId });
+      const result = await reactivateSubscription({
+        organizationId: sub.organizationId,
+      });
+      if (!result.success) {
+        if (existing && previousStatus !== undefined) {
+          existing.status = previousStatus;
+          existing.cancelAtPeriodEnd = previousCancelAtPeriodEnd ?? false;
+        }
+        reactivateErrors.set(
+          sub.id,
+          result.message || m.subscription_reactivate_error()
+        );
+        return;
+      }
       await Promise.all([
         invalidate('account:subscriptions'),
         invalidateCollection('library'),
@@ -197,7 +222,19 @@
     }
 
     try {
-      await resumeSubscription({ organizationId: sub.organizationId });
+      const result = await resumeSubscription({
+        organizationId: sub.organizationId,
+      });
+      if (!result.success) {
+        if (existing && previousStatus !== undefined) {
+          existing.status = previousStatus;
+        }
+        resumeErrors.set(
+          sub.id,
+          result.message || m.subscription_resume_error()
+        );
+        return;
+      }
       await Promise.all([
         invalidate('account:subscriptions'),
         invalidateCollection('library'),

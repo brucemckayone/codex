@@ -407,7 +407,7 @@
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    .create-btn:hover { transform: translateY(-1px); }
+    .create-btn:hover { transform: translateY(calc(-1 * var(--border-width))); }
   }
 
   @media (--below-sm) {
