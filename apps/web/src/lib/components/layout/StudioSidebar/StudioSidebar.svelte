@@ -676,35 +676,43 @@
     padding: 0 var(--space-2);
   }
 
+  /* DropdownMenuTrigger renders a native <button> with no scoped Svelte
+     styles — only browser UA defaults apply. A class selector (0,1,0)
+     beats UA element rules (0,0,1) and reset.css (0,0,1), so !important
+     was previously defensive but unnecessary here. */
   :global(.studio-rail__user-trigger) {
-    display: flex !important;
-    align-items: center !important;
-    gap: var(--space-3) !important;
-    padding: var(--space-2) !important;
-    width: 100% !important;
-    min-height: var(--space-12) !important;
-    border-radius: var(--radius-md) !important;
-    background: transparent !important;
-    border: none !important;
-    cursor: pointer !important;
-    transition: background-color var(--duration-fast) var(--ease-default) !important;
-    text-align: left !important;
-    color: var(--color-text) !important;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2);
+    width: 100%;
+    min-height: var(--space-12);
+    border-radius: var(--radius-md);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background-color var(--duration-fast) var(--ease-default);
+    text-align: left;
+    color: var(--color-text);
   }
 
   :global(.studio-rail__user-trigger:hover) {
-    background-color: color-mix(in oklch, var(--color-interactive) 12%, transparent) !important;
+    background-color: color-mix(in oklch, var(--color-interactive) 12%, transparent);
   }
 
   :global(.studio-rail__user-trigger:focus-visible) {
-    outline: var(--border-width-thick) solid var(--color-focus) !important;
-    outline-offset: var(--space-0-5) !important;
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
   }
 
   :global(.studio-rail__user-trigger[data-state='open']) {
-    background-color: color-mix(in oklch, var(--color-interactive) 15%, transparent) !important;
+    background-color: color-mix(in oklch, var(--color-interactive) 15%, transparent);
   }
 
+  /* !important: Avatar primitive's .avatar class is Svelte-scoped
+     (.avatar.svelte-HASH = specificity 0,2,0) and sets width/height/
+     flex-shrink. Consumer :global() class is (0,1,0) — primitive wins
+     without !important. See Avatar/Avatar.svelte. */
   :global(.studio-rail__user-avatar) {
     width: var(--space-8) !important;
     height: var(--space-8) !important;
@@ -754,6 +762,10 @@
   }
 
   /* ── User dropdown content ── */
+  /* !important: DropdownMenuContent's .dropdown-content class is
+     Svelte-scoped (.dropdown-content.svelte-HASH = specificity 0,2,0)
+     and sets min-width and padding. Consumer :global() is (0,1,0) —
+     primitive wins without !important. See DropdownMenuContent.svelte. */
   :global(.studio-rail__user-menu) {
     min-width: 240px !important;
     padding: var(--space-1) !important;
@@ -766,6 +778,9 @@
     padding: var(--space-3);
   }
 
+  /* !important: Avatar primitive's .avatar class is Svelte-scoped
+     (.avatar.svelte-HASH = 0,2,0) and sets width/height/flex-shrink.
+     Consumer :global() is (0,1,0) — primitive wins without !important. */
   :global(.studio-rail__user-menu-avatar) {
     width: var(--space-10) !important;
     height: var(--space-10) !important;
@@ -796,8 +811,16 @@
     text-overflow: ellipsis;
   }
 
+  /* !important: DropdownMenuItem's .dropdown-item class is Svelte-scoped
+     (.dropdown-item.svelte-HASH = 0,2,0) and sets font-size + color.
+     Consumer :global() is (0,1,0) — primitive wins without !important
+     for any property the primitive declares. `gap` is NOT set on the
+     primitive so it does not need !important. The data-highlighted
+     variant has matching specificity (0,2,1) but bundler load-order
+     is fragile — !important keeps consumer rule deterministic.
+     See DropdownMenuItem.svelte. */
   :global(.studio-rail__user-menu-item) {
-    gap: var(--space-2) !important;
+    gap: var(--space-2);
     font-size: var(--text-sm) !important;
   }
 

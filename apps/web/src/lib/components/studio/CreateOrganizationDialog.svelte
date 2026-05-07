@@ -261,17 +261,17 @@
     font-family: inherit;
   }
 
-  .field-input:focus {
+  .field-input:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: -1px;
+    outline-offset: var(--focus-offset-inset);
     border-color: var(--color-border-focus);
   }
 
-  .field-input.input-available:not(:focus) {
+  .field-input.input-available:not(:focus-visible) {
     border-color: var(--color-success-500);
   }
 
-  .field-input.input-taken:not(:focus) {
+  .field-input.input-taken:not(:focus-visible) {
     border-color: var(--color-error-500);
   }
 
@@ -288,9 +288,9 @@
     resize: vertical;
   }
 
-  .field-textarea:focus {
+  .field-textarea:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: -1px;
+    outline-offset: var(--focus-offset-inset);
     border-color: var(--color-border-focus);
   }
 
@@ -321,12 +321,20 @@
     border-radius: var(--radius-full);
     border: var(--border-width-thick) solid var(--color-text-muted);
     border-top-color: transparent;
-    animation: spin 0.6s linear infinite;
+    animation: spin var(--duration-slower) linear infinite;
   }
 
   @keyframes spin {
     to {
       transform: rotate(360deg);
+    }
+  }
+
+  /* Infinite spin bypasses the global token-level duration collapse —
+     neutralise here for vestibular safety (ref 03 §9 Skeleton Contract). */
+  @media (prefers-reduced-motion: reduce) {
+    .status-dot {
+      animation: none;
     }
   }
 

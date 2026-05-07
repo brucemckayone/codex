@@ -309,8 +309,8 @@
   .filter-segment {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
-    padding: 2px;
+    gap: var(--space-0-5);
+    padding: var(--space-0-5);
     border-radius: var(--radius-full, 9999px);
     border: var(--border-width) var(--border-style) var(--color-border);
     background: color-mix(in srgb, var(--color-surface-secondary) 60%, var(--color-surface));
@@ -412,7 +412,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 2px;
+    padding: var(--space-0-5);
     border: none;
     background: none;
     color: var(--color-text-muted);
@@ -428,7 +428,7 @@
 
   .search-clear:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 1px;
+    outline-offset: var(--focus-offset);
   }
 
   /* ── Actions ────────────────────────────────────────────── */
@@ -468,7 +468,7 @@
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    .upload-btn:hover { transform: translateY(-1px); }
+    .upload-btn:hover { transform: translateY(calc(-1 * var(--border-width))); }
   }
 
   @media (--below-sm) {

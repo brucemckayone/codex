@@ -4,7 +4,7 @@
  * Reusable helpers for setting up test contexts with database and service instances.
  * Eliminates boilerplate beforeAll/afterAll lifecycle code across test files.
  *
- * These helpers work seamlessly with neon-testing for ephemeral database isolation.
+ * These helpers pair with workflow-level Neon branch isolation (CI domain branches).
  *
  * @example
  * ```typescript

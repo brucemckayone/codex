@@ -117,8 +117,22 @@ interface UserLibraryItem {
     organizationId: string | null;
     organizationSlug: string | null;
   };
-  /** How the user has access: 'purchased', 'membership', or 'subscription' */
-  accessType: 'purchased' | 'membership' | 'subscription';
+  /**
+   * How the user has access:
+   * - `'purchased'`     — completed (or pending-webhook) purchase row exists
+   * - `'membership'`    — user holds an org management role (owner/admin/creator)
+   * - `'subscription'`  — active subscription gates `subscribers`/tier-paid content
+   * - `'free'`          — `accessType='free'` content the user has *engaged with*
+   *                       (a `videoPlayback` row exists)
+   * - `'followers'`     — `accessType='followers'` content the user can access
+   *                       (follower row OR active subscription) AND has engaged with
+   */
+  accessType:
+    | 'purchased'
+    | 'membership'
+    | 'subscription'
+    | 'free'
+    | 'followers';
   purchase: {
     purchasedAt: string;
     priceCents: number;
@@ -1229,6 +1243,10 @@ export class ContentAccessService extends BaseService {
       ORGANIZATION_ROLES.CREATOR,
     ];
 
+    // Skip the membership lookup when the caller filters to a bucket that
+    // doesn't need it. The membership arm needs it; engaged-free and
+    // engaged-followers also reference `managementOrgIds` for cross-arm
+    // exclusion, so they must NOT skip.
     const activeMemberships =
       input.accessType === 'purchased' || input.accessType === 'subscription'
         ? []
@@ -1247,8 +1265,15 @@ export class ContentAccessService extends BaseService {
     const managementOrgIds = activeMemberships.map((m) => m.organizationId);
 
     // ── Step 1b: Resolve active subscriptions with tier info ─────────
+    // Skip when filtering to a bucket that doesn't need subscription tier
+    // info. The engaged-followers arm uses an `EXISTS subscription` predicate
+    // inline (cheaper than reading + serialising tier rows here), so it can
+    // skip too. Engaged-free also doesn't reference subscriptions.
     const activeSubscriptions =
-      input.accessType === 'purchased' || input.accessType === 'membership'
+      input.accessType === 'purchased' ||
+      input.accessType === 'membership' ||
+      input.accessType === 'free' ||
+      input.accessType === 'followers'
         ? []
         : await this.db.query.subscriptions.findMany({
             where: and(
@@ -1334,7 +1359,9 @@ export class ContentAccessService extends BaseService {
     const queryPurchased = async () => {
       if (
         input.accessType === 'membership' ||
-        input.accessType === 'subscription'
+        input.accessType === 'subscription' ||
+        input.accessType === 'free' ||
+        input.accessType === 'followers'
       ) {
         return { items: [] as UserLibraryItem[], count: 0 };
       }
@@ -1444,6 +1471,8 @@ export class ContentAccessService extends BaseService {
       if (
         input.accessType === 'purchased' ||
         input.accessType === 'subscription' ||
+        input.accessType === 'free' ||
+        input.accessType === 'followers' ||
         managementOrgIds.length === 0
       ) {
         return { items: [] as UserLibraryItem[], count: 0 };
@@ -1553,6 +1582,8 @@ export class ContentAccessService extends BaseService {
       if (
         input.accessType === 'purchased' ||
         input.accessType === 'membership' ||
+        input.accessType === 'free' ||
+        input.accessType === 'followers' ||
         activeSubscriptions.length === 0
       ) {
         return { items: [] as UserLibraryItem[], count: 0 };
@@ -1709,17 +1740,189 @@ export class ContentAccessService extends BaseService {
       return { items, count: countResult[0]?.count ?? 0 };
     };
 
+    // ── Step 4c/4d: Relationship-based free + followers buckets ─────
+    // Free and followers buckets are both gated by *relationship*, not
+    // engagement. The relationship is "user has a follower row OR an active
+    // in-period subscription to the org" — i.e. the user has explicitly opted
+    // in to seeing this org's content. Differences between the two buckets:
+    //
+    //   - free arm:        content.accessType = 'free'
+    //   - followers arm:   content.accessType = 'followers'
+    //
+    // Same relationship predicate, same JOIN shape, same cross-arm exclusions.
+    // The shared builder below avoids 200 lines of near-duplicate SQL plumbing.
+    //
+    // Why dropping the engagement gate matters: the user already opted in by
+    // following or subscribing. Requiring them to additionally press play
+    // before content shows up in their library makes follow/subscribe feel
+    // empty until they navigate elsewhere first. Aligns with user expectation
+    // that "I follow this org → its content shows in my library."
+    //
+    // Volume guard: relationship-bound — if you don't follow / subscribe to
+    // any org, both buckets are empty for non-management orgs.
+    const relationshipPredicate = or(
+      sql`EXISTS (SELECT 1 FROM ${organizationFollowers}
+                  WHERE ${organizationFollowers.organizationId} = ${content.organizationId}
+                    AND ${organizationFollowers.userId} = ${userId})`,
+      sql`EXISTS (SELECT 1 FROM ${subscriptions}
+                  WHERE ${subscriptions.userId} = ${userId}
+                    AND ${subscriptions.organizationId} = ${content.organizationId}
+                    AND ${subscriptions.status} IN (${SUBSCRIPTION_STATUS.ACTIVE}, ${SUBSCRIPTION_STATUS.CANCELLING})
+                    AND ${subscriptions.currentPeriodEnd} > NOW())`
+    );
+
+    const buildRelationshipQuery = async (
+      bucketAccessType:
+        | typeof CONTENT_ACCESS_TYPE.FREE
+        | typeof CONTENT_ACCESS_TYPE.FOLLOWERS,
+      tag: 'free' | 'followers'
+    ) => {
+      const conditions = [
+        eq(content.accessType, bucketAccessType),
+        eq(content.status, CONTENT_STATUS.PUBLISHED),
+        isNull(content.deletedAt),
+        sql`${content.organizationId} IS NOT NULL`,
+        relationshipPredicate!,
+        // Cross-arm exclusion: purchased rows are surfaced by queryPurchased.
+        // Free items shouldn't be purchased, but flag-flips (paid → free)
+        // could create overlap; followers items shouldn't be priced. Both
+        // exclusions are defensive — keeps the priority contract explicit.
+        sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING}))`,
+        // Cross-arm exclusion: management orgs are surfaced by queryMembership
+        // which returns ALL of an org's content for owners/admins/creators.
+        ...(managementOrgIds.length > 0
+          ? [
+              sql`${content.organizationId} NOT IN (${sql.join(
+                managementOrgIds.map((id) => sql`${id}`),
+                sql`, `
+              )})`,
+            ]
+          : []),
+        ...(input.organizationId
+          ? [eq(content.organizationId, input.organizationId)]
+          : []),
+        ...contentFilters,
+        ...progressFilters,
+      ];
+
+      const sortClause =
+        input.sortBy === 'title'
+          ? content.title
+          : input.sortBy === 'duration'
+            ? sql`COALESCE(${mediaItems.durationSeconds}, 0)`
+            : content.createdAt;
+
+      const baseFrom = this.db
+        .select({
+          contentId: content.id,
+          contentSlug: content.slug,
+          contentTitle: content.title,
+          contentDescription: content.description,
+          contentThumbnailUrl: content.thumbnailUrl,
+          contentType: content.contentType,
+          mediaThumbnailKey: mediaItems.thumbnailKey,
+          mediaDurationSeconds: mediaItems.durationSeconds,
+          orgId: content.organizationId,
+          orgSlug: organizations.slug,
+          progressPositionSeconds: videoPlayback.positionSeconds,
+          progressDurationSeconds: videoPlayback.durationSeconds,
+          progressCompleted: videoPlayback.completed,
+          progressUpdatedAt: videoPlayback.updatedAt,
+        })
+        .from(content)
+        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+        .leftJoin(organizations, eq(organizations.id, content.organizationId))
+        .leftJoin(
+          videoPlayback,
+          and(
+            eq(videoPlayback.contentId, content.id),
+            eq(videoPlayback.userId, userId)
+          )
+        );
+
+      const countQuery = this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(content)
+        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+        .leftJoin(
+          videoPlayback,
+          and(
+            eq(videoPlayback.contentId, content.id),
+            eq(videoPlayback.userId, userId)
+          )
+        )
+        .where(and(...conditions));
+
+      const dataQuery = baseFrom
+        .where(and(...conditions))
+        .orderBy(input.sortBy === 'title' ? sortClause : desc(sortClause))
+        .limit(input.limit)
+        .offset(offset);
+
+      const [countResult, rows] = await Promise.all([countQuery, dataQuery]);
+
+      const items: UserLibraryItem[] = rows.map((row) => ({
+        content: {
+          id: row.contentId,
+          slug: row.contentSlug,
+          title: row.contentTitle,
+          description: row.contentDescription || '',
+          thumbnailUrl:
+            row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
+          contentType: row.contentType ?? 'video',
+          durationSeconds: row.mediaDurationSeconds ?? 0,
+          organizationId: row.orgId,
+          organizationSlug: row.orgSlug ?? null,
+        },
+        accessType: tag,
+        purchase: null,
+        progress: mapProgress(row),
+      }));
+
+      return { items, count: countResult[0]?.count ?? 0 };
+    };
+
+    const queryFreeRelationship = async () => {
+      if (input.accessType !== 'all' && input.accessType !== 'free') {
+        return { items: [] as UserLibraryItem[], count: 0 };
+      }
+      return buildRelationshipQuery(CONTENT_ACCESS_TYPE.FREE, 'free');
+    };
+
+    const queryFollowersRelationship = async () => {
+      if (input.accessType !== 'all' && input.accessType !== 'followers') {
+        return { items: [] as UserLibraryItem[], count: 0 };
+      }
+      return buildRelationshipQuery(CONTENT_ACCESS_TYPE.FOLLOWERS, 'followers');
+    };
+
     // ── Step 5: Execute all queries in parallel ──────────────────────
-    const [purchaseResult, membershipResult, subscriptionResult] =
-      await Promise.all([
-        queryPurchased(),
-        queryMembership(),
-        querySubscription(),
-      ]);
+    const [
+      purchaseResult,
+      membershipResult,
+      subscriptionResult,
+      freeResult,
+      followersResult,
+    ] = await Promise.all([
+      queryPurchased(),
+      queryMembership(),
+      querySubscription(),
+      queryFreeRelationship(),
+      queryFollowersRelationship(),
+    ]);
 
     // ── Step 6: Merge, sort, and paginate ─────────────────────────────
-    // Collect all sources that contributed items.
-    const sources = [purchaseResult, membershipResult, subscriptionResult];
+    // Source priority (first-match-wins on overlap):
+    //   purchased > membership > subscription > free > followers
+    // Cross-arm exclusion clauses already minimise overlap; the explicit
+    // dedup-by-contentId step below hardens this contract for future arms.
+    const sources = [
+      purchaseResult,
+      membershipResult,
+      subscriptionResult,
+      freeResult,
+      followersResult,
+    ];
     const activeSources = sources.filter((s) => s.count > 0);
 
     // When a specific accessType filter is applied or only one source has
@@ -1727,7 +1930,9 @@ export class ContentAccessService extends BaseService {
     const filteredAccessType =
       input.accessType === 'purchased' ||
       input.accessType === 'membership' ||
-      input.accessType === 'subscription';
+      input.accessType === 'subscription' ||
+      input.accessType === 'free' ||
+      input.accessType === 'followers';
 
     if (filteredAccessType || activeSources.length <= 1) {
       const result = filteredAccessType
@@ -1735,7 +1940,11 @@ export class ContentAccessService extends BaseService {
           ? purchaseResult
           : input.accessType === 'membership'
             ? membershipResult
-            : subscriptionResult
+            : input.accessType === 'subscription'
+              ? subscriptionResult
+              : input.accessType === 'free'
+                ? freeResult
+                : followersResult
         : (activeSources[0] ?? purchaseResult);
       return {
         items: result.items,
@@ -1749,19 +1958,33 @@ export class ContentAccessService extends BaseService {
     }
 
     // Multiple sources have items — merge sort (each fetched with LIMIT/OFFSET
-    // from their own source, so we merge and trim to page size)
+    // from their own source, so we merge and trim to page size). Cross-arm
+    // exclusion clauses (`NOT IN purchases`, `NOT IN management orgs`, etc.)
+    // already make arms disjoint at the DB layer, so summed counts are honest.
+    // The dedup pass below preserves the priority contract defensively for
+    // any future arm that forgets an exclusion clause.
     const totalCount = sources.reduce((sum, s) => sum + s.count, 0);
-    const allItems = sources.flatMap((s) => s.items);
+    const seen = new Set<string>();
+    const dedupedItems: UserLibraryItem[] = [];
+    for (const source of sources) {
+      for (const item of source.items) {
+        if (seen.has(item.content.id)) continue;
+        seen.add(item.content.id);
+        dedupedItems.push(item);
+      }
+    }
 
     if (input.sortBy === 'title') {
-      allItems.sort((a, b) => a.content.title.localeCompare(b.content.title));
+      dedupedItems.sort((a, b) =>
+        a.content.title.localeCompare(b.content.title)
+      );
     } else if (input.sortBy === 'duration') {
-      allItems.sort(
+      dedupedItems.sort(
         (a, b) =>
           (b.content.durationSeconds ?? 0) - (a.content.durationSeconds ?? 0)
       );
     } else {
-      allItems.sort((a, b) => {
+      dedupedItems.sort((a, b) => {
         const dateA = a.purchase?.purchasedAt ?? '';
         const dateB = b.purchase?.purchasedAt ?? '';
         return dateB.localeCompare(dateA);
@@ -1769,7 +1992,7 @@ export class ContentAccessService extends BaseService {
     }
 
     // Trim to page size (each source may have returned up to limit items)
-    const items = allItems.slice(0, input.limit);
+    const items = dedupedItems.slice(0, input.limit);
 
     return {
       items,

@@ -67,25 +67,4 @@ export class MailHogHttpProvider implements EmailProvider {
       };
     }
   }
-
-  /**
-   * Helper to fetch messages from MailHog for test assertions
-   */
-  async getMessages(): Promise<unknown[]> {
-    const response = await fetch(`${this.baseUrl}/api/v2/messages`);
-    if (!response.ok) {
-      throw new Error(`MailHog API error: ${response.status}`);
-    }
-    const data = await response.json();
-    return (data as { items: unknown[] }).items || [];
-  }
-
-  /**
-   * Clear all messages (useful before tests)
-   */
-  async clearMessages(): Promise<void> {
-    await fetch(`${this.baseUrl}/api/v1/messages`, {
-      method: 'DELETE',
-    });
-  }
 }

@@ -14,7 +14,13 @@
     const input = e.target as HTMLInputElement;
     if (!input.files?.length) return;
     // Programmatically submit the hidden form
-    input.form?.requestSubmit();
+    if (input.form) {
+      input.form.requestSubmit();
+    } else {
+      console.warn(
+        '[BrandEditorLogo] handleFileSelect: file input has no associated form; upload not triggered.'
+      );
+    }
   }
 
   async function handleRemove() {
@@ -48,7 +54,7 @@
 <div class="logo-level">
   <div
     class="logo-level__preview"
-    style:background-color={brandEditor.pending?.backgroundColor || 'var(--color-surface)'}
+    style:background-color={brandEditor.pending?.backgroundColor ?? null}
   >
     {#if logoUrl}
       <img src={logoUrl} alt="Organization logo" class="logo-level__image" />
@@ -121,6 +127,7 @@
     border-radius: var(--radius-lg);
     border: var(--border-width) var(--border-style) var(--color-border-subtle);
     padding: var(--space-6);
+    background-color: var(--color-surface);
   }
 
   .logo-level__image {

@@ -14,7 +14,11 @@ type SubscriptionStatus =
   (typeof SUBSCRIPTION_STATUS)[keyof typeof SUBSCRIPTION_STATUS];
 type BillingInterval = 'month' | 'year';
 
-export interface MappedStripeSubscription {
+// Internal shape — `mapStripeSubscriptionStatus` returns this and the only
+// caller (subscription-service.ts) destructures by property name, so the
+// type does not need to be exported. If a future consumer needs to reference
+// the shape, promote back to `export interface` and add to the package barrel.
+interface MappedStripeSubscription {
   status: SubscriptionStatus;
   cancelAtPeriodEnd: boolean;
   billingInterval: BillingInterval | null;

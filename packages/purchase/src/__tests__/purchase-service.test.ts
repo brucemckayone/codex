@@ -8,9 +8,8 @@
  * - Purchase history queries
  *
  * Database Isolation:
- * - Uses neon-testing for ephemeral branch per test file
+ * - Workflow-level Neon branching provides test domain isolation in CI
  * - Each test creates its own data (idempotent tests)
- * - No cleanup needed - fresh database for this file
  *
  * Stripe Integration:
  * - Mocks Stripe client to avoid real API calls
@@ -26,7 +25,6 @@ import {
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
-  withNeonTestBranch,
 } from '@codex/test-utils';
 import { eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
@@ -47,9 +45,6 @@ import {
   PurchaseNotFoundError,
 } from '../errors';
 import { PurchaseService } from '../services/purchase-service';
-
-// Enable ephemeral Neon branch for this test file
-withNeonTestBranch();
 
 describe('PurchaseService Integration', () => {
   let db: Database;

@@ -367,7 +367,7 @@
 
   .search-clear:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 1px;
+    outline-offset: var(--focus-offset);
   }
 
   /* ── Actions ────────────────────────────────────────────── */
@@ -407,7 +407,7 @@
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    .create-btn:hover { transform: translateY(-1px); }
+    .create-btn:hover { transform: translateY(calc(-1 * var(--border-width))); }
   }
 
   @media (--below-sm) {
