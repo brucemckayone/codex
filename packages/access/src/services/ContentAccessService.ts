@@ -1075,17 +1075,12 @@ export class ContentAccessService extends BaseService {
    *
    * @param userId - Authenticated user ID
    * @param input - Content ID, position, duration, completed flag
-   * @returns `{ firstEngagement: true }` when this save inserted the first
-   *   `videoPlayback` row for `(userId, contentId)` — the route handler uses
-   *   this to bump the user's library cache version (because the engaged-free
-   *   and engaged-followers arms now treat first engagement as a library
-   *   membership event). Subsequent heartbeats return `firstEngagement: false`.
    * @throws {ForbiddenError} Access revoked, or user lacks access to content
    */
   async savePlaybackProgress(
     userId: string,
     input: SavePlaybackProgressInput
-  ): Promise<{ firstEngagement: boolean }> {
+  ): Promise<void> {
     // ── Access gate ────────────────────────────────────────────────────
     // (1) KV revocation check — if revocation helper is wired, fetch the
     // content's orgId and check the block list before doing any DB writes.
@@ -1145,19 +1140,6 @@ export class ContentAccessService extends BaseService {
       completed: isCompleted,
     });
 
-    // Detect first engagement BEFORE the upsert so we can signal back to the
-    // route handler whether to bump the library cache version. Read uses the
-    // composite-unique `(user_id, content_id)` index — single-row indexed
-    // lookup, same round-trip cost as the existing access checks above.
-    const existing = await this.db.query.videoPlayback.findFirst({
-      where: and(
-        eq(videoPlayback.userId, userId),
-        eq(videoPlayback.contentId, input.contentId)
-      ),
-      columns: { id: true },
-    });
-    const firstEngagement = !existing;
-
     // Upsert using unique constraint with optimistic concurrency control
     // Only update if new position is greater (prevents backwards seeking overwrites)
     await this.db
@@ -1183,10 +1165,7 @@ export class ContentAccessService extends BaseService {
       userId,
       contentId: input.contentId,
       completed: isCompleted,
-      firstEngagement,
     });
-
-    return { firstEngagement };
   }
 
   /**
@@ -1761,31 +1740,56 @@ export class ContentAccessService extends BaseService {
       return { items, count: countResult[0]?.count ?? 0 };
     };
 
-    // ── Step 4c: Query engaged-free items ───────────────────────────
-    // Surfaces `accessType='free'` content from any org the user has actually
-    // touched (a `videoPlayback` row exists for the content). The INNER JOIN
-    // makes engagement the membership criterion — without it, every published
-    // free item from every org would dump into every user's library.
+    // ── Step 4c/4d: Relationship-based free + followers buckets ─────
+    // Free and followers buckets are both gated by *relationship*, not
+    // engagement. The relationship is "user has a follower row OR an active
+    // in-period subscription to the org" — i.e. the user has explicitly opted
+    // in to seeing this org's content. Differences between the two buckets:
     //
-    // Engagement signal is `videoPlayback`. Written ('article') content has
-    // no equivalent progress table yet, so free articles do not surface here
-    // until article-read tracking lands. Documented limitation; not a bug.
-    const queryEngagedFree = async () => {
-      if (input.accessType !== 'all' && input.accessType !== 'free') {
-        return { items: [] as UserLibraryItem[], count: 0 };
-      }
+    //   - free arm:        content.accessType = 'free'
+    //   - followers arm:   content.accessType = 'followers'
+    //
+    // Same relationship predicate, same JOIN shape, same cross-arm exclusions.
+    // The shared builder below avoids 200 lines of near-duplicate SQL plumbing.
+    //
+    // Why dropping the engagement gate matters: the user already opted in by
+    // following or subscribing. Requiring them to additionally press play
+    // before content shows up in their library makes follow/subscribe feel
+    // empty until they navigate elsewhere first. Aligns with user expectation
+    // that "I follow this org → its content shows in my library."
+    //
+    // Volume guard: relationship-bound — if you don't follow / subscribe to
+    // any org, both buckets are empty for non-management orgs.
+    const relationshipPredicate = or(
+      sql`EXISTS (SELECT 1 FROM ${organizationFollowers}
+                  WHERE ${organizationFollowers.organizationId} = ${content.organizationId}
+                    AND ${organizationFollowers.userId} = ${userId})`,
+      sql`EXISTS (SELECT 1 FROM ${subscriptions}
+                  WHERE ${subscriptions.userId} = ${userId}
+                    AND ${subscriptions.organizationId} = ${content.organizationId}
+                    AND ${subscriptions.status} IN (${SUBSCRIPTION_STATUS.ACTIVE}, ${SUBSCRIPTION_STATUS.CANCELLING})
+                    AND ${subscriptions.currentPeriodEnd} > NOW())`
+    );
 
+    const buildRelationshipQuery = async (
+      bucketAccessType:
+        | typeof CONTENT_ACCESS_TYPE.FREE
+        | typeof CONTENT_ACCESS_TYPE.FOLLOWERS,
+      tag: 'free' | 'followers'
+    ) => {
       const conditions = [
-        eq(content.accessType, CONTENT_ACCESS_TYPE.FREE),
+        eq(content.accessType, bucketAccessType),
         eq(content.status, CONTENT_STATUS.PUBLISHED),
         isNull(content.deletedAt),
         sql`${content.organizationId} IS NOT NULL`,
-        // Exclude content already covered by the purchased arm. Free content
-        // shouldn't have purchases, but a content row whose accessType was
-        // changed from paid → free after a sale could overlap; keep the
-        // priority contract explicit.
+        relationshipPredicate!,
+        // Cross-arm exclusion: purchased rows are surfaced by queryPurchased.
+        // Free items shouldn't be purchased, but flag-flips (paid → free)
+        // could create overlap; followers items shouldn't be priced. Both
+        // exclusions are defensive — keeps the priority contract explicit.
         sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING}))`,
-        // Exclude orgs the user manages — membership arm covers those.
+        // Cross-arm exclusion: management orgs are surfaced by queryMembership
+        // which returns ALL of an org's content for owners/admins/creators.
         ...(managementOrgIds.length > 0
           ? [
               sql`${content.organizationId} NOT IN (${sql.join(
@@ -1806,7 +1810,7 @@ export class ContentAccessService extends BaseService {
           ? content.title
           : input.sortBy === 'duration'
             ? sql`COALESCE(${mediaItems.durationSeconds}, 0)`
-            : videoPlayback.updatedAt;
+            : content.createdAt;
 
       const baseFrom = this.db
         .select({
@@ -1826,27 +1830,27 @@ export class ContentAccessService extends BaseService {
           progressUpdatedAt: videoPlayback.updatedAt,
         })
         .from(content)
-        .innerJoin(
+        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+        .leftJoin(organizations, eq(organizations.id, content.organizationId))
+        .leftJoin(
           videoPlayback,
           and(
             eq(videoPlayback.contentId, content.id),
             eq(videoPlayback.userId, userId)
           )
-        )
-        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
-        .leftJoin(organizations, eq(organizations.id, content.organizationId));
+        );
 
       const countQuery = this.db
         .select({ count: sql<number>`count(*)::int` })
         .from(content)
-        .innerJoin(
+        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+        .leftJoin(
           videoPlayback,
           and(
             eq(videoPlayback.contentId, content.id),
             eq(videoPlayback.userId, userId)
           )
         )
-        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
         .where(and(...conditions));
 
       const dataQuery = baseFrom
@@ -1870,7 +1874,7 @@ export class ContentAccessService extends BaseService {
           organizationId: row.orgId,
           organizationSlug: row.orgSlug ?? null,
         },
-        accessType: 'free' as const,
+        accessType: tag,
         purchase: null,
         progress: mapProgress(row),
       }));
@@ -1878,130 +1882,18 @@ export class ContentAccessService extends BaseService {
       return { items, count: countResult[0]?.count ?? 0 };
     };
 
-    // ── Step 4d: Query engaged-followers items ──────────────────────
-    // Surfaces `accessType='followers'` content from orgs where the user has
-    // either an `organizationFollowers` row OR an active subscription. Mirrors
-    // the access-decision contract in `getStreamingUrl` (subscribers ⊇ followers).
-    //
-    // Engagement is required (INNER JOIN videoPlayback) for the same reason as
-    // queryEngagedFree — without it, every followers-only item across every
-    // followed org would dump into the library.
-    const queryEngagedFollowers = async () => {
+    const queryFreeRelationship = async () => {
+      if (input.accessType !== 'all' && input.accessType !== 'free') {
+        return { items: [] as UserLibraryItem[], count: 0 };
+      }
+      return buildRelationshipQuery(CONTENT_ACCESS_TYPE.FREE, 'free');
+    };
+
+    const queryFollowersRelationship = async () => {
       if (input.accessType !== 'all' && input.accessType !== 'followers') {
         return { items: [] as UserLibraryItem[], count: 0 };
       }
-
-      const followerOrSubscriberPredicate = or(
-        sql`EXISTS (SELECT 1 FROM ${organizationFollowers}
-                    WHERE ${organizationFollowers.organizationId} = ${content.organizationId}
-                      AND ${organizationFollowers.userId} = ${userId})`,
-        sql`EXISTS (SELECT 1 FROM ${subscriptions}
-                    WHERE ${subscriptions.userId} = ${userId}
-                      AND ${subscriptions.organizationId} = ${content.organizationId}
-                      AND ${subscriptions.status} IN (${SUBSCRIPTION_STATUS.ACTIVE}, ${SUBSCRIPTION_STATUS.CANCELLING})
-                      AND ${subscriptions.currentPeriodEnd} > NOW())`
-      );
-
-      const conditions = [
-        eq(content.accessType, CONTENT_ACCESS_TYPE.FOLLOWERS),
-        eq(content.status, CONTENT_STATUS.PUBLISHED),
-        isNull(content.deletedAt),
-        sql`${content.organizationId} IS NOT NULL`,
-        followerOrSubscriberPredicate!,
-        // Defensive purchase exclusion (followers content shouldn't be priced;
-        // mirror the rule used by other arms so priority stays predictable).
-        sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING}))`,
-        // Exclude orgs the user manages — membership arm covers those.
-        ...(managementOrgIds.length > 0
-          ? [
-              sql`${content.organizationId} NOT IN (${sql.join(
-                managementOrgIds.map((id) => sql`${id}`),
-                sql`, `
-              )})`,
-            ]
-          : []),
-        ...(input.organizationId
-          ? [eq(content.organizationId, input.organizationId)]
-          : []),
-        ...contentFilters,
-        ...progressFilters,
-      ];
-
-      const sortClause =
-        input.sortBy === 'title'
-          ? content.title
-          : input.sortBy === 'duration'
-            ? sql`COALESCE(${mediaItems.durationSeconds}, 0)`
-            : videoPlayback.updatedAt;
-
-      const baseFrom = this.db
-        .select({
-          contentId: content.id,
-          contentSlug: content.slug,
-          contentTitle: content.title,
-          contentDescription: content.description,
-          contentThumbnailUrl: content.thumbnailUrl,
-          contentType: content.contentType,
-          mediaThumbnailKey: mediaItems.thumbnailKey,
-          mediaDurationSeconds: mediaItems.durationSeconds,
-          orgId: content.organizationId,
-          orgSlug: organizations.slug,
-          progressPositionSeconds: videoPlayback.positionSeconds,
-          progressDurationSeconds: videoPlayback.durationSeconds,
-          progressCompleted: videoPlayback.completed,
-          progressUpdatedAt: videoPlayback.updatedAt,
-        })
-        .from(content)
-        .innerJoin(
-          videoPlayback,
-          and(
-            eq(videoPlayback.contentId, content.id),
-            eq(videoPlayback.userId, userId)
-          )
-        )
-        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
-        .leftJoin(organizations, eq(organizations.id, content.organizationId));
-
-      const countQuery = this.db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(content)
-        .innerJoin(
-          videoPlayback,
-          and(
-            eq(videoPlayback.contentId, content.id),
-            eq(videoPlayback.userId, userId)
-          )
-        )
-        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
-        .where(and(...conditions));
-
-      const dataQuery = baseFrom
-        .where(and(...conditions))
-        .orderBy(input.sortBy === 'title' ? sortClause : desc(sortClause))
-        .limit(input.limit)
-        .offset(offset);
-
-      const [countResult, rows] = await Promise.all([countQuery, dataQuery]);
-
-      const items: UserLibraryItem[] = rows.map((row) => ({
-        content: {
-          id: row.contentId,
-          slug: row.contentSlug,
-          title: row.contentTitle,
-          description: row.contentDescription || '',
-          thumbnailUrl:
-            row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
-          contentType: row.contentType ?? 'video',
-          durationSeconds: row.mediaDurationSeconds ?? 0,
-          organizationId: row.orgId,
-          organizationSlug: row.orgSlug ?? null,
-        },
-        accessType: 'followers' as const,
-        purchase: null,
-        progress: mapProgress(row),
-      }));
-
-      return { items, count: countResult[0]?.count ?? 0 };
+      return buildRelationshipQuery(CONTENT_ACCESS_TYPE.FOLLOWERS, 'followers');
     };
 
     // ── Step 5: Execute all queries in parallel ──────────────────────
@@ -2009,14 +1901,14 @@ export class ContentAccessService extends BaseService {
       purchaseResult,
       membershipResult,
       subscriptionResult,
-      engagedFreeResult,
-      engagedFollowersResult,
+      freeResult,
+      followersResult,
     ] = await Promise.all([
       queryPurchased(),
       queryMembership(),
       querySubscription(),
-      queryEngagedFree(),
-      queryEngagedFollowers(),
+      queryFreeRelationship(),
+      queryFollowersRelationship(),
     ]);
 
     // ── Step 6: Merge, sort, and paginate ─────────────────────────────
@@ -2028,8 +1920,8 @@ export class ContentAccessService extends BaseService {
       purchaseResult,
       membershipResult,
       subscriptionResult,
-      engagedFreeResult,
-      engagedFollowersResult,
+      freeResult,
+      followersResult,
     ];
     const activeSources = sources.filter((s) => s.count > 0);
 
@@ -2051,8 +1943,8 @@ export class ContentAccessService extends BaseService {
             : input.accessType === 'subscription'
               ? subscriptionResult
               : input.accessType === 'free'
-                ? engagedFreeResult
-                : engagedFollowersResult
+                ? freeResult
+                : followersResult
         : (activeSources[0] ?? purchaseResult);
       return {
         items: result.items,
