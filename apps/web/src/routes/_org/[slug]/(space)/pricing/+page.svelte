@@ -17,6 +17,7 @@
   import * as Accordion from '$lib/components/ui/Accordion';
   import { invalidate } from '$app/navigation';
   import {
+    changeSubscriptionTier,
     createSubscriptionCheckoutSession,
     reactivateSubscription,
     resumeSubscription,
@@ -62,6 +63,7 @@
   let currentStatus = $state<SubscriptionStatus | null>(null);
   let currentCancelAtPeriodEnd = $state(false);
   let currentPeriodEnd = $state<string | null>(null);
+  let currentBillingInterval = $state<'month' | 'year' | null>(null);
   let pricingLoading = $state(true);
   // True while we don't yet know the user's subscription state because the
   // API errored. Until this resolves false, the CTA is disabled and a retry
@@ -75,6 +77,14 @@
   let paymentPortalLoading = $state(false);
   let resumeLoading = $state(false);
   let resumeError = $state('');
+
+  // Tier-switch flow state. `confirmSwitchTierId` powers the two-step
+  // inline confirmation: first click arms the confirm; second commits.
+  // Avoids a Dialog dependency while still preventing accidental swaps
+  // (which trigger Stripe proration charges).
+  let switchTierLoading = $state<string | null>(null);
+  let switchTierError = $state('');
+  let confirmSwitchTierId = $state<string | null>(null);
 
   let resolvedTiersPromise: Promise<unknown> | null = null;
   $effect(() => {
@@ -107,6 +117,7 @@
               status?: SubscriptionStatus | string;
               cancelAtPeriodEnd?: boolean;
               currentPeriodEnd?: string | Date;
+              billingInterval?: 'month' | 'year' | string;
             } | null;
             loadError: boolean;
           };
@@ -121,6 +132,9 @@
             periodEnd instanceof Date
               ? periodEnd.toISOString()
               : (periodEnd ?? null);
+          const interval = sub?.billingInterval;
+          currentBillingInterval =
+            interval === 'month' || interval === 'year' ? interval : null;
         });
       }
     });
@@ -363,6 +377,69 @@
         err instanceof Error ? err.message : 'Failed to resume subscription';
     } finally {
       resumeLoading = false;
+    }
+  }
+
+  // Tier switch (upgrade/downgrade or interval swap). Two-step:
+  //   1) First click arms confirmation (sets confirmSwitchTierId).
+  //   2) Second click commits — calls changeSubscriptionTier remote which
+  //      hits POST /subscriptions/change-tier on ecom-api. Stripe applies
+  //      `create_prorations` so the user is charged/credited for the
+  //      remaining period. The DB row is updated synchronously by the
+  //      service; a customer.subscription.updated webhook reconciles if
+  //      the DB write fails after Stripe succeeds.
+  // Optimistic flip pattern matches handleReactivate / handleResume.
+  function armSwitchTier(tier: SubscriptionTier) {
+    confirmSwitchTierId = tier.id;
+    switchTierError = '';
+  }
+
+  function cancelSwitchTier() {
+    confirmSwitchTierId = null;
+    switchTierError = '';
+  }
+
+  async function handleSwitchTier(tier: SubscriptionTier) {
+    if (switchTierLoading) return;
+
+    const previousTierId = currentTierId;
+    const previousCancelAtPeriodEnd = currentCancelAtPeriodEnd;
+    const previousBillingInterval = currentBillingInterval;
+    const previousStatus = currentStatus;
+
+    switchTierLoading = tier.id;
+    switchTierError = '';
+
+    // Optimistic flip — both tier and interval may change in a single swap.
+    currentTierId = tier.id;
+    currentBillingInterval = billingInterval;
+    // A swap clears any pending cancellation, mirroring Stripe's behaviour
+    // when subscriptions.update lands on an active subscription.
+    if (currentCancelAtPeriodEnd) currentCancelAtPeriodEnd = false;
+    if (currentStatus === 'cancelling') currentStatus = 'active';
+
+    try {
+      await changeSubscriptionTier({
+        organizationId: data.org.id,
+        newTierId: tier.id,
+        billingInterval,
+      });
+      confirmSwitchTierId = null;
+      await Promise.all([
+        invalidate('account:subscriptions'),
+        invalidateCollection('library'),
+        invalidateCollection('subscription'),
+      ]);
+    } catch (err) {
+      // Rollback all optimistic mutations.
+      currentTierId = previousTierId;
+      currentCancelAtPeriodEnd = previousCancelAtPeriodEnd;
+      currentBillingInterval = previousBillingInterval;
+      currentStatus = previousStatus;
+      switchTierError =
+        err instanceof Error ? err.message : 'Failed to switch plan';
+    } finally {
+      switchTierLoading = null;
     }
   }
 
@@ -798,13 +875,119 @@
                     {m.pricing_manage_plan()}
                   </a>
                 {:else if isCurrentPlan}
+                  {@const intervalMismatch =
+                    currentBillingInterval !== null &&
+                    currentBillingInterval !== billingInterval}
+                  {#if intervalMismatch && confirmSwitchTierId === tier.id}
+                    <Button
+                      variant="primary"
+                      onclick={() => handleSwitchTier(tier)}
+                      loading={switchTierLoading === tier.id}
+                      class="tier-cta"
+                      data-testid="tier-cta-switch-confirm"
+                      aria-label="Confirm switch to {billingInterval === 'year' ? 'annual' : 'monthly'} billing"
+                    >
+                      Confirm switch
+                    </Button>
+                    <button
+                      type="button"
+                      class="tier-secondary"
+                      onclick={cancelSwitchTier}
+                      data-testid="tier-cta-switch-cancel"
+                    >
+                      Cancel
+                    </button>
+                  {:else if intervalMismatch}
+                    <Button
+                      variant="primary"
+                      onclick={() => armSwitchTier(tier)}
+                      class="tier-cta"
+                      data-testid="tier-cta-switch-interval"
+                      aria-label="Switch to {billingInterval === 'year' ? 'annual' : 'monthly'} billing"
+                    >
+                      Switch to {billingInterval === 'year' ? 'annual' : 'monthly'} billing
+                    </Button>
+                    <a
+                      href={manageUrl}
+                      class="tier-secondary"
+                      data-testid="tier-cta-manage"
+                    >
+                      {m.pricing_manage_plan()}
+                    </a>
+                  {:else}
+                    <Button
+                      variant="secondary"
+                      disabled
+                      class="tier-cta"
+                      data-testid="tier-cta-current"
+                    >
+                      {m.pricing_current_plan()}
+                    </Button>
+                    <a
+                      href={manageUrl}
+                      class="tier-secondary"
+                      data-testid="tier-cta-manage"
+                    >
+                      {m.pricing_manage_plan()}
+                    </a>
+                  {/if}
+                {:else if currentTierId && (effectiveStatus === 'active' || effectiveStatus === 'cancelling')}
+                  {@const currentTier = tiers.find((t) => t.id === currentTierId)}
+                  {@const isUpgrade = currentTier
+                    ? tierPrice(tier) > tierPrice(currentTier)
+                    : false}
+                  {@const isDowngrade = currentTier
+                    ? tierPrice(tier) < tierPrice(currentTier)
+                    : false}
+                  {#if confirmSwitchTierId === tier.id}
+                    <Button
+                      variant="primary"
+                      onclick={() => handleSwitchTier(tier)}
+                      loading={switchTierLoading === tier.id}
+                      class="tier-cta"
+                      data-testid="tier-cta-switch-confirm"
+                      aria-label="Confirm switch to {tier.name}"
+                    >
+                      Confirm switch
+                    </Button>
+                    <button
+                      type="button"
+                      class="tier-secondary"
+                      onclick={cancelSwitchTier}
+                      data-testid="tier-cta-switch-cancel"
+                    >
+                      Cancel
+                    </button>
+                  {:else}
+                    <Button
+                      variant={isRecommended ? 'primary' : 'secondary'}
+                      onclick={() => armSwitchTier(tier)}
+                      class="tier-cta"
+                      data-testid="tier-cta-switch"
+                      aria-label="Switch to {tier.name}"
+                    >
+                      {isUpgrade
+                        ? `Upgrade to ${tier.name}`
+                        : isDowngrade
+                          ? `Downgrade to ${tier.name}`
+                          : `Switch to ${tier.name}`}
+                    </Button>
+                  {/if}
+                {:else if currentTierId}
+                  <!--
+                    Cross-tier swap blocked while the current subscription is
+                    paused or past_due — the user must resolve that state on
+                    its own card first. The disabled button surfaces the
+                    state without throwing AlreadySubscribedError.
+                  -->
                   <Button
                     variant="secondary"
                     disabled
                     class="tier-cta"
-                    data-testid="tier-cta-current"
+                    data-testid="tier-cta-blocked"
+                    aria-label="Resolve your current plan first to switch"
                   >
-                    {m.pricing_current_plan()}
+                    Resolve current plan first
                   </Button>
                   <a
                     href={manageUrl}
@@ -841,6 +1024,21 @@
                   data-testid="tier-resume-error"
                 >
                   {resumeError}
+                </p>
+              {/if}
+              {#if confirmSwitchTierId === tier.id && switchTierLoading !== tier.id}
+                <p class="card__switch-note" data-testid="tier-switch-note">
+                  Stripe will charge or credit a prorated amount for the
+                  remaining billing period.
+                </p>
+              {/if}
+              {#if switchTierError && (confirmSwitchTierId === tier.id || switchTierLoading === tier.id)}
+                <p
+                  class="card__status-error"
+                  role="alert"
+                  data-testid="tier-switch-error"
+                >
+                  {switchTierError}
                 </p>
               {/if}
             </div>
@@ -1623,6 +1821,14 @@
     font-size: var(--text-xs);
     color: var(--color-error-700);
     text-align: center;
+  }
+
+  .card__switch-note {
+    margin: var(--space-2) 0 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    text-align: center;
+    line-height: var(--leading-snug);
   }
 
   /* ── CARD CONTENT ──────────────────────────────────────────────── */
