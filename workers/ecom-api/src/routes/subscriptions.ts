@@ -174,6 +174,30 @@ subscriptions.get(
 );
 
 /**
+ * POST /subscriptions/preview-tier-change
+ * Preview the proration that a tier change would produce, without mutating
+ * the subscription. Powers the proration confirmation dialog.
+ *
+ * The returned `prorationDate` MUST be passed back to /change-tier so the
+ * commit-time proration matches the preview to the penny.
+ */
+subscriptions.post(
+  '/preview-tier-change',
+  procedure({
+    policy: { auth: 'required', rateLimit: 'strict' },
+    input: { body: changeTierSchema },
+    handler: async (ctx) => {
+      return await ctx.services.subscription.previewTierChange(
+        ctx.user.id,
+        ctx.input.body.organizationId,
+        ctx.input.body.newTierId,
+        ctx.input.body.billingInterval
+      );
+    },
+  })
+);
+
+/**
  * POST /subscriptions/change-tier
  * Upgrade or downgrade the user's subscription tier.
  */
@@ -189,7 +213,8 @@ subscriptions.post(
         ctx.user.id,
         ctx.input.body.organizationId,
         ctx.input.body.newTierId,
-        ctx.input.body.billingInterval
+        ctx.input.body.billingInterval,
+        ctx.input.body.prorationDate
       );
       return await ctx.services.subscription.getSubscription(
         ctx.user.id,

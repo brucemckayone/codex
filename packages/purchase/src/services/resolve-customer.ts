@@ -177,3 +177,86 @@ export async function resolveOrCreateCustomer(
     { userId, resolvedCustomerId }
   );
 }
+
+/**
+ * Stripe rejected a request because the `customer:` parameter referenced an
+ * id that does not exist (deleted in the Stripe dashboard, or — in dev —
+ * a seed value that never resolved against Stripe). The narrow signature
+ * `code === 'resource_missing'` + `param === 'customer'` keeps the predicate
+ * scoped to *this specific* failure mode; broader matching would mask
+ * unrelated bugs (missing price, missing payment method, etc.).
+ */
+export function isStaleCustomerError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const e = error as { code?: unknown; param?: unknown };
+  return e.code === 'resource_missing' && e.param === 'customer';
+}
+
+/**
+ * Hook fired when a stale customer id is detected and recovery kicks in.
+ * Callers wire this to `obs.warn(...)` so production gets a paper trail
+ * without forcing `@codex/purchase` to depend on `@codex/observability`.
+ */
+export interface StaleCustomerRecoveryEvent {
+  userId: string;
+  staleCustomerId: string;
+  stripeCode: string | undefined;
+}
+
+export interface WithStaleCustomerRecoveryOptions {
+  onStaleRecovery?: (event: StaleCustomerRecoveryEvent) => void;
+}
+
+/**
+ * Wrap a Stripe call that needs a `customer:` id, with one-shot self-healing
+ * when the cached `users.stripe_customer_id` is stale.
+ *
+ * Flow:
+ *   1. Resolve a customer id via `resolveOrCreateCustomer`.
+ *   2. Invoke `call(customerId)`.
+ *   3. If Stripe replies `resource_missing` for `customer`, NULL out the
+ *      cached id, mint a fresh one (the helper now sees a NULL cache and
+ *      goes through the email-match-or-create path), and retry the call
+ *      exactly once.
+ *
+ * A second `resource_missing` on the retry indicates a different problem
+ * and propagates normally — we do not loop on customer creation.
+ *
+ * Used by both subscription checkout (`SubscriptionService`) and one-time
+ * purchase / billing-portal flows (`PurchaseService`). Centralising here
+ * means any future `customer:` call site gets the same recovery for free.
+ *
+ * @see Codex-49gev — `resolveOrCreateCustomer` cache invariant
+ */
+export async function withStaleCustomerRecovery<T>(
+  deps: ResolveCustomerDeps,
+  input: ResolveCustomerInput,
+  call: (customerId: string) => Promise<T>,
+  options?: WithStaleCustomerRecoveryOptions
+): Promise<T> {
+  const { db } = deps;
+  const { userId } = input;
+
+  let customerId = await resolveOrCreateCustomer(deps, input);
+  try {
+    return await call(customerId);
+  } catch (error) {
+    if (!isStaleCustomerError(error)) {
+      throw error;
+    }
+
+    options?.onStaleRecovery?.({
+      userId,
+      staleCustomerId: customerId,
+      stripeCode: (error as { code?: string }).code,
+    });
+
+    await db
+      .update(users)
+      .set({ stripeCustomerId: null })
+      .where(eq(users.id, userId));
+
+    customerId = await resolveOrCreateCustomer(deps, input);
+    return await call(customerId);
+  }
+}

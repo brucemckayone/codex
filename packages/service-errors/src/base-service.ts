@@ -84,7 +84,16 @@ export abstract class BaseService {
    * Handle unknown errors by wrapping them with service context
    *
    * - If error is already a ServiceError, re-throws it unchanged
-   * - Otherwise, wraps it with service name and environment for debugging
+   * - Otherwise, logs the underlying error fields via `this.obs.error` and
+   *   wraps it as `InternalServiceError` for the response layer
+   *
+   * Why we log here: `wrapError` produces an `InternalServiceError`, which
+   * `mapErrorToResponse` treats as a typed `ServiceError` and therefore does
+   * NOT call `obs.trackError` for it. Without this log, the underlying
+   * message + stack + third-party error fields (e.g. Stripe `type`/`code`/
+   * `param`/`requestId`) are lost — the route returns 500 with no
+   * diagnostic trail. Logging here closes that gap centrally so individual
+   * services don't have to add their own try/catch instrumentation.
    *
    * @param error Unknown error to handle
    * @param context Optional additional context (domain-specific info)
@@ -95,7 +104,7 @@ export abstract class BaseService {
    * try {
    *   await query();
    * } catch (error) {
-   *   this.handleError(error, { userId: '123', action: 'create' });
+   *   this.handleError(error, 'createCheckoutSession');
    * }
    * ```
    */
@@ -103,6 +112,37 @@ export abstract class BaseService {
     if (isServiceError(error)) {
       throw error;
     }
+
+    // Snapshot the error's diagnostic surface BEFORE wrapping discards it.
+    // `as { ... }` reads are safe — missing fields land as undefined and
+    // structured-log serializers drop undefined keys.
+    if (error instanceof Error) {
+      const e = error as {
+        type?: unknown;
+        code?: unknown;
+        param?: unknown;
+        requestId?: unknown;
+      };
+      this.obs.error('Unhandled error wrapped by handleError', {
+        ...(context && { context }),
+        errorName: error.name,
+        errorMessage: error.message,
+        // Stripe SDK errors carry these fields; harmless for non-Stripe
+        // errors (undefined) and load-bearing for payments diagnosis.
+        stripeType: e.type,
+        stripeCode: e.code,
+        stripeParam: e.param,
+        stripeRequestId: e.requestId,
+        stack: error.stack,
+      });
+    } else {
+      this.obs.error('Unhandled non-Error thrown by handleError', {
+        ...(context && { context }),
+        thrownType: typeof error,
+        thrownValue: typeof error === 'string' ? error : String(error),
+      });
+    }
+
     throw wrapError(error, {
       service: this.constructor.name,
       environment: this.environment,
