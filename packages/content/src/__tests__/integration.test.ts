@@ -24,14 +24,10 @@ import {
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
-  withNeonTestBranch,
 } from '@codex/test-utils';
 import { getOriginalKey } from '@codex/transcoding';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ContentService, MediaItemService } from '../services';
-
-// Enable ephemeral Neon branch for this test file
-withNeonTestBranch();
 
 describe('Integration Tests', () => {
   let db: Database;

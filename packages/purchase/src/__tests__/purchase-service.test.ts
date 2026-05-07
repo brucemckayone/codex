@@ -26,7 +26,6 @@ import {
   seedTestUsers,
   setupTestDatabase,
   teardownTestDatabase,
-  withNeonTestBranch,
 } from '@codex/test-utils';
 import { eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
@@ -47,9 +46,6 @@ import {
   PurchaseNotFoundError,
 } from '../errors';
 import { PurchaseService } from '../services/purchase-service';
-
-// Enable ephemeral Neon branch for this test file
-withNeonTestBranch();
 
 describe('PurchaseService Integration', () => {
   let db: Database;
