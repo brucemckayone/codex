@@ -15,7 +15,7 @@
     XIcon,
   } from '$lib/components/ui/Icon';
   import * as Accordion from '$lib/components/ui/Accordion';
-  import { invalidate } from '$app/navigation';
+  import { invalidate, invalidateAll } from '$app/navigation';
   import {
     changeSubscriptionTier,
     createSubscriptionCheckoutSession,
@@ -35,6 +35,25 @@
   } from './status';
 
   let { data } = $props();
+
+  function mapSubscriptionErrorMessage(
+    code: string | undefined,
+    message: string
+  ): string {
+    switch (code) {
+      case 'ALREADY_SUBSCRIBED':
+        return 'You already have an active subscription to this organisation. Manage it from your account.';
+      case 'CONNECT_ACCOUNT_NOT_READY':
+      case 'CONNECT_ACCOUNT_NOT_FOUND':
+        return "This creator hasn't finished setting up payments yet. Please try again later.";
+      case 'TIER_NOT_FOUND':
+        return 'This plan is no longer available. Please refresh the page to see current options.';
+      case 'SUBSCRIPTION_CHECKOUT_ERROR':
+        return message || m.subscription_checkout_error();
+      default:
+        return m.subscription_checkout_error();
+    }
+  }
 
   // ── Billing Interval ──────────────────────────────────────────────
   const initialInterval = page.url.searchParams.get('billingInterval');
@@ -287,19 +306,18 @@
     lastAttemptedTierId = tier.id;
     checkoutLoading = tier.id;
     checkoutError = '';
-    try {
-      const result = await createSubscriptionCheckoutSession({
-        tierId: tier.id,
-        billingInterval,
-        organizationId: data.org.id,
-      });
-      retryCount = 0;
-      window.location.href = result.sessionUrl;
-    } catch (err) {
+    const result = await createSubscriptionCheckoutSession({
+      tierId: tier.id,
+      billingInterval,
+      organizationId: data.org.id,
+    });
+    if (!result.success) {
       retryCount += 1;
-      checkoutError =
-        err instanceof Error ? err.message : m.subscription_checkout_error();
+      checkoutError = mapSubscriptionErrorMessage(result.code, result.message);
       checkoutLoading = null;
+      if (result.code === 'TIER_NOT_FOUND') {
+        invalidateAll();
+      }
       // Scroll the error into view — the banner renders near the top of the
       // page, but the user may have clicked Subscribe from the sticky CTA
       // when scrolled near the bottom. Without this scroll, the error is
@@ -308,7 +326,10 @@
       document
         .querySelector('.checkout-error')
         ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
     }
+    retryCount = 0;
+    window.location.href = result.sessionUrl;
   }
 
   // ── Lifecycle actions (reactivate + update payment) ───────────────
@@ -330,7 +351,16 @@
     if (currentCancelAtPeriodEnd) currentCancelAtPeriodEnd = false;
 
     try {
-      await reactivateSubscription({ organizationId: data.org.id });
+      const result = await reactivateSubscription({
+        organizationId: data.org.id,
+      });
+      if (!result.success) {
+        currentStatus = previousStatus;
+        currentCancelAtPeriodEnd = previousCancelAtPeriodEnd;
+        reactivateError =
+          result.message || 'Failed to reactivate subscription';
+        return;
+      }
       await Promise.all([
         invalidate('account:subscriptions'),
         invalidateCollection('library'),
@@ -364,7 +394,12 @@
     if (currentStatus !== 'active') currentStatus = 'active';
 
     try {
-      await resumeSubscription({ organizationId: data.org.id });
+      const result = await resumeSubscription({ organizationId: data.org.id });
+      if (!result.success) {
+        currentStatus = previousStatus;
+        resumeError = result.message || 'Failed to resume subscription';
+        return;
+      }
       await Promise.all([
         invalidate('account:subscriptions'),
         invalidateCollection('library'),
@@ -419,11 +454,25 @@
     if (currentStatus === 'cancelling') currentStatus = 'active';
 
     try {
-      await changeSubscriptionTier({
+      const result = await changeSubscriptionTier({
         organizationId: data.org.id,
         newTierId: tier.id,
         billingInterval,
       });
+      if (!result.success) {
+        currentTierId = previousTierId;
+        currentCancelAtPeriodEnd = previousCancelAtPeriodEnd;
+        currentBillingInterval = previousBillingInterval;
+        currentStatus = previousStatus;
+        switchTierError = mapSubscriptionErrorMessage(
+          result.code,
+          result.message
+        );
+        if (result.code === 'TIER_NOT_FOUND') {
+          invalidateAll();
+        }
+        return;
+      }
       confirmSwitchTierId = null;
       await Promise.all([
         invalidate('account:subscriptions'),
