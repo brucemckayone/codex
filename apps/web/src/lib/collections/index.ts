@@ -23,10 +23,11 @@ export {
 } from '@tanstack/db';
 export { queryCollectionOptions } from '@tanstack/query-db-collection';
 // Collection exports
-export { contentCollection } from './content';
+export { getContentCollection } from './content';
 // SSR Hydration utilities
 export {
   COLLECTION_KEYS,
+  type CollectionTarget,
   hydrateCollection,
   hydrateIfNeeded,
   invalidateCollection,

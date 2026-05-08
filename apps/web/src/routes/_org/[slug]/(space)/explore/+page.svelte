@@ -17,7 +17,8 @@
   import { CreatorExploreBanner } from '$lib/components/ui/CreatorCard';
   import { Pagination } from '$lib/components/ui/Pagination';
   import Select from '$lib/components/ui/Select/Select.svelte';
-  import { contentCollection, hydrateCollection, useLiveQuery } from '$lib/collections';
+  import { getContentCollection, hydrateCollection, useLiveQuery } from '$lib/collections';
+  import { filterContentItemsByOrg } from '$lib/content/filter-by-org';
   import { followingStore } from '$lib/client/following.svelte';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { SearchIcon, SearchXIcon, FileIcon, XIcon } from '$lib/components/ui/Icon';
@@ -46,12 +47,14 @@
   let localCategory = $state(data.filters.category || '');
 
   // The server load is the source of truth for /explore. Always overwrite
-  // the global ['content'] cache on mount with the SSR payload — never
-  // hydrateIfNeeded — so a poisoned cache (e.g. seeded by a content detail
-  // page in the same session) cannot mask the org catalogue.
+  // the org-scoped ['content', orgId] cache on mount with the SSR payload
+  // so cross-org cache contamination cannot mask the org catalogue.
   onMount(() => {
-    if (data.content?.items) {
-      hydrateCollection('content', data.content.items);
+    if (data.content?.items && data.org?.id) {
+      hydrateCollection(
+        { kind: 'content', orgId: data.org.id },
+        data.content.items
+      );
     }
   });
 
@@ -68,8 +71,11 @@
   $effect(() => {
     const currentItems = data.content?.items;
     const currentSignature = signatureOf(currentItems);
-    if (currentItems && currentSignature !== prevSignature) {
-      hydrateCollection('content', currentItems);
+    if (currentItems && currentSignature !== prevSignature && data.org?.id) {
+      hydrateCollection(
+        { kind: 'content', orgId: data.org.id },
+        currentItems
+      );
       prevSignature = currentSignature;
       localType = data.filters.type || '';
       localCategory = data.filters.category || '';
@@ -83,17 +89,36 @@
     return `${items.length}:${first}:${last}`;
   }
 
-  // Reactive query over the content collection for client-side filtering
+  // Org-scoped content collection — keyed ['content', orgId] so visiting
+  // another org cannot return this org's cached data and vice versa.
+  const orgContentCollection = $derived(
+    data.org?.id ? getContentCollection(data.org.id) : undefined
+  );
+
+  // Reactive query over the org-scoped collection for client-side filtering.
+  // Re-runs when the org changes (cross-subdomain navigation) — deps is an
+  // array of getter functions, not a single getter returning an array.
   const contentQuery = useLiveQuery(
-    (q) => q.from({ item: contentCollection }),
-    undefined,
+    (q) => q.from({ item: orgContentCollection }),
+    [() => data.org?.id],
     // svelte-ignore state_referenced_locally — ssrData is only used for initial SSR render
     { ssrData: data.content?.items ?? [] }
   );
 
   const orgName = $derived(data.org?.name ?? 'Organization');
-  // Use live query data when available, fall back to server data
-  const items = $derived(contentQuery.data ?? data.content?.items ?? []);
+  // Use live query data when available, fall back to server data, then
+  // strict-equality filter to the current org. Defense in depth — even
+  // if the QueryClient cache has been polluted with another org's items
+  // (cross-tab navigation, stale state, future regression in cache
+  // scoping), this predicate guarantees the wrong org's data never
+  // reaches the DOM. Mirrors filterLibraryItemsByOrg on the library page
+  // (Codex-q3zuf).
+  const items = $derived(
+    filterContentItemsByOrg(
+      contentQuery.data ?? data.content?.items ?? [],
+      data.org?.id
+    )
+  );
   const total = $derived(data.content?.total ?? 0);
   const filters = $derived(data.filters);
   const limit = $derived(data.limit ?? 12);

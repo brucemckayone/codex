@@ -30,6 +30,7 @@ import type {
 import {
   ContentNotFoundError,
   checkContentSlugSchema,
+  contentBrowseQuerySchema,
   contentQuerySchema,
   createContentSchema,
   invalidateContentAccess,
@@ -269,9 +270,39 @@ app.get(
     policy: { auth: 'required' },
     input: { query: contentQuerySchema },
     handler: async (ctx) => {
+      // Studio-scope: returns the signed-in creator's content across all
+      // their orgs (drafts list, dashboard). organizationId is optional.
       const result = await ctx.services.content.list(
         ctx.user.id,
-        ctx.input.query
+        ctx.input.query,
+        { scope: 'studio' }
+      );
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * GET /api/content/browse
+ * Browse content within an org (cross-creator).
+ *
+ * Multi-tenant boundary: organizationId is REQUIRED via the schema, and
+ * the service rejects browse-mode queries that lack it. Used by the
+ * authenticated /explore "popular" / "top-selling" sorts where the
+ * caller is browsing other creators' content within an org context.
+ *
+ * Security: Authenticated users, API rate limit (100 req/min)
+ */
+app.get(
+  '/browse',
+  procedure({
+    policy: { auth: 'required' },
+    input: { query: contentBrowseQuerySchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.content.list(
+        ctx.user.id,
+        ctx.input.query,
+        { scope: 'browse' }
       );
       return new PaginatedResult(result.items, result.pagination);
     },

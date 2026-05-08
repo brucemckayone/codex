@@ -34,7 +34,7 @@ import {
   type ImageProcessingResult,
   ImageProcessingService,
 } from '@codex/image-processing';
-import { BaseService } from '@codex/service-errors';
+import { BaseService, ValidationError } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
 import { createContentSchema, updateContentSchema } from '@codex/validation';
@@ -612,35 +612,73 @@ export class ContentService extends BaseService {
   }
 
   /**
-   * List content with filtering and pagination
+   * List content with filtering and pagination.
    *
-   * Security:
-   * - Scoped to creator (only shows own content)
-   * - Excludes soft-deleted content
-   * - Supports organization filtering
+   * **Scope is required** to make the multi-tenant boundary explicit:
    *
-   * Features:
-   * - Pagination (page, limit)
-   * - Filtering (status, type, visibility, category, organization)
-   * - Search (title, description)
-   * - Sorting (by various fields)
+   * - `scope: 'studio'` (default for legacy callers) — scopes results
+   *   to the signed-in creator (`creatorId`). Used by the studio drafts
+   *   list / dashboard where the user is browsing THEIR OWN content.
    *
-   * @param creatorId - Creator ID (for authorization)
-   * @param filters - Query filters
+   * - `scope: 'browse'` — scopes results to an organization, NOT to
+   *   the signed-in creator. Used by authenticated /explore "popular"
+   *   / "top-selling" sorts where the user is browsing the catalogue
+   *   across creators within an org. **`organizationId` is required**
+   *   in browse mode — the method throws otherwise to prevent
+   *   cross-org data leakage. Browse mode also implicitly filters to
+   *   `status = 'published'`.
+   *
+   * @param creatorId - Signed-in user ID (used only when scope='studio')
+   * @param filters - Query filters (organizationId required for browse)
    * @param pagination - Pagination parameters
+   * @param options.scope - 'studio' (default) | 'browse'
    * @returns Paginated content list with metadata
+   * @throws ValidationError when scope='browse' and organizationId is missing
    */
   async list(
     creatorId: string,
     filters: ContentFilters = {},
-    pagination: PaginationParams = {
+    paginationOrOptions: PaginationParams | { scope?: 'studio' | 'browse' } = {
       page: 1,
       limit: PAGINATION.DEFAULT,
-    }
+    },
+    maybeOptions?: { scope?: 'studio' | 'browse' }
   ): Promise<PaginatedListResponse<ContentWithRelations>> {
+    // Backwards-compatible argument handling: callers may pass either
+    // (creatorId, filters, options) — new shape — or
+    // (creatorId, filters, pagination, options?) — extended shape.
+    const isPagination =
+      'page' in paginationOrOptions || 'limit' in paginationOrOptions;
+    const pagination: PaginationParams = isPagination
+      ? (paginationOrOptions as PaginationParams)
+      : { page: 1, limit: PAGINATION.DEFAULT };
+    const options =
+      (isPagination
+        ? maybeOptions
+        : (paginationOrOptions as { scope?: 'studio' | 'browse' })) ?? {};
+    const scope = options.scope ?? 'studio';
+
+    if (scope === 'browse' && !filters.organizationId) {
+      // Hard fail-closed: browse-mode queries without an org filter are
+      // a multi-tenant boundary violation. Schema-level validation
+      // catches this at the route, this is the service-level seatbelt.
+      throw new ValidationError(
+        'organizationId is required for browse-mode content list'
+      );
+    }
+
     try {
-      // Build WHERE conditions
-      const whereConditions = [scopedNotDeleted(content, creatorId)];
+      // Build WHERE conditions. Studio scope filters by the signed-in
+      // creator; browse scope filters by the org and published status,
+      // ignoring `creatorId` so the result spans every creator in the
+      // org's catalogue.
+      const whereConditions =
+        scope === 'browse'
+          ? [
+              isNull(content.deletedAt),
+              eq(content.status, CONTENT_STATUS.PUBLISHED),
+            ]
+          : [scopedNotDeleted(content, creatorId)];
 
       // Add filters
       if (filters.status) {

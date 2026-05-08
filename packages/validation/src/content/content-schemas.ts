@@ -527,6 +527,28 @@ export const contentQuerySchema = paginationSchema.extend({
 export type ContentQueryInput = z.infer<typeof contentQuerySchema>;
 
 /**
+ * Stricter sibling of `contentQuerySchema` for browse-style flows
+ * (e.g. authenticated /explore "popular" / "top-selling" sorts).
+ *
+ * Browse queries cross creator boundaries — the result list contains
+ * content from many creators within a single org. To prevent cross-org
+ * data leakage, `organizationId` MUST be present. The looser
+ * `contentQuerySchema` is reserved for studio-style queries where the
+ * caller is browsing their OWN content (creator dashboards, drafts).
+ *
+ * Codex-q3zuf-style multi-tenant boundary protection.
+ */
+export const contentBrowseQuerySchema = contentQuerySchema.refine(
+  (q) => q.organizationId !== undefined,
+  {
+    message: 'organizationId is required for cross-creator browsing',
+    path: ['organizationId'],
+  }
+);
+
+export type ContentBrowseQueryInput = z.infer<typeof contentBrowseQuerySchema>;
+
+/**
  * Media item query schema
  * Extends pagination with media-specific filters and sorting
  */

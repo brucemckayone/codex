@@ -18,7 +18,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 // vi.hoisted lets the factory below reference these before module init.
 const {
-  listMock,
+  browseMock,
   getPublicContentMock,
   getPublicCreatorsMock,
   cacheGetMock,
@@ -31,7 +31,7 @@ const {
     get = cacheGetMock;
   }
   return {
-    listMock: vi.fn(),
+    browseMock: vi.fn(),
     getPublicContentMock: vi.fn(),
     getPublicCreatorsMock: vi.fn(),
     cacheGetMock,
@@ -41,7 +41,10 @@ const {
 
 vi.mock('$lib/server/api', () => ({
   createServerApi: vi.fn(() => ({
-    content: { list: listMock },
+    // /explore auth path now hits the browse endpoint (org-scoped, not
+    // creator-scoped). The studio `list()` endpoint is no longer touched
+    // from explore — verifying that boundary is part of this test's job.
+    content: { browse: browseMock },
   })),
 }));
 
@@ -98,7 +101,7 @@ const baseInput = (overrides: {
 describe('explore +page.server.ts — cache wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    listMock.mockResolvedValue({ items: [], pagination: { total: 0 } });
+    browseMock.mockResolvedValue({ items: [], pagination: { total: 0 } });
     getPublicContentMock.mockResolvedValue({
       items: [],
       pagination: { total: 0 },
@@ -170,7 +173,7 @@ describe('explore +page.server.ts — cache wiring', () => {
       );
 
       expect(cacheGetMock).not.toHaveBeenCalled();
-      expect(listMock).toHaveBeenCalled();
+      expect(browseMock).toHaveBeenCalled();
     });
 
     it('bypasses the cache when creator filter is present', async () => {
@@ -202,7 +205,7 @@ describe('explore +page.server.ts — cache wiring', () => {
       );
 
       expect(cacheGetMock).not.toHaveBeenCalled();
-      expect(listMock).toHaveBeenCalled();
+      expect(browseMock).toHaveBeenCalled();
     });
 
     it('bypasses the cache when CACHE_KV is not bound', async () => {
@@ -217,7 +220,7 @@ describe('explore +page.server.ts — cache wiring', () => {
       );
 
       expect(cacheGetMock).not.toHaveBeenCalled();
-      expect(listMock).toHaveBeenCalled();
+      expect(browseMock).toHaveBeenCalled();
     });
   });
 
@@ -239,7 +242,7 @@ describe('explore +page.server.ts — cache wiring', () => {
         })
       );
       expect(cacheGetMock).not.toHaveBeenCalled();
-      expect(listMock).not.toHaveBeenCalled();
+      expect(browseMock).not.toHaveBeenCalled();
     });
 
     it('downgrades auth-only sorts to newest for unauthenticated users', async () => {

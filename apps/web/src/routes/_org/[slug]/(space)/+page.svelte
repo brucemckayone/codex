@@ -62,10 +62,15 @@
   });
 
   onMount(() => {
-    // Hydrate TanStack DB cache with whatever content we already rendered
-    // server-side so client navigations feel instant.
-    if (data.allContent?.length) {
-      hydrateIfNeeded('content', data.allContent);
+    // Hydrate the org-scoped TanStack DB cache with whatever content we
+    // already rendered server-side so client navigations feel instant.
+    // The cache key is ['content', orgId] — different orgs get separate
+    // cache entries, preventing cross-org leakage.
+    if (data.allContent?.length && data.org?.id) {
+      hydrateIfNeeded(
+        { kind: 'content', orgId: data.org.id },
+        data.allContent
+      );
     }
 
     // Track desktop breakpoint for inline vs modal video

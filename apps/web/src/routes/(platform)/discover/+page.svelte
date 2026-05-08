@@ -1,12 +1,15 @@
 <script lang="ts">
   /**
-   * Discover page - filterable content grid with search
+   * Discover page - filterable content grid with search.
+   *
+   * Renders directly from SSR data (data.content.items). No client-side
+   * collection hydration: the contentCollection is org-scoped and this
+   * page is platform-wide (cross-org). Seeding any single-org cache from
+   * here is a category error.
    */
-  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import type { PageData } from './$types';
-  import { hydrateIfNeeded } from '$lib/collections';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
@@ -14,12 +17,6 @@
   import * as m from '$paraglide/messages';
 
   const { data }: { data: PageData } = $props();
-
-  onMount(() => {
-    if (data.content?.items?.length) {
-      hydrateIfNeeded('content', data.content.items);
-    }
-  });
 
   let searchValue = $derived(data.search);
 

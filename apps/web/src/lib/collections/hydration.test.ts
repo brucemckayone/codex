@@ -72,9 +72,15 @@ describe('collections/hydration', () => {
   });
 
   describe('COLLECTION_KEYS', () => {
-    it('has content key', async () => {
+    it('content key is a function of orgId (org-scoped query key)', async () => {
       const { COLLECTION_KEYS } = await import('./hydration');
-      expect(COLLECTION_KEYS.content).toEqual(['content']);
+      expect(typeof COLLECTION_KEYS.content).toBe('function');
+      expect(COLLECTION_KEYS.content('org-a')).toEqual(['content', 'org-a']);
+      // Different orgs MUST produce different keys — this is the
+      // security boundary preventing cross-org cache contamination.
+      expect(COLLECTION_KEYS.content('org-a')).not.toEqual(
+        COLLECTION_KEYS.content('org-b')
+      );
     });
 
     it('has library key', async () => {
@@ -121,7 +127,7 @@ describe('collections/hydration', () => {
 
     it('returns a Promise', async () => {
       const { invalidateCollection } = await import('./hydration');
-      const result = invalidateCollection('content');
+      const result = invalidateCollection({ kind: 'content', orgId: 'org-a' });
       expect(result).toBeInstanceOf(Promise);
     });
 

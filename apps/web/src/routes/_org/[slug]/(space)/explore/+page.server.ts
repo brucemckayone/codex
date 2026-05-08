@@ -47,7 +47,10 @@ async function fetchAuthContent(
   params.set('sortOrder', AUTH_SORT_MAP[sort].sortOrder);
   params.set('page', String(page));
   params.set('limit', String(PAGE_LIMIT));
-  return api.content.list(params);
+  // Browse-mode endpoint: org-scoped, NOT creator-scoped. The studio
+  // `api.content.list` returns only the signed-in user's content, which
+  // is the wrong shape for /explore (the catalogue spans creators).
+  return api.content.browse(params);
 }
 
 export const load: PageServerLoad = async ({

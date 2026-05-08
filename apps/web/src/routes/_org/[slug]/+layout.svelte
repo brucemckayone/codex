@@ -232,7 +232,7 @@
     void Promise.resolve(versionsRef).then((versions) => {
       const staleKeys = getStaleKeys(versions ?? {});
       if (staleKeys.some((k) => k.includes(':content'))) {
-        void invalidateCollection('content');
+        void invalidateCollection({ kind: 'content', orgId: data.org.id });
       }
       if (staleKeys.some((k) => k.includes(':library'))) {
         void invalidateCollection('library');

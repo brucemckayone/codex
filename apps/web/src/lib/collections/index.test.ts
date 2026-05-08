@@ -72,9 +72,10 @@ describe('collections/index', () => {
   });
 
   describe('collection exports', () => {
-    it('exports contentCollection', async () => {
-      const { contentCollection } = await import('./index');
-      expect(contentCollection).toBeDefined();
+    it('exports getContentCollection factory', async () => {
+      const { getContentCollection } = await import('./index');
+      expect(getContentCollection).toBeDefined();
+      expect(typeof getContentCollection).toBe('function');
     });
 
     it('exports libraryCollection', async () => {
@@ -89,10 +90,13 @@ describe('collections/index', () => {
   });
 
   describe('hydration exports', () => {
-    it('exports COLLECTION_KEYS', async () => {
+    it('exports COLLECTION_KEYS with org-scoped content key', async () => {
       const { COLLECTION_KEYS } = await import('./index');
       expect(COLLECTION_KEYS).toBeDefined();
-      expect(COLLECTION_KEYS.content).toEqual(['content']);
+      // content is now a function of orgId — security boundary
+      expect(typeof COLLECTION_KEYS.content).toBe('function');
+      expect(COLLECTION_KEYS.content('org-a')).toEqual(['content', 'org-a']);
+      expect(COLLECTION_KEYS.content('org-b')).toEqual(['content', 'org-b']);
       expect(COLLECTION_KEYS.library).toEqual(['library']);
     });
 

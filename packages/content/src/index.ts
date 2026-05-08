@@ -160,6 +160,7 @@ export type {
 
 export {
   checkContentSlugSchema,
+  contentBrowseQuerySchema,
   contentQuerySchema,
   contentStatusEnum,
   contentTypeEnum,

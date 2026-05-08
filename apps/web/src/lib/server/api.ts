@@ -518,6 +518,25 @@ export function createServerApi(
         ),
 
       /**
+       * Browse content (cross-creator within an org).
+       *
+       * Stricter sibling of `list()`: the worker route enforces
+       * `organizationId` is present and the service rejects browse-mode
+       * queries that lack it. Use this from any UI that lists content
+       * the signed-in user does not necessarily own (e.g. authenticated
+       * /explore "popular" / "top-selling" sorts).
+       *
+       * Multi-tenant boundary: keeps studio drafts (no org filter) on
+       * `/api/content` and prevents browse-style callers from silently
+       * dropping orgId and leaking another org's data.
+       */
+      browse: (params: URLSearchParams) =>
+        request<PaginatedListResponse<ContentWithRelations>>(
+          'content',
+          `/api/content/browse?${params}`
+        ),
+
+      /**
        * Create new content
        */
       create: (data: unknown) =>
