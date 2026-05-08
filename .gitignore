@@ -66,8 +66,12 @@ packages/**/*.js.map
 .beads/*.db-shm
 .beads/*.db-wal
 .beads/bd.sock
+.beads/bd.sock.*
 .beads/daemon.*
 .beads/last-touched
+
+# Claude Code agent worktrees (never commit these — they're nested git checkouts)
+.claude/worktrees/
 
 # Playwright MCP snapshots
 .playwright-mcp/
