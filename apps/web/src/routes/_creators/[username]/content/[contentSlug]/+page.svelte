@@ -9,12 +9,11 @@
   while relatedContent and accessAndProgress are streamed as bare promises.
 -->
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { untrack } from 'svelte';
   import { enhance } from '$app/forms';
   import { invalidate } from '$app/navigation';
   import * as m from '$paraglide/messages';
   import { ContentDetailView, RelatedContent } from '$lib/components/content';
-  import { hydrateIfNeeded } from '$lib/collections';
   import { formatPrice } from '$lib/utils/format';
   import { useSubscriptionContext } from '$lib/utils/subscription-context.svelte';
   import type { AccessRevocationReason } from '$lib/server/content-detail';
@@ -27,15 +26,10 @@
 
   const { data, form }: Props = $props();
 
-  onMount(() => {
-    if (data.content) {
-      hydrateIfNeeded('content', [data.content]);
-    }
-  });
-
-  // Always use server load data — it's fetched by slug for this specific page.
-  // Collection state.get() returns wrong items after hydration from explore/browse.
-  // Tracked: Codex-s2k54.
+  // Read directly from server load. Do NOT seed contentCollection from this
+  // single-item payload — the global ['content'] queryKey is shared with
+  // org /explore, and a 1-item write here causes /explore to render only
+  // the most recently visited content for the rest of the session.
   const content = $derived(data.content);
 
   let purchasing = $state(false);

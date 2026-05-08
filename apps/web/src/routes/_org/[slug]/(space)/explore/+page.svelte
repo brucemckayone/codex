@@ -17,7 +17,7 @@
   import { CreatorExploreBanner } from '$lib/components/ui/CreatorCard';
   import { Pagination } from '$lib/components/ui/Pagination';
   import Select from '$lib/components/ui/Select/Select.svelte';
-  import { contentCollection, hydrateCollection, hydrateIfNeeded, useLiveQuery } from '$lib/collections';
+  import { contentCollection, hydrateCollection, useLiveQuery } from '$lib/collections';
   import { followingStore } from '$lib/client/following.svelte';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { SearchIcon, SearchXIcon, FileIcon, XIcon } from '$lib/components/ui/Icon';
@@ -45,29 +45,43 @@
   // svelte-ignore state_referenced_locally
   let localCategory = $state(data.filters.category || '');
 
-  // Hydrate collection on mount; re-hydrate when server data changes (search/sort navigation)
+  // The server load is the source of truth for /explore. Always overwrite
+  // the global ['content'] cache on mount with the SSR payload — never
+  // hydrateIfNeeded — so a poisoned cache (e.g. seeded by a content detail
+  // page in the same session) cannot mask the org catalogue.
   onMount(() => {
-    if (data.content?.items?.length) {
-      hydrateIfNeeded('content', data.content.items);
+    if (data.content?.items) {
+      hydrateCollection('content', data.content.items);
     }
   });
 
-  // Re-hydrate collection when server data changes (search/sort/page navigation).
-  // Plain variable (not $state) — only used for reference comparison inside the effect,
-  // never in the template. Using $state() would wrap the array in a Proxy, making
-  // reference equality checks always fail (raw !== proxy → infinite loop).
+  // Re-hydrate when server data changes (search/sort/page navigation).
+  // Compare a stable signature, not array identity: on initial mount the
+  // array reference and `prevSignature` are both seeded from the same
+  // `data.content?.items`, and reference equality would always be true
+  // there — but signature equality correctly recognises *content* changes
+  // when navigating between filter combinations.
+  // Plain variable (not $state) — read as a comparison key, not a reactive
+  // dependency. $state() would wrap in a Proxy, breaking the comparison.
   // svelte-ignore state_referenced_locally
-  let prevServerItems = data.content?.items;
+  let prevSignature = signatureOf(data.content?.items);
   $effect(() => {
     const currentItems = data.content?.items;
-    if (currentItems && currentItems !== prevServerItems) {
+    const currentSignature = signatureOf(currentItems);
+    if (currentItems && currentSignature !== prevSignature) {
       hydrateCollection('content', currentItems);
-      prevServerItems = currentItems;
-      // Reset client-side filters when server data changes (new search/sort context)
+      prevSignature = currentSignature;
       localType = data.filters.type || '';
       localCategory = data.filters.category || '';
     }
   });
+
+  function signatureOf(items: readonly unknown[] | undefined): string {
+    if (!items || items.length === 0) return '';
+    const first = (items[0] as { id?: string } | undefined)?.id ?? '';
+    const last = (items[items.length - 1] as { id?: string } | undefined)?.id ?? '';
+    return `${items.length}:${first}:${last}`;
+  }
 
   // Reactive query over the content collection for client-side filtering
   const contentQuery = useLiveQuery(
