@@ -1378,6 +1378,88 @@ describe('SubscriptionService', () => {
       expect(preview.isUpgrade).toBe(false);
     });
 
+    it('calls stripe.invoices.createPreview with always_invoice + correct items + proration_date', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('preview-shape');
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
+
+      stubCreatePreview(500, [{ description: 'X', amount: 500 }]);
+
+      const before = Math.floor(Date.now() / 1000);
+      await service.previewTierChange(
+        otherCreatorId,
+        org.id,
+        tier2.id,
+        'month'
+      );
+      const after = Math.floor(Date.now() / 1000);
+
+      const createPreviewMock = (
+        stripe as unknown as {
+          invoices: { createPreview: ReturnType<typeof vi.fn> };
+        }
+      ).invoices.createPreview;
+      expect(createPreviewMock).toHaveBeenCalledTimes(1);
+      const params = createPreviewMock.mock.calls[0][0] as {
+        subscription: string;
+        subscription_details: {
+          items: Array<{ id: string; price: string }>;
+          proration_date: number;
+          proration_behavior: string;
+        };
+      };
+      // Subscription ID is the Stripe sub ID stored on the local row, not
+      // the local row's UUID.
+      expect(params.subscription).toMatch(/^sub_test_/);
+      // Item.id is the Stripe subscription item id from .subscriptions.retrieve
+      expect(params.subscription_details.items).toHaveLength(1);
+      expect(params.subscription_details.items[0].id).toMatch(/^si_/);
+      // Price targets the new tier's MONTHLY Stripe price (not annual,
+      // since billingInterval='month' was passed).
+      expect(params.subscription_details.items[0].price).toBe(
+        tier2.stripePriceMonthlyId
+      );
+      // proration_date is a Unix timestamp around now (within bounds of
+      // the test wall-clock).
+      expect(params.subscription_details.proration_date).toBeGreaterThanOrEqual(
+        before
+      );
+      expect(params.subscription_details.proration_date).toBeLessThanOrEqual(
+        after
+      );
+      // CRITICAL: preview MUST mirror the commit's behaviour, not the
+      // legacy create_prorations. With create_prorations the preview's
+      // amount_due returns 0 (proration deferred), confusing the user
+      // with "£0 today" for an upgrade.
+      expect(params.subscription_details.proration_behavior).toBe(
+        'always_invoice'
+      );
+    });
+
+    it('uses annual price ID when billingInterval=year', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('preview-annual');
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
+
+      stubCreatePreview(0, []);
+
+      await service.previewTierChange(otherCreatorId, org.id, tier2.id, 'year');
+
+      const createPreviewMock = (
+        stripe as unknown as {
+          invoices: { createPreview: ReturnType<typeof vi.fn> };
+        }
+      ).invoices.createPreview;
+      const params = createPreviewMock.mock.calls[0][0] as {
+        subscription_details: { items: Array<{ price: string }> };
+      };
+      expect(params.subscription_details.items[0].price).toBe(
+        tier2.stripePriceAnnualId
+      );
+    });
+
     it('throws TierNotFoundError for an unknown tier', async () => {
       const { org, tier1 } = await createFullOrg('preview-bad-tier');
       await db
@@ -1419,17 +1501,40 @@ describe('SubscriptionService', () => {
       // tier1 (499) → tier2 (999) is an UPGRADE.
       await service.changeTier(otherCreatorId, org.id, tier2.id, 'month');
 
-      expect(stripe.subscriptions.update).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          proration_behavior: 'always_invoice',
-          payment_behavior: 'error_if_incomplete',
-          proration_date: expect.any(Number),
-        }),
-        expect.objectContaining({
-          idempotencyKey: expect.stringMatching(/^upgrade_.+_\d+$/),
-        })
-      );
+      // Full param-shape assertion. A regression here would let upgrades
+      // silently revert to the broken 'create_prorations' behaviour where
+      // Stripe defers the proration to the next invoice instead of
+      // charging the customer immediately. Verified live on 2026-05-07
+      // against sub_1TUZ0C7wyGmo4sh6EmqsD8yL: this exact param shape
+      // produced invoice in_1TUZ107wyGmo4sh6ke2mxEhP (status=paid,
+      // total=£34.97, with -£15 'Unused time' + £49.97 'Remaining time').
+      const updateCall = (
+        stripe.subscriptions.update as unknown as {
+          mock: { calls: unknown[][] };
+        }
+      ).mock.calls[0];
+      const params = updateCall[1] as {
+        items: Array<{ id: string; price: string }>;
+        proration_behavior: string;
+        payment_behavior: string;
+        proration_date: number;
+        metadata: Record<string, string>;
+      };
+      expect(params.proration_behavior).toBe('always_invoice');
+      expect(params.payment_behavior).toBe('error_if_incomplete');
+      expect(params.proration_date).toEqual(expect.any(Number));
+      // Targets the NEW tier's monthly Stripe price (not the old tier's,
+      // not annual).
+      expect(params.items).toHaveLength(1);
+      expect(params.items[0].price).toBe(tier2.stripePriceMonthlyId);
+      // Codex correlation metadata — let webhook handlers identify the
+      // tier change without round-tripping the DB.
+      expect(params.metadata.codex_tier_id).toBe(tier2.id);
+      expect(params.metadata.codex_user_id).toBe(otherCreatorId);
+      expect(params.metadata.codex_organization_id).toBe(org.id);
+      // Idempotency key shape (third arg is the request options object).
+      const options = updateCall[2] as { idempotencyKey: string };
+      expect(options.idempotencyKey).toMatch(/^upgrade_.+_\d+$/);
 
       // Verify local DB mirrored — tier swapped + amount + split aligned.
       const { eq, and } = await import('drizzle-orm');
@@ -1444,6 +1549,12 @@ describe('SubscriptionService', () => {
         );
       expect(updated.tierId).toBe(tier2.id);
       expect(updated.amountCents).toBe(tier2.priceMonthly);
+      // Revenue split must sum to amountCents (CHECK constraint).
+      expect(
+        updated.platformFeeCents +
+          updated.organizationFeeCents +
+          updated.creatorPayoutCents
+      ).toBe(updated.amountCents);
     });
 
     it('downgrade (Phase 1 fallback): keeps create_prorations, NO payment_behavior, NO idempotency key', async () => {
