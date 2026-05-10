@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { getContext } from 'svelte';
 
   interface Props {
     title: string;
@@ -9,9 +10,19 @@
   }
 
   const { title, subtitle, children, footer }: Props = $props();
+
+  // Set by (auth)/+layout.svelte. Lets the form heading echo the org name
+  // (e.g. "to acme studio") so the auth page reads as that org's, even
+  // though the title string itself comes from i18n and is shared.
+  const branding = getContext<{ orgName: string | null } | undefined>(
+    'auth-branding'
+  );
+  const orgName = $derived(branding?.orgName ?? null);
 </script>
 
-<a href="/" class="auth-logo">codex</a>
+{#if orgName}
+  <p class="auth-eyebrow">{orgName}</p>
+{/if}
 
 <h1>{title}</h1>
 
@@ -26,21 +37,21 @@
 {/if}
 
 <style>
-  .auth-logo {
-    display: block;
-    font-family: var(--font-heading);
-    font-size: var(--text-xl);
-    font-weight: var(--font-bold);
-    color: var(--color-interactive);
-    text-transform: lowercase;
-    letter-spacing: var(--tracking-tight);
-    margin-bottom: var(--space-6);
+  .auth-eyebrow {
+    font-family: var(--brand-font-heading, var(--font-heading));
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wide);
+    color: var(--color-brand-primary, var(--color-interactive));
+    margin: 0 0 var(--space-3) 0;
   }
 
   h1 {
+    font-family: var(--brand-font-heading, var(--font-heading));
     font-size: var(--text-2xl);
     font-weight: var(--font-bold);
-    margin-bottom: var(--space-6);
+    margin: 0 0 var(--space-6) 0;
   }
 
   .auth-subtitle {
@@ -109,12 +120,12 @@
   }
 
   :global(.auth-link) {
-    color: var(--color-interactive);
+    color: var(--color-brand-primary, var(--color-interactive));
     font-weight: var(--font-medium);
   }
 
   :global(.auth-link):hover {
-    color: var(--color-interactive-hover);
+    color: var(--color-brand-primary-hover, var(--color-interactive-hover));
   }
 
   :global(.auth-hint) {
@@ -130,6 +141,6 @@
   }
 
   :global(.auth-back-link):hover {
-    color: var(--color-interactive);
+    color: var(--color-brand-primary, var(--color-interactive));
   }
 </style>
