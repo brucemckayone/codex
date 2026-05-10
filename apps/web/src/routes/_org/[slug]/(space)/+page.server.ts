@@ -10,9 +10,9 @@
  * clicking any pill navigates to /explore?category=X for the dedicated
  * filtered view. No per-category carousels are rendered inline.
  *
- * Each section carries an explicit `layout` tag (`spotlight | spread |
- * carousel | mosaic | editorial | bento`) so the renderer dispatches on
- * server-picked layouts instead of reinventing the rule in the template.
+ * Each section carries an explicit `layout` tag (`spotlight | carousel |
+ * mosaic | editorial | bento`) so the renderer dispatches on server-picked
+ * layouts instead of reinventing the rule in the template.
  *
  * See feed-types.ts for the FeedSection / FeedLayout contract and
  * +page.svelte for render dispatch.
@@ -102,11 +102,9 @@ function buildSections(all: ContentItem[]): FeedSection[] {
   }
 
   // ── Videos / Audio / Articles — each media type owns its layout ─────
-  // Audio always uses 'mosaic' (AudioWall) regardless of count: AudioWall is
-  // density-aware and renders sparse (1–2), standard (3–8), and dense (>8)
-  // states without falling back to a generic carousel. Articles still need
-  // EDITORIAL_MIN items because the 60/40 editorial split looks unbalanced
-  // with one or two pieces.
+  // Audio always picks 'mosaic' (AudioWall) — AudioWall handles its own
+  // sparse/standard density. Articles need EDITORIAL_MIN because the 60/40
+  // editorial split looks unbalanced with one or two pieces.
   const EDITORIAL_MIN = 3;
   const byType = [
     {

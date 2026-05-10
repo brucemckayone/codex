@@ -24,12 +24,14 @@
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { getThumbnailUrl, getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
   import {
+    eq,
     hydrateIfNeeded,
     libraryCollection,
     loadSubscriptionFromServer,
     subscriptionCollection,
     useLiveQuery,
     type LibraryItem,
+    type SubscriptionItem,
   } from '$lib/collections';
   import { filterLibraryItemsByOrg } from '$lib/library/filter-by-org';
   import { followingStore } from '$lib/client/following.svelte';
@@ -200,14 +202,30 @@
   let accessChecked = $state(false);
   let hasActiveMembership = $state(false);
 
-  const hasOrgAccess = $derived.by(() => {
-    if (!browser || !data.org?.id) return false;
-    if (!user) return false;
-    if (hasActiveMembership) return true;
-    const entry = subscriptionCollection?.state.get(data.org.id);
-    if (!entry) return false;
-    return entry.status === 'active' || entry.status === 'cancelling';
-  });
+  // Subscription presence is sourced from TanStack DB so it participates in
+  // collection reactivity (live updates after checkout/cancellation flows
+  // propagate without the parent needing to manually re-read state).
+  const subQuery = useLiveQuery(
+    (q) =>
+      q
+        .from({ s: subscriptionCollection })
+        .where(({ s }) => eq(s.organizationId, data.org.id)),
+    [() => data.org?.id],
+    { ssrData: [] as SubscriptionItem[] }
+  );
+
+  const hasActiveSubscription = $derived(
+    (subQuery.data ?? []).some(
+      (s) => s.status === 'active' || s.status === 'cancelling'
+    )
+  );
+
+  const hasOrgAccess = $derived(
+    !!browser &&
+      !!data.org?.id &&
+      !!user &&
+      (hasActiveMembership || hasActiveSubscription)
+  );
 
   const shouldShowSubscribeCTA = $derived(
     !!data.org?.id && accessChecked && !hasOrgAccess
@@ -228,14 +246,23 @@
 
     const orgId = data.org.id;
     const orgSlug = data.org.slug;
+    let cancelled = false;
+
     void Promise.allSettled([
       getMyMembership(orgId).then((m) => {
+        if (cancelled) return;
+        // 'invited' members haven't accepted yet — still treat them as
+        // outsiders for CTA purposes.
         hasActiveMembership = !!m?.role && m.status === 'active';
       }),
       loadSubscriptionFromServer(orgId, orgSlug),
     ]).then(() => {
-      accessChecked = true;
+      if (!cancelled) accessChecked = true;
     });
+
+    return () => {
+      cancelled = true;
+    };
   });
 
   // Follow toggle — reads from followingStore (localStorage-backed, reactive)
@@ -1225,20 +1252,10 @@
     padding-block: var(--space-6);
   }
 
-  /* Carousel.svelte defaults to ContentCard tiles (max-width 400px,
-     scroll-snap-align: start). For the Spotlight carousel we want
-     peek-style pagination — each slide is 90vw with the two neighbours
-     peeking on either side. The track gets `padding-inline: 5vw` so
-     the first/last slides are *visually* centred at scroll-start /
-     scroll-end (instead of clamping flush against the viewport edge,
-     which `scroll-snap-align: center` cannot fix on its own — the
-     browser refuses to scroll past 0). Math: slide=90vw + padding=5vw
-     each side fits exactly 100vw, so slide 1 spans 5vw–95vw centred,
-     with a 5vw peek of slide 2 on the right and 5vw of empty padding
-     on the left (no left neighbour exists). Middle slides get
-     symmetric peek of both prev and next. Using vw instead of % avoids
-     the flex-basis-of-content-box trap (padding shrinking the
-     percentage reference). */
+  /* Peek-style pagination: 90vw slide + 5vw track padding each side
+     centres slide 1 at scroll-start (scroll-snap-align alone can't —
+     the browser refuses to scroll past 0). vw not % because percentages
+     resolve against the padded content box and shrink the slide. */
   .spotlight-carousel :global(.carousel__track) {
     padding-inline: 5vw;
     scroll-padding-inline: 0;
@@ -1251,13 +1268,9 @@
     scroll-snap-align: center;
   }
 
-  /* Desktop peek expansion — narrower slides + wider track padding so
-     adjacent featured items read as visible content rather than a thin
-     strip. Mobile keeps 90vw / 5vw because the small absolute peek
-     (~20px on a 390-wide phone) is fine at thumb-scroll distance;
-     desktop's 5vw peek (~72px on a 1440 monitor) was too easy to read
-     as page gap. 80vw / 10vw on desktop gives ~144px of visible card
-     content peeking on each side. */
+  /* Desktop: 80vw / 10vw so the peek (~144px on a 1440 monitor) reads
+     as visible content. Mobile's 5vw peek (~20px) is fine at thumb
+     distance but gets misread as page gap on desktop. */
   @media (--breakpoint-md) {
     .spotlight-carousel :global(.carousel__track) {
       padding-inline: 10vw;

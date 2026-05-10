@@ -176,19 +176,10 @@
   let previewActive = $state(false);
   let previewEl = $state<HTMLVideoElement | null>(null);
 
-  // ── Slide-active preview activation ────────────────────────────
-  // When the spotlight is wrapped in a Carousel, the user expects the
-  // currently-visible slide's preview to autoplay (not just on hover) —
-  // this is the "auto-playing HLS preview when slide is active" behaviour
-  // confirmed in the plan. An IntersectionObserver on the card element
-  // fires `slideActive=true` once ≥60% of the card is in the viewport,
-  // and `previewVisible` ORs that with the existing hover/focus state so
-  // both pathways work. Threshold 0.6 (not 0.5) avoids ambiguous mid-snap
-  // states where two slides briefly each show ~50%.
-  //
-  // Reduced-motion users opt out of slide-active activation entirely —
-  // the IO is never bound. They can still trigger preview on explicit
-  // hover/focus, which is a deliberate gesture rather than ambient motion.
+  // ── On-screen preview activation ───────────────────────────────
+  // Threshold 0.6 (not 0.5) so adjacent slides in a carousel don't both
+  // claim "active" at mid-snap. Reduced-motion users opt out — the IO is
+  // never bound, hover/focus still works as a deliberate gesture.
   let cardEl = $state<HTMLElement | null>(null);
   let slideActive = $state(false);
 
@@ -257,6 +248,16 @@
   }
 </script>
 
+{#snippet audioOverlayContent()}
+  <div class="spotlight__waveform" aria-hidden="true">
+    <AudioWaveform id={item.id} variant="thumb" />
+  </div>
+  <span class="spotlight__type-chip">
+    <MusicIcon size={14} aria-hidden="true" />
+    <span>Audio</span>
+  </span>
+{/snippet}
+
 <section
   class="spotlight"
   aria-labelledby={titleId}
@@ -284,7 +285,6 @@
       />
       <div class="spotlight__card-veil" aria-hidden="true"></div>
 
-      <!-- Content layer — always above the shader/veil -->
       <div class="spotlight__content">
         {#if hasImage && thumbnail}
           <a
@@ -292,7 +292,6 @@
             {href}
             tabindex="-1"
             aria-hidden="true"
-            data-preview-active={previewVisible}
             data-audio-overlay={contentType === 'audio'}
           >
             <img
@@ -309,12 +308,9 @@
             />
 
             {#if canPreview}
-              <!-- Lazy-attached preview video. Element stays mounted so the
-                   cross-fade has a target, but `src` only sets once the
-                   user hovers OR the carousel pages this slide into view —
-                   avoids prefetching ~2MB of HLS for every landing-page
-                   visit. The `preload="none"` + no-src-pre-activation combo
-                   keeps the idle network silent. -->
+              <!-- Element stays mounted so the cross-fade has a target;
+                   `src` only attaches on hover or slide-active to avoid
+                   prefetching ~2MB of HLS for every landing-page visit. -->
               <video
                 bind:this={previewEl}
                 class="spotlight__preview-video"
@@ -330,80 +326,39 @@
             {/if}
 
             {#if contentType === 'audio'}
-              <!--
-                Audio-with-thumbnail overlay. The thumbnail becomes
-                atmospheric backdrop (object-fit: cover + dimming gradient
-                via CSS) and the waveform overlays as the primary type
-                signal. Same `currentColor` (fixed white) treatment as the
-                no-thumb fallback so the bars stay legible against any
-                photo. Without this, the thumb sat letterboxed in a sea
-                of black — see commit history / image-backdrop iteration
-                for context.
-              -->
-              <div class="spotlight__waveform" aria-hidden="true">
-                <AudioWaveform id={item.id} variant="thumb" />
-              </div>
-              <span class="spotlight__type-chip">
-                <MusicIcon size={14} aria-hidden="true" />
-                <span>Audio</span>
-              </span>
+              <!-- Cover (not letterbox) so 16:9 podcast thumbs don't sit
+                   in a sea of black; waveform + vignette do the type-signal
+                   work. Fixed-white currentColor for legibility against any
+                   photo. -->
+              {@render audioOverlayContent()}
             {/if}
           </a>
         {:else if hasAudioSignature}
-          <!--
-            Audio-without-thumbnail fallback. Mirrors the structure of the
-            image column (anchor + absolutely-positioned visual + label) so
-            the 60/40 grid keeps its rhythm. The waveform inherits
-            `currentColor` from `.spotlight__image--audio`, which is bound
-            to a fixed-white token — `--color-player-*` is unsafe here for
-            the same reason the body column uses fixed white (see
-            feedback_player_tokens_for_dark_overlays). The `MUSIC` chip is
-            decorative reinforcement; the eyebrow + CTA already announce
-            audio semantically.
-          -->
+          <!-- Audio-without-thumbnail fallback. Waveform inherits fixed-white
+               currentColor from `.spotlight__image--audio` —
+               `--color-player-*` is org-overridable (see
+               feedback_player_tokens_for_dark_overlays). -->
           <a
             class="spotlight__image spotlight__image--audio"
             {href}
             tabindex="-1"
             aria-hidden="true"
           >
-            <div class="spotlight__waveform" aria-hidden="true">
-              <AudioWaveform id={item.id} variant="thumb" />
-            </div>
-            <span class="spotlight__type-chip">
-              <MusicIcon size={14} aria-hidden="true" />
-              <span>Audio</span>
-            </span>
+            {@render audioOverlayContent()}
           </a>
         {:else if hasVideoSignature}
-          <!--
-            Video-without-thumbnail fallback. Two sub-branches:
-            (1) `canPreview` — render the same lazy `<video>` element used
-                in the thumbnailed path. The IntersectionObserver above
-                attaches the source on slide-active or hover. The element
-                stretches to fill the column (`object-fit: cover`) so the
-                fallback reads cinematically rather than letterboxed.
-            (2) No previewUrl — render a static FilmIcon centred over the
-                same brand radial gradient as the audio fallback, with a
-                "WATCH" chip in the bottom-left. FilmIcon is the codebase's
-                canonical motion-cell signature (used in studio media
-                library, content kind-lines).
-            Both sub-branches preserve the 60/40 grid via the
-            `data-has-video-fallback='true'` attribute on `<section>`.
-          -->
+          <!-- Video-without-thumbnail fallback. FilmIcon is the codebase's
+               canonical motion-cell signature (studio media library,
+               content kind-lines) — preserve that recognition cue. -->
+
           <a
             class="spotlight__image spotlight__image--video"
             {href}
             tabindex="-1"
             aria-hidden="true"
-            data-preview-active={previewVisible}
           >
-            <!-- Static FilmIcon "still" — always rendered for video
-                 fallback, even when canPreview is true. The preview video
-                 (when present) crossfades over this still on slide-active
-                 or hover; crossfading back leaves the FilmIcon visible
-                 instead of an empty column. Mirrors the thumb + video
-                 crossfade pattern in the thumbnailed branch. -->
+            <!-- Static still — preview video crossfades over this so the
+                 column never reads as empty when the preview is paused. -->
             <span class="spotlight__video-icon" aria-hidden="true">
               <FilmIcon size={48} />
             </span>
@@ -499,8 +454,8 @@
     position: relative;
     display: grid;
     place-items: center;
-    padding-block: var(--space-12);
-    padding-inline: var(--space-4);
+    padding-block: var(--space-6);
+    padding-inline: var(--space-3);
   }
 
   .spotlight__container {
@@ -532,19 +487,25 @@
     box-shadow: var(--shadow-xl);
     overflow: hidden;
     isolation: isolate;
-    min-height: min(80vh, 720px);
+    /* Phone target — fit the entire card within a single viewport glance
+       so the CTA isn't pushed below the fold. Cap so tall phones (Pixel
+       7 Pro, Z Fold) don't bloat past readability. Desktop bumps to the
+       cinematic min(80vh, 720px) under @media (--breakpoint-md). */
+    min-height: min(55vh, 460px);
     transition:
       transform var(--duration-slow) var(--ease-smooth),
       box-shadow var(--duration-slow) var(--ease-smooth),
       border-color var(--duration-fast) var(--ease-default);
   }
 
-  /* Mobile @media block intentionally lives AFTER the defaults below so
-     its rules override them via cascade order — see the block at the
-     end of this stylesheet ("MOBILE TIGHTENING"). */
-
   @media (--breakpoint-md) {
+    .spotlight {
+      padding-block: var(--space-12);
+      padding-inline: var(--space-4);
+    }
+
     .spotlight__card {
+      min-height: min(80vh, 720px);
       /* 60/40 split — image claims the larger rectangle, body column
          the tighter reading space. `minmax(0, ...)` on both tracks
          prevents long titles from blowing out the body column. */
@@ -889,7 +850,7 @@
     display: flex;
     align-items: center;
     min-width: 0;
-    padding: var(--space-8) var(--space-6);
+    padding: var(--space-4);
   }
 
   @media (--breakpoint-md) {
@@ -959,33 +920,36 @@
   .spotlight__title {
     margin: 0;
     font-family: var(--font-heading, var(--font-sans));
-    /* Cinematic scale — fluid between mobile (2rem) and desktop (3.5rem).
-       Scaled down from the original 6vw/5rem spec because the title lives
-       in the 40% body column on desktop (≈500px wide); 5rem on a single
-       unbreakable word (org-generated test slugs like "geargaegaerg")
-       overflowed the column. Still reads as a cover line, not a card. */
-    font-size: clamp(2rem, 3.2vw, 3.5rem);
+    /* Phone-readable scale (24-30px). Glanceable card beats grandstanding
+       type when the whole spotlight has to fit a thumb-scroll viewport.
+       Desktop bumps to the cinematic clamp under @media (--breakpoint-md). */
+    font-size: clamp(1.5rem, 6.5vw, 1.875rem);
     font-weight: var(--font-semibold);
     line-height: var(--leading-tight);
-    /* Force long unbreakable words (test data + real-world long titles)
-       to wrap mid-word rather than overflow the column. `overflow-wrap`
-       is the modern spelling; `word-break: break-word` is legacy Safari. */
+    /* `overflow-wrap` is the modern spelling; `word-break: break-word` is
+       legacy Safari. Both required so unbreakable words wrap mid-word
+       rather than overflow the column. */
     overflow-wrap: anywhere;
     word-break: break-word;
     hyphens: auto;
-    /* Fixed white — shader backdrop + dark veil make this a promotional
-       light-on-dark poster where the title MUST stay white regardless of
-       org brand. Can't rely on `--color-player-text` here because
-       org-brand.css lets orgs rebind it via `--brand-player-text`
-       (of-blood-and-bones sets it to their brand red, which matches the
-       shader and renders the title invisible). Same reasoning as the
-       `hsl(0 0% 0% / α)` veil — an explicit neutral is the right tool
-       when the cascade can't guarantee legibility. */
+    /* Fixed white — `--color-player-text` is org-overridable via
+       `--brand-player-text` (of-blood-and-bones rebinds to brand red,
+       which matches the shader and renders the title invisible). */
     color: hsl(0 0% 100%);
     display: -webkit-box;
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+
+  @media (--breakpoint-md) {
+    .spotlight__title {
+      /* Cinematic clamp scaled to fit the 40% body column (~500px wide)
+         on desktop. The original 5rem floor on unbreakable words
+         (org-generated test slugs like "geargaegaerg") overflowed. */
+      font-size: clamp(2rem, 3.2vw, 3.5rem);
+      -webkit-line-clamp: 3;
+    }
   }
 
   .spotlight__title-link {
@@ -1009,16 +973,24 @@
 
   .spotlight__description {
     margin: 0;
-    font-size: var(--text-lg);
+    /* Phone size (text-sm) clamped to 2 lines so it acts as an editorial
+       subhead, not a paragraph. Desktop bumps to text-lg + 3 lines. */
+    font-size: var(--text-sm);
     line-height: var(--leading-relaxed);
-    /* Secondary white at 80% alpha — same reason as the title: fixed
-       neutral because the org-overridable player-text family can collapse
-       to brand colours that don't contrast against the shader. */
+    /* Fixed neutral white — player-text family is org-overridable and can
+       collapse to brand colours that don't contrast against the shader. */
     color: hsl(0 0% 100% / 0.8);
     display: -webkit-box;
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+
+  @media (--breakpoint-md) {
+    .spotlight__description {
+      font-size: var(--text-lg);
+      -webkit-line-clamp: 3;
+    }
   }
 
   /* ── Tags ──────────────────────────────────────────────────── */
@@ -1167,50 +1139,6 @@
        lands) but the opacity rule above never lifts. */
     .spotlight__preview-video[data-visible='true'] {
       opacity: 0;
-    }
-  }
-
-  /* ── MOBILE TIGHTENING ──────────────────────────────────────────
-     Placed at the end of the stylesheet so cascade order beats the
-     defaults above (Svelte scoped styles still respect normal source
-     order — equal-specificity later rules win). The whole spotlight
-     should fit within a single phone viewport for glanceable
-     comprehension; otherwise users have to scroll just to see the
-     CTA, which buries the action. */
-  @media (--below-md) {
-    .spotlight {
-      padding-block: var(--space-6);
-      padding-inline: var(--space-3);
-    }
-
-    .spotlight__card {
-      /* Phone target: ~55vh so the entire card fits within a viewport
-         glance without scrolling. Cap at 460px so tall phones (Pixel
-         7 Pro, Z Fold etc.) don't bloat the card past readability. */
-      min-height: min(55vh, 460px);
-    }
-
-    .spotlight__body {
-      /* Tighter than desktop's `space-8 space-6` so body content has
-         room without forcing a scrollable card. */
-      padding: var(--space-4) var(--space-4);
-    }
-
-    .spotlight__title {
-      /* Step the cinematic title down to a phone-readable scale:
-         24-30px instead of the desktop floor of 32px. Glanceable card
-         beats grandstanding type when the whole spotlight has to fit
-         in a single thumb-scroll viewport. */
-      font-size: clamp(1.5rem, 6.5vw, 1.875rem);
-      -webkit-line-clamp: 2;
-    }
-
-    .spotlight__description {
-      /* Body copy at text-sm (14px) instead of text-lg (18px), clamped
-         to 2 lines so it acts as an editorial subhead rather than a
-         paragraph. Anyone wanting more reads the detail page. */
-      font-size: var(--text-sm);
-      -webkit-line-clamp: 2;
     }
   }
 </style>
