@@ -293,6 +293,7 @@
             tabindex="-1"
             aria-hidden="true"
             data-preview-active={previewVisible}
+            data-audio-overlay={contentType === 'audio'}
           >
             <img
               class="spotlight__image-still"
@@ -326,6 +327,26 @@
                 tabindex="-1"
                 data-visible={previewVisible}
               ></video>
+            {/if}
+
+            {#if contentType === 'audio'}
+              <!--
+                Audio-with-thumbnail overlay. The thumbnail becomes
+                atmospheric backdrop (object-fit: cover + dimming gradient
+                via CSS) and the waveform overlays as the primary type
+                signal. Same `currentColor` (fixed white) treatment as the
+                no-thumb fallback so the bars stay legible against any
+                photo. Without this, the thumb sat letterboxed in a sea
+                of black — see commit history / image-backdrop iteration
+                for context.
+              -->
+              <div class="spotlight__waveform" aria-hidden="true">
+                <AudioWaveform id={item.id} variant="thumb" />
+              </div>
+              <span class="spotlight__type-chip">
+                <MusicIcon size={14} aria-hidden="true" />
+                <span>Audio</span>
+              </span>
             {/if}
           </a>
         {:else if hasAudioSignature}
@@ -633,13 +654,52 @@
     }
   }
 
-  /* Audio spotlight keeps a square feeling within the cinema rectangle —
-     letterbox the 1:1 thumbnail with `object-fit: contain` on audio
-     (album art is rarely croppable). */
-  .spotlight[data-content-type='audio'] .spotlight__image-still {
-    object-fit: contain;
-    object-position: center;
-    background: hsl(0 0% 0% / 0.35);
+  /* Audio thumbnail behaviour: image becomes atmospheric backdrop, the
+     waveform overlay carries the type signal. We deliberately do NOT
+     letterbox here — podcast thumbs are often 16:9 photos that turn
+     into a thin band of pixels in a black sea when contained. Cover
+     fills the column; the dimming gradient + waveform overlay do the
+     work of "this is audio, not a tiny photo". */
+  .spotlight__image[data-audio-overlay='true']::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    /* Soft radial vignette darkens the image centre so the waveform
+       has guaranteed contrast regardless of what the photo contains.
+       Edge tones stay legible too — we don't fully blanket the image. */
+    background: radial-gradient(
+      ellipse at center,
+      hsl(0 0% 0% / 0.55) 0%,
+      hsl(0 0% 0% / 0.35) 60%,
+      hsl(0 0% 0% / 0.45) 100%
+    );
+  }
+
+  .spotlight__image[data-audio-overlay='true'] .spotlight__image-still {
+    /* Mute the photo's saturation/brightness so colours don't fight the
+       white waveform on top. Recovers slightly on hover (audio-row
+       pattern) so the image still has interactive warmth. */
+    filter: saturate(0.7) brightness(0.85);
+  }
+
+  /* When the waveform overlays a thumbnail, fix its colour to white +
+     position it on top of both image and vignette. The fallback (no
+     thumb) variant uses the same .spotlight__waveform class but its
+     parent .spotlight__image--audio sets the colour and place-items
+     centring; here we have to do the centring ourselves because the
+     image is positioned absolutely beneath. */
+  .spotlight__image[data-audio-overlay='true'] .spotlight__waveform {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    z-index: 3;
+    /* 60/55% matches the no-thumb fallback so the waveform reads at the
+       same scale across both states. */
+    width: min(60%, 24rem);
+    height: 50%;
+    color: hsl(0 0% 100%);
   }
 
   .spotlight__image-still {
@@ -659,12 +719,18 @@
     transform: scale(var(--card-image-hover-scale, 1.05));
   }
 
-  /* Audio hover — brighten the thumbnail subtly as a feedback cue (there's
-     no preview playback for audio; the still just warms up). Matches the
-     ContentCard audio row hover treatment. */
-  .spotlight[data-content-type='audio'] .spotlight__card:hover
-    .spotlight__image-still {
-    filter: brightness(1.08);
+  /* Audio hover — soften the dim, warm the photo, and lift the waveform
+     scale slightly. Composing all three filters means the hover state
+     keeps the "image as backdrop, waveform as subject" hierarchy — we
+     never let the photo jump back to full saturation under the bars. */
+  .spotlight__image[data-audio-overlay='true']:hover .spotlight__image-still,
+  .spotlight__card:hover .spotlight__image[data-audio-overlay='true'] .spotlight__image-still {
+    filter: saturate(0.85) brightness(0.95);
+  }
+
+  .spotlight__image[data-audio-overlay='true']:hover .spotlight__waveform,
+  .spotlight__card:hover .spotlight__image[data-audio-overlay='true'] .spotlight__waveform {
+    transform: scale(1.03);
   }
 
   /* ── Audio fallback (no thumbnail) ─────────────────────────────
