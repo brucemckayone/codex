@@ -25,7 +25,6 @@
   import { getThumbnailUrl, getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
   import {
     hydrateIfNeeded,
-    isDismissed,
     libraryCollection,
     subscriptionCollection,
     useLiveQuery,
@@ -46,9 +45,6 @@
   // Hero ref drives the sticky-subscribe bar's visibility — the bar appears
   // once the hero scrolls above the viewport (mirrors the audio mini-player).
   let heroEl = $state<HTMLElement | null>(null);
-  // Initial dismissal is read once on mount; in-tab dismiss is handled inside
-  // SubscribeStickyBar. The dismiss collection has a 4-day TTL.
-  let initiallyDismissed = $state(false);
 
   // Category-bar sticky detection — IntersectionObserver watches a
   // 1px sentinel placed above the bar. When the sentinel scrolls out
@@ -94,13 +90,6 @@
       if (!e.matches && videoActive) videoActive = false;
     };
     mql.addEventListener('change', handler);
-
-    // Read dismissal once on mount so the lazy-expire side-effect inside
-    // isDismissed() doesn't run during reactive re-renders.
-    if (data.org?.id) {
-      initiallyDismissed = isDismissed(`subscribe-cta:${data.org.id}`);
-    }
-
     return () => mql.removeEventListener('change', handler);
   });
 
@@ -513,14 +502,14 @@
     and Free samples.
   -->
 
-  <!-- Snippet: compact ContentCard for grid + non-hero carousel tiles.
-       The optional `normalizeRatio` argument forces every card in a row
-       to 16:9 so mixed-type carousels (Free samples, per-category) read
-       as one rhythm instead of a jagged mix of per-type ratios. -->
+  <!-- ContentCard for grid cells + non-hero carousel tiles. The optional
+       `normalizeRatio` forces 16:9 thumbs so mixed-type rows (Free samples,
+       per-category) read as one rhythm instead of jagged per-type ratios. -->
   {#snippet gridCard(c, variant, normalizeRatio = false)}
     <ContentCard
       {variant}
       {normalizeRatio}
+      autoPromoteAudio
       id={c.id}
       title={c.title}
       thumbnail={c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null}
@@ -607,10 +596,8 @@
           </div>
         {:else}
           <!-- Default: horizontally-scrolling carousel. Mixed-type rows
-               keep this layout — each card renders as its content type
-               (audio rows via ContentCard's auto-promotion gate, video/
-               article as default tiles), so the row reads heterogeneously
-               by design rather than collapsing every item to one shape. -->
+               render heterogeneously — audio uses ContentCard's auto-
+               promote row, video/article keep the vertical tile. -->
           <Carousel
             items={section.items}
             itemMinWidth="16rem"
@@ -692,13 +679,11 @@
           </a>
         </div>
       </header>
+      <!-- Masonry packs audio rows alongside taller video/article tiles
+           via the shared utility — each item keeps its native aspect
+           rather than being normalised to one rhythm. -->
       <div class="content-grid content-grid--masonry">
         {#each data.allContent as item (item.id)}
-          <!-- Heterogeneous catalogue — masonry packs audio rows alongside
-               taller video/article tiles. Per-cell row-spans come from
-               ContentCard's data-content-type via the utility CSS, so
-               each item keeps its native aspect rather than being
-               normalised to one rhythm. -->
           {@render gridCard(item, 'grid', false)}
         {/each}
       </div>
@@ -777,7 +762,6 @@
     isAuthenticated={!!user}
     anchor={heroEl}
     dismissKey={`subscribe-cta:${data.org.id}`}
-    initiallyDismissed={initiallyDismissed}
   />
 {/if}
 
@@ -1209,42 +1193,46 @@
 
   /* Carousel.svelte defaults to ContentCard tiles (max-width 400px,
      scroll-snap-align: start). For the Spotlight carousel we want
-     peek-style pagination — each slide ~90% of the viewport with the
-     two neighbours visibly peeking on either side, so the user knows
-     more featured items exist without having to swipe blind. Centre
-     alignment gives symmetric peek on middle slides, and the browser
-     handles edge slides (first/last) gracefully — they butt against
-     the start/end of the track and still snap cleanly. flex: 0 0 90%
-     + min-width: 0 prevents the Spotlight's intrinsic min-content
-     (~600px on mobile) from bloating the slide past 90% of the
-     viewport. Scoped to .spotlight-carousel so other carousels keep
-     their tile-grid behaviour. */
-  .spotlight-carousel :global(.carousel__item) {
-    flex: 0 0 90%;
-    min-width: 0;
-    max-width: 90%;
-    scroll-snap-align: center;
-  }
-
+     peek-style pagination — each slide is 90vw with the two neighbours
+     peeking on either side. The track gets `padding-inline: 5vw` so
+     the first/last slides are *visually* centred at scroll-start /
+     scroll-end (instead of clamping flush against the viewport edge,
+     which `scroll-snap-align: center` cannot fix on its own — the
+     browser refuses to scroll past 0). Math: slide=90vw + padding=5vw
+     each side fits exactly 100vw, so slide 1 spans 5vw–95vw centred,
+     with a 5vw peek of slide 2 on the right and 5vw of empty padding
+     on the left (no left neighbour exists). Middle slides get
+     symmetric peek of both prev and next. Using vw instead of % avoids
+     the flex-basis-of-content-box trap (padding shrinking the
+     percentage reference). */
   .spotlight-carousel :global(.carousel__track) {
+    padding-inline: 5vw;
     scroll-padding-inline: 0;
   }
 
-  /* Force the Spotlight inside each slide to respect the slide's width
-     instead of pushing wider via its own min-content sizing. Without
-     this, the section's intrinsic min-width (driven by the title or
-     body column padding) ignores the parent's flex-basis cap. */
+  .spotlight-carousel :global(.carousel__item) {
+    flex: 0 0 90vw;
+    min-width: 0;
+    max-width: 90vw;
+    scroll-snap-align: center;
+  }
+
+  /* Strip the Spotlight section's default inline padding inside the
+     carousel — the slide IS the card. Any inner gutter reads as visual
+     "spacing" between peeking adjacent slides. width: 100% + min-width
+     0 prevents the section's intrinsic min-content from overshooting
+     the slide width on mobile. */
   .spotlight-carousel :global(.spotlight) {
     width: 100%;
     min-width: 0;
+    padding-inline: 0;
   }
 
   /* Let the spotlight card fill the slide. The single-spotlight case
-     uses `.spotlight__card { max-width: calc(--space-24 * 10) }` (~960px)
-     to keep the hero readable on huge monitors; in the carousel that
-     cap leaves an empty padding gap on each side of the card so peek
-     shows nothing of the next slide's actual content. Removing the cap
-     here lets adjacent slides actually peek as visible cards. */
+     keeps its `max-width: calc(--space-24 * 10)` (~960px) cap to stay
+     readable as a lone hero on huge monitors; in the carousel that cap
+     would leave empty space on each side and break the peek illusion
+     (peek would show empty padding rather than the next card). */
   .spotlight-carousel :global(.spotlight__card) {
     max-width: none;
   }

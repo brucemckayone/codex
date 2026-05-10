@@ -539,31 +539,9 @@
       border-color var(--duration-fast) var(--ease-default);
   }
 
-  /* Mobile + small tablet — tighten the section so the card doesn't
-     swallow the entire viewport. Default `min-height: min(80vh, 720px)`
-     reads as ~80% of a phone screen, which buries the rest of the feed
-     below the fold; `min(60vh, 520px)` keeps the spotlight imposing
-     without monopolising. The image column also shrinks: its default
-     `min-height: calc(--space-24 * 4)` (384px) plus the body column
-     stacked below produced an ~830px card on a 390-wide viewport.
-     Halving the image-column floor gives the body its breathing room
-     back without cutting the type-signature visibility. Body column
-     padding tightens too — desktop's space-8/space-6 reads as airy
-     waste on a phone. */
-  @media (--below-md) {
-    .spotlight {
-      padding-block: var(--space-6);
-      padding-inline: var(--space-3);
-    }
-
-    .spotlight__card {
-      min-height: min(60vh, 520px);
-    }
-
-    .spotlight__body {
-      padding: var(--space-6) var(--space-5);
-    }
-  }
+  /* Mobile @media block intentionally lives AFTER the defaults below so
+     its rules override them via cascade order — see the block at the
+     end of this stylesheet ("MOBILE TIGHTENING"). */
 
   @media (--breakpoint-md) {
     .spotlight__card {
@@ -671,10 +649,12 @@
        let the body decide the final height. The previous floor of
        `--space-24 * 4` (384px) made mobile cards a near-full-screen
        image+body stack at ~830px tall on a 390-wide viewport — half
-       the stretch was ambient gradient under a tiny FilmIcon. Halving
-       to `--space-24 * 2` (192px) keeps the type-signature visible
-       while letting the body claim the rest of the card height back. */
-    min-height: calc(var(--space-24) * 2);
+       the stretch was ambient gradient under a tiny FilmIcon.
+       `--space-24 * 1.5` (144px) keeps the type-signature visible
+       while letting the body claim the rest of the card height back.
+       Desktop reverts to `min-height: 0; height: 100%` via the
+       breakpoint-md override below. */
+    min-height: calc(var(--space-24) * 1.5);
   }
 
   @media (--breakpoint-md) {
@@ -1187,6 +1167,50 @@
        lands) but the opacity rule above never lifts. */
     .spotlight__preview-video[data-visible='true'] {
       opacity: 0;
+    }
+  }
+
+  /* ── MOBILE TIGHTENING ──────────────────────────────────────────
+     Placed at the end of the stylesheet so cascade order beats the
+     defaults above (Svelte scoped styles still respect normal source
+     order — equal-specificity later rules win). The whole spotlight
+     should fit within a single phone viewport for glanceable
+     comprehension; otherwise users have to scroll just to see the
+     CTA, which buries the action. */
+  @media (--below-md) {
+    .spotlight {
+      padding-block: var(--space-6);
+      padding-inline: var(--space-3);
+    }
+
+    .spotlight__card {
+      /* Phone target: ~55vh so the entire card fits within a viewport
+         glance without scrolling. Cap at 460px so tall phones (Pixel
+         7 Pro, Z Fold etc.) don't bloat the card past readability. */
+      min-height: min(55vh, 460px);
+    }
+
+    .spotlight__body {
+      /* Tighter than desktop's `space-8 space-6` so body content has
+         room without forcing a scrollable card. */
+      padding: var(--space-4) var(--space-4);
+    }
+
+    .spotlight__title {
+      /* Step the cinematic title down to a phone-readable scale:
+         24-30px instead of the desktop floor of 32px. Glanceable card
+         beats grandstanding type when the whole spotlight has to fit
+         in a single thumb-scroll viewport. */
+      font-size: clamp(1.5rem, 6.5vw, 1.875rem);
+      -webkit-line-clamp: 2;
+    }
+
+    .spotlight__description {
+      /* Body copy at text-sm (14px) instead of text-lg (18px), clamped
+         to 2 lines so it acts as an editorial subhead rather than a
+         paragraph. Anyone wanting more reads the detail page. */
+      font-size: var(--text-sm);
+      -webkit-line-clamp: 2;
     }
   }
 </style>
