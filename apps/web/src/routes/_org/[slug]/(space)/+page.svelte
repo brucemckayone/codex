@@ -18,11 +18,19 @@
   import ArticleEditorial from '$lib/components/content/ArticleEditorial.svelte';
   import DiscoverMix from '$lib/components/content/DiscoverMix.svelte';
   import SubscribeCTA from '$lib/components/subscription/SubscribeCTA.svelte';
+  import SubscribeStickyBar from '$lib/components/subscription/SubscribeStickyBar.svelte';
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { getThumbnailUrl, getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
-  import { hydrateIfNeeded, libraryCollection, useLiveQuery, type LibraryItem } from '$lib/collections';
+  import {
+    hydrateIfNeeded,
+    isDismissed,
+    libraryCollection,
+    subscriptionCollection,
+    useLiveQuery,
+    type LibraryItem,
+  } from '$lib/collections';
   import { filterLibraryItemsByOrg } from '$lib/library/filter-by-org';
   import { followingStore } from '$lib/client/following.svelte';
   import { followOrganization, unfollowOrganization } from '$lib/remote/org.remote';
@@ -34,6 +42,13 @@
 
   let videoActive = $state(false);
   let isDesktop = $state(false);
+
+  // Hero ref drives the sticky-subscribe bar's visibility — the bar appears
+  // once the hero scrolls above the viewport (mirrors the audio mini-player).
+  let heroEl = $state<HTMLElement | null>(null);
+  // Initial dismissal is read once on mount; in-tab dismiss is handled inside
+  // SubscribeStickyBar. The dismiss collection has a 4-day TTL.
+  let initiallyDismissed = $state(false);
 
   // Category-bar sticky detection — IntersectionObserver watches a
   // 1px sentinel placed above the bar. When the sentinel scrolls out
@@ -79,6 +94,13 @@
       if (!e.matches && videoActive) videoActive = false;
     };
     mql.addEventListener('change', handler);
+
+    // Read dismissal once on mount so the lazy-expire side-effect inside
+    // isDismissed() doesn't run during reactive re-renders.
+    if (data.org?.id) {
+      initiallyDismissed = isDismissed(`subscribe-cta:${data.org.id}`);
+    }
+
     return () => mql.removeEventListener('change', handler);
   });
 
@@ -176,6 +198,17 @@
     orgId: data.org.id,
   }));
 
+  // Live subscription gate. Hides both the inline SubscribeCTA banner and
+  // the bottom sticky bar for users who already have an access-granting
+  // subscription to THIS org. Re-evaluates whenever subscriptionCollection
+  // mutates (Stripe webhook, cross-tab login, manual refresh).
+  const isSubscribed = $derived.by(() => {
+    if (!browser || !data.org?.id) return false;
+    const entry = subscriptionCollection?.state.get(data.org.id);
+    if (!entry) return false;
+    return entry.status === 'active' || entry.status === 'cancelling';
+  });
+
   // Follow toggle — reads from followingStore (localStorage-backed, reactive)
   const isFollowing = $derived(followingStore.get(data.org.id));
   let followLoading = $state(false);
@@ -249,7 +282,11 @@
 
 <div class="org-landing">
   <!-- Hero: full viewport, content anchored bottom-left, editorial -->
-  <section class="hero" class:hero--video-playing={videoActive && isDesktop}>
+  <section
+    class="hero"
+    class:hero--video-playing={videoActive && isDesktop}
+    bind:this={heroEl}
+  >
     <!-- Title lives OUTSIDE hero__content so it has no z-index isolation
          and mix-blend-mode: difference can reach the shader canvas -->
     <h1 class="hero__title">{orgName}</h1>
@@ -599,7 +636,7 @@
          needed — the price row is additive; its absence is a valid state.
          previewContent + memberCount props are wired even when undefined,
          so SubscribeCTA's internal guards decide whether to render each row. -->
-    {#if section.id === subscribeAnchorId && data.org?.id}
+    {#if section.id === subscribeAnchorId && data.org?.id && !isSubscribed}
       {@const orgId = data.org.id}
       {@const orgDisplayName = data.org.name ?? 'us'}
       {@const previewProp =
@@ -728,6 +765,20 @@
 
 {#if introVideoUrl && videoActive && !isDesktop}
   <IntroVideoModal open={true} src={introVideoUrl} onclose={() => { videoActive = false; }} />
+{/if}
+
+<!-- Sticky subscribe CTA — appears once the hero has scrolled above the
+     viewport (mirrors the audio mini-player's appearance pattern). Hidden
+     for users who are already subscribed to this org, and dismissable with
+     a 4-day TTL via the dismissalCollection. -->
+{#if data.org?.id && !isSubscribed}
+  <SubscribeStickyBar
+    orgName={orgName}
+    isAuthenticated={!!user}
+    anchor={heroEl}
+    dismissKey={`subscribe-cta:${data.org.id}`}
+    initiallyDismissed={initiallyDismissed}
+  />
 {/if}
 
 <style>
@@ -1156,23 +1207,27 @@
     padding-block: var(--space-6);
   }
 
-  /* Carousel.svelte hard-codes `.carousel__item { max-width: 400px }` for
-     its default ContentCard tiles. For full-bleed Spotlight pagination
-     we need slides to lock at exactly the viewport width — flex
-     defaults `min-width: auto` would let the Spotlight's min-content
-     (~600px on mobile) bloat the slide past the viewport. `flex: 0 0
-     100%` + `min-width: 0` + `max-width: 100%` pins each slide to the
-     carousel container's width and lets inner content shrink-to-fit
-     instead. Scoped to .spotlight-carousel so other carousels keep
+  /* Carousel.svelte defaults to ContentCard tiles (max-width 400px,
+     scroll-snap-align: start). For the Spotlight carousel we want
+     peek-style pagination — each slide ~90% of the viewport with the
+     two neighbours visibly peeking on either side, so the user knows
+     more featured items exist without having to swipe blind. Centre
+     alignment gives symmetric peek on middle slides, and the browser
+     handles edge slides (first/last) gracefully — they butt against
+     the start/end of the track and still snap cleanly. flex: 0 0 90%
+     + min-width: 0 prevents the Spotlight's intrinsic min-content
+     (~600px on mobile) from bloating the slide past 90% of the
+     viewport. Scoped to .spotlight-carousel so other carousels keep
      their tile-grid behaviour. */
   .spotlight-carousel :global(.carousel__item) {
-    flex: 0 0 100%;
+    flex: 0 0 90%;
     min-width: 0;
-    max-width: 100%;
+    max-width: 90%;
+    scroll-snap-align: center;
   }
 
   .spotlight-carousel :global(.carousel__track) {
-    scroll-padding-inline-start: 0;
+    scroll-padding-inline: 0;
   }
 
   /* Force the Spotlight inside each slide to respect the slide's width
@@ -1182,6 +1237,16 @@
   .spotlight-carousel :global(.spotlight) {
     width: 100%;
     min-width: 0;
+  }
+
+  /* Let the spotlight card fill the slide. The single-spotlight case
+     uses `.spotlight__card { max-width: calc(--space-24 * 10) }` (~960px)
+     to keep the hero readable on huge monitors; in the carousel that
+     cap leaves an empty padding gap on each side of the card so peek
+     shows nothing of the next slide's actual content. Removing the cap
+     here lets adjacent slides actually peek as visible cards. */
+  .spotlight-carousel :global(.spotlight__card) {
+    max-width: none;
   }
 
   .feed-section {
