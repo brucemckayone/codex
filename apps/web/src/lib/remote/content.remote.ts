@@ -240,6 +240,27 @@ export const getContentBatch = query.batch(z.string().uuid(), async (ids) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Default studio list shape — matches the query the post-redirect page mounts
+ * with when no URL params are present (apps/web/src/routes/_org/[slug]/studio/content/+page.svelte).
+ * Used by mutations below to refresh the canonical landing cache shape via
+ * SvelteKit single-flight refresh, so the list lands on fresh data.
+ *
+ * Filtered / paginated shapes (search, status, page > 1) are NOT refreshed
+ * here — they'd require client-side `submit().updates(...)` from each shape's
+ * call site, and the realistic post-mutation flow returns to defaults anyway.
+ */
+function defaultStudioListArgs(organizationId: string | null) {
+  if (!organizationId) return null;
+  return {
+    organizationId,
+    page: 1,
+    limit: 20,
+    sortBy: 'updatedAt' as const,
+    sortOrder: 'desc' as const,
+  };
+}
+
+/**
  * Delete content by ID
  *
  * Usage:
@@ -400,6 +421,11 @@ export const createContentForm = form(
         featured,
       });
 
+      // Single-flight refresh: ship fresh list data with the form response so
+      // the post-redirect /studio/content page lands on already-fresh cache.
+      const listArgs = defaultStudioListArgs(organizationId);
+      if (listArgs) void listContent(listArgs).refresh();
+
       return { success: true as const, contentId: result.id };
     } catch (error) {
       return {
@@ -532,6 +558,10 @@ export const updateContentForm = form(
         shaderPreset,
         featured,
       });
+
+      // Single-flight refresh: keep the studio list cache fresh after edits.
+      const listArgs = defaultStudioListArgs(organizationId);
+      if (listArgs) void listContent(listArgs).refresh();
 
       return { success: true as const, data: result };
     } catch (error) {

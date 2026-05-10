@@ -122,8 +122,21 @@ export class ImageProcessingService extends BaseService {
   }
 
   /**
-   * Process and store content thumbnail
-   * Uploads to R2 and updates content record
+   * Process and store content thumbnail.
+   *
+   * Replacement semantics — important invariant:
+   *   The R2 keys (sm/md/lg) are deterministic per `(creatorId, contentId)`,
+   *   so re-uploading a thumbnail OVERWRITES at the same keys. This means:
+   *     • the previous custom thumbnail is replaced atomically (no orphan);
+   *     • transcoding output (`media-thumbnails/{mediaId}/...`,
+   *       `waveforms/{mediaId}/...`) lives under different prefixes and is
+   *       NEVER touched by this method — those are owned by the transcoding
+   *       pipeline and serve as the immutable fallback.
+   *   Do NOT change the key shape to be timestamped or content-hashed without
+   *   adding an explicit "delete previous keys" step here, or the storage
+   *   layer will start accumulating orphans.
+   *
+   * Uploads to R2 and updates content record.
    */
   async processContentThumbnail(
     contentId: string,

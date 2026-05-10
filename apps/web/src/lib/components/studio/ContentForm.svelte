@@ -254,6 +254,21 @@
     });
   }
 
+  // Identity-tracked ref: fire success handler exactly once per submission.
+  // form.result stays truthy after first success; without this guard, any
+  // re-render re-runs the handler → duplicate toast + duplicate goto.
+  // A *new* result object (second submission) has a different identity,
+  // so the handler fires again as expected.
+  let lastHandledResult: unknown = null;
+  $effect(() => {
+    const result = form.result;
+    if (!result?.success) return;
+    if (result === lastHandledResult) return;
+    lastHandledResult = result;
+    if (isEdit) handleUpdateSuccess();
+    else handleCreateSuccess();
+  });
+
   // ── Publish / Unpublish ───────────────────────────────────────────────
   async function handlePublishToggle() {
     if (!content) return;
@@ -437,13 +452,6 @@
     <div class="body-slot">
       {#if showSuccess}
         <Alert variant="success">{m.studio_content_form_update_success()}</Alert>
-      {/if}
-
-      {#if !isEdit && createContentForm.result?.success}
-        {@const _ = handleCreateSuccess()}
-      {/if}
-      {#if isEdit && updateContentForm.result?.success}
-        {@const _ = handleUpdateSuccess()}
       {/if}
 
       {#if form.result?.error}
