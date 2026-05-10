@@ -539,6 +539,32 @@
       border-color var(--duration-fast) var(--ease-default);
   }
 
+  /* Mobile + small tablet — tighten the section so the card doesn't
+     swallow the entire viewport. Default `min-height: min(80vh, 720px)`
+     reads as ~80% of a phone screen, which buries the rest of the feed
+     below the fold; `min(60vh, 520px)` keeps the spotlight imposing
+     without monopolising. The image column also shrinks: its default
+     `min-height: calc(--space-24 * 4)` (384px) plus the body column
+     stacked below produced an ~830px card on a 390-wide viewport.
+     Halving the image-column floor gives the body its breathing room
+     back without cutting the type-signature visibility. Body column
+     padding tightens too — desktop's space-8/space-6 reads as airy
+     waste on a phone. */
+  @media (--below-md) {
+    .spotlight {
+      padding-block: var(--space-6);
+      padding-inline: var(--space-3);
+    }
+
+    .spotlight__card {
+      min-height: min(60vh, 520px);
+    }
+
+    .spotlight__body {
+      padding: var(--space-6) var(--space-5);
+    }
+  }
+
   @media (--breakpoint-md) {
     .spotlight__card {
       /* 60/40 split — image claims the larger rectangle, body column
@@ -641,10 +667,14 @@
     background: transparent;
     display: block;
     text-decoration: none;
-    /* Default (stacked) — reserve some vertical space but let the body
-       decide the final height. Acceptable because the card's min-height
-       pushes the image past this minimum. */
-    min-height: calc(var(--space-24) * 4);
+    /* Default (stacked, mobile-first) — reserve some vertical space but
+       let the body decide the final height. The previous floor of
+       `--space-24 * 4` (384px) made mobile cards a near-full-screen
+       image+body stack at ~830px tall on a 390-wide viewport — half
+       the stretch was ambient gradient under a tiny FilmIcon. Halving
+       to `--space-24 * 2` (192px) keeps the type-signature visible
+       while letting the body claim the rest of the card height back. */
+    min-height: calc(var(--space-24) * 2);
   }
 
   @media (--breakpoint-md) {

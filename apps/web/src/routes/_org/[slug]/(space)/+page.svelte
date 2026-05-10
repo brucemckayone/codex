@@ -17,7 +17,6 @@
   import AudioWall from '$lib/components/content/AudioWall.svelte';
   import ArticleEditorial from '$lib/components/content/ArticleEditorial.svelte';
   import DiscoverMix from '$lib/components/content/DiscoverMix.svelte';
-  import MasonryGrid from '$lib/components/content/MasonryGrid.svelte';
   import SubscribeCTA from '$lib/components/subscription/SubscribeCTA.svelte';
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
@@ -514,19 +513,21 @@
            No surrounding .feed-section/.lede header; Spotlight renders
            its own section wrapper with an internal h2.
            When the org has flagged 2+ items as featured, wrap them in a
-           Carousel so the user can scroll through every featured piece
-           at hero scale. Single-item case stays unwrapped to keep the
-           DOM minimal and avoid carousel ARIA noise. itemMinWidth caps
-           each slide at the Spotlight's own max-width (~960px) so the
-           layout reads identically to the single-spotlight case. -->
+           Carousel that pages one slide at a time at full viewport
+           width (`itemMinWidth: 100%`, `gap: 0`). The Spotlight inside
+           self-constrains via its own `.spotlight__container` max-width
+           so content stays readable on huge monitors while the slide
+           pagination remains edge-to-edge clean. Single-item case stays
+           unwrapped to keep the DOM minimal and avoid carousel ARIA
+           noise. -->
       {#if section.items.length === 1}
         <Spotlight item={section.items[0]} />
       {:else}
         <div class="spotlight-carousel">
           <Carousel
             items={section.items}
-            itemMinWidth="min(100%, calc(var(--space-24) * 10))"
-            gap="var(--space-6)"
+            itemMinWidth="100%"
+            gap="0"
             ariaLabel={section.title}
             showArrows
           >
@@ -560,12 +561,6 @@
         {:else if section.layout === 'bento'}
           <!-- Discover Mix — varied-tile grid with 1 hero + 4 minor + 1 wide -->
           <DiscoverMix items={section.items} {access} />
-        {:else if section.mixedTypes}
-          <!-- Mixed-type sections (Recent releases, Free samples) — row-span
-               masonry grid so audio rows + 16:9 video tiles + 3:2 article
-               tiles share one container without the height-divergence
-               jaggedness a horizontal carousel would produce. -->
-          <MasonryGrid items={section.items} {access} />
         {:else if section.layout === 'carousel' && section.items.length === 2}
           <!-- Exactly 2 carousel items fill the row as a grid (no chrome) -->
           <div class="feed-pair">
@@ -574,9 +569,11 @@
             {/each}
           </div>
         {:else}
-          <!-- Default: horizontally-scrolling carousel — type-pure rows
-               (Videos) where audio is excluded and tile heights are
-               uniform. -->
+          <!-- Default: horizontally-scrolling carousel. Mixed-type rows
+               keep this layout — each card renders as its content type
+               (audio rows via ContentCard's auto-promotion gate, video/
+               article as default tiles), so the row reads heterogeneously
+               by design rather than collapsing every item to one shape. -->
           <Carousel
             items={section.items}
             itemMinWidth="16rem"
@@ -658,12 +655,14 @@
           </a>
         </div>
       </header>
-      <div class="content-grid">
+      <div class="content-grid content-grid--masonry">
         {#each data.allContent as item (item.id)}
-          <!-- The full catalogue is inherently mixed-type; normalise thumb
-               ratios so the grid reads as one rhythm (same reasoning as
-               Free samples / per-category carousels). -->
-          {@render gridCard(item, 'grid', true)}
+          <!-- Heterogeneous catalogue — masonry packs audio rows alongside
+               taller video/article tiles. Per-cell row-spans come from
+               ContentCard's data-content-type via the utility CSS, so
+               each item keeps its native aspect rather than being
+               normalised to one rhythm. -->
+          {@render gridCard(item, 'grid', false)}
         {/each}
       </div>
     </section>
@@ -1142,17 +1141,47 @@
      carries through; rhythm comes from vertical spacing and the
      lede rule.
      ══════════════════════════════════════════ */
-  /* Spotlight carousel wrapper — sits OUTSIDE .feed-section because the
-     Spotlight component renders its own <section> with a baked-in lede
-     and h2. The wrapper exists only to align the Carousel's outer chrome
-     (arrows, scroll-snap track) to the same container as the rest of the
-     feed without inheriting the .feed-section vertical rhythm (which
-     would double-pad above and below the spotlight). */
+  /* Spotlight carousel wrapper — sits OUTSIDE .feed-section so it can
+     break out of the page's max-width and span the entire viewport.
+     Each slide is `itemMinWidth: 100%` + `gap: 0`, so the scroll-snap
+     pages one full-viewport-width slide at a time with zero edge peek.
+     The Spotlight inside re-constrains its content via its own
+     `.spotlight__container { max-width: var(--container-max) }`, so
+     readable content centres within the full-bleed slide. Vertical
+     padding only — no horizontal padding (would shrink the slide
+     viewport and reintroduce the cutoff). */
   .spotlight-carousel {
     width: 100%;
-    max-width: var(--container-xl);
-    margin: 0 auto;
-    padding: var(--space-6) var(--space-6);
+    margin: 0;
+    padding-block: var(--space-6);
+  }
+
+  /* Carousel.svelte hard-codes `.carousel__item { max-width: 400px }` for
+     its default ContentCard tiles. For full-bleed Spotlight pagination
+     we need slides to lock at exactly the viewport width — flex
+     defaults `min-width: auto` would let the Spotlight's min-content
+     (~600px on mobile) bloat the slide past the viewport. `flex: 0 0
+     100%` + `min-width: 0` + `max-width: 100%` pins each slide to the
+     carousel container's width and lets inner content shrink-to-fit
+     instead. Scoped to .spotlight-carousel so other carousels keep
+     their tile-grid behaviour. */
+  .spotlight-carousel :global(.carousel__item) {
+    flex: 0 0 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .spotlight-carousel :global(.carousel__track) {
+    scroll-padding-inline-start: 0;
+  }
+
+  /* Force the Spotlight inside each slide to respect the slide's width
+     instead of pushing wider via its own min-content sizing. Without
+     this, the section's intrinsic min-width (driven by the title or
+     body column padding) ignores the parent's flex-basis cap. */
+  .spotlight-carousel :global(.spotlight) {
+    width: 100%;
+    min-width: 0;
   }
 
   .feed-section {
@@ -1181,10 +1210,12 @@
     padding-block: var(--space-10);
   }
 
-  /* Catalogue grid — flat tiled layout for the bottom "All content" band.
-     Same 3-column-at-xl rhythm as the carousel items above it, so the
-     visual tile size carries through. */
-  .content-grid {
+  /* Catalogue grid — flat tiled layout used when the "All content" band
+     opts OUT of masonry. The :not() guard lets the shared
+     `.content-grid--masonry` modifier in utilities.css take over when
+     present, so masonry's auto-fill 18rem columns + per-type row-spans
+     win without specificity gymnastics. */
+  .content-grid:not(.content-grid--masonry) {
     display: grid;
     grid-template-columns: repeat(
       auto-fill,
