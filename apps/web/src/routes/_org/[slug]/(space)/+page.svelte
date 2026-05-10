@@ -42,10 +42,6 @@
   let videoActive = $state(false);
   let isDesktop = $state(false);
 
-  // Hero ref drives the sticky-subscribe bar's visibility — the bar appears
-  // once the hero scrolls above the viewport (mirrors the audio mini-player).
-  let heroEl = $state<HTMLElement | null>(null);
-
   // Category-bar sticky detection — IntersectionObserver watches a
   // 1px sentinel placed above the bar. When the sentinel scrolls out
   // of the viewport the bar has reached top: 0 and we toggle the
@@ -271,11 +267,7 @@
 
 <div class="org-landing">
   <!-- Hero: full viewport, content anchored bottom-left, editorial -->
-  <section
-    class="hero"
-    class:hero--video-playing={videoActive && isDesktop}
-    bind:this={heroEl}
-  >
+  <section class="hero" class:hero--video-playing={videoActive && isDesktop}>
     <!-- Title lives OUTSIDE hero__content so it has no z-index isolation
          and mix-blend-mode: difference can reach the shader canvas -->
     <h1 class="hero__title">{orgName}</h1>
@@ -760,7 +752,6 @@
   <SubscribeStickyBar
     orgName={orgName}
     isAuthenticated={!!user}
-    anchor={heroEl}
     dismissKey={`subscribe-cta:${data.org.id}`}
   />
 {/if}
@@ -1217,15 +1208,17 @@
     scroll-snap-align: center;
   }
 
-  /* Strip the Spotlight section's default inline padding inside the
-     carousel — the slide IS the card. Any inner gutter reads as visual
-     "spacing" between peeking adjacent slides. width: 100% + min-width
-     0 prevents the section's intrinsic min-content from overshooting
-     the slide width on mobile. */
+  /* Inset each slide's card so adjacent cards have a visible gutter at
+     the peek boundary — without this, slide 1's right edge butts
+     directly against slide 2's left edge and the cards read as one
+     continuous strip. `--space-3` (12px) on each side composes to a
+     24px visual gap between cards: registers as deliberate without
+     eating the peek. width: 100% + min-width 0 prevents the section's
+     intrinsic min-content from overshooting the slide width on mobile. */
   .spotlight-carousel :global(.spotlight) {
     width: 100%;
     min-width: 0;
-    padding-inline: 0;
+    padding-inline: var(--space-3);
   }
 
   /* Let the spotlight card fill the slide. The single-spotlight case
@@ -1263,11 +1256,9 @@
     padding-block: var(--space-10);
   }
 
-  /* Catalogue grid — flat tiled layout used when the "All content" band
-     opts OUT of masonry. The :not() guard lets the shared
-     `.content-grid--masonry` modifier in utilities.css take over when
-     present, so masonry's auto-fill 18rem columns + per-type row-spans
-     win without specificity gymnastics. */
+  /* Flat tiled catalogue grid for non-masonry surfaces. The :not() guard
+     lets `.content-grid--masonry` from utilities.css take over without
+     specificity gymnastics. */
   .content-grid:not(.content-grid--masonry) {
     display: grid;
     grid-template-columns: repeat(
@@ -1278,17 +1269,15 @@
     align-items: stretch;
   }
 
-  /* Flatten the ContentCard frame inside both the catalogue grid and
-     the carousel tracks — adjacent cards visually merge via their
-     inner thumbnail padding rather than doubled borders. Hover still
-     lifts the card for interactivity feedback. */
+  /* Flatten ContentCard chrome inside the catalogue grid + carousel tracks
+     so adjacent cards merge via their inner thumbnail padding rather than
+     doubled borders. Hover still lifts the card for feedback. */
   .content-grid :global(.cc),
   .feed-section :global(.carousel__item .cc),
   .feed-pair :global(.cc) {
     border-color: transparent;
     background: transparent;
   }
-
 
   .content-grid :global(.cc:hover),
   .content-grid :global(.cc:focus-within:has(:focus-visible)),
@@ -1504,7 +1493,6 @@
       max-width: 80%;
     }
   }
-
 
   /*
     .lede — shared editorial section-header used by every content block on
