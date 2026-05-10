@@ -22,7 +22,13 @@
   import { page } from '$app/state';
   import { Avatar, AvatarFallback } from '$lib/components/ui/Avatar';
   import { BrandGradientBackdrop } from '$lib/components/ui/BrandGradient';
-  import { PlayIcon, MusicIcon, FileTextIcon } from '$lib/components/ui/Icon';
+  import AudioWaveform from '$lib/components/ui/ContentCard/AudioWaveform.svelte';
+  import {
+    PlayIcon,
+    MusicIcon,
+    FileTextIcon,
+    FilmIcon,
+  } from '$lib/components/ui/Icon';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
   import { formatDurationHuman } from '$lib/utils/format';
@@ -139,6 +145,18 @@
     !!thumbnail && !failedThumbnails.has(thumbnail)
   );
 
+  // When a typed item arrives without a usable thumbnail, fill the image
+  // column with a per-type signature instead of letting the grid collapse
+  // to a single column over a flat brand gradient. Audio gets the
+  // AudioWaveform tile; video gets a live HLS preview when one is
+  // available, otherwise a static FilmIcon. Written content has no image
+  // fallback — it canonically falls through to the body-text-led layout
+  // (mirrors ContentCard's behaviour where the thumb is hidden entirely
+  // for thumbless articles). Each signature is FNV-1a-deterministic or
+  // static, so SSR and client hydration produce identical markup.
+  const hasAudioSignature = $derived(!hasImage && contentType === 'audio');
+  const hasVideoSignature = $derived(!hasImage && contentType === 'video');
+
   // ── Preview media on hover/focus ───────────────────────────────
   // Only video content with a resolved preview URL is eligible. Audio and
   // written content types fall back to thumbnail-only — audio gets a
@@ -157,6 +175,59 @@
   let previewAttached = $state(false);
   let previewActive = $state(false);
   let previewEl = $state<HTMLVideoElement | null>(null);
+
+  // ── Slide-active preview activation ────────────────────────────
+  // When the spotlight is wrapped in a Carousel, the user expects the
+  // currently-visible slide's preview to autoplay (not just on hover) —
+  // this is the "auto-playing HLS preview when slide is active" behaviour
+  // confirmed in the plan. An IntersectionObserver on the card element
+  // fires `slideActive=true` once ≥60% of the card is in the viewport,
+  // and `previewVisible` ORs that with the existing hover/focus state so
+  // both pathways work. Threshold 0.6 (not 0.5) avoids ambiguous mid-snap
+  // states where two slides briefly each show ~50%.
+  //
+  // Reduced-motion users opt out of slide-active activation entirely —
+  // the IO is never bound. They can still trigger preview on explicit
+  // hover/focus, which is a deliberate gesture rather than ambient motion.
+  let cardEl = $state<HTMLElement | null>(null);
+  let slideActive = $state(false);
+
+  $effect(() => {
+    if (!canPreview || !cardEl) return;
+    if (
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    )
+      return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry) return;
+        slideActive = entry.intersectionRatio >= 0.6;
+        if (slideActive) {
+          previewAttached = true;
+          queueMicrotask(() => {
+            previewEl?.play().catch(() => {});
+          });
+        } else if (!previewActive) {
+          // Only pause when the user isn't ALSO hovering — hover takes
+          // precedence over carousel-active so hover-then-scroll keeps
+          // the preview running.
+          previewEl?.pause();
+        }
+      },
+      { threshold: [0, 0.6, 1] }
+    );
+    observer.observe(cardEl);
+    return () => observer.disconnect();
+  });
+
+  // Combined visibility — preview shows when either the user is actively
+  // engaging (hover/focus) OR the carousel has paged the slide into view.
+  // Both pathways gate on `canPreview`, so audio/article never reach this
+  // and `<video>` is only rendered for video content.
+  const previewVisible = $derived(
+    canPreview && (previewActive || slideActive)
+  );
 
   function handlePreviewEnter() {
     if (!canPreview) return;
@@ -177,8 +248,12 @@
     previewActive = false;
     // Pause (don't unload) so returning to the card snaps back quickly.
     // The browser keeps the buffered preview in memory while the card
-    // is still mounted.
-    previewEl?.pause();
+    // is still mounted. Skip the pause when slide-active is true — the
+    // carousel still considers this the visible slide, so the preview
+    // should keep playing even after the cursor leaves.
+    if (!slideActive) {
+      previewEl?.pause();
+    }
   }
 </script>
 
@@ -187,10 +262,13 @@
   aria-labelledby={titleId}
   data-content-type={contentType}
   data-has-image={hasImage}
+  data-has-audio-fallback={hasAudioSignature}
+  data-has-video-fallback={hasVideoSignature}
 >
   <div class="spotlight__container">
     <article
       class="spotlight__card"
+      bind:this={cardEl}
       onpointerenter={handlePreviewEnter}
       onpointerleave={handlePreviewLeave}
       onfocusin={handlePreviewEnter}
@@ -214,7 +292,7 @@
             {href}
             tabindex="-1"
             aria-hidden="true"
-            data-preview-active={previewActive}
+            data-preview-active={previewVisible}
           >
             <img
               class="spotlight__image-still"
@@ -232,9 +310,10 @@
             {#if canPreview}
               <!-- Lazy-attached preview video. Element stays mounted so the
                    cross-fade has a target, but `src` only sets once the
-                   user hovers — avoids prefetching ~2MB of HLS for every
-                   landing-page visit. The `preload="none"` + no-src-pre-hover
-                   combo keeps the idle network silent. -->
+                   user hovers OR the carousel pages this slide into view —
+                   avoids prefetching ~2MB of HLS for every landing-page
+                   visit. The `preload="none"` + no-src-pre-activation combo
+                   keeps the idle network silent. -->
               <video
                 bind:this={previewEl}
                 class="spotlight__preview-video"
@@ -245,9 +324,86 @@
                 preload="none"
                 aria-hidden="true"
                 tabindex="-1"
-                data-visible={previewActive}
+                data-visible={previewVisible}
               ></video>
             {/if}
+          </a>
+        {:else if hasAudioSignature}
+          <!--
+            Audio-without-thumbnail fallback. Mirrors the structure of the
+            image column (anchor + absolutely-positioned visual + label) so
+            the 60/40 grid keeps its rhythm. The waveform inherits
+            `currentColor` from `.spotlight__image--audio`, which is bound
+            to a fixed-white token — `--color-player-*` is unsafe here for
+            the same reason the body column uses fixed white (see
+            feedback_player_tokens_for_dark_overlays). The `MUSIC` chip is
+            decorative reinforcement; the eyebrow + CTA already announce
+            audio semantically.
+          -->
+          <a
+            class="spotlight__image spotlight__image--audio"
+            {href}
+            tabindex="-1"
+            aria-hidden="true"
+          >
+            <div class="spotlight__waveform" aria-hidden="true">
+              <AudioWaveform id={item.id} variant="thumb" />
+            </div>
+            <span class="spotlight__type-chip">
+              <MusicIcon size={14} aria-hidden="true" />
+              <span>Audio</span>
+            </span>
+          </a>
+        {:else if hasVideoSignature}
+          <!--
+            Video-without-thumbnail fallback. Two sub-branches:
+            (1) `canPreview` — render the same lazy `<video>` element used
+                in the thumbnailed path. The IntersectionObserver above
+                attaches the source on slide-active or hover. The element
+                stretches to fill the column (`object-fit: cover`) so the
+                fallback reads cinematically rather than letterboxed.
+            (2) No previewUrl — render a static FilmIcon centred over the
+                same brand radial gradient as the audio fallback, with a
+                "WATCH" chip in the bottom-left. FilmIcon is the codebase's
+                canonical motion-cell signature (used in studio media
+                library, content kind-lines).
+            Both sub-branches preserve the 60/40 grid via the
+            `data-has-video-fallback='true'` attribute on `<section>`.
+          -->
+          <a
+            class="spotlight__image spotlight__image--video"
+            {href}
+            tabindex="-1"
+            aria-hidden="true"
+            data-preview-active={previewVisible}
+          >
+            <!-- Static FilmIcon "still" — always rendered for video
+                 fallback, even when canPreview is true. The preview video
+                 (when present) crossfades over this still on slide-active
+                 or hover; crossfading back leaves the FilmIcon visible
+                 instead of an empty column. Mirrors the thumb + video
+                 crossfade pattern in the thumbnailed branch. -->
+            <span class="spotlight__video-icon" aria-hidden="true">
+              <FilmIcon size={48} />
+            </span>
+            {#if canPreview}
+              <video
+                bind:this={previewEl}
+                class="spotlight__preview-video"
+                src={previewAttached ? (previewUrl ?? undefined) : undefined}
+                loop
+                muted
+                playsinline
+                preload="none"
+                aria-hidden="true"
+                tabindex="-1"
+                data-visible={previewVisible}
+              ></video>
+            {/if}
+            <span class="spotlight__type-chip">
+              <PlayIcon size={14} aria-hidden="true" />
+              <span>Watch</span>
+            </span>
           </a>
         {/if}
 
@@ -372,8 +528,18 @@
 
     /* When the content item has no usable thumbnail, drop the image
        column entirely — body takes the full card width, the shader is
-       unobstructed. Avoids an awkward empty frame. */
-    .spotlight[data-has-image='false'] .spotlight__card {
+       unobstructed. Avoids an awkward empty frame.
+       Exception: audio AND video items render their own type signature
+       into the image column (see `.spotlight__image--audio` /
+       `.spotlight__image--video`), so the 60/40 split must survive even
+       though `data-has-image='false'`. Written items intentionally fall
+       through and become full-width text-led — the article identity in
+       this codebase is text-as-media (mirrors ContentCard's display:none
+       on .cc__thumb for thumbless articles). */
+    .spotlight[data-has-image='false']:not([data-has-audio-fallback='true']):not(
+        [data-has-video-fallback='true']
+      )
+      .spotlight__card {
       grid-template-columns: minmax(0, 1fr);
     }
   }
@@ -499,6 +665,119 @@
   .spotlight[data-content-type='audio'] .spotlight__card:hover
     .spotlight__image-still {
     filter: brightness(1.08);
+  }
+
+  /* ── Audio fallback (no thumbnail) ─────────────────────────────
+     Replaces the missing album-art tile with a waveform signature so
+     the spotlight still reads as audio rather than an empty gradient
+     panel. Fixed-white currentColor for parity with the body column —
+     see feedback_player_tokens_for_dark_overlays. The `radial-gradient`
+     adds a soft brand glow under the waveform so the frame doesn't read
+     as a flat colour-block on dark-branded orgs (see
+     feedback_css_gradient_dark_brand for why pure brand-mix gradients
+     can collapse to invisible). */
+  .spotlight__image--audio {
+    display: grid;
+    place-items: center;
+    color: hsl(0 0% 100%);
+    background:
+      radial-gradient(
+        ellipse at center,
+        color-mix(
+          in oklab,
+          var(--color-brand-primary, var(--color-primary-500)) 18%,
+          transparent
+        ),
+        transparent 70%
+      );
+  }
+
+  .spotlight__waveform {
+    position: relative;
+    z-index: 1;
+    width: min(70%, 28rem);
+    height: 55%;
+    /* Soft drop-shadow lifts the bars off the gradient on light shaders. */
+    filter: drop-shadow(0 var(--space-1) var(--space-3) hsl(0 0% 0% / 0.35));
+    transition: transform var(--duration-slow) var(--ease-smooth);
+  }
+
+  .spotlight__card:hover .spotlight__waveform {
+    transform: scale(1.03);
+  }
+
+  /* ── Video fallback (no thumbnail, with or without preview URL) ──
+     Same atmospheric backdrop as the audio fallback — radial brand glow
+     over a fixed-white-text surface — so the two type fallbacks read as
+     one family. The static FilmIcon stands in as the "still" image; if
+     the item has an HLS preview URL, the preview-video element overlays
+     this and crossfades on slide-active/hover (see .spotlight__preview-
+     video below). When no preview URL exists, the FilmIcon alone is the
+     full audio-equivalent waveform-tile signature. */
+  .spotlight__image--video {
+    display: grid;
+    place-items: center;
+    color: hsl(0 0% 100%);
+    background:
+      radial-gradient(
+        ellipse at center,
+        color-mix(
+          in oklab,
+          var(--color-brand-primary, var(--color-primary-500)) 18%,
+          transparent
+        ),
+        transparent 70%
+      );
+  }
+
+  .spotlight__video-icon {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: var(--space-16);
+    height: var(--space-16);
+    color: hsl(0 0% 100% / 0.5);
+    /* Soft drop-shadow lifts the icon off the gradient on light shaders,
+       matching the audio waveform's elevation cue. */
+    filter: drop-shadow(0 var(--space-1) var(--space-3) hsl(0 0% 0% / 0.35));
+    transition:
+      transform var(--duration-slow) var(--ease-smooth),
+      color var(--duration-default) var(--ease-default);
+  }
+
+  .spotlight__card:hover .spotlight__video-icon {
+    transform: scale(1.04);
+    color: hsl(0 0% 100% / 0.7);
+  }
+
+  /* Decorative chip mirrors the spotlight body's meta chips so the type
+     fallback feels of-a-piece with the rest of the card. Sits in the
+     bottom-left of the image column, identical placement to where a
+     duration chip would be on a video card. Shared between audio and
+     video fallbacks — both render the same chip shape with their own
+     icon + label ("Audio" / "Watch"). */
+  .spotlight__type-chip {
+    position: absolute;
+    z-index: 3;
+    bottom: var(--space-4);
+    left: var(--space-4);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    font-family: var(--font-body);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wider);
+    color: hsl(0 0% 100%);
+    background: hsl(0 0% 0% / 0.45);
+    backdrop-filter: blur(var(--blur-sm));
+    -webkit-backdrop-filter: blur(var(--blur-sm));
+    border: var(--border-width) var(--border-style) hsl(0 0% 100% / 0.12);
+    border-radius: var(--radius-full);
+    line-height: var(--leading-tight);
   }
 
   /* ── Preview video (hover/focus only, video contentType) ───────

@@ -19,25 +19,19 @@ export type ContentItem = NonNullable<
  * section shape:
  *
  *   spotlight  — one hero-sized item on an animated shader backdrop (anchor)
- *   spread     — 2-up editorial spread (Editor's Picks)
- *   carousel   — horizontally-scrolling row (videos, free samples)
+ *   carousel   — horizontally-scrolling row (videos, free samples). When
+ *                wrapped by `.spotlight-carousel` it pages one slide at a
+ *                time at near-full container width (Editor's picks).
  *   mosaic     — static grid of square tiles (audio wall)
  *   editorial  — 60/40 split: lead article spread + vertical list (articles)
  *   bento      — varied-tile grid with 2 hero + 4 minor items (Discover Mix)
  */
-type FeedLayout =
-  | 'spotlight'
-  | 'spread'
-  | 'carousel'
-  | 'mosaic'
-  | 'editorial'
-  | 'bento';
+type FeedLayout = 'spotlight' | 'carousel' | 'mosaic' | 'editorial' | 'bento';
 
 export type FeedSection = {
   /** Stable id used for #each keying. */
   id:
     | 'spotlight'
-    | 'featured'
     | 'new-release'
     | 'videos'
     | 'audio'

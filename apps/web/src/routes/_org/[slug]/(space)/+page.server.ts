@@ -54,58 +54,40 @@ function promoteFeatured(items: ContentItem[]): ContentItem[] {
 function buildSections(all: ContentItem[]): FeedSection[] {
   const sections: FeedSection[] = [];
 
-  // ── Spotlight — single hero-sized anchor at top ──────────────────────
-  // Prefer the first creator-flagged item; fall back to the newest item
-  // (`all` is already sorted newest-first server-side). If the catalogue
-  // is empty, no Spotlight is rendered.
-  const spotlight = all.find((i) => i.featured) ?? all[0];
-  if (spotlight) {
+  // ── Spotlight — hero-sized anchor at top, carousel when multiple ─────
+  // All creator-flagged items become slides in the spotlight carousel
+  // (renderer wraps them in <Carousel> when count > 1, single <Spotlight>
+  // when count === 1). When nothing is featured, the newest item takes
+  // the slot. If the catalogue is empty, no Spotlight is rendered.
+  // Featured items live in exactly one place — the spotlight — so there
+  // is no separate "Featured" section downstream.
+  const featured = all.filter((i) => i.featured);
+  const spotlightItems =
+    featured.length > 0 ? featured : all[0] ? [all[0]] : [];
+  if (spotlightItems.length > 0) {
     sections.push({
       id: 'spotlight',
       layout: 'spotlight',
-      eyebrow: "Editor's pick",
-      title: spotlight.title,
-      items: [spotlight],
+      eyebrow: spotlightItems.length === 1 ? "Editor's pick" : "Editor's picks",
+      title: spotlightItems[0].title,
+      items: spotlightItems,
     });
   }
 
-  // Exclude the Spotlight item from every downstream section so it never
-  // appears twice on the page.
-  const remaining = spotlight ? all.filter((i) => i.id !== spotlight.id) : all;
-
-  // ── Editor's Picks — remaining creator-flagged items, 2-up spread ────
-  // 1-2 items render as an editorial spread. 3+ items fall back to a
-  // carousel so we don't visually force a grid that can't breathe.
-  const featured = remaining.filter((i) => i.featured);
-  const featuredInSection =
-    featured.length > 0
-      ? featured.length <= 2
-        ? featured.slice(0, 2)
-        : featured
-      : [];
-  if (featured.length > 0) {
-    const useSpread = featured.length <= 2;
-    sections.push({
-      id: 'featured',
-      layout: useSpread ? 'spread' : 'carousel',
-      eyebrow: "Editor's picks",
-      title: 'Featured',
-      items: featuredInSection,
-    });
-  }
+  // Exclude every spotlight item from downstream sections so they never
+  // appear twice on the page. `Set` lookup keeps the per-section filter
+  // O(1) regardless of featured count.
+  const spotlightIds = new Set(spotlightItems.map((i) => i.id));
+  const remaining = all.filter((i) => !spotlightIds.has(i.id));
 
   // ── Recent releases — newest items across all types, mixed carousel ───
   // `remaining` is already newest-first (server fetched with sort: 'newest').
-  // Exclude items already surfaced in the Editor's Picks section to avoid
-  // duplication. Cap at 8 items — enough to fill a carousel without
-  // overwhelming the page. Skip entirely below 3 items so low-content
-  // orgs don't get a visually sparse row — discovery happens elsewhere.
+  // Cap at 8 items — enough to fill a carousel without overwhelming the
+  // page. Skip entirely below 3 items so low-content orgs don't get a
+  // visually sparse row — discovery happens elsewhere.
   const NEW_RELEASE_MAX = 8;
   const NEW_RELEASE_MIN = 3;
-  const featuredIds = new Set(featuredInSection.map((i) => i.id));
-  const newestSlice = remaining
-    .filter((i) => !featuredIds.has(i.id))
-    .slice(0, NEW_RELEASE_MAX);
+  const newestSlice = remaining.slice(0, NEW_RELEASE_MAX);
   if (newestSlice.length >= NEW_RELEASE_MIN) {
     sections.push({
       id: 'new-release',
@@ -120,11 +102,11 @@ function buildSections(all: ContentItem[]): FeedSection[] {
   }
 
   // ── Videos / Audio / Articles — each media type owns its layout ─────
-  // Rich layouts (audio mosaic, article editorial) need a minimum item
-  // count to look balanced. Below that threshold we gracefully fall
-  // back to the carousel — a single audio tile in a 4-col mosaic reads
-  // as a bug, not a design decision.
-  const MOSAIC_MIN = 3;
+  // Audio always uses 'mosaic' (AudioWall) regardless of count: AudioWall is
+  // density-aware and renders sparse (1–2), standard (3–8), and dense (>8)
+  // states without falling back to a generic carousel. Articles still need
+  // EDITORIAL_MIN items because the 60/40 editorial split looks unbalanced
+  // with one or two pieces.
   const EDITORIAL_MIN = 3;
   const byType = [
     {
@@ -138,7 +120,7 @@ function buildSections(all: ContentItem[]): FeedSection[] {
     {
       id: 'audio' as const,
       preferredLayout: 'mosaic' as const,
-      minForPreferred: MOSAIC_MIN,
+      minForPreferred: 0,
       eyebrow: 'Listen',
       title: 'Audio',
       match: 'audio' as const,

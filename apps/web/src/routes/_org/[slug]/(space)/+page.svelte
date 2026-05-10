@@ -12,19 +12,17 @@
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { CreatorCarouselCard, SkeletonCreatorCard } from '$lib/components/ui/CreatorCard';
-  import { Avatar, AvatarImage, AvatarFallback } from '$lib/components/ui/Avatar';
   import Carousel from '$lib/components/carousel/Carousel.svelte';
   import Spotlight from '$lib/components/content/Spotlight.svelte';
   import AudioWall from '$lib/components/content/AudioWall.svelte';
   import ArticleEditorial from '$lib/components/content/ArticleEditorial.svelte';
   import DiscoverMix from '$lib/components/content/DiscoverMix.svelte';
+  import MasonryGrid from '$lib/components/content/MasonryGrid.svelte';
   import SubscribeCTA from '$lib/components/subscription/SubscribeCTA.svelte';
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { getThumbnailUrl, getThumbnailSrcset, DEFAULT_SIZES } from '$lib/utils/image';
-  import { formatDurationHuman } from '$lib/utils/format';
-  import { extractPlainText } from '@codex/validation';
   import { hydrateIfNeeded, libraryCollection, useLiveQuery, type LibraryItem } from '$lib/collections';
   import { filterLibraryItemsByOrg } from '$lib/library/filter-by-org';
   import { followingStore } from '$lib/client/following.svelte';
@@ -471,73 +469,13 @@
   {/if}
 
   <!--
-    Per-domain feed — a stack of sections (Featured → category rows →
-    Videos → Audio → Articles → Free samples) composed server-side in
-    feed-types.ts. Renderer dispatches by count: Featured-1 → magazine
-    spread anchor; exactly 2 items → fill-row grid (no wasted space);
-    1 or 3+ items → horizontal carousel.
+    Per-domain feed — a stack of sections composed server-side in
+    feed-types.ts. Featured items live in the Spotlight section at the
+    top (single anchor when one item is featured, scrollable carousel
+    when multiple are). Below the spotlight: Recent releases, then per-
+    type sections (Videos / Audio / Articles), optional Discover Mix,
+    and Free samples.
   -->
-
-  <!-- Snippet: full-width feature spread (1–2-item sections + carousel hero) -->
-  {#snippet spread(c)}
-    {@const thumb = c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null}
-    {@const href = buildContentUrl(page.url, c)}
-    {@const duration = c.mediaItem?.durationSeconds ?? null}
-    {@const titleId = `feature-title-${c.id}`}
-    {@const ctaLabel = c.contentType === 'audio' ? 'Listen now' : c.contentType === 'written' ? 'Read now' : 'Watch now'}
-    <article class="feature-spread" aria-labelledby={titleId}>
-      <a class="feature-spread__link" {href}>
-        <figure class="feature-spread__frame">
-          {#if thumb}
-            <img
-              src={thumb}
-              srcset={getThumbnailSrcset(thumb)}
-              sizes={DEFAULT_SIZES}
-              alt=""
-              class="feature-spread__img"
-              loading="lazy"
-            />
-          {:else}
-            <div class="feature-spread__fallback" aria-hidden="true"></div>
-          {/if}
-        </figure>
-        <div class="feature-spread__body">
-          {#if c.category}
-            <p class="feature-spread__eyebrow">{c.category}</p>
-          {/if}
-          <h3 class="feature-spread__title" id={titleId}>{c.title}</h3>
-          {#if c.description}
-            <p class="feature-spread__description">{extractPlainText(c.description)}</p>
-          {/if}
-          <hr class="feature-spread__rule" aria-hidden="true" />
-          <div class="feature-spread__byline">
-            {#if c.creator?.name}
-              <Avatar class="feature-spread__avatar">
-                <AvatarImage src={undefined} alt={c.creator.name} />
-                <AvatarFallback>{c.creator.name.charAt(0).toUpperCase()}</AvatarFallback>
-              </Avatar>
-              <span class="feature-spread__creator">{c.creator.name}</span>
-            {/if}
-            {#if duration}
-              <span class="feature-spread__meta-sep" aria-hidden="true">·</span>
-              <span>{formatDurationHuman(duration)}</span>
-            {/if}
-            {#if c.priceCents != null && c.priceCents > 0}
-              <span class="feature-spread__meta-sep" aria-hidden="true">·</span>
-              <span>£{(c.priceCents / 100).toFixed(2)}</span>
-            {:else if c.accessType === 'free'}
-              <span class="feature-spread__meta-sep" aria-hidden="true">·</span>
-              <span>Free</span>
-            {/if}
-          </div>
-          <span class="feature-spread__cta">
-            {ctaLabel}
-            <span class="feature-spread__cta-arrow" aria-hidden="true">→</span>
-          </span>
-        </div>
-      </a>
-    </article>
-  {/snippet}
 
   <!-- Snippet: compact ContentCard for grid + non-hero carousel tiles.
        The optional `normalizeRatio` argument forces every card in a row
@@ -574,8 +512,30 @@
     {#if section.layout === 'spotlight' && section.items[0]}
       <!-- Anchor beat — full-bleed featured item on shader backdrop.
            No surrounding .feed-section/.lede header; Spotlight renders
-           its own section wrapper with an internal h2. -->
-      <Spotlight item={section.items[0]} />
+           its own section wrapper with an internal h2.
+           When the org has flagged 2+ items as featured, wrap them in a
+           Carousel so the user can scroll through every featured piece
+           at hero scale. Single-item case stays unwrapped to keep the
+           DOM minimal and avoid carousel ARIA noise. itemMinWidth caps
+           each slide at the Spotlight's own max-width (~960px) so the
+           layout reads identically to the single-spotlight case. -->
+      {#if section.items.length === 1}
+        <Spotlight item={section.items[0]} />
+      {:else}
+        <div class="spotlight-carousel">
+          <Carousel
+            items={section.items}
+            itemMinWidth="min(100%, calc(var(--space-24) * 10))"
+            gap="var(--space-6)"
+            ariaLabel={section.title}
+            showArrows
+          >
+            {#snippet renderItem(item)}
+              <Spotlight {item} />
+            {/snippet}
+          </Carousel>
+        </div>
+      {/if}
     {:else}
       <section class="feed-section" data-layout={section.layout}>
         <header class="lede">
@@ -591,14 +551,7 @@
           </div>
         </header>
 
-        {#if section.layout === 'spread'}
-          <!-- Editor's Picks — 1-2 items as 2-up editorial spread -->
-          <div class="feed-spread-grid">
-            {#each section.items as item (item.id)}
-              {@render spread(item)}
-            {/each}
-          </div>
-        {:else if section.layout === 'mosaic'}
+        {#if section.layout === 'mosaic'}
           <!-- Audio wall — responsive square mosaic, caps to 8 tiles -->
           <AudioWall items={section.items} {access} />
         {:else if section.layout === 'editorial'}
@@ -607,6 +560,12 @@
         {:else if section.layout === 'bento'}
           <!-- Discover Mix — varied-tile grid with 1 hero + 4 minor + 1 wide -->
           <DiscoverMix items={section.items} {access} />
+        {:else if section.mixedTypes}
+          <!-- Mixed-type sections (Recent releases, Free samples) — row-span
+               masonry grid so audio rows + 16:9 video tiles + 3:2 article
+               tiles share one container without the height-divergence
+               jaggedness a horizontal carousel would produce. -->
+          <MasonryGrid items={section.items} {access} />
         {:else if section.layout === 'carousel' && section.items.length === 2}
           <!-- Exactly 2 carousel items fill the row as a grid (no chrome) -->
           <div class="feed-pair">
@@ -615,7 +574,9 @@
             {/each}
           </div>
         {:else}
-          <!-- Default: horizontally-scrolling carousel -->
+          <!-- Default: horizontally-scrolling carousel — type-pure rows
+               (Videos) where audio is excluded and tile heights are
+               uniform. -->
           <Carousel
             items={section.items}
             itemMinWidth="16rem"
@@ -1181,6 +1142,19 @@
      carries through; rhythm comes from vertical spacing and the
      lede rule.
      ══════════════════════════════════════════ */
+  /* Spotlight carousel wrapper — sits OUTSIDE .feed-section because the
+     Spotlight component renders its own <section> with a baked-in lede
+     and h2. The wrapper exists only to align the Carousel's outer chrome
+     (arrows, scroll-snap track) to the same container as the rest of the
+     feed without inheriting the .feed-section vertical rhythm (which
+     would double-pad above and below the spotlight). */
+  .spotlight-carousel {
+    width: 100%;
+    max-width: var(--container-xl);
+    margin: 0 auto;
+    padding: var(--space-6) var(--space-6);
+  }
+
   .feed-section {
     width: 100%;
     max-width: var(--container-xl);
@@ -1399,344 +1373,6 @@
   @media (--below-md) {
     .category-bar__inner {
       padding: var(--space-3) var(--space-4);
-    }
-  }
-
-  /* ══════════════════════════════════════════
-     FEATURE SPREAD
-     Asymmetric 2:3 split (image left, body right) for full-width
-     featured content. Reads as a magazine feature rather than a
-     card — the CreatorExploreBanner sibling for content items.
-     Stacks on mobile.
-     ══════════════════════════════════════════ */
-  .feature-spread {
-    padding: var(--space-8) var(--space-6);
-  }
-
-  .feature-spread__link {
-    display: grid;
-    grid-template-columns: 2fr 3fr;
-    gap: var(--space-10);
-    /* Anchor both columns to the top. Sparse text no longer leaves empty
-       space equally above AND below — any extra vertical space falls
-       beneath the CTA where it reads as intentional breathing room. */
-    align-items: start;
-    text-decoration: none;
-    color: inherit;
-    outline: none;
-  }
-
-  .feature-spread__link:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--space-2);
-    border-radius: var(--radius-sm);
-  }
-
-  /* Image frame — native 16:9 ratio preserves the source thumbnail
-     without cropping and keeps image height balanced against the
-     text column, which on sparse content would otherwise leave a
-     cavern of whitespace on the right. */
-  .feature-spread__frame {
-    position: relative;
-    margin: 0;
-    aspect-ratio: 16 / 9;
-    overflow: hidden;
-    border-radius: var(--radius-md);
-    background: var(--color-surface-tertiary);
-    isolation: isolate;
-  }
-
-  /* Content-type pill — floats top-left corner of the image. Translucent
-     glass treatment so it doesn't compete with the thumbnail's hero
-     composition. */
-  .feature-spread__type-badge {
-    position: absolute;
-    top: var(--space-3);
-    left: var(--space-3);
-    z-index: 2;
-    padding: var(--space-1) var(--space-3);
-    font-family: var(--font-body);
-    font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-wider);
-    color: var(--color-neutral-50);
-    background: color-mix(in srgb, var(--color-neutral-900) 60%, transparent);
-    backdrop-filter: blur(var(--blur-sm));
-    -webkit-backdrop-filter: blur(var(--blur-sm));
-    border-radius: var(--radius-xs);
-    line-height: var(--leading-tight);
-  }
-
-  .feature-spread__img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    /* Slight desaturation by default, recovers on hover — matches the
-       Contributors carousel treatment for visual cohesion. */
-    filter: saturate(0.92) contrast(1.02);
-    transition:
-      transform var(--duration-slower) var(--ease-out),
-      filter var(--duration-normal) var(--ease-default);
-  }
-
-  .feature-spread__link:hover .feature-spread__img,
-  .feature-spread__link:focus-visible .feature-spread__img {
-    transform: scale(1.03);
-    filter: none;
-  }
-
-  .feature-spread__fallback {
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(
-      135deg,
-      color-mix(
-        in oklab,
-        var(--color-brand-primary, var(--color-primary-500)) 30%,
-        var(--color-surface-tertiary)
-      ),
-      var(--color-surface-tertiary)
-    );
-  }
-
-  /* Body column — editorial vertical stack */
-  .feature-spread__body {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    min-width: 0;
-  }
-
-  .feature-spread__eyebrow {
-    margin: 0;
-    font-family: var(--font-body);
-    font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-wider);
-    color: var(--color-text-tertiary);
-  }
-
-  .feature-spread__title {
-    margin: 0;
-    font-family: var(--font-heading);
-    /* Goldilocks ramp — 80px was shouting, 48px was timid. Landing at
-       ~64px max gives the title confident display presence without
-       turning single-word titles into wall art. */
-    font-size: clamp(var(--text-4xl), 4.5vw, 4rem);
-    font-weight: var(--font-bold);
-    line-height: 1.1;
-    letter-spacing: var(--tracking-tighter);
-    color: var(--color-text-primary);
-    max-width: 22ch;
-  }
-
-  .feature-spread__description {
-    margin: 0;
-    font-size: var(--text-lg);
-    line-height: var(--leading-relaxed);
-    color: var(--color-text-secondary);
-    /* Cap at a comfortable reading measure */
-    max-width: 55ch;
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .feature-spread__rule {
-    width: var(--space-10);
-    height: 0;
-    margin: var(--space-2) 0 0;
-    border: none;
-    border-top: var(--border-width-thick) var(--border-style) var(--color-text-primary);
-    opacity: var(--opacity-60);
-  }
-
-  /* Byline row — avatar + creator, then dot-separated meta. Familiar
-     newspaper/NYT rhythm where the photo gives the creator visual
-     identity beyond just their name as text. */
-  .feature-spread__byline {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2);
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-  }
-
-  :global(.feature-spread__avatar) {
-    height: var(--space-8);
-    width: var(--space-8);
-    font-size: var(--text-sm);
-    /* Pull the avatar slightly left so the creator name sits flush with
-       the rule above — matches the editorial vertical rhythm. */
-    margin-right: var(--space-1);
-  }
-
-  .feature-spread__creator {
-    font-weight: var(--font-semibold);
-    color: var(--color-text-primary);
-  }
-
-  .feature-spread__meta-sep {
-    opacity: var(--opacity-50);
-  }
-
-  /* Solid primary CTA — anchors the spread's visual weight so sparse
-     content still feels intentional. Sized and styled like the hero's
-     primary button for consistency across the landing surface. */
-  .feature-spread__cta {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    align-self: flex-start;
-    margin-top: var(--space-3);
-    padding: var(--space-3) var(--space-7);
-    font-size: var(--text-base);
-    font-weight: var(--font-semibold);
-    color: var(--color-text-inverse, white);
-    background: var(--color-brand-primary, var(--color-primary-500));
-    border-radius: var(--radius-base);
-    box-shadow: var(--shadow-md);
-    transition:
-      transform var(--duration-fast) var(--ease-default),
-      box-shadow var(--duration-normal) var(--ease-default),
-      background-color var(--duration-fast) var(--ease-default);
-  }
-
-  .feature-spread__cta-arrow {
-    display: inline-block;
-    transition: transform var(--duration-normal) var(--ease-out);
-  }
-
-  .feature-spread__link:hover .feature-spread__cta {
-    transform: translateY(calc(-1 * var(--space-0-5)));
-    box-shadow: var(--shadow-lg);
-    background: color-mix(
-      in oklch,
-      var(--color-brand-primary, var(--color-primary-500)) 90%,
-      black
-    );
-  }
-
-  .feature-spread__link:hover .feature-spread__cta-arrow {
-    transform: translateX(var(--space-1));
-  }
-
-  /* ══════════════════════════════════════════
-     FEED SPREAD GRID — 2-up Editor's Picks layout
-     Wraps 1-2 .feature-spread articles in a responsive grid.
-     Each spread stacks image-over-text vertically (since each
-     column is ~half the page width) instead of the original
-     full-width 2fr 3fr horizontal split — keeps both tiles
-     legible without cramming a horizontal spread into a tight box.
-     ══════════════════════════════════════════ */
-  .feed-spread-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-8);
-    padding-inline: var(--space-4);
-  }
-
-  @media (--breakpoint-md) {
-    .feed-spread-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: var(--space-10);
-      padding-inline: 0;
-    }
-  }
-
-  /* Single-item spread keeps the original magazine feel: one side image,
-     the other side a column of copy. Multi-item gets the vertical stack. */
-  .feed-spread-grid:has(.feature-spread:only-child) .feature-spread__link {
-    grid-template-columns: 2fr 3fr;
-    gap: var(--space-10);
-  }
-
-  .feed-spread-grid .feature-spread {
-    padding: var(--space-6);
-    background: color-mix(in srgb, var(--color-surface-card) 78%, transparent);
-    border: var(--border-width) var(--border-style)
-      color-mix(in srgb, var(--color-border) 30%, transparent);
-    border-radius: var(--radius-xl);
-    backdrop-filter: blur(var(--blur-lg));
-    -webkit-backdrop-filter: blur(var(--blur-lg));
-    transition:
-      transform var(--duration-slow) var(--ease-smooth),
-      box-shadow var(--duration-slow) var(--ease-smooth),
-      border-color var(--duration-fast) var(--ease-default);
-  }
-
-  .feed-spread-grid .feature-spread:hover {
-    transform: translateY(calc(-1 * var(--space-0-5)));
-    box-shadow: var(--shadow-xl);
-    border-color: color-mix(in srgb, var(--color-interactive) 28%, transparent);
-  }
-
-  /* In 2-up mode (multi-item spread-grid), each spread stacks vertically */
-  .feed-spread-grid:not(:has(.feature-spread:only-child)) .feature-spread__link {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-5);
-    align-items: start;
-  }
-
-  /* Tighter title ramp inside 2-up cards — clamp lower max so both
-     headlines feel parallel rather than one dwarfing the other. */
-  .feed-spread-grid:not(:has(.feature-spread:only-child)) .feature-spread__title {
-    font-size: clamp(var(--text-2xl), 3vw, var(--text-4xl));
-    max-width: none;
-  }
-
-  /* Constrain description inside 2-up tiles too */
-  .feed-spread-grid:not(:has(.feature-spread:only-child)) .feature-spread__description {
-    font-size: var(--text-base);
-    max-width: none;
-    -webkit-line-clamp: 3;
-  }
-
-  /* Reveal on enter — staggered 80ms for the second tile. */
-  @media (prefers-reduced-motion: no-preference) {
-    .feed-spread-grid .feature-spread {
-      opacity: 0;
-      transform: translateY(var(--space-4));
-      animation: feed-spread-in var(--duration-slower) var(--ease-out) forwards;
-    }
-
-    .feed-spread-grid .feature-spread:nth-child(2) {
-      animation-delay: 80ms;
-    }
-  }
-
-  @keyframes feed-spread-in {
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .feed-spread-grid .feature-spread {
-      transition: none;
-    }
-  }
-
-  /* Tablet + mobile — stack image on top, body below */
-  @media (--below-md) {
-    .feature-spread {
-      padding: var(--space-6) var(--space-4);
-    }
-
-    .feature-spread__link {
-      grid-template-columns: 1fr;
-      gap: var(--space-6);
-    }
-
-    .feature-spread__title {
-      /* Dial back the huge desktop title so it doesn't dominate the
-         single-column mobile stack. */
-      font-size: clamp(var(--text-3xl), 7vw, var(--text-5xl));
     }
   }
 
