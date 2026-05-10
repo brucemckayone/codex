@@ -26,13 +26,18 @@
   import {
     hydrateIfNeeded,
     libraryCollection,
+    loadSubscriptionFromServer,
     subscriptionCollection,
     useLiveQuery,
     type LibraryItem,
   } from '$lib/collections';
   import { filterLibraryItemsByOrg } from '$lib/library/filter-by-org';
   import { followingStore } from '$lib/client/following.svelte';
-  import { followOrganization, unfollowOrganization } from '$lib/remote/org.remote';
+  import {
+    followOrganization,
+    getMyMembership,
+    unfollowOrganization,
+  } from '$lib/remote/org.remote';
   import { useAccessContext } from '$lib/utils/access-context.svelte';
   import { StructuredData } from '$lib/components/seo';
   import type { PageData } from './$types';
@@ -183,15 +188,54 @@
     orgId: data.org.id,
   }));
 
-  // Live subscription gate. Hides both the inline SubscribeCTA banner and
-  // the bottom sticky bar for users who already have an access-granting
-  // subscription to THIS org. Re-evaluates whenever subscriptionCollection
-  // mutates (Stripe webhook, cross-tab login, manual refresh).
-  const isSubscribed = $derived.by(() => {
+  // Org-access gate. The org's public layout doesn't load membership info
+  // (only studio does), so we probe `getMyMembership` + subscription state
+  // client-side and combine them. Without this, owners and team members —
+  // who never carry a subscription record — would see the Subscribe CTA on
+  // their own org's landing page.
+  //
+  // `accessChecked` defers rendering the CTA until both probes settle, so
+  // a logged-in subscriber doesn't see a flash of the bar during the brief
+  // verification window. Logged-out users skip the probes entirely.
+  let accessChecked = $state(false);
+  let hasActiveMembership = $state(false);
+
+  const hasOrgAccess = $derived.by(() => {
     if (!browser || !data.org?.id) return false;
+    if (!user) return false;
+    if (hasActiveMembership) return true;
     const entry = subscriptionCollection?.state.get(data.org.id);
     if (!entry) return false;
     return entry.status === 'active' || entry.status === 'cancelling';
+  });
+
+  const shouldShowSubscribeCTA = $derived(
+    !!data.org?.id && accessChecked && !hasOrgAccess
+  );
+
+  $effect(() => {
+    if (!browser || !data.org?.id) return;
+    // Reset on org change (cross-org navigation re-runs this effect).
+    accessChecked = false;
+    hasActiveMembership = false;
+
+    if (!data.user) {
+      // Logged-out users can't have access — flip the gate immediately so
+      // the CTA renders without a round-trip.
+      accessChecked = true;
+      return;
+    }
+
+    const orgId = data.org.id;
+    const orgSlug = data.org.slug;
+    void Promise.allSettled([
+      getMyMembership(orgId).then((m) => {
+        hasActiveMembership = !!m?.role && m.status === 'active';
+      }),
+      loadSubscriptionFromServer(orgId, orgSlug),
+    ]).then(() => {
+      accessChecked = true;
+    });
   });
 
   // Follow toggle — reads from followingStore (localStorage-backed, reactive)
@@ -615,7 +659,7 @@
          needed — the price row is additive; its absence is a valid state.
          previewContent + memberCount props are wired even when undefined,
          so SubscribeCTA's internal guards decide whether to render each row. -->
-    {#if section.id === subscribeAnchorId && data.org?.id && !isSubscribed}
+    {#if section.id === subscribeAnchorId && shouldShowSubscribeCTA}
       {@const orgId = data.org.id}
       {@const orgDisplayName = data.org.name ?? 'us'}
       {@const previewProp =
@@ -748,10 +792,9 @@
      viewport (mirrors the audio mini-player's appearance pattern). Hidden
      for users who are already subscribed to this org, and dismissable with
      a 4-day TTL via the dismissalCollection. -->
-{#if data.org?.id && !isSubscribed}
+{#if shouldShowSubscribeCTA && data.org?.id}
   <SubscribeStickyBar
     orgName={orgName}
-    isAuthenticated={!!user}
     dismissKey={`subscribe-cta:${data.org.id}`}
   />
 {/if}
@@ -1206,6 +1249,24 @@
     min-width: 0;
     max-width: 90vw;
     scroll-snap-align: center;
+  }
+
+  /* Desktop peek expansion — narrower slides + wider track padding so
+     adjacent featured items read as visible content rather than a thin
+     strip. Mobile keeps 90vw / 5vw because the small absolute peek
+     (~20px on a 390-wide phone) is fine at thumb-scroll distance;
+     desktop's 5vw peek (~72px on a 1440 monitor) was too easy to read
+     as page gap. 80vw / 10vw on desktop gives ~144px of visible card
+     content peeking on each side. */
+  @media (--breakpoint-md) {
+    .spotlight-carousel :global(.carousel__track) {
+      padding-inline: 10vw;
+    }
+
+    .spotlight-carousel :global(.carousel__item) {
+      flex: 0 0 80vw;
+      max-width: 80vw;
+    }
   }
 
   /* Inset each slide's card so adjacent cards have a visible gutter at
