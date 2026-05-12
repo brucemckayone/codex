@@ -596,13 +596,15 @@ describe('handleCheckoutCompleted', () => {
 
   describe('currency handling', () => {
     /**
-     * NOTE: The handler currently hardcodes currency to 'usd'.
-     * This test documents the current behavior.
+     * Platform default currency is GBP (see root CLAUDE.md "Currency" rule).
+     * The handler hardcodes `CURRENCY.GBP` when calling `completePurchase`,
+     * ignoring `session.currency`. This is intentional for the single-currency
+     * MVP — Stripe Checkout sessions are created with GBP upstream.
      *
-     * Future consideration: Should we use session.currency instead?
-     * For now, we only support USD purchases.
+     * If multi-currency support is added later, the handler must read
+     * `session.currency` and these tests must be updated together.
      */
-    it('should use hardcoded USD currency regardless of session currency', async () => {
+    it('passes GBP through to completePurchase for a GBP session', async () => {
       const event = createMockStripeCheckoutEvent({
         metadata: {
           customerId: 'user_123',
@@ -610,19 +612,49 @@ describe('handleCheckoutCompleted', () => {
           organizationId: 'org_789',
         },
       }) as unknown as Stripe.Event;
-      // Even though session has currency, handler uses hardcoded 'usd'
+      (event.data.object as Stripe.Checkout.Session).currency = 'gbp';
+
+      const { context } = createContext();
+
+      await handleCheckoutCompleted(event, mockStripe, context);
+
+      expect(mockCompletePurchase).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          currency: CURRENCY.GBP,
+        })
+      );
+    });
+
+    it('still records GBP even when session.currency drifts (defends platform default)', async () => {
+      const event = createMockStripeCheckoutEvent({
+        metadata: {
+          customerId: 'user_123',
+          contentId: 'content_456',
+          organizationId: 'org_789',
+        },
+      }) as unknown as Stripe.Event;
+      // Defence-in-depth: even if a session leaks through with a non-GBP
+      // currency, the handler must persist GBP until multi-currency lands.
       (event.data.object as Stripe.Checkout.Session).currency = 'eur';
 
       const { context } = createContext();
 
       await handleCheckoutCompleted(event, mockStripe, context);
 
-      // Handler hardcodes currency to 'usd'
       expect(mockCompletePurchase).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           currency: CURRENCY.GBP,
         })
+      );
+      expect(mockCompletePurchase).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ currency: 'usd' })
+      );
+      expect(mockCompletePurchase).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ currency: 'eur' })
       );
     });
   });
