@@ -1704,9 +1704,22 @@ describe('SubscriptionService', () => {
         }
       ).mockRejectedValueOnce(stripeError);
 
-      await expect(
-        service.changeTier(otherCreatorId, org.id, tier2.id, 'month')
-      ).rejects.toThrow(SubscriptionPaymentRequiredError);
+      let caught: unknown;
+      try {
+        await service.changeTier(otherCreatorId, org.id, tier2.id, 'month');
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(SubscriptionPaymentRequiredError);
+      const err = caught as SubscriptionPaymentRequiredError & {
+        context?: Record<string, unknown>;
+      };
+      // Codex-w87s4: prorationDate is always present on the 402 — when
+      // the caller omits it, the service falls back to now() and forwards
+      // that timestamp to Stripe, so the error must mirror it.
+      expect(typeof err.context?.prorationDate).toBe('number');
+      // tierIdAtCommit echoes the new tier id the failed commit targeted.
+      expect(err.context?.tierIdAtCommit).toBe(tier2.id);
 
       // Local row must remain on tier1 with the original amount — Stripe
       // reverted the price update and we mustn't write the new tier.
@@ -1858,10 +1871,11 @@ describe('SubscriptionService', () => {
     //   3. No audit row / no partial commit even though the preview's
     //      prorationDate was pinned.
     //
-    // Note: production currently does NOT include `prorationDate` in the
-    // SubscriptionPaymentRequiredError context. A follow-up bead can add
-    // it so the dialog can distinguish "needs new preview" from "transient
-    // network blip". For now the test asserts what's there.
+    // Codex-w87s4 closed the prorationDate gap: the error context now
+    // carries the exact prorationDate Stripe rejected so the dialog can
+    // tell "needs fresh preview" (prorationDate doesn't match its local
+    // preview) from "transient payment failure" (matches — same window,
+    // just a declined card).
     it('commit fails after successful preview: SubscriptionPaymentRequiredError, NO silent retry, DB untouched', async () => {
       const { org, tier1, tier2 } = await createFullOrg(
         'change-tier-stale-402'
@@ -1911,6 +1925,16 @@ describe('SubscriptionService', () => {
       expect(err.context?.newTierId).toBe(tier2.id);
       expect(err.context?.billingInterval).toBe('month');
       expect(err.context?.stripeMessage).toBe('Your card was declined.');
+      // Codex-w87s4: prorationDate echoes the pinned preview timestamp
+      // — this is what lets the dialog branch "stale preview" from
+      // "transient payment failure" without needing a second round-trip.
+      expect(err.context?.prorationDate).toBe(previewProrationDate);
+      expect(err.context?.tierIdAtCommit).toBe(tier2.id);
+      // userId + organizationId are present so the route can log the
+      // failure against the correct audit subject without re-parsing
+      // the request body.
+      expect(err.context?.userId).toBe(otherCreatorId);
+      expect(err.context?.organizationId).toBe(org.id);
 
       // (b) NO silent retry — Stripe.subscriptions.update is called exactly
       // once. A retry loop here would double-charge if Stripe accepts the
@@ -3970,5 +3994,61 @@ describe('SubscriptionService', () => {
 
       warnSpy.mockRestore();
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// SubscriptionPaymentRequiredError (Codex-w87s4)
+//
+// Standalone constructor round-trip: no DB, no Stripe — just the error
+// class contract. Pins the field set the pricing dialog consumes so a
+// future refactor (e.g. tightening the context type) can't silently
+// drop a field.
+// ─────────────────────────────────────────────────────────────────────
+describe('SubscriptionPaymentRequiredError', () => {
+  it('round-trips every field the pricing dialog branches on', () => {
+    const err = new SubscriptionPaymentRequiredError('Card declined', {
+      userId: 'user_123',
+      organizationId: 'org_456',
+      newTierId: 'tier_789',
+      billingInterval: 'month',
+      stripeMessage: 'Your card was declined.',
+      prorationDate: 1_700_000_000,
+      tierIdAtCommit: 'tier_789',
+    });
+
+    expect(err).toBeInstanceOf(SubscriptionPaymentRequiredError);
+    expect(err.message).toBe('Card declined');
+    expect(err.code).toBe('PAYMENT_REQUIRED');
+    expect(err.statusCode).toBe(402);
+    expect(err.context).toEqual({
+      userId: 'user_123',
+      organizationId: 'org_456',
+      newTierId: 'tier_789',
+      billingInterval: 'month',
+      stripeMessage: 'Your card was declined.',
+      prorationDate: 1_700_000_000,
+      tierIdAtCommit: 'tier_789',
+    });
+  });
+
+  it('omitting optional prorationDate / tierIdAtCommit leaves them undefined (not null, not 0)', () => {
+    const err = new SubscriptionPaymentRequiredError('Card declined', {
+      userId: 'user_123',
+      organizationId: 'org_456',
+      newTierId: 'tier_789',
+      billingInterval: 'year',
+      stripeMessage: 'Insufficient funds.',
+    });
+
+    expect(err.context).toMatchObject({
+      userId: 'user_123',
+      organizationId: 'org_456',
+      newTierId: 'tier_789',
+      billingInterval: 'year',
+      stripeMessage: 'Insufficient funds.',
+    });
+    expect(err.context?.prorationDate).toBeUndefined();
+    expect(err.context?.tierIdAtCommit).toBeUndefined();
   });
 });
