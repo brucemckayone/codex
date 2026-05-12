@@ -1674,6 +1674,38 @@ describe('SubscriptionService', () => {
       ).rejects.toThrow(TierNotFoundError);
     });
 
+    it('should enforce user scoping: a different user cannot change the subscription tier', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('change-scope');
+      // otherCreatorId owns the active subscription on tier1.
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
+
+      // thirdUserId attempts to upgrade — getSubscriptionOrThrow filters by
+      // userId so this surfaces as NotFound (no information disclosure to
+      // non-owners; service is last line of defence behind route requireAuth).
+      await expect(
+        service.changeTier(thirdUserId, org.id, tier2.id, 'month')
+      ).rejects.toThrow(SubscriptionNotFoundError);
+
+      // Stripe must NOT be touched on the negative path.
+      expect(stripe.subscriptions.update).not.toHaveBeenCalled();
+
+      // And the original subscription must remain on tier1 with original amount.
+      const { eq, and } = await import('drizzle-orm');
+      const [row] = await db
+        .select()
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.userId, otherCreatorId),
+            eq(subscriptions.organizationId, org.id)
+          )
+        );
+      expect(row.tierId).toBe(tier1.id);
+      expect(row.amountCents).toBe(tier1.priceMonthly);
+    });
+
     it('mirrors the new tier price into amountCents synchronously (no webhook needed)', async () => {
       const { org, tier1, tier2 } = await createFullOrg('change-tier-amount');
       await db.insert(subscriptions).values(
@@ -1862,6 +1894,40 @@ describe('SubscriptionService', () => {
       expect(updated.churnReason).toBeNull();
       expect(updated.cancelReason).toBe('Just because');
     });
+
+    it('should enforce user scoping: a different user cannot cancel the subscription', async () => {
+      const { org, tier1 } = await createFullOrg('cancel-scope');
+      // otherCreatorId owns the active subscription.
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          status: 'active',
+        })
+      );
+
+      // thirdUserId attempts to cancel — getSubscriptionOrThrow filters by
+      // userId so this surfaces as NotFound (no information disclosure to
+      // non-owners; service is last line of defence behind route requireAuth).
+      await expect(
+        service.cancelSubscription(thirdUserId, org.id, 'malicious')
+      ).rejects.toThrow(SubscriptionNotFoundError);
+
+      // Stripe must NOT be touched on the negative path.
+      expect(stripe.subscriptions.update).not.toHaveBeenCalled();
+
+      // And the active subscription must remain active with no cancel reason.
+      const { eq, and } = await import('drizzle-orm');
+      const [row] = await db
+        .select()
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.userId, otherCreatorId),
+            eq(subscriptions.organizationId, org.id)
+          )
+        );
+      expect(row.status).toBe('active');
+      expect(row.cancelReason).toBeNull();
+    });
   });
 
   // ─── reactivateSubscription ───────────────────────────────────────
@@ -1928,6 +1994,39 @@ describe('SubscriptionService', () => {
       expect(result.orgId).toBe(org.id);
       expect(result.subscription.organizationId).toBe(org.id);
       expect(result.subscription.userId).toBe(otherCreatorId);
+    });
+
+    it('should enforce user scoping: a different user cannot reactivate the subscription', async () => {
+      const { org, tier1 } = await createFullOrg('react-scope');
+      // otherCreatorId owns the cancelling subscription.
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+          status: 'cancelling',
+        })
+      );
+
+      // thirdUserId attempts to reactivate — getSubscriptionOrThrow filters by
+      // userId so this surfaces as NotFound (no information disclosure to
+      // non-owners; service is last line of defence behind route requireAuth).
+      await expect(
+        service.reactivateSubscription(thirdUserId, org.id)
+      ).rejects.toThrow(SubscriptionNotFoundError);
+
+      // Stripe must NOT be touched on the negative path.
+      expect(stripe.subscriptions.update).not.toHaveBeenCalled();
+
+      // And the cancelling subscription must remain in cancelling state.
+      const { eq, and } = await import('drizzle-orm');
+      const [row] = await db
+        .select()
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.userId, otherCreatorId),
+            eq(subscriptions.organizationId, org.id)
+          )
+        );
+      expect(row.status).toBe('cancelling');
     });
   });
 
@@ -3216,9 +3315,8 @@ describe('SubscriptionService', () => {
     });
 
     it('isolates per-payout failure — failing transfer does not abort the batch', async () => {
-      const { org, sub, stripeAccountId } = await seedConnectAndSubscription(
-        'w4jjk-partial-fail'
-      );
+      const { org, sub, stripeAccountId } =
+        await seedConnectAndSubscription('w4jjk-partial-fail');
 
       const payoutRows = await db
         .insert(pendingPayoutsTable)
@@ -3357,8 +3455,11 @@ describe('SubscriptionService', () => {
 
       const warnSpy = vi
         .spyOn(
-          (service as unknown as { obs: { warn: (...args: unknown[]) => void } })
-            .obs,
+          (
+            service as unknown as {
+              obs: { warn: (...args: unknown[]) => void };
+            }
+          ).obs,
           'warn'
         )
         .mockImplementation(() => {});
