@@ -593,6 +593,7 @@
       isFollower={access.isFollowing}
       tierName={access.getTierName(c)}
       category={c.category ?? null}
+      featured={c.featured ?? false}
     />
   {/snippet}
 

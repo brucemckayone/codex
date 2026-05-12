@@ -477,6 +477,7 @@
           isFollower={access.isFollowing}
           tierName={access.getTierName(item as { accessType: string; minimumTierId: string | null })}
           category={item.category ?? null}
+          featured={item.featured ?? false}
         />
       {/each}
     </div>

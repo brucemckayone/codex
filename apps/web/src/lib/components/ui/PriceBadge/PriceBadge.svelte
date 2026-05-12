@@ -2,26 +2,18 @@
   @component PriceBadge
 
   Displays a price/access badge with dark glass overlay for guaranteed contrast
-  on any thumbnail. Semantic left-accent stripe indicates access type at a glance.
+  on any thumbnail. Subscriber-gated content carries a faint brand-primary
+  gradient so the badge reads as the org's premium tier without a second pill.
 
   Variants:
-  - "Free" (green accent) when amount is 0
-  - Formatted price (no accent) when amount > 0
-  - "Purchased" (blue accent + check) when purchased is true
-  - "Included" (green accent + check) when included OR follower viewing followers-only
-  - Tier name or "Subscription" (brand accent) for subscriber-gated content
-  - "Followers" (blue accent) for followers-only content (non-follower viewer)
-  - "Team" (muted accent) for team-only content
+  - "Free" / formatted price / "Purchased" (check) / "Included" (check)
+  - "Followers" / "Team" — gating labels
+  - Tier name or "Subscription" with faint brand gradient for subscriber-gated
+  - Stacked dual badge (price ▲ tier ▼) for hybrid content (paid + tierName),
+    enabled by `stacked={true}` from ContentCard.
 
-  Priority: purchased > included > followers+isFollower > accessType > price
-
-  @prop {number | null} amount - Price in minor units (pence). 0 = free, null = hidden.
-  @prop {string} currency - ISO 4217 currency code. Defaults to 'GBP'.
-  @prop {boolean} purchased - Whether the user has purchased this content.
-  @prop {boolean} included - Whether the user's subscription covers this content.
-  @prop {'free' | 'paid' | 'followers' | 'subscribers' | 'team' | null} [accessType] - Content access type.
-  @prop {boolean} [isFollower] - Whether the user follows this org (contextualizes followers badge).
-  @prop {string | null} [tierName] - Resolved tier name for subscriber-gated content.
+  Priority: purchased > included > followers+isFollower > stacked-hybrid >
+            subscribers > accessType > price.
 -->
 <script lang="ts">
   import type { HTMLAttributes } from 'svelte/elements';
@@ -37,6 +29,7 @@
     accessType?: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | null;
     isFollower?: boolean;
     tierName?: string | null;
+    stacked?: boolean;
   }
 
   const {
@@ -47,15 +40,26 @@
     accessType = null,
     isFollower = false,
     tierName = null,
+    stacked = false,
     class: className,
     ...restProps
   }: Props = $props();
 
+  const isHybrid = $derived(
+    stacked &&
+      accessType === 'paid' &&
+      !!tierName &&
+      !purchased &&
+      !included &&
+      amount != null &&
+      amount > 0
+  );
+
   const variant = $derived.by(() => {
     if (purchased) return 'purchased';
     if (included) return 'included';
-    // Follower viewing followers-only content → show as included (they have access)
     if (accessType === 'followers' && isFollower) return 'included';
+    if (isHybrid) return 'hybrid';
     if (accessType === 'subscribers') return 'subscribers';
     if (accessType === 'followers') return 'followers';
     if (accessType === 'team') return 'team';
@@ -66,10 +70,11 @@
   const label = $derived.by(() => {
     if (purchased) return m.content_price_purchased();
     if (included) return m.content_price_included();
-    // Follower viewing followers-only → "Included"
     if (accessType === 'followers' && isFollower) return m.content_price_included();
     if (accessType === 'subscribers') {
-      // Show price if dual-gated (purchasable + subscriber), otherwise tier name or generic
+      // Subscriber-gated content may still carry a price (legacy dual-gated
+      // case where `paid + minimumTierId` was modelled as `subscribers`).
+      // Show the price if present, else tier name, else generic label.
       if (amount && amount > 0) return formatPrice(amount);
       if (tierName) return tierName;
       return m.content_price_subscribers();
@@ -83,19 +88,37 @@
 
   const showCheck = $derived(variant === 'purchased' || variant === 'included');
   const show = $derived(amount != null || purchased || included || accessType != null);
+  const hybridPrice = $derived(amount != null && amount > 0 ? formatPrice(amount) : '');
 </script>
 
 {#if show}
-  <span class="price-badge {className ?? ''}" data-variant={variant} {...restProps}>
-    {#if showCheck}
-      <CheckIcon size={12} />
-    {/if}
-    {label}
-  </span>
+  {#if variant === 'hybrid' && tierName}
+    <span class="price-badge-stack {className ?? ''}" data-variant="hybrid" {...restProps}>
+      <span class="price-badge">{hybridPrice}</span>
+      <span class="price-badge price-badge--premium">{tierName}</span>
+    </span>
+  {:else}
+    <span class="price-badge {className ?? ''}" data-variant={variant} {...restProps}>
+      {#if showCheck}
+        <CheckIcon size={12} />
+      {/if}
+      {label}
+    </span>
+  {/if}
 {/if}
 
 <style>
   .price-badge {
+    /* Faint brand-primary gradient — used by subscriber-gated and the tier
+       line in hybrid stacks. Dominantly dark-glass for legibility; the wash
+       sits at ~28% intensity along a 135° axis. Brand-primary (not -accent)
+       is the org's identity colour; accent is reserved for hover/highlight. */
+    --_premium-bg: linear-gradient(
+      135deg,
+      color-mix(in oklch, var(--color-brand-primary) 28%, var(--color-neutral-900)) 0%,
+      var(--color-neutral-900) 70%
+    );
+
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
@@ -107,5 +130,21 @@
     white-space: nowrap;
     background: var(--color-neutral-900);
     color: var(--color-neutral-50);
+  }
+
+  .price-badge[data-variant='subscribers'],
+  .price-badge--premium {
+    background: var(--_premium-bg);
+  }
+
+  .price-badge--premium {
+    font-weight: var(--font-semibold);
+  }
+
+  .price-badge-stack {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--space-0-5);
   }
 </style>

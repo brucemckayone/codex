@@ -60,6 +60,7 @@
             ? { amount: item.priceCents, currency: 'GBP' }
             : null}
           contentAccessType={item.accessType as 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | null}
+          featured={item.featured ?? false}
         />
       {/each}
     </div>

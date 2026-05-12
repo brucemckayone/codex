@@ -35,7 +35,7 @@
   import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
   import { Skeleton } from '../Skeleton';
   import { PriceBadge } from '../PriceBadge';
-  import { PlayIcon, MusicIcon, FileTextIcon, ArrowRightIcon } from '$lib/components/ui/Icon';
+  import { PlayIcon, MusicIcon, FileTextIcon, ArrowRightIcon, SparkleIcon } from '$lib/components/ui/Icon';
   import { extractPlainText } from '@codex/validation';
   import AudioWaveform from './AudioWaveform.svelte';
 
@@ -103,6 +103,14 @@
     /** Content category (shown as overlay tag on thumbnail) */
     category?: string | null;
     /**
+     * Creator-flagged feature flag (DB `content.featured`). When true on a
+     * browse-surface grid/list card, the thumbnail gains a soft brand-primary
+     * ring + halo and a small sparkle mark bottom-left. Suppressed on
+     * `featured`/`compact`/`resume` variants and audio-row layout (those
+     * have their own promotional/structural treatment).
+     */
+    featured?: boolean;
+    /**
      * Subscription-backed access state for library surfaces (Codex-k7ppt).
      *
      * Only library/continue-watching consumers set this. Browse grids leave
@@ -149,6 +157,7 @@
     isFollower = false,
     tierName = null,
     category = null,
+    featured = false,
     accessState = 'active',
     accessStatePeriodEnd = null,
     accessStateActionHref = '/account/subscriptions',
@@ -212,6 +221,28 @@
     (price != null || purchased || included || contentAccessType != null)
   );
   const showResumeInfo = $derived(variant === 'resume');
+
+  // Hybrid = purchasable AND tier-included, viewer has neither. PriceBadge
+  // does the two-line render; ContentCard just opts in via `stacked`.
+  const isHybrid = $derived(
+    contentAccessType === 'paid' &&
+      !!tierName &&
+      !purchased &&
+      !included &&
+      price != null &&
+      price.amount > 0
+  );
+
+  // Featured decoration is reserved for standard browse tiles. The
+  // `featured` variant is already a hero promotion (double-up = noise);
+  // compact/resume strip non-essentials; audio-row is a playlist item.
+  const showFeaturedTreatment = $derived(
+    featured &&
+      variant !== 'featured' &&
+      variant !== 'compact' &&
+      variant !== 'resume' &&
+      !isAudioRow
+  );
 
   // ── Article editorial treatment ──────────────────────────────────────
   // Every article card — in every surface — carries the same triad:
@@ -311,7 +342,7 @@
     </div>
   {:else}
     <!-- Thumbnail -->
-    <div class="cc__thumb">
+    <div class="cc__thumb" class:cc__thumb--featured={showFeaturedTreatment}>
       {#if thumbnail}
         <img
           src={thumbnail}
@@ -378,8 +409,15 @@
           accessType={contentAccessType}
           {isFollower}
           {tierName}
+          stacked={isHybrid}
           class="cc__price-badge"
         />
+      {/if}
+
+      {#if showFeaturedTreatment}
+        <span class="cc__featured-mark" aria-label={m.content_featured_label()}>
+          <SparkleIcon size={12} />
+        </span>
       {/if}
 
       <!-- Progress bar (bottom of thumbnail) -->
@@ -703,6 +741,34 @@
     top: var(--space-2);
     right: var(--space-2);
     z-index: 1;
+  }
+
+  /* ═══════════════════════════════════════════
+     FEATURED DECORATION
+     Thin brand-primary inner ring + soft halo + small sparkle bottom-left.
+     Brand-primary (not -accent) is the org's identity colour; accent is
+     reserved for hover/highlight states. Top-left stays reserved for the
+     cancelling access badge.
+     ═══════════════════════════════════════════ */
+
+  .cc__thumb--featured {
+    box-shadow:
+      0 0 0 var(--border-width)
+        color-mix(in srgb, var(--color-brand-primary) 50%, transparent),
+      0 0 var(--space-2) 0
+        color-mix(in srgb, var(--color-brand-primary) 22%, transparent);
+  }
+
+  .cc__featured-mark {
+    position: absolute;
+    bottom: var(--space-2);
+    left: var(--space-2);
+    z-index: 2;
+    display: inline-flex;
+    color: var(--color-brand-primary);
+    filter: drop-shadow(0 var(--border-width) var(--border-width)
+      color-mix(in srgb, var(--color-neutral-900) 50%, transparent));
+    fill: currentColor;
   }
 
   /* ═══════════════════════════════════════════

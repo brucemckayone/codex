@@ -127,14 +127,22 @@ export function useAccessContext(getData: () => AccessContextInput) {
   }
 
   /**
-   * Resolve the display name of the tier required for a content item.
-   * Returns null for non-subscriber content or when tiers aren't loaded yet.
+   * Resolve the display name of the tier associated with a content item.
+   *
+   * Resolves for two access shapes:
+   *   - 'subscribers': the gating tier (or cheapest tier as marketing entry).
+   *   - 'paid' + minimumTierId: the tier that *also includes* this paid
+   *     content (hybrid mode). Purchase-only paid returns null.
+   *
+   * Returns null for any other access type or when tiers aren't loaded yet.
    */
   function getTierName(item: ContentAccessItem): string | null {
-    if (item.accessType !== 'subscribers') return null;
+    if (item.accessType !== 'subscribers' && item.accessType !== 'paid') {
+      return null;
+    }
     if (!resolvedTiers?.length) return null;
     if (!item.minimumTierId) {
-      // No minimum tier — show the cheapest tier as the entry point
+      if (item.accessType === 'paid') return null;
       const sorted = [...resolvedTiers].sort(
         (a, b) => a.sortOrder - b.sortOrder
       );

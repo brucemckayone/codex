@@ -84,6 +84,7 @@
             currency: 'GBP',
           } : null}
           contentAccessType={item.accessType}
+          featured={item.featured ?? false}
         />
       {/each}
     {:else}

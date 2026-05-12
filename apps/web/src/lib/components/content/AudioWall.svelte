@@ -73,6 +73,7 @@
       isFollower={access.isFollowing}
       tierName={access.getTierName(item)}
       category={item.category ?? null}
+      featured={item.featured ?? false}
     />
   {/each}
 
