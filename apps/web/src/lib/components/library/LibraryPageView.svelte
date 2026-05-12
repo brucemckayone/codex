@@ -32,11 +32,9 @@
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { ShoppingBagIcon, SearchXIcon } from '$lib/components/ui/Icon';
-  import LibraryFilters from './LibraryFilters.svelte';
+  import LibraryToolbar from './LibraryToolbar.svelte';
   import ContinueWatching from './ContinueWatching.svelte';
   import { Pagination } from '$lib/components/ui/Pagination';
-  import Select from '$lib/components/ui/Select/Select.svelte';
-  import { ViewToggle } from '$lib/components/ui/ViewToggle';
   import { BackToTop } from '$lib/components/ui/BackToTop';
   import { useViewMode } from '$lib/utils/view-mode.svelte';
   import { subscriptionCollection, useLiveQuery } from '$lib/collections';
@@ -118,10 +116,7 @@
     filters.search !== ''
   );
 
-  let filtersRef: LibraryFilters | undefined = $state();
-
   function handleClearFilters() {
-    filtersRef?.clearAll();
     onClearFilters();
   }
 
@@ -194,25 +189,20 @@
   {:else}
     <ContinueWatching items={continueWatchingItems} variant="prominent" />
 
-    <!-- Sort + View Toggle -->
-    <div class="sort-bar">
-      <Select
-        options={sortOptions}
-        value={currentSort}
-        onValueChange={onSortChange}
-        label={m.library_sort_label()}
-        placeholder={m.library_sort_label()}
-      />
-      <ViewToggle value={viewMode} onchange={handleViewChange} />
-    </div>
-
-    <LibraryFilters
-      bind:this={filtersRef}
+    <LibraryToolbar
+      filters={{
+        contentType: filters.contentType,
+        progressStatus: filters.progressStatus,
+        accessType: filters.accessType ?? 'all',
+        search: filters.search,
+      }}
+      sort={currentSort}
+      {sortOptions}
+      {viewMode}
       onFilterChange={onFilterChange}
-      initialContentType={filters.contentType}
-      initialProgressStatus={filters.progressStatus}
-      initialAccessType={filters.accessType}
-      initialSearch={filters.search}
+      {onSortChange}
+      onViewChange={handleViewChange}
+      onClearAll={handleClearFilters}
     />
 
     {#if items.length === 0 && hasActiveFilters}
@@ -327,15 +317,6 @@
   .clear-filters-btn:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
-  }
-
-  /* Sort bar */
-  .sort-bar {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    margin-bottom: var(--space-4);
-    max-width: 480px;
   }
 
   /* Pagination */

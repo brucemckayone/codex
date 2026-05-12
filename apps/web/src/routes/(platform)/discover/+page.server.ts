@@ -15,6 +15,24 @@ const EMPTY_CONTENT = {
   pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
 };
 
+const SORT_VALUES = ['newest', 'oldest', 'title'] as const;
+type SortValue = (typeof SORT_VALUES)[number];
+
+const TYPE_VALUES = ['video', 'audio', 'written'] as const;
+type TypeValue = (typeof TYPE_VALUES)[number];
+
+function parseSort(raw: string | null): SortValue {
+  return (SORT_VALUES as readonly string[]).includes(raw ?? '')
+    ? (raw as SortValue)
+    : 'newest';
+}
+
+function parseType(raw: string | null): TypeValue | undefined {
+  return (TYPE_VALUES as readonly string[]).includes(raw ?? '')
+    ? (raw as TypeValue)
+    : undefined;
+}
+
 export const load: PageServerLoad = async ({
   platform,
   cookies,
@@ -23,21 +41,22 @@ export const load: PageServerLoad = async ({
 }) => {
   const api = createServerApi(platform, cookies);
 
-  const params = new URLSearchParams();
-  params.set('sort', 'newest');
-
   const search = url.searchParams.get('q')?.slice(0, 200) ?? '';
-  if (search) {
-    params.set('search', search);
-  }
+  const sort = parseSort(url.searchParams.get('sort'));
+  const type = parseType(url.searchParams.get('type'));
 
   const pageParam = url.searchParams.get('page');
   const pageNum = pageParam
     ? Math.max(1, Math.min(100, parseInt(pageParam, 10) || 1))
     : undefined;
-  if (pageNum) {
-    params.set('page', String(pageNum));
-  }
+
+  const params = new URLSearchParams();
+  params.set('sort', sort);
+  if (search) params.set('search', search);
+  if (type) params.set('contentType', type);
+  if (pageNum) params.set('page', String(pageNum));
+
+  const filters = { q: search, type: type ?? 'all', sort } as const;
 
   try {
     const content = await api.content.getDiscoverContent(params);
@@ -48,6 +67,7 @@ export const load: PageServerLoad = async ({
     return {
       content: content ?? EMPTY_CONTENT,
       search,
+      filters,
       error: false,
     };
   } catch (err) {
@@ -57,6 +77,11 @@ export const load: PageServerLoad = async ({
     // Cached error fallback path — handler swallowed the error, so this is
     // a successful 200 with `error: true`. Safe to apply public cache here.
     setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
-    return { content: EMPTY_CONTENT, search, error: true };
+    return {
+      content: EMPTY_CONTENT,
+      search,
+      filters,
+      error: true,
+    };
   }
 };

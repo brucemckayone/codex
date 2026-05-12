@@ -35,7 +35,7 @@
   import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
   import { Skeleton } from '../Skeleton';
   import { PriceBadge } from '../PriceBadge';
-  import { PlayIcon, MusicIcon, FileTextIcon, ArrowRightIcon, SparkleIcon } from '$lib/components/ui/Icon';
+  import { PlayIcon, MusicIcon, FileTextIcon, ArrowRightIcon, StarIcon } from '$lib/components/ui/Icon';
   import { extractPlainText } from '@codex/validation';
   import AudioWaveform from './AudioWaveform.svelte';
 
@@ -62,12 +62,20 @@
   interface Props extends HTMLAttributes<HTMLDivElement> {
     variant?: 'grid' | 'list' | 'featured' | 'compact' | 'resume';
     /**
-     * Additive layout mode. 'row' swaps the card to a horizontal treatment
-     * (album art on the left, title + waveform strip + meta stacked on the
-     * right). Currently only audio uses it — callers must opt in explicitly
-     * so existing grid/list/compact usages keep the vertical-tile shape.
+     * Additive horizontal "music playlist row" mode (album art left,
+     * title + waveform + meta right). Audio-only; opt-in so existing
+     * grid/list/compact usages keep the vertical-tile shape.
      */
     layout?: 'default' | 'row';
+    /**
+     * Catalog/discovery surfaces (Discover, Explore, org-landing All-content,
+     * mixed-type carousels) opt in so audio renders as a horizontal row
+     * instead of a square video-lookalike. Curated list surfaces (Library,
+     * RelatedContent, CommandPalette, creator pages, ContentDetailView)
+     * leave it off. AudioWall passes `layout='row'` directly and bypasses
+     * this gate.
+     */
+    autoPromoteAudio?: boolean;
     id: string;
     title: string;
     thumbnail?: string | null;
@@ -104,10 +112,10 @@
     category?: string | null;
     /**
      * Creator-flagged feature flag (DB `content.featured`). When true on a
-     * browse-surface grid/list card, the thumbnail gains a soft brand-primary
-     * ring + halo and a small sparkle mark bottom-left. Suppressed on
-     * `featured`/`compact`/`resume` variants and audio-row layout (those
-     * have their own promotional/structural treatment).
+     * browse-surface grid/list card, the thumbnail gains a soft brand-accent
+     * glow and a small star glyph bottom-left. Suppressed on
+     * `featured`/`compact`/`resume` variants and audio-row layout — those
+     * have their own promotional/structural treatment.
      */
     featured?: boolean;
     /**
@@ -139,6 +147,7 @@
   const {
     variant = 'grid',
     layout = 'default',
+    autoPromoteAudio = false,
     id,
     title,
     thumbnail,
@@ -195,10 +204,19 @@
     return m.library_resume();
   });
 
-  // Audio-row layout: horizontal ("music playlist row") treatment. Only
-  // activates when the caller explicitly opts in via `layout='row'` AND
-  // the content is audio, so grid/list/compact audio callers are unaffected.
-  const isAudioRow = $derived(layout === 'row' && contentType === 'audio');
+  // Audio-row resolves when caller opts in two ways: explicit `layout='row'`
+  // (AudioWall) OR `autoPromoteAudio` on a grid-variant audio card (catalog
+  // surfaces). Other callers keep the square vertical tile.
+  const isAutoPromoted = $derived(
+    autoPromoteAudio &&
+      layout === 'default' &&
+      variant === 'grid' &&
+      contentType === 'audio',
+  );
+  const resolvedLayout = $derived<'default' | 'row'>(
+    layout === 'row' || isAutoPromoted ? 'row' : 'default',
+  );
+  const isAudioRow = $derived(resolvedLayout === 'row' && contentType === 'audio');
 
   const isArticle = $derived(contentType === 'article');
 
@@ -220,7 +238,6 @@
     variant !== 'compact' && variant !== 'resume' &&
     (price != null || purchased || included || contentAccessType != null)
   );
-  const showResumeInfo = $derived(variant === 'resume');
 
   // Hybrid = purchasable AND tier-included, viewer has neither. PriceBadge
   // does the two-line render; ContentCard just opts in via `stacked`.
@@ -241,8 +258,9 @@
       variant !== 'featured' &&
       variant !== 'compact' &&
       variant !== 'resume' &&
-      !isAudioRow
+      resolvedLayout === 'default'
   );
+  const showResumeInfo = $derived(variant === 'resume');
 
   // ── Article editorial treatment ──────────────────────────────────────
   // Every article card — in every surface — carries the same triad:
@@ -269,14 +287,13 @@
   // typographic signal (parity). Palette stays neutral — no coloured pill,
   // no per-type accent colour (R12 neutrality; see
   // feedback_neutral_card_palette.md).
-  const kindTypeLabel = $derived.by(() => {
-    if (contentType === 'audio') return 'AUDIO';
-    if (contentType === 'video') return 'VIDEO';
-    if (contentType === 'article') return 'ARTICLE';
-    return '';
-  });
+  const kindTypeLabel = $derived(
+    contentType ? contentType.toUpperCase() : ''
+  );
   const kindLabel = $derived(
-    kindTypeLabel ? (category ? `${kindTypeLabel} \u00B7 ${category}` : kindTypeLabel) : ''
+    kindTypeLabel && category
+      ? `${kindTypeLabel} \u00B7 ${category}`
+      : kindTypeLabel
   );
   // Featured variant already carries full metadata in its overlay body
   // (description + creator), so suppressing the kind-line avoids visual
@@ -324,7 +341,7 @@
   class:cc--access-dimmed={isDimmed}
   class:cc--audio-row={isAudioRow}
   data-variant={variant}
-  data-layout={layout !== 'default' ? layout : undefined}
+  data-layout={resolvedLayout !== 'default' ? resolvedLayout : undefined}
   data-content-type={contentType || undefined}
   data-normalize-ratio={normalizeRatio || undefined}
   data-access-state={accessState !== 'active' ? accessState : undefined}
@@ -415,8 +432,8 @@
       {/if}
 
       {#if showFeaturedTreatment}
-        <span class="cc__featured-mark" aria-label={m.content_featured_label()}>
-          <SparkleIcon size={12} />
+        <span class="cc__featured-star" aria-label={m.content_featured_label()}>
+          <StarIcon size={14} />
         </span>
       {/if}
 
@@ -745,38 +762,36 @@
 
   /* ═══════════════════════════════════════════
      FEATURED DECORATION
-     Thin brand-primary inner ring + soft halo + small sparkle bottom-left.
-     Brand-primary (not -accent) is the org's identity colour; accent is
-     reserved for hover/highlight states. Top-left stays reserved for the
-     cancelling access badge.
+     Soft brand-accent glow on the thumbnail + small star bottom-left.
+     Top-left stays reserved for the access-state cancelling badge.
      ═══════════════════════════════════════════ */
 
   .cc__thumb--featured {
+    /* Inner ring + soft outer halo, both colour-mixed against transparent
+       so the brand-accent never bleeds onto adjacent cards. */
     box-shadow:
       0 0 0 var(--border-width)
-        color-mix(in srgb, var(--color-brand-primary) 50%, transparent),
-      0 0 var(--space-2) 0
-        color-mix(in srgb, var(--color-brand-primary) 22%, transparent);
+        color-mix(in srgb, var(--color-brand-accent) 60%, transparent),
+      0 0 var(--space-3) var(--space-0-5)
+        color-mix(in srgb, var(--color-brand-accent) 35%, transparent);
   }
 
-  .cc__featured-mark {
+  .cc__featured-star {
     position: absolute;
     bottom: var(--space-2);
     left: var(--space-2);
     z-index: 2;
     display: inline-flex;
-    color: var(--color-brand-primary);
+    color: var(--color-brand-accent);
+    /* Drop-shadow keeps the glyph legible over light photographs without
+       needing a filled background. */
     filter: drop-shadow(0 var(--border-width) var(--border-width)
-      color-mix(in srgb, var(--color-neutral-900) 50%, transparent));
+      color-mix(in srgb, var(--color-neutral-900) 60%, transparent));
     fill: currentColor;
   }
 
   /* ═══════════════════════════════════════════
      ACCESS STATE (Codex-k7ppt)
-     Library surfaces decorate the card with a small 'Ends {date}' badge
-     when the underlying subscription is cancelling, and dim + expose a
-     hover/tap CTA when the subscription is past_due / revoked. Browse
-     grids pass no accessState, so none of this renders there.
      ═══════════════════════════════════════════ */
 
   /* Cancelling badge — top-left so it doesn't collide with the top-right PriceBadge. */
@@ -1347,16 +1362,14 @@
     display: grid;
     grid-template-columns: auto 1fr;
     align-items: center;
-    /* Bumped from space-3 to space-4 — gives the larger album art + title
-       cluster real breathing room instead of feeling crammed. */
     gap: var(--space-4);
-    /* Row padding bumped from space-2 to space-3 — the row is no longer
-       compact, so the outer cushion needs to match the taller album art. */
     padding: var(--space-3);
-    /* Transparent until hover — matches the card-transparency rule. */
     background: transparent;
     border-color: transparent;
     border-radius: var(--radius-lg);
+    /* Pinned to the shared card-row token so MasonryGrid row-span math
+       and AudioWall sparse mode stay in lockstep. */
+    min-height: var(--card-row-height);
   }
 
   .cc--audio-row:hover,
@@ -1369,10 +1382,9 @@
     box-shadow: var(--shadow-sm);
   }
 
-  /* Album art — square, fixed width. Bumped from space-20 (~80px) to
-     space-24 + space-4 (~112px) so the row reads as music-app generous
-     instead of compact-list terse. Composed from tokens so it scales
-     with org density. */
+  /* Album art — 112px square (--space-24 + --space-4). Composed from
+     tokens so it scales with org density. Stays in lockstep with
+     AudioWall's "View all" tile and the --card-row-height token. */
   .cc--audio-row .cc__thumb {
     width: calc(var(--space-24) + var(--space-4));
     min-width: calc(var(--space-24) + var(--space-4));
@@ -1384,16 +1396,13 @@
 
   .cc--audio-row .cc__body {
     padding: 0;
-    /* Bumped from space-1 to space-2 — the title is now one step larger,
-       so the meta/waveform need proportionally more separation. */
     gap: var(--space-2);
     min-width: 0;
   }
 
   /* Two-line clamp keeps long track titles readable without blowing up
-     the row height. Single-line felt too terse during review. Bumped
-     one step (base → lg) so the title reads as the primary thing in
-     the row, not peer to the meta line. */
+     the row height. text-lg sets the title above the meta line in
+     hierarchy, not peer to it. */
   .cc--audio-row .cc__title {
     font-size: var(--text-lg);
     font-weight: var(--font-semibold);
@@ -1416,9 +1425,7 @@
   }
 
   /* Waveform strip — brand-tinted via `color:` (AudioWaveform uses
-     currentColor). Slightly taller (space-5 → space-6) to match the
-     beefier row height so it doesn't look hair-thin next to the 112px
-     album art. */
+     currentColor). Sized to read alongside the 112px album art. */
   :global(.cc--audio-row .cc__waveform) {
     width: 100%;
     /* Fixed height keeps layout stable during SSR/client hydration and

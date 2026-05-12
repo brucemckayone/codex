@@ -29,6 +29,15 @@ export interface AudioAnalysis {
 export interface AudioAnalyserHandle {
   /** Get current frequency analysis (call once per frame in render loop) */
   getAnalysis(): AudioAnalysis;
+  /**
+   * Raw byte frequency bins (length = `fftSize / 2`). The returned buffer is
+   * shared — treat as read-only. Refreshed lazily: callers must invoke
+   * `getAnalysis()` first in the same frame, or the bins reflect the previous
+   * sample. Exposed so render loops that want per-bar FFT mapping (rather
+   * than the aggregated bass/mids/treble bands) can avoid a duplicate
+   * `getByteFrequencyData()` call.
+   */
+  getFrequencyData(): Uint8Array;
   /** Resume AudioContext — MUST be called within a user gesture handler */
   resume(): Promise<void>;
   /** Clean up AudioContext and disconnect nodes */
@@ -208,5 +217,9 @@ export function createAudioAnalyser(
     sourceCache.delete(audioElement);
   }
 
-  return { getAnalysis, resume, destroy };
+  function getFrequencyData(): Uint8Array {
+    return frequencyData;
+  }
+
+  return { getAnalysis, getFrequencyData, resume, destroy };
 }

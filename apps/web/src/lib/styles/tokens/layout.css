@@ -46,6 +46,15 @@
    * waveform (--space-24 = 96px) + controls row (~40px) ≈ 176-192px.
    */
   --player-height-audio: 12rem;  /* 192px */
+
+  /* ========================================
+   * CARD ROW HEIGHT
+   * ========================================
+   * Audio-row card target height — single source of truth for the
+   * `.cc--audio-row` min-height and AudioWall's "View all" overflow
+   * tile. Composed = album art (--space-24 + --space-4) + row padding
+   * (--space-6, i.e. 2 × --space-3). Update in lockstep with both. */
+  --card-row-height: calc(var(--space-24) + var(--space-4) + var(--space-6));
 }
 
 @media (--below-md) {

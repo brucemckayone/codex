@@ -70,6 +70,8 @@ export const load: PageServerLoad = async ({
   const pageParam = url.searchParams.get('page');
   const category = url.searchParams.get('category') ?? undefined;
   const creatorUsername = url.searchParams.get('creator') ?? undefined;
+  const featuredParam = url.searchParams.get('featured');
+  const featured = featuredParam === 'true' ? true : undefined;
 
   // Resolve creator username → userId + profile for the banner.
   // We reuse getPublicCreators (KV-cached upstream, returns up to 100 members) rather
@@ -193,6 +195,7 @@ export const load: PageServerLoad = async ({
       page,
       limit: PAGE_LIMIT,
       creatorId: creator?.id,
+      featured,
     });
     // Set the public cache header only after the fetch succeeds. If
     // getPublicContent throws (4xx/5xx), the error response inherits the
@@ -212,6 +215,7 @@ export const load: PageServerLoad = async ({
       sort,
       category: category ?? '',
       creator: creator?.username ?? '',
+      featured: featured === true,
       page,
     },
     limit: PAGE_LIMIT,

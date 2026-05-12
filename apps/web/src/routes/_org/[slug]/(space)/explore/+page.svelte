@@ -16,18 +16,25 @@
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { CreatorExploreBanner } from '$lib/components/ui/CreatorCard';
   import { Pagination } from '$lib/components/ui/Pagination';
-  import Select from '$lib/components/ui/Select/Select.svelte';
   import { getContentCollection, hydrateCollection, useLiveQuery } from '$lib/collections';
   import { filterContentItemsByOrg } from '$lib/content/filter-by-org';
   import { followingStore } from '$lib/client/following.svelte';
   import { buildContentUrl } from '$lib/utils/subdomain';
-  import { SearchIcon, SearchXIcon, FileIcon, XIcon } from '$lib/components/ui/Icon';
+  import { SearchXIcon, FileIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { ViewToggle } from '$lib/components/ui/ViewToggle';
   import { BackToTop } from '$lib/components/ui/BackToTop';
+  import { StickyToolbar } from '$lib/components/ui/StickyToolbar';
+  import { SearchPill } from '$lib/components/ui/SearchPill';
+  import { FilterTriggerButton } from '$lib/components/ui/FilterTriggerButton';
+  import {
+    ActiveFiltersStrip,
+    type ActiveFilterChip,
+  } from '$lib/components/ui/ActiveFiltersStrip';
   import { useViewMode } from '$lib/utils/view-mode.svelte';
   import { useAccessContext } from '$lib/utils/access-context.svelte';
   import { StructuredData } from '$lib/components/seo';
+  import ExploreFilterDrawer from '$lib/components/explore/ExploreFilterDrawer.svelte';
   import type { PageData } from './$types';
 
 
@@ -106,19 +113,27 @@
   );
 
   const orgName = $derived(data.org?.name ?? 'Organization');
-  // Use live query data when available, fall back to server data, then
-  // strict-equality filter to the current org. Defense in depth — even
-  // if the QueryClient cache has been polluted with another org's items
-  // (cross-tab navigation, stale state, future regression in cache
-  // scoping), this predicate guarantees the wrong org's data never
-  // reaches the DOM. Mirrors filterLibraryItemsByOrg on the library page
-  // (Codex-q3zuf).
-  const items = $derived(
-    filterContentItemsByOrg(
-      contentQuery.data ?? data.content?.items ?? [],
-      data.org?.id
-    )
-  );
+  // Source-selection rule:
+  // The live query reports `data: []` whenever the org-scoped collection
+  // hasn't yet observed the latest `setQueryData` — TanStack Query's
+  // observer notification is microtask-scheduled, so there is always a
+  // window where the sync hydrate has landed but the live query still
+  // reads as empty. This window re-opens on every sort/filter goto()
+  // because the $effect re-hydrates the cache atomically.
+  // Disambiguate by comparing to the SSR payload: if SSR has items but
+  // the live query is empty, the collection is mid-hydrate — render SSR.
+  // Only trust an empty live query when SSR is also empty (genuinely
+  // empty result set).
+  // The org-equality filter is defense in depth against cache poisoning
+  // (mirrors filterLibraryItemsByOrg, Codex-q3zuf).
+  const items = $derived.by(() => {
+    const liveItems = contentQuery.data ?? [];
+    const ssrItems = data.content?.items ?? [];
+    const source = liveItems.length === 0 && ssrItems.length > 0
+      ? ssrItems
+      : liveItems;
+    return filterContentItemsByOrg(source, data.org?.id);
+  });
   const total = $derived(data.content?.total ?? 0);
   const filters = $derived(data.filters);
   const limit = $derived(data.limit ?? 12);
@@ -155,64 +170,61 @@
     ] : []),
   ]);
 
-  // Filter chips — type/category use local state; search/sort use URL params
-  const activeFilterChips = $derived.by(() => {
-    const chips: Array<{ key: string; label: string; onRemove: () => void }> = [];
+  // Filter chips — type/category use local state; search/sort use URL params.
+  // Removal dispatches via `removeChip` keyed by chip.key.
+  const activeFilterChips = $derived.by<ActiveFilterChip[]>(() => {
+    const chips: ActiveFilterChip[] = [];
 
     if (filters.q) {
-      chips.push({
-        key: 'q',
-        label: `Search: "${filters.q}"`,
-        onRemove: () => { searchInput = ''; updateFilter('q', null); },
-      });
+      chips.push({ key: 'q', label: `Search: "${filters.q}"` });
     }
-
     if (localType) {
       const typeLabel = typeOptions.find((o) => o.value === localType)?.label ?? localType;
-      chips.push({
-        key: 'type',
-        label: `Type: ${typeLabel}`,
-        onRemove: () => { localType = ''; },
-      });
+      chips.push({ key: 'type', label: `Type: ${typeLabel}` });
     }
-
     if (localCategory) {
-      chips.push({
-        key: 'category',
-        label: `Category: ${localCategory}`,
-        onRemove: () => { localCategory = ''; },
-      });
+      chips.push({ key: 'category', label: `Category: ${localCategory}` });
     }
-
     if (filters.sort && filters.sort !== 'newest') {
       const sortLabel = sortOptions.find((o) => o.value === filters.sort)?.label ?? filters.sort;
-      chips.push({
-        key: 'sort',
-        label: `Sort: ${sortLabel}`,
-        onRemove: () => updateFilter('sort', null),
-      });
+      chips.push({ key: 'sort', label: `Sort: ${sortLabel}` });
     }
-
     if (data.creator) {
-      chips.push({
-        key: 'creator',
-        label: `Creator: ${data.creator.name}`,
-        onRemove: () => updateFilter('creator', null),
-      });
+      chips.push({ key: 'creator', label: `Creator: ${data.creator.name}` });
+    }
+    if (filters.featured === true) {
+      chips.push({ key: 'featured', label: m.explore_filter_featured() });
     }
 
     return chips;
   });
 
+  function removeChip(chip: ActiveFilterChip) {
+    switch (chip.key) {
+      case 'q':
+        updateFilter('q', null);
+        break;
+      case 'type':
+        localType = '';
+        break;
+      case 'category':
+        localCategory = '';
+        break;
+      case 'sort':
+        updateFilter('sort', null);
+        break;
+      case 'creator':
+        updateFilter('creator', null);
+        break;
+      case 'featured':
+        updateFilter('featured', null);
+        break;
+    }
+  }
+
   const hasActiveFilters = $derived(
-    !!filters.q || !!localType || !!localCategory || (filters.sort !== 'newest') || !!data.creator
+    !!filters.q || !!localType || !!localCategory || (filters.sort !== 'newest') || !!data.creator || filters.featured === true
   );
-
-  let searchInput = $state('');
-
-  $effect(() => {
-    searchInput = data.filters?.q ?? '';
-  });
 
   function updateFilter(key: string, value: string | null) {
     const url = new URL(page.url);
@@ -227,14 +239,12 @@
     goto(url.toString(), { replaceState: true, noScroll: true });
   }
 
-  function handleSearchSubmit(e: SubmitEvent) {
-    e.preventDefault();
-    const trimmed = searchInput.trim();
+  function handleSearchSubmit(value: string) {
+    const trimmed = value.trim();
     updateFilter('q', trimmed || null);
   }
 
   function clearFilters() {
-    searchInput = '';
     localType = '';
     localCategory = '';
     const url = new URL(page.url);
@@ -243,6 +253,7 @@
     url.searchParams.delete('sort');
     url.searchParams.delete('category');
     url.searchParams.delete('creator');
+    url.searchParams.delete('featured');
     url.searchParams.delete('page');
     goto(url.toString(), { replaceState: true });
   }
@@ -261,6 +272,45 @@
   ] as const;
 
   const { viewMode, handleViewChange } = useViewMode();
+
+  // Featured filter — backend publicContentQuerySchema supports `featured: boolean`.
+  // Toggle exposes creator-flagged featured items only.
+  const featuredActive = $derived(filters.featured === true);
+  function toggleFeatured() {
+    updateFilter('featured', featuredActive ? null : 'true');
+  }
+
+  // ── Filter drawer ─────────────────────────────────────────────────
+  // Drawer holds Sort + Type + Featured. Search stays in the toolbar;
+  // Category strip stays inline (distinct horizontal discovery surface).
+  let drawerOpen = $state(false);
+  function setDrawerOpen(next: boolean) {
+    if (drawerOpen === next) return; // Melt echo guard
+    drawerOpen = next;
+  }
+
+  // Drawer callbacks route to the existing write paths:
+  //   • type is client-side (localType, instant)
+  //   • featured is URL-driven (updateFilter, navigation)
+  //   • sort is URL-driven (updateFilter)
+  function handleDrawerFilterChange(next: { type: string; featured: boolean }) {
+    if (next.type !== localType) localType = next.type;
+    if (next.featured !== featuredActive) {
+      updateFilter('featured', next.featured ? 'true' : null);
+    }
+  }
+  function handleDrawerSortChange(value: string | undefined) {
+    updateFilter('sort', value ?? null);
+  }
+
+  // Filter button shows a dot when ANY non-default facet is active.
+  // (Search, category, creator are also non-default but they have their
+  // own UI; the dot reflects the in-drawer facet state specifically.)
+  const drawerActiveCount = $derived(
+    (localType ? 1 : 0) +
+      (featuredActive ? 1 : 0) +
+      (filters.sort !== 'newest' ? 1 : 0)
+  );
 
   // ── SEO ──────────────────────────────────────────────────────────
   // Canonical URL strategy: preserve meaningful filter params (type,
@@ -366,44 +416,27 @@
     {/if}
   </header>
 
-  <!-- Controls: Search, Type Filter, Sort, View Toggle -->
-  <div class="explore__controls">
-    <form class="explore__search" onsubmit={handleSearchSubmit}>
-      <SearchIcon size={18} class="explore__search-icon" />
-      <input
-        id="explore-search"
-        name="q"
-        type="search"
-        class="explore__search-input"
-        placeholder={m.explore_search_placeholder()}
-        bind:value={searchInput}
-        aria-label={m.explore_search_placeholder()}
-      />
-    </form>
+  <!-- Sticky command bar: search + filter trigger + view toggle. Type,
+       Featured, and Sort live inside the drawer. -->
+  <StickyToolbar>
+    <SearchPill
+      value={filters.q ?? ''}
+      placeholder={m.explore_search_placeholder()}
+      onSubmit={handleSearchSubmit}
+    />
 
-    <div class="explore__filter-group">
-      {#each typeOptions as option (option.value)}
-        <button
-          class="explore__filter-btn"
-          class:explore__filter-btn--active={localType === option.value}
-          onclick={() => { localType = option.value; }}
-          aria-pressed={localType === option.value}
-        >
-          {option.label}
-        </button>
-      {/each}
-    </div>
+    <FilterTriggerButton
+      activeCount={drawerActiveCount}
+      onClick={() => setDrawerOpen(true)}
+      expanded={drawerOpen}
+      ariaLabel={`${m.explore_filters_and_sort()}${drawerActiveCount > 0 ? ` (${drawerActiveCount} active)` : ''}`}
+      title={m.explore_filters_and_sort()}
+    />
 
-    <div class="explore__sort-wrapper">
-      <Select
-        options={sortOptions}
-        value={filters.sort}
-        onValueChange={(val) => updateFilter('sort', val ?? null)}
-        placeholder="Sort content"
-      />
+    <div class="explore__view-toggle">
+      <ViewToggle value={viewMode} onchange={handleViewChange} />
     </div>
-    <ViewToggle value={viewMode} onchange={handleViewChange} />
-  </div>
+  </StickyToolbar>
 
   <!-- Category Strip -->
   {#if categories.length >= 2}
@@ -430,33 +463,20 @@
   {/if}
 
   <!-- Active Filter Chips -->
-  {#if hasActiveFilters}
-    <div class="explore__chips" aria-label="Active filters">
-      {#each activeFilterChips as chip (chip.key)}
-        <span class="explore__chip">
-          {chip.label}
-          <button
-            class="explore__chip-remove"
-            onclick={chip.onRemove}
-            aria-label="Remove {chip.label} filter"
-          >
-            <XIcon size={12} />
-          </button>
-        </span>
-      {/each}
-      {#if activeFilterChips.length > 1}
-        <button class="explore__clear-all" onclick={clearFilters}>
-          {m.explore_clear_filters()}
-        </button>
-      {/if}
-    </div>
-  {/if}
+  <ActiveFiltersStrip
+    chips={activeFilterChips}
+    onRemove={removeChip}
+    onClearAll={clearFilters}
+    clearAllLabel={m.explore_clear_filters()}
+    requireMultipleForClear
+  />
 
   <!-- Content Grid -->
   {#if displayItems.length > 0}
-    <div class="content-grid explore__grid" data-view={viewMode}>
+    <div class="content-grid content-grid--masonry explore__grid" data-view={viewMode}>
       {#each displayItems as item (item.id)}
         <ContentCard
+          autoPromoteAudio
           id={item.id}
           title={item.title}
           thumbnail={item.mediaItem?.thumbnailUrl ?? item.thumbnailUrl ?? null}
@@ -504,6 +524,18 @@
   {/if}
 </div>
 
+<ExploreFilterDrawer
+  open={drawerOpen}
+  onOpenChange={setDrawerOpen}
+  filters={{ type: localType, featured: featuredActive }}
+  sort={filters.sort}
+  {sortOptions}
+  {typeOptions}
+  onFilterChange={handleDrawerFilterChange}
+  onSortChange={handleDrawerSortChange}
+  onClearAll={clearFilters}
+/>
+
 <BackToTop />
 
 <style>
@@ -541,88 +573,11 @@
     color: var(--color-text-secondary);
   }
 
-  /* ── Controls ── */
-  .explore__controls {
-    display: flex;
-    flex-wrap: wrap;
+  /* Push the view toggle to the trailing edge of the sticky bar row. */
+  .explore__view-toggle {
+    display: inline-flex;
     align-items: center;
-    gap: var(--space-4);
-  }
-
-  .explore__search {
-    position: relative;
-    flex: 1 1 280px;
-    min-width: 0;
-  }
-
-  :global(.explore__search-icon) {
-    position: absolute;
-    left: var(--space-3);
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--color-text-muted);
-    pointer-events: none;
-  }
-
-  .explore__search-input {
-    width: 100%;
-    padding: var(--space-2-5) var(--space-3);
-    padding-left: var(--space-10);
-    font-size: var(--text-sm);
-    color: var(--color-text);
-    background: var(--color-surface);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-md);
-    outline: none;
-    transition: border-color var(--duration-fast) var(--ease-default),
-      box-shadow var(--duration-fast) var(--ease-default);
-  }
-
-  .explore__search-input:focus {
-    border-color: var(--color-border-focus);
-    box-shadow: var(--shadow-focus-ring);
-  }
-
-  .explore__search-input::placeholder {
-    color: var(--color-text-muted);
-  }
-
-  .explore__filter-group {
-    display: flex;
-    gap: var(--space-1);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-  }
-
-  .explore__filter-btn {
-    padding: var(--space-2) var(--space-3);
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--color-text-secondary);
-    background: var(--color-surface);
-    border: none;
-    cursor: pointer;
-    transition: background-color var(--duration-fast) var(--ease-default),
-      color var(--duration-fast) var(--ease-default);
-    white-space: nowrap;
-  }
-
-  .explore__filter-btn:hover {
-    background: var(--color-surface-secondary);
-  }
-
-  .explore__filter-btn--active {
-    background: var(--color-interactive);
-    color: var(--color-text-on-brand);
-  }
-
-  .explore__filter-btn--active:hover {
-    background: var(--color-interactive-hover);
-  }
-
-  .explore__sort-wrapper {
-    min-width: 160px;
+    margin-inline-start: auto;
   }
 
   /* ── Category Strip ── */
@@ -646,101 +601,45 @@
     display: none;
   }
 
+  /* Ghost pills — transparent by default, subtle border, filled-on-active
+     uses surface-elevated rather than interactive so the strip whispers
+     and lets the content grid lead. */
   .explore__category-pill {
     flex-shrink: 0;
     padding: var(--space-1-5) var(--space-3);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
     color: var(--color-text-secondary);
-    background: var(--color-surface-secondary);
-    border: var(--border-width) var(--border-style) var(--color-border);
+    background: transparent;
+    border: var(--border-width) var(--border-style) var(--color-border-subtle);
     border-radius: var(--radius-full);
     cursor: pointer;
     white-space: nowrap;
-    transition: background-color var(--duration-fast) var(--ease-default),
+    transition:
+      background-color var(--duration-fast) var(--ease-default),
       color var(--duration-fast) var(--ease-default),
       border-color var(--duration-fast) var(--ease-default);
   }
 
   .explore__category-pill:hover {
-    border-color: var(--color-border-hover);
+    color: var(--color-text);
+    background: var(--color-surface-secondary);
+  }
+
+  .explore__category-pill:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--focus-offset, 1px);
   }
 
   .explore__category-pill--active {
-    background: var(--color-interactive);
-    color: var(--color-text-on-brand);
-    border-color: var(--color-interactive);
+    color: var(--color-text);
+    background: var(--color-surface-elevated);
+    border-color: var(--color-border-strong);
   }
 
   .explore__category-pill--active:hover {
-    background: var(--color-interactive-hover);
-    border-color: var(--color-interactive-hover);
-  }
-
-  /* ── Filter Chips ── */
-  .explore__chips {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2);
-  }
-
-  .explore__chip {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1-5);
-    padding: var(--space-1-5) var(--space-3);
-    font-size: var(--text-xs);
-    font-weight: var(--font-medium);
-    color: var(--color-interactive);
-    background: var(--color-surface-secondary);
-    border: var(--border-width) var(--border-style) var(--color-interactive);
-    border-radius: var(--radius-full);
-    white-space: nowrap;
-    animation: chip-in var(--duration-fast) var(--ease-default);
-  }
-
-  @keyframes chip-in {
-    from {
-      opacity: 0;
-      transform: translateX(calc(-1 * var(--space-2)));
-    }
-  }
-
-  .explore__chip-remove {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    width: var(--space-4);
-    height: var(--space-4);
-    border: none;
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-    border-radius: var(--radius-full);
-    transition: background-color var(--duration-fast) var(--ease-default);
-  }
-
-  .explore__chip-remove:hover {
-    background: var(--color-interactive);
-    color: var(--color-text-on-brand);
-  }
-
-  .explore__clear-all {
-    font-size: var(--text-xs);
-    font-weight: var(--font-medium);
-    color: var(--color-text-muted);
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: var(--space-1) var(--space-2);
-    text-decoration: underline;
-    transition: color var(--duration-fast) var(--ease-default);
-  }
-
-  .explore__clear-all:hover {
-    color: var(--color-text);
+    background: var(--color-surface-elevated);
   }
 
   /* ── List View ── */
@@ -808,21 +707,10 @@
       font-size: var(--text-2xl);
     }
 
-    .explore__controls {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .explore__search {
-      flex: 1 1 auto;
-    }
-
-    .explore__filter-group {
-      overflow-x: auto;
-    }
-
-    .explore__sort-wrapper {
-      width: 100%;
+    /* Mobile: hide ViewToggle — the drawer is the all-in-one surface,
+       grid is the default. */
+    .explore__view-toggle {
+      display: none;
     }
   }
 </style>

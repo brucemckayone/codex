@@ -42,6 +42,53 @@
   gap: var(--space-3);
 }
 
+/* ── Masonry Modifier ──
+   Opt-in heterogeneous packing for catalog surfaces (Discover, Explore,
+   org-landing All-content) where short audio rows sit alongside taller
+   video/article tiles. Curated grids stay uniform by leaving it off.
+
+   CSS Columns over Grid row-span: row-span Grid leaves dead space when
+   tile heights don't divide evenly into the row-track unit, or needs
+   JS-measured spans. Columns pack every tile at its natural height
+   with zero JS. Tradeoff is column-first source order (Pinterest-
+   style) — fine for non-curated feeds.
+
+   Mobile (<sm) inherits the base 1-col flow. data-view='list' opts out
+   so the explore/library list toggle keeps its compact rhythm. */
+@media (--breakpoint-sm) {
+  .content-grid--masonry:not([data-view='list']) {
+    display: block;
+    column-width: 18rem;
+    column-gap: var(--space-4);
+    grid-template-columns: none;
+    grid-auto-rows: auto;
+  }
+
+  .content-grid--masonry:not([data-view='list']) > * {
+    /* Block + width 100% is required for `break-inside: avoid` to work
+       reliably across Chromium/WebKit/Gecko inside CSS Columns. */
+    display: block;
+    width: 100%;
+    break-inside: avoid;
+    /* column-gap is horizontal only; vertical spacing comes from margin. */
+    margin-bottom: var(--space-4);
+  }
+
+  /* Native CSS Masonry — Firefox 137+ default, Safari TP partial as of
+     early 2026. Where supported, swap to Grid for row-first source order. */
+  @supports (grid-template-rows: masonry) {
+    .content-grid--masonry:not([data-view='list']) {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
+      grid-template-rows: masonry;
+      gap: var(--space-4);
+    }
+    .content-grid--masonry:not([data-view='list']) > * {
+      margin-bottom: 0;
+    }
+  }
+}
+
 /* ── Featured Grid ──
    First item spans 2 cols (sm) or 2×2 (lg) when there are enough items.
    Uses :has() to guard against awkward layouts with <4 items. */

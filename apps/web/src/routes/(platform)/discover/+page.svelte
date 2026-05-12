@@ -14,20 +14,36 @@
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import ErrorBanner from '$lib/components/ui/Feedback/ErrorBanner.svelte';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
+  import { Pagination } from '$lib/components/ui/Pagination';
+  import DiscoverFilters, {
+    type DiscoverFilterValues,
+  } from '$lib/components/discover/DiscoverFilters.svelte';
   import * as m from '$paraglide/messages';
 
   const { data }: { data: PageData } = $props();
 
-  let searchValue = $derived(data.search);
-
-  function handleSearch(event: Event) {
-    event.preventDefault();
+  function updateFilters(next: DiscoverFilterValues) {
     const params = new URLSearchParams();
-    if (searchValue.trim()) {
-      params.set('q', searchValue.trim());
-    }
-    goto(`/discover${params.toString() ? `?${params}` : ''}`, { replaceState: true });
+    if (next.q.trim()) params.set('q', next.q.trim());
+    if (next.type !== 'all') params.set('type', next.type);
+    if (next.sort !== 'newest') params.set('sort', next.sort);
+    const qs = params.toString();
+    goto(`/discover${qs ? `?${qs}` : ''}`, {
+      replaceState: true,
+      keepFocus: true,
+      noScroll: true,
+    });
   }
+
+  // Pagination baseUrl keeps active filter params, strips `page` —
+  // the Pagination component appends `?page=N` (or `&page=N`) per link.
+  const paginationBaseUrl = $derived.by(() => {
+    const url = new URL(page.url);
+    url.searchParams.delete('page');
+    return `${url.pathname}${url.search}`;
+  });
+  const currentPage = $derived(data.content.pagination?.page ?? 1);
+  const totalPages = $derived(data.content.pagination?.totalPages ?? 1);
 </script>
 
 <svelte:head>
@@ -47,28 +63,21 @@
     <p class="subtitle">{m.discover_subtitle()}</p>
   </section>
 
-  <form class="search-bar" onsubmit={handleSearch}>
-    <input
-      type="search"
-      id="discover-search"
-      name="q"
-      autocomplete="off"
-      bind:value={searchValue}
-      placeholder={m.explore_search_placeholder()}
-      class="search-input"
-      aria-label={m.discover_search_aria()}
-    />
-    <button type="submit" class="search-btn">{m.discover_search_button()}</button>
-  </form>
+  <DiscoverFilters
+    values={data.filters}
+    resultCount={data.content.pagination?.total}
+    onChange={updateFilters}
+  />
 
   {#if data.error}
     <ErrorBanner title={m.discover_error_title()} description={m.discover_error_description()} />
   {/if}
 
-  <section class="content-grid" aria-label="Content results">
+  <section class="content-grid content-grid--masonry" aria-label="Content results">
     {#if data.content.items && data.content.items.length > 0}
       {#each data.content.items as item (item.id)}
         <ContentCard
+          autoPromoteAudio
           id={item.id}
           title={item.title}
           thumbnail={item.mediaItem?.thumbnailUrl ?? null}
@@ -91,6 +100,16 @@
       <EmptyState title={data.search ? m.discover_empty_search({ query: data.search }) : m.discover_empty()} />
     {/if}
   </section>
+
+  {#if totalPages > 1}
+    <div class="discover__pagination">
+      <Pagination
+        {currentPage}
+        {totalPages}
+        baseUrl={paginationBaseUrl}
+      />
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -99,7 +118,7 @@
   }
 
   .discover-header {
-    margin-bottom: var(--space-8);
+    margin-bottom: var(--space-6);
   }
 
   .discover-header h1 {
@@ -115,40 +134,9 @@
     color: var(--color-text-secondary);
   }
 
-  .search-bar {
+  .discover__pagination {
     display: flex;
-    gap: var(--space-2);
-    margin-bottom: var(--space-8);
-  }
-
-  .search-input {
-    flex: 1;
-    padding: var(--space-2) var(--space-4);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    border-radius: var(--radius-md);
-    font-size: var(--text-sm);
-    background-color: var(--color-surface);
-    color: var(--color-text);
-  }
-
-  .search-input:focus {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: -1px;
-  }
-
-  .search-btn {
-    padding: var(--space-2) var(--space-4);
-    background-color: var(--color-interactive);
-    color: var(--color-text-inverse);
-    border: none;
-    border-radius: var(--radius-md);
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    cursor: pointer;
-    transition: var(--transition-colors);
-  }
-
-  .search-btn:hover {
-    background-color: var(--color-interactive-hover);
+    justify-content: center;
+    padding-top: var(--space-6);
   }
 </style>
