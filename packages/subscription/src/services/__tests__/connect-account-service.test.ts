@@ -14,11 +14,18 @@
  * - All 4 status transitions (onboarding → active/restricted/disabled)
  */
 
-import { organizations, stripeConnectAccounts } from '@codex/database/schema';
+import {
+  organizations,
+  stripeConnectAccounts,
+  subscriptions,
+  subscriptionTiers,
+} from '@codex/database/schema';
 import {
   createMockStripe,
   createTestConnectAccountInput,
   createTestOrganizationInput,
+  createTestSubscriptionInput,
+  createTestTierInput,
   createUniqueSlug,
   seedTestUsers,
   setupTestDatabase,
@@ -26,9 +33,22 @@ import {
   validateDatabaseConnection,
 } from '@codex/test-utils';
 import type Stripe from 'stripe';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { ConnectAccountNotFoundError } from '../../errors';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
+import {
+  ConnectAccountNotFoundError,
+  ConnectAccountNotReadyError,
+} from '../../errors';
 import { ConnectAccountService } from '../connect-account-service';
+import { SubscriptionService } from '../subscription-service';
+import { TierService } from '../tier-service';
 
 describe('ConnectAccountService', () => {
   let db: ReturnType<typeof setupTestDatabase>;
@@ -475,6 +495,333 @@ describe('ConnectAccountService', () => {
         payouts_enabled: true,
         requirements: { currently_due: [], disabled_reason: null },
       } as unknown as Stripe.Account);
+    });
+
+    // ─── Capability loss (Codex-fynnr) ────────────────────────────────
+    //
+    // Regression guard for the active-onwards branch (line ~341). When a
+    // previously-active Connect account loses a capability (charges_enabled
+    // flips true → false), Stripe almost always also sets a
+    // requirements.disabled_reason or repopulates requirements.currently_due.
+    // The local row MUST drop out of `'active'` so subsequent
+    // createCheckoutSession resolves to ConnectAccountNotReadyError. A regression
+    // that left status at `'active'` after the flip would silently allow new
+    // checkouts against a broken Connect account.
+
+    it('should flip status active → restricted when charges_enabled drops with currently_due', async () => {
+      const [lossOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('capability-loss-restricted'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      const [inserted] = await db
+        .insert(stripeConnectAccounts)
+        .values(
+          createTestConnectAccountInput(lossOrg.id, creatorId, {
+            status: 'active',
+            chargesEnabled: true,
+            payoutsEnabled: true,
+            onboardingCompletedAt: new Date(),
+          })
+        )
+        .returning();
+
+      // Stripe fires account.updated with capabilities revoked and new
+      // requirements (e.g. updated KYC info needed).
+      await service.handleAccountUpdated({
+        id: inserted.stripeAccountId,
+        charges_enabled: false,
+        payouts_enabled: true,
+        requirements: {
+          currently_due: ['individual.verification.document'],
+          disabled_reason: null,
+        },
+      } as unknown as Stripe.Account);
+
+      const updated = await service.getAccount(lossOrg.id, creatorId);
+      expect(updated!.status).toBe('restricted');
+      expect(updated!.chargesEnabled).toBe(false);
+      expect(updated!.payoutsEnabled).toBe(true);
+      // onboardingCompletedAt is cleared because the account is no longer
+      // both charges_enabled AND payouts_enabled.
+      expect(updated!.onboardingCompletedAt).toBeNull();
+    });
+
+    it('should flip status active → disabled when charges_enabled drops with disabled_reason', async () => {
+      const [lossOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('capability-loss-disabled'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      const [inserted] = await db
+        .insert(stripeConnectAccounts)
+        .values(
+          createTestConnectAccountInput(lossOrg.id, creatorId, {
+            status: 'active',
+            chargesEnabled: true,
+            payoutsEnabled: true,
+            onboardingCompletedAt: new Date(),
+          })
+        )
+        .returning();
+
+      await service.handleAccountUpdated({
+        id: inserted.stripeAccountId,
+        charges_enabled: false,
+        payouts_enabled: false,
+        requirements: {
+          currently_due: [],
+          disabled_reason: 'rejected.fraud',
+        },
+      } as unknown as Stripe.Account);
+
+      const updated = await service.getAccount(lossOrg.id, creatorId);
+      expect(updated!.status).toBe('disabled');
+      expect(updated!.chargesEnabled).toBe(false);
+      expect(updated!.payoutsEnabled).toBe(false);
+      expect(updated!.onboardingCompletedAt).toBeNull();
+    });
+
+    it('should cause SubscriptionService.createCheckoutSession to throw ConnectAccountNotReadyError after capability loss', async () => {
+      // Bootstrap: a fully active org with a tier, then strip the
+      // capability via the production webhook path.
+      const [crossOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('capability-loss-checkout'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      const [connectRow] = await db
+        .insert(stripeConnectAccounts)
+        .values(
+          createTestConnectAccountInput(crossOrg.id, creatorId, {
+            status: 'active',
+            chargesEnabled: true,
+            payoutsEnabled: true,
+          })
+        )
+        .returning();
+
+      const [tier] = await db
+        .insert(subscriptionTiers)
+        .values(createTestTierInput(crossOrg.id))
+        .returning();
+
+      // Capability flips true → false via the same handler the live
+      // account.updated webhook calls.
+      await service.handleAccountUpdated({
+        id: connectRow.stripeAccountId,
+        charges_enabled: false,
+        payouts_enabled: false,
+        requirements: {
+          currently_due: ['individual.verification.document'],
+          disabled_reason: null,
+        },
+      } as unknown as Stripe.Account);
+
+      const subscriptionService = new SubscriptionService(
+        { db, environment: 'test' },
+        stripe
+      );
+
+      // Attach customer-resolution stubs in the shape SubscriptionService
+      // expects so we exercise the Connect gate, not the Customer-create gate.
+      (stripe as unknown as { customers: unknown }).customers = {
+        list: vi.fn().mockResolvedValue({ data: [], has_more: false }),
+        create: vi.fn().mockResolvedValue({
+          id: 'cus_capability_loss',
+          email: 'sub@example.com',
+        }),
+      };
+
+      await expect(
+        subscriptionService.createCheckoutSession(
+          otherCreatorId,
+          crossOrg.id,
+          tier.id,
+          'month',
+          'https://example.com/success',
+          'https://example.com/cancel'
+        )
+      ).rejects.toThrow(ConnectAccountNotReadyError);
+    });
+
+    it('preserves paid-tier access via TierService.getTierForAccessCheck after capability loss (Connect status ≠ subscription revocation)', async () => {
+      // Subscribers already paying retain access to content they've paid for
+      // even when the org's Connect account loses capability. This is the
+      // crucial distinction: capability loss stops NEW transfers; it does NOT
+      // retroactively revoke active subscriptions or the tier metadata they
+      // join against.
+      const [accessOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('capability-loss-access'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      const [connectRow] = await db
+        .insert(stripeConnectAccounts)
+        .values(
+          createTestConnectAccountInput(accessOrg.id, creatorId, {
+            status: 'active',
+            chargesEnabled: true,
+            payoutsEnabled: true,
+          })
+        )
+        .returning();
+
+      const [tier] = await db
+        .insert(subscriptionTiers)
+        .values(createTestTierInput(accessOrg.id))
+        .returning();
+
+      // Existing paid subscriber on this tier.
+      await db.insert(subscriptions).values(
+        createTestSubscriptionInput(otherCreatorId, accessOrg.id, tier.id, {
+          status: 'active',
+        })
+      );
+
+      // Capability is lost AFTER the subscription is in place.
+      await service.handleAccountUpdated({
+        id: connectRow.stripeAccountId,
+        charges_enabled: false,
+        payouts_enabled: false,
+        requirements: {
+          currently_due: [],
+          disabled_reason: 'rejected.fraud',
+        },
+      } as unknown as Stripe.Account);
+
+      // Sanity check: the Connect row really did move to disabled.
+      const refreshed = await service.getAccount(accessOrg.id, creatorId);
+      expect(refreshed!.status).toBe('disabled');
+
+      // The access-path tier read MUST still resolve the tier so the existing
+      // subscriber's content access keeps working.
+      const tierService = new TierService({ db, environment: 'test' }, stripe);
+      const accessTier = await tierService.getTierForAccessCheck(tier.id);
+      expect(accessTier).not.toBeNull();
+      expect(accessTier!.id).toBe(tier.id);
+      expect(accessTier!.organizationId).toBe(accessOrg.id);
+    });
+  });
+
+  // ─── handleAccountDeauthorized (Codex-fynnr) ────────────────────────
+  //
+  // account.application.deauthorized fires when the connected account
+  // disconnects our platform via the Stripe Dashboard (or Stripe revokes us).
+  // The local row MUST move to `'disabled'` so all future capability checks
+  // (createCheckoutSession, transfer attempts) refuse cleanly. The handler
+  // is registered in workers/ecom-api/src/handlers/connect-webhook.ts.
+
+  describe('handleAccountDeauthorized', () => {
+    it('should flip status to disabled and clear capability flags', async () => {
+      const [deauthOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('deauth-disable'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      const [inserted] = await db
+        .insert(stripeConnectAccounts)
+        .values(
+          createTestConnectAccountInput(deauthOrg.id, creatorId, {
+            status: 'active',
+            chargesEnabled: true,
+            payoutsEnabled: true,
+          })
+        )
+        .returning();
+
+      await service.handleAccountDeauthorized(inserted.stripeAccountId);
+
+      const updated = await service.getAccount(deauthOrg.id, creatorId);
+      expect(updated!.status).toBe('disabled');
+      expect(updated!.chargesEnabled).toBe(false);
+      expect(updated!.payoutsEnabled).toBe(false);
+    });
+
+    it('should cause SubscriptionService.createCheckoutSession to throw ConnectAccountNotReadyError after deauthorization', async () => {
+      const [deauthOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('deauth-checkout'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      const [connectRow] = await db
+        .insert(stripeConnectAccounts)
+        .values(
+          createTestConnectAccountInput(deauthOrg.id, creatorId, {
+            status: 'active',
+            chargesEnabled: true,
+            payoutsEnabled: true,
+          })
+        )
+        .returning();
+
+      const [tier] = await db
+        .insert(subscriptionTiers)
+        .values(createTestTierInput(deauthOrg.id))
+        .returning();
+
+      await service.handleAccountDeauthorized(connectRow.stripeAccountId);
+
+      const subscriptionService = new SubscriptionService(
+        { db, environment: 'test' },
+        stripe
+      );
+      (stripe as unknown as { customers: unknown }).customers = {
+        list: vi.fn().mockResolvedValue({ data: [], has_more: false }),
+        create: vi.fn().mockResolvedValue({
+          id: 'cus_deauth',
+          email: 'sub@example.com',
+        }),
+      };
+
+      await expect(
+        subscriptionService.createCheckoutSession(
+          otherCreatorId,
+          deauthOrg.id,
+          tier.id,
+          'month',
+          'https://example.com/success',
+          'https://example.com/cancel'
+        )
+      ).rejects.toThrow(ConnectAccountNotReadyError);
+    });
+
+    it('should log warning for unknown stripe account ID (no throw)', async () => {
+      // Deauthorize for an account we don't have — must not throw,
+      // matching the unknown-account branch of handleAccountUpdated.
+      await expect(
+        service.handleAccountDeauthorized('acct_unknown_deauth_999')
+      ).resolves.toBeUndefined();
     });
   });
 
