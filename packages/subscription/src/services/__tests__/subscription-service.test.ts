@@ -1047,6 +1047,104 @@ describe('SubscriptionService', () => {
 
       expect(result).toBeUndefined();
     });
+
+    // Codex-8wfnv: replay-safety contract for the no-op status path.
+    // A Stripe webhook can legitimately fire twice for the same logical
+    // state transition (or for an `updated` event whose mapped status
+    // already matches the DB). The handler must:
+    //   - re-emit the canonical { userId, orgId } envelope unchanged
+    //   - leave every business column untouched (status, cancelAtPeriodEnd,
+    //     tierId, currentPeriodStart/End, amountCents)
+    //   - NOT create rows, NOT delete rows, NOT change row identity
+    // Production bumps `updatedAt` on every call (no short-circuit) — that
+    // is acceptable; assert only that meaningful columns are stable.
+    it('replay safety: customer.subscription.updated for a no-op status (DB already at target) → no extra side effects, no extra cache invalidation', async () => {
+      const { org, tier1 } = await createFullOrg('wh-updated-replay');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const periodStart = Math.floor(Date.now() / 1000);
+      const periodEnd = periodStart + 86400;
+      const stripeEvent = {
+        id: sub.stripeSubscriptionId,
+        status: 'active', // matches DB
+        cancel_at_period_end: false, // matches DB default
+        metadata: {},
+        items: {
+          data: [
+            {
+              current_period_start: periodStart,
+              current_period_end: periodEnd,
+              price: {
+                id: 'price_test_monthly',
+                unit_amount: sub.amountCents,
+                currency: 'gbp',
+                recurring: { interval: sub.billingInterval ?? 'month' },
+              },
+            },
+          ],
+        },
+      } as unknown as Stripe.Subscription;
+
+      const first = await service.handleSubscriptionUpdated(stripeEvent);
+      const { eq } = await import('drizzle-orm');
+      const [afterFirst] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.id, sub.id));
+
+      const second = await service.handleSubscriptionUpdated(stripeEvent);
+      const [afterSecond] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.id, sub.id));
+
+      // Envelope is canonical and stable across replays.
+      expect(first).toEqual({ userId: otherCreatorId, orgId: org.id });
+      expect(second).toEqual({ userId: otherCreatorId, orgId: org.id });
+
+      // Replay must not create or delete rows (same id, exactly one row).
+      const allRows = await db
+        .select()
+        .from(subscriptions)
+        .where(
+          eq(subscriptions.stripeSubscriptionId, sub.stripeSubscriptionId)
+        );
+      expect(allRows).toHaveLength(1);
+      expect(allRows[0].id).toBe(sub.id);
+
+      // Every business column must be stable between replays (status,
+      // cancelAtPeriodEnd, tierId, period dates, amountCents). updatedAt
+      // is deliberately excluded — production refreshes it every call.
+      expect(afterSecond.status).toBe(afterFirst.status);
+      expect(afterSecond.cancelAtPeriodEnd).toBe(afterFirst.cancelAtPeriodEnd);
+      expect(afterSecond.tierId).toBe(afterFirst.tierId);
+      expect(afterSecond.amountCents).toBe(afterFirst.amountCents);
+      expect(afterSecond.currentPeriodStart?.getTime()).toBe(
+        afterFirst.currentPeriodStart?.getTime()
+      );
+      expect(afterSecond.currentPeriodEnd?.getTime()).toBe(
+        afterFirst.currentPeriodEnd?.getTime()
+      );
+
+      // And concretely: the DB row matches the initial seed for the
+      // business-meaningful columns (no drift from replay).
+      expect(afterSecond.status).toBe('active');
+      expect(afterSecond.cancelAtPeriodEnd).toBe(false);
+      expect(afterSecond.tierId).toBe(tier1.id);
+
+      // Cache-invalidation count semantics live in the orchestrator test
+      // file (subscription-service-orchestrator.test.ts) where cache +
+      // waitUntil are wired. This service is constructed without that
+      // wiring, so `invalidateIfConfigured` is a documented no-op — there
+      // is no extra cache side effect to assert against here.
+    });
   });
 
   // ─── handleSubscriptionDeleted ────────────────────────────────────
@@ -2568,6 +2666,207 @@ describe('SubscriptionService', () => {
 
       const result = await service.handleInvoicePaymentSucceeded(mockInvoice);
       expect(result).toBeUndefined();
+    });
+
+    // Codex-8wfnv: explicit idempotency assertions for the renewal path.
+    // handleSubscriptionCreated has a uniqueness-constraint short-circuit
+    // (line 519). handleInvoicePaymentSucceeded has no such short-circuit
+    // — its replay safety lives downstream in `executeTransfers`, which
+    // passes a deterministic `idempotencyKey` to `stripe.transfers.create`
+    // (`${chargeId}_org_fee`, `${chargeId}_creator_pool_owner`,
+    // `${chargeId}_creator_<creatorId>` — see subscription-service.ts:2810,
+    // :2900, :2983). Stripe dedupes on idempotency key, so even if the
+    // handler is invoked twice for the same invoice, no double transfer
+    // can settle. Assert the keys are stable across replays.
+    it('replay safety: same invoice.payment_succeeded fired twice → revenue transfer dedupes via deterministic idempotency key (chargeId-derived)', async () => {
+      const { org, tier1 } = await createFullOrg('invoice-replay-idempotent');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      // Pin chargeId so both invocations derive identical idempotency keys
+      // — exactly the replay shape we're asserting against.
+      const chargeId = 'ch_test_replay_fixed';
+      const paymentIntentId = 'pi_test_replay_fixed';
+      const invoiceId = 'in_test_replay_fixed';
+      const mockInvoice = createMockStripeInvoice({
+        id: invoiceId,
+        amount_paid: 499,
+        billing_reason: 'subscription_cycle',
+        customer_email: 'replay@example.com',
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [
+            { payment: { charge: chargeId, payment_intent: paymentIntentId } },
+          ],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      // Fire the same event twice — the realistic replay shape.
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+      const callsAfterFirst = (
+        stripe.transfers.create as ReturnType<typeof vi.fn>
+      ).mock.calls.length;
+
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+      const transfersMock = stripe.transfers.create as ReturnType<typeof vi.fn>;
+      const callsAfterSecond = transfersMock.mock.calls.length;
+
+      // Replay must invoke transfers.create the SAME number of times each
+      // call (same code path) — but every invocation across both calls
+      // must carry an idempotency key Stripe will dedupe on.
+      expect(callsAfterFirst).toBeGreaterThan(0);
+      expect(callsAfterSecond).toBe(callsAfterFirst * 2);
+
+      // Deterministic idempotency key contract: every transfers.create
+      // call must pass `{ idempotencyKey }` as its 2nd argument, derived
+      // from the (stable) chargeId. This is the Stripe-side dedupe.
+      const allOptions = transfersMock.mock.calls.map(
+        (call) => call[1] as { idempotencyKey?: string } | undefined
+      );
+      for (const opts of allOptions) {
+        expect(opts).toBeDefined();
+        expect(opts?.idempotencyKey).toBeDefined();
+        expect(opts?.idempotencyKey).toMatch(new RegExp(`^${chargeId}_`));
+      }
+
+      // Stronger: the SET of idempotency keys used on the second call
+      // must equal the SET used on the first call — i.e. every transfer
+      // attempted on replay carries an already-seen key, so Stripe
+      // dedupes and no double-spend can settle on the platform side.
+      const firstKeys = allOptions
+        .slice(0, callsAfterFirst)
+        .map((o) => o?.idempotencyKey)
+        .sort();
+      const secondKeys = allOptions
+        .slice(callsAfterFirst)
+        .map((o) => o?.idempotencyKey)
+        .sort();
+      expect(secondKeys).toEqual(firstKeys);
+
+      // DB state after second call must equal state after first call for
+      // every business column (no double-extension of the period, no
+      // double-recording of the revenue split).
+      const { eq } = await import('drizzle-orm');
+      const [row] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.id, sub.id));
+      expect(row.status).toBe('active');
+      expect(
+        row.platformFeeCents + row.organizationFeeCents + row.creatorPayoutCents
+      ).toBe(row.amountCents);
+    });
+
+    // Codex-8wfnv: separate assertion for the "period already extended"
+    // shape. Production has no DB short-circuit on already-extended period
+    // dates — it re-writes the same period_end. This test pins that
+    // behaviour and proves the re-write is a true no-op for business
+    // columns (period dates unchanged, status unchanged, split unchanged).
+    it('replay safety: invoice for an already-extended period → period_end + status + revenue split unchanged on replay', async () => {
+      const { org, tier1 } = await createFullOrg('invoice-replay-noop');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        billing_reason: 'subscription_cycle',
+        customer_email: 'noop@example.com',
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      // First call extends the period.
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+      const { eq } = await import('drizzle-orm');
+      const [afterFirst] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.id, sub.id));
+
+      // Second call should be a no-op for every business column. Because
+      // stripe.subscriptions.retrieve is a vi.fn(), its return value is
+      // regenerated per call — but the mock's `now` window is small
+      // (sub-second), so period dates may drift by ms. Pin the retrieve
+      // return to the same value we observed after the first call so the
+      // assertion targets handler logic, not mock drift.
+      const periodStartSec = Math.floor(
+        (afterFirst.currentPeriodStart?.getTime() ?? 0) / 1000
+      );
+      const periodEndSec = Math.floor(
+        (afterFirst.currentPeriodEnd?.getTime() ?? 0) / 1000
+      );
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce({
+        id: sub.stripeSubscriptionId,
+        status: 'active',
+        cancel_at_period_end: false,
+        metadata: {},
+        items: {
+          data: [
+            {
+              id: 'si_test_noop',
+              price: {
+                id: 'price_test_monthly',
+                unit_amount: 499,
+                currency: 'gbp',
+                recurring: { interval: 'month' },
+              },
+              current_period_start: periodStartSec,
+              current_period_end: periodEndSec,
+            },
+          ],
+        },
+      });
+
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+      const [afterSecond] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.id, sub.id));
+
+      // Period dates pinned identical across replay.
+      expect(afterSecond.currentPeriodStart?.getTime()).toBe(
+        afterFirst.currentPeriodStart?.getTime()
+      );
+      expect(afterSecond.currentPeriodEnd?.getTime()).toBe(
+        afterFirst.currentPeriodEnd?.getTime()
+      );
+
+      // Status and revenue split (in pence, GBP) untouched.
+      expect(afterSecond.status).toBe(afterFirst.status);
+      expect(afterSecond.amountCents).toBe(afterFirst.amountCents);
+      expect(afterSecond.platformFeeCents).toBe(afterFirst.platformFeeCents);
+      expect(afterSecond.organizationFeeCents).toBe(
+        afterFirst.organizationFeeCents
+      );
+      expect(afterSecond.creatorPayoutCents).toBe(
+        afterFirst.creatorPayoutCents
+      );
+
+      // Single subscription row (no duplication on replay).
+      const rows = await db
+        .select()
+        .from(subscriptions)
+        .where(
+          eq(subscriptions.stripeSubscriptionId, sub.stripeSubscriptionId)
+        );
+      expect(rows).toHaveLength(1);
     });
   });
 
