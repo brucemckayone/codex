@@ -101,8 +101,8 @@ export class SubscriptionCheckoutError extends BusinessLogicError {
  * method" toast.
  *
  * `context.prorationDate` is the Unix-seconds timestamp that
- * `SubscriptionService.changeTier` forwarded to Stripe as `proration_date`
- * (Codex-w87s4). The pricing dialog uses its presence/identity to branch:
+ * `SubscriptionService.changeTier` forwarded to Stripe as `proration_date`.
+ * The pricing dialog uses its presence/identity to branch:
  *   - if the dialog still holds the same prorationDate, the failure is
  *     payment-side (declined card / SCA needed) — prompt for a fresh
  *     payment method, keep the preview;

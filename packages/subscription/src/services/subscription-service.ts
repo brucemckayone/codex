@@ -1784,10 +1784,10 @@ export class SubscriptionService extends BaseService {
               newTierId,
               billingInterval,
               stripeMessage: (stripeError as Error).message,
-              // Codex-w87s4: surface the prorationDate the failed commit
-              // pinned to Stripe so the pricing dialog can branch
-              // "needs fresh preview" vs "transient payment failure"
-              // by comparing against the dialog's local preview state.
+              // Surface the prorationDate the failed commit pinned to
+              // Stripe so the pricing dialog can branch "needs fresh
+              // preview" vs "transient payment failure" by comparing
+              // against the dialog's local preview state.
               prorationDate: effectiveProrationDate,
               // tierIdAtCommit lets the dialog correlate the 402 back to
               // the specific tier row the commit targeted (defensive
