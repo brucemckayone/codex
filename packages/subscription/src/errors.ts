@@ -99,9 +99,38 @@ export class SubscriptionCheckoutError extends BusinessLogicError {
  * subscription stays on the old tier — no reconciliation needed. The
  * frontend surfaces this as a "card declined, please update your payment
  * method" toast.
+ *
+ * `context.prorationDate` is the Unix-seconds timestamp that
+ * `SubscriptionService.changeTier` forwarded to Stripe as `proration_date`
+ * (Codex-w87s4). The pricing dialog uses its presence/identity to branch:
+ *   - if the dialog still holds the same prorationDate, the failure is
+ *     payment-side (declined card / SCA needed) — prompt for a fresh
+ *     payment method, keep the preview;
+ *   - if the dialog has no matching prorationDate (e.g. preview never
+ *     ran, or the user reloaded), refresh `previewTierChange` before
+ *     retrying.
+ *
+ * `context.tierIdAtCommit` is the new tier id the failed commit targeted
+ * — exposed so the dialog can correlate the error to the specific row
+ * the user clicked (defensive: the dialog could in principle be open on
+ * a different tier by the time the error returns).
  */
+export interface SubscriptionPaymentRequiredErrorContext
+  extends Record<string, unknown> {
+  userId: string;
+  organizationId: string;
+  newTierId: string;
+  billingInterval: 'month' | 'year';
+  stripeMessage: string;
+  prorationDate?: number;
+  tierIdAtCommit?: string;
+}
+
 export class SubscriptionPaymentRequiredError extends ServiceError {
-  constructor(message: string, context?: Record<string, unknown>) {
+  constructor(
+    message: string,
+    context?: SubscriptionPaymentRequiredErrorContext
+  ) {
     super(message, 'PAYMENT_REQUIRED', 402, context);
   }
 }
