@@ -853,10 +853,12 @@
      ABOVE the title (z-index 1 > title's implicit 0) so it adds contrast
      to the content block sitting at the bottom of the hero. Intentionally
      subtle — orgs WITH a shader want the shader to breathe.
+     Scoped to `[data-hero-shader-active]` so shader-less orgs show their
+     natural brand background instead of a dark overlay.
      Uses `hsl(0 0% 0% / α)` direct (same pattern as player.css) — semantic
      surface tokens flip to light in dark-theme orgs, which would invert
      the intended darkening effect. */
-  .hero::after {
+  :global(.org-layout[data-hero-shader-active]) .hero::after {
     content: '';
     position: absolute;
     inset: 0;
@@ -870,24 +872,6 @@
       hsl(0 0% 0% / 0.38) 80%,
       hsl(0 0% 0% / 0.55) 100%
     );
-  }
-
-  /* Shader-absent fallback backdrop — paints the hero with the org's
-     brand background so the section reads as integrated with the rest
-     of the page rather than a darkened plate. Rendered as `::before`
-     (DOM-order sibling, no explicit z-index) so it sits BEFORE the
-     title in the same stacking level — making it the title's actual
-     blend backdrop. Scoped via `[data-hero-shader-active]` on
-     `.org-layout` (set in the parent layout from
-     `tokenOverrides['shader-preset']`) so orgs WITH a shader keep their
-     current look. Title's `mix-blend-mode: difference` (set on
-     `.hero__title`) gives auto-contrast against this brand-derived bg. */
-  :global(.org-layout:not([data-hero-shader-active])) .hero::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: var(--brand-bg, var(--color-background));
   }
 
   .hero__content {
