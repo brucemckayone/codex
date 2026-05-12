@@ -48,7 +48,7 @@ vi.mock('$lib/remote/account.remote', () => ({
 }));
 
 vi.mock('$app/navigation', () => ({
-  invalidate: vi.fn(),
+  invalidate: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('$app/state', () => ({
@@ -276,5 +276,212 @@ describe('SubscribeButton', () => {
 
     expect(screen.getByTestId('subscribe-button-reactivate')).toBeTruthy();
     expect(screen.getByTestId('subscribe-button-update-payment')).toBeNull();
+  });
+
+  // ── Reactivate: error / rollback paths (Codex-70lic) ───────────────
+  // The reactivate path is the only inline mutation the button performs
+  // for cancelling subscriptions. Confirm both halves of the optimistic
+  // contract: success acknowledged AND failure rolled back without
+  // leaking server internals.
+
+  test('cancelling → Reactivate click invokes reactivateSubscription with org id (Codex-70lic)', async () => {
+    const { reactivateSubscription } = await import(
+      '$lib/remote/subscription.remote'
+    );
+    const mockReactivate = reactivateSubscription as unknown as ReturnType<
+      typeof vi.fn
+    >;
+    mockReactivate.mockResolvedValueOnce({ success: true, data: undefined });
+
+    seed({
+      status: 'active',
+      cancelAtPeriodEnd: true,
+      currentPeriodEnd: '2026-05-20T00:00:00Z',
+    });
+    component = mount(SubscribeButton, {
+      target: document.body,
+      props: { organizationId: ORG_ID, isAuthenticated: true },
+    });
+
+    const reactivate = screen.getByTestId(
+      'subscribe-button-reactivate'
+    ) as HTMLButtonElement;
+    reactivate.click();
+
+    // Optimistic flip lands BEFORE the remote resolves.
+    expect(mockUpdate).toHaveBeenCalledWith(ORG_ID, expect.any(Function));
+    await Promise.resolve();
+    expect(mockReactivate).toHaveBeenCalledTimes(1);
+    expect(mockReactivate).toHaveBeenCalledWith({ organizationId: ORG_ID });
+  });
+
+  test('cancelling → Reactivate API failure rolls back and surfaces user-readable error, no Stripe internals leak (Codex-70lic)', async () => {
+    const { reactivateSubscription } = await import(
+      '$lib/remote/subscription.remote'
+    );
+    const mockReactivate = reactivateSubscription as unknown as ReturnType<
+      typeof vi.fn
+    >;
+    // Service contract returns SubscriptionCommandFailure with a sanitised
+    // message — never raw Stripe `StripeCardError: card_declined: ...`.
+    mockReactivate.mockResolvedValueOnce({
+      success: false,
+      code: 'SUBSCRIPTION_REACTIVATE_FAILED',
+      message: 'Unable to reactivate subscription. Please try again.',
+      status: 502,
+    });
+
+    seed({
+      status: 'active',
+      cancelAtPeriodEnd: true,
+      currentPeriodEnd: '2026-05-20T00:00:00Z',
+    });
+    component = mount(SubscribeButton, {
+      target: document.body,
+      props: { organizationId: ORG_ID, isAuthenticated: true },
+    });
+
+    const reactivate = screen.getByTestId(
+      'subscribe-button-reactivate'
+    ) as HTMLButtonElement;
+    reactivate.click();
+
+    // Flush microtasks so the failure branch can run + render.
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Error region is exposed via role=alert (a11y contract).
+    const errorAlert = document.querySelector('[role="alert"]');
+    expect(errorAlert).toBeTruthy();
+    expect(errorAlert?.textContent).toContain('Unable to reactivate');
+    // No raw Stripe wording leaked through (defence-in-depth assert).
+    expect(errorAlert?.textContent ?? '').not.toMatch(
+      /stripe|card_declined|invoice|payment_intent/i
+    );
+
+    // Rollback path: the second update() call restores the prior snapshot.
+    // First call was the optimistic flip; second is the rollback.
+    expect(mockUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  test('cancelling → Reactivate network exception rolls back and shows error message (Codex-70lic)', async () => {
+    const { reactivateSubscription } = await import(
+      '$lib/remote/subscription.remote'
+    );
+    const mockReactivate = reactivateSubscription as unknown as ReturnType<
+      typeof vi.fn
+    >;
+    // Thrown error simulates network failure / DNS / 5xx unwrap.
+    mockReactivate.mockRejectedValueOnce(new Error('Network request failed'));
+
+    seed({
+      status: 'active',
+      cancelAtPeriodEnd: true,
+      currentPeriodEnd: '2026-05-20T00:00:00Z',
+    });
+    component = mount(SubscribeButton, {
+      target: document.body,
+      props: { organizationId: ORG_ID, isAuthenticated: true },
+    });
+
+    const reactivate = screen.getByTestId(
+      'subscribe-button-reactivate'
+    ) as HTMLButtonElement;
+    reactivate.click();
+    await new Promise((r) => setTimeout(r, 0));
+
+    const errorAlert = document.querySelector('[role="alert"]');
+    expect(errorAlert?.textContent).toContain('Network request failed');
+    // Optimistic + rollback = 2 update() calls.
+    expect(mockUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  test('paused → Resume API failure rolls back state and surfaces sanitised error (Codex-70lic)', async () => {
+    const { resumeSubscription } = await import(
+      '$lib/remote/subscription.remote'
+    );
+    const mockResume = resumeSubscription as unknown as ReturnType<
+      typeof vi.fn
+    >;
+    mockResume.mockResolvedValueOnce({
+      success: false,
+      code: 'SUBSCRIPTION_RESUME_FAILED',
+      message: 'Could not resume your subscription right now.',
+      status: 502,
+    });
+
+    seed({ status: 'paused' });
+    component = mount(SubscribeButton, {
+      target: document.body,
+      props: { organizationId: ORG_ID, isAuthenticated: true },
+    });
+
+    const resume = screen.getByTestId(
+      'subscribe-button-resume'
+    ) as HTMLButtonElement;
+    resume.click();
+    await new Promise((r) => setTimeout(r, 0));
+
+    const errorAlert = document.querySelector('[role="alert"]');
+    expect(errorAlert?.textContent).toContain('Could not resume');
+    // No internal Stripe terminology bleeds into the UI.
+    expect(errorAlert?.textContent ?? '').not.toMatch(
+      /stripe|subscription_pause|invoice/i
+    );
+    // Optimistic + rollback.
+    expect(mockUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  test('past_due → Update payment click opens billing portal (Codex-70lic)', async () => {
+    const { openBillingPortal } = await import('$lib/remote/account.remote');
+    const mockPortal = openBillingPortal as unknown as ReturnType<typeof vi.fn>;
+    mockPortal.mockResolvedValueOnce({
+      url: 'https://billing.stripe.com/p/session/test_xyz',
+    });
+
+    // Stub window.location.href so we can assert without navigating away
+    // (jsdom navigates synchronously and pollutes subsequent tests).
+    const originalLocation = window.location;
+    const hrefSetter = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: new Proxy(originalLocation, {
+        set(target, prop, value) {
+          if (prop === 'href') {
+            hrefSetter(value);
+            return true;
+          }
+          return Reflect.set(target, prop, value);
+        },
+        get(target, prop) {
+          return Reflect.get(target, prop);
+        },
+      }),
+    });
+
+    try {
+      seed({ status: 'past_due' });
+      component = mount(SubscribeButton, {
+        target: document.body,
+        props: { organizationId: ORG_ID, isAuthenticated: true },
+      });
+
+      const update = screen.getByTestId(
+        'subscribe-button-update-payment'
+      ) as HTMLButtonElement;
+      update.click();
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mockPortal).toHaveBeenCalledWith({
+        returnUrl: 'http://example.lvh.me:3000/pricing',
+      });
+      expect(hrefSetter).toHaveBeenCalledWith(
+        'https://billing.stripe.com/p/session/test_xyz'
+      );
+    } finally {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
   });
 });
