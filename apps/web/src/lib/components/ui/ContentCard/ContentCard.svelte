@@ -35,7 +35,7 @@
   import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
   import { Skeleton } from '../Skeleton';
   import { PriceBadge } from '../PriceBadge';
-  import { PlayIcon, MusicIcon, FileTextIcon, ArrowRightIcon, StarIcon } from '$lib/components/ui/Icon';
+  import { PlayIcon, MusicIcon, FileTextIcon, ArrowRightIcon, SparkleIcon } from '$lib/components/ui/Icon';
   import { extractPlainText } from '@codex/validation';
   import AudioWaveform from './AudioWaveform.svelte';
 
@@ -433,7 +433,7 @@
 
       {#if showFeaturedTreatment}
         <span class="cc__featured-star" aria-label={m.content_featured_label()}>
-          <StarIcon size={14} />
+          <SparkleIcon size={14} />
         </span>
       {/if}
 
