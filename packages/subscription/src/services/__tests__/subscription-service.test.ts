@@ -17,6 +17,7 @@
 
 import {
   organizations,
+  pendingPayouts as pendingPayoutsTable,
   stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
@@ -3064,6 +3065,322 @@ describe('SubscriptionService', () => {
         // No mailer injected — silent no-op. Propagation result
         // MUST still match the swap outcome.
       });
+    });
+  });
+
+  // ─── resolvePendingPayouts (Codex-w4jjk) ───────────────────────────────────
+  //
+  // Called from workers/ecom-api/src/handlers/connect-webhook.ts:75 when a
+  // Connect account transitions to chargesEnabled + payoutsEnabled. The
+  // method walks all unresolved pendingPayouts for that user+org, calls
+  // stripe.transfers.create() per row, and stamps resolvedAt + transfer id.
+  // Replay safety is provided at the DB layer (the `isNull(resolvedAt)`
+  // filter prevents duplicate transfers on a second call) rather than via
+  // Stripe idempotency keys.
+  describe('resolvePendingPayouts', () => {
+    /**
+     * Seed the connect account with a known stripeAccountId so we can drive
+     * resolvePendingPayouts deterministically. Returns the seeded account
+     * row, an active subscription owned by `otherCreatorId` for FK
+     * references on pendingPayouts, and the unique stripeAccountId.
+     */
+    async function seedConnectAndSubscription(slug: string) {
+      const { org, tier1 } = await createFullOrg(slug);
+      const stripeAccountId = `acct_w4jjk_${createUniqueSlug('a')}`;
+
+      const { eq } = await import('drizzle-orm');
+      // The createFullOrg helper inserted a connect account with a random
+      // stripeAccountId — overwrite it with our deterministic value so
+      // tests can assert the (orgId, stripeAccountId) lookup explicitly.
+      await db
+        .update(stripeConnectAccounts)
+        .set({ stripeAccountId })
+        .where(eq(stripeConnectAccounts.organizationId, org.id));
+
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+            stripeSubscriptionId: `sub_w4jjk_${createUniqueSlug('s')}`,
+          })
+        )
+        .returning();
+
+      return { org, tier1, sub, stripeAccountId };
+    }
+
+    it('returns zero counts and skips Stripe transfers when no unresolved payouts exist', async () => {
+      const { org, stripeAccountId } =
+        await seedConnectAndSubscription('w4jjk-empty');
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      expect(result).toEqual({ resolved: 0, failed: 0 });
+      expect(transferSpy).not.toHaveBeenCalled();
+    });
+
+    it('resolves every pending payout, sets resolvedAt + stripeTransferId, and forwards correlation metadata', async () => {
+      const { org, sub, stripeAccountId } =
+        await seedConnectAndSubscription('w4jjk-batch-ok');
+
+      // Seed three unresolved payouts for the connect-account user.
+      const payoutRows = await db
+        .insert(pendingPayoutsTable)
+        .values([
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 1200,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+          },
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 750,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+          },
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 320,
+            currency: 'gbp',
+            reason: 'connect_restricted',
+          },
+        ])
+        .returning();
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      expect(result).toEqual({ resolved: 3, failed: 0 });
+      expect(transferSpy).toHaveBeenCalledTimes(3);
+
+      // Each transfer must carry the destination Connect account, GBP
+      // currency, the row's amount, and correlation metadata pointing
+      // back to the pendingPayoutId + subscriptionId so Stripe-side
+      // reconciliation can match the rows.
+      for (const row of payoutRows) {
+        const match = transferSpy.mock.calls.find(
+          ([params]) =>
+            (params as { metadata?: { pending_payout_id?: string } }).metadata
+              ?.pending_payout_id === row.id
+        );
+        expect(match, `no transfer for payout ${row.id}`).toBeDefined();
+        const [params] = match as [Record<string, unknown>];
+        expect(params).toMatchObject({
+          amount: row.amountCents,
+          currency: 'gbp',
+          destination: stripeAccountId,
+          metadata: {
+            pending_payout_id: row.id,
+            subscription_id: row.subscriptionId,
+            type: 'pending_payout_resolution',
+          },
+        });
+      }
+
+      // DB rows must be stamped resolved + carry the Stripe transfer id.
+      const { eq, inArray } = await import('drizzle-orm');
+      const after = await db
+        .select()
+        .from(pendingPayoutsTable)
+        .where(
+          inArray(
+            pendingPayoutsTable.id,
+            payoutRows.map((r) => r.id)
+          )
+        );
+      expect(after).toHaveLength(3);
+      for (const row of after) {
+        expect(row.resolvedAt).not.toBeNull();
+        expect(row.stripeTransferId).toMatch(/^tr_/);
+      }
+      // Silence unused-import warning when no further use occurs.
+      void eq;
+    });
+
+    it('isolates per-payout failure — failing transfer does not abort the batch', async () => {
+      const { org, sub, stripeAccountId } = await seedConnectAndSubscription(
+        'w4jjk-partial-fail'
+      );
+
+      const payoutRows = await db
+        .insert(pendingPayoutsTable)
+        .values([
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 1000,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+          },
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 2000,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+          },
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 3000,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+          },
+        ])
+        .returning();
+      const failingPayoutId = payoutRows[1].id;
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+      transferSpy.mockImplementation(
+        (params: Record<string, unknown>): unknown => {
+          const metadata = params.metadata as { pending_payout_id?: string };
+          if (metadata?.pending_payout_id === failingPayoutId) {
+            return Promise.reject(new Error('Stripe transfer rejected (test)'));
+          }
+          return Promise.resolve({
+            id: `tr_ok_${createUniqueSlug('t')}`,
+            amount: params.amount,
+            currency: params.currency,
+            destination: params.destination,
+            metadata,
+          });
+        }
+      );
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      expect(result).toEqual({ resolved: 2, failed: 1 });
+      expect(transferSpy).toHaveBeenCalledTimes(3);
+
+      const { inArray, eq } = await import('drizzle-orm');
+      const after = await db
+        .select()
+        .from(pendingPayoutsTable)
+        .where(
+          inArray(
+            pendingPayoutsTable.id,
+            payoutRows.map((r) => r.id)
+          )
+        );
+      const byId = new Map(after.map((r) => [r.id, r] as const));
+
+      // The two succeeding rows are stamped resolved.
+      for (const row of payoutRows.filter((r) => r.id !== failingPayoutId)) {
+        const persisted = byId.get(row.id);
+        expect(persisted?.resolvedAt).not.toBeNull();
+        expect(persisted?.stripeTransferId).toMatch(/^tr_ok_/);
+      }
+      // The failing row stays unresolved and re-tryable.
+      const stillPending = byId.get(failingPayoutId);
+      expect(stillPending?.resolvedAt).toBeNull();
+      expect(stillPending?.stripeTransferId).toBeNull();
+
+      // Silence unused-import warning.
+      void eq;
+    });
+
+    it('is a no-op on replay — second call after success makes zero Stripe transfer calls', async () => {
+      const { org, sub, stripeAccountId } =
+        await seedConnectAndSubscription('w4jjk-replay');
+
+      await db.insert(pendingPayoutsTable).values([
+        {
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 1500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+        },
+        {
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 2500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+        },
+      ]);
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const first = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+      expect(first).toEqual({ resolved: 2, failed: 0 });
+      expect(transferSpy).toHaveBeenCalledTimes(2);
+
+      transferSpy.mockClear();
+      const second = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      // Replay safety lives in the DB filter (isNull(resolvedAt)) — there
+      // are no remaining rows after the first run, so the second call
+      // returns the empty-batch shape and makes zero Stripe calls. This
+      // is what guards us against duplicate disbursement if the
+      // account.updated webhook fires twice.
+      expect(second).toEqual({ resolved: 0, failed: 0 });
+      expect(transferSpy).not.toHaveBeenCalled();
+    });
+
+    it('warns and returns empty when the (orgId, stripeAccountId) pair has no Connect account row', async () => {
+      const { org } = await createFullOrg('w4jjk-acct-not-found');
+
+      const warnSpy = vi
+        .spyOn(
+          (service as unknown as { obs: { warn: (...args: unknown[]) => void } })
+            .obs,
+          'warn'
+        )
+        .mockImplementation(() => {});
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        'acct_does_not_exist_for_this_org'
+      );
+
+      expect(result).toEqual({ resolved: 0, failed: 0 });
+      expect(transferSpy).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        'resolvePendingPayouts: Connect account not found',
+        expect.objectContaining({
+          organizationId: org.id,
+          stripeAccountId: 'acct_does_not_exist_for_this_org',
+        })
+      );
+
+      warnSpy.mockRestore();
     });
   });
 });
