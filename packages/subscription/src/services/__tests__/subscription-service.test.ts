@@ -1651,6 +1651,194 @@ describe('SubscriptionService', () => {
       );
     });
 
+    // Codex-fhqxx (stale-preview consistency guard):
+    //
+    // Scenario: user opens the pricing dialog → service calls
+    // previewTierChange() which returns prorationDate=T1 based on the
+    // tier's current £15/month price. BEFORE the user clicks "Confirm",
+    // a Stripe Dashboard edit fires `price.created` → `applyStripePriceCreated`
+    // syncs the new £25/month price into our `subscriptionTiers` row.
+    // The user then clicks "Confirm"; the dialog still holds the stale
+    // T1 prorationDate from the preview.
+    //
+    // Production contract (per current implementation): changeTier RE-READS
+    // the tier from the DB at commit time, so the Stripe API call targets
+    // the tier's CURRENT stripePriceMonthlyId (post-sync) and the local
+    // `amountCents` mirror is the CURRENT priceMonthly (post-sync). The
+    // stale prorationDate is forwarded — Stripe uses it only to pick the
+    // proration window; the per-period charge always reflects the current
+    // price metadata. Net effect: the user is charged the up-to-date
+    // amount, never the stale preview amount.
+    //
+    // This test pins that contract. If anyone later changes changeTier to
+    // capture price snapshots from the preview (vs. re-reading the row),
+    // this test will fail loudly. See reference_stripe_tier_change_pattern.
+    it('stale preview: tier price changed between preview and commit — commit reflects CURRENT tier price, not the preview snapshot', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('change-tier-stale');
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
+
+      // Preview was generated against tier2 at its current £9.99/month
+      // price (priceMonthly=999 from createFullOrg). Capture the prorationDate
+      // the dialog would have held.
+      const previewProrationDate = 1700000000;
+      const previewSnapshotMonthly = tier2.priceMonthly; // 999
+
+      // Dashboard sync-back arrives: tier2's monthly price is bumped to
+      // £25.00 and a fresh Stripe Price object is minted. This is what
+      // TierService.applyStripePriceCreated would do in production.
+      const newMonthlyPriceId = `price_test_resync_${tier2.id}`;
+      const { eq } = await import('drizzle-orm');
+      await db
+        .update(subscriptionTiers)
+        .set({
+          priceMonthly: 2500,
+          stripePriceMonthlyId: newMonthlyPriceId,
+        })
+        .where(eq(subscriptionTiers.id, tier2.id));
+
+      // Now the user clicks Confirm — dialog still holds the stale
+      // prorationDate from the preview.
+      await service.changeTier(
+        otherCreatorId,
+        org.id,
+        tier2.id,
+        'month',
+        previewProrationDate
+      );
+
+      // Assert: Stripe.subscriptions.update targets the CURRENT priceId
+      // (post-sync), NOT whatever the preview saw.
+      const updateCall = (
+        stripe.subscriptions.update as unknown as {
+          mock: { calls: unknown[][] };
+        }
+      ).mock.calls[0];
+      const params = updateCall[1] as {
+        items: Array<{ id: string; price: string }>;
+        proration_date: number;
+      };
+      expect(params.items[0].price).toBe(newMonthlyPriceId);
+      expect(params.items[0].price).not.toBe(tier2.stripePriceMonthlyId);
+      // Stale prorationDate IS still forwarded — Stripe uses it for the
+      // proration window only; the per-period charge is computed against
+      // the current price metadata. This is intentional, not a bug.
+      expect(params.proration_date).toBe(previewProrationDate);
+
+      // Assert: local amountCents mirror reflects the CURRENT priceMonthly
+      // (2500), NOT the preview's stale snapshot (999).
+      const { and } = await import('drizzle-orm');
+      const [updated] = await db
+        .select()
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.userId, otherCreatorId),
+            eq(subscriptions.organizationId, org.id)
+          )
+        );
+      expect(updated.amountCents).toBe(2500);
+      expect(updated.amountCents).not.toBe(previewSnapshotMonthly);
+      // Revenue split must still sum to amountCents (CHECK constraint).
+      expect(
+        updated.platformFeeCents +
+          updated.organizationFeeCents +
+          updated.creatorPayoutCents
+      ).toBe(updated.amountCents);
+    });
+
+    // Codex-fhqxx (commit-time failure contract):
+    //
+    // Sibling to the existing 'upgrade payment failure: maps Stripe 402'
+    // test (above). That test covers: 402 → SubscriptionPaymentRequiredError
+    // + DB untouched. This test adds the dialog-side guarantees:
+    //   1. Service does NOT silently retry .subscriptions.update on 402 —
+    //      caller must re-open the dialog to fetch a fresh preview.
+    //   2. Error context carries enough info for the route to map cleanly
+    //      to PAYMENT_REQUIRED (used by pricing/+page.svelte switch on code).
+    //   3. No audit row / no partial commit even though the preview's
+    //      prorationDate was pinned.
+    //
+    // Note: production currently does NOT include `prorationDate` in the
+    // SubscriptionPaymentRequiredError context. A follow-up bead can add
+    // it so the dialog can distinguish "needs new preview" from "transient
+    // network blip". For now the test asserts what's there.
+    it('commit fails after successful preview: SubscriptionPaymentRequiredError, NO silent retry, DB untouched', async () => {
+      const { org, tier1, tier2 } = await createFullOrg(
+        'change-tier-stale-402'
+      );
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(otherCreatorId, org.id, tier1.id));
+
+      const previewProrationDate = 1700000001;
+
+      // Stripe rejects the proration invoice with HTTP 402.
+      const stripeError = Object.assign(new Error('Your card was declined.'), {
+        statusCode: 402,
+        type: 'StripeCardError',
+        code: 'card_declined',
+      });
+      (
+        stripe.subscriptions.update as unknown as {
+          mockRejectedValueOnce: (e: unknown) => void;
+        }
+      ).mockRejectedValueOnce(stripeError);
+
+      let caught: unknown;
+      try {
+        await service.changeTier(
+          otherCreatorId,
+          org.id,
+          tier2.id,
+          'month',
+          previewProrationDate
+        );
+      } catch (err) {
+        caught = err;
+      }
+
+      // (a) Typed 402 surfaces with the structured fields the route uses
+      // to render the dialog's "Payment was declined" banner.
+      expect(caught).toBeInstanceOf(SubscriptionPaymentRequiredError);
+      const err = caught as SubscriptionPaymentRequiredError & {
+        context?: Record<string, unknown>;
+      };
+      expect(err.code).toBe('PAYMENT_REQUIRED');
+      expect(err.statusCode).toBe(402);
+      // Context carries newTierId + billingInterval so the dialog can
+      // re-open the correct row, and stripeMessage so the toast can show
+      // the upstream message verbatim.
+      expect(err.context?.newTierId).toBe(tier2.id);
+      expect(err.context?.billingInterval).toBe('month');
+      expect(err.context?.stripeMessage).toBe('Your card was declined.');
+
+      // (b) NO silent retry — Stripe.subscriptions.update is called exactly
+      // once. A retry loop here would double-charge if Stripe accepts the
+      // second attempt; the contract is that the caller MUST refresh
+      // preview + payment method before re-submitting.
+      expect(stripe.subscriptions.update).toHaveBeenCalledTimes(1);
+
+      // (c) DB untouched — local row still on tier1 with the original
+      // amount. The Stripe-side price update was reverted by
+      // payment_behavior=error_if_incomplete, so there's nothing to
+      // reconcile.
+      const { eq, and } = await import('drizzle-orm');
+      const [unchanged] = await db
+        .select()
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.userId, otherCreatorId),
+            eq(subscriptions.organizationId, org.id)
+          )
+        );
+      expect(unchanged.tierId).toBe(tier1.id);
+      expect(unchanged.amountCents).toBe(tier1.priceMonthly);
+      expect(unchanged.billingInterval).toBe('month');
+    });
+
     it('should throw SubscriptionNotFoundError without subscription', async () => {
       const { org, tier2 } = await createFullOrg('change-nosub');
       await expect(
