@@ -205,6 +205,13 @@
   --color-border-hover: oklch(from var(--brand-bg, white) calc(l - 0.15) calc(c * 0.3) h);
   --color-surface-overlay: oklch(from var(--brand-bg, white) clamp(0, (0.5 - l) * 2, 0.15) 0 0 / 0.6);
   --color-surface-variant: oklch(from var(--brand-bg, white) calc(l - 0.04) calc(c * 0.4) h);
+
+  /* Floating-glass surfaces (FilterDrawer, MobileBottomSheet) — tint
+     with the org's brand bg so glass reads as integrated rather than
+     gray-on-brand. Lift lightness slightly + drop chroma so the glass
+     stays bright/blurry enough to read against busy content behind. */
+  --material-glass: oklch(from var(--brand-bg, white) calc(l + 0.05) calc(c * 0.4) h / 0.72);
+  --material-glass-border: oklch(from var(--brand-bg, white) calc(l + 0.12) calc(c * 0.2) h / 0.5);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -271,6 +278,13 @@
   --color-border-hover: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.15) calc(c * 0.3) h);
   --color-surface-overlay: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) clamp(0, (0.5 - l) * 2, 0.15) 0 0 / 0.75);
   --color-surface-variant: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.06) calc(c * 0.4) h);
+
+  /* Floating-glass surfaces, dark mode — slight lightness lift over the
+     dark brand bg for layer separation; low chroma keeps the surface
+     reading as glass not branded chrome. Border alpha kept subtle to
+     match the original near-invisible rim feel. */
+  --material-glass: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.04) calc(c * 0.4) h / 0.72);
+  --material-glass-border: oklch(from var(--brand-bg-dark, var(--brand-bg, #1a1a2e)) calc(l + 0.22) calc(c * 0.2) h / 0.18);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

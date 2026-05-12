@@ -58,6 +58,8 @@ export { default as SearchMinusIcon } from './SearchMinusIcon.svelte';
 export { default as SearchXIcon } from './SearchXIcon.svelte';
 export { default as SettingsIcon } from './SettingsIcon.svelte';
 export { default as ShoppingBagIcon } from './ShoppingBagIcon.svelte';
+export { default as SlidersIcon } from './SlidersIcon.svelte';
+export { default as SparkleIcon } from './SparkleIcon.svelte';
 export { default as SunIcon } from './SunIcon.svelte';
 export { default as TagIcon } from './TagIcon.svelte';
 export { default as TrashIcon } from './TrashIcon.svelte';

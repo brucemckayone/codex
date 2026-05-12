@@ -1739,6 +1739,30 @@ export const explore_clear_filters = () => `Clear filters`
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_filters_and_sort = () => `Filters & sort`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_apply = () => `Apply`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_done = () => `Done`
+
+
+/**
  * @param {{ count: NonNullable<unknown> }} params
  * @returns {string}
  */
@@ -2592,6 +2616,14 @@ export const content_price_team = () => `Team`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const content_price_members = () => `Members`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_featured_label = () => `Featured`
 
 
 /**
@@ -3679,6 +3711,22 @@ export const library_filter_membership = () => `Member Access`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const library_filter_free = () => `Free`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_filter_followers = () => `Following`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const library_access_badge_purchased = () => `Purchased`
 
 
@@ -3703,7 +3751,47 @@ export const library_access_badge_membership = () => `Member`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const library_access_badge_free = () => `Free`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_access_badge_followers = () => `Following`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const library_clear_filters = () => `Clear filters`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_filters_and_sort = () => `Filters & sort`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_apply = () => `Apply`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_done = () => `Done`
 
 
 /**
@@ -8503,7 +8591,7 @@ export const command_palette_creators = () => `Creators`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const library_filter_free = () => `Free`
+export const discover_clear_all = () => `Clear all`
 
 
 /**
@@ -8511,7 +8599,7 @@ export const library_filter_free = () => `Free`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const library_filter_followers = () => `Following`
+export const discover_filter_all = () => `All`
 
 
 /**
@@ -8519,7 +8607,7 @@ export const library_filter_followers = () => `Following`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const library_access_badge_free = () => `Free`
+export const discover_filter_article = () => `Article`
 
 
 /**
@@ -8527,4 +8615,92 @@ export const library_access_badge_free = () => `Free`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const library_access_badge_followers = () => `Following`
+export const discover_filter_audio = () => `Audio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const discover_filter_video = () => `Video`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const discover_sort_newest = () => `Newest`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const discover_sort_oldest = () => `Oldest`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const discover_sort_title = () => `A–Z`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_filter_featured_heading = () => `Featured`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_filter_featured_only = () => `Featured only`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_filter_type_heading = () => `Content type`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const explore_sort_heading = () => `Sort by`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_filter_group_access = () => `Access`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_filter_group_progress = () => `Progress`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_filter_group_type = () => `Type`
