@@ -872,31 +872,22 @@
     );
   }
 
-  /* Shader-absent fallback backdrop — guarantees title contrast when no
-     shader preset is configured. The hero title uses `mix-blend-mode:
-     difference` against the shader canvas; when the canvas has opacity 0
-     the title composites against the light page background (often near
-     white) and `difference(white, white) ≈ black` collapses contrast to
-     ~1:1 (Codex-tl2ts, Lighthouse reported 1.04).
-     Rendered as `::before` (DOM-order sibling) with no explicit z-index so
-     it paints BEFORE the title in the same stacking level — making it the
-     title's actual blend backdrop rather than an overlay on top. Scoped
-     via `[data-hero-shader-active]` on `.org-layout` (set in the parent
-     layout from `tokenOverrides['shader-preset']`) so orgs WITH a shader
-     keep their current look and the shader shines through untouched.
-     Uses `hsl(0 0% 0% / α)` direct — same rationale as `::after` above. */
+  /* Shader-absent fallback backdrop — paints the hero with the org's
+     brand background so the section reads as integrated with the rest
+     of the page rather than a darkened plate. Rendered as `::before`
+     (DOM-order sibling, no explicit z-index) so it sits BEFORE the
+     title in the same stacking level — making it the title's actual
+     blend backdrop. Scoped via `[data-hero-shader-active]` on
+     `.org-layout` (set in the parent layout from
+     `tokenOverrides['shader-preset']`) so orgs WITH a shader keep their
+     current look. Title's `mix-blend-mode: difference` (set on
+     `.hero__title`) gives auto-contrast against this brand-derived bg. */
   :global(.org-layout:not([data-hero-shader-active])) .hero::before {
     content: '';
     position: absolute;
     inset: 0;
     pointer-events: none;
-    background: linear-gradient(
-      180deg,
-      hsl(0 0% 0% / 0.55) 0%,
-      hsl(0 0% 0% / 0.4) 40%,
-      hsl(0 0% 0% / 0.45) 70%,
-      hsl(0 0% 0% / 0.6) 100%
-    );
+    background: var(--brand-bg, var(--color-background));
   }
 
   .hero__content {
