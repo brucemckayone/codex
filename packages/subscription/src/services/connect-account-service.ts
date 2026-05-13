@@ -193,10 +193,11 @@ export class ConnectAccountService extends BaseService {
 
     const chargesEnabled = stripeAccount.charges_enabled ?? false;
     const payoutsEnabled = stripeAccount.payouts_enabled ?? false;
+    const isActive = chargesEnabled && payoutsEnabled;
 
     // Determine status from capabilities
     let status: 'onboarding' | 'active' | 'restricted' | 'disabled';
-    if (chargesEnabled && payoutsEnabled) {
+    if (isActive) {
       status = 'active';
     } else if (stripeAccount.requirements?.disabled_reason) {
       status = 'disabled';
@@ -215,8 +216,7 @@ export class ConnectAccountService extends BaseService {
         chargesEnabled,
         payoutsEnabled,
         status,
-        onboardingCompletedAt:
-          chargesEnabled && payoutsEnabled ? new Date() : null,
+        onboardingCompletedAt: isActive ? new Date() : null,
         updatedAt: new Date(),
       })
       .where(eq(stripeConnectAccounts.stripeAccountId, stripeAccountId))
