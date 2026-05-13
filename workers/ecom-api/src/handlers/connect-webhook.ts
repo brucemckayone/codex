@@ -36,19 +36,25 @@ export async function handleConnectWebhook(
     switch (event.type) {
       case STRIPE_EVENTS.ACCOUNT_UPDATED: {
         const account = event.data.object as Stripe.Account;
-        // Check previous values to detect activation transition
-        const previousAttributes = event.data.previous_attributes as
-          | Partial<Stripe.Account>
-          | undefined;
-        const wasChargesEnabled =
-          previousAttributes?.charges_enabled !== undefined
-            ? previousAttributes.charges_enabled
-            : account.charges_enabled;
-        const wasPayoutsEnabled =
-          previousAttributes?.payouts_enabled !== undefined
-            ? previousAttributes.payouts_enabled
-            : account.payouts_enabled;
-        const wasActive = wasChargesEnabled && wasPayoutsEnabled;
+
+        // Codex-qigid: detect the active-transition from `data.object`
+        // (Stripe's CURRENT state) rather than from `previous_attributes`.
+        // Context7-verified 2026-05-13: `account.updated` fires on ANY status
+        // or property change and `previous_attributes` may NOT contain the
+        // `charges_enabled` / `payouts_enabled` fields on capability-ricochet
+        // events (e.g. `requirements.past_due` → `restricted` → re-enabled).
+        //
+        // `wasActive` is sourced from the CURRENT DB row BEFORE the update,
+        // so the transition signal is the persisted state-change rather
+        // than Stripe's diff. This also gives idempotency for free: a
+        // duplicate `active → active` event finds `wasActive=true` and
+        // skips the payout resolution. A ricochet (active → restricted →
+        // active) correctly clears `wasActive` to false during the
+        // restricted hop and fires payouts again on re-activation.
+        const currentRecord = await service.getAccountByStripeId(account.id);
+        const wasActive =
+          (currentRecord?.chargesEnabled ?? false) &&
+          (currentRecord?.payoutsEnabled ?? false);
         const isNowActive = account.charges_enabled && account.payouts_enabled;
 
         await service.handleAccountUpdated(account);
