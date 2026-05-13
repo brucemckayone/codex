@@ -24,6 +24,7 @@ import {
   subscriptionTiers,
   users,
 } from '@codex/database/schema';
+import { UnsupportedCurrencyError } from '@codex/service-errors';
 import {
   createMockStripe,
   createMockStripeInvoice,
@@ -5670,14 +5671,14 @@ describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
       const transferSpy = vi.mocked(stripe.transfers.create);
       transferSpy.mockClear();
 
-      await expect(
-        service.handleInvoicePaymentSucceeded(mockInvoice)
-      ).rejects.toMatchObject({
-        name: 'UnsupportedCurrencyError',
-        code: 'UNSUPPORTED_CURRENCY',
-        statusCode: 400,
-        received: 'usd',
-      });
+      // constructor.name is mangled by esbuild — use toBeInstanceOf (static class import) instead of .name on the error
+      const err = await service
+        .handleInvoicePaymentSucceeded(mockInvoice)
+        .catch((e) => e);
+      expect(err).toBeInstanceOf(UnsupportedCurrencyError);
+      expect(err.code).toBe('UNSUPPORTED_CURRENCY');
+      expect(err.statusCode).toBe(400);
+      expect(err.received).toBe('usd');
 
       expect(transferSpy).not.toHaveBeenCalled();
     });
@@ -5702,7 +5703,8 @@ describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
         .handleInvoicePaymentSucceeded(mockInvoice)
         .catch((e) => e);
 
-      expect(err?.name).toBe('UnsupportedCurrencyError');
+      // constructor.name is mangled by esbuild — use toBeInstanceOf (static class import) instead of .name on the error
+      expect(err).toBeInstanceOf(UnsupportedCurrencyError);
       expect(err?.received).toBe('eur');
       expect(err?.supported).toEqual(['gbp']);
       expect(err?.context).toMatchObject({
@@ -5868,16 +5870,13 @@ describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
 
   describe('UnsupportedCurrencyError contract', () => {
     it('round-trips received + supported + context fields', async () => {
-      const { UnsupportedCurrencyError } = await import(
-        '@codex/service-errors'
-      );
       const err = new UnsupportedCurrencyError('usd', ['gbp'], {
         invoiceId: 'in_test',
         subscriptionId: 'sub_test',
       });
 
+      // constructor.name is mangled by esbuild — toBeInstanceOf is the type-safe alternative
       expect(err).toBeInstanceOf(UnsupportedCurrencyError);
-      expect(err.name).toBe('UnsupportedCurrencyError');
       expect(err.code).toBe('UNSUPPORTED_CURRENCY');
       expect(err.statusCode).toBe(400);
       expect(err.received).toBe('usd');
