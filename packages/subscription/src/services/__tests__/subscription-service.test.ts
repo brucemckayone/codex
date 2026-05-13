@@ -5048,6 +5048,350 @@ describe('SubscriptionService', () => {
       expect(transferSpy).not.toHaveBeenCalled();
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // resolvePendingPayouts — creator-exit orphan handling (Codex-aq58x)
+  //
+  // User-decided contract (interview 2026-05-13): when a creator is removed
+  // from an org and they still have unresolved pendingPayouts rows from
+  // when they were a member, those rows MUST still resolve to the original
+  // creator's Connect account on the next sweep — they were owed the money
+  // for past work ("Orphaned — still paid out").
+  //
+  // Production guard: resolvePendingPayouts joins pendingPayouts ⇄
+  // stripeConnectAccounts on userId (subscription-service.ts:2253-2325) —
+  // it never touches creatorOrganizationAgreements. These tests pin that
+  // contract so a future refactor can't accidentally re-introduce an
+  // agreement join that would silently orphan the row.
+  // ─────────────────────────────────────────────────────────────────────
+  describe('resolvePendingPayouts — creator-exit orphan handling', () => {
+    /**
+     * Mint a removed-creator scenario: a fresh org, a connect account for the
+     * creator (with a deterministic stripeAccountId), an active subscription
+     * for FK references, and an OPTIONAL agreement row that the caller can
+     * end-date / leave-missing to drive the "removed from org" semantics.
+     */
+    async function seedOrgWithCreatorConnect(
+      slug: string,
+      creatorUserId: string
+    ) {
+      const [org] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug(slug),
+            creatorId: creatorUserId,
+          })
+        )
+        .returning();
+
+      const stripeAccountId = `acct_aq58x_${createUniqueSlug('a')}`;
+      await db.insert(stripeConnectAccounts).values(
+        createTestConnectAccountInput(org.id, creatorUserId, {
+          stripeAccountId,
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          status: 'active',
+        })
+      );
+
+      const [tier] = await db
+        .insert(subscriptionTiers)
+        .values(
+          createTestTierInput(org.id, {
+            name: 'Basic',
+            sortOrder: 1,
+            priceMonthly: 499,
+            priceAnnual: 4990,
+          })
+        )
+        .returning();
+
+      // Subscription FK is required by pendingPayouts.subscriptionId. Use a
+      // distinct subscriber so we never collide with the creator's own row.
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier.id, {
+            status: 'active',
+            stripeSubscriptionId: `sub_aq58x_${createUniqueSlug('s')}`,
+          })
+        )
+        .returning();
+
+      return { org, tier, sub, stripeAccountId };
+    }
+
+    it('pays out a removed creator whose agreement is end-dated (effectiveUntil in the past)', async () => {
+      // Setup: creator + agreement + accrued pendingPayout, then end-date the
+      // agreement to simulate "removed from org". The Connect account stays
+      // active (the creator still owns their Stripe Connect), so the next
+      // sweep MUST disburse the owed money.
+      const { org, sub, stripeAccountId } = await seedOrgWithCreatorConnect(
+        'aq58x-end-dated',
+        creatorId
+      );
+
+      // Insert + end-date an agreement for the creator-org pair.
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      await db.insert(creatorOrganizationAgreements).values({
+        creatorId,
+        organizationId: org.id,
+        organizationFeePercentage: 1500,
+        effectiveFrom: new Date(Date.now() - 48 * 60 * 60 * 1000),
+        effectiveUntil: yesterday,
+      });
+
+      const [payout] = await db
+        .insert(pendingPayoutsTable)
+        .values({
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 5000,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+        })
+        .returning();
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      // Removed-creator orphan still resolves — agreement end-date does NOT
+      // block the payout.
+      expect(result).toEqual({ resolved: 1, failed: 0 });
+      expect(transferSpy).toHaveBeenCalledTimes(1);
+
+      const [params] = transferSpy.mock.calls[0] as [Record<string, unknown>];
+      expect(params).toMatchObject({
+        amount: 5000,
+        currency: 'gbp',
+        destination: stripeAccountId,
+        metadata: expect.objectContaining({
+          pending_payout_id: payout.id,
+          type: 'pending_payout_resolution',
+        }),
+      });
+
+      const { eq } = await import('drizzle-orm');
+      const [after] = await db
+        .select()
+        .from(pendingPayoutsTable)
+        .where(eq(pendingPayoutsTable.id, payout.id));
+      expect(after.resolvedAt).not.toBeNull();
+      expect(after.stripeTransferId).toMatch(/^tr_/);
+    });
+
+    it('resolves the row even when no agreement row exists at all (resolve query joins on userId, not via agreement)', async () => {
+      // Setup: pendingPayout row exists for (creatorId, orgId) but there is
+      // NO creatorOrganizationAgreements row. This is the
+      // never-had-an-agreement / hard-deleted-agreement path. The contract:
+      // pendingPayouts.userId is the source of truth — resolution depends
+      // ONLY on the (stripeConnectAccounts.userId == pendingPayouts.userId)
+      // join, never on an agreement row.
+      const { org, sub, stripeAccountId } = await seedOrgWithCreatorConnect(
+        'aq58x-no-agreement',
+        creatorId
+      );
+
+      // Defensive: confirm no agreement row exists for this pair.
+      const { and, eq } = await import('drizzle-orm');
+      const existingAgreement = await db
+        .select()
+        .from(creatorOrganizationAgreements)
+        .where(
+          and(
+            eq(creatorOrganizationAgreements.creatorId, creatorId),
+            eq(creatorOrganizationAgreements.organizationId, org.id)
+          )
+        );
+      expect(existingAgreement).toHaveLength(0);
+
+      const [payout] = await db
+        .insert(pendingPayoutsTable)
+        .values({
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 2750,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+        })
+        .returning();
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      expect(result).toEqual({ resolved: 1, failed: 0 });
+      expect(transferSpy).toHaveBeenCalledTimes(1);
+      const [params] = transferSpy.mock.calls[0] as [Record<string, unknown>];
+      expect(params).toMatchObject({
+        amount: 2750,
+        destination: stripeAccountId,
+      });
+
+      const [after] = await db
+        .select()
+        .from(pendingPayoutsTable)
+        .where(eq(pendingPayoutsTable.id, payout.id));
+      expect(after.resolvedAt).not.toBeNull();
+      expect(after.stripeTransferId).toMatch(/^tr_/);
+    });
+
+    it('resolves each removed creator independently across multiple end-dated agreements', async () => {
+      // Setup: ONE org, THREE creators each with their own Connect account,
+      // each with their own pendingPayout row, each with an end-dated
+      // agreement. resolvePendingPayouts takes one (orgId, stripeAccountId)
+      // pair at a time — each call MUST only touch its own user's rows and
+      // never disturb the others.
+      const [org] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('aq58x-multi'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      const [tier] = await db
+        .insert(subscriptionTiers)
+        .values(
+          createTestTierInput(org.id, {
+            name: 'Basic',
+            sortOrder: 1,
+            priceMonthly: 499,
+            priceAnnual: 4990,
+          })
+        )
+        .returning();
+
+      // Three creators — reuse the seeded user pool. creatorId owns the org;
+      // otherCreatorId and thirdUserId are removed contributors.
+      const creators = [creatorId, otherCreatorId, thirdUserId];
+      expect(
+        creators.every((id) => typeof id === 'string' && id.length > 0)
+      ).toBe(true);
+
+      // Per-creator: connect account + end-dated agreement + subscription FK
+      // + pendingPayout row.
+      const seeded: {
+        userId: string;
+        stripeAccountId: string;
+        payoutId: string;
+        amountCents: number;
+      }[] = [];
+
+      const amounts = [1100, 2200, 3300];
+      for (let i = 0; i < creators.length; i++) {
+        const userId = creators[i];
+        const stripeAccountId = `acct_aq58x_multi_${createUniqueSlug(`c${i}`)}`;
+
+        await db.insert(stripeConnectAccounts).values(
+          createTestConnectAccountInput(org.id, userId, {
+            stripeAccountId,
+            chargesEnabled: true,
+            payoutsEnabled: true,
+            status: 'active',
+          })
+        );
+
+        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        await db.insert(creatorOrganizationAgreements).values({
+          creatorId: userId,
+          organizationId: org.id,
+          organizationFeePercentage: 1500,
+          effectiveFrom: new Date(Date.now() - 48 * 60 * 60 * 1000),
+          effectiveUntil: yesterday,
+        });
+
+        // Each pendingPayout needs a subscription FK. Use a unique subscriber
+        // per creator so we don't violate any uniqueness constraint — the
+        // simplest path is the same active subscription per creator's own
+        // user id (subscriptions are (userId, orgId) — one per pair).
+        const [sub] = await db
+          .insert(subscriptions)
+          .values(
+            createTestSubscriptionInput(userId, org.id, tier.id, {
+              status: 'active',
+              stripeSubscriptionId: `sub_aq58x_multi_${createUniqueSlug(`s${i}`)}`,
+            })
+          )
+          .returning();
+
+        const [payout] = await db
+          .insert(pendingPayoutsTable)
+          .values({
+            userId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: amounts[i],
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+          })
+          .returning();
+
+        seeded.push({
+          userId,
+          stripeAccountId,
+          payoutId: payout.id,
+          amountCents: amounts[i],
+        });
+      }
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+
+      // Run resolve once per creator and assert per-call isolation.
+      for (const row of seeded) {
+        transferSpy.mockClear();
+
+        const result = await service.resolvePendingPayouts(
+          org.id,
+          row.stripeAccountId
+        );
+
+        expect(result).toEqual({ resolved: 1, failed: 0 });
+        expect(transferSpy).toHaveBeenCalledTimes(1);
+        const [params] = transferSpy.mock.calls[0] as [Record<string, unknown>];
+        expect(params).toMatchObject({
+          amount: row.amountCents,
+          destination: row.stripeAccountId,
+          metadata: expect.objectContaining({
+            pending_payout_id: row.payoutId,
+            type: 'pending_payout_resolution',
+          }),
+        });
+      }
+
+      // All three rows must be stamped resolved, and each must carry the
+      // transfer id from its own Connect account.
+      const { inArray } = await import('drizzle-orm');
+      const after = await db
+        .select()
+        .from(pendingPayoutsTable)
+        .where(
+          inArray(
+            pendingPayoutsTable.id,
+            seeded.map((r) => r.payoutId)
+          )
+        );
+      expect(after).toHaveLength(3);
+      for (const row of after) {
+        expect(row.resolvedAt).not.toBeNull();
+        expect(row.stripeTransferId).toMatch(/^tr_/);
+      }
+    });
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────
