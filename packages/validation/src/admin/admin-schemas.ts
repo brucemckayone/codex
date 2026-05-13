@@ -240,6 +240,31 @@ export type AdminContentPerformanceQueryInput = z.infer<
   typeof adminContentPerformanceQuerySchema
 >;
 
+/**
+ * Revenue-by-creator analytics query parameters (Codex-mtv05).
+ *
+ * Optional main date range only — comparison windows are NOT supported in
+ * Phase 1 (single snapshot of current splits, not historical drift).
+ *
+ * Cross-field rules reused from `applyDateRangeRefinements`:
+ *  - `startDate <= endDate` when both provided
+ *  - Range <= 365 days
+ *
+ * `organizationId` is NOT a body/query field — it is resolved from the
+ * authenticated user's org membership in the procedure layer
+ * (canonical pattern; matches every other admin analytics schema).
+ */
+export const adminRevenueByCreatorQuerySchema = applyDateRangeRefinements(
+  z.object({
+    startDate: isoDateSchema.optional(),
+    endDate: isoDateSchema.optional(),
+  })
+);
+
+export type AdminRevenueByCreatorQueryInput = z.infer<
+  typeof adminRevenueByCreatorQuerySchema
+>;
+
 // ============================================================================
 // Content Management Schemas
 // ============================================================================

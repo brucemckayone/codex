@@ -264,6 +264,47 @@ export interface RevenueQueryOptions {
 }
 
 /**
+ * Per-creator revenue split row for org-owner visibility on the studio
+ * analytics page (Codex-mtv05). Surfaces the same fan-out that
+ * `SubscriptionService.executeTransfers` performs in production, so an
+ * org-owner can verify each creator's share before it lands in Stripe.
+ *
+ * Notes on semantics:
+ *  - `totalRevenueCents` is the SUM of `purchases.creatorPayoutCents` for the
+ *    creator's content in the org+window. Subscription invoice revenue is
+ *    NOT included in Phase 1 — there is no per-creator immutable invoice
+ *    row today, only dynamic fan-out at transfer time. A future revenue
+ *    ledger will close that gap (Phase 2).
+ *  - `splitPercent` is a display percentage (0..100), derived from the
+ *    creator's CURRENT `organizationFeePercentage` basis points
+ *    (`bps / 100`). It is the present DB value, not historical.
+ *  - `lastPayoutAt` is the most-recent `pendingPayouts.resolvedAt` for the
+ *    (creator, org) pair; `null` when nothing has drained yet.
+ *  - `pendingPayoutCents` is the SUM of `amountCents` for unresolved
+ *    `pendingPayouts` (where `resolvedAt IS NULL`) joined on BOTH
+ *    `userId` AND `organizationId` — multi-org membership safety.
+ */
+export interface CreatorRevenueSplitItem {
+  creatorId: string;
+  name: string;
+  avatarUrl: string | null;
+  totalRevenueCents: number;
+  /** Display percent (0..100), NOT basis points. */
+  splitPercent: number;
+  lastPayoutAt: string | null; // ISO string for JSON-safe transport
+  pendingPayoutCents: number;
+}
+
+/**
+ * Options for `AdminAnalyticsService.getRevenueByCreator`. Date filter is
+ * optional and aligns with the existing studio analytics window primitives.
+ */
+export interface CreatorRevenueQueryOptions {
+  startDate?: Date;
+  endDate?: Date;
+}
+
+/**
  * Dashboard stats - combined metrics for studio overview
  * Includes revenue, customer, and top content data for dashboard view
  */

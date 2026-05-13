@@ -17,6 +17,7 @@ import type {
 import type {
   ActivityFeedResponse,
   ContentPerformanceItem,
+  CreatorRevenueSplitItem,
   CustomerDetails,
   CustomerListItem,
   DashboardStats,
@@ -1246,6 +1247,33 @@ export function createServerApi(
         request<DashboardStats>(
           'admin',
           `/api/admin/analytics/dashboard-stats${params ? `?${params}` : ''}`
+        ),
+
+      /**
+       * Get per-creator revenue split rows for org-owner visibility on the
+       * studio analytics page (Codex-mtv05).
+       *
+       * One row per ACTIVE creator-organization agreement, annotated with:
+       *  - `totalRevenueCents` — SUM of purchase `creatorPayoutCents` joined
+       *    via `content.creatorId`. Subscription invoice revenue is NOT
+       *    included in Phase 1 (no per-creator immutable invoice row).
+       *  - `splitPercent` — CURRENT creator share as a display percentage
+       *    (0..100), already converted from basis points by the service.
+       *  - `lastPayoutAt` — ISO string or null.
+       *  - `pendingPayoutCents` — SUM of unresolved pending-payout amounts
+       *    scoped by BOTH userId AND organizationId (multi-org safety).
+       *
+       * Single-creator orgs receive `items: []` and the page hides the
+       * section entirely.
+       *
+       * Query parameters (from `adminRevenueByCreatorQuerySchema`):
+       * - `startDate` / `endDate` — ISO strings (optional, both-or-neither
+       *   for chronological order; max 365-day range)
+       */
+      getRevenueByCreator: (params?: URLSearchParams) =>
+        request<PaginatedListResponse<CreatorRevenueSplitItem>>(
+          'admin',
+          `/api/admin/analytics/revenue-by-creator${params ? `?${params}` : ''}`
         ),
     },
 

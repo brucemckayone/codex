@@ -285,6 +285,46 @@ export const getAnalyticsContentPerformance = query(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Analytics Revenue-by-Creator (multi-creator split visibility — Codex-mtv05)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const revenueByCreatorQuerySchema = z.object({
+  organizationId: z.string().uuid(),
+  // Only the main window — comparison windows are NOT supported in Phase 1
+  // (current splits only, no historical drift surface).
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+});
+
+/**
+ * Per-creator revenue split rows for the studio analytics page. One row per
+ * ACTIVE creator-organization agreement for the org, annotated with
+ * purchase-derived revenue, current split % (display, not basis points),
+ * last drained payout date, and unresolved pending payout amount.
+ *
+ * Single-creator orgs receive `items: []` — the page hides the section.
+ *
+ * Subscription invoice revenue is NOT included in Phase 1 — there is no
+ * per-creator immutable invoice row today (only dynamic transfer-time
+ * fan-out via `SubscriptionService.executeTransfers`). A future revenue
+ * ledger will close that gap.
+ */
+export const getAnalyticsRevenueByCreator = query(
+  revenueByCreatorQuerySchema,
+  async (params) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    const searchParams = new URLSearchParams();
+    searchParams.set('organizationId', params.organizationId);
+    if (params.startDate) searchParams.set('startDate', params.startDate);
+    if (params.endDate) searchParams.set('endDate', params.endDate);
+
+    return api.analytics.getRevenueByCreator(searchParams);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Admin Content List (org-scoped)
 // ─────────────────────────────────────────────────────────────────────────────
 
