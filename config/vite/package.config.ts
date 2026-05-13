@@ -135,8 +135,15 @@ export function createPackageConfig(
         // Treat broken .d.ts generation as a build failure rather than a
         // silent warning. Without this, malformed types ship to consumers
         // unnoticed (worker-utils + test-utils have shipped broken .d.ts
-        // in past iterations because failOnError defaults to false).
-        failOnError: true,
+        // in past iterations). vite-plugin-dts 4.5.4 does not expose a
+        // `failOnError` flag; equivalent semantics live in `afterDiagnostic`.
+        afterDiagnostic: (diagnostics) => {
+          if (diagnostics.length > 0) {
+            throw new Error(
+              `vite-plugin-dts: ${diagnostics.length} type-emission diagnostic(s) for ${packageName}`
+            );
+          }
+        },
       }) as PluginOption,
       ...plugins,
     ],
