@@ -19,7 +19,10 @@ const PADDING_FRACTION = 0.15;
  *
  * Exported for unit testing — pure DOMParser logic with no WebGL deps.
  */
-export function ensureSVGDimensions(svgText: string, targetSize: number): string {
+export function ensureSVGDimensions(
+  svgText: string,
+  targetSize: number
+): string {
   const parser = new DOMParser();
   const doc = parser.parseFromString(svgText, 'image/svg+xml');
   const svg = doc.documentElement;

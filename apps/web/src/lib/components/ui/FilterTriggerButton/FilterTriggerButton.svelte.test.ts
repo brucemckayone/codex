@@ -201,8 +201,8 @@ describe('FilterTriggerButton', () => {
       },
     });
 
-    expect(
-      screen.getByTestId('filter-trigger')?.getAttribute('title')
-    ).toBe('Open filters');
+    expect(screen.getByTestId('filter-trigger')?.getAttribute('title')).toBe(
+      'Open filters'
+    );
   });
 });

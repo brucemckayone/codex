@@ -164,9 +164,7 @@ describe('FilterDrawer — desktop (default jsdom matchMedia)', () => {
     });
     flushSync();
 
-    (
-      screen.getByTestId('set-type-video') as HTMLButtonElement
-    ).click();
+    (screen.getByTestId('set-type-video') as HTMLButtonElement).click();
     flushSync();
 
     expect(onFilterChange).toHaveBeenCalledTimes(1);
@@ -432,9 +430,7 @@ describe('FilterDrawer — mobile (matchMedia matches)', () => {
     // Simulate the dialog being closed via X / Esc / overlay (Melt fires
     // onOpenChange(false) on the Dialog, which the shell wraps via
     // handleOpenChange — we trigger it by clicking the dialog close button.
-    const closeBtn = document.querySelector<HTMLButtonElement>(
-      '.dialog-close'
-    );
+    const closeBtn = document.querySelector<HTMLButtonElement>('.dialog-close');
     closeBtn?.click();
     flushSync();
 
@@ -473,9 +469,7 @@ describe('FilterDrawer — mobile (matchMedia matches)', () => {
     expect(screen.getByTestId('view-type')?.textContent).toBe('video');
     expect(screen.getByTestId('view-sort')?.textContent).toBe('oldest');
 
-    document
-      .querySelector<HTMLButtonElement>('.filter-drawer__clear')
-      ?.click();
+    document.querySelector<HTMLButtonElement>('.filter-drawer__clear')?.click();
     flushSync();
 
     // Mobile Clear DOES NOT delegate to the parent.
