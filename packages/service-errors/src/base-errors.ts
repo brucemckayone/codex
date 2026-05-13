@@ -127,6 +127,33 @@ export class InternalServiceError extends ServiceError {
 }
 
 /**
+ * Unsupported currency error (400)
+ * Thrown when a charge/payout is in a currency the platform does not yet support.
+ * Currently the platform is GBP-only — cross-currency support is a tracked future
+ * feature. Surfacing this explicitly prevents silent currency mismatch against
+ * downstream providers (e.g. Stripe transfers).
+ */
+export class UnsupportedCurrencyError extends ServiceError {
+  public readonly received: string;
+  public readonly supported: readonly string[];
+
+  constructor(
+    received: string,
+    supported: readonly string[],
+    context?: Record<string, unknown>
+  ) {
+    super(
+      `Unsupported currency '${received}'. Currently supports: ${supported.join(', ')}`,
+      'UNSUPPORTED_CURRENCY',
+      400,
+      context
+    );
+    this.received = received;
+    this.supported = supported;
+  }
+}
+
+/**
  * Type guard to check if error is a ServiceError
  */
 export function isServiceError(error: unknown): error is ServiceError {

@@ -4258,3 +4258,343 @@ describe('SubscriptionPaymentRequiredError', () => {
     expect(err.context?.tierIdAtCommit).toBeUndefined();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// Currency GBP-only enforcement (Codex-yv18n)
+//
+// The platform is GBP-only for revenue transfers. Non-GBP invoices and
+// non-GBP pending-payout rows MUST surface an explicit
+// UnsupportedCurrencyError BEFORE any stripe.transfers.create call —
+// silently transferring in the wrong currency would mismatch the source
+// charge currency at Stripe. Cross-currency support is a tracked future
+// feature; until then, this contract MUST hold.
+// ─────────────────────────────────────────────────────────────────────
+describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
+  let db: ReturnType<typeof setupTestDatabase>;
+  let stripe: Stripe;
+  let service: SubscriptionService;
+  let creatorId: string;
+  let subscriberId: string;
+
+  beforeAll(async () => {
+    db = setupTestDatabase();
+    await validateDatabaseConnection(db);
+    const userIds = await seedTestUsers(db, 2);
+    [creatorId, subscriberId] = userIds;
+  });
+
+  beforeEach(() => {
+    stripe = createMockStripe();
+    service = new SubscriptionService({ db, environment: 'test' }, stripe);
+  });
+
+  afterAll(async () => {
+    await teardownTestDatabase();
+  });
+
+  /**
+   * Local copy of createFullOrg — the outer describe's helper is not in
+   * scope. Mirrors the same shape: org + owner membership + connect +
+   * two tiers (monthly+annual).
+   */
+  async function seedOrg(slug: string) {
+    const [org] = await db
+      .insert(organizations)
+      .values(
+        createTestOrganizationInput({
+          slug: createUniqueSlug(slug),
+          creatorId,
+        })
+      )
+      .returning();
+
+    await db.insert(stripeConnectAccounts).values(
+      createTestConnectAccountInput(org.id, creatorId, {
+        chargesEnabled: true,
+        payoutsEnabled: true,
+      })
+    );
+
+    const [tier1] = await db
+      .insert(subscriptionTiers)
+      .values(createTestTierInput(org.id, { name: 'Basic GBP' }))
+      .returning();
+
+    return { org, tier1 };
+  }
+
+  async function seedActiveSubscription(orgId: string, tierId: string) {
+    const [sub] = await db
+      .insert(subscriptions)
+      .values(
+        createTestSubscriptionInput(subscriberId, orgId, tierId, {
+          status: 'active',
+        })
+      )
+      .returning();
+    return sub;
+  }
+
+  describe('handleInvoicePaymentSucceeded — invoice currency guard', () => {
+    it('GBP invoice → transfers fire normally (happy path)', async () => {
+      const { org, tier1 } = await seedOrg('yv18n-gbp');
+      const sub = await seedActiveSubscription(org.id, tier1.id);
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        currency: 'gbp',
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      expect(transferSpy).toHaveBeenCalled();
+      // Every call MUST be GBP — defence-in-depth assertion.
+      for (const call of transferSpy.mock.calls) {
+        const params = call[0] as { currency?: string } | undefined;
+        expect(params?.currency).toBe('gbp');
+      }
+    });
+
+    it('USD invoice → throws UnsupportedCurrencyError BEFORE any transfer fires', async () => {
+      const { org, tier1 } = await seedOrg('yv18n-usd');
+      const sub = await seedActiveSubscription(org.id, tier1.id);
+
+      const mockInvoice = createMockStripeInvoice({
+        id: 'in_test_usd_reject',
+        amount_paid: 499,
+        currency: 'usd',
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      await expect(
+        service.handleInvoicePaymentSucceeded(mockInvoice)
+      ).rejects.toMatchObject({
+        name: 'UnsupportedCurrencyError',
+        code: 'UNSUPPORTED_CURRENCY',
+        statusCode: 400,
+        received: 'usd',
+      });
+
+      expect(transferSpy).not.toHaveBeenCalled();
+    });
+
+    it('EUR invoice → throws UnsupportedCurrencyError BEFORE any transfer fires', async () => {
+      const { org, tier1 } = await seedOrg('yv18n-eur');
+      const sub = await seedActiveSubscription(org.id, tier1.id);
+
+      const mockInvoice = createMockStripeInvoice({
+        id: 'in_test_eur_reject',
+        amount_paid: 499,
+        currency: 'eur',
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const err = await service
+        .handleInvoicePaymentSucceeded(mockInvoice)
+        .catch((e) => e);
+
+      expect(err?.name).toBe('UnsupportedCurrencyError');
+      expect(err?.received).toBe('eur');
+      expect(err?.supported).toEqual(['gbp']);
+      expect(err?.context).toMatchObject({
+        invoiceId: 'in_test_eur_reject',
+        subscriptionId: sub.id,
+        stripeSubscriptionId: sub.stripeSubscriptionId,
+      });
+      expect(transferSpy).not.toHaveBeenCalled();
+    });
+
+    it('upper-case currency (GBP) is normalised to lowercase and accepted', async () => {
+      // Stripe webhooks always lowercase, but the guard MUST not be
+      // case-sensitive — a defensive normalisation prevents a future
+      // refactor from regressing the happy path.
+      const { org, tier1 } = await seedOrg('yv18n-case');
+      const sub = await seedActiveSubscription(org.id, tier1.id);
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        currency: 'GBP',
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+      expect(transferSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('resolvePendingPayouts — payout.currency guard', () => {
+    async function seedConnectAndSubscription(slug: string) {
+      const { org, tier1 } = await seedOrg(slug);
+      const stripeAccountId = `acct_yv18n_${createUniqueSlug('a')}`;
+
+      const { eq } = await import('drizzle-orm');
+      await db
+        .update(stripeConnectAccounts)
+        .set({ stripeAccountId })
+        .where(eq(stripeConnectAccounts.organizationId, org.id));
+
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(subscriberId, org.id, tier1.id, {
+            status: 'active',
+            stripeSubscriptionId: `sub_yv18n_${createUniqueSlug('s')}`,
+          })
+        )
+        .returning();
+
+      return { org, tier1, sub, stripeAccountId };
+    }
+
+    it("payout.currency='gbp' → transfer fires with currency 'gbp'", async () => {
+      const { org, sub, stripeAccountId } =
+        await seedConnectAndSubscription('yv18n-payout-gbp');
+
+      await db.insert(pendingPayoutsTable).values({
+        userId: creatorId,
+        organizationId: org.id,
+        subscriptionId: sub.id,
+        amountCents: 1000,
+        currency: 'gbp',
+        reason: 'connect_not_ready',
+      });
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      expect(result).toEqual({ resolved: 1, failed: 0 });
+      expect(transferSpy).toHaveBeenCalledTimes(1);
+      const params = transferSpy.mock.calls[0]?.[0] as
+        | {
+            currency?: string;
+          }
+        | undefined;
+      expect(params?.currency).toBe('gbp');
+    });
+
+    it("payout.currency='usd' → no transfer fires; failed++ via the per-row catch", async () => {
+      const { org, sub, stripeAccountId } =
+        await seedConnectAndSubscription('yv18n-payout-usd');
+
+      // Seed a USD payout directly — bypasses the schema default by
+      // explicitly setting currency: 'usd'.
+      await db.insert(pendingPayoutsTable).values({
+        userId: creatorId,
+        organizationId: org.id,
+        subscriptionId: sub.id,
+        amountCents: 2500,
+        currency: 'usd',
+        reason: 'connect_not_ready',
+      });
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      // The guard throws UnsupportedCurrencyError BEFORE
+      // stripe.transfers.create — the per-row catch logs+counts as
+      // failed and continues to the next row. The contract here is:
+      // no Stripe transfer ever fires for the bad-currency row.
+      expect(result).toEqual({ resolved: 0, failed: 1 });
+      expect(transferSpy).not.toHaveBeenCalled();
+    });
+
+    it('mixed batch: GBP row resolves, USD row fails — bad currency does not poison the good rows', async () => {
+      const { org, sub, stripeAccountId } =
+        await seedConnectAndSubscription('yv18n-payout-mixed');
+
+      await db.insert(pendingPayoutsTable).values([
+        {
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+        },
+        {
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 700,
+          currency: 'eur',
+          reason: 'connect_not_ready',
+        },
+      ]);
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      expect(result).toEqual({ resolved: 1, failed: 1 });
+      expect(transferSpy).toHaveBeenCalledTimes(1);
+      const params = transferSpy.mock.calls[0]?.[0] as
+        | {
+            currency?: string;
+            amount?: number;
+          }
+        | undefined;
+      expect(params?.currency).toBe('gbp');
+      expect(params?.amount).toBe(500);
+    });
+  });
+
+  describe('UnsupportedCurrencyError contract', () => {
+    it('round-trips received + supported + context fields', async () => {
+      const { UnsupportedCurrencyError } = await import(
+        '@codex/service-errors'
+      );
+      const err = new UnsupportedCurrencyError('usd', ['gbp'], {
+        invoiceId: 'in_test',
+        subscriptionId: 'sub_test',
+      });
+
+      expect(err).toBeInstanceOf(UnsupportedCurrencyError);
+      expect(err.name).toBe('UnsupportedCurrencyError');
+      expect(err.code).toBe('UNSUPPORTED_CURRENCY');
+      expect(err.statusCode).toBe(400);
+      expect(err.received).toBe('usd');
+      expect(err.supported).toEqual(['gbp']);
+      expect(err.message).toContain("Unsupported currency 'usd'");
+      expect(err.message).toContain('gbp');
+      expect(err.context).toMatchObject({
+        invoiceId: 'in_test',
+        subscriptionId: 'sub_test',
+      });
+    });
+  });
+});
