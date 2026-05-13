@@ -3961,6 +3961,212 @@ describe('SubscriptionService', () => {
       expect(transferSpy).not.toHaveBeenCalled();
     });
 
+    // Codex-90ocz: defence-in-depth Stripe idempotency-key contract for
+    // resolvePendingPayouts. The DB `WHERE resolvedAt IS NULL` gate guards
+    // against intra-process replay, but a worker that crashes AFTER
+    // stripe.transfers.create resolves and BEFORE the DB UPDATE commits
+    // would re-attempt the transfer on the next account.updated webhook
+    // unless Stripe-side dedupe is in place. The fix passes a deterministic
+    // `idempotencyKey = payout_<row.id>` as the 2nd arg to
+    // stripe.transfers.create so Stripe rejects the duplicate.
+    it('passes deterministic idempotencyKey = payout_<id> to stripe.transfers.create per row', async () => {
+      const { org, sub, stripeAccountId } =
+        await seedConnectAndSubscription('90ocz-idem-key');
+
+      const payoutRows = await db
+        .insert(pendingPayoutsTable)
+        .values([
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 1100,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+          },
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 2200,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+          },
+        ])
+        .returning();
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+      expect(result).toEqual({ resolved: 2, failed: 0 });
+      expect(transferSpy).toHaveBeenCalledTimes(2);
+
+      // Every transfers.create call MUST pass `{ idempotencyKey }` as its
+      // 2nd argument, deterministically derived from the row id. Stripe
+      // dedupes on the key, so a re-attempt after a crash-before-commit
+      // returns the original Transfer instead of creating a second one.
+      for (const row of payoutRows) {
+        const match = transferSpy.mock.calls.find(
+          ([params]) =>
+            (params as { metadata?: { pending_payout_id?: string } }).metadata
+              ?.pending_payout_id === row.id
+        );
+        expect(match, `no transfer for payout ${row.id}`).toBeDefined();
+        const [, options] = match as [
+          unknown,
+          { idempotencyKey?: string } | undefined,
+        ];
+        expect(options).toBeDefined();
+        expect(options?.idempotencyKey).toBe(`payout_${row.id}`);
+      }
+    });
+
+    it('replay safety: clearing resolvedAt and re-running yields the SAME idempotencyKey per row (Stripe-side dedupe contract)', async () => {
+      const { org, sub, stripeAccountId } =
+        await seedConnectAndSubscription('90ocz-idem-replay');
+
+      const payoutRows = await db
+        .insert(pendingPayoutsTable)
+        .values([
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 1500,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+          },
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 2500,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+          },
+        ])
+        .returning();
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      // First pass — happy path, rows get stamped resolved.
+      const first = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+      expect(first).toEqual({ resolved: 2, failed: 0 });
+      const firstKeys = transferSpy.mock.calls
+        .map(
+          (call) =>
+            (call[1] as { idempotencyKey?: string } | undefined)?.idempotencyKey
+        )
+        .sort();
+      expect(firstKeys.every((k) => typeof k === 'string')).toBe(true);
+
+      // Simulate the worst-case replay: DB UPDATE never committed
+      // (e.g. worker crashed between Stripe success and DB write), so
+      // the rows revert to unresolved and the next account.updated
+      // webhook triggers a second pass. Defence-in-depth requires the
+      // 2nd pass to pass the SAME idempotency key per row — Stripe then
+      // returns the original Transfer instead of creating a new one.
+      const { inArray } = await import('drizzle-orm');
+      await db
+        .update(pendingPayoutsTable)
+        .set({ resolvedAt: null, stripeTransferId: null })
+        .where(
+          inArray(
+            pendingPayoutsTable.id,
+            payoutRows.map((r) => r.id)
+          )
+        );
+
+      transferSpy.mockClear();
+      const second = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+      expect(second).toEqual({ resolved: 2, failed: 0 });
+      const secondKeys = transferSpy.mock.calls
+        .map(
+          (call) =>
+            (call[1] as { idempotencyKey?: string } | undefined)?.idempotencyKey
+        )
+        .sort();
+
+      // SET equality — every key in the replay matches a key from the
+      // first pass. This is the Stripe-side dedupe contract.
+      expect(secondKeys).toEqual(firstKeys);
+      // And each key matches the row-id shape (no off-by-one between
+      // row.id and the key suffix).
+      for (const row of payoutRows) {
+        expect(secondKeys).toContain(`payout_${row.id}`);
+      }
+    });
+
+    it('treats Stripe duplicate-idempotency-key replay as success: row is stamped resolved and no error escapes', async () => {
+      const { org, sub, stripeAccountId } =
+        await seedConnectAndSubscription('90ocz-idem-dup');
+
+      const [row] = await db
+        .insert(pendingPayoutsTable)
+        .values([
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 4200,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+          },
+        ])
+        .returning();
+
+      // Stripe's documented response to an idempotency-key replay is to
+      // return the ORIGINAL Transfer object (same id, same fields). The
+      // service must accept that and stamp the row resolved — there's no
+      // distinct "duplicate" error shape from the SDK.
+      const replayedTransferId = 'tr_replayed_original_id';
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+      transferSpy.mockImplementationOnce(
+        (params: Record<string, unknown>): unknown =>
+          Promise.resolve({
+            id: replayedTransferId,
+            amount: params.amount,
+            currency: params.currency,
+            destination: params.destination,
+            metadata: params.metadata ?? {},
+          })
+      );
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      expect(result).toEqual({ resolved: 1, failed: 0 });
+      expect(transferSpy).toHaveBeenCalledTimes(1);
+      const [, options] = transferSpy.mock.calls[0] as [
+        unknown,
+        { idempotencyKey?: string } | undefined,
+      ];
+      expect(options?.idempotencyKey).toBe(`payout_${row.id}`);
+
+      // DB row stamped resolved with the (replayed) transfer id.
+      const { eq } = await import('drizzle-orm');
+      const [after] = await db
+        .select()
+        .from(pendingPayoutsTable)
+        .where(eq(pendingPayoutsTable.id, row.id));
+      expect(after.resolvedAt).not.toBeNull();
+      expect(after.stripeTransferId).toBe(replayedTransferId);
+    });
+
     it('warns and returns empty when the (orgId, stripeAccountId) pair has no Connect account row', async () => {
       const { org } = await createFullOrg('w4jjk-acct-not-found');
 
