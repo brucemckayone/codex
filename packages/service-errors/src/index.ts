@@ -16,6 +16,7 @@ export {
   NotFoundError,
   ServiceError,
   UnauthorizedError,
+  UnsupportedCurrencyError,
   ValidationError,
   wrapError,
 } from './base-errors';

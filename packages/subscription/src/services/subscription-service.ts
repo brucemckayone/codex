@@ -53,6 +53,7 @@ import {
   InternalServiceError,
   NotFoundError,
   type ServiceConfig,
+  UnsupportedCurrencyError,
 } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
@@ -950,6 +951,20 @@ export class SubscriptionService extends BaseService {
         updatedAt: new Date(),
       })
       .where(eq(subscriptions.id, sub.id));
+
+    // GBP-only enforcement (Codex-yv18n): explicitly reject non-GBP charges
+    // before triggering transfers. executeTransfers and downstream
+    // stripe.transfers.create() are hardcoded to CURRENCY.GBP — silently
+    // letting a non-GBP invoice through would cause a currency mismatch at
+    // Stripe. Cross-currency support is a tracked future feature.
+    const invoiceCurrency = stripeInvoice.currency?.toLowerCase();
+    if (invoiceCurrency && invoiceCurrency !== CURRENCY.GBP) {
+      throw new UnsupportedCurrencyError(invoiceCurrency, [CURRENCY.GBP], {
+        invoiceId: stripeInvoice.id,
+        subscriptionId: sub.id,
+        stripeSubscriptionId: stripeSubId,
+      });
+    }
 
     // Execute revenue transfers
     await this.executeTransfers(
@@ -2302,10 +2317,23 @@ export class SubscriptionService extends BaseService {
 
     for (const payout of unresolvedPayouts) {
       try {
+        // GBP-only enforcement (Codex-yv18n): honour the row's currency but
+        // explicitly reject any non-GBP value. Historical rows that somehow
+        // lack the column fall back to CURRENCY.GBP (schema default is 'gbp'
+        // but defence-in-depth never hurts).
+        const payoutCurrency = (payout.currency || CURRENCY.GBP).toLowerCase();
+        if (payoutCurrency !== CURRENCY.GBP) {
+          throw new UnsupportedCurrencyError(payoutCurrency, [CURRENCY.GBP], {
+            pendingPayoutId: payout.id,
+            subscriptionId: payout.subscriptionId,
+            organizationId: orgId,
+          });
+        }
+
         const transfer = await this.stripe.transfers.create(
           {
             amount: payout.amountCents,
-            currency: payout.currency,
+            currency: payoutCurrency,
             destination: stripeAccountId,
             metadata: {
               pending_payout_id: payout.id,
@@ -2790,6 +2818,15 @@ export class SubscriptionService extends BaseService {
    * Execute revenue transfers to org and creator(s) after invoice payment.
    * Uses source_transaction to link transfers to the charge.
    * Creators without active Connect accounts have their share accumulated.
+   *
+   * IMPORTANT (Codex-yv18n): This implementation is GBP-only. Every
+   * stripe.transfers.create() call here hardcodes `currency: CURRENCY.GBP`.
+   * Callers MUST reject non-GBP invoices BEFORE invoking executeTransfers —
+   * see the currency guard in handleInvoicePaymentSucceeded() which throws
+   * UnsupportedCurrencyError. Cross-currency support is tracked as a future
+   * feature bead. Do NOT remove the call-site guard or add new call sites
+   * without an equivalent guard + updating tests in
+   * subscription-service.test.ts > "Currency GBP-only enforcement".
    */
   private async executeTransfers(
     subscriptionId: string,
