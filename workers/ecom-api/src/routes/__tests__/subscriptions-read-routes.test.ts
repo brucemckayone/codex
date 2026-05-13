@@ -219,7 +219,10 @@ vi.mock('@codex/worker-utils', async (importOriginal) => {
           const { statusCode, response } = mapErrorToResponse(error, {
             logError: false,
           });
-          return c.json(response, statusCode as 400 | 401 | 403 | 404 | 409 | 422 | 500);
+          return c.json(
+            response,
+            statusCode as 400 | 401 | 403 | 404 | 409 | 422 | 500
+          );
         }
       };
     },
@@ -228,18 +231,17 @@ vi.mock('@codex/worker-utils', async (importOriginal) => {
 
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
+// We hand-build an AlreadySubscribedError equivalent rather than importing
+// from `@codex/subscription` (which we've mocked above to a hollow shape).
+// Functionally identical for the test: it's a `ConflictError` → 409 mapping
+// we are asserting at the HTTP boundary.
 import {
+  ConflictError,
   ForbiddenError,
   NotFoundError,
 } from '@codex/service-errors';
 import { Hono } from 'hono';
 import subscriptions from '../subscriptions';
-
-// We hand-build an AlreadySubscribedError equivalent rather than importing
-// from `@codex/subscription` (which we've mocked above to a hollow shape).
-// Functionally identical for the test: it's a `ConflictError` → 409 mapping
-// we are asserting at the HTTP boundary.
-import { ConflictError } from '@codex/service-errors';
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -326,10 +328,7 @@ function buildApp(args: BuildAppArgs = {}): AppBundle {
   };
   const app = new Hono<{ Variables: TestVars }>();
   app.use('*', async (c, next) => {
-    c.set(
-      '__testUser',
-      args.user === undefined ? { id: 'user_1' } : args.user
-    );
+    c.set('__testUser', args.user === undefined ? { id: 'user_1' } : args.user);
     c.set('__testServices', services);
     c.set('__testObs', undefined);
     c.set('__testEnv', { CACHE_KV: kv });
@@ -384,7 +383,9 @@ describe('POST /subscriptions/checkout — route → service contract', () => {
       successUrl: VALID_REDIRECT,
       cancelUrl: VALID_CANCEL,
     };
-    const res = await bundle.app.request(postJson('/subscriptions/checkout', body));
+    const res = await bundle.app.request(
+      postJson('/subscriptions/checkout', body)
+    );
     expect(res.status).toBe(201);
 
     const payload = (await res.json()) as { data: { checkoutUrl: string } };
@@ -392,7 +393,9 @@ describe('POST /subscriptions/checkout — route → service contract', () => {
       'https://checkout.stripe.com/session_stub'
     );
 
-    expect(services.subscription.createCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(services.subscription.createCheckoutSession).toHaveBeenCalledTimes(
+      1
+    );
     expect(services.subscription.createCheckoutSession).toHaveBeenCalledWith(
       'user_pos',
       VALID_ORG_ID,
@@ -413,7 +416,9 @@ describe('POST /subscriptions/checkout — route → service contract', () => {
       successUrl: VALID_REDIRECT,
       cancelUrl: VALID_CANCEL,
     };
-    const res = await bundle.app.request(postJson('/subscriptions/checkout', body));
+    const res = await bundle.app.request(
+      postJson('/subscriptions/checkout', body)
+    );
     expect(res.status).toBe(401);
     expect(services.subscription.createCheckoutSession).not.toHaveBeenCalled();
   });
@@ -466,7 +471,9 @@ describe('POST /subscriptions/checkout — route → service contract', () => {
       successUrl: VALID_REDIRECT,
       cancelUrl: VALID_CANCEL,
     };
-    const res = await bundle.app.request(postJson('/subscriptions/checkout', body));
+    const res = await bundle.app.request(
+      postJson('/subscriptions/checkout', body)
+    );
     expect(res.status).toBe(409);
 
     const payload = (await res.json()) as {
@@ -489,7 +496,9 @@ describe('POST /subscriptions/checkout — route → service contract', () => {
       successUrl: VALID_REDIRECT,
       cancelUrl: VALID_CANCEL,
     };
-    const res = await bundle.app.request(postJson('/subscriptions/checkout', body));
+    const res = await bundle.app.request(
+      postJson('/subscriptions/checkout', body)
+    );
     expect(res.status).toBe(500);
 
     const payload = (await res.json()) as {
@@ -524,7 +533,9 @@ describe('GET /subscriptions/verify — route → service contract', () => {
     };
     expect(payload.data.sessionStatus).toBe('complete');
 
-    expect(services.subscription.verifyCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(services.subscription.verifyCheckoutSession).toHaveBeenCalledTimes(
+      1
+    );
     expect(services.subscription.verifyCheckoutSession).toHaveBeenCalledWith(
       'cs_test_123',
       'user_verify'
@@ -815,7 +826,7 @@ describe('GET /subscriptions/mine — route → service contract', () => {
     // path, this assertion forces the mapping to surface as 403, not 500.
     const services = { subscription: createSubscriptionServiceMock() };
     services.subscription.getUserSubscriptions.mockRejectedValueOnce(
-      new ForbiddenError('Cannot list another user\'s subscriptions', {
+      new ForbiddenError("Cannot list another user's subscriptions", {
         userId: 'user_attacker',
       })
     );

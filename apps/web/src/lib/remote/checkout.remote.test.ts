@@ -39,9 +39,7 @@ const getRequestEventMock = vi.hoisted(() =>
   }))
 );
 const redirectMock = vi.hoisted(() => vi.fn());
-const isRedirectMock = vi.hoisted(() =>
-  vi.fn((_e: unknown): boolean => false)
-);
+const isRedirectMock = vi.hoisted(() => vi.fn((_e: unknown): boolean => false));
 
 // Override the globally-mocked $lib/server/api with a per-test handle.
 vi.mock('$lib/server/api', () => ({

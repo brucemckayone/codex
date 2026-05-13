@@ -1139,7 +1139,9 @@ export class OrganizationService extends BaseService {
         creators: Number(creatorCount[0]?.total ?? 0),
         totalViews: Number(stats?.totalViews ?? 0),
         categories: categoryResult
-          .filter((r): r is { category: string; count: number } => r.category !== null)
+          .filter(
+            (r): r is { category: string; count: number } => r.category !== null
+          )
           .map((r) => ({ name: r.category, count: Number(r.count) })),
       };
     } catch (error) {

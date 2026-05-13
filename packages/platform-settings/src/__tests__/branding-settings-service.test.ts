@@ -471,7 +471,8 @@ describe('BrandingSettingsService', () => {
       const mockR2 = createMockR2();
       const service = createService(mockR2);
 
-      const svg = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>';
+      const svg =
+        '<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>';
       const buffer = new TextEncoder().encode(svg).buffer;
 
       await service.uploadLogo({
@@ -588,9 +589,7 @@ describe('BrandingSettingsService', () => {
       // only reads creatorId; the media's status is irrelevant for cleanup.
       const [media] = await db
         .insert(schema.mediaItems)
-        .values(
-          createTestMediaItemInput(creatorId, { status: 'uploaded' })
-        )
+        .values(createTestMediaItemInput(creatorId, { status: 'uploaded' }))
         .returning();
 
       await db.insert(schema.platformSettings).values({ organizationId });

@@ -95,9 +95,7 @@ describe('ExploreFilterDrawer', () => {
     expect(typePills.length).toBe(4);
 
     // Featured toggle (1) inside the third section.
-    const featuredOption = sections[2].querySelector(
-      '.filter-drawer__option'
-    );
+    const featuredOption = sections[2].querySelector('.filter-drawer__option');
     expect(featuredOption).toBeTruthy();
   });
 

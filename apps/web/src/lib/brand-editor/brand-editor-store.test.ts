@@ -115,7 +115,9 @@ describe('brandEditor.setThemeTokenOverride (Codex-wwedk)', () => {
 
     brandEditor.setThemeTokenOverride('shader-preset', null);
 
-    expect(brandEditor.pending?.tokenOverrides['shader-preset']).toBeUndefined();
+    expect(
+      brandEditor.pending?.tokenOverrides['shader-preset']
+    ).toBeUndefined();
   });
 });
 
@@ -162,6 +164,8 @@ describe('brandEditor.getThemeTokenOverride (Codex-wwedk)', () => {
     brandEditor.open(ORG_ID, makeSaved());
     brandEditor.setEditingTheme('dark');
 
-    expect(brandEditor.getThemeTokenOverride('nonexistent-key')).toBeUndefined();
+    expect(
+      brandEditor.getThemeTokenOverride('nonexistent-key')
+    ).toBeUndefined();
   });
 });

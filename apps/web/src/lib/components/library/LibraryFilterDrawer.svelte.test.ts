@@ -81,24 +81,18 @@ describe('LibraryFilterDrawer', () => {
     expect(sections.length).toBe(4);
 
     // Section[0] = Sort (list rows, not pills).
-    expect(
-      sections[0].querySelectorAll('.filter-drawer__option').length
-    ).toBe(2);
+    expect(sections[0].querySelectorAll('.filter-drawer__option').length).toBe(
+      2
+    );
 
     // Section[1] = contentType pills: 1 "All" + 3 options = 4.
-    expect(
-      sections[1].querySelectorAll('.filter-drawer__pill').length
-    ).toBe(4);
+    expect(sections[1].querySelectorAll('.filter-drawer__pill').length).toBe(4);
 
     // Section[2] = progressStatus pills: 1 "All" + 3 options = 4.
-    expect(
-      sections[2].querySelectorAll('.filter-drawer__pill').length
-    ).toBe(4);
+    expect(sections[2].querySelectorAll('.filter-drawer__pill').length).toBe(4);
 
     // Section[3] = accessType pills: 1 "All" + 5 options = 6.
-    expect(
-      sections[3].querySelectorAll('.filter-drawer__pill').length
-    ).toBe(6);
+    expect(sections[3].querySelectorAll('.filter-drawer__pill').length).toBe(6);
   });
 
   test('clicking a contentType pill calls onFilterChange with contentType set', () => {
@@ -259,9 +253,7 @@ describe('LibraryFilterDrawer', () => {
 
     // progressStatus section — "All" pill (first) NOT active; "in_progress"
     // (index 2) IS active.
-    const progressPills = sections[2].querySelectorAll(
-      '.filter-drawer__pill'
-    );
+    const progressPills = sections[2].querySelectorAll('.filter-drawer__pill');
     expect(progressPills[0].classList.contains('is-active')).toBe(false);
     expect(progressPills[2].classList.contains('is-active')).toBe(true);
   });
