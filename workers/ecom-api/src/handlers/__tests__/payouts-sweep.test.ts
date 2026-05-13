@@ -1,16 +1,19 @@
 /**
- * payouts-sweep — handler tests (Codex-vv77x)
+ * ecom-api payouts-sweep — handler tests (Codex-vv77x)
  *
  * Asserts the scheduled handler:
  *   - constructs SubscriptionService.sweepUnresolvedPayouts via injected deps
  *   - does NOT throw when the service rejects (cron crash protection)
  *   - exits cleanly when required env vars are missing
  *   - forwards `olderThanMinutes` override to the service
+ *
+ * Consolidated into workers/ecom-api 2026-05-13. Lives alongside the Stripe
+ * webhook handlers because the cron + the Stripe webhooks share an owner.
  */
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { runPayoutsSweep, runScheduledSweep } from '../sweep';
+import { runPayoutsSweep, runScheduledPayoutsSweep } from '../payouts-sweep';
 
 // Construct a minimal-ish Bindings stub. The handler only reads
 // DATABASE_URL, STRIPE_SECRET_KEY, and ENVIRONMENT.
@@ -41,7 +44,7 @@ function makeObs(): {
   };
 }
 
-describe('payouts-sweep handler', () => {
+describe('ecom-api payouts-sweep handler', () => {
   it('runPayoutsSweep delegates to SubscriptionService.sweepUnresolvedPayouts and logs the result', async () => {
     // Build a SubscriptionService-shaped stub by passing a pre-built db
     // that the real SubscriptionService constructor won't actually touch
@@ -115,7 +118,7 @@ describe('payouts-sweep handler', () => {
     spy.mockRestore();
   });
 
-  it('runScheduledSweep exits cleanly when DATABASE_URL is missing and never touches the service', async () => {
+  it('runScheduledPayoutsSweep exits cleanly when DATABASE_URL is missing and never touches the service', async () => {
     const { SubscriptionService } = await import('@codex/subscription');
     const spy = vi
       .spyOn(SubscriptionService.prototype, 'sweepUnresolvedPayouts')
@@ -129,7 +132,7 @@ describe('payouts-sweep handler', () => {
     const { obs } = makeObs();
     const env = makeEnv({ DATABASE_URL: undefined });
 
-    await runScheduledSweep(env as never, { obs: obs as never });
+    await runScheduledPayoutsSweep(env as never, { obs: obs as never });
 
     expect(spy).not.toHaveBeenCalled();
     expect(obs.error).toHaveBeenCalledWith(
@@ -143,7 +146,7 @@ describe('payouts-sweep handler', () => {
     spy.mockRestore();
   });
 
-  it('runScheduledSweep invokes sweepUnresolvedPayouts when env is configured', async () => {
+  it('runScheduledPayoutsSweep invokes sweepUnresolvedPayouts when env is configured', async () => {
     const { SubscriptionService } = await import('@codex/subscription');
     const spy = vi
       .spyOn(SubscriptionService.prototype, 'sweepUnresolvedPayouts')
@@ -157,7 +160,7 @@ describe('payouts-sweep handler', () => {
     const { obs } = makeObs();
 
     // Pass pre-built db + stripe stubs so we don't need real connections.
-    await runScheduledSweep(makeEnv() as never, {
+    await runScheduledPayoutsSweep(makeEnv() as never, {
       db: {} as never,
       stripe: {} as never,
       obs: obs as never,

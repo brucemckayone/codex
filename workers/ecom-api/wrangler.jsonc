@@ -10,6 +10,16 @@
     "enabled": true
   },
 
+  // Cron Triggers (scheduled handler)
+  // - Every 15 minutes — payouts sweep (Codex-vv77x): drains pendingPayouts
+  //   whose Connect account is now charges_enabled && payouts_enabled.
+  //   Hybrid event+sweep resolution per Stripe docs (account.updated webhook
+  //   + periodic reconciliation). Consolidated into ecom-api 2026-05-13 so
+  //   Stripe cron + Stripe webhooks colocate in one Worker.
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
+
   // KV Namespaces
   "kv_namespaces": [
     {
@@ -65,6 +75,9 @@
     // Production environment
     "production": {
       "name": "ecom-api-production",
+      "triggers": {
+        "crons": ["*/15 * * * *"]
+      },
       "vars": {
         "ENVIRONMENT": "production",
         "DB_METHOD": "PRODUCTION",
@@ -96,6 +109,9 @@
     // Staging environment
     "staging": {
       "name": "ecom-api-staging",
+      "triggers": {
+        "crons": ["*/15 * * * *"]
+      },
       "vars": {
         "ENVIRONMENT": "staging",
         "WEB_APP_URL": "https://codex-staging.revelations.studio",

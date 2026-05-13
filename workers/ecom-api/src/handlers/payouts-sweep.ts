@@ -7,8 +7,11 @@
  * relevant previous_attributes, etc).
  *
  * Hybrid event+sweep resolution per Stripe docs (verified 2026-05-13):
- *   - account.updated webhook is primary (workers/ecom-api/src/handlers/connect-webhook.ts)
+ *   - account.updated webhook is primary (./connect-webhook.ts)
  *   - This sweep is the safety net: webhooks retry for 3 days then drop
+ *
+ * Consolidated into ecom-api 2026-05-13 so the Stripe cron colocates with
+ * Stripe webhooks in a single Worker (no separate payouts-sweep deploy).
  *
  * Error handling: NEVER throws. The function is invoked from
  * `scheduled()` inside a `waitUntil` chain — if we throw, the cron
@@ -87,13 +90,13 @@ export async function runPayoutsSweep(deps: RunSweepDeps): Promise<{
  * Exposed as a function so the test suite can drive it without needing the
  * full `scheduled()` Cloudflare interface.
  */
-export async function runScheduledSweep(
+export async function runScheduledPayoutsSweep(
   env: Bindings,
   deps?: Partial<RunSweepDeps>
 ): Promise<void> {
   const obs =
     deps?.obs ??
-    new ObservabilityClient('payouts-sweep', env.ENVIRONMENT ?? 'development');
+    new ObservabilityClient('ecom-api', env.ENVIRONMENT ?? 'development');
 
   // Guard against missing env vars — don't throw, log and exit.
   if (!env.DATABASE_URL || !env.STRIPE_SECRET_KEY) {
@@ -115,4 +118,30 @@ export async function runScheduledSweep(
     environment: env.ENVIRONMENT ?? 'development',
     olderThanMinutes: deps?.olderThanMinutes,
   });
+}
+
+/**
+ * Top-level `scheduled()` dispatcher for the ecom-api Worker.
+ *
+ * Currently routes all cron invocations to the payouts sweep. If we later
+ * add more crons we discriminate by `controller.cron` here.
+ *
+ * Wraps the sweep in `waitUntil` with `.catch()` so a slow sweep doesn't
+ * get killed mid-flight and an unexpected rejection doesn't crash the
+ * cron invocation silently.
+ */
+export function dispatchScheduled(
+  _controller: ScheduledController,
+  env: Bindings,
+  ctx: ExecutionContext
+): void {
+  ctx.waitUntil(
+    runScheduledPayoutsSweep(env).catch((error: unknown) => {
+      // runScheduledPayoutsSweep already swallows its own errors and logs
+      // via ObservabilityClient — this .catch is the belt-and-braces guard
+      // against future refactors that drop the inner try/catch.
+      // eslint-disable-next-line no-console
+      console.error('ecom-api scheduled waitUntil rejected', error);
+    })
+  );
 }

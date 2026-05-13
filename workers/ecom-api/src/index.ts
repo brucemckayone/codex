@@ -25,6 +25,7 @@ import {
 import { handleCheckoutCompleted } from './handlers/checkout';
 import { handleConnectWebhook } from './handlers/connect-webhook';
 import { handlePaymentWebhook } from './handlers/payment-webhook';
+import { dispatchScheduled } from './handlers/payouts-sweep';
 import { handleSubscriptionWebhook } from './handlers/subscription-webhook';
 import { verifyStripeSignature } from './middleware/verify-signature';
 import checkout from './routes/checkout';
@@ -231,4 +232,20 @@ app.post(
   createWebhookHandler('Dev', routeDevWebhook)
 );
 
-export default app;
+// ============================================================================
+// Worker Entry Point
+// ============================================================================
+
+/**
+ * Default export — Cloudflare Worker entry point.
+ *
+ * Exposes both:
+ *   - `fetch` : HTTP requests (routes + webhooks above)
+ *   - `scheduled` : cron triggers (see wrangler.jsonc → triggers.crons).
+ *      Currently dispatches the payouts sweep (Codex-vv77x), colocated
+ *      here so the Stripe cron lives alongside the Stripe webhooks.
+ */
+export default {
+  fetch: app.fetch,
+  scheduled: dispatchScheduled,
+};
