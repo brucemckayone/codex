@@ -48,6 +48,10 @@ app.post(
 /**
  * GET /connect/status
  * Get the Connect account status for an org.
+ *
+ * Returns the full status payload including Stripe's `requirements`
+ * (currently_due, eventually_due, current_deadline, errors). Cached
+ * 10 min via VersionedCache; invalidated by `account.updated` webhook.
  */
 app.get(
   '/status',
@@ -58,27 +62,9 @@ app.get(
     },
     input: { query: connectStatusQuerySchema },
     handler: async (ctx) => {
-      const account = await ctx.services.connect.getAccount(
+      return await ctx.services.connect.getStatus(
         ctx.input.query.organizationId
       );
-
-      if (!account) {
-        return {
-          isConnected: false,
-          accountId: null,
-          chargesEnabled: false,
-          payoutsEnabled: false,
-          status: null,
-        };
-      }
-
-      return {
-        isConnected: true,
-        accountId: account.stripeAccountId,
-        chargesEnabled: account.chargesEnabled,
-        payoutsEnabled: account.payoutsEnabled,
-        status: account.status,
-      };
     },
   })
 );

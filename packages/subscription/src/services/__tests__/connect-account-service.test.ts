@@ -14,6 +14,7 @@
  * - All 4 status transitions (onboarding → active/restricted/disabled)
  */
 
+import type { KVNamespace } from '@cloudflare/workers-types';
 import {
   organizations,
   stripeConnectAccounts,
@@ -76,6 +77,10 @@ describe('ConnectAccountService', () => {
   beforeEach(() => {
     // Don't reset IDs — unique constraint on stripeAccountId means IDs must be globally unique
     stripe = createMockStripe();
+    // createMockStripe() does not ship `accounts.retrieve` — install a spy
+    // so tests that assert `.not.toHaveBeenCalled()` work (and per-test
+    // mockResolvedValue / mockRejectedValue overrides apply on top).
+    stripe.accounts.retrieve = vi.fn();
     service = new ConnectAccountService({ db, environment: 'test' }, stripe);
   });
 
@@ -926,6 +931,286 @@ describe('ConnectAccountService', () => {
 
       const ready = await service.isReady(noOrg.id);
       expect(ready).toBe(false);
+    });
+  });
+
+  // ─── getStatus (requirements + cache) ────────────────────────────────
+
+  describe('getStatus', () => {
+    it('returns disconnected sentinel when no DB row exists', async () => {
+      const [emptyOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('status-empty'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      const result = await service.getStatus(emptyOrg.id);
+
+      expect(result).toEqual({
+        isConnected: false,
+        accountId: null,
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        status: null,
+        requirements: null,
+      });
+      // No Stripe call when there's no DB account
+      expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
+    });
+
+    it('returns full requirements payload when account exists', async () => {
+      const [reqOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('status-req'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      const [inserted] = await db
+        .insert(stripeConnectAccounts)
+        .values(
+          createTestConnectAccountInput(reqOrg.id, creatorId, {
+            status: 'restricted',
+            chargesEnabled: true,
+            payoutsEnabled: false,
+          })
+        )
+        .returning();
+
+      const deadline = 1_800_000_000;
+      (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: inserted.stripeAccountId,
+        charges_enabled: true,
+        payouts_enabled: false,
+        requirements: {
+          currently_due: ['business_profile.url', 'individual.dob.day'],
+          eventually_due: ['company.tax_id'],
+          past_due: [],
+          pending_verification: [],
+          current_deadline: deadline,
+          disabled_reason: null,
+          errors: [
+            {
+              requirement: 'business_profile.url',
+              code: 'invalid_url_format',
+              reason: 'The provided URL is not valid.',
+            },
+          ],
+        },
+      } as unknown as Stripe.Account);
+
+      const result = await service.getStatus(reqOrg.id);
+
+      expect(result.isConnected).toBe(true);
+      expect(result.status).toBe('restricted');
+      expect(result.accountId).toBe(inserted.stripeAccountId);
+      expect(result.requirements).not.toBeNull();
+      expect(result.requirements?.currentlyDue).toEqual([
+        'business_profile.url',
+        'individual.dob.day',
+      ]);
+      expect(result.requirements?.eventuallyDue).toEqual(['company.tax_id']);
+      expect(result.requirements?.currentDeadline).toBe(deadline);
+      expect(result.requirements?.errors).toHaveLength(1);
+      expect(result.requirements?.errors[0].requirement).toBe(
+        'business_profile.url'
+      );
+    });
+
+    it('normalises null arrays to [] so the UI can iterate without guards', async () => {
+      const [normOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('status-norm'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      const [inserted] = await db
+        .insert(stripeConnectAccounts)
+        .values(createTestConnectAccountInput(normOrg.id, creatorId))
+        .returning();
+
+      (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: inserted.stripeAccountId,
+        charges_enabled: true,
+        payouts_enabled: true,
+        // Stripe returns null arrays in real responses — must be normalised
+        requirements: {
+          currently_due: null,
+          eventually_due: null,
+          past_due: null,
+          pending_verification: null,
+          current_deadline: null,
+          disabled_reason: null,
+          errors: null,
+        },
+      } as unknown as Stripe.Account);
+
+      const result = await service.getStatus(normOrg.id);
+
+      expect(result.requirements?.currentlyDue).toEqual([]);
+      expect(result.requirements?.eventuallyDue).toEqual([]);
+      expect(result.requirements?.pastDue).toEqual([]);
+      expect(result.requirements?.pendingVerification).toEqual([]);
+      expect(result.requirements?.errors).toEqual([]);
+      expect(result.requirements?.currentDeadline).toBeNull();
+      expect(result.requirements?.disabledReason).toBeNull();
+    });
+
+    it('degrades gracefully when Stripe is unreachable — returns status without requirements', async () => {
+      const [degOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('status-deg'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      const [inserted] = await db
+        .insert(stripeConnectAccounts)
+        .values(
+          createTestConnectAccountInput(degOrg.id, creatorId, {
+            status: 'restricted',
+            chargesEnabled: false,
+            payoutsEnabled: false,
+          })
+        )
+        .returning();
+
+      (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('Stripe API unreachable')
+      );
+
+      const result = await service.getStatus(degOrg.id);
+
+      // Still surfaces the DB-known fields even if Stripe is down
+      expect(result.isConnected).toBe(true);
+      expect(result.accountId).toBe(inserted.stripeAccountId);
+      expect(result.status).toBe('restricted');
+      expect(result.requirements).toBeNull();
+    });
+  });
+
+  // ─── handleAccountUpdated cache invalidation ─────────────────────────
+
+  describe('handleAccountUpdated cache invalidation', () => {
+    it('invalidates the cache after a successful update (idempotent on duplicate)', async () => {
+      const { VersionedCache } = await import('@codex/cache');
+      const { createMockKVNamespace, createMockObservability } = await import(
+        '@codex/test-utils'
+      );
+
+      const kv = createMockKVNamespace();
+      const { obs } = createMockObservability();
+      const cache = new VersionedCache({
+        kv: kv as unknown as KVNamespace,
+        prefix: 'cache',
+        obs,
+      });
+
+      const cachedService = new ConnectAccountService(
+        { db, environment: 'test', cache },
+        stripe
+      );
+
+      const [invOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('cache-inv'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      const [inserted] = await db
+        .insert(stripeConnectAccounts)
+        .values(createTestConnectAccountInput(invOrg.id, creatorId))
+        .returning();
+
+      const invalidateSpy = vi.spyOn(cache, 'invalidate');
+
+      await cachedService.handleAccountUpdated({
+        id: inserted.stripeAccountId,
+        charges_enabled: true,
+        payouts_enabled: true,
+        requirements: { currently_due: [], disabled_reason: null },
+      } as unknown as Stripe.Account);
+
+      expect(invalidateSpy).toHaveBeenCalledWith(invOrg.id);
+      expect(invalidateSpy).toHaveBeenCalledTimes(1);
+
+      // Duplicate Stripe webhook delivery — second invalidation must be a
+      // safe no-op (idempotency invariant; Stripe retries webhooks).
+      await cachedService.handleAccountUpdated({
+        id: inserted.stripeAccountId,
+        charges_enabled: true,
+        payouts_enabled: true,
+        requirements: { currently_due: [], disabled_reason: null },
+      } as unknown as Stripe.Account);
+
+      expect(invalidateSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('does NOT throw when cache invalidation fails — webhook idempotency wins', async () => {
+      const { VersionedCache } = await import('@codex/cache');
+      const { createMockKVNamespace, createMockObservability } = await import(
+        '@codex/test-utils'
+      );
+
+      const kv = createMockKVNamespace();
+      const { obs } = createMockObservability();
+      const cache = new VersionedCache({
+        kv: kv as unknown as KVNamespace,
+        prefix: 'cache',
+        obs,
+      });
+
+      vi.spyOn(cache, 'invalidate').mockRejectedValueOnce(
+        new Error('KV unavailable')
+      );
+
+      const cachedService = new ConnectAccountService(
+        { db, environment: 'test', cache },
+        stripe
+      );
+
+      const [failOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('cache-fail'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      const [inserted] = await db
+        .insert(stripeConnectAccounts)
+        .values(createTestConnectAccountInput(failOrg.id, creatorId))
+        .returning();
+
+      // MUST resolve — DB write already happened, cache failure is logged
+      await expect(
+        cachedService.handleAccountUpdated({
+          id: inserted.stripeAccountId,
+          charges_enabled: true,
+          payouts_enabled: true,
+          requirements: { currently_due: [], disabled_reason: null },
+        } as unknown as Stripe.Account)
+      ).resolves.toBeUndefined();
     });
   });
 });

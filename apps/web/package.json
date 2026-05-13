@@ -35,6 +35,7 @@
     "@codex/observability": "workspace:*",
     "@codex/purchase": "workspace:*",
     "@codex/shared-types": "workspace:*",
+    "@codex/subscription": "workspace:*",
     "@codex/test-utils": "workspace:*",
     "@codex/validation": "workspace:*",
     "@inlang/paraglide-sveltekit": "^0.15.0",

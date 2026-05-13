@@ -8,6 +8,7 @@
  * - Signature already verified by verifyStripeSignature middleware
  */
 
+import { VersionedCache } from '@codex/cache';
 import { STRIPE_EVENTS } from '@codex/constants';
 import {
   ConnectAccountService,
@@ -28,8 +29,22 @@ export async function handleConnectWebhook(
   const { db, cleanup } = createWebhookDbClient(c.env);
 
   try {
+    // Wire VersionedCache so the service's internal `account.updated`
+    // invalidation runs against the same KV namespace the studio's
+    // `getStatus(orgId)` reads from. Without this, the cache would stay
+    // warm with stale requirements for up to 10 min after a Stripe push.
+    // Idempotent on duplicate webhook delivery — `cache.invalidate` is
+    // a single KV PUT of a fresh version timestamp.
+    const cache = c.env.CACHE_KV
+      ? new VersionedCache({ kv: c.env.CACHE_KV, prefix: 'cache' })
+      : undefined;
+
     const service = new ConnectAccountService(
-      { db, environment: c.env.ENVIRONMENT || 'development' },
+      {
+        db,
+        environment: c.env.ENVIRONMENT || 'development',
+        cache,
+      },
       stripe
     );
 

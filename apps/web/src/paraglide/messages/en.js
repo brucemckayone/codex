@@ -2911,6 +2911,38 @@ export const monetisation_connect_payouts_enabled = () => `Payouts enabled`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const monetisation_connect_requirements_title = () => `Action required to enable payouts`
+
+
+/**
+ * @param {{ deadline: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_connect_requirements_with_deadline = (params) => `Complete the following by ${params.deadline} to keep payouts enabled:`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_connect_requirements_no_deadline = () => `Complete the following to enable payouts:`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const monetisation_connect_requirements_errors_summary = () => `Show verification errors`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const monetisation_tiers_title = () => `Subscription Tiers`
 
 

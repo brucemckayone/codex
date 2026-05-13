@@ -23,6 +23,7 @@
  * 4. isReady() returns true when charges_enabled + payouts_enabled
  */
 
+import { CacheType, type VersionedCache } from '@codex/cache';
 import { stripeConnectAccounts } from '@codex/database/schema';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import { and, eq } from 'drizzle-orm';
@@ -31,12 +32,114 @@ import { ConnectAccountNotFoundError } from '../errors';
 
 type StripeConnectAccount = typeof stripeConnectAccounts.$inferSelect;
 
+/**
+ * Stripe Connect account requirements payload returned to the UI.
+ *
+ * Mirrors `Stripe.Account.Requirements` from the Stripe Node SDK
+ * (verified against `stripe@19.3.1` types on 2026-05-13). Stripe returns
+ * `null` for unset array fields; we normalise to `[]` here so the UI can
+ * iterate without null-guards. `current_deadline` and `disabled_reason`
+ * remain nullable because they are semantically meaningful as "none yet"
+ * / "no reason yet" states the UI distinguishes from empty arrays.
+ *
+ * See `node_modules/stripe/types/Accounts.d.ts:1228-1268`.
+ */
+export interface ConnectRequirements {
+  currentlyDue: string[];
+  eventuallyDue: string[];
+  pastDue: string[];
+  pendingVerification: string[];
+  currentDeadline: number | null;
+  disabledReason: string | null;
+  errors: Array<{ requirement: string; code: string; reason: string }>;
+}
+
+/**
+ * Full Connect status payload — what the studio monetisation page consumes.
+ *
+ * `requirements` is only populated when there's something actionable
+ * (status !== 'active') so the UI can render a single warning Alert without
+ * additional null checks.
+ */
+export interface ConnectStatusPayload {
+  isConnected: boolean;
+  accountId: string | null;
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  status: 'onboarding' | 'active' | 'restricted' | 'disabled' | null;
+  requirements: ConnectRequirements | null;
+}
+
+/**
+ * Cache TTL for Connect status (10 min).
+ *
+ * Webhook delivery (`account.updated`) invalidates the cache so worst-case
+ * staleness is bounded by webhook latency, not the TTL. The 10 min ceiling
+ * is the safety net for when the webhook silently misses a delivery.
+ */
+const CONNECT_STATUS_TTL_SECONDS = 600;
+
+/**
+ * Normalise Stripe's `Account.Requirements` payload for the UI.
+ *
+ * Stripe's typings model `currently_due` / `eventually_due` / `past_due` /
+ * `pending_verification` as `Array<string> | null`. We return `[]` for null
+ * so the UI iterates without null guards. Critical nullable fields
+ * (`current_deadline`, `disabled_reason`) are preserved as `null` because
+ * the UI distinguishes "no deadline" from "no due fields".
+ *
+ * Returns `null` when Stripe returned no requirements object at all (rare —
+ * usually only on accounts created via legacy paths).
+ */
+function normaliseRequirements(
+  requirements: Stripe.Account['requirements']
+): ConnectRequirements | null {
+  if (!requirements) return null;
+
+  return {
+    currentlyDue: requirements.currently_due ?? [],
+    eventuallyDue: requirements.eventually_due ?? [],
+    pastDue: requirements.past_due ?? [],
+    pendingVerification: requirements.pending_verification ?? [],
+    currentDeadline: requirements.current_deadline ?? null,
+    disabledReason: requirements.disabled_reason ?? null,
+    errors: (requirements.errors ?? []).map((err) => ({
+      requirement: err.requirement,
+      code: err.code,
+      reason: err.reason,
+    })),
+  };
+}
+
+export interface ConnectAccountServiceConfig extends ServiceConfig {
+  /**
+   * Optional VersionedCache for `getStatus(orgId)` cache-aside.
+   *
+   * Wired in workers via the service-registry. When omitted (e.g. unit tests),
+   * `getStatus()` falls back to direct Stripe + DB reads on every call.
+   */
+  cache?: VersionedCache;
+}
+
 export class ConnectAccountService extends BaseService {
   private readonly stripe: Stripe;
+  private cache?: VersionedCache;
 
-  constructor(config: ServiceConfig, stripe: Stripe) {
+  constructor(config: ConnectAccountServiceConfig, stripe: Stripe) {
     super(config);
     this.stripe = stripe;
+    this.cache = config.cache;
+  }
+
+  /**
+   * Inject the cache after construction.
+   *
+   * Mirrors the `ContentService.setCache` pattern used by the worker service
+   * registry — the registry constructs the service first then conditionally
+   * wires the cache only when `env.CACHE_KV` is bound.
+   */
+  setCache(cache: VersionedCache): void {
+    this.cache = cache;
   }
 
   /**
@@ -161,6 +264,35 @@ export class ConnectAccountService extends BaseService {
   }
 
   /**
+   * Get the full Connect status for an org — cache-aside.
+   *
+   * Returns the local DB-cached `isConnected/chargesEnabled/payoutsEnabled/status`
+   * fields PLUS the live `requirements` payload from Stripe (currently_due,
+   * eventually_due, current_deadline, errors, disabled_reason). The Stripe
+   * `requirements` shape changes only via `account.updated` webhooks, so the
+   * webhook handler is responsible for invalidating this cache.
+   *
+   * Falls back to direct fetch when no cache is wired (e.g. unit tests).
+   *
+   * @param orgId - Organization ID (cache key namespace)
+   * @returns Connect status payload with requirements
+   */
+  async getStatus(orgId: string): Promise<ConnectStatusPayload> {
+    if (this.cache) {
+      const result = await this.cache.getWithResult(
+        orgId,
+        CacheType.CONNECT_STATUS,
+        () => this.fetchStatusFromStripe(orgId),
+        { ttl: CONNECT_STATUS_TTL_SECONDS }
+      );
+      this.obs.debug('getStatus', { orgId, cacheHit: result.hit });
+      return result.data;
+    }
+
+    return this.fetchStatusFromStripe(orgId);
+  }
+
+  /**
    * Generate a new onboarding link for an existing account.
    * Used to resume abandoned onboarding — Stripe remembers prior progress.
    */
@@ -236,6 +368,21 @@ export class ConnectAccountService extends BaseService {
       chargesEnabled,
       payoutsEnabled,
     });
+
+    // Stripe's `requirements` payload changed — invalidate the cached
+    // `getStatus(orgId)` response so the next read returns fresh data.
+    // Idempotent: a duplicate `account.updated` delivery just bumps the
+    // version a second time, which is a no-op for correctness.
+    if (this.cache) {
+      try {
+        await this.cache.invalidate(updated.organizationId);
+      } catch (error) {
+        this.obs.warn('Connect status cache invalidation failed', {
+          organizationId: updated.organizationId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   /**
@@ -266,6 +413,17 @@ export class ConnectAccountService extends BaseService {
       stripeAccountId,
       organizationId: updated.organizationId,
     });
+
+    if (this.cache) {
+      try {
+        await this.cache.invalidate(updated.organizationId);
+      } catch (error) {
+        this.obs.warn('Connect status cache invalidation failed', {
+          organizationId: updated.organizationId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   /**
@@ -319,6 +477,65 @@ export class ConnectAccountService extends BaseService {
   }
 
   // ─── Private Helpers ─────────────────────────────────────────────────────
+
+  /**
+   * Fetch live Connect status from DB + Stripe (cache miss path).
+   *
+   * Combines the local DB row (source of truth for charges/payouts toggles
+   * and derived status) with Stripe's live `requirements` payload so the UI
+   * can render `currently_due` / `current_deadline` / `errors`.
+   *
+   * Returns the disconnected sentinel when no DB row exists — this matches
+   * the route handler's existing "no account" branch and avoids a Stripe
+   * call for orgs that never started onboarding.
+   */
+  private async fetchStatusFromStripe(
+    orgId: string
+  ): Promise<ConnectStatusPayload> {
+    const account = await this.getAccount(orgId);
+
+    if (!account) {
+      return {
+        isConnected: false,
+        accountId: null,
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        status: null,
+        requirements: null,
+      };
+    }
+
+    // Read live requirements from Stripe. Stripe's `account.updated` webhook
+    // is the canonical signal for change; we read on cache-miss only.
+    let requirements: ConnectRequirements | null = null;
+    try {
+      const stripeAccount = await this.stripe.accounts.retrieve(
+        account.stripeAccountId
+      );
+      requirements = normaliseRequirements(stripeAccount.requirements);
+    } catch (error) {
+      // Graceful degradation: surface what we know from the DB row even if
+      // Stripe is unreachable. The UI degrades to "status only" rather than
+      // failing the page load.
+      this.obs.warn('Failed to fetch Stripe Connect requirements', {
+        organizationId: orgId,
+        stripeAccountId: account.stripeAccountId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    return {
+      isConnected: true,
+      accountId: account.stripeAccountId,
+      chargesEnabled: account.chargesEnabled,
+      payoutsEnabled: account.payoutsEnabled,
+      // DB column is `text` so Drizzle infers `string`; narrow to the union
+      // we publish. The four values are the canonical set written by
+      // `handleAccountUpdated` — anything else is a data corruption bug.
+      status: account.status as ConnectStatusPayload['status'],
+      requirements,
+    };
+  }
 
   private async createOnboardingLink(
     stripeAccountId: string,

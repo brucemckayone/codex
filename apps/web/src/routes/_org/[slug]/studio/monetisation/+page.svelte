@@ -41,8 +41,9 @@
     syncConnectStatus,
   } from '$lib/remote/subscription.remote';
   import { getOrgSettings } from '$lib/remote/org.remote';
-  import { formatPrice } from '$lib/utils/format';
-  import type { SubscriptionTier } from '$lib/types';
+  import { formatDate, formatPrice } from '$lib/utils/format';
+  import { humanizeRequirement } from '@codex/subscription';
+  import type { ConnectRequirements, SubscriptionTier } from '$lib/types';
 
   /** Shape returned by SvelteKit's query() when called client-side */
   interface QueryResult<T> {
@@ -78,9 +79,35 @@
     (connectQuery as QueryResult<{
       isConnected: boolean; accountId: string | null;
       chargesEnabled: boolean; payoutsEnabled: boolean; status: string | null;
+      requirements: ConnectRequirements | null;
     }> | null)?.current ?? {
-      isConnected: false, accountId: null, chargesEnabled: false, payoutsEnabled: false, status: null,
+      isConnected: false, accountId: null, chargesEnabled: false, payoutsEnabled: false, status: null, requirements: null,
     }
+  );
+
+  /**
+   * Show the requirements warning when:
+   *  - the account is restricted (Stripe is actively blocking payouts), OR
+   *  - the account is in onboarding AND has at least one currently_due field
+   *    (the operator stopped mid-onboarding and needs nudge), OR
+   *  - charges or payouts are disabled with `currently_due` items present
+   *
+   * We deliberately DON'T render for `eventually_due`-only state on Phase 1
+   * (those become `currently_due` later) — keeps the alert action-oriented.
+   */
+  const showRequirementsAlert = $derived(
+    !!connectStatus.requirements
+      && connectStatus.requirements.currentlyDue.length > 0
+      && (connectStatus.status === 'restricted'
+        || connectStatus.status === 'disabled'
+        || connectStatus.status === 'onboarding'
+        || !connectStatus.payoutsEnabled)
+  );
+
+  const deadlineLabel = $derived(
+    connectStatus.requirements?.currentDeadline
+      ? formatDate(new Date(connectStatus.requirements.currentDeadline * 1000))
+      : null
   );
   const enableSubscriptionsFromServer = $derived(
     (settingsQuery as QueryResult<{ features?: { enableSubscriptions?: boolean } }> | null)
@@ -377,6 +404,44 @@
 
         {#if connectError}
           <Alert variant="error" style="margin-top: var(--space-3)">{connectError}</Alert>
+        {/if}
+
+        {#if showRequirementsAlert && connectStatus.requirements}
+          <Alert
+            variant="warning"
+            role="alert"
+            aria-live="assertive"
+            class="requirements-alert"
+            style="margin-top: var(--space-3)"
+          >
+            <div class="requirements-content">
+              <h3 class="requirements-title">{m.monetisation_connect_requirements_title()}</h3>
+              <p class="requirements-description">
+                {#if deadlineLabel}
+                  {m.monetisation_connect_requirements_with_deadline({ deadline: deadlineLabel })}
+                {:else}
+                  {m.monetisation_connect_requirements_no_deadline()}
+                {/if}
+              </p>
+              <ul class="requirements-list">
+                {#each connectStatus.requirements.currentlyDue as field (field)}
+                  <li>{humanizeRequirement(field)}</li>
+                {/each}
+              </ul>
+              {#if connectStatus.requirements.errors.length > 0}
+                <details class="requirements-errors">
+                  <summary>{m.monetisation_connect_requirements_errors_summary()}</summary>
+                  <ul>
+                    {#each connectStatus.requirements.errors as error (error.requirement + error.code)}
+                      <li>
+                        <strong>{humanizeRequirement(error.requirement)}:</strong> {error.reason}
+                      </li>
+                    {/each}
+                  </ul>
+                </details>
+              {/if}
+            </div>
+          </Alert>
         {/if}
 
         <div class="connect-actions">
@@ -711,6 +776,68 @@
 
   .connect-actions {
     margin-top: var(--space-3);
+  }
+
+  /* Connect requirements alert
+   * Lives inside <Alert variant="warning">; the Alert component owns the
+   * outer background/border/text-colour via design tokens (already WCAG AA
+   * verified). These styles cover ONLY the inner content layout. */
+  .requirements-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .requirements-title {
+    margin: 0;
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    /* Inherit colour from Alert variant — preserves WCAG AA contrast */
+    color: inherit;
+  }
+
+  .requirements-description {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: inherit;
+  }
+
+  .requirements-list {
+    margin: 0;
+    padding-left: var(--space-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: var(--text-sm);
+    color: inherit;
+  }
+
+  .requirements-errors {
+    margin-top: var(--space-2);
+    font-size: var(--text-sm);
+    color: inherit;
+  }
+
+  .requirements-errors summary {
+    cursor: pointer;
+    font-weight: var(--font-medium);
+    /* Visible focus for keyboard users — Alert variant border colour is too
+     * subtle for a focus indicator. */
+    border-radius: var(--radius-sm);
+    padding: var(--space-1) 0;
+  }
+
+  .requirements-errors summary:focus-visible {
+    outline: var(--border-width) var(--border-style) currentColor;
+    outline-offset: var(--space-1);
+  }
+
+  .requirements-errors ul {
+    margin: var(--space-2) 0 0;
+    padding-left: var(--space-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
   }
 
   /* Feature toggle */
