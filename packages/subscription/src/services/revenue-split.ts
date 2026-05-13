@@ -12,6 +12,7 @@
  * Rounding: ceil for platform and org, remainder goes to creators.
  */
 
+import { FEES } from '@codex/constants';
 import { InternalServiceError } from '@codex/service-errors';
 import type { RevenueSplit } from '@codex/shared-types';
 
@@ -42,11 +43,19 @@ export function calculateRevenueSplit(
   }
 
   // Platform fee: ceil to ensure platform never underpaid
-  const platformFeeCents = Math.ceil(
+  const percentPlatformFeeCents = Math.ceil(
     (amountCents * platformFeePercent) / 10000
   );
 
-  // Post-platform remainder
+  // Apply absolute minimum platform fee floor (Codex-a6hop) so that
+  // micro-transactions still cover infrastructure cost. Capped at amountCents
+  // so we never produce a negative post-platform remainder for sub-floor inputs.
+  const platformFeeCents = Math.min(
+    amountCents,
+    Math.max(percentPlatformFeeCents, FEES.MIN_PLATFORM_FEE_CENTS)
+  );
+
+  // Post-platform remainder (recomputed after floor — org+creator shrink)
   const postPlatform = amountCents - platformFeeCents;
 
   // Org fee: ceil, applied to post-platform amount

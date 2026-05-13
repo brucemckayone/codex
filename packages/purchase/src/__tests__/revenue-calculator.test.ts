@@ -4,6 +4,7 @@
  * Tests for revenue split calculation logic
  */
 
+import { FEES } from '@codex/constants';
 import { describe, expect, it } from 'vitest';
 import { RevenueCalculationError } from '../errors';
 import {
@@ -76,12 +77,13 @@ describe('Revenue Calculator', () => {
     });
 
     describe('rounding behavior', () => {
-      it('rounds platform fee UP (ceil)', () => {
-        // $1.01 (101 cents) with 10% = 10.1 cents -> 11 cents
+      it('rounds platform fee UP (ceil) — floor overrides at 101p (Codex-a6hop)', () => {
+        // 101p with 10% = ceil(10.1) = 11, floor = MIN_PLATFORM_FEE_CENTS = 30
+        // platform = max(11, 30) = 30, creator = 71
         const split = calculateRevenueSplit(101, 1000, 0);
 
-        expect(split.platformFeeCents).toBe(11);
-        expect(split.creatorPayoutCents).toBe(90);
+        expect(split.platformFeeCents).toBe(FEES.MIN_PLATFORM_FEE_CENTS);
+        expect(split.creatorPayoutCents).toBe(71);
         expect(
           split.platformFeeCents +
             split.organizationFeeCents +
@@ -139,12 +141,12 @@ describe('Revenue Calculator', () => {
         expect(split.creatorPayoutCents).toBe(0);
       });
 
-      it('handles 0% platform fee', () => {
+      it('handles 0% platform fee (floor still applies — Codex-a6hop)', () => {
         const split = calculateRevenueSplit(1000, 0, 0);
-
-        expect(split.platformFeeCents).toBe(0);
+        // percent = 0, floor = 30 → platform = 30, creator = 970
+        expect(split.platformFeeCents).toBe(FEES.MIN_PLATFORM_FEE_CENTS);
         expect(split.organizationFeeCents).toBe(0);
-        expect(split.creatorPayoutCents).toBe(1000);
+        expect(split.creatorPayoutCents).toBe(970);
       });
 
       it('handles combined fees totaling 100%', () => {
@@ -287,6 +289,75 @@ describe('Revenue Calculator', () => {
 
     it('DEFAULT_ORG_FEE_PERCENTAGE is 0% (0 basis points)', () => {
       expect(DEFAULT_ORG_FEE_PERCENTAGE).toBe(0);
+    });
+  });
+
+  // ─── Minimum platform-fee floor (Codex-a6hop) ────────────────────────
+  describe('minimum platform-fee floor (FEES.MIN_PLATFORM_FEE_CENTS)', () => {
+    const FLOOR = FEES.MIN_PLATFORM_FEE_CENTS;
+
+    it('floor kicks in when percent fee is below MIN_PLATFORM_FEE_CENTS', () => {
+      // 200p at 10%: percent = 20, floor = 30 → platform = 30
+      const split = calculateRevenueSplit(200, 1000, 0);
+      expect(split.platformFeeCents).toBe(FLOOR);
+      expect(split.creatorPayoutCents).toBe(170);
+      expect(
+        split.platformFeeCents +
+          split.organizationFeeCents +
+          split.creatorPayoutCents
+      ).toBe(200);
+    });
+
+    it('percent wins when percent fee is above MIN_PLATFORM_FEE_CENTS', () => {
+      // 400p at 10%: percent = 40, floor = 30 → platform = 40
+      const split = calculateRevenueSplit(400, 1000, 0);
+      expect(split.platformFeeCents).toBe(40);
+      expect(split.creatorPayoutCents).toBe(360);
+      expect(
+        split.platformFeeCents +
+          split.organizationFeeCents +
+          split.creatorPayoutCents
+      ).toBe(400);
+    });
+
+    it('percent equals floor exactly at break-even (300p at 10%)', () => {
+      const split = calculateRevenueSplit(300, 1000, 0);
+      expect(split.platformFeeCents).toBe(FLOOR);
+      expect(split.creatorPayoutCents).toBe(270);
+    });
+
+    it('floor is capped at amountCents for micro-transactions (10p)', () => {
+      // 10p at 10%: percent = 1, floor = 30, cap = 10 → platform = 10
+      const split = calculateRevenueSplit(10, 1000, 0);
+      expect(split.platformFeeCents).toBe(10);
+      expect(split.organizationFeeCents).toBe(0);
+      expect(split.creatorPayoutCents).toBe(0);
+      expect(
+        split.platformFeeCents +
+          split.organizationFeeCents +
+          split.creatorPayoutCents
+      ).toBe(10);
+    });
+
+    it('amount below MIN_TRANSFER_CENTS still splits correctly (transfer floor is separate concern)', () => {
+      // 99p (just below £1 transfer floor) still gets a normal calculator split.
+      // Transfer-floor logic lives in the sweep cron, not the calculator.
+      const split = calculateRevenueSplit(99, 1000, 0);
+      // percent = ceil(9.9) = 10, floor = 30 → platform = 30, creator = 69
+      expect(split.platformFeeCents).toBe(FLOOR);
+      expect(split.creatorPayoutCents).toBe(69);
+      expect(
+        split.platformFeeCents +
+          split.organizationFeeCents +
+          split.creatorPayoutCents
+      ).toBe(99);
+    });
+
+    it('0 amount bypasses floor (no fee on zero gross)', () => {
+      const split = calculateRevenueSplit(0, 1000, 0);
+      expect(split.platformFeeCents).toBe(0);
+      expect(split.organizationFeeCents).toBe(0);
+      expect(split.creatorPayoutCents).toBe(0);
     });
   });
 });

@@ -54,12 +54,11 @@ describe('calculateRevenueSplit', () => {
       ).toBe(999);
     });
 
-    it('should calculate correct split for 1p (minimum positive amount)', () => {
+    it('should calculate correct split for 1p (minimum positive amount, capped by amountCents)', () => {
       const result = calculateRevenueSplit(1, PLATFORM, ORG);
-      // platform = ceil(1 * 0.1) = ceil(0.1) = 1
-      // postPlatform = 0
-      // org = ceil(0 * 0.15) = 0
-      // creator = 0
+      // percent = ceil(1 * 0.1) = 1, floor = MIN_PLATFORM_FEE_CENTS = 30
+      // platform = min(1, max(1, 30)) = 1 (cap prevents > amountCents)
+      // postPlatform = 0, org = 0, creator = 0
       expect(result.platformFeeCents).toBe(1);
       expect(result.organizationFeeCents).toBe(0);
       expect(result.creatorPayoutCents).toBe(0);
@@ -82,14 +81,13 @@ describe('calculateRevenueSplit', () => {
       ).toBe(100000);
     });
 
-    it('should calculate correct split for 2p (edge: both ceil effects active)', () => {
+    it('should calculate correct split for 2p (floor capped at amountCents, eats whole gross)', () => {
       const result = calculateRevenueSplit(2, PLATFORM, ORG);
-      // platform = ceil(2 * 0.1) = ceil(0.2) = 1
-      // postPlatform = 1
-      // org = ceil(1 * 0.15) = ceil(0.15) = 1
-      // creator = 1 - 1 = 0
-      expect(result.platformFeeCents).toBe(1);
-      expect(result.organizationFeeCents).toBe(1);
+      // percent = ceil(2 * 0.1) = 1, floor = 30
+      // platform = min(2, max(1, 30)) = 2 (floor wants 30, capped at amountCents)
+      // postPlatform = 0, org = 0, creator = 0
+      expect(result.platformFeeCents).toBe(2);
+      expect(result.organizationFeeCents).toBe(0);
       expect(result.creatorPayoutCents).toBe(0);
       expect(
         result.platformFeeCents +
@@ -136,11 +134,14 @@ describe('calculateRevenueSplit', () => {
   // ─── Custom fee percentages ──────────────────────────────────────────
 
   describe('custom fee percentages', () => {
-    it('should handle 0% platform fee (all goes to org + creator)', () => {
+    it('should handle 0% platform fee (floor still applies — Codex-a6hop)', () => {
       const result = calculateRevenueSplit(1000, 0, 1500);
-      expect(result.platformFeeCents).toBe(0);
-      expect(result.organizationFeeCents).toBe(150);
-      expect(result.creatorPayoutCents).toBe(850);
+      // percent = 0, floor = MIN_PLATFORM_FEE_CENTS = 30
+      // platform = min(1000, max(0, 30)) = 30
+      // postPlatform = 970, org = ceil(970*0.15) = 146, creator = 824
+      expect(result.platformFeeCents).toBe(30);
+      expect(result.organizationFeeCents).toBe(146);
+      expect(result.creatorPayoutCents).toBe(824);
       expect(
         result.platformFeeCents +
           result.organizationFeeCents +
@@ -160,11 +161,12 @@ describe('calculateRevenueSplit', () => {
       ).toBe(1000);
     });
 
-    it('should handle 0% for both fees (all to creator)', () => {
+    it('should handle 0% for both fees (floor still applies — Codex-a6hop)', () => {
       const result = calculateRevenueSplit(1000, 0, 0);
-      expect(result.platformFeeCents).toBe(0);
+      // percent = 0, floor = 30 → platform = 30, creator = 970
+      expect(result.platformFeeCents).toBe(30);
       expect(result.organizationFeeCents).toBe(0);
-      expect(result.creatorPayoutCents).toBe(1000);
+      expect(result.creatorPayoutCents).toBe(970);
     });
 
     it('should handle 100% platform fee (nothing to org or creator)', () => {
@@ -194,13 +196,14 @@ describe('calculateRevenueSplit', () => {
   // ─── Rounding behavior ──────────────────────────────────────────────
 
   describe('rounding behavior (ceil for platform and org, remainder to creator)', () => {
-    it('should ceil platform fee and give remainder to creator', () => {
-      // 101p: platform = ceil(101 * 0.1) = ceil(10.1) = 11
+    it('should apply platform-fee floor when percent < MIN (101p)', () => {
+      // 101p: percent = ceil(10.1) = 11, floor = 30 → platform = 30
+      // postPlatform = 71, org = ceil(71 * 0.15) = ceil(10.65) = 11
+      // creator = 71 - 11 = 60
       const result = calculateRevenueSplit(101, PLATFORM, ORG);
-      expect(result.platformFeeCents).toBe(11);
-      // postPlatform = 90, org = ceil(90 * 0.15) = ceil(13.5) = 14
-      expect(result.organizationFeeCents).toBe(14);
-      expect(result.creatorPayoutCents).toBe(76);
+      expect(result.platformFeeCents).toBe(30);
+      expect(result.organizationFeeCents).toBe(11);
+      expect(result.creatorPayoutCents).toBe(60);
       expect(
         result.platformFeeCents +
           result.organizationFeeCents +
@@ -208,12 +211,13 @@ describe('calculateRevenueSplit', () => {
       ).toBe(101);
     });
 
-    it('should ceil org fee and give remainder to creator', () => {
-      // 103p: platform = ceil(10.3) = 11, post = 92, org = ceil(92*0.15) = ceil(13.8) = 14
+    it('should apply platform-fee floor when percent < MIN (103p)', () => {
+      // 103p: percent = ceil(10.3) = 11, floor = 30 → platform = 30
+      // postPlatform = 73, org = ceil(73 * 0.15) = ceil(10.95) = 11, creator = 62
       const result = calculateRevenueSplit(103, PLATFORM, ORG);
-      expect(result.platformFeeCents).toBe(11);
-      expect(result.organizationFeeCents).toBe(14);
-      expect(result.creatorPayoutCents).toBe(78);
+      expect(result.platformFeeCents).toBe(30);
+      expect(result.organizationFeeCents).toBe(11);
+      expect(result.creatorPayoutCents).toBe(62);
       expect(
         result.platformFeeCents +
           result.organizationFeeCents +
@@ -222,7 +226,7 @@ describe('calculateRevenueSplit', () => {
     });
 
     it('should never produce negative creator payout', () => {
-      // Very small amounts: 3p
+      // Very small amounts: 3p — floor capped at amountCents → platform=3, rest=0
       const result = calculateRevenueSplit(3, PLATFORM, ORG);
       expect(result.creatorPayoutCents).toBeGreaterThanOrEqual(0);
       expect(
@@ -246,7 +250,7 @@ describe('calculateRevenueSplit', () => {
 
     it('should handle exact GBP subscription price (£4.99 = 499p)', () => {
       const result = calculateRevenueSplit(499, PLATFORM, ORG);
-      // platform = ceil(499 * 0.1) = ceil(49.9) = 50
+      // platform = ceil(499 * 0.1) = ceil(49.9) = 50 (> floor 30, percent wins)
       // postPlatform = 449
       // org = ceil(449 * 0.15) = ceil(67.35) = 68
       // creator = 449 - 68 = 381
@@ -258,6 +262,83 @@ describe('calculateRevenueSplit', () => {
           result.organizationFeeCents +
           result.creatorPayoutCents
       ).toBe(499);
+    });
+  });
+
+  // ─── Minimum platform-fee floor (Codex-a6hop) ────────────────────────
+  describe('minimum platform-fee floor (FEES.MIN_PLATFORM_FEE_CENTS)', () => {
+    const FLOOR = FEES.MIN_PLATFORM_FEE_CENTS;
+
+    it('floor kicks in when percent fee is below MIN_PLATFORM_FEE_CENTS', () => {
+      // 200p at 10%: percent = 20, floor = 30 → platform = 30
+      const result = calculateRevenueSplit(200, PLATFORM, ORG);
+      expect(result.platformFeeCents).toBe(FLOOR);
+      // postPlatform = 170, org = ceil(170*0.15) = ceil(25.5) = 26, creator = 144
+      expect(result.organizationFeeCents).toBe(26);
+      expect(result.creatorPayoutCents).toBe(144);
+      expect(
+        result.platformFeeCents +
+          result.organizationFeeCents +
+          result.creatorPayoutCents
+      ).toBe(200);
+    });
+
+    it('percent wins when percent fee is above MIN_PLATFORM_FEE_CENTS', () => {
+      // 400p at 10%: percent = 40, floor = 30 → platform = 40
+      const result = calculateRevenueSplit(400, PLATFORM, ORG);
+      expect(result.platformFeeCents).toBe(40);
+      // postPlatform = 360, org = ceil(360*0.15) = 54, creator = 306
+      expect(result.organizationFeeCents).toBe(54);
+      expect(result.creatorPayoutCents).toBe(306);
+      expect(
+        result.platformFeeCents +
+          result.organizationFeeCents +
+          result.creatorPayoutCents
+      ).toBe(400);
+    });
+
+    it('percent equals floor exactly at break-even (300p)', () => {
+      // 300p at 10%: percent = 30, floor = 30 → platform = 30
+      const result = calculateRevenueSplit(300, PLATFORM, ORG);
+      expect(result.platformFeeCents).toBe(FLOOR);
+      // postPlatform = 270, org = ceil(270*0.15) = ceil(40.5) = 41, creator = 229
+      expect(result.organizationFeeCents).toBe(41);
+      expect(result.creatorPayoutCents).toBe(229);
+      expect(
+        result.platformFeeCents +
+          result.organizationFeeCents +
+          result.creatorPayoutCents
+      ).toBe(300);
+    });
+
+    it('floor is capped at amountCents for micro-transactions (10p)', () => {
+      // 10p at 10%: percent = 1, floor = 30, cap = 10 → platform = 10
+      // postPlatform = 0, org = 0, creator = 0
+      const result = calculateRevenueSplit(10, PLATFORM, ORG);
+      expect(result.platformFeeCents).toBe(10);
+      expect(result.organizationFeeCents).toBe(0);
+      expect(result.creatorPayoutCents).toBe(0);
+      expect(
+        result.platformFeeCents +
+          result.organizationFeeCents +
+          result.creatorPayoutCents
+      ).toBe(10);
+    });
+
+    it('amount below MIN_TRANSFER_CENTS still splits correctly (transfer floor is separate concern)', () => {
+      // 99p (just below £1 transfer floor) still gets a normal split.
+      // Transfer-floor logic lives in the sweep cron, not the calculator.
+      const result = calculateRevenueSplit(99, PLATFORM, ORG);
+      // percent = ceil(9.9) = 10, floor = 30 → platform = 30
+      // postPlatform = 69, org = ceil(69*0.15) = ceil(10.35) = 11, creator = 58
+      expect(result.platformFeeCents).toBe(30);
+      expect(result.organizationFeeCents).toBe(11);
+      expect(result.creatorPayoutCents).toBe(58);
+      expect(
+        result.platformFeeCents +
+          result.organizationFeeCents +
+          result.creatorPayoutCents
+      ).toBe(99);
     });
   });
 });

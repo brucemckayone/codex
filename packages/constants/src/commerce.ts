@@ -89,7 +89,32 @@ export const FEES = {
   PLATFORM_PERCENT: 1000, // 10.00% of gross
   ORG_PERCENT: 0, // 0% for one-time purchases
   SUBSCRIPTION_ORG_PERCENT: 1500, // 15.00% of post-platform-fee for subscriptions
+  /**
+   * Absolute minimum platform fee in pence (Codex-a6hop).
+   *
+   * Floor applied to the percentage-based platform fee so that micro-transactions
+   * still cover infrastructure cost (Stripe per-txn fee ~20p in UK + KV/Worker/streaming
+   * overhead). Effective rule: platformFeeCents = max(percent_of_gross, MIN_PLATFORM_FEE_CENTS).
+   *
+   * Calibration: At PLATFORM_PERCENT=10%, percentage wins above £3.00 gross
+   * (300p * 10% = 30p). Below £3.00, the floor kicks in.
+   *
+   * Applied identically in:
+   *   - packages/subscription/src/services/revenue-split.ts (subscriptions)
+   *   - packages/purchase/src/services/revenue-calculator.ts (one-time purchases)
+   */
+  MIN_PLATFORM_FEE_CENTS: 30,
 } as const;
+
+/**
+ * Minimum transfer amount in pence (£1.00) — Codex-a6hop.
+ *
+ * The payout sweep (Codex-vv77x) skips any `pendingPayouts` row whose
+ * `amountCents < MIN_TRANSFER_CENTS`, leaving it pending until subsequent
+ * earnings push the balance above the floor. This avoids dust transfers
+ * that would cost more in Stripe per-payout fees than they pay out.
+ */
+export const MIN_TRANSFER_CENTS = 100;
 
 export const CURRENCY = {
   GBP: 'gbp',

@@ -101,9 +101,21 @@ export function calculateRevenueSplit(
 
   // Step 1: Calculate platform fee (round up)
   // Example: $29.99 * 10% = $2.999 -> $3.00 (300 cents)
-  const platformFeeCents = Math.ceil(
+  const percentPlatformFeeCents = Math.ceil(
     (amountCents * platformFeePercentage) / 10000
   );
+
+  // Step 1b: Apply absolute minimum platform fee floor (Codex-a6hop).
+  // Mirrors the same rule in @codex/subscription's revenue-split.ts — both
+  // calculators MUST stay in lockstep. Capped at amountCents so a sub-floor
+  // gross never produces a negative remainder.
+  const platformFeeCents =
+    amountCents === 0
+      ? 0
+      : Math.min(
+          amountCents,
+          Math.max(percentPlatformFeeCents, FEES.MIN_PLATFORM_FEE_CENTS)
+        );
 
   // Step 2: Calculate remaining after platform fee
   const remainingAfterPlatform = amountCents - platformFeeCents;
