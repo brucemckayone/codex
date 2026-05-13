@@ -32,7 +32,11 @@ import {
   ContactSettingsService,
   PlatformSettingsFacade,
 } from '@codex/platform-settings';
-import { createStripeClient, PurchaseService } from '@codex/purchase';
+import {
+  createStripeClient,
+  FeeConfigService,
+  PurchaseService,
+} from '@codex/purchase';
 import type { Bindings } from '@codex/shared-types';
 import {
   ConnectAccountService,
@@ -91,6 +95,7 @@ export function createServiceRegistry(
   let _organization: OrganizationService | undefined;
   let _settings: PlatformSettingsFacade | undefined;
   let _purchase: PurchaseService | undefined;
+  let _feeConfig: FeeConfigService | undefined;
   let _transcoding: TranscodingService | undefined;
   let _adminAnalytics: AdminAnalyticsService | undefined;
   let _adminContent: AdminContentManagementService | undefined;
@@ -369,12 +374,39 @@ export function createServiceRegistry(
     // Commerce Domain
     // ========================================================================
 
+    /**
+     * Fee configuration service (Codex-m644n) — 3-tier DB-configurable fee
+     * model with version-cache invalidation and audit logging. Consumed by
+     * `purchase` (one-off path) and `subscription` (subscription path).
+     */
+    get feeConfig() {
+      if (!_feeConfig) {
+        const cache = env.CACHE_KV
+          ? new VersionedCache({ kv: env.CACHE_KV, prefix: 'cache' })
+          : undefined;
+        const waitUntil = executionCtx
+          ? executionCtx.waitUntil.bind(executionCtx)
+          : undefined;
+
+        _feeConfig = new FeeConfigService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          cache,
+          waitUntil,
+        });
+      }
+      return _feeConfig;
+    },
+
     get purchase() {
       if (!_purchase) {
         _purchase = new PurchaseService(
           {
             db: getSharedDb(),
             environment: getEnvironment(),
+            // Codex-m644n: inject FeeConfigService so completePurchase walks
+            // the 3-tier fallback chain instead of hardcoding DEFAULT_* consts.
+            feeConfig: registry.feeConfig,
           },
           getStripeClient()
         );
@@ -446,6 +478,12 @@ export function createServiceRegistry(
             waitUntil,
             mailer,
             webAppUrl,
+            // Codex-m644n: inject FeeConfigService so invoice + tier-change
+            // flows resolve fees via the 3-tier fallback chain. Per-creator
+            // fan-out additionally walks creator-override → org-default →
+            // platform → constants, so two creators in the same invoice can
+            // receive different splits.
+            feeConfig: registry.feeConfig,
           },
           getStripeClient()
         );

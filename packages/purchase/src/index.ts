@@ -60,6 +60,17 @@ export {
   ValidationError,
   wrapError,
 } from './errors';
+// Fee configuration service (Codex-m644n)
+export {
+  type AuditLogEntry,
+  type AuditLogFilters,
+  type CreatorOverrideUpdate,
+  type FeeConfig,
+  FeeConfigService,
+  type FeeConfigUpdate,
+  type FeeContext,
+  type PlatformFeeConfigUpdate,
+} from './services/fee-config-service';
 // Service
 export { PurchaseService } from './services/purchase-service';
 // Customer resolution (Codex-49gev)

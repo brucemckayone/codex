@@ -19,6 +19,8 @@ export * from './image';
 export * from './primitives';
 // Access schemas
 export * from './schemas/access';
+// Fee configuration schemas (Codex-m644n)
+export * from './schemas/fee-config';
 // File upload schemas
 export * from './schemas/file-upload';
 // Notification schemas

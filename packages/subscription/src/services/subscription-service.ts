@@ -47,7 +47,11 @@ import {
   subscriptionTiers,
   users,
 } from '@codex/database/schema';
-import { withStaleCustomerRecovery } from '@codex/purchase';
+import {
+  type FeeConfig,
+  type FeeConfigService,
+  withStaleCustomerRecovery,
+} from '@codex/purchase';
 import {
   BaseService,
   InternalServiceError,
@@ -277,6 +281,20 @@ interface SubscriptionServiceConfig extends ServiceConfig {
    * without needing to re-send.
    */
   webAppUrl?: string;
+  /**
+   * Optional DB-configurable fee resolver (Codex-m644n).
+   *
+   * When provided, the subscription invoice flows resolve platform/org fees
+   * via `feeConfig.getFeesForOrg(orgId, 'subscription')` instead of the
+   * `FEES.*` code constants. The per-creator fan-out inside `executeTransfers`
+   * additionally consults `getFeesForCreator(orgId, creatorId, 'subscription')`
+   * so two creators in the same invoice can receive different splits when one
+   * has a negotiated override.
+   *
+   * When absent (narrow unit tests, legacy harnesses), the service falls
+   * back to the `FEES.*` constants — bit-for-bit pre-Codex-m644n behaviour.
+   */
+  feeConfig?: FeeConfigService;
 }
 
 /**
@@ -302,6 +320,7 @@ export class SubscriptionService extends BaseService {
   private readonly waitUntil: WaitUntilFn | undefined;
   private readonly mailer: TierPriceChangeMailer | undefined;
   private readonly webAppUrl: string | undefined;
+  private readonly feeConfig: FeeConfigService | undefined;
 
   constructor(config: SubscriptionServiceConfig, stripe: Stripe) {
     super(config);
@@ -310,6 +329,66 @@ export class SubscriptionService extends BaseService {
     this.waitUntil = config.waitUntil;
     this.mailer = config.mailer;
     this.webAppUrl = config.webAppUrl;
+    this.feeConfig = config.feeConfig;
+  }
+
+  /**
+   * Resolve fee config for the subscription path (Codex-m644n).
+   * Delegates to `FeeConfigService` when injected; falls back to `FEES.*`
+   * constants when no resolver is available (legacy unit tests, fresh installs).
+   */
+  private async resolveSubscriptionFees(
+    orgId: string,
+    creatorId?: string
+  ): Promise<FeeConfig> {
+    if (!this.feeConfig) {
+      return {
+        platformFeePercent: FEES.PLATFORM_PERCENT,
+        orgFeePercent: FEES.SUBSCRIPTION_ORG_PERCENT,
+        minPlatformFeeCents: 0,
+        minTransferCents: 0,
+      };
+    }
+    return creatorId
+      ? this.feeConfig.getFeesForCreator(orgId, creatorId, 'subscription')
+      : this.feeConfig.getFeesForOrg(orgId, 'subscription');
+  }
+
+  /**
+   * Apply the min-platform-fee floor to a calculated split.
+   *
+   * Per Codex-m644n design: caller is responsible for the floor, not
+   * `calculateRevenueSplit` (which stays pure). When the floor exceeds the
+   * platform percentage, we reduce the creator pool first then the org fee
+   * to absorb the shortfall. Preserves the DB CHECK invariant `amount =
+   * platform + org + creator` by construction.
+   */
+  private applyMinPlatformFeeFloor(
+    amountCents: number,
+    split: {
+      platformFeeCents: number;
+      organizationFeeCents: number;
+      creatorPayoutCents: number;
+    },
+    minPlatformFeeCents: number
+  ): {
+    platformFeeCents: number;
+    organizationFeeCents: number;
+    creatorPayoutCents: number;
+  } {
+    if (split.platformFeeCents >= minPlatformFeeCents) return split;
+    const floor = Math.min(minPlatformFeeCents, amountCents);
+    const shortfall = floor - split.platformFeeCents;
+    const creatorReduction = Math.min(shortfall, split.creatorPayoutCents);
+    const orgReduction = Math.min(
+      shortfall - creatorReduction,
+      split.organizationFeeCents
+    );
+    return {
+      platformFeeCents: floor,
+      organizationFeeCents: split.organizationFeeCents - orgReduction,
+      creatorPayoutCents: split.creatorPayoutCents - creatorReduction,
+    };
   }
 
   /**
@@ -689,11 +768,19 @@ export class SubscriptionService extends BaseService {
         ? BILLING_INTERVAL.YEAR
         : BILLING_INTERVAL.MONTH;
 
-    // Calculate revenue split
-    const split = calculateRevenueSplit(
+    // Calculate revenue split using DB-configurable fees (Codex-m644n).
+    // FeeConfigService falls back to FEES.* constants when no fee row exists,
+    // preserving pre-m644n bit-for-bit behaviour on fresh installs.
+    const orgFees = await this.resolveSubscriptionFees(orgId);
+    const rawSplit = calculateRevenueSplit(
       amountCents,
-      FEES.PLATFORM_PERCENT,
-      FEES.SUBSCRIPTION_ORG_PERCENT
+      orgFees.platformFeePercent,
+      orgFees.orgFeePercent
+    );
+    const split = this.applyMinPlatformFeeFloor(
+      amountCents,
+      rawSplit,
+      orgFees.minPlatformFeeCents
     );
 
     // In Stripe v19+, period dates are on the subscription item, not the subscription
@@ -930,12 +1017,18 @@ export class SubscriptionService extends BaseService {
     const periodStart = subItem?.current_period_start ?? 0;
     const periodEnd = subItem?.current_period_end ?? 0;
 
-    // Update period dates and recalculate split
+    // Update period dates and recalculate split (DB-configurable fees, Codex-m644n).
     const amountCents = stripeInvoice.amount_paid;
-    const split = calculateRevenueSplit(
+    const orgFees = await this.resolveSubscriptionFees(sub.organizationId);
+    const rawSplit = calculateRevenueSplit(
       amountCents,
-      FEES.PLATFORM_PERCENT,
-      FEES.SUBSCRIPTION_ORG_PERCENT
+      orgFees.platformFeePercent,
+      orgFees.orgFeePercent
+    );
+    const split = this.applyMinPlatformFeeFloor(
+      amountCents,
+      rawSplit,
+      orgFees.minPlatformFeeCents
     );
 
     await this.db
@@ -1830,10 +1923,18 @@ export class SubscriptionService extends BaseService {
       // the row carries a CHECK constraint:
       //   amount_cents = platform_fee + org_fee + creator_payout
       // Updating amountCents alone would silently violate it.
-      const newSplit = calculateRevenueSplit(
+      // DB-configurable fees (Codex-m644n) — falls back to FEES.* constants
+      // when FeeConfigService is not injected (legacy tests).
+      const orgFees = await this.resolveSubscriptionFees(orgId);
+      const rawNewSplit = calculateRevenueSplit(
         newRecurringAmount,
-        FEES.PLATFORM_PERCENT,
-        FEES.SUBSCRIPTION_ORG_PERCENT
+        orgFees.platformFeePercent,
+        orgFees.orgFeePercent
+      );
+      const newSplit = this.applyMinPlatformFeeFloor(
+        newRecurringAmount,
+        rawNewSplit,
+        orgFees.minPlatformFeeCents
       );
       try {
         await this.db
@@ -2328,6 +2429,29 @@ export class SubscriptionService extends BaseService {
             subscriptionId: payout.subscriptionId,
             organizationId: orgId,
           });
+        }
+
+        // Codex-m644n: min-transfer floor gate. Walk the per-creator override
+        // chain so a low-volume creator with a high floor accumulates further
+        // while a high-volume creator clears immediately. Leaves the existing
+        // pending row in place (unresolved) so a later resolution attempt picks
+        // it up — no new row inserted to avoid duplicating the amount on retry.
+        const payoutFees = await this.resolveSubscriptionFees(
+          orgId,
+          payout.userId
+        );
+        if (payout.amountCents < payoutFees.minTransferCents) {
+          this.obs.info(
+            'resolvePendingPayouts: skipping payout below min-transfer floor',
+            {
+              pendingPayoutId: payout.id,
+              userId: payout.userId,
+              organizationId: orgId,
+              amountCents: payout.amountCents,
+              minTransferCents: payoutFees.minTransferCents,
+            }
+          );
+          continue;
         }
 
         const transfer = await this.stripe.transfers.create(
@@ -3011,6 +3135,45 @@ export class SubscriptionService extends BaseService {
       );
 
       if (creatorAmount <= 0) continue;
+
+      // Codex-m644n: per-creator min-transfer floor. Walk the override chain
+      // for this specific (org, creator) pair — Creator A and Creator B can
+      // carry different `minTransferCents` thresholds even in the same invoice.
+      // When the calculated amount falls below this creator's floor, accumulate
+      // as pending with reason='min_transfer_floor' instead of firing a Stripe
+      // transfer. The next invoice payment will re-roll the floor evaluation.
+      const creatorFees = await this.resolveSubscriptionFees(
+        orgId,
+        agreement.creatorId
+      );
+      if (creatorAmount < creatorFees.minTransferCents) {
+        this.obs.info('Creator payout below min-transfer floor, accumulating', {
+          subscriptionId,
+          creatorId: agreement.creatorId,
+          amountCents: creatorAmount,
+          minTransferCents: creatorFees.minTransferCents,
+        });
+        try {
+          await this.db.insert(pendingPayouts).values({
+            userId: agreement.creatorId,
+            organizationId: orgId,
+            subscriptionId,
+            amountCents: creatorAmount,
+            reason: 'min_transfer_floor',
+          });
+        } catch (insertError) {
+          this.obs.error(
+            'Failed to record pending payout (min_transfer_floor)',
+            {
+              subscriptionId,
+              creatorId: agreement.creatorId,
+              amountCents: creatorAmount,
+              error: (insertError as Error).message,
+            }
+          );
+        }
+        continue;
+      }
 
       const creatorConnect = connectByCreator.get(agreement.creatorId);
 

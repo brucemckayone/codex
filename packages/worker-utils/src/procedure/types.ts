@@ -26,7 +26,7 @@ import type {
 import type { ObservabilityClient } from '@codex/observability';
 import type { OrganizationService } from '@codex/organization';
 import type { PlatformSettingsFacade } from '@codex/platform-settings';
-import type { PurchaseService } from '@codex/purchase';
+import type { FeeConfigService, PurchaseService } from '@codex/purchase';
 import type {
   Bindings,
   HonoEnv,
@@ -127,6 +127,11 @@ export interface ServiceRegistry {
 
   // Commerce domain
   purchase: PurchaseService;
+  /**
+   * Fee configuration (Codex-m644n) — 3-tier DB-configurable fees with
+   * version-cache invalidation. Lazily read by purchase + subscription.
+   */
+  feeConfig: FeeConfigService;
 
   // Subscription domain
   subscription: SubscriptionService;
