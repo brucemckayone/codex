@@ -400,7 +400,18 @@ export function createMockKVNamespace(options?: {
     get: vi.fn(async (key: string, type?: string) => {
       const value = storage.get(key);
       if (value === undefined) return null;
-      if (type === 'json') return value;
+      // Match real Cloudflare KV semantics: when callers pass a stringified
+      // JSON payload to put() and request type 'json' on read, KV parses the
+      // string. Non-string values that were stashed directly via
+      // `_storage.set()` for spy-tracking tests pass through unchanged.
+      if (type === 'json') {
+        if (typeof value !== 'string') return value;
+        try {
+          return JSON.parse(value);
+        } catch {
+          return null;
+        }
+      }
       if (type === 'text') return String(value);
       if (type === 'arrayBuffer') return value;
       return value;

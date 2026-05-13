@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250102.0",
+    "@codex/test-utils": "workspace:*",
     "@types/node": "^22.0.0",
     "typescript": "^5.6.3",
     "vite-plugin-dts": "^4.5.4",

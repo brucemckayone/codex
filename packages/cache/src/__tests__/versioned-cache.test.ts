@@ -1,105 +1,32 @@
+import type { KVNamespace } from '@cloudflare/workers-types';
+import { createMockKVNamespace } from '@codex/test-utils/mocks';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CacheType } from '../cache-keys';
 import { VersionedCache } from '../versioned-cache';
 
 /**
- * Mock KVNamespace for testing
- *
- * Note: We need to be careful with return types since KV.get() returns
- * different types based on the 'type' parameter.
+ * Reset a mock KV: clear backing storage and reset all spy state.
  */
-function createMockKV(): KVNamespace & {
-  _data: Map<string, string>;
-  _reset: () => void;
-  _getMockCalls: () => unknown[][];
-} {
-  const data = new Map<string, string>();
-  const mockCalls: unknown[][] = [];
-
-  return {
-    get: vi.fn(
-      async (key: string, type?: string): Promise<string | null | object> => {
-        const value = data.get(key);
-        if (value === undefined) return null;
-
-        // Simulate KV's type-based return
-        if (type === 'json') {
-          try {
-            return JSON.parse(value);
-          } catch {
-            return null;
-          }
-        }
-        if (type === 'text') {
-          return value;
-        }
-        if (type === 'arrayBuffer') {
-          return new TextEncoder().encode(value).buffer;
-        }
-        if (type === 'stream') {
-          return new ReadableStream({
-            start(controller) {
-              controller.enqueue(new TextEncoder().encode(value));
-              controller.close();
-            },
-          });
-        }
-        return value;
-      }
-    ),
-    put: vi.fn(
-      async (
-        key: string,
-        value: string | ReadableStream | ArrayBuffer,
-        options?: unknown
-      ) => {
-        // Track calls for verification
-        mockCalls.push([key, value, options]);
-
-        if (typeof value === 'string') {
-          data.set(key, value);
-        } else if (value instanceof ArrayBuffer) {
-          data.set(key, new TextDecoder().decode(value));
-        } else {
-          // For streams, we'll just set a placeholder
-          data.set(key, '[stream]');
-        }
-        return void 0;
-      }
-    ),
-    delete: vi.fn(async (key: string) => {
-      data.delete(key);
-    }),
-    list: vi.fn(),
-    getWithMetadata: vi.fn(),
-    _data: data,
-    _reset: () => {
-      data.clear();
-      mockCalls.length = 0;
-    },
-    _getMockCalls: () => [...mockCalls],
-  } as unknown as KVNamespace & {
-    _data: Map<string, string>;
-    _reset: () => void;
-    _getMockCalls: () => unknown[][];
-  };
+function resetMockKV(kv: ReturnType<typeof createMockKVNamespace>): void {
+  kv._storage.clear();
+  kv.get.mockClear();
+  kv.put.mockClear();
+  kv.delete.mockClear();
+  kv.list.mockClear();
+  kv.getWithMetadata.mockClear();
 }
 
 describe('VersionedCache', () => {
-  let mockKV: KVNamespace & {
-    _data: Map<string, string>;
-    _reset: () => void;
-    _getMockCalls: () => unknown[][];
-  };
+  let mockKV: ReturnType<typeof createMockKVNamespace>;
   let cache: VersionedCache;
 
   beforeEach(() => {
-    mockKV = createMockKV();
-    cache = new VersionedCache({ kv: mockKV });
+    mockKV = createMockKVNamespace();
+    cache = new VersionedCache({ kv: mockKV as unknown as KVNamespace });
   });
 
   afterEach(() => {
-    mockKV._reset();
+    resetMockKV(mockKV);
   });
 
   describe('constructor', () => {
@@ -108,12 +35,17 @@ describe('VersionedCache', () => {
     });
 
     it('should use default prefix', () => {
-      const testCache = new VersionedCache({ kv: mockKV });
+      const testCache = new VersionedCache({
+        kv: mockKV as unknown as KVNamespace,
+      });
       expect(testCache).toBeInstanceOf(VersionedCache);
     });
 
     it('should use custom prefix', () => {
-      const testCache = new VersionedCache({ kv: mockKV, prefix: 'custom' });
+      const testCache = new VersionedCache({
+        kv: mockKV as unknown as KVNamespace,
+        prefix: 'custom',
+      });
       expect(testCache).toBeInstanceOf(VersionedCache);
     });
   });
@@ -171,22 +103,24 @@ describe('VersionedCache', () => {
     });
 
     it('should invalidate cache with new version', async () => {
-      const freshMock = createMockKV();
-      const testCache = new VersionedCache({ kv: freshMock });
+      const freshMock = createMockKVNamespace();
+      const testCache = new VersionedCache({
+        kv: freshMock as unknown as KVNamespace,
+      });
 
       // Store some data first
       const fetcher = vi.fn().mockResolvedValue({ data: 'test' });
       await testCache.get('user-123', CacheType.USER_PROFILE, fetcher);
 
       // Clear the mock calls
-      (freshMock.put as ReturnType<typeof vi.fn>).mockClear();
+      freshMock.put.mockClear();
 
       // Invalidate cache
       await testCache.invalidate('user-123');
 
       // Verify invalidate was called with version key
       expect(freshMock.put).toHaveBeenCalledTimes(1);
-      const calls = (freshMock.put as ReturnType<typeof vi.fn>).mock.calls;
+      const calls = freshMock.put.mock.calls;
       expect(calls[0][0]).toBe('cache:version:user-123');
       expect(typeof calls[0][1]).toBe('string'); // version timestamp
     });
@@ -442,7 +376,7 @@ describe('VersionedCache', () => {
 
       // Only ONE version key should exist, regardless of how many types
       // were primed.
-      const versionKeys = [...mockKV._data.keys()].filter((k) =>
+      const versionKeys = [...mockKV._storage.keys()].filter((k) =>
         k.startsWith('cache:version:')
       );
       expect(versionKeys).toEqual([`cache:version:${orgId}`]);
@@ -520,7 +454,7 @@ describe('VersionedCache', () => {
 
   describe('statistics', () => {
     beforeEach(() => {
-      mockKV._reset();
+      resetMockKV(mockKV);
     });
 
     it('should track cache hits and misses', async () => {
@@ -678,16 +612,16 @@ describe('VersionedCache', () => {
     // Note: Custom prefix test is skipped due to mock state management complexity
     // The functionality works correctly in real KV (verified via integration tests)
     it.skip('should use custom prefix in keys', async () => {
-      const freshMock = createMockKV();
+      const freshMock = createMockKVNamespace();
       const customCache = new VersionedCache({
-        kv: freshMock,
+        kv: freshMock as unknown as KVNamespace,
         prefix: 'custom',
       });
       const fetcher = vi.fn().mockResolvedValue({ data: 'test' });
 
       await customCache.get('test-id-unique', 'test:type', fetcher);
 
-      const calls = freshMock._getMockCalls();
+      const calls = freshMock.put.mock.calls;
       const dataKeyCall = calls.find(
         (call) =>
           typeof call[0] === 'string' &&
