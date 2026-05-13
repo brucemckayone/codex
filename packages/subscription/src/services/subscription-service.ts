@@ -2302,16 +2302,19 @@ export class SubscriptionService extends BaseService {
 
     for (const payout of unresolvedPayouts) {
       try {
-        const transfer = await this.stripe.transfers.create({
-          amount: payout.amountCents,
-          currency: payout.currency,
-          destination: stripeAccountId,
-          metadata: {
-            pending_payout_id: payout.id,
-            subscription_id: payout.subscriptionId,
-            type: 'pending_payout_resolution',
+        const transfer = await this.stripe.transfers.create(
+          {
+            amount: payout.amountCents,
+            currency: payout.currency,
+            destination: stripeAccountId,
+            metadata: {
+              pending_payout_id: payout.id,
+              subscription_id: payout.subscriptionId,
+              type: 'pending_payout_resolution',
+            },
           },
-        });
+          { idempotencyKey: `payout_${payout.id}` }
+        );
 
         await this.db
           .update(pendingPayouts)
