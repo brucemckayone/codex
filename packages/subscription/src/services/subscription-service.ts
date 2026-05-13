@@ -356,6 +356,36 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
+   * Compute a final revenue split for the subscription path: resolves
+   * DB-configurable fees by orgId, runs the pure split math, then applies
+   * the min-platform-fee floor (Codex-m644n).
+   *
+   * Used by invoice creation, recurring invoice updates, and tier-change
+   * proration — all of which need an identical (split, fees) pair that
+   * satisfies the `amount = platform + org + creator` CHECK constraint.
+   */
+  private async computeSubscriptionSplit(
+    orgId: string,
+    amountCents: number
+  ): Promise<{
+    platformFeeCents: number;
+    organizationFeeCents: number;
+    creatorPayoutCents: number;
+  }> {
+    const orgFees = await this.resolveSubscriptionFees(orgId);
+    const rawSplit = calculateRevenueSplit(
+      amountCents,
+      orgFees.platformFeePercent,
+      orgFees.orgFeePercent
+    );
+    return applyMinPlatformFeeFloor(
+      amountCents,
+      rawSplit,
+      orgFees.minPlatformFeeCents
+    );
+  }
+
+  /**
    * Internal orchestrator hook.
    *
    * Called at the end of every public mutation method (cancel, changeTier,
@@ -735,17 +765,7 @@ export class SubscriptionService extends BaseService {
     // Calculate revenue split using DB-configurable fees (Codex-m644n).
     // FeeConfigService falls back to FEES.* constants when no fee row exists,
     // preserving pre-m644n bit-for-bit behaviour on fresh installs.
-    const orgFees = await this.resolveSubscriptionFees(orgId);
-    const rawSplit = calculateRevenueSplit(
-      amountCents,
-      orgFees.platformFeePercent,
-      orgFees.orgFeePercent
-    );
-    const split = applyMinPlatformFeeFloor(
-      amountCents,
-      rawSplit,
-      orgFees.minPlatformFeeCents
-    );
+    const split = await this.computeSubscriptionSplit(orgId, amountCents);
 
     // In Stripe v19+, period dates are on the subscription item, not the subscription
     const periodStart = item?.current_period_start ?? 0;
@@ -983,16 +1003,9 @@ export class SubscriptionService extends BaseService {
 
     // Update period dates and recalculate split (DB-configurable fees, Codex-m644n).
     const amountCents = stripeInvoice.amount_paid;
-    const orgFees = await this.resolveSubscriptionFees(sub.organizationId);
-    const rawSplit = calculateRevenueSplit(
-      amountCents,
-      orgFees.platformFeePercent,
-      orgFees.orgFeePercent
-    );
-    const split = applyMinPlatformFeeFloor(
-      amountCents,
-      rawSplit,
-      orgFees.minPlatformFeeCents
+    const split = await this.computeSubscriptionSplit(
+      sub.organizationId,
+      amountCents
     );
 
     await this.db
@@ -1889,16 +1902,9 @@ export class SubscriptionService extends BaseService {
       // Updating amountCents alone would silently violate it.
       // DB-configurable fees (Codex-m644n) — falls back to FEES.* constants
       // when FeeConfigService is not injected (legacy tests).
-      const orgFees = await this.resolveSubscriptionFees(orgId);
-      const rawNewSplit = calculateRevenueSplit(
-        newRecurringAmount,
-        orgFees.platformFeePercent,
-        orgFees.orgFeePercent
-      );
-      const newSplit = applyMinPlatformFeeFloor(
-        newRecurringAmount,
-        rawNewSplit,
-        orgFees.minPlatformFeeCents
+      const newSplit = await this.computeSubscriptionSplit(
+        orgId,
+        newRecurringAmount
       );
       try {
         await this.db
