@@ -163,3 +163,39 @@ export function calculateRevenueSplit(
  */
 export const DEFAULT_PLATFORM_FEE_PERCENTAGE = FEES.PLATFORM_PERCENT;
 export const DEFAULT_ORG_FEE_PERCENTAGE = FEES.ORG_PERCENT;
+
+/**
+ * Apply the per-row min-platform-fee floor to a calculated revenue split
+ * (Codex-m644n).
+ *
+ * Floor logic lives in the caller (not in `calculateRevenueSplit`) so the
+ * pure math stays untouched. When `split.platformFeeCents < minFloor`, the
+ * shortfall is taken from the creator pool first, then the org fee, both
+ * floored at 0 so we never go negative. When the floor exceeds the total
+ * (degenerate input), the platform takes the whole amount and the other
+ * recipients receive 0 — safer than letting the DB CHECK constraint reject
+ * the entire row. Preserves the invariant `amount = platform + org + creator`
+ * by construction.
+ *
+ * Shared between the one-off purchase path (`@codex/purchase`) and the
+ * subscription path (`@codex/subscription`).
+ */
+export function applyMinPlatformFeeFloor(
+  amountCents: number,
+  split: RevenueSplit,
+  minPlatformFeeCents: number
+): RevenueSplit {
+  if (split.platformFeeCents >= minPlatformFeeCents) return split;
+  const floor = Math.min(minPlatformFeeCents, amountCents);
+  const shortfall = floor - split.platformFeeCents;
+  const creatorReduction = Math.min(shortfall, split.creatorPayoutCents);
+  const orgReduction = Math.min(
+    shortfall - creatorReduction,
+    split.organizationFeeCents
+  );
+  return {
+    platformFeeCents: floor,
+    organizationFeeCents: split.organizationFeeCents - orgReduction,
+    creatorPayoutCents: split.creatorPayoutCents - creatorReduction,
+  };
+}

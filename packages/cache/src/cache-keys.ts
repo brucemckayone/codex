@@ -49,6 +49,25 @@ export const CacheType = {
   /** User session data (complements BetterAuth KV cache) */
   USER_SESSION: 'user:session',
 
+  /**
+   * Fee config — platform singleton row.
+   * Version-bumped on every UPDATE; NO TTL. Reads cached by entity version.
+   * Used by FeeConfigService in @codex/purchase. (Codex-m644n)
+   */
+  FEE_CONFIG_PLATFORM: 'fee:platform',
+
+  /**
+   * Fee config — per-org override row.
+   * Version-bumped on every UPDATE; NO TTL.
+   */
+  FEE_CONFIG_ORG: 'fee:org',
+
+  /**
+   * Fee config — per-creator-per-org override row.
+   * Version-bumped on every UPDATE; NO TTL.
+   */
+  FEE_CONFIG_OVERRIDE: 'fee:override',
+
   // --- Collection version identifiers ---
   // These IDs are passed to cache.invalidate() to bump a collection version.
   // They do NOT store cached data — they store a version timestamp used for

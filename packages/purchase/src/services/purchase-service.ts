@@ -80,11 +80,25 @@ import type {
   PurchaseListItem,
   PurchaseWithContent,
 } from '../types';
+import type { FeeConfigService } from './fee-config-service';
 import {
+  applyMinPlatformFeeFloor,
   calculateRevenueSplit,
   DEFAULT_ORG_FEE_PERCENTAGE,
   DEFAULT_PLATFORM_FEE_PERCENTAGE,
 } from './revenue-calculator';
+
+/**
+ * Configuration for `PurchaseService`.
+ *
+ * Adds optional `feeConfig` (Codex-m644n) so the one-off purchase flow can
+ * resolve DB-configurable fees via the 3-tier fallback chain. When absent,
+ * the service uses the `DEFAULT_*` constants — bit-for-bit pre-Codex-m644n
+ * behaviour (covered by existing tests).
+ */
+interface PurchaseServiceConfig extends ServiceConfig {
+  feeConfig?: FeeConfigService;
+}
 
 /**
  * Purchase Service Class
@@ -93,16 +107,18 @@ import {
  */
 export class PurchaseService extends BaseService {
   private readonly stripe: Stripe;
+  private readonly feeConfig: FeeConfigService | undefined;
 
   /**
    * Initialize purchase service
    *
-   * @param config - Service configuration (db, environment)
+   * @param config - Service configuration (db, environment, optional feeConfig)
    * @param stripe - Stripe client instance
    */
-  constructor(config: ServiceConfig, stripe: Stripe) {
+  constructor(config: PurchaseServiceConfig, stripe: Stripe) {
     super(config);
     this.stripe = stripe;
+    this.feeConfig = config.feeConfig;
   }
 
   /**
@@ -423,20 +439,74 @@ export class PurchaseService extends BaseService {
           return existing;
         }
 
-        // Step 2: Get active fee configurations
-        // Phase 1: Use defaults (10% platform, 0% org)
-        // Future: Query platformFeeConfig and agreements tables
-        const platformFeePercentage = DEFAULT_PLATFORM_FEE_PERCENTAGE; // 1000 = 10%
-        const orgFeePercentage = DEFAULT_ORG_FEE_PERCENTAGE; // 0 = 0%
+        // Step 2: Fetch content for org + creator scope (needed for fee resolution).
+        // Codex-m644n moved this above the fee lookup so the FeeConfigService
+        // fallback chain can walk creator-override → org-default → platform
+        // → constants. The org/creator pair anchors all three lookups.
+        const contentRecord = await tx.query.content.findFirst({
+          where: eq(content.id, metadata.contentId),
+          columns: { organizationId: true, creatorId: true },
+        });
 
-        // Step 3: Calculate revenue split
-        const revenueSplit = calculateRevenueSplit(
+        if (!contentRecord) {
+          throw new PaymentProcessingError(
+            'Content not found during purchase completion',
+            {
+              contentId: metadata.contentId,
+              stripePaymentIntentId,
+            }
+          );
+        }
+
+        const organizationId =
+          metadata.organizationId ?? contentRecord.organizationId;
+
+        // Phase 1: Personal content (organizationId = null) cannot be purchased
+        if (!organizationId) {
+          throw new PaymentProcessingError(
+            'Personal content purchases not supported - content must belong to an organization',
+            {
+              contentId: metadata.contentId,
+              stripePaymentIntentId,
+            }
+          );
+        }
+
+        // Step 3: Resolve fees via FeeConfigService when available (Codex-m644n).
+        // Falls back to legacy constants when no resolver is injected — preserves
+        // the pre-m644n behaviour covered by existing tests.
+        const fees = this.feeConfig
+          ? await this.feeConfig.getFeesForCreator(
+              organizationId,
+              contentRecord.creatorId,
+              'one_off'
+            )
+          : {
+              platformFeePercent: DEFAULT_PLATFORM_FEE_PERCENTAGE,
+              orgFeePercent: DEFAULT_ORG_FEE_PERCENTAGE,
+              minPlatformFeeCents: 0,
+              minTransferCents: 0,
+            };
+
+        // Step 4: Calculate revenue split, then apply min-platform-fee floor.
+        // The floor is enforced in the caller (not in calculateRevenueSplit)
+        // to keep the math pure. When (amount * pct / 10000) < minFee, we
+        // override the platform component to the floor and subtract from the
+        // creator pool, then from the org fee if the pool can't cover it. The
+        // DB CHECK constraint `amount = platform + org + creator` is preserved
+        // by construction.
+        const rawSplit = calculateRevenueSplit(
           metadata.amountPaidCents,
-          platformFeePercentage,
-          orgFeePercentage
+          fees.platformFeePercent,
+          fees.orgFeePercent
+        );
+        const revenueSplit = applyMinPlatformFeeFloor(
+          metadata.amountPaidCents,
+          rawSplit,
+          fees.minPlatformFeeCents
         );
 
-        // Step 3a: Reconcile Stripe-collected fee against calculated split.
+        // Step 4a: Reconcile Stripe-collected fee against calculated split.
         // If the application fee Stripe actually charged differs from what
         // calculateRevenueSplit() produces, something drifted — log but don't throw.
         if (
@@ -451,38 +521,6 @@ export class PurchaseService extends BaseService {
               amountPaidCents: metadata.amountPaidCents,
               stripePaymentIntentId,
               contentId: metadata.contentId,
-            }
-          );
-        }
-
-        // Step 3.5: Fetch organizationId from content if not in metadata
-        let organizationId = metadata.organizationId;
-        if (!organizationId) {
-          const contentRecord = await tx.query.content.findFirst({
-            where: eq(content.id, metadata.contentId),
-            columns: { organizationId: true },
-          });
-
-          if (!contentRecord) {
-            throw new PaymentProcessingError(
-              'Content not found during purchase completion',
-              {
-                contentId: metadata.contentId,
-                stripePaymentIntentId,
-              }
-            );
-          }
-
-          organizationId = contentRecord.organizationId;
-        }
-
-        // Phase 1: Personal content (organizationId = null) cannot be purchased
-        if (!organizationId) {
-          throw new PaymentProcessingError(
-            'Personal content purchases not supported - content must belong to an organization',
-            {
-              contentId: metadata.contentId,
-              stripePaymentIntentId,
             }
           );
         }

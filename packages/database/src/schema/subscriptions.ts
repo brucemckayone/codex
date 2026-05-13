@@ -281,7 +281,9 @@ export const pendingPayouts = pgTable(
     amountCents: integer('amount_cents').notNull(),
     currency: varchar('currency', { length: 3 }).notNull().default('gbp'),
     reason: varchar('reason', { length: 100 }).notNull(),
-    // 'connect_not_ready' | 'connect_restricted' | 'transfer_failed'
+    // 'connect_not_ready' | 'connect_restricted' | 'transfer_failed' | 'min_transfer_floor'
+    // (Codex-m644n: min_transfer_floor — amount below feeConfig.minTransferCents,
+    //  accumulates until a future invoice pushes it over the threshold.)
 
     // Resolution
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
@@ -300,7 +302,7 @@ export const pendingPayouts = pgTable(
     check('check_pending_payout_positive', sql`${table.amountCents} > 0`),
     check(
       'check_pending_payout_reason',
-      sql`${table.reason} IN ('connect_not_ready', 'connect_restricted', 'transfer_failed')`
+      sql`${table.reason} IN ('connect_not_ready', 'connect_restricted', 'transfer_failed', 'min_transfer_floor')`
     ),
   ]
 );

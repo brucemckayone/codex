@@ -34,6 +34,12 @@ import {
   adminRevenueQuerySchema,
   adminSubscribersQuerySchema,
   adminTopContentQuerySchema,
+  feeAuditLogQuerySchema,
+  orgCreatorParamsSchema,
+  orgIdParamsSchema,
+  updateOrgFeesSchema,
+  updatePlatformFeesSchema,
+  upsertCreatorOverrideSchema,
 } from '@codex/validation';
 import {
   createKvCheck,
@@ -440,6 +446,183 @@ app.post(
         ctx.input.params.contentId
       );
       return { success: true };
+    },
+  })
+);
+
+// ============================================================================
+// Fee Configuration Endpoints (Codex-m644n) — INTERNAL
+//
+// 3-tier DB-configurable fee model: platform → org → creator-override.
+// All routes are gated by `policy: { auth: 'platform_owner' }` — they are NOT
+// safe for org-admin consumption (the platform's revenue model lives here).
+//
+// IMPORTANT: These endpoints are NOT public. They are not described in any
+// public OpenAPI document and there is no SvelteKit/web UI that consumes
+// them today. The future local desktop admin app (epic Codex-xyb7v) is the
+// planned consumer. Until that ships, mutations happen via direct DB edits
+// or by ad-hoc admin tooling running on a trusted local machine.
+//
+// All write endpoints bump the row's version counter and write one row per
+// changed column to `fee_config_audit_log`, then fire-and-forget invalidate
+// the VersionedCache key for that entity (NO TTL — cache is effectively
+// immutable until the next write).
+// ============================================================================
+
+app.get(
+  '/api/admin/fees/platform',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    handler: async (ctx) => {
+      const row = await ctx.services.feeConfig.getPlatformRow();
+      return { config: row };
+    },
+  })
+);
+
+app.patch(
+  '/api/admin/fees/platform',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { body: updatePlatformFeesSchema },
+    handler: async (ctx) => {
+      await ctx.services.feeConfig.updatePlatformFees(
+        ctx.input.body,
+        ctx.user.id
+      );
+      const row = await ctx.services.feeConfig.getPlatformRow();
+      return { config: row };
+    },
+  })
+);
+
+app.get(
+  '/api/admin/fees/org/:orgId',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { params: orgIdParamsSchema },
+    handler: async (ctx) => {
+      const row = await ctx.services.feeConfig.getOrgRow(
+        ctx.input.params.orgId
+      );
+      return { config: row };
+    },
+  })
+);
+
+app.patch(
+  '/api/admin/fees/org/:orgId',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { params: orgIdParamsSchema, body: updateOrgFeesSchema },
+    handler: async (ctx) => {
+      await ctx.services.feeConfig.updateOrgFees(
+        ctx.input.params.orgId,
+        ctx.input.body,
+        ctx.user.id
+      );
+      const row = await ctx.services.feeConfig.getOrgRow(
+        ctx.input.params.orgId
+      );
+      return { config: row };
+    },
+  })
+);
+
+app.delete(
+  '/api/admin/fees/org/:orgId',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { params: orgIdParamsSchema },
+    successStatus: 204,
+    handler: async (ctx) => {
+      await ctx.services.feeConfig.deleteOrgFees(
+        ctx.input.params.orgId,
+        ctx.user.id
+      );
+      return null;
+    },
+  })
+);
+
+app.get(
+  '/api/admin/fees/org/:orgId/creators',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { params: orgIdParamsSchema },
+    handler: async (ctx) => {
+      const rows = await ctx.services.feeConfig.listCreatorOverrides(
+        ctx.input.params.orgId
+      );
+      return { overrides: rows };
+    },
+  })
+);
+
+app.get(
+  '/api/admin/fees/org/:orgId/creator/:creatorId',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { params: orgCreatorParamsSchema },
+    handler: async (ctx) => {
+      const row = await ctx.services.feeConfig.getCreatorOverrideRow(
+        ctx.input.params.orgId,
+        ctx.input.params.creatorId
+      );
+      return { override: row };
+    },
+  })
+);
+
+app.put(
+  '/api/admin/fees/org/:orgId/creator/:creatorId',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: {
+      params: orgCreatorParamsSchema,
+      body: upsertCreatorOverrideSchema,
+    },
+    handler: async (ctx) => {
+      await ctx.services.feeConfig.upsertCreatorOverride(
+        ctx.input.params.orgId,
+        ctx.input.params.creatorId,
+        ctx.input.body,
+        ctx.user.id
+      );
+      const row = await ctx.services.feeConfig.getCreatorOverrideRow(
+        ctx.input.params.orgId,
+        ctx.input.params.creatorId
+      );
+      return { override: row };
+    },
+  })
+);
+
+app.delete(
+  '/api/admin/fees/org/:orgId/creator/:creatorId',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { params: orgCreatorParamsSchema },
+    successStatus: 204,
+    handler: async (ctx) => {
+      await ctx.services.feeConfig.deleteCreatorOverride(
+        ctx.input.params.orgId,
+        ctx.input.params.creatorId,
+        ctx.user.id
+      );
+      return null;
+    },
+  })
+);
+
+app.get(
+  '/api/admin/fees/audit-log',
+  procedure({
+    policy: { auth: 'platform_owner' },
+    input: { query: feeAuditLogQuerySchema },
+    handler: async (ctx) => {
+      const entries = await ctx.services.feeConfig.getAuditLog(ctx.input.query);
+      return { entries };
     },
   })
 );
