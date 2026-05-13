@@ -48,6 +48,7 @@ import {
   users,
 } from '@codex/database/schema';
 import {
+  applyMinPlatformFeeFloor,
   type FeeConfig,
   type FeeConfigService,
   withStaleCustomerRecovery,
@@ -352,43 +353,6 @@ export class SubscriptionService extends BaseService {
     return creatorId
       ? this.feeConfig.getFeesForCreator(orgId, creatorId, 'subscription')
       : this.feeConfig.getFeesForOrg(orgId, 'subscription');
-  }
-
-  /**
-   * Apply the min-platform-fee floor to a calculated split.
-   *
-   * Per Codex-m644n design: caller is responsible for the floor, not
-   * `calculateRevenueSplit` (which stays pure). When the floor exceeds the
-   * platform percentage, we reduce the creator pool first then the org fee
-   * to absorb the shortfall. Preserves the DB CHECK invariant `amount =
-   * platform + org + creator` by construction.
-   */
-  private applyMinPlatformFeeFloor(
-    amountCents: number,
-    split: {
-      platformFeeCents: number;
-      organizationFeeCents: number;
-      creatorPayoutCents: number;
-    },
-    minPlatformFeeCents: number
-  ): {
-    platformFeeCents: number;
-    organizationFeeCents: number;
-    creatorPayoutCents: number;
-  } {
-    if (split.platformFeeCents >= minPlatformFeeCents) return split;
-    const floor = Math.min(minPlatformFeeCents, amountCents);
-    const shortfall = floor - split.platformFeeCents;
-    const creatorReduction = Math.min(shortfall, split.creatorPayoutCents);
-    const orgReduction = Math.min(
-      shortfall - creatorReduction,
-      split.organizationFeeCents
-    );
-    return {
-      platformFeeCents: floor,
-      organizationFeeCents: split.organizationFeeCents - orgReduction,
-      creatorPayoutCents: split.creatorPayoutCents - creatorReduction,
-    };
   }
 
   /**
@@ -777,7 +741,7 @@ export class SubscriptionService extends BaseService {
       orgFees.platformFeePercent,
       orgFees.orgFeePercent
     );
-    const split = this.applyMinPlatformFeeFloor(
+    const split = applyMinPlatformFeeFloor(
       amountCents,
       rawSplit,
       orgFees.minPlatformFeeCents
@@ -1025,7 +989,7 @@ export class SubscriptionService extends BaseService {
       orgFees.platformFeePercent,
       orgFees.orgFeePercent
     );
-    const split = this.applyMinPlatformFeeFloor(
+    const split = applyMinPlatformFeeFloor(
       amountCents,
       rawSplit,
       orgFees.minPlatformFeeCents
@@ -1931,7 +1895,7 @@ export class SubscriptionService extends BaseService {
         orgFees.platformFeePercent,
         orgFees.orgFeePercent
       );
-      const newSplit = this.applyMinPlatformFeeFloor(
+      const newSplit = applyMinPlatformFeeFloor(
         newRecurringAmount,
         rawNewSplit,
         orgFees.minPlatformFeeCents

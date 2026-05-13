@@ -81,49 +81,11 @@ import type {
   PurchaseWithContent,
 } from '../types';
 import {
+  applyMinPlatformFeeFloor,
   calculateRevenueSplit,
   DEFAULT_ORG_FEE_PERCENTAGE,
   DEFAULT_PLATFORM_FEE_PERCENTAGE,
 } from './revenue-calculator';
-
-/**
- * Apply the per-row min-platform-fee floor to a calculated split (Codex-m644n).
- *
- * Floor logic lives in the caller (not in `calculateRevenueSplit`) so the
- * pure math stays untouched. When `split.platformFeeCents < minFloor`, the
- * shortfall is taken from the creator pool first, then the org fee, both
- * floored at 0 so we never go negative. When the floor exceeds the total
- * (degenerate input), the platform takes the whole amount and the other
- * recipients receive 0 — safer than letting the DB CHECK constraint reject
- * the entire row.
- */
-function applyOneOffMinPlatformFloor(
-  amountCents: number,
-  split: {
-    platformFeeCents: number;
-    organizationFeeCents: number;
-    creatorPayoutCents: number;
-  },
-  minPlatformFeeCents: number
-): {
-  platformFeeCents: number;
-  organizationFeeCents: number;
-  creatorPayoutCents: number;
-} {
-  if (split.platformFeeCents >= minPlatformFeeCents) return split;
-  const floor = Math.min(minPlatformFeeCents, amountCents);
-  const shortfall = floor - split.platformFeeCents;
-  const creatorReduction = Math.min(shortfall, split.creatorPayoutCents);
-  const orgReduction = Math.min(
-    shortfall - creatorReduction,
-    split.organizationFeeCents
-  );
-  return {
-    platformFeeCents: floor,
-    organizationFeeCents: split.organizationFeeCents - orgReduction,
-    creatorPayoutCents: split.creatorPayoutCents - creatorReduction,
-  };
-}
 
 /**
  * Configuration for `PurchaseService`.
@@ -539,7 +501,7 @@ export class PurchaseService extends BaseService {
           fees.platformFeePercent,
           fees.orgFeePercent
         );
-        const revenueSplit = applyOneOffMinPlatformFloor(
+        const revenueSplit = applyMinPlatformFeeFloor(
           metadata.amountPaidCents,
           rawSplit,
           fees.minPlatformFeeCents

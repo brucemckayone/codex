@@ -85,6 +85,7 @@ export {
 } from './services/resolve-customer';
 // Revenue calculator
 export {
+  applyMinPlatformFeeFloor,
   calculateRevenueSplit,
   DEFAULT_ORG_FEE_PERCENTAGE,
   DEFAULT_PLATFORM_FEE_PERCENTAGE,
