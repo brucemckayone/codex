@@ -138,6 +138,29 @@ export class ConnectAccountService extends BaseService {
   }
 
   /**
+   * Get Connect account by Stripe account id.
+   *
+   * Used by webhook handlers to read CURRENT DB state before applying an
+   * `account.updated` mutation. This is the source of truth for "wasActive"
+   * because Stripe's `previous_attributes` diff is unreliable on capability
+   * ricochet events (verified via Context7 2026-05-13: `account.updated`
+   * fires on ANY status/property change and `previous_attributes` may NOT
+   * contain `charges_enabled`/`payouts_enabled` when the event is triggered
+   * by a tangential capability or requirement field flip).
+   */
+  async getAccountByStripeId(
+    stripeAccountId: string
+  ): Promise<StripeConnectAccount | null> {
+    const [account] = await this.db
+      .select()
+      .from(stripeConnectAccounts)
+      .where(eq(stripeConnectAccounts.stripeAccountId, stripeAccountId))
+      .limit(1);
+
+    return account ?? null;
+  }
+
+  /**
    * Generate a new onboarding link for an existing account.
    * Used to resume abandoned onboarding — Stripe remembers prior progress.
    */
