@@ -4,6 +4,7 @@ export { default as AlertTriangleIcon } from './AlertTriangleIcon.svelte';
 // Navigation
 export { default as ArrowLeftIcon } from './ArrowLeftIcon.svelte';
 export { default as ArrowRightIcon } from './ArrowRightIcon.svelte';
+export { default as BanknoteIcon } from './BanknoteIcon.svelte';
 // Misc
 export { default as CalendarIcon } from './CalendarIcon.svelte';
 export { default as CheckCircleIcon } from './CheckCircleIcon.svelte';

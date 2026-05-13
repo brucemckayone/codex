@@ -32,6 +32,7 @@
     SettingsIcon,
     CoinsIcon,
     CreditCardIcon,
+    BanknoteIcon,
     GlobeIcon,
     UserIcon,
     LogInIcon,
@@ -60,6 +61,7 @@
     customers: UserPlusIcon,
     settings: SettingsIcon,
     monetisation: CoinsIcon,
+    payouts: BanknoteIcon,
     billing: CreditCardIcon,
   };
 

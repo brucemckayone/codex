@@ -4220,6 +4220,318 @@ describe('SubscriptionService', () => {
     });
   });
 
+  // ─── listPayoutsByOrg (Codex-zqaxo) ───────────────────────────────────────
+  //
+  // Powers the read-only `/studio/payouts` table. Org-scoped via
+  // `pendingPayouts.organizationId` — never user-scoped, because a creator
+  // can belong to multiple orgs and we must NEVER leak rows across orgs.
+
+  describe('listPayoutsByOrg', () => {
+    async function seedSubscriptionForOrg(
+      orgId: string,
+      tierId: string,
+      userId: string,
+      slug: string
+    ) {
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(userId, orgId, tierId, {
+            status: 'active',
+            stripeSubscriptionId: `sub_zqaxo_${createUniqueSlug(slug)}`,
+          })
+        )
+        .returning();
+      return sub;
+    }
+
+    it('returns empty paginated result when org has no payouts', async () => {
+      const { org } = await createFullOrg('zqaxo-empty');
+      const result = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 20,
+      });
+      expect(result.items).toEqual([]);
+      expect(result.pagination).toEqual({
+        page: 1,
+        limit: 20,
+        total: 0,
+        totalPages: 0,
+      });
+    });
+
+    it('returns rows scoped to the requested org, derived statuses, and ISO dates', async () => {
+      const { org, tier1 } = await createFullOrg('zqaxo-mixed');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'mixed'
+      );
+
+      // Three rows: one pending, one resolved, one failed.
+      await db.insert(pendingPayoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 1234,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 4567,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date('2026-05-01T10:00:00Z'),
+          stripeTransferId: 'tr_resolved_zqaxo_1',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 999,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+        },
+      ]);
+
+      const result = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 20,
+      });
+
+      expect(result.items).toHaveLength(3);
+      const byStatus = new Map(result.items.map((r) => [r.status, r]));
+      expect(byStatus.get('pending')?.amountCents).toBe(1234);
+      expect(byStatus.get('resolved')?.amountCents).toBe(4567);
+      expect(byStatus.get('resolved')?.stripeTransferId).toBe(
+        'tr_resolved_zqaxo_1'
+      );
+      expect(byStatus.get('failed')?.reason).toBe('transfer_failed');
+
+      // Dates must be ISO strings (not Date objects) so the worker → JSON
+      // hop is lossless and the page can hand them straight to formatDate.
+      for (const row of result.items) {
+        expect(typeof row.createdAt).toBe('string');
+        if (row.resolvedAt) expect(typeof row.resolvedAt).toBe('string');
+      }
+    });
+
+    it('SCOPING INVARIANT: never leaks payouts from a different org', async () => {
+      // Codex-zqaxo STOP-rule: listPayoutsByOrg MUST filter by
+      // pendingPayouts.organizationId — filtering by userId alone would
+      // expose another org's rows for the same creator.
+      const { org: org1, tier1: t1 } = await createFullOrg('zqaxo-scope-a');
+      const { org: org2, tier1: t2 } = await createFullOrg('zqaxo-scope-b');
+
+      const subA = await seedSubscriptionForOrg(
+        org1.id,
+        t1.id,
+        otherCreatorId,
+        'scope-a'
+      );
+      const subB = await seedSubscriptionForOrg(
+        org2.id,
+        t2.id,
+        otherCreatorId,
+        'scope-b'
+      );
+
+      await db.insert(pendingPayoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org1.id,
+          subscriptionId: subA.id,
+          amountCents: 100,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org2.id,
+          subscriptionId: subB.id,
+          amountCents: 200,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+        },
+      ]);
+
+      const a = await service.listPayoutsByOrg(org1.id, {
+        page: 1,
+        limit: 20,
+      });
+      const b = await service.listPayoutsByOrg(org2.id, {
+        page: 1,
+        limit: 20,
+      });
+
+      expect(a.items).toHaveLength(1);
+      expect(a.items[0].amountCents).toBe(100);
+      expect(b.items).toHaveLength(1);
+      expect(b.items[0].amountCents).toBe(200);
+    });
+
+    it('applies the pending status filter', async () => {
+      const { org, tier1 } = await createFullOrg('zqaxo-filter-pending');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'fp'
+      );
+
+      await db.insert(pendingPayoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 200,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_x',
+        },
+      ]);
+
+      const result = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 20,
+        status: 'pending',
+      });
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].status).toBe('pending');
+      expect(result.items[0].amountCents).toBe(100);
+    });
+
+    it('applies the resolved status filter', async () => {
+      const { org, tier1 } = await createFullOrg('zqaxo-filter-resolved');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'fr'
+      );
+
+      await db.insert(pendingPayoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 200,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_zqaxo_resolved',
+        },
+      ]);
+
+      const result = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 20,
+        status: 'resolved',
+      });
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].status).toBe('resolved');
+      expect(result.items[0].stripeTransferId).toBe('tr_zqaxo_resolved');
+    });
+
+    it('applies the failed status filter (reason=transfer_failed AND unresolved)', async () => {
+      const { org, tier1 } = await createFullOrg('zqaxo-filter-failed');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'ff'
+      );
+
+      await db.insert(pendingPayoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 999,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+        },
+      ]);
+
+      const result = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 20,
+        status: 'failed',
+      });
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].status).toBe('failed');
+      expect(result.items[0].reason).toBe('transfer_failed');
+    });
+
+    it('paginates correctly with totalPages math', async () => {
+      const { org, tier1 } = await createFullOrg('zqaxo-pagination');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'pg'
+      );
+
+      const rows = Array.from({ length: 5 }, (_, i) => ({
+        userId: otherCreatorId,
+        organizationId: org.id,
+        subscriptionId: sub.id,
+        amountCents: 100 + i,
+        currency: 'gbp',
+        reason: 'connect_not_ready',
+      }));
+      await db.insert(pendingPayoutsTable).values(rows);
+
+      const page1 = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 2,
+      });
+      expect(page1.items).toHaveLength(2);
+      expect(page1.pagination).toEqual({
+        page: 1,
+        limit: 2,
+        total: 5,
+        totalPages: 3,
+      });
+
+      const page3 = await service.listPayoutsByOrg(org.id, {
+        page: 3,
+        limit: 2,
+      });
+      expect(page3.items).toHaveLength(1);
+    });
+  });
+
   // ─── resolvePendingPayouts (Codex-w4jjk) ───────────────────────────────────
   //
   // Called from workers/ecom-api/src/handlers/connect-webhook.ts:75 when a

@@ -386,6 +386,46 @@ export const getConnectStatus = query(
   }
 );
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin: Payouts Query (Codex-zqaxo)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const listPayoutsQueryArgsSchema = z.object({
+  organizationId: z.string().uuid(),
+  status: z.enum(['all', 'pending', 'resolved', 'failed']).default('all'),
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+/**
+ * List pending + resolved creator payouts for an org (Codex-zqaxo).
+ *
+ * Backs the read-only `/studio/payouts` table. Owner-only — the worker
+ * route enforces `requireOrgManagement` and re-derives scope from the
+ * authenticated session membership; the client-supplied
+ * `organizationId` is only used to build the URL.
+ *
+ * NOT cached as a TanStack DB live collection in Phase 1 — each
+ * filter/page is a fresh snapshot query. See epic Codex-kbfe3 design
+ * decisions.
+ */
+export const listPayouts = query(
+  listPayoutsQueryArgsSchema,
+  async ({ organizationId, status, fromDate, toDate, page, limit }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (fromDate) params.set('fromDate', fromDate);
+    if (toDate) params.set('toDate', toDate);
+    params.set('page', String(page));
+    params.set('limit', String(limit));
+    return api.subscription.listPayouts(organizationId, params);
+  }
+);
+
 const connectDashboardCommandSchema = z.object({
   organizationId: z.string().uuid(),
 });
