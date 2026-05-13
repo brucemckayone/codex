@@ -80,6 +80,7 @@ import type {
   PurchaseListItem,
   PurchaseWithContent,
 } from '../types';
+import type { FeeConfigService } from './fee-config-service';
 import {
   applyMinPlatformFeeFloor,
   calculateRevenueSplit,
@@ -96,7 +97,7 @@ import {
  * behaviour (covered by existing tests).
  */
 interface PurchaseServiceConfig extends ServiceConfig {
-  feeConfig?: import('./fee-config-service').FeeConfigService;
+  feeConfig?: FeeConfigService;
 }
 
 /**
@@ -106,9 +107,7 @@ interface PurchaseServiceConfig extends ServiceConfig {
  */
 export class PurchaseService extends BaseService {
   private readonly stripe: Stripe;
-  private readonly feeConfig:
-    | import('./fee-config-service').FeeConfigService
-    | undefined;
+  private readonly feeConfig: FeeConfigService | undefined;
 
   /**
    * Initialize purchase service
