@@ -4708,6 +4708,108 @@ describe('SubscriptionService', () => {
       expect(after.stripeTransferId).toBe(replayedTransferId);
     });
 
+    // Codex-fzal7: tighten the duplicate-response contract. The prior test
+    // (90ocz-idem-dup, above) covered the happy result shape, but did not
+    // assert (a) that the transferred amount in the SDK call equals the
+    // row's amountCents — Stripe-side dedupe is only safe if our retry uses
+    // identical params; (b) that no spurious pending-payout row is
+    // inserted as a side-effect of the duplicate-response branch (single
+    // DB write contract — exactly one row exists for this payout id, in
+    // the resolved state, after the call returns).
+    it('duplicate-response: transferred amount equals row.amountCents and no extra DB rows are written', async () => {
+      const { org, sub, stripeAccountId } = await seedConnectAndSubscription(
+        'fzal7-idem-dup-strong'
+      );
+
+      const [row] = await db
+        .insert(pendingPayoutsTable)
+        .values([
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 4242,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+          },
+        ])
+        .returning();
+
+      // Snapshot the total pending-payout row count for this user+org BEFORE
+      // the call, so we can prove no spurious rows are inserted by the
+      // duplicate-response branch (e.g. a "retry" row, audit row, etc.).
+      const { eq, and } = await import('drizzle-orm');
+      const rowsBefore = await db
+        .select()
+        .from(pendingPayoutsTable)
+        .where(
+          and(
+            eq(pendingPayoutsTable.userId, creatorId),
+            eq(pendingPayoutsTable.organizationId, org.id)
+          )
+        );
+      expect(rowsBefore).toHaveLength(1);
+
+      // Stripe returns the ORIGINAL transfer (same id, same amount, same
+      // destination) when called with a previously-seen idempotency key.
+      // The amount in the response MUST equal what we sent — that's the
+      // dedupe contract: identical params → identical response.
+      const replayedTransferId = 'tr_replayed_fzal7';
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+      transferSpy.mockImplementationOnce(
+        (params: Record<string, unknown>): unknown =>
+          Promise.resolve({
+            id: replayedTransferId,
+            amount: params.amount, // echo: dedupe → identical response
+            currency: params.currency,
+            destination: params.destination,
+            metadata: params.metadata ?? {},
+          })
+      );
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      // Contract: duplicate-response counts as success — `resolved` ticks,
+      // `failed` MUST stay zero. A regression that mis-classifies the
+      // dedupe response as an error would flip this to { 0, 1 }.
+      expect(result).toEqual({ resolved: 1, failed: 0 });
+      expect(transferSpy).toHaveBeenCalledTimes(1);
+
+      // Transferred amount equals the row's amountCents (the params our
+      // service passed to Stripe). Stripe-side dedupe is only safe under
+      // this invariant — different params with the same key would 400.
+      const [params] = transferSpy.mock.calls[0] as [
+        Record<string, unknown>,
+        { idempotencyKey?: string } | undefined,
+      ];
+      expect(params.amount).toBe(row.amountCents);
+      expect(params.currency).toBe('gbp');
+      expect(params.destination).toBe(stripeAccountId);
+
+      // DB row is stamped resolved with the (replayed) transfer id, AND
+      // the total row count for this user+org has not grown — the
+      // duplicate-response branch is a single-write path (UPDATE only).
+      const rowsAfter = await db
+        .select()
+        .from(pendingPayoutsTable)
+        .where(
+          and(
+            eq(pendingPayoutsTable.userId, creatorId),
+            eq(pendingPayoutsTable.organizationId, org.id)
+          )
+        );
+      expect(rowsAfter).toHaveLength(1);
+      const [after] = rowsAfter;
+      expect(after.id).toBe(row.id);
+      expect(after.resolvedAt).not.toBeNull();
+      expect(after.stripeTransferId).toBe(replayedTransferId);
+      expect(after.amountCents).toBe(row.amountCents);
+    });
+
     it('warns and returns empty when the (orgId, stripeAccountId) pair has no Connect account row', async () => {
       const { org } = await createFullOrg('w4jjk-acct-not-found');
 
