@@ -24,6 +24,7 @@ When working with beads, you MUST have a full understanding of how tasks fit int
 | Handle errors correctly | [packages/service-errors/CLAUDE.md](packages/service-errors/CLAUDE.md) |
 | Work with R2/KV | [packages/cloudflare-clients/CLAUDE.md](packages/cloudflare-clients/CLAUDE.md) |
 | Work with caching/versions | [packages/cache/CLAUDE.md](packages/cache/CLAUDE.md) (if exists), [apps/web/CLAUDE.md](apps/web/CLAUDE.md) |
+| Work with payouts / Stripe transfers | [docs/payouts/README.md](docs/payouts/README.md) — pipeline + fee config |
 
 ---
 

@@ -72,7 +72,24 @@ The platform's access hierarchy is **`subscribers ⊇ followers ⊇ public`**: a
 
 Tier-gated (`accessType='subscribers'`) content is **orthogonal** to this hierarchy: a subscription only unlocks tier-gated content if the subscriber's tier `sortOrder >= content.minimumTierId.sortOrder`. The grant path is implemented in `ContentAccessService` (see `packages/access/CLAUDE.md`).
 
-Revenue split defaults: Platform 10%, Org 15% of post-platform, Creators 75% of post-platform. Amounts are in pence (GBP).
+Revenue split defaults: Platform 10%, Org 15% of post-platform, Creators 75% of post-platform. Amounts are in pence (GBP). Defaults are **overridable** via the DB-configurable fee model — see `docs/payouts/fee-configuration.md`.
+
+### Payout pipeline (audit closed 2026-05-13)
+
+The invoice → transfer → pending-payout → drain flow is documented end-to-end in **`docs/payouts/payout-pipeline.md`**. Read that doc before touching any of:
+
+- `handleInvoicePaymentSucceeded` — currency guard + split + transfers
+- `executeTransfers` — fan-out + per-creator min-transfer floor
+- `resolvePendingPayouts` — primary drain (webhook-triggered)
+- `sweepUnresolvedPayouts` — safety-net drain (15-min cron)
+- `assertGbpOnly` — single source of truth for the GBP-only currency guard
+
+Hard invariants enforced by tests — do not regress:
+
+- **GBP-only** (Codex-yv18n). Every `stripe.transfers.create()` call hardcodes `currency: CURRENCY.GBP` AND is preceded by `assertGbpOnly(source, context)`. New transfer call sites without a guard are a regression.
+- **Idempotency keys** (Codex-90ocz). Org transfers use `${chargeId}_org_fee`, creator transfers use `${chargeId}_creator_${creatorId}`, pending-payout resolutions use `payout_${pendingPayoutId}`. Never use random/timestamp keys — they defeat replay safety.
+- **Webhook `wasActive` source** (Codex-qigid). `connect-webhook.ts` reads prior state from the DB row via `getAccountByStripeId`, NOT from Stripe's `previous_attributes` (which is unreliable on capability-ricochet events).
+- **Per-row error isolation** (Codex-vv77x). Both `resolvePendingPayouts` and `sweepUnresolvedPayouts` log per-row/per-group failures and continue. One bad row never poisons the batch.
 
 ## ConnectAccountService Responsibilities
 
