@@ -22,6 +22,7 @@ import {
   createSubscriptionCheckoutSchema,
   getCurrentSubscriptionQuerySchema,
   getSubscriptionStatsQuerySchema,
+  listPayoutsQuerySchema,
   listSubscribersQuerySchema,
   reactivateSubscriptionSchema,
   resumeSubscriptionSchema,
@@ -353,6 +354,42 @@ subscriptions.get(
       const result = await ctx.services.subscription.listSubscribers(
         ctx.organizationId,
         ctx.input.query
+      );
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * GET /subscriptions/payouts
+ *
+ * Codex-zqaxo: list pending + resolved creator payouts for the org owner's
+ * studio payouts table. Owner/admin only via `requireOrgManagement` —
+ * mirror of `/stats` and `/subscribers`.
+ *
+ * SECURITY INVARIANT: the service queries `pendingPayouts` filtered by
+ * `organizationId = ctx.organizationId`. `ctx.organizationId` is set by
+ * `requireOrgManagement` from the user's membership row, so this route
+ * cannot leak another org's payouts even if the client forges
+ * `query.organizationId`. The Zod schema requires `organizationId` for
+ * the URL contract, but the service ignores it in favour of the
+ * authenticated `ctx.organizationId`.
+ */
+subscriptions.get(
+  '/payouts',
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: { query: listPayoutsQuerySchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.subscription.listPayoutsByOrg(
+        ctx.organizationId,
+        {
+          page: ctx.input.query.page,
+          limit: ctx.input.query.limit,
+          status: ctx.input.query.status,
+          fromDate: ctx.input.query.fromDate,
+          toDate: ctx.input.query.toDate,
+        }
       );
       return new PaginatedResult(result.items, result.pagination);
     },

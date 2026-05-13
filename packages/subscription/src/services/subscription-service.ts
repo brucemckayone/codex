@@ -61,7 +61,18 @@ import {
   UnsupportedCurrencyError,
 } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
-import { and, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  sql,
+} from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   AlreadySubscribedError,
@@ -107,6 +118,56 @@ interface SubscriptionStats {
     subscriberCount: number;
     mrrCents: number;
   }>;
+}
+
+/**
+ * Display status for a `pendingPayouts` row in the studio payouts table
+ * (Codex-zqaxo). Derived from the persisted `resolvedAt`,
+ * `stripeTransferId`, and `reason` columns — there is no `status` column
+ * on the table itself.
+ */
+export type PayoutDisplayStatus = 'pending' | 'resolved' | 'failed';
+
+/**
+ * Read-model returned by `SubscriptionService.listPayoutsByOrg`. The
+ * creator denorm fields (`creatorName`, `creatorEmail`, `creatorAvatarUrl`)
+ * come from a LEFT JOIN on `users` — null when the user row has been
+ * removed but the payout history remains.
+ *
+ * Dates are serialised as ISO strings so the worker→Hono→JSON boundary
+ * is lossless and the SvelteKit remote-function consumer can pass them
+ * straight to `formatDate`.
+ */
+export interface PayoutWithCreator {
+  id: string;
+  creatorId: string;
+  creatorName: string | null;
+  creatorEmail: string | null;
+  creatorAvatarUrl: string | null;
+  amountCents: number;
+  currency: string;
+  reason: string;
+  status: PayoutDisplayStatus;
+  resolvedAt: string | null;
+  stripeTransferId: string | null;
+  createdAt: string;
+}
+
+/**
+ * Resolve a `pendingPayouts` row to one of three display statuses. Used by
+ * `listPayoutsByOrg` so the UI never has to re-derive these branches.
+ *
+ *  - `resolved` — has both `resolvedAt` and `stripeTransferId`
+ *  - `failed`   — `reason='transfer_failed'` and not yet resolved
+ *  - `pending`  — every other unresolved row
+ */
+function derivePayoutStatus(
+  resolvedAt: Date | null,
+  reason: string
+): PayoutDisplayStatus {
+  if (resolvedAt) return 'resolved';
+  if (reason === 'transfer_failed') return 'failed';
+  return 'pending';
 }
 
 /**
@@ -2317,6 +2378,111 @@ export class SubscriptionService extends BaseService {
         subscriberCount: t.subscriberCount,
         mrrCents: t.mrrCents ?? 0,
       })),
+    };
+  }
+
+  /**
+   * Codex-zqaxo: list pending + resolved payouts for an org owner's
+   * `/studio/payouts` table.
+   *
+   * Scoping invariant (HARD): rows MUST be filtered by
+   * `pendingPayouts.organizationId = orgId`. The route layer applies
+   * `requireOrgManagement` so `orgId === ctx.organizationId`. Filtering by
+   * `userId` here would leak cross-org payouts because a creator can belong
+   * to multiple orgs — never relax to user-only scoping.
+   *
+   * Status filter semantics:
+   *  - `pending`  → `resolvedAt IS NULL` AND reason != 'transfer_failed'
+   *  - `resolved` → `stripeTransferId IS NOT NULL` AND `resolvedAt IS NOT NULL`
+   *  - `failed`   → `reason = 'transfer_failed'` AND `resolvedAt IS NULL`
+   *  - `all`      → no status predicate
+   *
+   * The creator name/avatar denorm comes from a LEFT JOIN on `users` so a
+   * deleted user row does not drop the payout from the table.
+   */
+  async listPayoutsByOrg(
+    orgId: string,
+    options: {
+      page: number;
+      limit: number;
+      status?: 'all' | 'pending' | 'resolved' | 'failed';
+      fromDate?: string;
+      toDate?: string;
+    }
+  ): Promise<PaginatedListResponse<PayoutWithCreator>> {
+    const { page, limit, status = 'all', fromDate, toDate } = options;
+    const offset = (page - 1) * limit;
+
+    const conditions = [eq(pendingPayouts.organizationId, orgId)];
+
+    if (status === 'pending') {
+      conditions.push(isNull(pendingPayouts.resolvedAt));
+      conditions.push(sql`${pendingPayouts.reason} != 'transfer_failed'`);
+    } else if (status === 'resolved') {
+      conditions.push(isNotNull(pendingPayouts.resolvedAt));
+      conditions.push(isNotNull(pendingPayouts.stripeTransferId));
+    } else if (status === 'failed') {
+      conditions.push(eq(pendingPayouts.reason, 'transfer_failed'));
+      conditions.push(isNull(pendingPayouts.resolvedAt));
+    }
+
+    if (fromDate) {
+      conditions.push(gte(pendingPayouts.createdAt, new Date(fromDate)));
+    }
+    if (toDate) {
+      conditions.push(lte(pendingPayouts.createdAt, new Date(toDate)));
+    }
+
+    const [items, [totalResult]] = await Promise.all([
+      this.db
+        .select({
+          id: pendingPayouts.id,
+          creatorId: pendingPayouts.userId,
+          creatorName: users.name,
+          creatorEmail: users.email,
+          creatorAvatarUrl: users.image,
+          amountCents: pendingPayouts.amountCents,
+          currency: pendingPayouts.currency,
+          reason: pendingPayouts.reason,
+          resolvedAt: pendingPayouts.resolvedAt,
+          stripeTransferId: pendingPayouts.stripeTransferId,
+          createdAt: pendingPayouts.createdAt,
+        })
+        .from(pendingPayouts)
+        .leftJoin(users, eq(pendingPayouts.userId, users.id))
+        .where(and(...conditions))
+        .orderBy(desc(pendingPayouts.createdAt))
+        .limit(limit)
+        .offset(offset),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(pendingPayouts)
+        .where(and(...conditions)),
+    ]);
+
+    const total = totalResult?.count ?? 0;
+
+    return {
+      items: items.map((row) => ({
+        id: row.id,
+        creatorId: row.creatorId,
+        creatorName: row.creatorName ?? null,
+        creatorEmail: row.creatorEmail ?? null,
+        creatorAvatarUrl: row.creatorAvatarUrl ?? null,
+        amountCents: row.amountCents,
+        currency: row.currency,
+        reason: row.reason,
+        status: derivePayoutStatus(row.resolvedAt, row.reason),
+        resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
+        stripeTransferId: row.stripeTransferId,
+        createdAt: row.createdAt.toISOString(),
+      })),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
     };
   }
 

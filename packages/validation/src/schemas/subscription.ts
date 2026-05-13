@@ -168,6 +168,32 @@ export const listSubscribersQuerySchema = paginationSchema.extend({
   status: subscriptionStatusEnum.optional(),
 });
 
+/**
+ * Payout status filter for the studio payouts table (Codex-zqaxo).
+ *
+ * Phase 1 surfaces three states:
+ *  - `pending`   — row exists, `resolvedAt IS NULL`
+ *  - `resolved`  — `resolvedAt IS NOT NULL` AND `stripeTransferId IS NOT NULL`
+ *  - `failed`    — `reason='transfer_failed'` AND unresolved
+ *  - `all`       — no status filter (default)
+ *
+ * The enum is shared by the worker route's query schema below AND the
+ * frontend remote function so both ends stay in sync.
+ */
+export const payoutStatusFilterEnum = z.enum([
+  'all',
+  'pending',
+  'resolved',
+  'failed',
+]);
+
+export const listPayoutsQuerySchema = paginationSchema.extend({
+  organizationId: uuidSchema,
+  status: payoutStatusFilterEnum.default('all'),
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
+});
+
 export const getCurrentSubscriptionQuerySchema = z.object({
   organizationId: uuidSchema,
 });
@@ -215,6 +241,9 @@ export type ReactivateSubscriptionInput = z.infer<
   typeof reactivateSubscriptionSchema
 >;
 export type ResumeSubscriptionInput = z.infer<typeof resumeSubscriptionSchema>;
+export type PayoutStatusFilter = z.infer<typeof payoutStatusFilterEnum>;
+export type ListPayoutsQueryInput = z.infer<typeof listPayoutsQuerySchema>;
+
 export type ListSubscribersQueryInput = z.infer<
   typeof listSubscribersQuerySchema
 >;

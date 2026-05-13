@@ -51,6 +51,7 @@ import type {
   SessionData,
   UserData,
 } from '@codex/shared-types';
+import type { PayoutWithCreator } from '@codex/subscription';
 import type {
   CancelSubscriptionInput,
   ChangeTierInput,
@@ -1648,6 +1649,23 @@ export function createServerApi(
         return request<PaginatedListResponse<SubscriberItem>>(
           'ecom',
           `/subscriptions/subscribers?${query}`
+        );
+      },
+
+      /**
+       * List pending + resolved creator payouts for an org (owner only,
+       * paginated). Backs the studio payouts table (Codex-zqaxo).
+       *
+       * Forwards `organizationId` in the query string as the route
+       * contract requires it, but the worker re-derives the scope from
+       * the authenticated membership — never trusts the URL value.
+       */
+      listPayouts: (organizationId: string, params?: URLSearchParams) => {
+        const query = new URLSearchParams(params);
+        query.set('organizationId', organizationId);
+        return request<PaginatedListResponse<PayoutWithCreator>>(
+          'ecom',
+          `/subscriptions/payouts?${query}`
         );
       },
     },
