@@ -4201,6 +4201,312 @@ describe('SubscriptionService', () => {
       warnSpy.mockRestore();
     });
   });
+
+  // ─── sweepUnresolvedPayouts — hybrid event+sweep resolution (Codex-vv77x) ───
+  //
+  // Stripe docs (verified 2026-05-13) say account.updated webhooks retry for
+  // 3 days then drop. Without a periodic sweep, dropped events leave
+  // pendingPayouts stuck forever. This describe covers:
+  //   - empty-DB short-circuit (no Stripe calls)
+  //   - active-account → delegates to resolvePendingPayouts
+  //   - inactive-account → skipped (waits for next sweep)
+  //   - grouping by (orgId, userId) — 1 Stripe call per Connect account
+  //   - per-group error isolation — one group failing doesn't abort sweep
+  //   - olderThanMinutes filter — fresh rows wait for the webhook first
+  describe('sweepUnresolvedPayouts — hybrid event+sweep resolution', () => {
+    /**
+     * Attach a stub `accounts.retrieve` to the shared Stripe mock since
+     * createMockStripe() doesn't ship with one (this is the first sweep-only
+     * caller). Returns a vi.fn so individual tests can drive its response.
+     */
+    function stubAccountsRetrieve(ready: boolean): ReturnType<typeof vi.fn> {
+      const fn = vi.fn().mockImplementation(async (accountId: string) => ({
+        id: accountId,
+        charges_enabled: ready,
+        payouts_enabled: ready,
+      }));
+      (stripe as unknown as { accounts: Record<string, unknown> }).accounts = {
+        ...((stripe as unknown as { accounts?: Record<string, unknown> })
+          .accounts ?? {}),
+        retrieve: fn,
+      };
+      return fn;
+    }
+
+    /**
+     * Mirror seedConnectAndSubscription from the resolvePendingPayouts
+     * block — deterministic stripeAccountId so we can drive the lookup.
+     */
+    async function seedConnectAndSubscription(slug: string) {
+      const { org, tier1 } = await createFullOrg(slug);
+      const stripeAccountId = `acct_vv77x_${createUniqueSlug('a')}`;
+
+      const { eq } = await import('drizzle-orm');
+      await db
+        .update(stripeConnectAccounts)
+        .set({ stripeAccountId })
+        .where(eq(stripeConnectAccounts.organizationId, org.id));
+
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+            stripeSubscriptionId: `sub_vv77x_${createUniqueSlug('s')}`,
+          })
+        )
+        .returning();
+
+      return { org, tier1, sub, stripeAccountId };
+    }
+
+    it('returns zero counters and makes no Stripe calls when no pending rows exist', async () => {
+      // Ensure no leftover pending rows from earlier tests
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM pending_payouts`);
+
+      const retrieveSpy = stubAccountsRetrieve(true);
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.sweepUnresolvedPayouts(15);
+
+      expect(result).toEqual({
+        groupsScanned: 0,
+        groupsResolved: 0,
+        groupsSkipped: 0,
+        errors: 0,
+      });
+      expect(retrieveSpy).not.toHaveBeenCalled();
+      expect(transferSpy).not.toHaveBeenCalled();
+    });
+
+    it('resolves the group when the Connect account now reports charges_enabled && payouts_enabled', async () => {
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM pending_payouts`);
+
+      const { org, sub, stripeAccountId } =
+        await seedConnectAndSubscription('vv77x-ready');
+
+      // Old enough to pass the olderThanMinutes filter
+      const longAgo = new Date(Date.now() - 60 * 60 * 1000); // 1h ago
+      await db.insert(pendingPayoutsTable).values({
+        userId: creatorId,
+        organizationId: org.id,
+        subscriptionId: sub.id,
+        amountCents: 500,
+        currency: 'gbp',
+        reason: 'connect_not_ready',
+        createdAt: longAgo,
+      });
+
+      const retrieveSpy = stubAccountsRetrieve(true);
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.sweepUnresolvedPayouts(15);
+
+      expect(result).toEqual({
+        groupsScanned: 1,
+        groupsResolved: 1,
+        groupsSkipped: 0,
+        errors: 0,
+      });
+      expect(retrieveSpy).toHaveBeenCalledTimes(1);
+      expect(retrieveSpy).toHaveBeenCalledWith(stripeAccountId);
+      // resolvePendingPayouts walks the row(s) — at least one transfer
+      expect(transferSpy).toHaveBeenCalled();
+    });
+
+    it('skips the group (no transfer) when the Connect account is still not ready', async () => {
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM pending_payouts`);
+
+      const { org, sub } = await seedConnectAndSubscription('vv77x-not-ready');
+
+      const longAgo = new Date(Date.now() - 60 * 60 * 1000);
+      await db.insert(pendingPayoutsTable).values({
+        userId: creatorId,
+        organizationId: org.id,
+        subscriptionId: sub.id,
+        amountCents: 500,
+        currency: 'gbp',
+        reason: 'connect_not_ready',
+        createdAt: longAgo,
+      });
+
+      const retrieveSpy = stubAccountsRetrieve(false);
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.sweepUnresolvedPayouts(15);
+
+      expect(result).toEqual({
+        groupsScanned: 1,
+        groupsResolved: 0,
+        groupsSkipped: 1,
+        errors: 0,
+      });
+      expect(retrieveSpy).toHaveBeenCalledTimes(1);
+      expect(transferSpy).not.toHaveBeenCalled();
+    });
+
+    it('groups by (orgId, userId) — N rows for one Connect account → one accounts.retrieve, one resolvePendingPayouts', async () => {
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM pending_payouts`);
+
+      const { org, sub, stripeAccountId } =
+        await seedConnectAndSubscription('vv77x-grouping');
+
+      const longAgo = new Date(Date.now() - 60 * 60 * 1000);
+      // 3 rows, same (orgId, userId) — one Connect account
+      await db.insert(pendingPayoutsTable).values([
+        {
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          createdAt: longAgo,
+        },
+        {
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 200,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          createdAt: longAgo,
+        },
+        {
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 300,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          createdAt: longAgo,
+        },
+      ]);
+
+      const retrieveSpy = stubAccountsRetrieve(true);
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+      const resolveSpy = vi.spyOn(service, 'resolvePendingPayouts');
+
+      const result = await service.sweepUnresolvedPayouts(15);
+
+      expect(result.groupsScanned).toBe(1);
+      expect(result.groupsResolved).toBe(1);
+      // One Stripe accounts.retrieve per Connect account, not per row
+      expect(retrieveSpy).toHaveBeenCalledTimes(1);
+      expect(retrieveSpy).toHaveBeenCalledWith(stripeAccountId);
+      // One resolvePendingPayouts per group, not per row
+      expect(resolveSpy).toHaveBeenCalledTimes(1);
+      expect(resolveSpy).toHaveBeenCalledWith(org.id, stripeAccountId);
+      // Three transfers because resolvePendingPayouts processes 3 rows
+      expect(transferSpy).toHaveBeenCalledTimes(3);
+
+      resolveSpy.mockRestore();
+    });
+
+    it('isolates per-group failure — one Stripe.accounts.retrieve throwing does not abort other groups', async () => {
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM pending_payouts`);
+
+      const failOrg = await seedConnectAndSubscription('vv77x-fail');
+      const okOrg = await seedConnectAndSubscription('vv77x-ok');
+
+      const longAgo = new Date(Date.now() - 60 * 60 * 1000);
+      await db.insert(pendingPayoutsTable).values([
+        {
+          userId: creatorId,
+          organizationId: failOrg.org.id,
+          subscriptionId: failOrg.sub.id,
+          amountCents: 500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          createdAt: longAgo,
+        },
+        {
+          userId: creatorId,
+          organizationId: okOrg.org.id,
+          subscriptionId: okOrg.sub.id,
+          amountCents: 700,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          createdAt: longAgo,
+        },
+      ]);
+
+      const failingAccountId = failOrg.stripeAccountId;
+      const retrieveFn = vi
+        .fn()
+        .mockImplementation(async (accountId: string) => {
+          if (accountId === failingAccountId) {
+            throw new Error('Stripe accounts.retrieve rejected (test)');
+          }
+          return {
+            id: accountId,
+            charges_enabled: true,
+            payouts_enabled: true,
+          };
+        });
+      (stripe as unknown as { accounts: Record<string, unknown> }).accounts = {
+        ...((stripe as unknown as { accounts?: Record<string, unknown> })
+          .accounts ?? {}),
+        retrieve: retrieveFn,
+      };
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.sweepUnresolvedPayouts(15);
+
+      // 2 groups scanned, 1 erred, 1 resolved, 0 skipped
+      expect(result.groupsScanned).toBe(2);
+      expect(result.errors).toBe(1);
+      expect(result.groupsResolved).toBe(1);
+      expect(result.groupsSkipped).toBe(0);
+      // Healthy org still received its transfer
+      expect(transferSpy).toHaveBeenCalled();
+    });
+
+    it('respects olderThanMinutes — rows newer than the threshold are NOT swept (webhook handles fresh rows)', async () => {
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM pending_payouts`);
+
+      const { org, sub } = await seedConnectAndSubscription('vv77x-fresh');
+
+      // Row created "now" — newer than the 15min threshold so should be
+      // ignored by the sweep (the account.updated webhook owns fresh rows).
+      await db.insert(pendingPayoutsTable).values({
+        userId: creatorId,
+        organizationId: org.id,
+        subscriptionId: sub.id,
+        amountCents: 500,
+        currency: 'gbp',
+        reason: 'connect_not_ready',
+        createdAt: new Date(),
+      });
+
+      const retrieveSpy = stubAccountsRetrieve(true);
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.sweepUnresolvedPayouts(15);
+
+      expect(result).toEqual({
+        groupsScanned: 0,
+        groupsResolved: 0,
+        groupsSkipped: 0,
+        errors: 0,
+      });
+      expect(retrieveSpy).not.toHaveBeenCalled();
+      expect(transferSpy).not.toHaveBeenCalled();
+    });
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────
