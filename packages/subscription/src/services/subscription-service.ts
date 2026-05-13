@@ -1027,14 +1027,11 @@ export class SubscriptionService extends BaseService {
     // stripe.transfers.create() are hardcoded to CURRENCY.GBP — silently
     // letting a non-GBP invoice through would cause a currency mismatch at
     // Stripe. Cross-currency support is a tracked future feature.
-    const invoiceCurrency = stripeInvoice.currency?.toLowerCase();
-    if (invoiceCurrency && invoiceCurrency !== CURRENCY.GBP) {
-      throw new UnsupportedCurrencyError(invoiceCurrency, [CURRENCY.GBP], {
-        invoiceId: stripeInvoice.id,
-        subscriptionId: sub.id,
-        stripeSubscriptionId: stripeSubId,
-      });
-    }
+    this.assertGbpOnly(stripeInvoice.currency, {
+      invoiceId: stripeInvoice.id,
+      subscriptionId: sub.id,
+      stripeSubscriptionId: stripeSubId,
+    });
 
     // Execute revenue transfers
     await this.executeTransfers(
@@ -2393,13 +2390,11 @@ export class SubscriptionService extends BaseService {
         // lack the column fall back to CURRENCY.GBP (schema default is 'gbp'
         // but defence-in-depth never hurts).
         const payoutCurrency = (payout.currency || CURRENCY.GBP).toLowerCase();
-        if (payoutCurrency !== CURRENCY.GBP) {
-          throw new UnsupportedCurrencyError(payoutCurrency, [CURRENCY.GBP], {
-            pendingPayoutId: payout.id,
-            subscriptionId: payout.subscriptionId,
-            organizationId: orgId,
-          });
-        }
+        this.assertGbpOnly(payoutCurrency, {
+          pendingPayoutId: payout.id,
+          subscriptionId: payout.subscriptionId,
+          organizationId: orgId,
+        });
 
         // Codex-m644n: min-transfer floor gate. Walk the per-creator override
         // chain so a low-volume creator with a high floor accumulates further
@@ -2471,6 +2466,30 @@ export class SubscriptionService extends BaseService {
   }
 
   // ─── Private Helpers ─────────────────────────────────────────────────────
+
+  /**
+   * Throw `UnsupportedCurrencyError` unless `currency` is GBP (or absent).
+   *
+   * Centralises the GBP-only guard shared by `handleInvoicePaymentSucceeded`
+   * and `resolvePendingPayouts`. Both downstream paths feed
+   * `stripe.transfers.create()` which is hardcoded to `CURRENCY.GBP`; this
+   * guard prevents silent currency mismatch. Cross-currency support is a
+   * tracked future feature (Codex-yv18n).
+   *
+   * Passing `null`/`undefined` is treated as "no currency on this Stripe
+   * object" and skipped — preserves the prior behaviour of letting Stripe
+   * payloads without a `currency` field through (the schema default for
+   * pendingPayouts is 'gbp', so the row branch normalises before calling).
+   */
+  private assertGbpOnly(
+    currency: string | null | undefined,
+    context: Record<string, unknown>
+  ): void {
+    if (!currency) return;
+    const normalised = currency.toLowerCase();
+    if (normalised === CURRENCY.GBP) return;
+    throw new UnsupportedCurrencyError(normalised, [CURRENCY.GBP], context);
+  }
 
   private async getSubscriptionOrThrow(
     userId: string,
