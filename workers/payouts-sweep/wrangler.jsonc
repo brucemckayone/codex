@@ -1,0 +1,70 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "payouts-sweep",
+  "main": "dist/index.js",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "observability": {
+    "enabled": true
+  },
+
+  // Cron Triggers (scheduled handler)
+  // - Every 15 minutes — drains pendingPayouts whose Connect account is now
+  //   charges_enabled && payouts_enabled. Hybrid event+sweep resolution per
+  //   Stripe docs (account.updated webhook + periodic reconciliation).
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
+
+  // Default environment variables (local development)
+  "vars": {
+    "ENVIRONMENT": "development",
+    "DB_METHOD": "LOCAL_PROXY"
+  },
+
+  // Environment configurations
+  "env": {
+    "test": {
+      "name": "payouts-sweep-test",
+      "vars": {
+        "ENVIRONMENT": "test",
+        "DB_METHOD": "LOCAL_PROXY"
+      }
+    },
+
+    "production": {
+      "name": "payouts-sweep",
+      "triggers": {
+        "crons": ["*/15 * * * *"]
+      },
+      "vars": {
+        "ENVIRONMENT": "production",
+        "DB_METHOD": "PRODUCTION"
+      }
+    },
+
+    "staging": {
+      "name": "payouts-sweep-staging",
+      "triggers": {
+        "crons": ["*/15 * * * *"]
+      },
+      "vars": {
+        "ENVIRONMENT": "staging",
+        "DB_METHOD": "PRODUCTION"
+      }
+    }
+  }
+
+  // ==========================================================================
+  // Environment Variables & Secrets
+  // ==========================================================================
+  //
+  // Required Variables (set via wrangler CLI):
+  //   - DATABASE_URL: PostgreSQL connection string
+  //   - STRIPE_SECRET_KEY: Stripe secret API key
+  //
+  // Production Secrets:
+  //   wrangler secret put DATABASE_URL --env production
+  //   wrangler secret put STRIPE_SECRET_KEY --env production
+}

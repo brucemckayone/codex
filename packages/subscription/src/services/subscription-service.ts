@@ -55,7 +55,7 @@ import {
   type ServiceConfig,
 } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   AlreadySubscribedError,
@@ -3099,5 +3099,141 @@ export class SubscriptionService extends BaseService {
       .where(eq(stripeConnectAccounts.organizationId, orgId))
       .limit(1);
     return fallback ?? null;
+  }
+
+  // ─── Pending Payout Sweep (Codex-vv77x) ─────────────────────────────────
+  //
+  // Hybrid event+sweep resolution pattern per Stripe docs:
+  //   1. account.updated webhook is the primary trigger (connect-webhook.ts:73)
+  //   2. Webhooks retry for 3 days then drop — this sweep is the safety net
+  //   3. Periodic sweep groups pendingPayouts by (orgId, userId) — each unique
+  //      pair maps to one Connect account — and asks Stripe for current state
+  //   4. If the Connect account is now charges_enabled && payouts_enabled,
+  //      delegate to resolvePendingPayouts(orgId, stripeAccountId) which owns
+  //      the actual transfer loop.
+  //   5. olderThanMinutes guards against racing the webhook on freshly inserted
+  //      rows — only sweep rows old enough that the webhook would already have
+  //      fired by now if it was going to.
+
+  /**
+   * Sweep unresolved pendingPayouts rows older than `olderThanMinutes`,
+   * group by (organizationId, userId), and attempt resolution for each
+   * group whose Connect account now reports charges_enabled && payouts_enabled.
+   *
+   * Returns aggregate counters for observability; never throws on a
+   * per-group failure — failures are isolated and counted.
+   */
+  async sweepUnresolvedPayouts(olderThanMinutes = 15): Promise<{
+    groupsScanned: number;
+    groupsResolved: number;
+    groupsSkipped: number;
+    errors: number;
+  }> {
+    const threshold = new Date(Date.now() - olderThanMinutes * 60 * 1000);
+
+    // Distinct (orgId, userId) pairs with at least one unresolved row older
+    // than the threshold. We deliberately do NOT join to stripeConnectAccounts
+    // here — we want the sweep to surface orphan pending rows whose Connect
+    // account row may have been re-keyed, and the per-group lookup below
+    // handles the missing-account case (logs warn + returns 0).
+    const groups = await this.db
+      .selectDistinct({
+        organizationId: pendingPayouts.organizationId,
+        userId: pendingPayouts.userId,
+      })
+      .from(pendingPayouts)
+      .where(
+        and(
+          isNull(pendingPayouts.resolvedAt),
+          lt(pendingPayouts.createdAt, threshold)
+        )
+      );
+
+    const groupsScanned = groups.length;
+    let groupsResolved = 0;
+    let groupsSkipped = 0;
+    let errors = 0;
+
+    if (groupsScanned === 0) {
+      this.obs.info('sweepUnresolvedPayouts: no pending groups', {
+        olderThanMinutes,
+      });
+      return {
+        groupsScanned: 0,
+        groupsResolved: 0,
+        groupsSkipped: 0,
+        errors: 0,
+      };
+    }
+
+    for (const group of groups) {
+      try {
+        // Find the Connect account row for this (orgId, userId) so we can
+        // look up the stripeAccountId. If the row is missing (rare — a
+        // Connect account was deleted but its pendingPayouts survived
+        // because of ON DELETE behaviour) skip this group; it will be
+        // re-attempted on the next sweep window.
+        const [connect] = await this.db
+          .select({ stripeAccountId: stripeConnectAccounts.stripeAccountId })
+          .from(stripeConnectAccounts)
+          .where(
+            and(
+              eq(stripeConnectAccounts.organizationId, group.organizationId),
+              eq(stripeConnectAccounts.userId, group.userId)
+            )
+          )
+          .limit(1);
+
+        if (!connect) {
+          this.obs.warn(
+            'sweepUnresolvedPayouts: connect row missing for pending group',
+            {
+              organizationId: group.organizationId,
+              userId: group.userId,
+            }
+          );
+          groupsSkipped++;
+          continue;
+        }
+
+        // Ask Stripe for current account state. The Connect account flags
+        // change asynchronously after onboarding so we cannot trust the
+        // DB-mirrored row — that is the bug this sweep exists to fix.
+        const account = await this.stripe.accounts.retrieve(
+          connect.stripeAccountId
+        );
+
+        const ready =
+          account.charges_enabled === true && account.payouts_enabled === true;
+        if (!ready) {
+          groupsSkipped++;
+          continue;
+        }
+
+        await this.resolvePendingPayouts(
+          group.organizationId,
+          connect.stripeAccountId
+        );
+        groupsResolved++;
+      } catch (error) {
+        errors++;
+        this.obs.error('sweepUnresolvedPayouts: per-group failure', {
+          organizationId: group.organizationId,
+          userId: group.userId,
+          error: (error as Error).message,
+        });
+        // Continue to next group — don't fail the whole sweep
+      }
+    }
+
+    this.obs.info('sweepUnresolvedPayouts: complete', {
+      olderThanMinutes,
+      groupsScanned,
+      groupsResolved,
+      groupsSkipped,
+      errors,
+    });
+
+    return { groupsScanned, groupsResolved, groupsSkipped, errors };
   }
 }
