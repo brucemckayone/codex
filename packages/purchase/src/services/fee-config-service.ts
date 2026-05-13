@@ -331,22 +331,12 @@ export class FeeConfigService extends BaseService {
       const existing = await this.fetchOrgRow(orgId);
       if (!existing) return;
 
-      const diff: DiffEntry[] = [];
-      for (const col of [
-        'platformFeePercent',
-        'orgFeePercent',
-        'minPlatformFeeCents',
-        'minTransferCents',
-      ] as const) {
-        const oldVal = (existing as Record<string, unknown>)[col];
-        if (oldVal !== null && oldVal !== undefined) {
-          diff.push({
-            columnName: col,
-            oldValue: String(oldVal),
-            newValue: 'null',
-          });
-        }
-      }
+      const diff = diffUpdate(existing as Record<string, unknown>, {
+        platformFeePercent: null,
+        orgFeePercent: null,
+        minPlatformFeeCents: null,
+        minTransferCents: null,
+      });
 
       await (this.db as Database)
         .delete(feeConfigOrg)
@@ -436,23 +426,13 @@ export class FeeConfigService extends BaseService {
       const existing = await this.fetchOverrideRow(orgId, creatorId);
       if (!existing) return;
 
-      const diff: DiffEntry[] = [];
-      for (const col of [
-        'platformFeePercent',
-        'orgFeePercent',
-        'minPlatformFeeCents',
-        'minTransferCents',
-        'notes',
-      ] as const) {
-        const oldVal = (existing as Record<string, unknown>)[col];
-        if (oldVal !== null && oldVal !== undefined) {
-          diff.push({
-            columnName: col,
-            oldValue: String(oldVal),
-            newValue: 'null',
-          });
-        }
-      }
+      const diff = diffUpdate(existing as Record<string, unknown>, {
+        platformFeePercent: null,
+        orgFeePercent: null,
+        minPlatformFeeCents: null,
+        minTransferCents: null,
+        notes: null,
+      });
 
       await (this.db as Database)
         .delete(feeConfigOrgCreator)
