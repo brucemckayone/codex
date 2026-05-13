@@ -39,7 +39,12 @@ export {
   type UpdateTierInput,
   updateTierSchema,
 } from '@codex/validation';
-
+// Constants
+export {
+  humanizeRequirement,
+  isKnownRequirement,
+  REQUIREMENT_HUMANIZATION,
+} from './constants/requirement-humanization';
 // Error classes
 export {
   AlreadySubscribedError,

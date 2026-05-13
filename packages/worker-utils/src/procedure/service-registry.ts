@@ -560,6 +560,15 @@ export function createServiceRegistry(
           },
           getStripeClient()
         );
+
+        // Wire VersionedCache for `getStatus(orgId)` cache-aside. Mirrors the
+        // ContentService cache-wiring pattern: construct first, then inject
+        // the cache only when CACHE_KV is bound (skipped in unit tests).
+        if (env.CACHE_KV) {
+          _connectAccount.setCache(
+            new VersionedCache({ kv: env.CACHE_KV, prefix: 'cache' })
+          );
+        }
       }
       return _connectAccount;
     },

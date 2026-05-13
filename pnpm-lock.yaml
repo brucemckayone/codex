@@ -129,6 +129,9 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@codex/subscription':
+        specifier: workspace:*
+        version: link:../../packages/subscription
       '@codex/test-utils':
         specifier: workspace:*
         version: link:../../packages/test-utils

@@ -220,6 +220,24 @@ export interface SubscriptionStats {
 }
 
 /**
+ * Stripe Connect requirements payload.
+ *
+ * Normalised from Stripe's `Account.Requirements` shape — `null` arrays
+ * are converted to `[]` server-side so the UI can iterate without guards.
+ * `currentDeadline` is a Unix timestamp (seconds) — multiply by 1000 for
+ * JavaScript `Date`.
+ */
+export interface ConnectRequirements {
+  currentlyDue: string[];
+  eventuallyDue: string[];
+  pastDue: string[];
+  pendingVerification: string[];
+  currentDeadline: number | null;
+  disabledReason: string | null;
+  errors: Array<{ requirement: string; code: string; reason: string }>;
+}
+
+/**
  * Connect account status response.
  * Returned by GET /connect/status
  */
@@ -229,6 +247,13 @@ export interface ConnectAccountStatusResponse {
   chargesEnabled: boolean;
   payoutsEnabled: boolean;
   status: 'onboarding' | 'active' | 'restricted' | 'disabled' | null;
+  /**
+   * Live Stripe requirements payload (currently_due, eventually_due,
+   * current_deadline, errors). Null when the account isn't connected, or
+   * when Stripe was unreachable on the cache-miss path (degrades gracefully —
+   * the UI shows status only, no requirements list).
+   */
+  requirements: ConnectRequirements | null;
 }
 
 /**

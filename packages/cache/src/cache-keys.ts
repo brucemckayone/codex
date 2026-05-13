@@ -46,6 +46,17 @@ export const CacheType = {
   /** Organization subscription tiers (sorted list, public) */
   ORG_TIERS: 'org:tiers',
 
+  /**
+   * Stripe Connect account status (per-org).
+   * Includes `requirements` payload for the studio monetisation page so the
+   * UI can render `currently_due` + `current_deadline` + `errors` without
+   * hitting Stripe on every page view.
+   *
+   * TTL: 10 min. Invalidated by ecom-api on `account.updated` webhook so the
+   * worst-case staleness is bounded by the webhook delivery latency.
+   */
+  CONNECT_STATUS: 'connect:status',
+
   /** User session data (complements BetterAuth KV cache) */
   USER_SESSION: 'user:session',
 
