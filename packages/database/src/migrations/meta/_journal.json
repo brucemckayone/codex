@@ -435,6 +435,20 @@
       "when": 1777977376432,
       "tag": "0061_swift_swordsman",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1778664093631,
+      "tag": "0062_superb_thanos",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1778664339750,
+      "tag": "0063_lethal_gideon",
+      "breakpoints": true
     }
   ]
 }

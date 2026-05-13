@@ -4258,3 +4258,70 @@ describe('SubscriptionPaymentRequiredError', () => {
     expect(err.context?.tierIdAtCommit).toBeUndefined();
   });
 });
+
+// ─── FeeConfigService integration (Codex-t2t8d) ────────────────────────────
+//
+// Lightweight contract block — verifies the DB-configurable fee path is
+// wired through SubscriptionService construction. Behaviour of the
+// FeeConfigService itself (cache TTL, fallback, partial-update merge,
+// floor math) lives in
+// packages/purchase/src/services/__tests__/fee-config-service.test.ts.
+// These tests intentionally avoid the integration harness above — they
+// build a minimal SubscriptionService with mocked deps so the contract
+// is asserted without booting Neon.
+describe('FeeConfigService integration', () => {
+  it('constructs without feeConfigService (back-compat) — defaults to FEES.* fallback', async () => {
+    const mockStripe = {} as Stripe;
+    const mockDb = {} as never;
+    const svc = new SubscriptionService(
+      { db: mockDb, environment: 'test' },
+      mockStripe
+    );
+    // Reach into the private method via the public surface — exposing
+    // the contract that resolveFeeConfig is in place and works without
+    // the optional feeConfigService config field. The fallback should
+    // return DEFAULT_FEE_CONFIG (= FEES.* mirror).
+    const fees = await (
+      svc as unknown as { resolveFeeConfig: () => Promise<unknown> }
+    ).resolveFeeConfig();
+    expect(fees).toMatchObject({
+      platformFeePercent: expect.any(Number),
+      subscriptionOrgFeePercent: expect.any(Number),
+      minPlatformFeeCents: expect.any(Number),
+      minTransferCents: expect.any(Number),
+    });
+  });
+
+  it('delegates to feeConfigService.getFees() when wired', async () => {
+    const mockStripe = {} as Stripe;
+    const mockDb = {} as never;
+    const fakeFees = {
+      platformFeePercent: 1234,
+      subscriptionOrgFeePercent: 5678,
+      minPlatformFeeCents: 11,
+      minTransferCents: 22,
+    };
+    const getFees = vi.fn().mockResolvedValue(fakeFees);
+    const fakeFeeConfigService = {
+      getFees,
+    } as unknown as ConstructorParameters<
+      typeof SubscriptionService
+    >[0]['feeConfigService'];
+
+    const svc = new SubscriptionService(
+      {
+        db: mockDb,
+        environment: 'test',
+        feeConfigService: fakeFeeConfigService,
+      },
+      mockStripe
+    );
+
+    const fees = await (
+      svc as unknown as { resolveFeeConfig: () => Promise<unknown> }
+    ).resolveFeeConfig();
+
+    expect(getFees).toHaveBeenCalledTimes(1);
+    expect(fees).toEqual(fakeFees);
+  });
+});

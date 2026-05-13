@@ -89,6 +89,21 @@ export const FEES = {
   PLATFORM_PERCENT: 1000, // 10.00% of gross
   ORG_PERCENT: 0, // 0% for one-time purchases
   SUBSCRIPTION_ORG_PERCENT: 1500, // 15.00% of post-platform-fee for subscriptions
+  /**
+   * Fallback floor — applied per-transaction so micro-payments still cover
+   * gateway costs. Overridden by `revenue_model_config.min_platform_fee_cents`
+   * once the singleton row exists. £0.30 default mirrors a typical Stripe
+   * micro-fee surcharge.
+   */
+  MIN_PLATFORM_FEE_CENTS: 30,
+  /**
+   * Fallback floor — applied at transfer execution time. Transfers below
+   * this threshold are skipped (rolled forward as `pendingPayouts`).
+   * Overridden by `revenue_model_config.min_transfer_cents` once the
+   * singleton row exists. £1 default avoids a flurry of sub-pound
+   * Connect transfers.
+   */
+  MIN_TRANSFER_CENTS: 100,
 } as const;
 
 export const CURRENCY = {

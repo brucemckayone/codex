@@ -1,0 +1,2 @@
+ALTER TABLE "pending_payouts" DROP CONSTRAINT "check_pending_payout_reason";--> statement-breakpoint
+ALTER TABLE "pending_payouts" ADD CONSTRAINT "check_pending_payout_reason" CHECK ("pending_payouts"."reason" IN ('connect_not_ready', 'connect_restricted', 'transfer_failed', 'min_transfer_floor'));

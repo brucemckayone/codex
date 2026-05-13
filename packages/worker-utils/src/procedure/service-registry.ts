@@ -32,7 +32,11 @@ import {
   ContactSettingsService,
   PlatformSettingsFacade,
 } from '@codex/platform-settings';
-import { createStripeClient, PurchaseService } from '@codex/purchase';
+import {
+  createStripeClient,
+  FeeConfigService,
+  PurchaseService,
+} from '@codex/purchase';
 import type { Bindings } from '@codex/shared-types';
 import {
   ConnectAccountService,
@@ -91,6 +95,7 @@ export function createServiceRegistry(
   let _organization: OrganizationService | undefined;
   let _settings: PlatformSettingsFacade | undefined;
   let _purchase: PurchaseService | undefined;
+  let _feeConfig: FeeConfigService | undefined;
   let _transcoding: TranscodingService | undefined;
   let _adminAnalytics: AdminAnalyticsService | undefined;
   let _adminContent: AdminContentManagementService | undefined;
@@ -369,12 +374,34 @@ export function createServiceRegistry(
     // Commerce Domain
     // ========================================================================
 
+    get feeConfig() {
+      if (!_feeConfig) {
+        // VersionedCache provides 10min TTL cache-aside; absent in dev/
+        // test envs without KV — service degrades to direct DB reads
+        // with the FEES.* fallback path on missing rows.
+        const cache = env.CACHE_KV
+          ? new VersionedCache({ kv: env.CACHE_KV, prefix: 'cache' })
+          : undefined;
+        _feeConfig = new FeeConfigService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          cache,
+        });
+      }
+      return _feeConfig;
+    },
+
     get purchase() {
       if (!_purchase) {
         _purchase = new PurchaseService(
           {
             db: getSharedDb(),
             environment: getEnvironment(),
+            // Wire fee config so the DB-configurable revenue model
+            // (Codex-t2t8d) drives both createCheckoutSession's
+            // applicationFee and completePurchase's split. Falls back
+            // to FEES.* constants when no row exists.
+            feeConfigService: registry.feeConfig,
           },
           getStripeClient()
         );
@@ -446,6 +473,12 @@ export function createServiceRegistry(
             waitUntil,
             mailer,
             webAppUrl,
+            // Codex-t2t8d: thread the DB-configurable revenue model
+            // through every subscription flow that splits revenue
+            // (recordNewSubscription, handleInvoicePaymentSucceeded,
+            // changeTier) and through executeTransfers /
+            // resolvePendingPayouts for the min-transfer floor.
+            feeConfigService: registry.feeConfig,
           },
           getStripeClient()
         );

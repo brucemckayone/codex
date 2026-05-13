@@ -81,9 +81,13 @@ import type {
   PurchaseWithContent,
 } from '../types';
 import {
+  DEFAULT_FEE_CONFIG,
+  type FeeConfig,
+  type FeeConfigService,
+} from './fee-config-service';
+import {
   calculateRevenueSplit,
   DEFAULT_ORG_FEE_PERCENTAGE,
-  DEFAULT_PLATFORM_FEE_PERCENTAGE,
 } from './revenue-calculator';
 
 /**
@@ -91,18 +95,44 @@ import {
  *
  * Handles purchase operations with Stripe integration.
  */
+/**
+ * Extended PurchaseService config — same shape as ServiceConfig but
+ * with an optional FeeConfigService that powers DB-configurable
+ * revenue splits (Codex-t2t8d). When absent, falls back to the
+ * code-default FEES.* constants.
+ */
+export interface PurchaseServiceConfig extends ServiceConfig {
+  feeConfigService?: FeeConfigService;
+}
+
 export class PurchaseService extends BaseService {
   private readonly stripe: Stripe;
+  private readonly feeConfigService: FeeConfigService | undefined;
 
   /**
    * Initialize purchase service
    *
-   * @param config - Service configuration (db, environment)
+   * @param config - Service configuration (db, environment, optional feeConfigService)
    * @param stripe - Stripe client instance
    */
-  constructor(config: ServiceConfig, stripe: Stripe) {
+  constructor(config: PurchaseServiceConfig, stripe: Stripe) {
     super(config);
     this.stripe = stripe;
+    this.feeConfigService = config.feeConfigService;
+  }
+
+  /**
+   * Resolve fee configuration for the current request. Calls
+   * `FeeConfigService.getFees()` when wired (production); otherwise
+   * returns the code-default `FEES.*` constants via DEFAULT_FEE_CONFIG.
+   * Single read per request — repeated calls add latency without
+   * changing the answer within a TTL window.
+   */
+  private async resolveFeeConfig(): Promise<FeeConfig> {
+    if (this.feeConfigService) {
+      return this.feeConfigService.getFees();
+    }
+    return { ...DEFAULT_FEE_CONFIG };
   }
 
   /**
@@ -218,12 +248,19 @@ export class PurchaseService extends BaseService {
       // Uses calculateRevenueSplit() — the single source of truth shared with
       // completePurchase() — so the Stripe-collected fee can never diverge
       // from the DB-recorded platform fee.
+      // DB-configurable fees (Codex-t2t8d) — apply minPlatformFeeCents floor
+      // here so the application fee Stripe collects matches what
+      // completePurchase() will record (avoiding the drift-warning path).
+      const checkoutFees = await this.resolveFeeConfig();
+      const checkoutPercentageFee = Math.ceil(
+        (contentRecord.priceCents * checkoutFees.platformFeePercent) / 10000
+      );
+      const checkoutFlooredPlatformFee = Math.max(
+        checkoutPercentageFee,
+        checkoutFees.minPlatformFeeCents
+      );
       const applicationFeeCents = creatorConnect?.chargesEnabled
-        ? calculateRevenueSplit(
-            contentRecord.priceCents,
-            DEFAULT_PLATFORM_FEE_PERCENTAGE,
-            DEFAULT_ORG_FEE_PERCENTAGE
-          ).platformFeeCents
+        ? checkoutFlooredPlatformFee
         : undefined;
 
       if (!creatorConnect?.chargesEnabled) {
@@ -423,17 +460,37 @@ export class PurchaseService extends BaseService {
           return existing;
         }
 
-        // Step 2: Get active fee configurations
-        // Phase 1: Use defaults (10% platform, 0% org)
-        // Future: Query platformFeeConfig and agreements tables
-        const platformFeePercentage = DEFAULT_PLATFORM_FEE_PERCENTAGE; // 1000 = 10%
-        const orgFeePercentage = DEFAULT_ORG_FEE_PERCENTAGE; // 0 = 0%
+        // Step 2: Resolve active fee configuration (Codex-t2t8d).
+        // DB-configurable via FeeConfigService — falls back to FEES.*
+        // constants when not wired (tests / legacy harness).
+        const completionFees = await this.resolveFeeConfig();
 
-        // Step 3: Calculate revenue split
+        // Step 3: Calculate revenue split with minPlatformFeeCents floor.
+        // The floor is applied in the caller (here) — calculateRevenueSplit
+        // stays pure. For amounts where the percentage fee exceeds the
+        // floor, the floor is a no-op; for micro-transactions, we override
+        // the platform percentage so Math.ceil rounds back to the floor
+        // value, then run the pure calculation for the org/creator split.
+        const percentageFeeCents = Math.ceil(
+          (metadata.amountPaidCents * completionFees.platformFeePercent) / 10000
+        );
+        const useFloor =
+          percentageFeeCents < completionFees.minPlatformFeeCents;
+        let effectivePlatformFeePercent = completionFees.platformFeePercent;
+        if (useFloor && metadata.amountPaidCents > 0) {
+          effectivePlatformFeePercent = Math.min(
+            Math.ceil(
+              (completionFees.minPlatformFeeCents / metadata.amountPaidCents) *
+                10000
+            ),
+            10000
+          );
+        }
+
         const revenueSplit = calculateRevenueSplit(
           metadata.amountPaidCents,
-          platformFeePercentage,
-          orgFeePercentage
+          effectivePlatformFeePercent,
+          DEFAULT_ORG_FEE_PERCENTAGE // one-time purchases: 0% org
         );
 
         // Step 3a: Reconcile Stripe-collected fee against calculated split.

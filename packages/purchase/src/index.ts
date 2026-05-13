@@ -60,6 +60,15 @@ export {
   ValidationError,
   wrapError,
 } from './errors';
+// Fee config (DB-configurable revenue model)
+export {
+  applyPlatformFeeFloor,
+  DEFAULT_FEE_CONFIG,
+  type FeeConfig,
+  FeeConfigService,
+  type FeeConfigUpdate,
+  REVENUE_MODEL_SINGLETON_ID,
+} from './services/fee-config-service';
 // Service
 export { PurchaseService } from './services/purchase-service';
 // Customer resolution (Codex-49gev)

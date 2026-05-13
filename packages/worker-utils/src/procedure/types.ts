@@ -26,7 +26,7 @@ import type {
 import type { ObservabilityClient } from '@codex/observability';
 import type { OrganizationService } from '@codex/organization';
 import type { PlatformSettingsFacade } from '@codex/platform-settings';
-import type { PurchaseService } from '@codex/purchase';
+import type { FeeConfigService, PurchaseService } from '@codex/purchase';
 import type {
   Bindings,
   HonoEnv,
@@ -127,6 +127,8 @@ export interface ServiceRegistry {
 
   // Commerce domain
   purchase: PurchaseService;
+  /** DB-configurable revenue model (Codex-t2t8d). */
+  feeConfig: FeeConfigService;
 
   // Subscription domain
   subscription: SubscriptionService;

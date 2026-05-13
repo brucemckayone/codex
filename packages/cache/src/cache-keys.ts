@@ -49,6 +49,14 @@ export const CacheType = {
   /** User session data (complements BetterAuth KV cache) */
   USER_SESSION: 'user:session',
 
+  /**
+   * Platform-wide revenue model config (singleton row in
+   * `revenue_model_config`). Cached as `<prefix>:platform:fee-config:singleton`
+   * with a 10min TTL. Bumped via `cache.invalidate('singleton')` after every
+   * `FeeConfigService.updateFees()` call.
+   */
+  PLATFORM_FEE_CONFIG: 'platform:fee-config',
+
   // --- Collection version identifiers ---
   // These IDs are passed to cache.invalidate() to bump a collection version.
   // They do NOT store cached data — they store a version timestamp used for

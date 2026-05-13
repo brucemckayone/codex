@@ -282,6 +282,7 @@ export const pendingPayouts = pgTable(
     currency: varchar('currency', { length: 3 }).notNull().default('gbp'),
     reason: varchar('reason', { length: 100 }).notNull(),
     // 'connect_not_ready' | 'connect_restricted' | 'transfer_failed'
+    // | 'min_transfer_floor' (Codex-t2t8d — transfer below configured floor)
 
     // Resolution
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
@@ -300,7 +301,7 @@ export const pendingPayouts = pgTable(
     check('check_pending_payout_positive', sql`${table.amountCents} > 0`),
     check(
       'check_pending_payout_reason',
-      sql`${table.reason} IN ('connect_not_ready', 'connect_restricted', 'transfer_failed')`
+      sql`${table.reason} IN ('connect_not_ready', 'connect_restricted', 'transfer_failed', 'min_transfer_floor')`
     ),
   ]
 );

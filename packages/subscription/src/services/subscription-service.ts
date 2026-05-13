@@ -32,7 +32,6 @@ import type { VersionedCache } from '@codex/cache';
 import {
   BILLING_INTERVAL,
   CURRENCY,
-  FEES,
   SUBSCRIPTION_STATUS,
 } from '@codex/constants';
 import { isUniqueViolation } from '@codex/database';
@@ -47,7 +46,12 @@ import {
   subscriptionTiers,
   users,
 } from '@codex/database/schema';
-import { withStaleCustomerRecovery } from '@codex/purchase';
+import {
+  DEFAULT_FEE_CONFIG,
+  type FeeConfig,
+  type FeeConfigService,
+  withStaleCustomerRecovery,
+} from '@codex/purchase';
 import {
   BaseService,
   InternalServiceError,
@@ -276,6 +280,19 @@ interface SubscriptionServiceConfig extends ServiceConfig {
    * without needing to re-send.
    */
   webAppUrl?: string;
+  /**
+   * Optional FeeConfigService used to resolve the DB-configurable
+   * revenue model (platform fee %, subscription org fee %, floors).
+   * When provided, every subscription flow that splits revenue
+   * (`recordNewSubscription`, `handleInvoicePaymentSucceeded`,
+   * `changeTier`) calls `feeConfigService.getFees()` ONCE per request
+   * and threads the result into `calculateRevenueSplit`. When absent
+   * (narrow unit tests, legacy harnesses), the service falls back to
+   * the code-default `FEES.*` constants. Min-transfer floor on
+   * `executeTransfers` / `resolvePendingPayouts` also consults this
+   * service when present.
+   */
+  feeConfigService?: FeeConfigService;
 }
 
 /**
@@ -301,6 +318,7 @@ export class SubscriptionService extends BaseService {
   private readonly waitUntil: WaitUntilFn | undefined;
   private readonly mailer: TierPriceChangeMailer | undefined;
   private readonly webAppUrl: string | undefined;
+  private readonly feeConfigService: FeeConfigService | undefined;
 
   constructor(config: SubscriptionServiceConfig, stripe: Stripe) {
     super(config);
@@ -309,6 +327,23 @@ export class SubscriptionService extends BaseService {
     this.waitUntil = config.waitUntil;
     this.mailer = config.mailer;
     this.webAppUrl = config.webAppUrl;
+    this.feeConfigService = config.feeConfigService;
+  }
+
+  /**
+   * Resolve fee configuration for the current request. Calls
+   * `FeeConfigService.getFees()` when wired (production); otherwise
+   * returns the code-default `FEES.*` constants via DEFAULT_FEE_CONFIG.
+   *
+   * Callers must invoke this ONCE per request and thread the result
+   * through to the split / transfer-floor sites — repeated calls add
+   * latency without changing the answer within a TTL window.
+   */
+  private async resolveFeeConfig(): Promise<FeeConfig> {
+    if (this.feeConfigService) {
+      return this.feeConfigService.getFees();
+    }
+    return { ...DEFAULT_FEE_CONFIG };
   }
 
   /**
@@ -688,11 +723,13 @@ export class SubscriptionService extends BaseService {
         ? BILLING_INTERVAL.YEAR
         : BILLING_INTERVAL.MONTH;
 
-    // Calculate revenue split
+    // Calculate revenue split using DB-configurable fees (Codex-t2t8d).
+    // Falls back to FEES.* constants when feeConfigService isn't wired.
+    const fees = await this.resolveFeeConfig();
     const split = calculateRevenueSplit(
       amountCents,
-      FEES.PLATFORM_PERCENT,
-      FEES.SUBSCRIPTION_ORG_PERCENT
+      fees.platformFeePercent,
+      fees.subscriptionOrgFeePercent
     );
 
     // In Stripe v19+, period dates are on the subscription item, not the subscription
@@ -929,12 +966,16 @@ export class SubscriptionService extends BaseService {
     const periodStart = subItem?.current_period_start ?? 0;
     const periodEnd = subItem?.current_period_end ?? 0;
 
-    // Update period dates and recalculate split
+    // Update period dates and recalculate split using DB-configurable
+    // fees (Codex-t2t8d). Single fee read per invoice — passed into both
+    // the pure split calculator and executeTransfers (for the
+    // min-transfer floor).
+    const fees = await this.resolveFeeConfig();
     const amountCents = stripeInvoice.amount_paid;
     const split = calculateRevenueSplit(
       amountCents,
-      FEES.PLATFORM_PERCENT,
-      FEES.SUBSCRIPTION_ORG_PERCENT
+      fees.platformFeePercent,
+      fees.subscriptionOrgFeePercent
     );
 
     await this.db
@@ -951,13 +992,15 @@ export class SubscriptionService extends BaseService {
       })
       .where(eq(subscriptions.id, sub.id));
 
-    // Execute revenue transfers
+    // Execute revenue transfers. `minTransferCents` floor is consulted
+    // inside executeTransfers to short-circuit micro-transfers.
     await this.executeTransfers(
       sub.id,
       sub.organizationId,
       sourceTransaction,
       split.organizationFeeCents,
-      split.creatorPayoutCents
+      split.creatorPayoutCents,
+      fees.minTransferCents
     );
 
     this.obs.info('Invoice payment processed', {
@@ -1815,10 +1858,16 @@ export class SubscriptionService extends BaseService {
       // the row carries a CHECK constraint:
       //   amount_cents = platform_fee + org_fee + creator_payout
       // Updating amountCents alone would silently violate it.
+      // DB-configurable revenue model (Codex-t2t8d). Resolved once here
+      // and used purely to mirror the new tier price into the local row;
+      // executeTransfers is NOT called from changeTier (it fires on the
+      // next invoice.payment_succeeded webhook), so we don't need the
+      // floor knobs at this site.
+      const feesAtChange = await this.resolveFeeConfig();
       const newSplit = calculateRevenueSplit(
         newRecurringAmount,
-        FEES.PLATFORM_PERCENT,
-        FEES.SUBSCRIPTION_ORG_PERCENT
+        feesAtChange.platformFeePercent,
+        feesAtChange.subscriptionOrgFeePercent
       );
       try {
         await this.db
@@ -2300,7 +2349,26 @@ export class SubscriptionService extends BaseService {
       count: unresolvedPayouts.length,
     });
 
+    // Resolve min-transfer floor once for the whole batch (Codex-t2t8d).
+    // Payouts below the floor are skipped (left pending) — they'll resolve
+    // on a future invocation once the accumulated amount clears the floor,
+    // or once the operator lowers the floor.
+    const feesForResolve = await this.resolveFeeConfig();
+    const minTransferCents = feesForResolve.minTransferCents;
+
     for (const payout of unresolvedPayouts) {
+      // Skip if amount is below the floor — leave row pending.
+      if (minTransferCents > 0 && payout.amountCents < minTransferCents) {
+        this.obs.info(
+          'Pending payout below minTransferCents floor — leaving pending',
+          {
+            pendingPayoutId: payout.id,
+            amountCents: payout.amountCents,
+            minTransferCents,
+          }
+        );
+        continue;
+      }
       try {
         const transfer = await this.stripe.transfers.create(
           {
@@ -2796,7 +2864,8 @@ export class SubscriptionService extends BaseService {
     orgId: string,
     chargeId: string,
     orgFeeCents: number,
-    creatorPayoutCents: number
+    creatorPayoutCents: number,
+    minTransferCents = 0
   ): Promise<void> {
     const transferGroup = `sub_${subscriptionId}`;
 
@@ -2804,8 +2873,49 @@ export class SubscriptionService extends BaseService {
     // transfers route to the same account checkout validated against.
     const orgConnect = await this.resolvePrimaryConnect(orgId);
 
-    // Transfer org fee
-    if (orgConnect?.chargesEnabled && orgFeeCents > 0) {
+    // Min-transfer floor (Codex-t2t8d): for the org leg, if the fee is
+    // non-zero but below the configured floor, skip stripe.transfers.create
+    // and insert a `min_transfer_floor` pending row instead. The amount
+    // accumulates and is paid out by a future resolution sweep when the
+    // total exceeds the floor. Same shape mirrored for each creator leg
+    // below. Floor=0 (default when feeConfigService isn't wired) disables
+    // the check entirely.
+    if (
+      minTransferCents > 0 &&
+      orgFeeCents > 0 &&
+      orgFeeCents < minTransferCents &&
+      orgConnect?.chargesEnabled
+    ) {
+      this.obs.info(
+        'Org transfer below minTransferCents floor — accumulating',
+        {
+          subscriptionId,
+          organizationId: orgId,
+          amountCents: orgFeeCents,
+          minTransferCents,
+        }
+      );
+      try {
+        await this.db.insert(pendingPayouts).values({
+          userId: orgConnect.userId,
+          organizationId: orgId,
+          subscriptionId,
+          amountCents: orgFeeCents,
+          reason: 'min_transfer_floor',
+        });
+      } catch (insertError) {
+        this.obs.error(
+          'Failed to record pending payout for min_transfer_floor (org)',
+          {
+            subscriptionId,
+            organizationId: orgId,
+            amountCents: orgFeeCents,
+            error: (insertError as Error).message,
+          }
+        );
+      }
+      // Fall through to creator pool logic below — the org leg is done.
+    } else if (orgConnect?.chargesEnabled && orgFeeCents > 0) {
       try {
         await this.stripe.transfers.create(
           {
@@ -2894,6 +3004,44 @@ export class SubscriptionService extends BaseService {
     if (creatorAgreements.length === 0) {
       // No creator agreements — org owner gets the full creator pool
       // (Already handled by org transfer above or accumulated)
+      // Min-transfer floor (Codex-t2t8d) — short-circuit micro-transfers
+      // to a `min_transfer_floor` pending row before the stripe call.
+      if (
+        minTransferCents > 0 &&
+        creatorPayoutCents > 0 &&
+        creatorPayoutCents < minTransferCents &&
+        orgConnect?.chargesEnabled
+      ) {
+        this.obs.info(
+          'Creator-pool-to-owner transfer below minTransferCents floor — accumulating',
+          {
+            subscriptionId,
+            organizationId: orgId,
+            amountCents: creatorPayoutCents,
+            minTransferCents,
+          }
+        );
+        try {
+          await this.db.insert(pendingPayouts).values({
+            userId: orgConnect.userId,
+            organizationId: orgId,
+            subscriptionId,
+            amountCents: creatorPayoutCents,
+            reason: 'min_transfer_floor',
+          });
+        } catch (insertError) {
+          this.obs.error(
+            'Failed to record pending payout for min_transfer_floor (creator-pool-to-owner)',
+            {
+              subscriptionId,
+              organizationId: orgId,
+              amountCents: creatorPayoutCents,
+              error: (insertError as Error).message,
+            }
+          );
+        }
+        return;
+      }
       // Transfer remaining to the org Connect account as creator payout
       if (orgConnect?.chargesEnabled && creatorPayoutCents > 0) {
         try {
@@ -2976,6 +3124,47 @@ export class SubscriptionService extends BaseService {
       if (creatorAmount <= 0) continue;
 
       const creatorConnect = connectByCreator.get(agreement.creatorId);
+
+      // Min-transfer floor (Codex-t2t8d): accumulate sub-floor amounts
+      // as `min_transfer_floor` pending rows instead of hitting Stripe.
+      // Only meaningful when the creator's Connect is ready — otherwise
+      // existing connect_not_ready / connect_restricted handling below
+      // already accumulates the amount.
+      if (
+        minTransferCents > 0 &&
+        creatorAmount < minTransferCents &&
+        creatorConnect?.chargesEnabled
+      ) {
+        this.obs.info(
+          'Creator transfer below minTransferCents floor — accumulating',
+          {
+            subscriptionId,
+            creatorId: agreement.creatorId,
+            amountCents: creatorAmount,
+            minTransferCents,
+          }
+        );
+        try {
+          await this.db.insert(pendingPayouts).values({
+            userId: agreement.creatorId,
+            organizationId: orgId,
+            subscriptionId,
+            amountCents: creatorAmount,
+            reason: 'min_transfer_floor',
+          });
+        } catch (insertError) {
+          this.obs.error(
+            'Failed to record pending payout for min_transfer_floor (creator)',
+            {
+              subscriptionId,
+              creatorId: agreement.creatorId,
+              amountCents: creatorAmount,
+              error: (insertError as Error).message,
+            }
+          );
+        }
+        continue;
+      }
 
       if (creatorConnect?.chargesEnabled) {
         try {

@@ -11,6 +11,7 @@ export * from './followers';
 export * from './notifications';
 export * from './organizations';
 export * from './playback';
+export * from './revenue-model-config';
 export * from './settings';
 export * from './storage';
 export * from './subscriptions';
