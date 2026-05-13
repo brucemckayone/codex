@@ -7007,6 +7007,78 @@ export const analytics_section_leaderboard_heading = () => `Top content by reven
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const analytics_section_creator_revenue_heading = () => `Revenue by creator`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_creator_revenue_loading_label = () => `Loading creator revenue split`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_creator_revenue_empty = () => `No active creator agreements yet.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_creator_revenue_col_creator = () => `Creator`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_creator_revenue_col_revenue = () => `Total revenue`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_creator_revenue_col_split = () => `Split`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_creator_revenue_col_last_payout = () => `Last payout`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_creator_revenue_col_pending = () => `Pending`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const analytics_creator_revenue_no_payout = () => `No payouts drained yet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const kpi_loading_label = () => `Loading metric`
 
 

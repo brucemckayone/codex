@@ -54,6 +54,8 @@ export type {
   AdminContentStatus,
   ContentPerformanceItem,
   ContentPerformanceQueryOptions,
+  CreatorRevenueQueryOptions,
+  CreatorRevenueSplitItem,
   CustomerDetails,
   CustomerListItem,
   CustomerStats,

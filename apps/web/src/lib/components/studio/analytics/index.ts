@@ -6,6 +6,7 @@
  */
 export { default as AnalyticsCommandBar } from './AnalyticsCommandBar.svelte';
 export { default as AnalyticsZeroState } from './AnalyticsZeroState.svelte';
+export { default as CreatorRevenueTable } from './CreatorRevenueTable.svelte';
 export { default as HeroAnalyticsChart } from './HeroAnalyticsChart.svelte';
 export { default as KPICard } from './KPICard.svelte';
 export { default as NarrativeSummary } from './NarrativeSummary.svelte';

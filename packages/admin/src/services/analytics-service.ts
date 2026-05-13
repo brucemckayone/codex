@@ -32,6 +32,8 @@ import type {
   ActivityFeedResponse,
   ContentPerformanceItem,
   ContentPerformanceQueryOptions,
+  CreatorRevenueQueryOptions,
+  CreatorRevenueSplitItem,
   CustomerStats,
   DailyFollowers,
   DailyRevenue,
@@ -963,6 +965,200 @@ export class AdminAnalyticsService extends BaseService {
         throw error;
       }
       this.handleError(error, 'getDashboardStats');
+    }
+  }
+
+  /**
+   * Per-creator revenue split for org-owner visibility on the studio
+   * analytics page (Codex-mtv05).
+   *
+   * Returns one row per ACTIVE creator-organization agreement
+   * (`effectiveUntil IS NULL OR > now()`), annotated with:
+   *  - Purchase-revenue aggregated for content authored by that creator
+   *    within the org and the optional date window. Subscription invoice
+   *    revenue is NOT included in Phase 1 — there is no per-creator
+   *    immutable invoice row today, only dynamic transfer-time fan-out.
+   *  - The creator's CURRENT share, converted from basis points to a
+   *    display percentage (`bps / 100`). Historical splits are not surfaced.
+   *  - `lastPayoutAt` (MAX resolved drain) and `pendingPayoutCents` (SUM
+   *    of unresolved drains) joined by BOTH `userId` AND `organizationId`
+   *    — multi-org-membership safety per the bead STOP rule.
+   *
+   * The result mirrors the data contract `SubscriptionService.executeTransfers`
+   * uses at fan-out time, so the UI can faithfully visualise it.
+   *
+   * Empty agreements list (single-creator org or no agreements) returns
+   * `items: []` — the studio page hides the section in that case.
+   */
+  async getRevenueByCreator(
+    organizationId: string,
+    options?: CreatorRevenueQueryOptions
+  ): Promise<PaginatedListResponse<CreatorRevenueSplitItem>> {
+    try {
+      const startDate = options?.startDate;
+      const endDate = options?.endDate;
+
+      // Active agreements + creator profile join. Drives the result-set
+      // shape — rows that exist here are the ones the executeTransfers
+      // fan-out will distribute to in production. `sharePercent` is the
+      // creator's `organizationFeePercentage` (basis points) per the
+      // subscription-service contract.
+      const agreementRows = await this.db
+        .select({
+          creatorId: schema.creatorOrganizationAgreements.creatorId,
+          shareBps:
+            schema.creatorOrganizationAgreements.organizationFeePercentage,
+          name: schema.users.name,
+          avatarUrl: schema.users.avatarUrl,
+        })
+        .from(schema.creatorOrganizationAgreements)
+        .innerJoin(
+          schema.users,
+          eq(schema.creatorOrganizationAgreements.creatorId, schema.users.id)
+        )
+        .where(
+          and(
+            eq(
+              schema.creatorOrganizationAgreements.organizationId,
+              organizationId
+            ),
+            or(
+              isNull(schema.creatorOrganizationAgreements.effectiveUntil),
+              gt(
+                schema.creatorOrganizationAgreements.effectiveUntil,
+                new Date()
+              )
+            )
+          )
+        );
+
+      if (agreementRows.length === 0) {
+        const pagination: PaginationMetadata = {
+          page: 1,
+          limit: 0,
+          total: 0,
+          totalPages: 1,
+        };
+        return { items: [], pagination };
+      }
+
+      const creatorIds = agreementRows.map((r) => r.creatorId);
+
+      // Purchase revenue per creator: SUM(purchases.creatorPayoutCents)
+      // joined to content for the creatorId mapping. ALL aggregates filtered
+      // by `purchases.organizationId = orgId` AND status=completed AND optional
+      // window. The join via `content.creatorId` is the canonical
+      // purchase→creator path (per `purchase-service.ts:249, 346, 481`).
+      const purchaseConditions = [
+        eq(schema.purchases.organizationId, organizationId),
+        eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED),
+        inArray(schema.content.creatorId, creatorIds),
+      ];
+      if (startDate) {
+        purchaseConditions.push(gte(schema.purchases.purchasedAt, startDate));
+      }
+      if (endDate) {
+        purchaseConditions.push(lte(schema.purchases.purchasedAt, endDate));
+      }
+
+      // Three independent aggregates over creator-keyed data — fire concurrently
+      // (R12 hard rule). Pending-payouts queries are scoped by BOTH userId AND
+      // organizationId to prevent cross-org bleed in multi-org membership cases.
+      const [revenueRows, lastPayoutRows, pendingPayoutRows] =
+        await Promise.all([
+          this.db
+            .select({
+              creatorId: schema.content.creatorId,
+              totalRevenueCents: sql<number>`COALESCE(SUM(${schema.purchases.creatorPayoutCents}), 0)::int`,
+            })
+            .from(schema.purchases)
+            .innerJoin(
+              schema.content,
+              eq(schema.purchases.contentId, schema.content.id)
+            )
+            .where(and(...purchaseConditions))
+            .groupBy(schema.content.creatorId),
+          this.db
+            .select({
+              creatorId: schema.pendingPayouts.userId,
+              lastPayoutAt: sql<
+                string | null
+              >`MAX(${schema.pendingPayouts.resolvedAt})`,
+            })
+            .from(schema.pendingPayouts)
+            .where(
+              and(
+                eq(schema.pendingPayouts.organizationId, organizationId),
+                inArray(schema.pendingPayouts.userId, creatorIds),
+                sql`${schema.pendingPayouts.resolvedAt} IS NOT NULL`
+              )
+            )
+            .groupBy(schema.pendingPayouts.userId),
+          this.db
+            .select({
+              creatorId: schema.pendingPayouts.userId,
+              pendingPayoutCents: sql<number>`COALESCE(SUM(${schema.pendingPayouts.amountCents}), 0)::int`,
+            })
+            .from(schema.pendingPayouts)
+            .where(
+              and(
+                eq(schema.pendingPayouts.organizationId, organizationId),
+                inArray(schema.pendingPayouts.userId, creatorIds),
+                isNull(schema.pendingPayouts.resolvedAt)
+              )
+            )
+            .groupBy(schema.pendingPayouts.userId),
+        ]);
+
+      const revenueByCreator = new Map(
+        revenueRows.map((r) => [r.creatorId, r.totalRevenueCents])
+      );
+      const lastPayoutByCreator = new Map(
+        lastPayoutRows.map((r) => [r.creatorId, r.lastPayoutAt])
+      );
+      const pendingByCreator = new Map(
+        pendingPayoutRows.map((r) => [r.creatorId, r.pendingPayoutCents])
+      );
+
+      // sharePercent is converted at the service boundary so the frontend
+      // NEVER sees raw basis points — bead STOP rule explicitly forbids
+      // leaking bps to the DOM. Basis points: 10000 = 100%, so display
+      // percent = bps / 100 (e.g. 7500 bps → 75%).
+      const items: CreatorRevenueSplitItem[] = agreementRows
+        .map((row) => {
+          const lastPayoutRaw = lastPayoutByCreator.get(row.creatorId) ?? null;
+          // `lastPayoutRaw` is typed `string | null` by the SQL builder but
+          // drivers sometimes hand back a Date directly. `new Date(value)`
+          // handles both shapes without an `instanceof` discriminator.
+          const lastPayoutAt =
+            lastPayoutRaw === null
+              ? null
+              : new Date(lastPayoutRaw).toISOString();
+          return {
+            creatorId: row.creatorId,
+            name: row.name ?? '',
+            avatarUrl: row.avatarUrl ?? null,
+            totalRevenueCents: revenueByCreator.get(row.creatorId) ?? 0,
+            splitPercent: row.shareBps / 100,
+            lastPayoutAt,
+            pendingPayoutCents: pendingByCreator.get(row.creatorId) ?? 0,
+          };
+        })
+        .sort((a, b) => b.totalRevenueCents - a.totalRevenueCents);
+
+      const pagination: PaginationMetadata = {
+        page: 1,
+        limit: items.length,
+        total: items.length,
+        totalPages: 1,
+      };
+
+      return { items, pagination };
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        throw error;
+      }
+      this.handleError(error, 'getRevenueByCreator');
     }
   }
 }

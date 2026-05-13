@@ -31,6 +31,7 @@ import {
   adminDashboardStatsQuerySchema,
   adminFollowersQuerySchema,
   adminGrantAccessParamsSchema,
+  adminRevenueByCreatorQuerySchema,
   adminRevenueQuerySchema,
   adminSubscribersQuerySchema,
   adminTopContentQuerySchema,
@@ -196,6 +197,38 @@ app.get(
         ctx.organizationId,
         ctx.input.query
       );
+    },
+  })
+);
+
+/**
+ * GET /api/admin/analytics/revenue-by-creator
+ * Per-creator revenue split visibility (Codex-mtv05).
+ *
+ * Returns one row per ACTIVE creator-organization agreement for the
+ * org-owner's organization, annotated with totalRevenueCents (purchases
+ * only in Phase 1), CURRENT splitPercent (display %, not basis points),
+ * lastPayoutAt, and pendingPayoutCents.
+ *
+ * Section is hidden in the UI for single-creator orgs; this endpoint returns
+ * the same shape regardless and the client renders conditionally on
+ * `items.length > 1`.
+ */
+app.get(
+  '/api/admin/analytics/revenue-by-creator',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
+    input: { query: adminRevenueByCreatorQuerySchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.adminAnalytics.getRevenueByCreator(
+        ctx.organizationId,
+        ctx.input.query
+      );
+      return new PaginatedResult(result.items, result.pagination);
     },
   })
 );

@@ -22,6 +22,7 @@
   import {
     AnalyticsCommandBar,
     AnalyticsZeroState,
+    CreatorRevenueTable,
     HeroAnalyticsChart,
     KPICard,
     NarrativeSummary,
@@ -31,6 +32,7 @@
     getAnalyticsContentPerformance,
     getAnalyticsFollowers,
     getAnalyticsRevenue,
+    getAnalyticsRevenueByCreator,
     getAnalyticsSubscribers,
     getAnalyticsTopContent,
   } from '$lib/remote/admin.remote';
@@ -145,6 +147,21 @@
       : null
   );
 
+  // Codex-mtv05: per-creator revenue split visibility. Only renders for
+  // multi-creator orgs (gated on items.length > 1) — single-creator orgs
+  // get items: [] from the server and the entire section is suppressed.
+  // Comparison windows are NOT applied (Phase 1 is a snapshot of current
+  // splits, not historical drift).
+  const revenueByCreatorQuery = $derived(
+    isAuthorized
+      ? getAnalyticsRevenueByCreator({
+          organizationId: data.org.id,
+          startDate,
+          endDate,
+        })
+      : null
+  );
+
   // ─── Resolved data + loading flags ────────────────────────────────────
   const revenue = $derived(revenueQuery?.current);
   const subscribers = $derived(subscribersQuery?.current);
@@ -172,6 +189,17 @@
   const followersLoading = $derived(isLoading(followersQuery));
   const topContentLoading = $derived(isLoading(topContentQuery));
   const contentPerformanceLoading = $derived(isLoading(contentPerformanceQuery));
+
+  // Codex-mtv05 derivations — kept alongside their peers for consistency.
+  // `showRevenueByCreator` gates the entire section render: single-creator
+  // orgs get items: [] from the server, length === 1 (or 0) → hidden.
+  const revenueByCreatorItems = $derived(
+    revenueByCreatorQuery?.current?.items ?? []
+  );
+  const revenueByCreatorLoading = $derived(
+    isLoading(revenueByCreatorQuery)
+  );
+  const showRevenueByCreator = $derived(revenueByCreatorItems.length > 1);
 
   // Zero-state gating waits for every query to settle (success or error).
   // Using .loading (not .current) means errored queries still "resolve" for
@@ -356,6 +384,25 @@
           loading={topContentLoading}
         />
       </section>
+
+      {#if showRevenueByCreator}
+        <section
+          class="creator-revenue-section"
+          data-test="revenue-by-creator-section"
+          aria-labelledby="analytics-creator-revenue-heading"
+        >
+          <h2
+            id="analytics-creator-revenue-heading"
+            class="creator-revenue-section__heading"
+          >
+            {m.analytics_section_creator_revenue_heading()}
+          </h2>
+          <CreatorRevenueTable
+            items={revenueByCreatorItems}
+            loading={revenueByCreatorLoading}
+          />
+        </section>
+      {/if}
     {/if}
   </div>
 {/if}
@@ -390,13 +437,15 @@
   }
 
   .chart-section,
-  .leaderboard-section {
+  .leaderboard-section,
+  .creator-revenue-section {
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
   }
 
-  .leaderboard-section__heading {
+  .leaderboard-section__heading,
+  .creator-revenue-section__heading {
     margin: 0;
     font-family: var(--font-heading);
     font-size: var(--text-lg);
