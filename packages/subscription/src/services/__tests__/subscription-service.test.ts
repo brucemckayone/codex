@@ -5987,6 +5987,698 @@ describe('SubscriptionService', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────
+// Payouts ledger — schema + status-column behaviour (Codex-e9v3b)
+//
+// Companion tests for the `payouts` ledger introduced in Codex-bxpmu.
+// These pin the NEW behaviour explicitly:
+//
+//   A. executeTransfers writes status='paid' rows on success at each of
+//      the three transfer sites (org fee, creator-pool-to-owner,
+//      per-creator fan-out).
+//   B. Webhook double-fire: the partial unique index on
+//      stripe_transfer_id collapses the second insert to one row.
+//   C. CHECK constraints catch malformed inserts at the DB level
+//      (defence-in-depth — the service is the first line, the DB is
+//      the last).
+//   E. Drain status transitions: resolvePendingPayouts flips
+//      pending→paid; sweepUnresolvedPayouts only touches pending rows
+//      and uses attemptedAt (not createdAt) for the age threshold.
+//
+// (D) cross-org isolation for listPayoutsByOrg is already covered by
+// the "SCOPING INVARIANT" test in the listPayoutsByOrg describe block
+// above — no new test needed.
+// ─────────────────────────────────────────────────────────────────────
+describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', () => {
+  let db: ReturnType<typeof setupTestDatabase>;
+  let stripe: Stripe;
+  let service: SubscriptionService;
+  let creatorId: string;
+  let subscriberId: string;
+
+  beforeAll(async () => {
+    db = setupTestDatabase();
+    await validateDatabaseConnection(db);
+    const userIds = await seedTestUsers(db, 2);
+    [creatorId, subscriberId] = userIds;
+  });
+
+  beforeEach(() => {
+    stripe = createMockStripe();
+    service = new SubscriptionService({ db, environment: 'test' }, stripe);
+  });
+
+  afterAll(async () => {
+    await teardownTestDatabase();
+  });
+
+  /**
+   * Seed an org + Connect account (chargesEnabled+payoutsEnabled, active)
+   * + one tier + one active subscription owned by `subscriberId`. The
+   * org owner (the user who can receive the org fee transfer) is
+   * `creatorId`. Returns refs the per-test bodies need.
+   */
+  async function seedOrgWithConnect(slug: string) {
+    const [org] = await db
+      .insert(organizations)
+      .values(
+        createTestOrganizationInput({
+          slug: createUniqueSlug(slug),
+          creatorId,
+        })
+      )
+      .returning();
+
+    await db.insert(stripeConnectAccounts).values(
+      createTestConnectAccountInput(org.id, creatorId, {
+        chargesEnabled: true,
+        payoutsEnabled: true,
+        status: 'active',
+      })
+    );
+
+    const [tier] = await db
+      .insert(subscriptionTiers)
+      .values(createTestTierInput(org.id, { name: 'Basic' }))
+      .returning();
+
+    const [sub] = await db
+      .insert(subscriptions)
+      .values(
+        createTestSubscriptionInput(subscriberId, org.id, tier.id, {
+          status: 'active',
+        })
+      )
+      .returning();
+
+    return { org, tier, sub };
+  }
+
+  /**
+   * Add an extra creator (with their own Connect account) to an org and
+   * seed an active agreement for them. Returns the creator's userId.
+   */
+  async function addCreatorWithAgreement(
+    orgId: string,
+    sharePercent: number
+  ): Promise<string> {
+    const [userId] = await seedTestUsers(db, 1);
+    await db.insert(stripeConnectAccounts).values(
+      createTestConnectAccountInput(orgId, userId, {
+        chargesEnabled: true,
+        payoutsEnabled: true,
+        status: 'active',
+      })
+    );
+    await db.insert(creatorOrganizationAgreements).values({
+      creatorId: userId,
+      organizationId: orgId,
+      organizationFeePercentage: sharePercent,
+    });
+    return userId;
+  }
+
+  // ─── A. Success-path inserts ────────────────────────────────────────
+
+  describe('A. executeTransfers success-path inserts', () => {
+    it('org fee transfer → one payouts row with status=paid, payoutType=organization_fee', async () => {
+      const { org, sub } = await seedOrgWithConnect('e9v3b-org-fee');
+
+      const chargeId = `ch_e9v3b_orgfee_${createUniqueSlug('c')}`;
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [{ payment: { charge: chargeId, payment_intent: 'pi_orgfee' } }],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      const { eq, and } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(payoutsTable)
+        .where(
+          and(
+            eq(payoutsTable.organizationId, org.id),
+            eq(payoutsTable.payoutType, 'organization_fee')
+          )
+        );
+
+      expect(rows).toHaveLength(1);
+      const [row] = rows;
+      expect(row.status).toBe('paid');
+      expect(row.userId).toBe(creatorId); // Connect account owner
+      expect(row.subscriptionId).toBe(sub.id);
+      expect(row.stripeTransferId).toMatch(/^tr_/);
+      expect(row.stripeChargeId).toBe(chargeId);
+      expect(row.transferGroup).toBe(`sub_${sub.id}`);
+      expect(row.resolvedAt).not.toBeNull();
+      expect(row.reason).toBeNull();
+      expect(row.amountCents).toBeGreaterThan(0);
+    });
+
+    it('creator-pool-to-owner (no creator agreements) → one payouts row with payoutType=creator_payout_to_owner', async () => {
+      const { org, sub } = await seedOrgWithConnect('e9v3b-pool-owner');
+
+      // No creatorOrganizationAgreements inserted — exercises the
+      // "no agreements" branch where the creator pool routes to the org
+      // owner.
+      const chargeId = `ch_e9v3b_pool_${createUniqueSlug('c')}`;
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [{ payment: { charge: chargeId, payment_intent: 'pi_pool' } }],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      const { eq, and } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(payoutsTable)
+        .where(
+          and(
+            eq(payoutsTable.organizationId, org.id),
+            eq(payoutsTable.payoutType, 'creator_payout_to_owner')
+          )
+        );
+
+      expect(rows).toHaveLength(1);
+      const [row] = rows;
+      expect(row.status).toBe('paid');
+      expect(row.userId).toBe(creatorId); // org owner
+      expect(row.subscriptionId).toBe(sub.id);
+      expect(row.stripeTransferId).toMatch(/^tr_/);
+      expect(row.stripeChargeId).toBe(chargeId);
+      expect(row.transferGroup).toBe(`sub_${sub.id}`);
+      expect(row.resolvedAt).not.toBeNull();
+      expect(row.reason).toBeNull();
+      expect(row.amountCents).toBeGreaterThan(0);
+    });
+
+    it('per-creator fan-out (2 creators) → N payouts rows, each payoutType=creator_payout, correct creator userIds, amounts sum within pool', async () => {
+      const { org, sub } = await seedOrgWithConnect('e9v3b-fanout');
+
+      // Two creators with active agreements (50/50 split).
+      const c1 = await addCreatorWithAgreement(org.id, 5000);
+      const c2 = await addCreatorWithAgreement(org.id, 5000);
+
+      const chargeId = `ch_e9v3b_fanout_${createUniqueSlug('c')}`;
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [
+            { payment: { charge: chargeId, payment_intent: 'pi_fanout' } },
+          ],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      const { eq, and, inArray } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(payoutsTable)
+        .where(
+          and(
+            eq(payoutsTable.organizationId, org.id),
+            eq(payoutsTable.payoutType, 'creator_payout'),
+            inArray(payoutsTable.userId, [c1, c2])
+          )
+        );
+
+      expect(rows).toHaveLength(2);
+      const byUser = new Map(rows.map((r) => [r.userId, r]));
+      for (const cid of [c1, c2]) {
+        const row = byUser.get(cid);
+        expect(row, `no row for creator ${cid}`).toBeDefined();
+        expect(row?.status).toBe('paid');
+        expect(row?.payoutType).toBe('creator_payout');
+        expect(row?.subscriptionId).toBe(sub.id);
+        expect(row?.stripeTransferId).toMatch(/^tr_/);
+        expect(row?.stripeChargeId).toBe(chargeId);
+        expect(row?.transferGroup).toBe(`sub_${sub.id}`);
+        expect(row?.resolvedAt).not.toBeNull();
+        expect(row?.reason).toBeNull();
+        expect(row?.amountCents).toBeGreaterThan(0);
+      }
+
+      // Sum of per-creator amounts ≤ amount_paid (the creator pool is a
+      // subset of the gross invoice). 50/50 split → equal amounts.
+      const amounts = rows.map((r) => r.amountCents);
+      expect(amounts[0]).toBe(amounts[1]);
+      expect(amounts.reduce((s, a) => s + a, 0)).toBeLessThanOrEqual(1000);
+    });
+  });
+
+  // ─── B. Idempotency under webhook double-fire ───────────────────────
+
+  describe('B. Idempotency — partial unique index collapses webhook double-fire', () => {
+    it('firing the same invoice.payment_succeeded twice → one paid row per stripeTransferId (unique partial index)', async () => {
+      const { org, sub } = await seedOrgWithConnect('e9v3b-idem');
+
+      // Pin a stable charge id so the service derives identical
+      // idempotency keys on both calls → Stripe mock returns identical
+      // tr_ ids → the partial unique index on stripe_transfer_id rejects
+      // the second insert. Note: the mock isn't truly Stripe-side-dedupe
+      // (it returns a fresh tr_ each call), so we override it to return
+      // a deterministic id per idempotencyKey to faithfully exercise
+      // the partial-unique-index path.
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      const byKey = new Map<string, string>();
+      transferSpy.mockImplementation((params: Record<string, unknown>, opts) => {
+        const o = opts as { idempotencyKey?: string } | undefined;
+        const key = o?.idempotencyKey ?? '';
+        let id = byKey.get(key);
+        if (!id) {
+          id = `tr_idem_${createUniqueSlug('t')}`;
+          byKey.set(key, id);
+        }
+        return Promise.resolve({
+          id,
+          amount: params.amount,
+          currency: params.currency,
+          destination: params.destination,
+          metadata: params.metadata ?? {},
+        }) as unknown as ReturnType<typeof transferSpy>;
+      });
+
+      const chargeId = 'ch_e9v3b_idem_fixed';
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [{ payment: { charge: chargeId, payment_intent: 'pi_idem' } }],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      // First fire: rows inserted normally.
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+      const { eq, and } = await import('drizzle-orm');
+      const afterFirst = await db
+        .select()
+        .from(payoutsTable)
+        .where(
+          and(
+            eq(payoutsTable.organizationId, org.id),
+            eq(payoutsTable.status, 'paid')
+          )
+        );
+      expect(afterFirst.length).toBeGreaterThan(0);
+      const firstTransferIds = new Set(
+        afterFirst.map((r) => r.stripeTransferId)
+      );
+
+      // Second fire: the service re-attempts the transfers (Stripe mock
+      // returns the SAME tr_ id per idempotencyKey), then tries to
+      // INSERT a row with the same stripeTransferId — partial unique
+      // index rejects, and the service swallows the duplicate (see
+      // isUniqueViolation check in executeTransfers). No throw, no
+      // extra rows.
+      await expect(
+        service.handleInvoicePaymentSucceeded(mockInvoice)
+      ).resolves.toBeDefined();
+
+      const afterSecond = await db
+        .select()
+        .from(payoutsTable)
+        .where(
+          and(
+            eq(payoutsTable.organizationId, org.id),
+            eq(payoutsTable.status, 'paid')
+          )
+        );
+
+      // Row count unchanged across replay — partial unique index did
+      // its job.
+      expect(afterSecond).toHaveLength(afterFirst.length);
+      const secondTransferIds = new Set(
+        afterSecond.map((r) => r.stripeTransferId)
+      );
+      expect(secondTransferIds).toEqual(firstTransferIds);
+    });
+  });
+
+  // ─── C. CHECK constraint enforcement (defence-in-depth) ─────────────
+
+  describe('C. CHECK constraints — raw insert defence-in-depth', () => {
+    /**
+     * Common base values for the malformed-insert tests. Each test
+     * overrides exactly the column it's testing. The base values are
+     * otherwise valid so the failure mode isolates to the targeted
+     * constraint.
+     */
+    async function baseValues(slug: string) {
+      const { org, sub } = await seedOrgWithConnect(slug);
+      return {
+        userId: creatorId,
+        organizationId: org.id,
+        subscriptionId: sub.id,
+        amountCents: 1000,
+        currency: 'gbp',
+        payoutType: 'creator_payout' as const,
+        status: 'pending' as const,
+        reason: 'connect_not_ready' as const,
+      };
+    }
+
+    /**
+     * Assert that a Postgres CHECK violation (SQLSTATE 23514) escapes
+     * the insert. Different drivers wrap the error; match on the .code
+     * (Drizzle / pg) or on the constraint name in the message.
+     */
+    function expectCheckViolation(err: unknown, constraint: string) {
+      expect(err).toBeDefined();
+      const e = err as {
+        code?: string;
+        cause?: { code?: string; message?: string };
+        message?: string;
+      };
+      const code = e.code ?? e.cause?.code;
+      const msg = `${e.message ?? ''} ${e.cause?.message ?? ''}`;
+      // 23514 is the Postgres CHECK violation SQLSTATE.
+      const matched =
+        code === '23514' ||
+        msg.includes('23514') ||
+        msg.includes(constraint) ||
+        msg.toLowerCase().includes('check constraint');
+      expect(
+        matched,
+        `expected CHECK violation (${constraint}); got code=${code} message=${msg}`
+      ).toBe(true);
+    }
+
+    it('check_payouts_paid_invariant: status=paid with stripeTransferId=null is rejected', async () => {
+      const base = await baseValues('e9v3b-check-paid-invariant');
+      const err = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          status: 'paid',
+          reason: null,
+          stripeTransferId: null,
+          resolvedAt: null,
+        })
+        .catch((e) => e);
+      expectCheckViolation(err, 'check_payouts_paid_invariant');
+    });
+
+    it("check_payouts_status: status='resolved' (not in {paid,pending,failed}) is rejected", async () => {
+      const base = await baseValues('e9v3b-check-status');
+      const err = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          // 'resolved' is the URL alias, NOT a valid DB status — the
+          // CHECK only accepts paid/pending/failed.
+          status: 'resolved' as unknown as 'pending',
+        })
+        .catch((e) => e);
+      expectCheckViolation(err, 'check_payouts_status');
+    });
+
+    it("check_payouts_reason: reason='made_up' (not in allowed set) is rejected", async () => {
+      const base = await baseValues('e9v3b-check-reason');
+      const err = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          reason: 'made_up' as unknown as 'connect_not_ready',
+        })
+        .catch((e) => e);
+      expectCheckViolation(err, 'check_payouts_reason');
+    });
+
+    it("check_payouts_type: payoutType='bogus' (not in allowed set) is rejected", async () => {
+      const base = await baseValues('e9v3b-check-type');
+      const err = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          payoutType: 'bogus' as unknown as 'creator_payout',
+        })
+        .catch((e) => e);
+      expectCheckViolation(err, 'check_payouts_type');
+    });
+
+    it('check_payouts_amount_positive: amountCents=0 is rejected', async () => {
+      const base = await baseValues('e9v3b-check-amount');
+      const err = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          amountCents: 0,
+        })
+        .catch((e) => e);
+      expectCheckViolation(err, 'check_payouts_amount_positive');
+    });
+  });
+
+  // ─── E. Drain status transitions ────────────────────────────────────
+
+  describe('E. Drain status transitions', () => {
+    /**
+     * Seed an org + a Connect account with a deterministic
+     * stripeAccountId so resolvePendingPayouts /
+     * sweepUnresolvedPayouts can be driven explicitly. The org owner
+     * is `creatorId` and the connect account belongs to `creatorId`.
+     */
+    async function seedDrainScenario(slug: string) {
+      const { org, sub } = await seedOrgWithConnect(slug);
+      const stripeAccountId = `acct_e9v3b_${createUniqueSlug('a')}`;
+      const { eq } = await import('drizzle-orm');
+      await db
+        .update(stripeConnectAccounts)
+        .set({ stripeAccountId })
+        .where(eq(stripeConnectAccounts.organizationId, org.id));
+      return { org, sub, stripeAccountId };
+    }
+
+    function stubAccountsRetrieve(ready: boolean): void {
+      const fn = vi.fn().mockImplementation(async (accountId: string) => ({
+        id: accountId,
+        charges_enabled: ready,
+        payouts_enabled: ready,
+      }));
+      (stripe as unknown as { accounts: Record<string, unknown> }).accounts = {
+        ...((stripe as unknown as { accounts?: Record<string, unknown> })
+          .accounts ?? {}),
+        retrieve: fn,
+      };
+    }
+
+    it("resolvePendingPayouts flips a pending row to status='paid' with stripeTransferId + resolvedAt set", async () => {
+      const { org, sub, stripeAccountId } = await seedDrainScenario(
+        'e9v3b-drain-resolve'
+      );
+
+      const [pending] = await db
+        .insert(payoutsTable)
+        .values({
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 1750,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        })
+        .returning();
+
+      // Pre-condition: status='pending', no transfer id, no resolvedAt.
+      expect(pending.status).toBe('pending');
+      expect(pending.stripeTransferId).toBeNull();
+      expect(pending.resolvedAt).toBeNull();
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+      expect(result).toEqual({ resolved: 1, failed: 0 });
+
+      const { eq } = await import('drizzle-orm');
+      const [after] = await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.id, pending.id));
+
+      // Post-condition: row transitioned pending → paid, transfer id
+      // + resolvedAt stamped.
+      expect(after.status).toBe('paid');
+      expect(after.stripeTransferId).toMatch(/^tr_/);
+      expect(after.resolvedAt).not.toBeNull();
+    });
+
+    it("sweepUnresolvedPayouts only touches status='pending' rows — paid and failed rows are left untouched", async () => {
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM payouts`);
+
+      const { org, sub, stripeAccountId } = await seedDrainScenario(
+        'e9v3b-drain-sweep-touch'
+      );
+
+      const longAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+      // Seed three rows: one paid (terminal-success), one failed
+      // (terminal-failure), one pending (sweep target). The sweep
+      // should only touch the pending row.
+      const [paid, failed, pending] = await db
+        .insert(payoutsTable)
+        .values([
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 100,
+            currency: 'gbp',
+            payoutType: 'creator_payout',
+            status: 'paid',
+            reason: null,
+            stripeTransferId: 'tr_terminal_paid',
+            resolvedAt: new Date('2026-01-01T00:00:00Z'),
+            attemptedAt: longAgo,
+          },
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 200,
+            currency: 'gbp',
+            payoutType: 'creator_payout',
+            status: 'failed',
+            reason: 'transfer_failed',
+            attemptedAt: longAgo,
+          },
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 300,
+            currency: 'gbp',
+            payoutType: 'creator_payout',
+            status: 'pending',
+            reason: 'connect_not_ready',
+            attemptedAt: longAgo,
+          },
+        ])
+        .returning();
+
+      stubAccountsRetrieve(true);
+
+      const result = await service.sweepUnresolvedPayouts(15);
+
+      // Only one group scanned (the pending row), and it resolved.
+      expect(result.groupsScanned).toBe(1);
+      expect(result.groupsResolved).toBe(1);
+      expect(result.errors).toBe(0);
+
+      const { eq } = await import('drizzle-orm');
+
+      // Paid row: completely unchanged.
+      const [paidAfter] = await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.id, paid.id));
+      expect(paidAfter.status).toBe('paid');
+      expect(paidAfter.stripeTransferId).toBe('tr_terminal_paid');
+      expect(paidAfter.resolvedAt?.getTime()).toBe(paid.resolvedAt?.getTime());
+
+      // Failed row: status stays 'failed' (sweep does NOT retry
+      // terminal-failure rows).
+      const [failedAfter] = await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.id, failed.id));
+      expect(failedAfter.status).toBe('failed');
+      expect(failedAfter.stripeTransferId).toBeNull();
+      expect(failedAfter.resolvedAt).toBeNull();
+
+      // Pending row: transitioned to paid via the sweep.
+      const [pendingAfter] = await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.id, pending.id));
+      expect(pendingAfter.status).toBe('paid');
+      expect(pendingAfter.stripeTransferId).toMatch(/^tr_/);
+      expect(pendingAfter.resolvedAt).not.toBeNull();
+
+      // Silence unused-var (stripeAccountId only needed for setup).
+      void stripeAccountId;
+    });
+
+    it('sweepUnresolvedPayouts uses attemptedAt (not createdAt) for the age threshold — recent createdAt + old attemptedAt is swept', async () => {
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM payouts`);
+
+      const { org, sub, stripeAccountId } = await seedDrainScenario(
+        'e9v3b-drain-attemptedAt'
+      );
+
+      // attemptedAt is OLD (1h ago) but createdAt is implicit (now).
+      // The sweep's age filter is on attemptedAt — so even though the
+      // row was just inserted, it should still be picked up.
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      const [row] = await db
+        .insert(payoutsTable)
+        .values({
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+          attemptedAt: oneHourAgo,
+        })
+        .returning();
+
+      // Sanity check the setup: createdAt is recent (well within the
+      // 15min threshold) but attemptedAt is older than it.
+      const ageMinutesCreated =
+        (Date.now() - row.createdAt.getTime()) / (60 * 1000);
+      const ageMinutesAttempted =
+        (Date.now() - row.attemptedAt.getTime()) / (60 * 1000);
+      expect(ageMinutesCreated).toBeLessThan(5);
+      expect(ageMinutesAttempted).toBeGreaterThan(15);
+
+      stubAccountsRetrieve(true);
+
+      const result = await service.sweepUnresolvedPayouts(15);
+
+      // attemptedAt was old enough → the row IS swept. If the service
+      // were filtering on createdAt instead, this would skip the row
+      // and the assertion would fail.
+      expect(result.groupsScanned).toBe(1);
+      expect(result.groupsResolved).toBe(1);
+
+      const { eq } = await import('drizzle-orm');
+      const [after] = await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.id, row.id));
+      expect(after.status).toBe('paid');
+      expect(after.stripeTransferId).toMatch(/^tr_/);
+
+      void stripeAccountId;
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
 // SubscriptionPaymentRequiredError (Codex-w87s4)
 //
 // Standalone constructor round-trip: no DB, no Stripe — just the error
