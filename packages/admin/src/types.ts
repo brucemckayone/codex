@@ -278,11 +278,12 @@ export interface RevenueQueryOptions {
  *  - `splitPercent` is a display percentage (0..100), derived from the
  *    creator's CURRENT `organizationFeePercentage` basis points
  *    (`bps / 100`). It is the present DB value, not historical.
- *  - `lastPayoutAt` is the most-recent `pendingPayouts.resolvedAt` for the
- *    (creator, org) pair; `null` when nothing has drained yet.
- *  - `pendingPayoutCents` is the SUM of `amountCents` for unresolved
- *    `pendingPayouts` (where `resolvedAt IS NULL`) joined on BOTH
- *    `userId` AND `organizationId` — multi-org membership safety.
+ *  - `lastPayoutAt` is the most-recent `payouts.resolvedAt` for `status='paid'`
+ *    rows belonging to the (creator, org) pair; `null` when nothing has paid
+ *    out yet.
+ *  - `pendingPayoutCents` is the SUM of `amountCents` for `payouts` rows
+ *    where `status IN ('pending', 'failed')`, joined on BOTH `userId` AND
+ *    `organizationId` — multi-org membership safety.
  */
 export interface CreatorRevenueSplitItem {
   creatorId: string;

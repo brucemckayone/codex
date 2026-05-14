@@ -442,6 +442,20 @@
       "when": 1778669734176,
       "tag": "0062_romantic_purifiers",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1778764209416,
+      "tag": "0063_clumsy_karnak",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1778764800000,
+      "tag": "0064_migrate_pending_payouts_to_payouts",
+      "breakpoints": true
     }
   ]
 }

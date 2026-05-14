@@ -24,7 +24,7 @@ import {
   creatorOrganizationAgreements,
   mediaItems,
   organizations,
-  pendingPayouts,
+  payouts,
   purchases,
   subscriptions,
   subscriptionTiers,
@@ -63,7 +63,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
 
   /**
    * Per-test scaffold. Returns a fresh org with N creators, one content per
-   * creator, plus an active subscription (so pendingPayouts can FK to a real
+   * creator, plus an active subscription (so payouts can FK to a real
    * subscription row when needed).
    */
   async function seedScenario(creatorCount: number) {
@@ -110,7 +110,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
   }
 
   /**
-   * Seed an active subscription for the given creator + org so pendingPayouts
+   * Seed an active subscription for the given creator + org so payouts
    * inserts can satisfy their FK to subscriptions.id.
    */
   async function seedActiveSubscription(
@@ -250,13 +250,15 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     const resolvedDate = new Date('2026-03-15T00:00:00Z');
     const moreRecentResolvedDate = new Date('2026-04-20T00:00:00Z');
 
-    await db.insert(pendingPayouts).values([
+    await db.insert(payouts).values([
       {
         userId: creatorId,
         organizationId: orgId,
         subscriptionId,
         amountCents: 500,
-        reason: 'min_transfer_floor',
+        payoutType: 'creator_payout',
+        status: 'paid',
+        reason: null,
         resolvedAt: resolvedDate,
         stripeTransferId: 'tr_old',
       },
@@ -265,7 +267,9 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
         organizationId: orgId,
         subscriptionId,
         amountCents: 700,
-        reason: 'min_transfer_floor',
+        payoutType: 'creator_payout',
+        status: 'paid',
+        reason: null,
         resolvedAt: moreRecentResolvedDate,
         stripeTransferId: 'tr_new',
       },
@@ -274,6 +278,8 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
         organizationId: orgId,
         subscriptionId,
         amountCents: 250,
+        payoutType: 'creator_payout',
+        status: 'pending',
         reason: 'min_transfer_floor',
         resolvedAt: null,
       },
@@ -282,6 +288,8 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
         organizationId: orgId,
         subscriptionId,
         amountCents: 1000,
+        payoutType: 'creator_payout',
+        status: 'pending',
         reason: 'connect_not_ready',
         resolvedAt: null,
       },
@@ -313,11 +321,13 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     // amount that MUST NOT leak into orgA's result.
     const subscriptionId = await seedActiveSubscription(orgB, creatorId);
 
-    await db.insert(pendingPayouts).values({
+    await db.insert(payouts).values({
       userId: creatorId,
       organizationId: orgB,
       subscriptionId,
       amountCents: 9999,
+      payoutType: 'creator_payout',
+      status: 'pending',
       reason: 'connect_not_ready',
       resolvedAt: null,
     });
@@ -431,5 +441,75 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     // not the orgB revenue (cross-org leak guard).
     expect(result.items).toHaveLength(1);
     expect(result.items[0].totalRevenueCents).toBe(0);
+  });
+
+  // ───────────────────────────────────────────────────────────────────
+  // F. pendingPayoutCents widening (Codex-bxpmu → Codex-e9v3b)
+  //
+  // The payouts ledger migration changed `pendingPayoutCents` from
+  // `resolvedAt IS NULL` to `status IN ('pending','failed')`. Failed
+  // payouts (status='failed', reason='transfer_failed') are now also
+  // surfaced in the admin revenue-by-creator view because they
+  // represent money the creator is owed but hasn't received — the
+  // platform owes them regardless of whether the failure was Connect
+  // not-ready (pending) or a Stripe transfer that hard-failed (failed).
+  // ───────────────────────────────────────────────────────────────────
+  it('pendingPayoutCents sums BOTH status=pending AND status=failed rows', async () => {
+    const { orgId, creators } = await seedScenario(1);
+    const [creatorId] = creators;
+
+    await db.insert(creatorOrganizationAgreements).values({
+      creatorId,
+      organizationId: orgId,
+      organizationFeePercentage: 10000,
+    });
+
+    const subscriptionId = await seedActiveSubscription(orgId, creatorId);
+
+    // Three rows under the widened predicate: one pending (legacy
+    // shape), one failed (new shape — surfaced by the widening), and
+    // one paid (terminal — MUST NOT contribute).
+    await db.insert(payouts).values([
+      {
+        userId: creatorId,
+        organizationId: orgId,
+        subscriptionId,
+        amountCents: 250,
+        payoutType: 'creator_payout',
+        status: 'pending',
+        reason: 'connect_not_ready',
+        resolvedAt: null,
+      },
+      {
+        userId: creatorId,
+        organizationId: orgId,
+        subscriptionId,
+        amountCents: 500,
+        payoutType: 'creator_payout',
+        status: 'failed',
+        reason: 'transfer_failed',
+        resolvedAt: null,
+      },
+      {
+        userId: creatorId,
+        organizationId: orgId,
+        subscriptionId,
+        amountCents: 9999,
+        payoutType: 'creator_payout',
+        status: 'paid',
+        reason: null,
+        resolvedAt: new Date('2026-04-01T00:00:00Z'),
+        stripeTransferId: 'tr_paid_excluded',
+      },
+    ]);
+
+    const result = await service.getRevenueByCreator(orgId);
+
+    expect(result.items).toHaveLength(1);
+    // 250 (pending) + 500 (failed) = 750. The 9999 paid row MUST NOT
+    // be summed (it's already disbursed). Regression on widening this
+    // back to `resolvedAt IS NULL` would also return 750 — but a
+    // regression that DROPS the failed shape would return 250.
+    expect(result.items[0].pendingPayoutCents).toBe(750);
   });
 });

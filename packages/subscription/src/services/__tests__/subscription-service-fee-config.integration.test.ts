@@ -18,7 +18,7 @@
 
 import {
   organizations,
-  pendingPayouts as pendingPayoutsTable,
+  payouts as payoutsTable,
   stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
@@ -35,7 +35,7 @@ import {
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -159,7 +159,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
 
     // Seed one payout BELOW the floor.
     const [row] = await db
-      .insert(pendingPayoutsTable)
+      .insert(payoutsTable)
       .values({
         userId: payoutUserId,
         organizationId: org.id,
@@ -167,6 +167,8 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
         amountCents: 50,
         currency: 'gbp',
         reason: 'connect_not_ready',
+        status: 'pending',
+        payoutType: 'creator_payout',
       })
       .returning();
 
@@ -181,8 +183,8 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
 
     const [reread] = await db
       .select()
-      .from(pendingPayoutsTable)
-      .where(eq(pendingPayoutsTable.id, row.id))
+      .from(payoutsTable)
+      .where(eq(payoutsTable.id, row.id))
       .limit(1);
     expect(reread.resolvedAt).toBeNull();
     expect(reread.stripeTransferId).toBeNull();
@@ -215,7 +217,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     );
 
     const [row] = await db
-      .insert(pendingPayoutsTable)
+      .insert(payoutsTable)
       .values({
         userId: payoutUserId,
         organizationId: org.id,
@@ -223,6 +225,8 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
         amountCents: 50,
         currency: 'gbp',
         reason: 'connect_not_ready',
+        status: 'pending',
+        payoutType: 'creator_payout',
       })
       .returning();
 
@@ -243,8 +247,8 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
 
     const [reread] = await db
       .select()
-      .from(pendingPayoutsTable)
-      .where(eq(pendingPayoutsTable.id, row.id))
+      .from(payoutsTable)
+      .where(eq(payoutsTable.id, row.id))
       .limit(1);
     expect(reread.resolvedAt).not.toBeNull();
     expect(reread.stripeTransferId).toBe('tr_fc_clear');
@@ -275,7 +279,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     );
 
     const inserted = await db
-      .insert(pendingPayoutsTable)
+      .insert(payoutsTable)
       .values([
         {
           userId: payoutUserId,
@@ -284,6 +288,8 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
           amountCents: 50, // below floor
           currency: 'gbp',
           reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
         },
         {
           userId: payoutUserId,
@@ -292,6 +298,8 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
           amountCents: 500, // above floor
           currency: 'gbp',
           reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
         },
       ])
       .returning();
@@ -310,13 +318,13 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
 
     const [smallAfter] = await db
       .select()
-      .from(pendingPayoutsTable)
-      .where(eq(pendingPayoutsTable.id, smallRow.id))
+      .from(payoutsTable)
+      .where(eq(payoutsTable.id, smallRow.id))
       .limit(1);
     const [largeAfter] = await db
       .select()
-      .from(pendingPayoutsTable)
-      .where(eq(pendingPayoutsTable.id, largeRow.id))
+      .from(payoutsTable)
+      .where(eq(payoutsTable.id, largeRow.id))
       .limit(1);
 
     expect(smallAfter.resolvedAt).toBeNull();
@@ -332,13 +340,15 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
       stripe
     );
 
-    await db.insert(pendingPayoutsTable).values({
+    await db.insert(payoutsTable).values({
       userId: payoutUserId,
       organizationId: org.id,
       subscriptionId: sub.id,
       amountCents: 1, // pence
       currency: 'gbp',
       reason: 'connect_not_ready',
+      status: 'pending',
+      payoutType: 'creator_payout',
     });
 
     const transferSpy = vi.mocked(stripe.transfers.create);
@@ -374,7 +384,7 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
       stripe
     );
 
-    await db.insert(pendingPayoutsTable).values([
+    await db.insert(payoutsTable).values([
       {
         userId: payoutUserId,
         organizationId: org.id,
@@ -382,6 +392,8 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
         amountCents: 100,
         currency: 'gbp',
         reason: 'connect_not_ready',
+        status: 'pending',
+        payoutType: 'creator_payout',
       },
       {
         userId: payoutUserId,
@@ -390,6 +402,8 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
         amountCents: 200,
         currency: 'gbp',
         reason: 'connect_not_ready',
+        status: 'pending',
+        payoutType: 'creator_payout',
       },
       {
         userId: payoutUserId,
@@ -398,6 +412,8 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
         amountCents: 300,
         currency: 'gbp',
         reason: 'connect_not_ready',
+        status: 'pending',
+        payoutType: 'creator_payout',
       },
     ]);
 
@@ -445,13 +461,15 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
       stripe
     );
 
-    await db.insert(pendingPayoutsTable).values({
+    await db.insert(payoutsTable).values({
       userId: payoutUserId,
       organizationId: org.id,
       subscriptionId: sub.id,
       amountCents: 30,
       currency: 'gbp',
       reason: 'connect_not_ready',
+      status: 'pending',
+      payoutType: 'creator_payout',
     });
 
     await service.resolvePendingPayouts(org.id, stripeAccountId);
@@ -459,12 +477,12 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     // The row stays unresolved AND specifically for this (user, org) pair.
     const unresolved = await db
       .select()
-      .from(pendingPayoutsTable)
+      .from(payoutsTable)
       .where(
         and(
-          eq(pendingPayoutsTable.userId, payoutUserId),
-          eq(pendingPayoutsTable.organizationId, org.id),
-          isNull(pendingPayoutsTable.resolvedAt)
+          eq(payoutsTable.userId, payoutUserId),
+          eq(payoutsTable.organizationId, org.id),
+          eq(payoutsTable.status, 'pending')
         )
       );
     expect(unresolved.length).toBeGreaterThanOrEqual(1);

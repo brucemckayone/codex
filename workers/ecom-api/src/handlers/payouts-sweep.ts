@@ -1,7 +1,7 @@
 /**
  * Pending Payouts Sweep Handler (Codex-vv77x)
  *
- * Drains pendingPayouts rows whose Connect account has since become
+ * Drains pending payouts rows whose Connect account has since become
  * charges_enabled && payouts_enabled but whose account.updated webhook
  * never fired (webhook drop, capability-ricochet event without the
  * relevant previous_attributes, etc).

@@ -11,7 +11,7 @@
   },
 
   // Cron Triggers (scheduled handler)
-  // - Every 15 minutes — payouts sweep (Codex-vv77x): drains pendingPayouts
+  // - Every 15 minutes — payouts sweep (Codex-vv77x): drains pending payouts
   //   whose Connect account is now charges_enabled && payouts_enabled.
   //   Hybrid event+sweep resolution per Stripe docs (account.updated webhook
   //   + periodic reconciliation). Consolidated into ecom-api 2026-05-13 so
