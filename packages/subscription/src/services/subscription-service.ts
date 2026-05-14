@@ -1074,6 +1074,11 @@ export class SubscriptionService extends BaseService {
     const pi = await this.stripe.paymentIntents.retrieve(piId);
     if (typeof pi.latest_charge === 'string') return pi.latest_charge;
 
+    // Idempotency-drift invariant: charges.list returns the most recent
+    // charge for this PI. We assume Stripe sets pi.latest_charge once and
+    // never reassigns. If that invariant breaks (e.g., PI re-charge after
+    // a failure), the chargeId resolved here could differ across webhook
+    // retries → idempotency keys diverge → executeTransfers may double-pay.
     const charges = await this.stripe.charges.list({
       payment_intent: piId,
       limit: 1,

@@ -2853,6 +2853,58 @@ describe('SubscriptionService', () => {
       }
     });
 
+    it('resolves charge via paymentIntents.retrieve.latest_charge when expanded invoice has only a PI', async () => {
+      const { org, tier1 } = await createFullOrg('invoice-pi-latest-charge');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const piId = 'pi_with_latest_charge';
+      const chargeViaPi = 'ch_recovered_via_pi';
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: undefined,
+      }) as unknown as Stripe.Invoice;
+
+      (
+        stripe as unknown as { invoices: { retrieve: ReturnType<typeof vi.fn> } }
+      ).invoices.retrieve.mockResolvedValueOnce({
+        id: mockInvoice.id,
+        payments: {
+          data: [{ payment: { charge: null, payment_intent: piId } }],
+        },
+      });
+      (
+        stripe as unknown as {
+          paymentIntents: { retrieve: ReturnType<typeof vi.fn> };
+        }
+      ).paymentIntents.retrieve.mockResolvedValueOnce({
+        id: piId,
+        latest_charge: chargeViaPi,
+      });
+
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      expect(stripe.paymentIntents.retrieve).toHaveBeenCalledWith(piId);
+      expect(stripe.charges.list).not.toHaveBeenCalled();
+      expect(stripe.transfers.create).toHaveBeenCalled();
+      const calls = (stripe.transfers.create as ReturnType<typeof vi.fn>).mock
+        .calls;
+      for (const [, opts] of calls) {
+        expect(opts?.idempotencyKey).toMatch(
+          new RegExp(`^${chargeViaPi}_`)
+        );
+      }
+    });
+
     it('falls back to charges.list when paymentIntent has no latest_charge (race after PI confirmation)', async () => {
       const { org, tier1 } = await createFullOrg('invoice-charges-list-fallback');
       const [sub] = await db
