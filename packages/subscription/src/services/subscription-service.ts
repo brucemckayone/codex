@@ -41,7 +41,7 @@ import {
   organizationFollowers,
   organizationMemberships,
   organizations,
-  pendingPayouts,
+  payouts,
   stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
@@ -61,16 +61,7 @@ import {
   UnsupportedCurrencyError,
 } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
-import {
-  and,
-  desc,
-  eq,
-  inArray,
-  isNotNull,
-  isNull,
-  lt,
-  sql,
-} from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   AlreadySubscribedError,
@@ -119,7 +110,7 @@ interface SubscriptionStats {
 }
 
 /**
- * Display status for a `pendingPayouts` row in the studio payouts table
+ * Display status for a `payouts` row in the studio payouts table
  * (Codex-zqaxo). Derived from the persisted `resolvedAt`,
  * `stripeTransferId`, and `reason` columns — there is no `status` column
  * on the table itself.
@@ -184,19 +175,17 @@ export interface PayoutWithCreator {
 }
 
 /**
- * Resolve a `pendingPayouts` row to one of three display statuses. Used by
- * `listPayoutsByOrg` so the UI never has to re-derive these branches.
+ * Map the persisted `payouts.status` column to the UI display vocabulary.
  *
- *  - `resolved` — has both `resolvedAt` and `stripeTransferId`
- *  - `failed`   — `reason='transfer_failed'` and not yet resolved
- *  - `pending`  — every other unresolved row
+ * Storage column: `'paid' | 'pending' | 'failed'` (CHECK-enforced).
+ * UI vocabulary keeps the legacy term `'resolved'` for one release so existing
+ * `/studio/payouts?status=resolved` URLs and the current filter chip continue
+ * to work. PR 3 (UI rebuild) introduces a `'paid'` chip and PR 4 drops the
+ * alias.
  */
-function derivePayoutStatus(
-  resolvedAt: Date | null,
-  reason: string
-): PayoutDisplayStatus {
-  if (resolvedAt) return 'resolved';
-  if (reason === 'transfer_failed') return 'failed';
+function derivePayoutStatus(status: string): PayoutDisplayStatus {
+  if (status === 'paid') return 'resolved';
+  if (status === 'failed') return 'failed';
   return 'pending';
 }
 
@@ -2489,19 +2478,21 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * Codex-zqaxo: list pending + resolved payouts for an org owner's
+   * Codex-zqaxo / Codex-bxpmu: list payouts for an org owner's
    * `/studio/payouts` table.
    *
    * Scoping invariant (HARD): rows MUST be filtered by
-   * `pendingPayouts.organizationId = orgId`. The route layer applies
+   * `payouts.organizationId = orgId`. The route layer applies
    * `requireOrgManagement` so `orgId === ctx.organizationId`. Filtering by
    * `userId` here would leak cross-org payouts because a creator can belong
    * to multiple orgs — never relax to user-only scoping.
    *
-   * Status filter semantics:
-   *  - `pending`  → `resolvedAt IS NULL` AND reason != 'transfer_failed'
-   *  - `resolved` → `stripeTransferId IS NOT NULL` AND `resolvedAt IS NOT NULL`
-   *  - `failed`   → `reason = 'transfer_failed'` AND `resolvedAt IS NULL`
+   * Status filter semantics (reads the persisted `status` column directly —
+   * the CHECK constraint guarantees the value is one of paid/pending/failed):
+   *  - `pending`  → `status = 'pending'`
+   *  - `resolved` → `status = 'paid'` (URL alias retained one release; PR 3
+   *                 introduces the canonical `'paid'` chip)
+   *  - `failed`   → `status = 'failed'`
    *  - `all`      → no status predicate
    *
    * The creator name/avatar denorm comes from a LEFT JOIN on `users` so a
@@ -2520,45 +2511,43 @@ export class SubscriptionService extends BaseService {
     const { page, limit, status = 'all', fromDate, toDate } = options;
     const offset = (page - 1) * limit;
 
-    const conditions = [eq(pendingPayouts.organizationId, orgId)];
+    const conditions = [eq(payouts.organizationId, orgId)];
 
     if (status === 'pending') {
-      conditions.push(isNull(pendingPayouts.resolvedAt));
-      conditions.push(sql`${pendingPayouts.reason} != 'transfer_failed'`);
+      conditions.push(eq(payouts.status, 'pending'));
     } else if (status === 'resolved') {
-      conditions.push(isNotNull(pendingPayouts.resolvedAt));
-      conditions.push(isNotNull(pendingPayouts.stripeTransferId));
+      conditions.push(eq(payouts.status, 'paid'));
     } else if (status === 'failed') {
-      conditions.push(eq(pendingPayouts.reason, 'transfer_failed'));
-      conditions.push(isNull(pendingPayouts.resolvedAt));
+      conditions.push(eq(payouts.status, 'failed'));
     }
 
-    conditions.push(...dateWindow(pendingPayouts.createdAt, fromDate, toDate));
+    conditions.push(...dateWindow(payouts.createdAt, fromDate, toDate));
 
     const [items, [totalResult]] = await Promise.all([
       this.db
         .select({
-          id: pendingPayouts.id,
-          creatorId: pendingPayouts.userId,
+          id: payouts.id,
+          creatorId: payouts.userId,
           creatorName: users.name,
           creatorEmail: users.email,
           creatorAvatarUrl: users.image,
-          amountCents: pendingPayouts.amountCents,
-          currency: pendingPayouts.currency,
-          reason: pendingPayouts.reason,
-          resolvedAt: pendingPayouts.resolvedAt,
-          stripeTransferId: pendingPayouts.stripeTransferId,
-          createdAt: pendingPayouts.createdAt,
+          amountCents: payouts.amountCents,
+          currency: payouts.currency,
+          reason: payouts.reason,
+          status: payouts.status,
+          resolvedAt: payouts.resolvedAt,
+          stripeTransferId: payouts.stripeTransferId,
+          createdAt: payouts.createdAt,
         })
-        .from(pendingPayouts)
-        .leftJoin(users, eq(pendingPayouts.userId, users.id))
+        .from(payouts)
+        .leftJoin(users, eq(payouts.userId, users.id))
         .where(and(...conditions))
-        .orderBy(desc(pendingPayouts.createdAt))
+        .orderBy(desc(payouts.createdAt))
         .limit(limit)
         .offset(offset),
       this.db
         .select({ count: sql<number>`count(*)::int` })
-        .from(pendingPayouts)
+        .from(payouts)
         .where(and(...conditions)),
     ]);
 
@@ -2573,8 +2562,8 @@ export class SubscriptionService extends BaseService {
         creatorAvatarUrl: row.creatorAvatarUrl ?? null,
         amountCents: row.amountCents,
         currency: row.currency,
-        reason: row.reason,
-        status: derivePayoutStatus(row.resolvedAt, row.reason),
+        reason: row.reason ?? '',
+        status: derivePayoutStatus(row.status),
         resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
         stripeTransferId: row.stripeTransferId,
         createdAt: row.createdAt.toISOString(),
@@ -2631,12 +2620,12 @@ export class SubscriptionService extends BaseService {
 
     const unresolvedPayouts = await this.db
       .select()
-      .from(pendingPayouts)
+      .from(payouts)
       .where(
         and(
-          eq(pendingPayouts.userId, connectAccount.userId),
-          eq(pendingPayouts.organizationId, orgId),
-          isNull(pendingPayouts.resolvedAt)
+          eq(payouts.userId, connectAccount.userId),
+          eq(payouts.organizationId, orgId),
+          eq(payouts.status, 'pending')
         )
       );
 
@@ -2702,12 +2691,13 @@ export class SubscriptionService extends BaseService {
         );
 
         await this.db
-          .update(pendingPayouts)
+          .update(payouts)
           .set({
+            status: 'paid',
             resolvedAt: new Date(),
             stripeTransferId: transfer.id,
           })
-          .where(eq(pendingPayouts.id, payout.id));
+          .where(eq(payouts.id, payout.id));
 
         resolved++;
       } catch (error) {
@@ -2747,7 +2737,7 @@ export class SubscriptionService extends BaseService {
    * Passing `null`/`undefined` is treated as "no currency on this Stripe
    * object" and skipped — preserves the prior behaviour of letting Stripe
    * payloads without a `currency` field through (the schema default for
-   * pendingPayouts is 'gbp', so the row branch normalises before calling).
+   * payouts is 'gbp', so the row branch normalises before calling).
    */
   private assertGbpOnly(
     currency: string | null | undefined,
@@ -3247,11 +3237,13 @@ export class SubscriptionService extends BaseService {
           error: (transferError as Error).message,
         });
         try {
-          await this.db.insert(pendingPayouts).values({
+          await this.db.insert(payouts).values({
             userId: orgConnect.userId,
             organizationId: orgId,
             subscriptionId,
             amountCents: orgFeeCents,
+            payoutType: 'organization_fee',
+            status: 'failed',
             reason: 'transfer_failed',
           });
         } catch (insertError) {
@@ -3274,11 +3266,13 @@ export class SubscriptionService extends BaseService {
         );
       } else {
         try {
-          await this.db.insert(pendingPayouts).values({
+          await this.db.insert(payouts).values({
             userId: ownerId,
             organizationId: orgId,
             subscriptionId,
             amountCents: orgFeeCents,
+            payoutType: 'organization_fee',
+            status: 'pending',
             reason: 'connect_not_ready',
           });
         } catch (insertError) {
@@ -3342,11 +3336,13 @@ export class SubscriptionService extends BaseService {
           // BUG-036: Wrap pending payout insert in try/catch so a DB failure
           // doesn't crash the entire transfer flow.
           try {
-            await this.db.insert(pendingPayouts).values({
+            await this.db.insert(payouts).values({
               userId: orgConnect.userId,
               organizationId: orgId,
               subscriptionId,
               amountCents: creatorPayoutCents,
+              payoutType: 'creator_payout_to_owner',
+              status: 'failed',
               reason: 'transfer_failed',
             });
           } catch (insertError) {
@@ -3411,11 +3407,13 @@ export class SubscriptionService extends BaseService {
           minTransferCents: creatorFees.minTransferCents,
         });
         try {
-          await this.db.insert(pendingPayouts).values({
+          await this.db.insert(payouts).values({
             userId: agreement.creatorId,
             organizationId: orgId,
             subscriptionId,
             amountCents: creatorAmount,
+            payoutType: 'creator_payout',
+            status: 'pending',
             reason: 'min_transfer_floor',
           });
         } catch (insertError) {
@@ -3461,11 +3459,13 @@ export class SubscriptionService extends BaseService {
           // BUG-036: Wrap pending payout insert in try/catch so a DB failure
           // doesn't crash the entire transfer flow.
           try {
-            await this.db.insert(pendingPayouts).values({
+            await this.db.insert(payouts).values({
               userId: agreement.creatorId,
               organizationId: orgId,
               subscriptionId,
               amountCents: creatorAmount,
+              payoutType: 'creator_payout',
+              status: 'failed',
               reason: 'transfer_failed',
             });
           } catch (insertError) {
@@ -3485,11 +3485,13 @@ export class SubscriptionService extends BaseService {
         // BUG-036: Wrap pending payout insert in try/catch so a DB failure
         // doesn't crash the entire transfer flow.
         try {
-          await this.db.insert(pendingPayouts).values({
+          await this.db.insert(payouts).values({
             userId: agreement.creatorId,
             organizationId: orgId,
             subscriptionId,
             amountCents: creatorAmount,
+            payoutType: 'creator_payout',
+            status: 'pending',
             reason: creatorConnect ? 'connect_restricted' : 'connect_not_ready',
           });
         } catch (insertError) {
@@ -3563,7 +3565,7 @@ export class SubscriptionService extends BaseService {
   // Hybrid event+sweep resolution pattern per Stripe docs:
   //   1. account.updated webhook is the primary trigger (connect-webhook.ts:73)
   //   2. Webhooks retry for 3 days then drop — this sweep is the safety net
-  //   3. Periodic sweep groups pendingPayouts by (orgId, userId) — each unique
+  //   3. Periodic sweep groups payouts by (orgId, userId) — each unique
   //      pair maps to one Connect account — and asks Stripe for current state
   //   4. If the Connect account is now charges_enabled && payouts_enabled,
   //      delegate to resolvePendingPayouts(orgId, stripeAccountId) which owns
@@ -3573,7 +3575,7 @@ export class SubscriptionService extends BaseService {
   //      fired by now if it was going to.
 
   /**
-   * Sweep unresolved pendingPayouts rows older than `olderThanMinutes`,
+   * Sweep pending payouts rows older than `olderThanMinutes`,
    * group by (organizationId, userId), and attempt resolution for each
    * group whose Connect account now reports charges_enabled && payouts_enabled.
    *
@@ -3595,15 +3597,12 @@ export class SubscriptionService extends BaseService {
     // handles the missing-account case (logs warn + returns 0).
     const groups = await this.db
       .selectDistinct({
-        organizationId: pendingPayouts.organizationId,
-        userId: pendingPayouts.userId,
+        organizationId: payouts.organizationId,
+        userId: payouts.userId,
       })
-      .from(pendingPayouts)
+      .from(payouts)
       .where(
-        and(
-          isNull(pendingPayouts.resolvedAt),
-          lt(pendingPayouts.createdAt, threshold)
-        )
+        and(eq(payouts.status, 'pending'), lt(payouts.attemptedAt, threshold))
       );
 
     const groupsScanned = groups.length;
@@ -3627,7 +3626,7 @@ export class SubscriptionService extends BaseService {
       try {
         // Find the Connect account row for this (orgId, userId) so we can
         // look up the stripeAccountId. If the row is missing (rare — a
-        // Connect account was deleted but its pendingPayouts survived
+        // Connect account was deleted but its payouts survived
         // because of ON DELETE behaviour) skip this group; it will be
         // re-attempted on the next sweep window.
         const [connect] = await this.db

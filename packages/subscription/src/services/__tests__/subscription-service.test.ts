@@ -18,7 +18,7 @@
 import {
   creatorOrganizationAgreements,
   organizations,
-  pendingPayouts as pendingPayoutsTable,
+  payouts as payoutsTable,
   stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
@@ -3406,11 +3406,11 @@ describe('SubscriptionService', () => {
       const { eq, and } = await import('drizzle-orm');
       const c2PendingRows = await db
         .select()
-        .from(pendingPayoutsTable)
+        .from(payoutsTable)
         .where(
           and(
-            eq(pendingPayoutsTable.userId, c2),
-            eq(pendingPayoutsTable.organizationId, org.id)
+            eq(payoutsTable.userId, c2),
+            eq(payoutsTable.organizationId, org.id)
           )
         );
       expect(c2PendingRows).toHaveLength(0);
@@ -4373,7 +4373,7 @@ describe('SubscriptionService', () => {
       );
 
       // Three rows: one pending, one resolved, one failed.
-      await db.insert(pendingPayoutsTable).values([
+      await db.insert(payoutsTable).values([
         {
           userId: otherCreatorId,
           organizationId: org.id,
@@ -4381,6 +4381,8 @@ describe('SubscriptionService', () => {
           amountCents: 1234,
           currency: 'gbp',
           reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
         },
         {
           userId: otherCreatorId,
@@ -4391,6 +4393,8 @@ describe('SubscriptionService', () => {
           reason: 'connect_not_ready',
           resolvedAt: new Date('2026-05-01T10:00:00Z'),
           stripeTransferId: 'tr_resolved_zqaxo_1',
+          status: 'paid',
+          payoutType: 'creator_payout',
         },
         {
           userId: otherCreatorId,
@@ -4399,6 +4403,8 @@ describe('SubscriptionService', () => {
           amountCents: 999,
           currency: 'gbp',
           reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'creator_payout',
         },
       ]);
 
@@ -4444,7 +4450,7 @@ describe('SubscriptionService', () => {
         'scope-b'
       );
 
-      await db.insert(pendingPayoutsTable).values([
+      await db.insert(payoutsTable).values([
         {
           userId: otherCreatorId,
           organizationId: org1.id,
@@ -4452,6 +4458,8 @@ describe('SubscriptionService', () => {
           amountCents: 100,
           currency: 'gbp',
           reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
         },
         {
           userId: otherCreatorId,
@@ -4460,6 +4468,8 @@ describe('SubscriptionService', () => {
           amountCents: 200,
           currency: 'gbp',
           reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
         },
       ]);
 
@@ -4487,7 +4497,7 @@ describe('SubscriptionService', () => {
         'fp'
       );
 
-      await db.insert(pendingPayoutsTable).values([
+      await db.insert(payoutsTable).values([
         {
           userId: otherCreatorId,
           organizationId: org.id,
@@ -4495,6 +4505,8 @@ describe('SubscriptionService', () => {
           amountCents: 100,
           currency: 'gbp',
           reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
         },
         {
           userId: otherCreatorId,
@@ -4505,6 +4517,8 @@ describe('SubscriptionService', () => {
           reason: 'connect_not_ready',
           resolvedAt: new Date(),
           stripeTransferId: 'tr_x',
+          status: 'paid',
+          payoutType: 'creator_payout',
         },
       ]);
 
@@ -4527,7 +4541,7 @@ describe('SubscriptionService', () => {
         'fr'
       );
 
-      await db.insert(pendingPayoutsTable).values([
+      await db.insert(payoutsTable).values([
         {
           userId: otherCreatorId,
           organizationId: org.id,
@@ -4535,6 +4549,8 @@ describe('SubscriptionService', () => {
           amountCents: 100,
           currency: 'gbp',
           reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
         },
         {
           userId: otherCreatorId,
@@ -4545,6 +4561,8 @@ describe('SubscriptionService', () => {
           reason: 'connect_not_ready',
           resolvedAt: new Date(),
           stripeTransferId: 'tr_zqaxo_resolved',
+          status: 'paid',
+          payoutType: 'creator_payout',
         },
       ]);
 
@@ -4567,7 +4585,7 @@ describe('SubscriptionService', () => {
         'ff'
       );
 
-      await db.insert(pendingPayoutsTable).values([
+      await db.insert(payoutsTable).values([
         {
           userId: otherCreatorId,
           organizationId: org.id,
@@ -4575,6 +4593,8 @@ describe('SubscriptionService', () => {
           amountCents: 100,
           currency: 'gbp',
           reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
         },
         {
           userId: otherCreatorId,
@@ -4583,6 +4603,8 @@ describe('SubscriptionService', () => {
           amountCents: 999,
           currency: 'gbp',
           reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'creator_payout',
         },
       ]);
 
@@ -4611,9 +4633,11 @@ describe('SubscriptionService', () => {
         subscriptionId: sub.id,
         amountCents: 100 + i,
         currency: 'gbp',
-        reason: 'connect_not_ready',
+        reason: 'connect_not_ready' as const,
+        status: 'pending' as const,
+        payoutType: 'creator_payout' as const,
       }));
-      await db.insert(pendingPayoutsTable).values(rows);
+      await db.insert(payoutsTable).values(rows);
 
       const page1 = await service.listPayoutsByOrg(org.id, {
         page: 1,
@@ -4698,7 +4722,7 @@ describe('SubscriptionService', () => {
 
       // Seed three unresolved payouts for the connect-account user.
       const payoutRows = await db
-        .insert(pendingPayoutsTable)
+        .insert(payoutsTable)
         .values([
           {
             userId: creatorId,
@@ -4707,6 +4731,8 @@ describe('SubscriptionService', () => {
             amountCents: 1200,
             currency: 'gbp',
             reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
           },
           {
             userId: creatorId,
@@ -4715,6 +4741,8 @@ describe('SubscriptionService', () => {
             amountCents: 750,
             currency: 'gbp',
             reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
           },
           {
             userId: creatorId,
@@ -4723,6 +4751,8 @@ describe('SubscriptionService', () => {
             amountCents: 320,
             currency: 'gbp',
             reason: 'connect_restricted',
+            status: 'pending',
+            payoutType: 'creator_payout',
           },
         ])
         .returning();
@@ -4766,10 +4796,10 @@ describe('SubscriptionService', () => {
       const { eq, inArray } = await import('drizzle-orm');
       const after = await db
         .select()
-        .from(pendingPayoutsTable)
+        .from(payoutsTable)
         .where(
           inArray(
-            pendingPayoutsTable.id,
+            payoutsTable.id,
             payoutRows.map((r) => r.id)
           )
         );
@@ -4787,7 +4817,7 @@ describe('SubscriptionService', () => {
         await seedConnectAndSubscription('w4jjk-partial-fail');
 
       const payoutRows = await db
-        .insert(pendingPayoutsTable)
+        .insert(payoutsTable)
         .values([
           {
             userId: creatorId,
@@ -4796,6 +4826,8 @@ describe('SubscriptionService', () => {
             amountCents: 1000,
             currency: 'gbp',
             reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
           },
           {
             userId: creatorId,
@@ -4804,6 +4836,8 @@ describe('SubscriptionService', () => {
             amountCents: 2000,
             currency: 'gbp',
             reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
           },
           {
             userId: creatorId,
@@ -4812,6 +4846,8 @@ describe('SubscriptionService', () => {
             amountCents: 3000,
             currency: 'gbp',
             reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
           },
         ])
         .returning();
@@ -4846,10 +4882,10 @@ describe('SubscriptionService', () => {
       const { inArray, eq } = await import('drizzle-orm');
       const after = await db
         .select()
-        .from(pendingPayoutsTable)
+        .from(payoutsTable)
         .where(
           inArray(
-            pendingPayoutsTable.id,
+            payoutsTable.id,
             payoutRows.map((r) => r.id)
           )
         );
@@ -4874,7 +4910,7 @@ describe('SubscriptionService', () => {
       const { org, sub, stripeAccountId } =
         await seedConnectAndSubscription('w4jjk-replay');
 
-      await db.insert(pendingPayoutsTable).values([
+      await db.insert(payoutsTable).values([
         {
           userId: creatorId,
           organizationId: org.id,
@@ -4882,6 +4918,8 @@ describe('SubscriptionService', () => {
           amountCents: 1500,
           currency: 'gbp',
           reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
         },
         {
           userId: creatorId,
@@ -4890,6 +4928,8 @@ describe('SubscriptionService', () => {
           amountCents: 2500,
           currency: 'gbp',
           reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
         },
       ]);
 
@@ -4931,7 +4971,7 @@ describe('SubscriptionService', () => {
         await seedConnectAndSubscription('90ocz-idem-key');
 
       const payoutRows = await db
-        .insert(pendingPayoutsTable)
+        .insert(payoutsTable)
         .values([
           {
             userId: creatorId,
@@ -4940,6 +4980,8 @@ describe('SubscriptionService', () => {
             amountCents: 1100,
             currency: 'gbp',
             reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
           },
           {
             userId: creatorId,
@@ -4948,6 +4990,8 @@ describe('SubscriptionService', () => {
             amountCents: 2200,
             currency: 'gbp',
             reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
           },
         ])
         .returning();
@@ -4987,7 +5031,7 @@ describe('SubscriptionService', () => {
         await seedConnectAndSubscription('90ocz-idem-replay');
 
       const payoutRows = await db
-        .insert(pendingPayoutsTable)
+        .insert(payoutsTable)
         .values([
           {
             userId: creatorId,
@@ -4996,6 +5040,8 @@ describe('SubscriptionService', () => {
             amountCents: 1500,
             currency: 'gbp',
             reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
           },
           {
             userId: creatorId,
@@ -5004,6 +5050,8 @@ describe('SubscriptionService', () => {
             amountCents: 2500,
             currency: 'gbp',
             reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
           },
         ])
         .returning();
@@ -5033,11 +5081,11 @@ describe('SubscriptionService', () => {
       // returns the original Transfer instead of creating a new one.
       const { inArray } = await import('drizzle-orm');
       await db
-        .update(pendingPayoutsTable)
-        .set({ resolvedAt: null, stripeTransferId: null })
+        .update(payoutsTable)
+        .set({ status: 'pending', resolvedAt: null, stripeTransferId: null })
         .where(
           inArray(
-            pendingPayoutsTable.id,
+            payoutsTable.id,
             payoutRows.map((r) => r.id)
           )
         );
@@ -5070,7 +5118,7 @@ describe('SubscriptionService', () => {
         await seedConnectAndSubscription('90ocz-idem-dup');
 
       const [row] = await db
-        .insert(pendingPayoutsTable)
+        .insert(payoutsTable)
         .values([
           {
             userId: creatorId,
@@ -5079,6 +5127,8 @@ describe('SubscriptionService', () => {
             amountCents: 4200,
             currency: 'gbp',
             reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
           },
         ])
         .returning();
@@ -5118,8 +5168,8 @@ describe('SubscriptionService', () => {
       const { eq } = await import('drizzle-orm');
       const [after] = await db
         .select()
-        .from(pendingPayoutsTable)
-        .where(eq(pendingPayoutsTable.id, row.id));
+        .from(payoutsTable)
+        .where(eq(payoutsTable.id, row.id));
       expect(after.resolvedAt).not.toBeNull();
       expect(after.stripeTransferId).toBe(replayedTransferId);
     });
@@ -5138,7 +5188,7 @@ describe('SubscriptionService', () => {
       );
 
       const [row] = await db
-        .insert(pendingPayoutsTable)
+        .insert(payoutsTable)
         .values([
           {
             userId: creatorId,
@@ -5147,6 +5197,8 @@ describe('SubscriptionService', () => {
             amountCents: 4242,
             currency: 'gbp',
             reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
           },
         ])
         .returning();
@@ -5157,11 +5209,11 @@ describe('SubscriptionService', () => {
       const { eq, and } = await import('drizzle-orm');
       const rowsBefore = await db
         .select()
-        .from(pendingPayoutsTable)
+        .from(payoutsTable)
         .where(
           and(
-            eq(pendingPayoutsTable.userId, creatorId),
-            eq(pendingPayoutsTable.organizationId, org.id)
+            eq(payoutsTable.userId, creatorId),
+            eq(payoutsTable.organizationId, org.id)
           )
         );
       expect(rowsBefore).toHaveLength(1);
@@ -5211,11 +5263,11 @@ describe('SubscriptionService', () => {
       // duplicate-response branch is a single-write path (UPDATE only).
       const rowsAfter = await db
         .select()
-        .from(pendingPayoutsTable)
+        .from(payoutsTable)
         .where(
           and(
-            eq(pendingPayoutsTable.userId, creatorId),
-            eq(pendingPayoutsTable.organizationId, org.id)
+            eq(payoutsTable.userId, creatorId),
+            eq(payoutsTable.organizationId, org.id)
           )
         );
       expect(rowsAfter).toHaveLength(1);
@@ -5322,7 +5374,7 @@ describe('SubscriptionService', () => {
     it('returns zero counters and makes no Stripe calls when no pending rows exist', async () => {
       // Ensure no leftover pending rows from earlier tests
       const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM pending_payouts`);
+      await db.execute(rawSql`DELETE FROM payouts`);
 
       const retrieveSpy = stubAccountsRetrieve(true);
       const transferSpy = vi.mocked(stripe.transfers.create);
@@ -5342,21 +5394,23 @@ describe('SubscriptionService', () => {
 
     it('resolves the group when the Connect account now reports charges_enabled && payouts_enabled', async () => {
       const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM pending_payouts`);
+      await db.execute(rawSql`DELETE FROM payouts`);
 
       const { org, sub, stripeAccountId } =
         await seedConnectAndSubscription('vv77x-ready');
 
       // Old enough to pass the olderThanMinutes filter
       const longAgo = new Date(Date.now() - 60 * 60 * 1000); // 1h ago
-      await db.insert(pendingPayoutsTable).values({
+      await db.insert(payoutsTable).values({
         userId: creatorId,
         organizationId: org.id,
         subscriptionId: sub.id,
         amountCents: 500,
         currency: 'gbp',
         reason: 'connect_not_ready',
-        createdAt: longAgo,
+        status: 'pending',
+        payoutType: 'creator_payout',
+        attemptedAt: longAgo,
       });
 
       const retrieveSpy = stubAccountsRetrieve(true);
@@ -5379,19 +5433,21 @@ describe('SubscriptionService', () => {
 
     it('skips the group (no transfer) when the Connect account is still not ready', async () => {
       const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM pending_payouts`);
+      await db.execute(rawSql`DELETE FROM payouts`);
 
       const { org, sub } = await seedConnectAndSubscription('vv77x-not-ready');
 
       const longAgo = new Date(Date.now() - 60 * 60 * 1000);
-      await db.insert(pendingPayoutsTable).values({
+      await db.insert(payoutsTable).values({
         userId: creatorId,
         organizationId: org.id,
         subscriptionId: sub.id,
         amountCents: 500,
         currency: 'gbp',
         reason: 'connect_not_ready',
-        createdAt: longAgo,
+        status: 'pending',
+        payoutType: 'creator_payout',
+        attemptedAt: longAgo,
       });
 
       const retrieveSpy = stubAccountsRetrieve(false);
@@ -5412,14 +5468,14 @@ describe('SubscriptionService', () => {
 
     it('groups by (orgId, userId) — N rows for one Connect account → one accounts.retrieve, one resolvePendingPayouts', async () => {
       const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM pending_payouts`);
+      await db.execute(rawSql`DELETE FROM payouts`);
 
       const { org, sub, stripeAccountId } =
         await seedConnectAndSubscription('vv77x-grouping');
 
       const longAgo = new Date(Date.now() - 60 * 60 * 1000);
       // 3 rows, same (orgId, userId) — one Connect account
-      await db.insert(pendingPayoutsTable).values([
+      await db.insert(payoutsTable).values([
         {
           userId: creatorId,
           organizationId: org.id,
@@ -5427,7 +5483,9 @@ describe('SubscriptionService', () => {
           amountCents: 100,
           currency: 'gbp',
           reason: 'connect_not_ready',
-          createdAt: longAgo,
+          status: 'pending',
+          payoutType: 'creator_payout',
+          attemptedAt: longAgo,
         },
         {
           userId: creatorId,
@@ -5436,7 +5494,9 @@ describe('SubscriptionService', () => {
           amountCents: 200,
           currency: 'gbp',
           reason: 'connect_not_ready',
-          createdAt: longAgo,
+          status: 'pending',
+          payoutType: 'creator_payout',
+          attemptedAt: longAgo,
         },
         {
           userId: creatorId,
@@ -5445,7 +5505,9 @@ describe('SubscriptionService', () => {
           amountCents: 300,
           currency: 'gbp',
           reason: 'connect_not_ready',
-          createdAt: longAgo,
+          status: 'pending',
+          payoutType: 'creator_payout',
+          attemptedAt: longAgo,
         },
       ]);
 
@@ -5472,13 +5534,13 @@ describe('SubscriptionService', () => {
 
     it('isolates per-group failure — one Stripe.accounts.retrieve throwing does not abort other groups', async () => {
       const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM pending_payouts`);
+      await db.execute(rawSql`DELETE FROM payouts`);
 
       const failOrg = await seedConnectAndSubscription('vv77x-fail');
       const okOrg = await seedConnectAndSubscription('vv77x-ok');
 
       const longAgo = new Date(Date.now() - 60 * 60 * 1000);
-      await db.insert(pendingPayoutsTable).values([
+      await db.insert(payoutsTable).values([
         {
           userId: creatorId,
           organizationId: failOrg.org.id,
@@ -5486,7 +5548,9 @@ describe('SubscriptionService', () => {
           amountCents: 500,
           currency: 'gbp',
           reason: 'connect_not_ready',
-          createdAt: longAgo,
+          status: 'pending',
+          payoutType: 'creator_payout',
+          attemptedAt: longAgo,
         },
         {
           userId: creatorId,
@@ -5495,7 +5559,9 @@ describe('SubscriptionService', () => {
           amountCents: 700,
           currency: 'gbp',
           reason: 'connect_not_ready',
-          createdAt: longAgo,
+          status: 'pending',
+          payoutType: 'creator_payout',
+          attemptedAt: longAgo,
         },
       ]);
 
@@ -5534,20 +5600,22 @@ describe('SubscriptionService', () => {
 
     it('respects olderThanMinutes — rows newer than the threshold are NOT swept (webhook handles fresh rows)', async () => {
       const { sql: rawSql } = await import('drizzle-orm');
-      await db.execute(rawSql`DELETE FROM pending_payouts`);
+      await db.execute(rawSql`DELETE FROM payouts`);
 
       const { org, sub } = await seedConnectAndSubscription('vv77x-fresh');
 
       // Row created "now" — newer than the 15min threshold so should be
       // ignored by the sweep (the account.updated webhook owns fresh rows).
-      await db.insert(pendingPayoutsTable).values({
+      await db.insert(payoutsTable).values({
         userId: creatorId,
         organizationId: org.id,
         subscriptionId: sub.id,
         amountCents: 500,
         currency: 'gbp',
         reason: 'connect_not_ready',
-        createdAt: new Date(),
+        status: 'pending',
+        payoutType: 'creator_payout',
+        attemptedAt: new Date(),
       });
 
       const retrieveSpy = stubAccountsRetrieve(true);
@@ -5661,7 +5729,7 @@ describe('SubscriptionService', () => {
       });
 
       const [payout] = await db
-        .insert(pendingPayoutsTable)
+        .insert(payoutsTable)
         .values({
           userId: creatorId,
           organizationId: org.id,
@@ -5669,6 +5737,8 @@ describe('SubscriptionService', () => {
           amountCents: 5000,
           currency: 'gbp',
           reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
         })
         .returning();
 
@@ -5699,8 +5769,8 @@ describe('SubscriptionService', () => {
       const { eq } = await import('drizzle-orm');
       const [after] = await db
         .select()
-        .from(pendingPayoutsTable)
-        .where(eq(pendingPayoutsTable.id, payout.id));
+        .from(payoutsTable)
+        .where(eq(payoutsTable.id, payout.id));
       expect(after.resolvedAt).not.toBeNull();
       expect(after.stripeTransferId).toMatch(/^tr_/);
     });
@@ -5731,7 +5801,7 @@ describe('SubscriptionService', () => {
       expect(existingAgreement).toHaveLength(0);
 
       const [payout] = await db
-        .insert(pendingPayoutsTable)
+        .insert(payoutsTable)
         .values({
           userId: creatorId,
           organizationId: org.id,
@@ -5739,6 +5809,8 @@ describe('SubscriptionService', () => {
           amountCents: 2750,
           currency: 'gbp',
           reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
         })
         .returning();
 
@@ -5760,8 +5832,8 @@ describe('SubscriptionService', () => {
 
       const [after] = await db
         .select()
-        .from(pendingPayoutsTable)
-        .where(eq(pendingPayoutsTable.id, payout.id));
+        .from(payoutsTable)
+        .where(eq(payoutsTable.id, payout.id));
       expect(after.resolvedAt).not.toBeNull();
       expect(after.stripeTransferId).toMatch(/^tr_/);
     });
@@ -5848,7 +5920,7 @@ describe('SubscriptionService', () => {
           .returning();
 
         const [payout] = await db
-          .insert(pendingPayoutsTable)
+          .insert(payoutsTable)
           .values({
             userId,
             organizationId: org.id,
@@ -5856,6 +5928,8 @@ describe('SubscriptionService', () => {
             amountCents: amounts[i],
             currency: 'gbp',
             reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
           })
           .returning();
 
@@ -5896,10 +5970,10 @@ describe('SubscriptionService', () => {
       const { inArray } = await import('drizzle-orm');
       const after = await db
         .select()
-        .from(pendingPayoutsTable)
+        .from(payoutsTable)
         .where(
           inArray(
-            pendingPayoutsTable.id,
+            payoutsTable.id,
             seeded.map((r) => r.payoutId)
           )
         );
@@ -6181,13 +6255,15 @@ describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
       const { org, sub, stripeAccountId } =
         await seedConnectAndSubscription('yv18n-payout-gbp');
 
-      await db.insert(pendingPayoutsTable).values({
+      await db.insert(payoutsTable).values({
         userId: creatorId,
         organizationId: org.id,
         subscriptionId: sub.id,
         amountCents: 1000,
         currency: 'gbp',
         reason: 'connect_not_ready',
+        status: 'pending',
+        payoutType: 'creator_payout',
       });
 
       const transferSpy = vi.mocked(stripe.transfers.create);
@@ -6214,13 +6290,15 @@ describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
 
       // Seed a USD payout directly — bypasses the schema default by
       // explicitly setting currency: 'usd'.
-      await db.insert(pendingPayoutsTable).values({
+      await db.insert(payoutsTable).values({
         userId: creatorId,
         organizationId: org.id,
         subscriptionId: sub.id,
         amountCents: 2500,
         currency: 'usd',
         reason: 'connect_not_ready',
+        status: 'pending',
+        payoutType: 'creator_payout',
       });
 
       const transferSpy = vi.mocked(stripe.transfers.create);
@@ -6243,7 +6321,7 @@ describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
       const { org, sub, stripeAccountId } =
         await seedConnectAndSubscription('yv18n-payout-mixed');
 
-      await db.insert(pendingPayoutsTable).values([
+      await db.insert(payoutsTable).values([
         {
           userId: creatorId,
           organizationId: org.id,
@@ -6251,6 +6329,8 @@ describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
           amountCents: 500,
           currency: 'gbp',
           reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
         },
         {
           userId: creatorId,
@@ -6259,6 +6339,8 @@ describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
           amountCents: 700,
           currency: 'eur',
           reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
         },
       ]);
 

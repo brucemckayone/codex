@@ -367,7 +367,7 @@ subscriptions.get(
  * studio payouts table. Owner/admin only via `requireOrgManagement` —
  * mirror of `/stats` and `/subscribers`.
  *
- * SECURITY INVARIANT: the service queries `pendingPayouts` filtered by
+ * SECURITY INVARIANT: the service queries `payouts` filtered by
  * `organizationId = ctx.organizationId`. `ctx.organizationId` is set by
  * `requireOrgManagement` from the user's membership row, so this route
  * cannot leak another org's payouts even if the client forges

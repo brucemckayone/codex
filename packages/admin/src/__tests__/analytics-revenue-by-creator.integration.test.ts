@@ -24,7 +24,7 @@ import {
   creatorOrganizationAgreements,
   mediaItems,
   organizations,
-  pendingPayouts,
+  payouts,
   purchases,
   subscriptions,
   subscriptionTiers,
@@ -63,7 +63,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
 
   /**
    * Per-test scaffold. Returns a fresh org with N creators, one content per
-   * creator, plus an active subscription (so pendingPayouts can FK to a real
+   * creator, plus an active subscription (so payouts can FK to a real
    * subscription row when needed).
    */
   async function seedScenario(creatorCount: number) {
@@ -110,7 +110,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
   }
 
   /**
-   * Seed an active subscription for the given creator + org so pendingPayouts
+   * Seed an active subscription for the given creator + org so payouts
    * inserts can satisfy their FK to subscriptions.id.
    */
   async function seedActiveSubscription(
@@ -250,13 +250,15 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     const resolvedDate = new Date('2026-03-15T00:00:00Z');
     const moreRecentResolvedDate = new Date('2026-04-20T00:00:00Z');
 
-    await db.insert(pendingPayouts).values([
+    await db.insert(payouts).values([
       {
         userId: creatorId,
         organizationId: orgId,
         subscriptionId,
         amountCents: 500,
-        reason: 'min_transfer_floor',
+        payoutType: 'creator_payout',
+        status: 'paid',
+        reason: null,
         resolvedAt: resolvedDate,
         stripeTransferId: 'tr_old',
       },
@@ -265,7 +267,9 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
         organizationId: orgId,
         subscriptionId,
         amountCents: 700,
-        reason: 'min_transfer_floor',
+        payoutType: 'creator_payout',
+        status: 'paid',
+        reason: null,
         resolvedAt: moreRecentResolvedDate,
         stripeTransferId: 'tr_new',
       },
@@ -274,6 +278,8 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
         organizationId: orgId,
         subscriptionId,
         amountCents: 250,
+        payoutType: 'creator_payout',
+        status: 'pending',
         reason: 'min_transfer_floor',
         resolvedAt: null,
       },
@@ -282,6 +288,8 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
         organizationId: orgId,
         subscriptionId,
         amountCents: 1000,
+        payoutType: 'creator_payout',
+        status: 'pending',
         reason: 'connect_not_ready',
         resolvedAt: null,
       },
@@ -313,11 +321,13 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
     // amount that MUST NOT leak into orgA's result.
     const subscriptionId = await seedActiveSubscription(orgB, creatorId);
 
-    await db.insert(pendingPayouts).values({
+    await db.insert(payouts).values({
       userId: creatorId,
       organizationId: orgB,
       subscriptionId,
       amountCents: 9999,
+      payoutType: 'creator_payout',
+      status: 'pending',
       reason: 'connect_not_ready',
       resolvedAt: null,
     });

@@ -1107,34 +1107,34 @@ export class AdminAnalyticsService extends BaseService {
             .groupBy(schema.content.creatorId),
           this.db
             .select({
-              creatorId: schema.pendingPayouts.userId,
+              creatorId: schema.payouts.userId,
               lastPayoutAt: sql<
                 string | null
-              >`MAX(${schema.pendingPayouts.resolvedAt})`,
+              >`MAX(${schema.payouts.resolvedAt})`,
             })
-            .from(schema.pendingPayouts)
+            .from(schema.payouts)
             .where(
               and(
-                eq(schema.pendingPayouts.organizationId, organizationId),
-                inArray(schema.pendingPayouts.userId, creatorIds),
-                sql`${schema.pendingPayouts.resolvedAt} IS NOT NULL`
+                eq(schema.payouts.organizationId, organizationId),
+                inArray(schema.payouts.userId, creatorIds),
+                eq(schema.payouts.status, 'paid')
               )
             )
-            .groupBy(schema.pendingPayouts.userId),
+            .groupBy(schema.payouts.userId),
           this.db
             .select({
-              creatorId: schema.pendingPayouts.userId,
-              pendingPayoutCents: sql<number>`COALESCE(SUM(${schema.pendingPayouts.amountCents}), 0)::int`,
+              creatorId: schema.payouts.userId,
+              pendingPayoutCents: sql<number>`COALESCE(SUM(${schema.payouts.amountCents}), 0)::int`,
             })
-            .from(schema.pendingPayouts)
+            .from(schema.payouts)
             .where(
               and(
-                eq(schema.pendingPayouts.organizationId, organizationId),
-                inArray(schema.pendingPayouts.userId, creatorIds),
-                isNull(schema.pendingPayouts.resolvedAt)
+                eq(schema.payouts.organizationId, organizationId),
+                inArray(schema.payouts.userId, creatorIds),
+                inArray(schema.payouts.status, ['pending', 'failed'])
               )
             )
-            .groupBy(schema.pendingPayouts.userId),
+            .groupBy(schema.payouts.userId),
         ]);
 
       const revenueByCreator = new Map(
