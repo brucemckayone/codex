@@ -150,6 +150,28 @@ function purchaseDateWindow(fromDate?: string, toDate?: string): SQL[] {
 }
 
 /**
+ * Status values valid for the studio Sales ledger / customer purchase
+ * history list. The DB CHECK constraint on `purchases.status` enforces
+ * the same enum, so the fallback to PENDING in coercePurchaseStatus is
+ * defensive — it would only fire on schema drift that bypassed the
+ * constraint (e.g. raw SQL migration).
+ */
+const PURCHASE_LIST_STATUSES = [
+  PURCHASE_STATUS.COMPLETED,
+  PURCHASE_STATUS.PENDING,
+  PURCHASE_STATUS.FAILED,
+  PURCHASE_STATUS.REFUNDED,
+] as const;
+
+type PurchaseListStatus = (typeof PURCHASE_LIST_STATUSES)[number];
+
+function coercePurchaseStatus(s: string): PurchaseListStatus {
+  return (PURCHASE_LIST_STATUSES as readonly string[]).includes(s)
+    ? (s as PurchaseListStatus)
+    : PURCHASE_STATUS.PENDING;
+}
+
+/**
  * Purchase Service Class
  *
  * Handles purchase operations with Stripe integration.
@@ -775,13 +797,6 @@ export class PurchaseService extends BaseService {
   formatPurchasesForClient(
     result: PaginatedListResponse<PurchaseWithContent>
   ): PaginatedListResponse<PurchaseListItem> {
-    const validStatuses = new Set<PurchaseListItem['status']>([
-      PURCHASE_STATUS.COMPLETED,
-      PURCHASE_STATUS.PENDING,
-      PURCHASE_STATUS.FAILED,
-      PURCHASE_STATUS.REFUNDED,
-    ]);
-
     return {
       items: result.items.map(
         (p): PurchaseListItem => ({
@@ -794,9 +809,7 @@ export class PurchaseService extends BaseService {
           contentId: p.contentId,
           contentTitle: p.content.title,
           amountCents: p.amountPaidCents,
-          status: validStatuses.has(p.status as PurchaseListItem['status'])
-            ? (p.status as PurchaseListItem['status'])
-            : PURCHASE_STATUS.PENDING,
+          status: coercePurchaseStatus(p.status),
         })
       ),
       pagination: result.pagination,
@@ -1310,13 +1323,6 @@ export class PurchaseService extends BaseService {
       ]);
       const total = countResult[0]?.total ?? 0;
 
-      const validStatuses: ReadonlyArray<SaleListItem['status']> = [
-        PURCHASE_STATUS.COMPLETED,
-        PURCHASE_STATUS.PENDING,
-        PURCHASE_STATUS.FAILED,
-        PURCHASE_STATUS.REFUNDED,
-      ];
-
       const formatted: SaleListItem[] = items.map((p) => ({
         id: p.id,
         purchasedAt: toIso(p.purchasedAt),
@@ -1329,9 +1335,7 @@ export class PurchaseService extends BaseService {
         contentSlug: p.content.slug,
         amountPaidCents: p.amountPaidCents,
         currency: p.currency,
-        status: (validStatuses.includes(p.status as SaleListItem['status'])
-          ? p.status
-          : PURCHASE_STATUS.PENDING) as SaleListItem['status'],
+        status: coercePurchaseStatus(p.status) as SaleListItem['status'],
         platformFeeCents: p.platformFeeCents,
         organizationFeeCents: p.organizationFeeCents,
         creatorPayoutCents: p.creatorPayoutCents,
