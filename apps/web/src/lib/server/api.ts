@@ -260,6 +260,22 @@ export function createServerApi(
     return json as T;
   }
 
+  /**
+   * Builds an ecom-api URL with `organizationId` appended to the search
+   * params, merging any caller-supplied URLSearchParams. The worker
+   * re-derives scope from the authenticated membership — the URL param
+   * is only used by `procedure()` to resolve org context.
+   */
+  function withOrg(
+    path: string,
+    organizationId: string,
+    params?: URLSearchParams
+  ): string {
+    const q = new URLSearchParams(params);
+    q.set('organizationId', organizationId);
+    return `${path}?${q}`;
+  }
+
   return {
     /**
      * Low-level fetch method (for backward compatibility)
@@ -1652,38 +1668,32 @@ export function createServerApi(
        * The worker re-derives scope from membership; the URL `organizationId`
        * is used only to resolve org context for the procedure helper.
        */
-      getSubscribers: (organizationId: string, params?: URLSearchParams) => {
-        const query = new URLSearchParams(params);
-        query.set('organizationId', organizationId);
-        return request<PaginatedListResponse<SubscriberListItem>>(
+      getSubscribers: (organizationId: string, params?: URLSearchParams) =>
+        request<PaginatedListResponse<SubscriberListItem>>(
           'ecom',
-          `/subscriptions/subscribers?${query}`
-        );
-      },
+          withOrg('/subscriptions/subscribers', organizationId, params)
+        ),
 
       /**
        * List sales for the studio ledger (Codex-1csms). Org-scoped inverse
        * of /purchases. See `packages/purchase/src/services/purchase-service.ts`
        * `listSales` for the data contract.
        */
-      listSales: (organizationId: string, params?: URLSearchParams) => {
-        const query = new URLSearchParams(params);
-        query.set('organizationId', organizationId);
-        return request<PaginatedListResponse<SaleListItem>>(
+      listSales: (organizationId: string, params?: URLSearchParams) =>
+        request<PaginatedListResponse<SaleListItem>>(
           'ecom',
-          `/sales?${query}`
-        );
-      },
+          withOrg('/sales', organizationId, params)
+        ),
 
       /**
        * Aggregate KPIs (gross/net/refunded/count) for the studio Sales
        * ledger header tiles (Codex-1csms).
        */
-      getSalesStats: (organizationId: string, params?: URLSearchParams) => {
-        const query = new URLSearchParams(params);
-        query.set('organizationId', organizationId);
-        return request<SalesStats>('ecom', `/sales/stats?${query}`);
-      },
+      getSalesStats: (organizationId: string, params?: URLSearchParams) =>
+        request<SalesStats>(
+          'ecom',
+          withOrg('/sales/stats', organizationId, params)
+        ),
 
       /**
        * List pending + resolved creator payouts for an org (owner only,
@@ -1693,14 +1703,11 @@ export function createServerApi(
        * contract requires it, but the worker re-derives the scope from
        * the authenticated membership — never trusts the URL value.
        */
-      listPayouts: (organizationId: string, params?: URLSearchParams) => {
-        const query = new URLSearchParams(params);
-        query.set('organizationId', organizationId);
-        return request<PaginatedListResponse<PayoutWithCreator>>(
+      listPayouts: (organizationId: string, params?: URLSearchParams) =>
+        request<PaginatedListResponse<PayoutWithCreator>>(
           'ecom',
-          `/subscriptions/payouts?${query}`
-        );
-      },
+          withOrg('/subscriptions/payouts', organizationId, params)
+        ),
     },
 
     /**
