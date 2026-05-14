@@ -6,6 +6,8 @@
  * - Query helper functions (soft delete filtering, scoping, pagination)
  */
 
+// Date-window helper
+export * from './date-window';
 // Error detection utilities
 export * from './db-errors';
 // ISO-date serialisation helper
