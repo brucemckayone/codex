@@ -181,9 +181,6 @@
     { value: 'needs_attention', label: 'Needs attention' },
   ];
 
-  // KPI label dynamics — "Earned (last 7d)" etc. The "all time" case is
-  // collapsed to the same label as Total earned in practice; we still
-  // render the windowed card to keep the row stable.
   const RANGE_LABELS: Record<DateRange, string> = {
     '7': 'last 7 days',
     '30': 'last 30 days',

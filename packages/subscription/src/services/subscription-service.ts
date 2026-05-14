@@ -2635,19 +2635,20 @@ export class SubscriptionService extends BaseService {
     // Three parallel aggregates:
     // 1. Paid earnings — one query returns both lifetime + windowed via
     //    CASE WHEN, saving a round-trip vs. two separate SUMs over the
-    //    same WHERE clause.
+    //    same WHERE clause. When no date window is set, the windowed
+    //    column collapses to the lifetime aggregate.
     // 2. In-transit (status='pending') sum.
     // 3. Needs-attention (pending OR failed) count.
     const dateConditions = dateWindow(payouts.createdAt, fromDate, toDate);
-    const inPeriodPredicate =
-      dateConditions.length > 0
-        ? sql`(${and(...dateConditions)})`
-        : sql`TRUE`;
+    const inPeriodSum =
+      dateConditions.length === 0
+        ? sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`
+        : sql<number>`COALESCE(SUM(CASE WHEN ${and(...dateConditions)} THEN ${payouts.amountCents} ELSE 0 END),0)::int`;
 
     const [paid, inTransit, needsAttention] = await Promise.all([
       this.db
         .select({
-          inPeriod: sql<number>`COALESCE(SUM(CASE WHEN ${inPeriodPredicate} THEN ${payouts.amountCents} ELSE 0 END),0)::int`,
+          inPeriod: inPeriodSum,
           total: sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`,
         })
         .from(payouts)
