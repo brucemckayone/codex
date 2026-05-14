@@ -188,7 +188,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
         organizationId: orgId,
         amountPaidCents: 1000,
         platformFeeCents: 100,
-        organizationFeeCents: 0,
+        organizationFeeCents: 300,
         creatorPayoutCents: 600,
         stripePaymentIntentId: `pi_b1_${Date.now()}`,
         status: PURCHASE_STATUS.COMPLETED,
