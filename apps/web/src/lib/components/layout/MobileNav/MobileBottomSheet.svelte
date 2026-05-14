@@ -5,7 +5,8 @@
 	import { fade, fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { buildPlatformUrl } from '$lib/utils/subdomain';
-	import { getInitials, useStudioAccess } from '$lib/utils/studio-access.svelte';
+	import { useStudioAccess } from '$lib/utils/studio-access.svelte';
+	import { getInitials } from '$lib/utils/format';
 	import { submitFormPost } from '$lib/utils/navigation';
 	import {
 		LogInIcon,

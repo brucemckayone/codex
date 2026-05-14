@@ -2531,6 +2531,109 @@ describe('SubscriptionService', () => {
       expect(result.pagination.total).toBe(3);
       expect(result.pagination.totalPages).toBe(2);
     });
+
+    it('flattens user + tier joins into SubscriberListItem shape', async () => {
+      const { org, tier1 } = await createFullOrg('list-subs-shape');
+      const [uid] = await seedTestUsers(db, 1);
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(uid, org.id, tier1.id));
+
+      const result = await service.listSubscribers(org.id, {
+        page: 1,
+        limit: 10,
+      });
+      expect(result.items).toHaveLength(1);
+      const row = result.items[0]!;
+      expect(row.userId).toBe(uid);
+      expect(row.userEmail).toBeTruthy();
+      expect(row.tierId).toBe(tier1.id);
+      expect(row.tierName).toBe(tier1.name);
+      expect(row.amountCents).toBeGreaterThan(0);
+      expect(row.currency).toBe('gbp');
+      // ISO strings, not Date instances
+      expect(typeof row.createdAt).toBe('string');
+    });
+
+    it('excludes cancelled by default (BUG-023 regression guard)', async () => {
+      const { org, tier1 } = await createFullOrg('list-subs-cancel-default');
+      const [activeUid, cancelledUid] = await seedTestUsers(db, 2);
+      await db.insert(subscriptions).values([
+        createTestSubscriptionInput(activeUid, org.id, tier1.id, {
+          status: 'active',
+        }),
+        createTestSubscriptionInput(cancelledUid, org.id, tier1.id, {
+          status: 'cancelled',
+        }),
+      ]);
+
+      const result = await service.listSubscribers(org.id, {
+        page: 1,
+        limit: 10,
+      });
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]!.userId).toBe(activeUid);
+      expect(result.items.every((s) => s.status !== 'cancelled')).toBe(true);
+    });
+
+    it('includes cancelled when includeCancelled=true', async () => {
+      const { org, tier1 } = await createFullOrg('list-subs-cancel-on');
+      const [activeUid, cancelledUid] = await seedTestUsers(db, 2);
+      await db.insert(subscriptions).values([
+        createTestSubscriptionInput(activeUid, org.id, tier1.id, {
+          status: 'active',
+        }),
+        createTestSubscriptionInput(cancelledUid, org.id, tier1.id, {
+          status: 'cancelled',
+        }),
+      ]);
+
+      const result = await service.listSubscribers(org.id, {
+        page: 1,
+        limit: 10,
+        includeCancelled: true,
+      });
+      expect(result.items).toHaveLength(2);
+      expect(result.items.some((s) => s.status === 'cancelled')).toBe(true);
+    });
+
+    it('filters by tierId', async () => {
+      const { org, tier1, tier2 } = await createFullOrg('list-subs-tier');
+      const [u1, u2] = await seedTestUsers(db, 2);
+      await db.insert(subscriptions).values([
+        createTestSubscriptionInput(u1, org.id, tier1.id, {
+          status: 'active',
+        }),
+        createTestSubscriptionInput(u2, org.id, tier2.id, {
+          status: 'active',
+        }),
+      ]);
+
+      const result = await service.listSubscribers(org.id, {
+        page: 1,
+        limit: 10,
+        tierId: tier1.id,
+      });
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]!.tierId).toBe(tier1.id);
+    });
+
+    it('search filters by user email (case-insensitive ILIKE)', async () => {
+      const { org, tier1 } = await createFullOrg('list-subs-search');
+      const [uid] = await seedTestUsers(db, 1);
+      await db
+        .insert(subscriptions)
+        .values(createTestSubscriptionInput(uid, org.id, tier1.id));
+
+      // seedTestUsers makes emails like `user-1-<rand>@example.com`. The
+      // first segment is deterministic enough for a contains-match.
+      const result = await service.listSubscribers(org.id, {
+        page: 1,
+        limit: 10,
+        search: 'example.com',
+      });
+      expect(result.items.length).toBeGreaterThanOrEqual(1);
+    });
   });
 
   // ─── getSubscriptionStats ─────────────────────────────────────────

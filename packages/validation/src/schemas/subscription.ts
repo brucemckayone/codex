@@ -166,6 +166,12 @@ export const resumeSubscriptionSchema = z.object({
 export const listSubscribersQuerySchema = paginationSchema.extend({
   tierId: uuidSchema.optional(),
   status: subscriptionStatusEnum.optional(),
+  // BUG-023: `listSubscribers` excludes cancelled rows by default. Set this
+  // to `true` from the studio Subscribers page when the operator toggles
+  // the "Show cancelled" view. Ignored if `status` is explicitly set.
+  includeCancelled: z.coerce.boolean().optional(),
+  // Free-text search across user name / email — case-insensitive ILIKE.
+  search: z.string().trim().min(1).max(120).optional(),
 });
 
 /**

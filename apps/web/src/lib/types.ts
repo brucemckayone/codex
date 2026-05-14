@@ -282,24 +282,6 @@ export interface SubscriptionCheckoutResponse {
   sessionId: string;
 }
 
-/**
- * Subscriber item in admin list.
- * Returned by GET /subscriptions/subscribers
- */
-export interface SubscriberItem {
-  id: string;
-  userId: string;
-  email: string;
-  name: string | null;
-  tierId: string;
-  tierName: string;
-  status: string;
-  billingInterval: string;
-  amountCents: number;
-  currentPeriodEnd: string;
-  createdAt: string;
-}
-
 // Re-export for convenience
 export type { SubscriptionTier } from '@codex/database/schema';
 

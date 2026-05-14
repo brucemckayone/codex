@@ -33,6 +33,7 @@ export { default as FileTextIcon } from './FileTextIcon.svelte';
 // Media
 export { default as FilmIcon } from './FilmIcon.svelte';
 export { default as GlobeIcon } from './GlobeIcon.svelte';
+export { default as HeartIcon } from './HeartIcon.svelte';
 export { default as HomeIcon } from './HomeIcon.svelte';
 export { default as ImageIcon } from './ImageIcon.svelte';
 // Social
@@ -54,6 +55,7 @@ export { default as MusicIcon } from './MusicIcon.svelte';
 export { default as PauseIcon } from './PauseIcon.svelte';
 export { default as PlayIcon } from './PlayIcon.svelte';
 export { default as PlusIcon } from './PlusIcon.svelte';
+export { default as ReceiptIcon } from './ReceiptIcon.svelte';
 export { default as SearchIcon } from './SearchIcon.svelte';
 export { default as SearchMinusIcon } from './SearchMinusIcon.svelte';
 export { default as SearchXIcon } from './SearchXIcon.svelte';

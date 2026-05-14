@@ -11,7 +11,7 @@ import {
   SUBSCRIPTION_STATUS,
   VIDEO_PROGRESS,
 } from '@codex/constants';
-import { createPerRequestDbClient } from '@codex/database';
+import { createPerRequestDbClient, toIso } from '@codex/database';
 import {
   content,
   mediaItems,
@@ -1025,7 +1025,7 @@ export class ContentAccessService extends BaseService {
           contentId: input.contentId,
           contentType: mediaType,
           hasWaveform: !!waveformUrl,
-          expiresAt: expiresAt.toISOString(),
+          expiresAt: toIso(expiresAt),
         });
 
         return {
@@ -1351,7 +1351,7 @@ export class ContentAccessService extends BaseService {
         durationSeconds: dur,
         completed: row.progressCompleted ?? false,
         percentComplete: dur > 0 ? Math.round((pos / dur) * 100) : 0,
-        updatedAt: row.progressUpdatedAt.toISOString(),
+        updatedAt: toIso(row.progressUpdatedAt),
       };
     };
 

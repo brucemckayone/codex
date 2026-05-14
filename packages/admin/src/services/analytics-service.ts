@@ -6,7 +6,7 @@
  */
 
 import { ANALYTICS, PURCHASE_STATUS } from '@codex/constants';
-import { schema } from '@codex/database';
+import { dateWindow, schema, toIso } from '@codex/database';
 import { BaseService, NotFoundError } from '@codex/service-errors';
 import type {
   PaginatedListResponse,
@@ -19,10 +19,8 @@ import {
   desc,
   eq,
   gt,
-  gte,
   inArray,
   isNull,
-  lte,
   or,
   sql,
 } from 'drizzle-orm';
@@ -124,8 +122,7 @@ export class AdminAnalyticsService extends BaseService {
     const baseConditions = [
       eq(schema.purchases.organizationId, organizationId),
       eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED),
-      gte(schema.purchases.purchasedAt, effectiveStart),
-      lte(schema.purchases.purchasedAt, effectiveEnd),
+      ...dateWindow(schema.purchases.purchasedAt, effectiveStart, effectiveEnd),
     ];
 
     // Independent queries — neither consumes the other's value. Launch via
@@ -264,7 +261,11 @@ export class AdminAnalyticsService extends BaseService {
                 'past_due',
                 'cancelling',
               ]),
-              lte(schema.subscriptions.createdAt, effectiveEnd),
+              ...dateWindow(
+                schema.subscriptions.createdAt,
+                undefined,
+                effectiveEnd
+              ),
               or(
                 isNull(schema.subscriptions.cancelledAt),
                 gt(schema.subscriptions.cancelledAt, effectiveEnd)
@@ -278,8 +279,11 @@ export class AdminAnalyticsService extends BaseService {
           .where(
             and(
               eq(schema.subscriptions.organizationId, organizationId),
-              gte(schema.subscriptions.createdAt, effectiveStart),
-              lte(schema.subscriptions.createdAt, effectiveEnd)
+              ...dateWindow(
+                schema.subscriptions.createdAt,
+                effectiveStart,
+                effectiveEnd
+              )
             )
           ),
         // Churned in period: cancelledAt within [start, end]
@@ -289,8 +293,11 @@ export class AdminAnalyticsService extends BaseService {
           .where(
             and(
               eq(schema.subscriptions.organizationId, organizationId),
-              gte(schema.subscriptions.cancelledAt, effectiveStart),
-              lte(schema.subscriptions.cancelledAt, effectiveEnd)
+              ...dateWindow(
+                schema.subscriptions.cancelledAt,
+                effectiveStart,
+                effectiveEnd
+              )
             )
           ),
         // Daily new subscribers, grouped by DATE(createdAt), most recent first
@@ -303,8 +310,11 @@ export class AdminAnalyticsService extends BaseService {
           .where(
             and(
               eq(schema.subscriptions.organizationId, organizationId),
-              gte(schema.subscriptions.createdAt, effectiveStart),
-              lte(schema.subscriptions.createdAt, effectiveEnd)
+              ...dateWindow(
+                schema.subscriptions.createdAt,
+                effectiveStart,
+                effectiveEnd
+              )
             )
           )
           .groupBy(sql`DATE(${schema.subscriptions.createdAt})`)
@@ -408,7 +418,11 @@ export class AdminAnalyticsService extends BaseService {
         .where(
           and(
             eq(schema.organizationFollowers.organizationId, organizationId),
-            lte(schema.organizationFollowers.createdAt, effectiveEnd)
+            ...dateWindow(
+              schema.organizationFollowers.createdAt,
+              undefined,
+              effectiveEnd
+            )
           )
         ),
       // New followers in period: createdAt within [start, end]
@@ -418,8 +432,11 @@ export class AdminAnalyticsService extends BaseService {
         .where(
           and(
             eq(schema.organizationFollowers.organizationId, organizationId),
-            gte(schema.organizationFollowers.createdAt, effectiveStart),
-            lte(schema.organizationFollowers.createdAt, effectiveEnd)
+            ...dateWindow(
+              schema.organizationFollowers.createdAt,
+              effectiveStart,
+              effectiveEnd
+            )
           )
         ),
       // Daily new followers, grouped by DATE(createdAt), most recent first
@@ -432,8 +449,11 @@ export class AdminAnalyticsService extends BaseService {
         .where(
           and(
             eq(schema.organizationFollowers.organizationId, organizationId),
-            gte(schema.organizationFollowers.createdAt, effectiveStart),
-            lte(schema.organizationFollowers.createdAt, effectiveEnd)
+            ...dateWindow(
+              schema.organizationFollowers.createdAt,
+              effectiveStart,
+              effectiveEnd
+            )
           )
         )
         .groupBy(sql`DATE(${schema.organizationFollowers.createdAt})`)
@@ -571,8 +591,11 @@ export class AdminAnalyticsService extends BaseService {
           and(
             eq(schema.purchases.organizationId, organizationId),
             eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED),
-            gte(schema.purchases.purchasedAt, effectiveStart),
-            lte(schema.purchases.purchasedAt, effectiveEnd)
+            ...dateWindow(
+              schema.purchases.purchasedAt,
+              effectiveStart,
+              effectiveEnd
+            )
           )
         )
         .groupBy(
@@ -606,10 +629,13 @@ export class AdminAnalyticsService extends BaseService {
             and(
               eq(schema.purchases.organizationId, organizationId),
               eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED),
-              // Non-null assertions are safe here: wantsCompare is only true
-              // when both compareFrom and compareTo are defined.
-              gte(schema.purchases.purchasedAt, options!.compareFrom!),
-              lte(schema.purchases.purchasedAt, options!.compareTo!),
+              // Helper's truthy checks make non-null asserts redundant — the
+              // outer wantsCompare guard still selects this code path.
+              ...dateWindow(
+                schema.purchases.purchasedAt,
+                options?.compareFrom,
+                options?.compareTo
+              ),
               inArray(schema.purchases.contentId, contentIds)
             )
           )
@@ -705,8 +731,13 @@ export class AdminAnalyticsService extends BaseService {
           .where(
             and(
               inArray(schema.videoPlayback.contentId, contentIds),
-              gte(schema.videoPlayback.updatedAt, options!.compareFrom!),
-              lte(schema.videoPlayback.updatedAt, options!.compareTo!)
+              // Helper's truthy checks make non-null asserts redundant — the
+              // outer wantsCompare guard still selects this code path.
+              ...dateWindow(
+                schema.videoPlayback.updatedAt,
+                options?.compareFrom,
+                options?.compareTo
+              )
             )
           )
           .groupBy(schema.videoPlayback.contentId);
@@ -790,8 +821,7 @@ export class AdminAnalyticsService extends BaseService {
         schema.videoPlayback,
         and(
           eq(schema.videoPlayback.contentId, schema.content.id),
-          gte(schema.videoPlayback.updatedAt, startDate),
-          lte(schema.videoPlayback.updatedAt, endDate)
+          ...dateWindow(schema.videoPlayback.updatedAt, startDate, endDate)
         )
       )
       .where(
@@ -1054,12 +1084,9 @@ export class AdminAnalyticsService extends BaseService {
         eq(schema.purchases.status, PURCHASE_STATUS.COMPLETED),
         inArray(schema.content.creatorId, creatorIds),
       ];
-      if (startDate) {
-        purchaseConditions.push(gte(schema.purchases.purchasedAt, startDate));
-      }
-      if (endDate) {
-        purchaseConditions.push(lte(schema.purchases.purchasedAt, endDate));
-      }
+      purchaseConditions.push(
+        ...dateWindow(schema.purchases.purchasedAt, startDate, endDate)
+      );
 
       // Three independent aggregates over creator-keyed data — fire concurrently
       // (R12 hard rule). Pending-payouts queries are scoped by BOTH userId AND
@@ -1128,12 +1155,9 @@ export class AdminAnalyticsService extends BaseService {
         .map((row) => {
           const lastPayoutRaw = lastPayoutByCreator.get(row.creatorId) ?? null;
           // `lastPayoutRaw` is typed `string | null` by the SQL builder but
-          // drivers sometimes hand back a Date directly. `new Date(value)`
-          // handles both shapes without an `instanceof` discriminator.
-          const lastPayoutAt =
-            lastPayoutRaw === null
-              ? null
-              : new Date(lastPayoutRaw).toISOString();
+          // drivers sometimes hand back a Date directly. `toIso()` handles
+          // both shapes (Date | string | null) at the service boundary.
+          const lastPayoutAt = toIso(lastPayoutRaw);
           return {
             creatorId: row.creatorId,
             name: row.name ?? '',

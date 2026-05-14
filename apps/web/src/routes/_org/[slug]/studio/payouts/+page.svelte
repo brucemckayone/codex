@@ -33,15 +33,9 @@
   import AvatarImage from '$lib/components/ui/Avatar/AvatarImage.svelte';
   import AvatarFallback from '$lib/components/ui/Avatar/AvatarFallback.svelte';
   import { listPayouts } from '$lib/remote/subscription.remote';
-  import { formatDate, formatPrice } from '$lib/utils/format';
+  import { formatDate, formatPrice, getInitials } from '$lib/utils/format';
   import type { PayoutWithCreator } from '@codex/subscription';
-
-  /** Shape returned by SvelteKit's query() when called client-side */
-  interface QueryResult<T> {
-    current: T | undefined;
-    loading?: boolean;
-    error?: { message?: string } | null;
-  }
+  import type { QueryResult } from '$lib/remote/query-result';
 
   type PayoutsPage = {
     items: PayoutWithCreator[];
@@ -155,17 +149,6 @@
       default:
         return reason;
     }
-  }
-
-  function getInitials(name: string | null, email: string | null): string {
-    const source = name?.trim() || email?.trim() || '?';
-    return source
-      .split(/\s+|@/)
-      .filter(Boolean)
-      .map((part) => part[0])
-      .slice(0, 2)
-      .join('')
-      .toUpperCase();
   }
 
   /**

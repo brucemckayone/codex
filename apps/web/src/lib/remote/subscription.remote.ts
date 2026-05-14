@@ -390,6 +390,54 @@ export const getConnectStatus = query(
 // Admin: Payouts Query (Codex-zqaxo)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin: Subscribers list (studio Subscribers page — Codex-1csms)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const listSubscribersQueryArgsSchema = z.object({
+  organizationId: z.string().uuid(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  tierId: z.string().uuid().optional(),
+  status: z.string().optional(),
+  includeCancelled: z.coerce.boolean().optional(),
+  search: z.string().trim().min(1).max(120).optional(),
+});
+
+/**
+ * List subscribers for the studio Subscribers page (Codex-1csms).
+ *
+ * Owner-only at the UI layer (the worker route uses requireOrgManagement +
+ * the page applies $effect redirect for non-owners — same pattern as
+ * /studio/payouts). Returns SubscriberListItem rows joined with user + tier.
+ *
+ * Re-fires every time any arg changes — snapshot semantics matching the
+ * payouts page (no TanStack DB live collection in Phase 1).
+ */
+export const listSubscribers = query(
+  listSubscribersQueryArgsSchema,
+  async ({
+    organizationId,
+    page,
+    limit,
+    tierId,
+    status,
+    includeCancelled,
+    search,
+  }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    const params = new URLSearchParams();
+    params.set('page', String(page));
+    params.set('limit', String(limit));
+    if (tierId) params.set('tierId', tierId);
+    if (status) params.set('status', status);
+    if (includeCancelled) params.set('includeCancelled', 'true');
+    if (search) params.set('search', search);
+    return api.subscription.getSubscribers(organizationId, params);
+  }
+);
+
 const listPayoutsQueryArgsSchema = z.object({
   organizationId: z.string().uuid(),
   status: z.enum(['all', 'pending', 'resolved', 'failed']).default('all'),

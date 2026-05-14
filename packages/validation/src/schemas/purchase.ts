@@ -207,3 +207,48 @@ export const verifyCheckoutSessionSchema = z.object({
 export type VerifyCheckoutSessionInput = z.infer<
   typeof verifyCheckoutSessionSchema
 >;
+
+// ============================================================================
+// Org-scoped Sales schemas (studio Sales ledger — Codex-1csms)
+// ============================================================================
+
+/**
+ * Sales Query Schema (org-scoped)
+ *
+ * Used by GET /sales on ecom-api to list every purchase landing on an org.
+ * The inverse view of `purchaseQuerySchema` (which is customer-scoped).
+ *
+ * Filters:
+ * - status: optional purchase status (also accepts 'disputed' which is not a
+ *   DB status but a query convenience flag — handler maps to `disputedAt IS NOT NULL`)
+ * - contentId: scope to a single piece of content
+ * - customerId: scope to a single buyer (free-text BetterAuth ID)
+ * - fromDate / toDate: closed interval on `purchases.purchasedAt`
+ *
+ * `organizationId` is intentionally NOT here — it's re-derived from the
+ * authenticated session's owner membership in the route handler so the
+ * client cannot point this query at a different org.
+ */
+export const salesQuerySchema = paginationSchema.extend({
+  status: z
+    .enum(['pending', 'completed', 'refunded', 'failed', 'disputed'])
+    .optional(),
+  contentId: uuidSchema.optional(),
+  customerId: userIdSchema.optional(),
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
+});
+
+/**
+ * Sales Stats Query Schema (org-scoped)
+ *
+ * Used by GET /sales/stats. Same date window semantics as `salesQuerySchema`
+ * but no pagination — returns headline KPI totals.
+ */
+export const salesStatsQuerySchema = z.object({
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
+});
+
+export type SalesQueryInput = z.infer<typeof salesQuerySchema>;
+export type SalesStatsQueryInput = z.infer<typeof salesStatsQuerySchema>;

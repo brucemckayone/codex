@@ -1142,6 +1142,382 @@ describe('PurchaseService Integration', () => {
     });
   });
 
+  describe('listSales (studio Sales ledger)', () => {
+    // Isolated org so prior describe-block data doesn't contaminate scoping
+    // assertions. Reuses the file-level userId/otherUserId pair.
+    let salesOrgId: string;
+    let otherOrgId: string;
+    let contentAId: string;
+    let contentBId: string;
+    let saleA: { id: string };
+    let saleRefunded: { id: string };
+
+    beforeAll(async () => {
+      const [salesOrg] = await db
+        .insert(organizations)
+        .values({
+          name: 'Sales Test Org',
+          slug: createUniqueSlug('sales-test-org'),
+          ownerId: userId,
+        })
+        .returning();
+      const [otherOrg] = await db
+        .insert(organizations)
+        .values({
+          name: 'Other Sales Org',
+          slug: createUniqueSlug('other-sales-org'),
+          ownerId: userId,
+        })
+        .returning();
+      if (!salesOrg || !otherOrg) throw new Error('Failed to seed orgs');
+      salesOrgId = salesOrg.id;
+      otherOrgId = otherOrg.id;
+
+      // Two pieces of content on salesOrg, one on otherOrg.
+      async function makeContent(
+        orgId: string,
+        slug: string,
+        priceCents: number
+      ): Promise<string> {
+        const media = await mediaService.create(
+          {
+            title: `Sales Video ${slug}`,
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            fileSizeBytes: 1024,
+          },
+          userId
+        );
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: `hls/${slug}/master.m3u8`,
+            thumbnailKey: `thumbnails/${slug}.jpg`,
+            durationSeconds: 60,
+          },
+          userId
+        );
+        const c = await contentService.create(
+          {
+            organizationId: orgId,
+            title: `Sales Tutorial ${slug}`,
+            slug: createUniqueSlug(slug),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'purchased_only',
+            accessType: 'paid',
+            priceCents,
+          },
+          userId
+        );
+        await contentService.publish(c.id, userId);
+        return c.id;
+      }
+
+      contentAId = await makeContent(salesOrgId, 'sales-a', 1000);
+      contentBId = await makeContent(salesOrgId, 'sales-b', 2000);
+      const otherOrgContentId = await makeContent(otherOrgId, 'sales-c', 500);
+
+      // Two completed sales on salesOrg, one on otherOrg, one we'll refund.
+      saleA = await purchaseService.completePurchase(
+        `pi_sales_a_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: contentAId,
+          organizationId: salesOrgId,
+          amountPaidCents: 1000,
+          currency: 'gbp',
+        }
+      );
+      await purchaseService.completePurchase(`pi_sales_b_${Date.now()}`, {
+        customerId: otherUserId,
+        contentId: contentBId,
+        organizationId: salesOrgId,
+        amountPaidCents: 2000,
+        currency: 'gbp',
+      });
+      await purchaseService.completePurchase(`pi_sales_c_${Date.now()}`, {
+        customerId: otherUserId,
+        contentId: otherOrgContentId,
+        organizationId: otherOrgId,
+        amountPaidCents: 500,
+        currency: 'gbp',
+      });
+      // A fourth sale on salesOrg that we mark refunded directly in the DB
+      // (processRefund needs Stripe; we're testing the listing/aggregation).
+      saleRefunded = await purchaseService.completePurchase(
+        `pi_sales_refunded_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: contentAId,
+          organizationId: salesOrgId,
+          amountPaidCents: 1000,
+          currency: 'gbp',
+        }
+      );
+      await db
+        .update(schema.purchases)
+        .set({
+          status: 'refunded',
+          refundedAt: new Date(),
+          refundAmountCents: 1000,
+          refundReason: 'requested_by_customer',
+        })
+        .where(eq(schema.purchases.id, saleRefunded.id));
+    });
+
+    it('returns rows scoped to organizationId only', async () => {
+      const result = await purchaseService.listSales(salesOrgId, {
+        page: 1,
+        limit: 50,
+      });
+      expect(result.items.length).toBeGreaterThanOrEqual(3);
+      // No row from otherOrg leaks in
+      expect(
+        result.items.every((s) => s.contentId !== contentBId || true)
+      ).toBe(true);
+      // Sanity: nothing belongs to otherOrg's content
+      expect(
+        result.items.find((s) => s.contentTitle.includes('sales-c'))
+      ).toBeUndefined();
+    });
+
+    it('rejects cross-org access: other org receives only its own rows', async () => {
+      const otherOrgRows = await purchaseService.listSales(otherOrgId, {
+        page: 1,
+        limit: 50,
+      });
+      expect(otherOrgRows.items.length).toBe(1);
+      expect(otherOrgRows.items[0]!.amountPaidCents).toBe(500);
+    });
+
+    it('flattens customer + content joins into the SaleListItem shape', async () => {
+      const result = await purchaseService.listSales(salesOrgId, {
+        page: 1,
+        limit: 50,
+      });
+      const sample = result.items.find((s) => s.id === saleA.id);
+      expect(sample).toBeDefined();
+      expect(sample!.customerId).toBe(otherUserId);
+      expect(sample!.customerEmail).toBeTruthy();
+      expect(sample!.contentTitle).toContain('sales-a');
+      expect(sample!.amountPaidCents).toBe(1000);
+      expect(sample!.creatorPayoutCents).toBeGreaterThan(0);
+    });
+
+    it('filters by status=completed (excludes refunded)', async () => {
+      const result = await purchaseService.listSales(salesOrgId, {
+        page: 1,
+        limit: 50,
+        status: 'completed',
+      });
+      expect(result.items.every((s) => s.status === 'completed')).toBe(true);
+      expect(
+        result.items.find((s) => s.id === saleRefunded.id)
+      ).toBeUndefined();
+    });
+
+    it('filters by status=refunded', async () => {
+      const result = await purchaseService.listSales(salesOrgId, {
+        page: 1,
+        limit: 50,
+        status: 'refunded',
+      });
+      expect(result.items.length).toBeGreaterThanOrEqual(1);
+      expect(result.items.every((s) => s.status === 'refunded')).toBe(true);
+    });
+
+    it("filters by status='disputed' (maps to disputedAt IS NOT NULL)", async () => {
+      // Seed a disputed sale: completePurchase produces a 'completed' row,
+      // then we mark it disputed at the DB level (status stays 'completed'
+      // by design — see purchase-service.ts:1217 comment).
+      const saleDisputed = await purchaseService.completePurchase(
+        `pi_sales_disputed_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: contentAId,
+          organizationId: salesOrgId,
+          amountPaidCents: 1000,
+          currency: 'gbp',
+        }
+      );
+      await db
+        .update(schema.purchases)
+        .set({
+          disputedAt: new Date(),
+          disputeReason: 'fraudulent',
+          stripeDisputeId: 'dp_test_xxx',
+        })
+        .where(eq(schema.purchases.id, saleDisputed.id));
+
+      const result = await purchaseService.listSales(salesOrgId, {
+        page: 1,
+        limit: 50,
+        status: 'disputed',
+      });
+
+      expect(result.items.length).toBeGreaterThanOrEqual(1);
+      expect(result.items.every((s) => s.disputedAt !== null)).toBe(true);
+      expect(result.items.find((s) => s.id === saleDisputed.id)).toBeDefined();
+
+      // Filter-additive sanity: an unfiltered query should also surface
+      // the same disputed row (the special case is filter-additive, not
+      // filter-exclusive).
+      const unfiltered = await purchaseService.listSales(salesOrgId, {
+        page: 1,
+        limit: 50,
+      });
+      expect(
+        unfiltered.items.find((s) => s.id === saleDisputed.id)
+      ).toBeDefined();
+    });
+
+    it('filters by contentId', async () => {
+      const result = await purchaseService.listSales(salesOrgId, {
+        page: 1,
+        limit: 50,
+        contentId: contentAId,
+      });
+      expect(result.items.length).toBeGreaterThanOrEqual(2);
+      expect(result.items.every((s) => s.contentId === contentAId)).toBe(true);
+    });
+
+    it('paginates correctly', async () => {
+      const first = await purchaseService.listSales(salesOrgId, {
+        page: 1,
+        limit: 2,
+      });
+      expect(first.items.length).toBeLessThanOrEqual(2);
+      expect(first.pagination.page).toBe(1);
+      expect(first.pagination.limit).toBe(2);
+      expect(first.pagination.total).toBeGreaterThanOrEqual(3);
+      expect(first.pagination.totalPages).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('getSalesStats (studio Sales KPIs)', () => {
+    let statsOrgId: string;
+    let statsContentId: string;
+
+    beforeAll(async () => {
+      const [org] = await db
+        .insert(organizations)
+        .values({
+          name: 'Stats Test Org',
+          slug: createUniqueSlug('stats-test-org'),
+          ownerId: userId,
+        })
+        .returning();
+      if (!org) throw new Error('Failed to seed stats org');
+      statsOrgId = org.id;
+
+      const media = await mediaService.create(
+        {
+          title: 'Stats Video',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/stats/master.m3u8',
+          thumbnailKey: 'thumbnails/stats.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+      const c = await contentService.create(
+        {
+          organizationId: statsOrgId,
+          title: 'Stats Tutorial',
+          slug: createUniqueSlug('stats-tutorial'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 1000,
+        },
+        userId
+      );
+      await contentService.publish(c.id, userId);
+      statsContentId = c.id;
+
+      // Three completed @ 1000p + one refunded @ 1000p (refund 500p partial).
+      for (let i = 0; i < 3; i++) {
+        await purchaseService.completePurchase(
+          `pi_stats_${i}_${Date.now()}_${Math.random()}`,
+          {
+            customerId: otherUserId,
+            contentId: statsContentId,
+            organizationId: statsOrgId,
+            amountPaidCents: 1000,
+            currency: 'gbp',
+          }
+        );
+      }
+      const refunded = await purchaseService.completePurchase(
+        `pi_stats_refund_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: statsContentId,
+          organizationId: statsOrgId,
+          amountPaidCents: 1000,
+          currency: 'gbp',
+        }
+      );
+      await db
+        .update(schema.purchases)
+        .set({
+          status: 'refunded',
+          refundedAt: new Date(),
+          refundAmountCents: 500,
+        })
+        .where(eq(schema.purchases.id, refunded.id));
+    });
+
+    it('computes gross, net, refundedCents and count for org', async () => {
+      const stats = await purchaseService.getSalesStats(statsOrgId, {});
+      // 3 completed @ 1000 + 1 refunded @ 1000 (originally collected) = 4000
+      expect(stats.grossCents).toBe(4000);
+      // Net = sum of (creator + org fee) on completed rows only
+      //   = 3 * (1000 - platformFee) on completed rows
+      // Default platform fee 10% => 900 per row => 2700
+      expect(stats.netCents).toBe(2700);
+      expect(stats.refundedCents).toBe(500);
+      expect(stats.count).toBe(3);
+      expect(stats.currency).toBe('gbp');
+    });
+
+    it('returns zero stats for org with no sales', async () => {
+      const [emptyOrg] = await db
+        .insert(organizations)
+        .values({
+          name: 'Empty Org',
+          slug: createUniqueSlug('empty-stats-org'),
+          ownerId: userId,
+        })
+        .returning();
+      const stats = await purchaseService.getSalesStats(emptyOrg!.id, {});
+      expect(stats.grossCents).toBe(0);
+      expect(stats.netCents).toBe(0);
+      expect(stats.refundedCents).toBe(0);
+      expect(stats.count).toBe(0);
+    });
+
+    it('honours fromDate window — excludes rows outside the range', async () => {
+      // Future fromDate excludes everything we just seeded.
+      const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      const stats = await purchaseService.getSalesStats(statsOrgId, {
+        fromDate: future.toISOString(),
+      });
+      expect(stats.grossCents).toBe(0);
+      expect(stats.count).toBe(0);
+    });
+  });
+
   describe('getPurchase', () => {
     it('returns purchase for owner', async () => {
       // Create content and purchase

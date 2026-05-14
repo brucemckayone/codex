@@ -74,6 +74,58 @@ export interface PurchaseListItem {
 }
 
 /**
+ * Sale list item for the studio Sales ledger (org-scoped).
+ *
+ * Mirrors a `purchases` row joined with `content` and `users`, flattened into
+ * the shape the studio table consumes directly. `creatorPayoutCents` is the
+ * org's net for that row (frontend labels it "Your share").
+ *
+ * Dates are ISO 8601 strings — serialised in the worker route so the SvelteKit
+ * remote layer doesn't re-coerce Date instances.
+ */
+export interface SaleListItem {
+  id: string;
+  purchasedAt: string | null;
+  createdAt: string;
+  customerId: string;
+  customerName: string | null;
+  customerEmail: string;
+  contentId: string;
+  contentTitle: string;
+  contentSlug: string;
+  amountPaidCents: number;
+  currency: string;
+  status: 'pending' | 'completed' | 'failed' | 'refunded';
+  platformFeeCents: number;
+  organizationFeeCents: number;
+  creatorPayoutCents: number;
+  refundedAt: string | null;
+  refundAmountCents: number | null;
+  refundReason: string | null;
+  disputedAt: string | null;
+  disputeReason: string | null;
+  stripePaymentIntentId: string;
+}
+
+/**
+ * Sales summary KPIs for the studio Sales ledger header tiles.
+ *
+ * - `grossCents` includes completed + refunded (gross amount actually
+ *   collected by Stripe before refunds)
+ * - `netCents` is the org's share — sum of `creatorPayoutCents` +
+ *   `organizationFeeCents` on completed rows
+ * - `refundedCents` is the sum of `refundAmountCents` on refunded rows
+ * - `count` is the number of completed sales rows in the window
+ */
+export interface SalesStats {
+  grossCents: number;
+  netCents: number;
+  refundedCents: number;
+  count: number;
+  currency: string;
+}
+
+/**
  * Checkout session verification result
  *
  * Session status values from Stripe API (2025):

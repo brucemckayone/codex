@@ -100,17 +100,6 @@ export const LEVELS: Record<LevelId, LevelMeta> = {
   },
 };
 
-/** Level 1 categories shown on the home screen (in display order). */
-const HOME_CATEGORIES: LevelId[] = [
-  'header-layout',
-  'colors',
-  'typography',
-  'shape',
-  'shadows',
-  'logo',
-  'hero-effects',
-];
-
 /** Get the breadcrumb trail for a given level. */
 export function getBreadcrumb(levelId: LevelId): LevelMeta[] {
   const trail: LevelMeta[] = [];

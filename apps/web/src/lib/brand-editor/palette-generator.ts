@@ -49,13 +49,6 @@ const STRATEGY_META: Record<
   triadic: { label: 'Triadic', secondaryOffset: 120, accentOffset: 240 },
 };
 
-const PALETTE_STRATEGIES = Object.entries(STRATEGY_META).map(
-  ([id, { label }]) => ({
-    id: id as PaletteStrategy,
-    label,
-  })
-);
-
 /** Wrap hue to 0-360 range. */
 function wrapHue(h: number): number {
   return ((h % 360) + 360) % 360;

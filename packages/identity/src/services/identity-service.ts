@@ -1,7 +1,7 @@
 import type { VersionedCache } from '@codex/cache';
 import { CacheType } from '@codex/cache';
 import type { R2Service } from '@codex/cloudflare-clients';
-import { whereNotDeleted } from '@codex/database';
+import { toIso, whereNotDeleted } from '@codex/database';
 import {
   notificationPreferences,
   organizationMemberships,
@@ -172,7 +172,7 @@ export class IdentityService extends BaseService {
       return {
         role: membership.role,
         status: membership.status,
-        joinedAt: membership.createdAt.toISOString(),
+        joinedAt: toIso(membership.createdAt),
       };
     } catch (error) {
       throw this.handleError(error, 'IdentityService.getMyMembership');
