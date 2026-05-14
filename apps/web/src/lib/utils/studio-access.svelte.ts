@@ -90,16 +90,3 @@ export function useStudioAccess(
     },
   };
 }
-
-/**
- * Compute initials for an avatar fallback — first letter of up to the first
- * two whitespace-separated tokens, uppercased. Empty string in, empty out.
- */
-export function getInitials(name: string): string {
-  return name
-    .split(' ')
-    .map((part) => part[0] ?? '')
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
-}

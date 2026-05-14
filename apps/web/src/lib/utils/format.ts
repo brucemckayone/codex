@@ -83,19 +83,46 @@ export function formatPriceCompact(cents: number | null | undefined): string {
 }
 
 /**
- * Extract initials from a display name.
- * Returns up to 2 uppercase characters (first letter of each word).
- * Falls back to `fallback` (default `'?'`) when name is null / empty.
+ * Extract avatar initials from a display name with an optional fallback.
+ *
+ * Resolution order:
+ * 1. If `name` is non-empty: take the first letter of up to the first two
+ *    whitespace-separated tokens, uppercased (max 2 chars).
+ * 2. Else if `fallback` looks like an email (`includes('@')`): take the
+ *    first 1–2 letters of the local part, uppercased.
+ * 3. Else if `fallback` is non-empty: take the first 2 letters, uppercased.
+ * 4. Else: return `'??'`.
+ *
+ * The `fallback` parameter is general — emails fit naturally via the `@`
+ * heuristic, but any string is accepted.
  */
 export function getInitials(
-  name: string | null | undefined,
-  fallback = '?'
+  name?: string | null,
+  fallback?: string | null
 ): string {
-  if (!name) return fallback;
-  return name
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
+  const trimmedName = name?.trim();
+  if (trimmedName) {
+    const initials = trimmedName
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join('')
+      .toUpperCase();
+    if (initials) return initials;
+  }
+
+  const trimmedFallback = fallback?.trim();
+  if (trimmedFallback) {
+    if (trimmedFallback.includes('@')) {
+      const local = trimmedFallback.split('@')[0] ?? '';
+      const initials = local.slice(0, 2).toUpperCase();
+      if (initials) return initials;
+    } else {
+      const initials = trimmedFallback.slice(0, 2).toUpperCase();
+      if (initials) return initials;
+    }
+  }
+
+  return '??';
 }

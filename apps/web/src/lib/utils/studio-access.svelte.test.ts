@@ -8,7 +8,7 @@
  * NOT verify behavioural correctness of the canonical helpers the consumers
  * now rely on. This file covers that gap per skill R10 (test-gate before close).
  *
- * Scope: pure helpers (`hasStudioRole`, `resolveStudioHref`, `getInitials`,
+ * Scope: pure helpers (`hasStudioRole`, `resolveStudioHref`,
  * `STUDIO_ROLES` membership). The reactive composable `useStudioAccess` wraps
  * these in `$derived` and is correct by construction if the pure functions are.
  */
@@ -17,7 +17,6 @@ import { AUTH_ROLES } from '@codex/constants';
 import { describe, expect, test } from 'vitest';
 
 import {
-  getInitials,
   hasStudioRole,
   resolveStudioHref,
   STUDIO_ROLES,
@@ -101,26 +100,6 @@ describe('studio-access', () => {
       const url = new URL('https://lvh.me:3000/');
       const result = resolveStudioHref(url);
       expect(result).toContain('/studio');
-    });
-  });
-
-  describe('getInitials', () => {
-    test('returns first letter of up to two whitespace-separated tokens, uppercased', () => {
-      expect(getInitials('Jane Doe')).toBe('JD');
-      expect(getInitials('Alice Bob Charlie')).toBe('AB');
-    });
-
-    test('returns single uppercased letter for single-word name', () => {
-      expect(getInitials('Single')).toBe('S');
-      expect(getInitials('lowercase')).toBe('L');
-    });
-
-    test('returns empty string for empty input', () => {
-      expect(getInitials('')).toBe('');
-    });
-
-    test('handles whitespace-only input gracefully', () => {
-      expect(getInitials('   ')).toBe('');
     });
   });
 });
