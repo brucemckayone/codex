@@ -209,7 +209,7 @@ export type VerifyCheckoutSessionInput = z.infer<
 >;
 
 // ============================================================================
-// Org-scoped Sales schemas (studio Sales ledger — Codex-1sips)
+// Org-scoped Sales schemas (studio Sales ledger — Codex-1csms)
 // ============================================================================
 
 /**
