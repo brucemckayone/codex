@@ -6,7 +6,7 @@
  */
 
 import { ANALYTICS, PURCHASE_STATUS } from '@codex/constants';
-import { schema } from '@codex/database';
+import { schema, toIso } from '@codex/database';
 import { BaseService, NotFoundError } from '@codex/service-errors';
 import type {
   PaginatedListResponse,
@@ -1128,12 +1128,9 @@ export class AdminAnalyticsService extends BaseService {
         .map((row) => {
           const lastPayoutRaw = lastPayoutByCreator.get(row.creatorId) ?? null;
           // `lastPayoutRaw` is typed `string | null` by the SQL builder but
-          // drivers sometimes hand back a Date directly. `new Date(value)`
-          // handles both shapes without an `instanceof` discriminator.
-          const lastPayoutAt =
-            lastPayoutRaw === null
-              ? null
-              : new Date(lastPayoutRaw).toISOString();
+          // drivers sometimes hand back a Date directly. `toIso()` handles
+          // both shapes (Date | string | null) at the service boundary.
+          const lastPayoutAt = toIso(lastPayoutRaw);
           return {
             creatorId: row.creatorId,
             name: row.name ?? '',
