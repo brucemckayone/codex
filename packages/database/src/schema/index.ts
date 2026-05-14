@@ -11,6 +11,7 @@ export * from './fee-config';
 export * from './followers';
 export * from './notifications';
 export * from './organizations';
+export * from './payouts';
 export * from './playback';
 export * from './settings';
 export * from './storage';

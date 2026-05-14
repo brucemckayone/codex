@@ -442,6 +442,13 @@
       "when": 1778669734176,
       "tag": "0062_romantic_purifiers",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1778764209416,
+      "tag": "0063_clumsy_karnak",
+      "breakpoints": true
     }
   ]
 }
