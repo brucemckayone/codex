@@ -14,6 +14,7 @@
 import { PAGINATION, RESERVED_SUBDOMAINS_SET } from '@codex/constants';
 import {
   isUniqueViolation,
+  toIso,
   whereNotDeleted,
   withPagination,
 } from '@codex/database';
@@ -565,7 +566,7 @@ export class OrganizationService extends BaseService {
           bio: m.bio ?? null,
           socialLinks: (m.socialLinks as SocialLinks) ?? null,
           role: m.role,
-          joinedAt: m.joinedAt.toISOString(),
+          joinedAt: toIso(m.joinedAt),
           contentCount: Number(m.contentCount ?? 0),
           recentContent: recentContentMap.get(m.userId) ?? [],
           organizations: otherOrgsMap.get(m.userId) ?? [],
@@ -719,7 +720,7 @@ export class OrganizationService extends BaseService {
 
       return {
         role: membership?.role ?? null,
-        joinedAt: membership?.createdAt.toISOString() ?? null,
+        joinedAt: toIso(membership?.createdAt),
       };
     } catch (error) {
       this.handleError(error, 'getMyMembership');
@@ -1044,7 +1045,7 @@ export class OrganizationService extends BaseService {
           name: m.name,
           avatarUrl: m.avatarUrl ?? m.image ?? null,
           role: m.role,
-          joinedAt: m.joinedAt.toISOString(),
+          joinedAt: toIso(m.joinedAt),
         })),
         pagination: {
           page,

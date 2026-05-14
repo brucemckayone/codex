@@ -802,10 +802,7 @@ export class PurchaseService extends BaseService {
         (p): PurchaseListItem => ({
           id: p.id,
           customerId: p.customerId,
-          createdAt:
-            p.createdAt instanceof Date
-              ? p.createdAt.toISOString()
-              : p.createdAt,
+          createdAt: toIso(p.createdAt),
           contentId: p.contentId,
           contentTitle: p.content.title,
           amountCents: p.amountPaidCents,
