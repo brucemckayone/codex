@@ -1327,6 +1327,51 @@ describe('PurchaseService Integration', () => {
       expect(result.items.every((s) => s.status === 'refunded')).toBe(true);
     });
 
+    it("filters by status='disputed' (maps to disputedAt IS NOT NULL)", async () => {
+      // Seed a disputed sale: completePurchase produces a 'completed' row,
+      // then we mark it disputed at the DB level (status stays 'completed'
+      // by design — see purchase-service.ts:1217 comment).
+      const saleDisputed = await purchaseService.completePurchase(
+        `pi_sales_disputed_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: contentAId,
+          organizationId: salesOrgId,
+          amountPaidCents: 1000,
+          currency: 'gbp',
+        }
+      );
+      await db
+        .update(schema.purchases)
+        .set({
+          disputedAt: new Date(),
+          disputeReason: 'fraudulent',
+          stripeDisputeId: 'dp_test_xxx',
+        })
+        .where(eq(schema.purchases.id, saleDisputed.id));
+
+      const result = await purchaseService.listSales(salesOrgId, {
+        page: 1,
+        limit: 50,
+        status: 'disputed',
+      });
+
+      expect(result.items.length).toBeGreaterThanOrEqual(1);
+      expect(result.items.every((s) => s.disputedAt !== null)).toBe(true);
+      expect(result.items.find((s) => s.id === saleDisputed.id)).toBeDefined();
+
+      // Filter-additive sanity: an unfiltered query should also surface
+      // the same disputed row (the special case is filter-additive, not
+      // filter-exclusive).
+      const unfiltered = await purchaseService.listSales(salesOrgId, {
+        page: 1,
+        limit: 50,
+      });
+      expect(
+        unfiltered.items.find((s) => s.id === saleDisputed.id)
+      ).toBeDefined();
+    });
+
     it('filters by contentId', async () => {
       const result = await purchaseService.listSales(salesOrgId, {
         page: 1,
