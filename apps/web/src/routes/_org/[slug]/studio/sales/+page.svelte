@@ -130,9 +130,20 @@
   const isEmpty = $derived(!loading && items.length === 0);
 
   // ── Filter handlers ──────────────────────────────────────────────────
+  /**
+   * Default values per URL key. setUrlParam strips a key from the URL when
+   * its value matches the default — keeps URLs short and unambiguous, but
+   * scoped per key so a future filter that also accepts 'all' (e.g.
+   * customer filter) doesn't silently lose state.
+   */
+  const URL_DEFAULTS: Record<string, string> = {
+    range: '30',
+    status: 'all',
+  };
+
   function setUrlParam(key: string, value: string | null) {
     const params = new URLSearchParams(page.url.searchParams);
-    if (value && value !== 'all' && value !== '30') params.set(key, value);
+    if (value && value !== URL_DEFAULTS[key]) params.set(key, value);
     else params.delete(key);
     if (key !== 'page') params.delete('page');
     const qs = params.toString();
