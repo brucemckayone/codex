@@ -35,7 +35,7 @@ import {
   FEES,
   SUBSCRIPTION_STATUS,
 } from '@codex/constants';
-import { isUniqueViolation, toIso } from '@codex/database';
+import { dateWindow, isUniqueViolation, toIso } from '@codex/database';
 import {
   creatorOrganizationAgreements,
   organizationFollowers,
@@ -65,12 +65,10 @@ import {
   and,
   desc,
   eq,
-  gte,
   inArray,
   isNotNull,
   isNull,
   lt,
-  lte,
   sql,
 } from 'drizzle-orm';
 import type Stripe from 'stripe';
@@ -2535,12 +2533,7 @@ export class SubscriptionService extends BaseService {
       conditions.push(isNull(pendingPayouts.resolvedAt));
     }
 
-    if (fromDate) {
-      conditions.push(gte(pendingPayouts.createdAt, new Date(fromDate)));
-    }
-    if (toDate) {
-      conditions.push(lte(pendingPayouts.createdAt, new Date(toDate)));
-    }
+    conditions.push(...dateWindow(pendingPayouts.createdAt, fromDate, toDate));
 
     const [items, [totalResult]] = await Promise.all([
       this.db
