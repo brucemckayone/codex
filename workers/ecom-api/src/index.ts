@@ -31,6 +31,7 @@ import { verifyStripeSignature } from './middleware/verify-signature';
 import checkout from './routes/checkout';
 import connect from './routes/connect';
 import purchases from './routes/purchases';
+import sales from './routes/sales';
 import subscriptions from './routes/subscriptions';
 import { isDevEnvironment } from './utils/dev-env-guard';
 import { routeDevWebhook } from './utils/dev-webhook-router';
@@ -119,6 +120,12 @@ app.route('/checkout', checkout);
  * Handles purchase listing and retrieval for customers
  */
 app.route('/purchases', purchases);
+
+/**
+ * Sales routes (studio Sales ledger — Codex-1csms)
+ * Org-scoped inverse of /purchases for studio operators.
+ */
+app.route('/sales', sales);
 
 /**
  * Subscription routes

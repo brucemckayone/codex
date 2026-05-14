@@ -38,6 +38,8 @@ import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import type {
   CreateCheckoutInput,
   PurchaseQueryInput,
+  SalesQueryInput,
+  SalesStatsQueryInput,
 } from '@codex/validation';
 import {
   createCheckoutSchema,
@@ -45,8 +47,21 @@ import {
   extractPlainText,
   getPurchaseSchema,
   purchaseQuerySchema,
+  salesQuerySchema,
+  salesStatsQuerySchema,
 } from '@codex/validation';
-import { and, count, desc, eq, isNull } from 'drizzle-orm';
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  isNotNull,
+  isNull,
+  lte,
+  or,
+  sql,
+} from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   AlreadyPurchasedError,
@@ -79,6 +94,8 @@ import type {
   Purchase,
   PurchaseListItem,
   PurchaseWithContent,
+  SaleListItem,
+  SalesStats,
 } from '../types';
 import type { FeeConfigService } from './fee-config-service';
 import {
@@ -1182,6 +1199,220 @@ export class PurchaseService extends BaseService {
       }
 
       this.handleError(error, 'createPortalSession');
+    }
+  }
+
+  /**
+   * List sales for an organization (studio Sales ledger).
+   *
+   * Inverse of `getPurchaseHistory` (which is customer-scoped). Returns every
+   * purchase that landed on `orgId` with `customer` + `content` joined and
+   * flattened into a `SaleListItem` shape suitable for direct table render.
+   *
+   * Composite index `idx_purchases_org_status_purchased` covers the common
+   * (orgId, status, purchasedAt) access pattern; date-range filters use the
+   * `idx_purchases_org_status_created` fallback when only `createdAt` is
+   * meaningful (pending rows have no `purchasedAt`).
+   *
+   * `status: 'disputed'` is a query convenience — it's not a DB status, so we
+   * map it to `disputedAt IS NOT NULL` regardless of the underlying status
+   * (a row can be both completed AND disputed).
+   */
+  async listSales(
+    orgId: string,
+    filters: SalesQueryInput
+  ): Promise<PaginatedListResponse<SaleListItem>> {
+    const validated = salesQuerySchema.parse(filters);
+
+    try {
+      const conditions = [eq(purchases.organizationId, orgId)];
+
+      if (validated.status === 'disputed') {
+        conditions.push(isNotNull(purchases.disputedAt));
+      } else if (validated.status) {
+        conditions.push(eq(purchases.status, validated.status));
+      }
+
+      if (validated.contentId) {
+        conditions.push(eq(purchases.contentId, validated.contentId));
+      }
+      if (validated.customerId) {
+        conditions.push(eq(purchases.customerId, validated.customerId));
+      }
+
+      // Date range applies to `purchasedAt` for completed rows. We OR against
+      // `createdAt` so pending/failed rows (which never set `purchasedAt`)
+      // still surface inside the window — useful for support triage where the
+      // operator is looking for a row by the date the customer attempted to pay.
+      if (validated.fromDate) {
+        const from = new Date(validated.fromDate);
+        conditions.push(
+          or(
+            gte(purchases.purchasedAt, from),
+            and(isNull(purchases.purchasedAt), gte(purchases.createdAt, from))
+          )!
+        );
+      }
+      if (validated.toDate) {
+        const to = new Date(validated.toDate);
+        conditions.push(
+          or(
+            lte(purchases.purchasedAt, to),
+            and(isNull(purchases.purchasedAt), lte(purchases.createdAt, to))
+          )!
+        );
+      }
+
+      const offset = (validated.page - 1) * validated.limit;
+
+      const [items, countResult] = await Promise.all([
+        this.db.query.purchases.findMany({
+          where: and(...conditions),
+          limit: validated.limit,
+          offset,
+          // Completed rows sort by purchasedAt; pending/failed rows fall back
+          // to createdAt via coalesce so the most-recent row is always first.
+          orderBy: [
+            desc(
+              sql`COALESCE(${purchases.purchasedAt}, ${purchases.createdAt})`
+            ),
+          ],
+          with: {
+            content: {
+              columns: { id: true, title: true, slug: true },
+            },
+            customer: {
+              columns: { id: true, name: true, email: true },
+            },
+          },
+        }),
+        this.db
+          .select({ total: count() })
+          .from(purchases)
+          .where(and(...conditions)),
+      ]);
+      const total = countResult[0]?.total ?? 0;
+
+      const validStatuses: ReadonlyArray<SaleListItem['status']> = [
+        PURCHASE_STATUS.COMPLETED,
+        PURCHASE_STATUS.PENDING,
+        PURCHASE_STATUS.FAILED,
+        PURCHASE_STATUS.REFUNDED,
+      ];
+
+      const formatted: SaleListItem[] = items.map((p) => ({
+        id: p.id,
+        purchasedAt:
+          p.purchasedAt instanceof Date
+            ? p.purchasedAt.toISOString()
+            : p.purchasedAt,
+        createdAt:
+          p.createdAt instanceof Date ? p.createdAt.toISOString() : p.createdAt,
+        customerId: p.customerId,
+        customerName: p.customer.name,
+        customerEmail: p.customer.email,
+        contentId: p.contentId,
+        contentTitle: p.content.title,
+        contentSlug: p.content.slug,
+        amountPaidCents: p.amountPaidCents,
+        currency: p.currency,
+        status: (validStatuses.includes(p.status as SaleListItem['status'])
+          ? p.status
+          : PURCHASE_STATUS.PENDING) as SaleListItem['status'],
+        platformFeeCents: p.platformFeeCents,
+        organizationFeeCents: p.organizationFeeCents,
+        creatorPayoutCents: p.creatorPayoutCents,
+        refundedAt:
+          p.refundedAt instanceof Date
+            ? p.refundedAt.toISOString()
+            : p.refundedAt,
+        refundAmountCents: p.refundAmountCents,
+        refundReason: p.refundReason,
+        disputedAt:
+          p.disputedAt instanceof Date
+            ? p.disputedAt.toISOString()
+            : p.disputedAt,
+        disputeReason: p.disputeReason,
+        stripePaymentIntentId: p.stripePaymentIntentId,
+      }));
+
+      return {
+        items: formatted,
+        pagination: {
+          page: validated.page,
+          limit: validated.limit,
+          total,
+          totalPages: Math.ceil(total / validated.limit),
+        },
+      };
+    } catch (error) {
+      this.handleError(error, 'listSales');
+    }
+  }
+
+  /**
+   * Aggregate KPIs for the studio Sales ledger header tiles.
+   *
+   * Single round-trip SUM aggregation scoped to `orgId` + optional date
+   * window. Returns pence (GBP) for `*Cents` fields and an integer `count`
+   * of *completed* sales rows (refunded rows still contribute to `grossCents`
+   * but not to `count` — `count` is the headline "sales made" number).
+   *
+   * Net is org-perspective: `creatorPayoutCents + organizationFeeCents`. The
+   * frontend labels this "your share". Platform fee is intentionally excluded
+   * — that's the platform's cut, not the org's.
+   */
+  async getSalesStats(
+    orgId: string,
+    filters: SalesStatsQueryInput
+  ): Promise<SalesStats> {
+    const validated = salesStatsQuerySchema.parse(filters);
+
+    try {
+      const conditions = [eq(purchases.organizationId, orgId)];
+
+      if (validated.fromDate) {
+        const from = new Date(validated.fromDate);
+        conditions.push(
+          or(
+            gte(purchases.purchasedAt, from),
+            and(isNull(purchases.purchasedAt), gte(purchases.createdAt, from))
+          )!
+        );
+      }
+      if (validated.toDate) {
+        const to = new Date(validated.toDate);
+        conditions.push(
+          or(
+            lte(purchases.purchasedAt, to),
+            and(isNull(purchases.purchasedAt), lte(purchases.createdAt, to))
+          )!
+        );
+      }
+
+      const [agg] = await this.db
+        .select({
+          // Gross: amount collected on completed OR refunded rows (refunded
+          // rows reflect money that *was* collected before being given back).
+          grossCents: sql<number>`COALESCE(SUM(${purchases.amountPaidCents}) FILTER (WHERE ${purchases.status} IN ('completed','refunded')), 0)::int`,
+          // Net to org: their share on completed rows only. Refunded rows
+          // already returned the customer's money so they zero out for net.
+          netCents: sql<number>`COALESCE(SUM(${purchases.creatorPayoutCents} + ${purchases.organizationFeeCents}) FILTER (WHERE ${purchases.status} = 'completed'), 0)::int`,
+          refundedCents: sql<number>`COALESCE(SUM(${purchases.refundAmountCents}) FILTER (WHERE ${purchases.status} = 'refunded'), 0)::int`,
+          count: sql<number>`COUNT(*) FILTER (WHERE ${purchases.status} = 'completed')::int`,
+        })
+        .from(purchases)
+        .where(and(...conditions));
+
+      return {
+        grossCents: agg?.grossCents ?? 0,
+        netCents: agg?.netCents ?? 0,
+        refundedCents: agg?.refundedCents ?? 0,
+        count: agg?.count ?? 0,
+        currency: CURRENCY.GBP,
+      };
+    } catch (error) {
+      this.handleError(error, 'getSalesStats');
     }
   }
 }

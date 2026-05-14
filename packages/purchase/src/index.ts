@@ -42,6 +42,10 @@ export {
   type PurchaseStatus,
   purchaseQuerySchema,
   purchaseStatusEnum,
+  type SalesQueryInput,
+  type SalesStatsQueryInput,
+  salesQuerySchema,
+  salesStatsQuerySchema,
 } from '@codex/validation';
 // Error classes
 export {
@@ -109,4 +113,6 @@ export type {
   Purchase,
   PurchaseListItem,
   PurchaseWithContent,
+  SaleListItem,
+  SalesStats,
 } from './types';

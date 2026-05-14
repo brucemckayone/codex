@@ -17,6 +17,8 @@ export type SidebarIcon =
   | 'analytics'
   | 'team'
   | 'customers'
+  | 'subscribers'
+  | 'sales'
   | 'settings'
   | 'billing'
   | 'monetisation'
@@ -68,6 +70,8 @@ export const SIDEBAR_ADMIN_LINKS: SidebarLink[] = [
 /** Studio sidebar — owner-only links */
 export const SIDEBAR_OWNER_LINKS: SidebarLink[] = [
   { href: '/studio/monetisation', label: 'Monetisation', icon: 'monetisation' },
+  { href: '/studio/subscribers', label: 'Subscribers', icon: 'subscribers' },
+  { href: '/studio/sales', label: 'Sales', icon: 'sales' },
   { href: '/studio/payouts', label: 'Payouts', icon: 'payouts' },
   { href: '/studio/billing', label: 'Billing', icon: 'billing' },
 ];

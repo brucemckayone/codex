@@ -36,7 +36,11 @@ import {
 import type { MediaItem } from '@codex/database/schema';
 import type { AvatarUploadResponse } from '@codex/identity';
 import type { NotificationPreferencesResponse } from '@codex/notifications';
-import type { PurchaseListItem } from '@codex/purchase';
+import type {
+  PurchaseListItem,
+  SaleListItem,
+  SalesStats,
+} from '@codex/purchase';
 import type {
   AllSettingsResponse,
   BrandingSettingsResponse,
@@ -51,7 +55,10 @@ import type {
   SessionData,
   UserData,
 } from '@codex/shared-types';
-import type { PayoutWithCreator } from '@codex/subscription';
+import type {
+  PayoutWithCreator,
+  SubscriberListItem,
+} from '@codex/subscription';
 import type {
   CancelSubscriptionInput,
   ChangeTierInput,
@@ -86,7 +93,6 @@ import type {
   MediaItemWithRelations,
   OrganizationData,
   OrgMemberItem,
-  SubscriberItem,
   SubscriptionCheckoutResponse,
   SubscriptionStats,
   SubscriptionTier,
@@ -1641,15 +1647,42 @@ export function createServerApi(
         ),
 
       /**
-       * List subscribers for an org (admin, paginated)
+       * List subscribers for an org (studio Subscribers page — Codex-1csms).
+       * Returns the joined SubscriberListItem shape (user + tier flattened in).
+       * The worker re-derives scope from membership; the URL `organizationId`
+       * is used only to resolve org context for the procedure helper.
        */
       getSubscribers: (organizationId: string, params?: URLSearchParams) => {
         const query = new URLSearchParams(params);
         query.set('organizationId', organizationId);
-        return request<PaginatedListResponse<SubscriberItem>>(
+        return request<PaginatedListResponse<SubscriberListItem>>(
           'ecom',
           `/subscriptions/subscribers?${query}`
         );
+      },
+
+      /**
+       * List sales for the studio ledger (Codex-1csms). Org-scoped inverse
+       * of /purchases. See `packages/purchase/src/services/purchase-service.ts`
+       * `listSales` for the data contract.
+       */
+      listSales: (organizationId: string, params?: URLSearchParams) => {
+        const query = new URLSearchParams(params);
+        query.set('organizationId', organizationId);
+        return request<PaginatedListResponse<SaleListItem>>(
+          'ecom',
+          `/sales?${query}`
+        );
+      },
+
+      /**
+       * Aggregate KPIs (gross/net/refunded/count) for the studio Sales
+       * ledger header tiles (Codex-1csms).
+       */
+      getSalesStats: (organizationId: string, params?: URLSearchParams) => {
+        const query = new URLSearchParams(params);
+        query.set('organizationId', organizationId);
+        return request<SalesStats>('ecom', `/sales/stats?${query}`);
       },
 
       /**

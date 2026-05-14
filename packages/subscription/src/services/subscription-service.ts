@@ -138,6 +138,38 @@ export type PayoutDisplayStatus = 'pending' | 'resolved' | 'failed';
  * is lossless and the SvelteKit remote-function consumer can pass them
  * straight to `formatDate`.
  */
+/**
+ * Read-model returned by `SubscriptionService.listSubscribers` (studio
+ * Subscribers page — Codex-z27ml).
+ *
+ * Joins the `subscriptions` row with the subscribing `users` row and the
+ * `subscriptionTiers` row, flattened into a single shape the studio table
+ * consumes directly. All dates are ISO strings — serialised at the service
+ * boundary so the worker → JSON → SvelteKit remote pipeline is lossless.
+ *
+ * `userName` is nullable because BetterAuth allows users without a display
+ * name; the UI falls back to `userEmail` in that case.
+ */
+export interface SubscriberListItem {
+  id: string;
+  userId: string;
+  userName: string | null;
+  userEmail: string;
+  userAvatarUrl: string | null;
+  tierId: string;
+  tierName: string;
+  status: string;
+  billingInterval: string;
+  amountCents: number;
+  currency: string;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  cancelledAt: string | null;
+  churnReason: string | null;
+  createdAt: string;
+}
+
 export interface PayoutWithCreator {
   id: string;
   creatorId: string;
@@ -2269,21 +2301,43 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * List subscribers for an org (admin view). Paginated with filters.
+   * List subscribers for an org (studio Subscribers page).
+   *
+   * Joins `subscriptions` with `users` and `subscriptionTiers` and flattens
+   * the result into `SubscriberListItem` rows the studio table consumes
+   * directly (no extra fetches needed for tier name or avatar).
+   *
+   * Filters:
+   *  - `tierId` — narrow to a single tier (powers the tier chip group)
+   *  - `status` — explicit status filter (overrides the default exclusion)
+   *  - `includeCancelled` — when true, drops the BUG-023 default exclusion
+   *    so cancelled rows appear in the list (ignored if `status` is set)
+   *  - `search` — case-insensitive ILIKE across user name + email
+   *
+   * Default behaviour (no `status`, no `includeCancelled`) excludes
+   * cancelled subscriptions — BUG-023 regression guard. The test
+   * "excludes cancelled by default" in the test file pins this.
    */
   async listSubscribers(
     orgId: string,
-    options: { page: number; limit: number; tierId?: string; status?: string }
-  ): Promise<PaginatedListResponse<Subscription>> {
-    const { page, limit, tierId, status } = options;
+    options: {
+      page: number;
+      limit: number;
+      tierId?: string;
+      status?: string;
+      includeCancelled?: boolean;
+      search?: string;
+    }
+  ): Promise<PaginatedListResponse<SubscriberListItem>> {
+    const { page, limit, tierId, status, includeCancelled, search } = options;
     const offset = (page - 1) * limit;
 
     const conditions = [eq(subscriptions.organizationId, orgId)];
     if (tierId) conditions.push(eq(subscriptions.tierId, tierId));
     if (status) {
       conditions.push(eq(subscriptions.status, status));
-    } else {
-      // BUG-023: Exclude cancelled subscriptions by default when no status filter given
+    } else if (!includeCancelled) {
+      // BUG-023: Exclude cancelled subscriptions by default
       conditions.push(
         inArray(subscriptions.status, [
           SUBSCRIPTION_STATUS.ACTIVE,
@@ -2292,11 +2346,41 @@ export class SubscriptionService extends BaseService {
         ])
       );
     }
+    if (search) {
+      const pattern = `%${search}%`;
+      conditions.push(
+        sql`(${users.name} ILIKE ${pattern} OR ${users.email} ILIKE ${pattern})`
+      );
+    }
 
-    const [items, [totalResult]] = await Promise.all([
+    const [rows, [totalResult]] = await Promise.all([
       this.db
-        .select()
+        .select({
+          id: subscriptions.id,
+          userId: subscriptions.userId,
+          userName: users.name,
+          userEmail: users.email,
+          userAvatarUrl: sql<
+            string | null
+          >`COALESCE(${users.avatarUrl}, ${users.image})`,
+          tierId: subscriptions.tierId,
+          tierName: subscriptionTiers.name,
+          status: subscriptions.status,
+          billingInterval: subscriptions.billingInterval,
+          amountCents: subscriptions.amountCents,
+          currentPeriodStart: subscriptions.currentPeriodStart,
+          currentPeriodEnd: subscriptions.currentPeriodEnd,
+          cancelAtPeriodEnd: subscriptions.cancelAtPeriodEnd,
+          cancelledAt: subscriptions.cancelledAt,
+          churnReason: subscriptions.churnReason,
+          createdAt: subscriptions.createdAt,
+        })
         .from(subscriptions)
+        .innerJoin(users, eq(subscriptions.userId, users.id))
+        .innerJoin(
+          subscriptionTiers,
+          eq(subscriptions.tierId, subscriptionTiers.id)
+        )
         .where(and(...conditions))
         .orderBy(desc(subscriptions.createdAt))
         .limit(limit)
@@ -2304,10 +2388,45 @@ export class SubscriptionService extends BaseService {
       this.db
         .select({ count: sql<number>`count(*)::int` })
         .from(subscriptions)
+        .innerJoin(users, eq(subscriptions.userId, users.id))
+        .innerJoin(
+          subscriptionTiers,
+          eq(subscriptions.tierId, subscriptionTiers.id)
+        )
         .where(and(...conditions)),
     ]);
 
     const total = totalResult?.count ?? 0;
+
+    const items: SubscriberListItem[] = rows.map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      userName: r.userName,
+      userEmail: r.userEmail,
+      userAvatarUrl: r.userAvatarUrl,
+      tierId: r.tierId,
+      tierName: r.tierName,
+      status: r.status,
+      billingInterval: r.billingInterval,
+      amountCents: r.amountCents,
+      currency: CURRENCY.GBP,
+      currentPeriodStart:
+        r.currentPeriodStart instanceof Date
+          ? r.currentPeriodStart.toISOString()
+          : r.currentPeriodStart,
+      currentPeriodEnd:
+        r.currentPeriodEnd instanceof Date
+          ? r.currentPeriodEnd.toISOString()
+          : r.currentPeriodEnd,
+      cancelAtPeriodEnd: r.cancelAtPeriodEnd,
+      cancelledAt:
+        r.cancelledAt instanceof Date
+          ? r.cancelledAt.toISOString()
+          : r.cancelledAt,
+      churnReason: r.churnReason,
+      createdAt:
+        r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+    }));
 
     return {
       items,
