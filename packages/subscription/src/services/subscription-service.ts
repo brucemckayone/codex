@@ -35,7 +35,7 @@ import {
   FEES,
   SUBSCRIPTION_STATUS,
 } from '@codex/constants';
-import { isUniqueViolation } from '@codex/database';
+import { isUniqueViolation, toIso } from '@codex/database';
 import {
   creatorOrganizationAgreements,
   organizationFollowers,
@@ -2410,22 +2410,12 @@ export class SubscriptionService extends BaseService {
       billingInterval: r.billingInterval,
       amountCents: r.amountCents,
       currency: CURRENCY.GBP,
-      currentPeriodStart:
-        r.currentPeriodStart instanceof Date
-          ? r.currentPeriodStart.toISOString()
-          : r.currentPeriodStart,
-      currentPeriodEnd:
-        r.currentPeriodEnd instanceof Date
-          ? r.currentPeriodEnd.toISOString()
-          : r.currentPeriodEnd,
+      currentPeriodStart: toIso(r.currentPeriodStart),
+      currentPeriodEnd: toIso(r.currentPeriodEnd),
       cancelAtPeriodEnd: r.cancelAtPeriodEnd,
-      cancelledAt:
-        r.cancelledAt instanceof Date
-          ? r.cancelledAt.toISOString()
-          : r.cancelledAt,
+      cancelledAt: toIso(r.cancelledAt),
       churnReason: r.churnReason,
-      createdAt:
-        r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+      createdAt: toIso(r.createdAt),
     }));
 
     return {

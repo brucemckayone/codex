@@ -27,6 +27,7 @@ import {
   CURRENCY,
   PURCHASE_STATUS,
 } from '@codex/constants';
+import { toIso } from '@codex/database';
 import {
   content,
   contentAccess,
@@ -1302,12 +1303,8 @@ export class PurchaseService extends BaseService {
 
       const formatted: SaleListItem[] = items.map((p) => ({
         id: p.id,
-        purchasedAt:
-          p.purchasedAt instanceof Date
-            ? p.purchasedAt.toISOString()
-            : p.purchasedAt,
-        createdAt:
-          p.createdAt instanceof Date ? p.createdAt.toISOString() : p.createdAt,
+        purchasedAt: toIso(p.purchasedAt),
+        createdAt: toIso(p.createdAt),
         customerId: p.customerId,
         customerName: p.customer.name,
         customerEmail: p.customer.email,
@@ -1322,16 +1319,10 @@ export class PurchaseService extends BaseService {
         platformFeeCents: p.platformFeeCents,
         organizationFeeCents: p.organizationFeeCents,
         creatorPayoutCents: p.creatorPayoutCents,
-        refundedAt:
-          p.refundedAt instanceof Date
-            ? p.refundedAt.toISOString()
-            : p.refundedAt,
+        refundedAt: toIso(p.refundedAt),
         refundAmountCents: p.refundAmountCents,
         refundReason: p.refundReason,
-        disputedAt:
-          p.disputedAt instanceof Date
-            ? p.disputedAt.toISOString()
-            : p.disputedAt,
+        disputedAt: toIso(p.disputedAt),
         disputeReason: p.disputeReason,
         stripePaymentIntentId: p.stripePaymentIntentId,
       }));

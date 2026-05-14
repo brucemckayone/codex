@@ -8,6 +8,8 @@
 
 // Error detection utilities
 export * from './db-errors';
+// ISO-date serialisation helper
+export * from './iso-date';
 // Paginated query helper
 export * from './paginated-query';
 // Query helper utilities
