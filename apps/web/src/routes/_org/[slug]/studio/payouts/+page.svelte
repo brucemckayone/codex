@@ -34,6 +34,7 @@
   import AvatarFallback from '$lib/components/ui/Avatar/AvatarFallback.svelte';
   import { listPayouts } from '$lib/remote/subscription.remote';
   import { formatDate, formatPrice } from '$lib/utils/format';
+  import { getInitials } from '$lib/utils/initials';
   import type { PayoutWithCreator } from '@codex/subscription';
   import type { QueryResult } from '$lib/remote/query-result';
 
@@ -149,17 +150,6 @@
       default:
         return reason;
     }
-  }
-
-  function getInitials(name: string | null, email: string | null): string {
-    const source = name?.trim() || email?.trim() || '?';
-    return source
-      .split(/\s+|@/)
-      .filter(Boolean)
-      .map((part) => part[0])
-      .slice(0, 2)
-      .join('')
-      .toUpperCase();
   }
 
   /**

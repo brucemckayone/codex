@@ -27,6 +27,7 @@
     listTiers,
   } from '$lib/remote/subscription.remote';
   import { formatDate, formatPrice } from '$lib/utils/format';
+  import { getInitials } from '$lib/utils/initials';
   import { downloadCsv } from '$lib/utils/csv-export';
   import type { SubscriberListItem } from '@codex/subscription';
   import type { QueryResult } from '$lib/remote/query-result';
@@ -153,17 +154,6 @@
 
   function statusLabel(s: string): string {
     return s.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-  }
-
-  function getInitials(name: string | null, email: string): string {
-    const source = name?.trim() || email;
-    return source
-      .split(/\s+|@/)
-      .filter(Boolean)
-      .map((part) => part[0])
-      .slice(0, 2)
-      .join('')
-      .toUpperCase();
   }
 
   // ── CSV export ───────────────────────────────────────────────────────
