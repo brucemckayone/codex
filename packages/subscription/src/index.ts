@@ -75,6 +75,7 @@ export {
 } from './services/subscription-invalidation';
 export type {
   PayoutDisplayStatus,
+  PayoutSummary,
   PayoutWithCreator,
   PropagateTierPriceOptions,
   PropagateTierPriceResult,

@@ -1,40 +1,52 @@
 <!--
-  @component StudioPayouts
+  @component StudioPayouts (Codex-zqaxo, rebuilt Codex-05vp8)
 
-  Owner-only payout history table (Codex-zqaxo). Phase 1 of the
-  payouts-visibility epic (Codex-kbfe3) — read-only surface that lists
-  pending + resolved creator payouts for the org so owners can verify
-  Stripe transfers landed after subscription invoices.
+  Owner-only payouts ledger surface for the org. Shows every transfer
+  event (success/pending/failed) with KPI cards, an exception banner,
+  status + date-range filters, and a Stripe deep-link per paid row.
 
   Backend data flow:
     listPayouts() remote query → api.subscription.listPayouts
       → GET ecom-api `/subscriptions/payouts`
       → SubscriptionService.listPayoutsByOrg (org-scoped)
 
-  This page deliberately uses snapshot queries per filter — NO TanStack DB
-  live collection in Phase 1 (epic decision). Each filter/page change
-  re-issues the remote query.
+    getPayoutSummary() remote query → api.subscription.getPayoutSummary
+      → GET ecom-api `/subscriptions/payouts/summary`
+      → SubscriptionService.getPayoutSummary (org-scoped aggregates)
+
+  Mirrors /studio/sales URL-sync + snapshot-query pattern. NO TanStack
+  DB live collection — each filter/page change re-issues the remote
+  queries.
 
   @prop data - Org info + userRole from parent studio layout
 -->
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { page } from '$app/state';
   import { Alert, Badge, EmptyState, Skeleton } from '$lib/components/ui';
   import * as Card from '$lib/components/ui/Card';
   import * as Table from '$lib/components/ui/Table';
   import Select from '$lib/components/ui/Select/Select.svelte';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import {
+    AlertTriangleIcon,
     BanknoteIcon,
     CopyIcon,
-    AlertTriangleIcon,
+    ExternalLinkIcon,
   } from '$lib/components/ui/Icon';
   import Avatar from '$lib/components/ui/Avatar/Avatar.svelte';
   import AvatarImage from '$lib/components/ui/Avatar/AvatarImage.svelte';
   import AvatarFallback from '$lib/components/ui/Avatar/AvatarFallback.svelte';
-  import { listPayouts } from '$lib/remote/subscription.remote';
+  import KPICard from '$lib/components/studio/analytics/KPICard.svelte';
+  import {
+    getPayoutSummary,
+    listPayouts,
+  } from '$lib/remote/subscription.remote';
   import { formatDate, formatPrice, getInitials } from '$lib/utils/format';
-  import type { PayoutWithCreator } from '@codex/subscription';
+  import type {
+    PayoutSummary,
+    PayoutWithCreator,
+  } from '@codex/subscription';
   import type { QueryResult } from '$lib/remote/query-result';
 
   type PayoutsPage = {
@@ -47,11 +59,18 @@
     };
   };
 
+  type DateRange = '7' | '30' | '90' | 'all';
+  type StatusFilter =
+    | 'all'
+    | 'paid'
+    | 'resolved' // legacy URL alias for 'paid'
+    | 'pending'
+    | 'failed'
+    | 'needs_attention';
+
   let { data } = $props();
 
-  // Role guard — owner only. Mirror the billing/monetisation pages exactly.
-  // The studio layout supplies `data.userRole`; non-owners are redirected to
-  // /studio rather than a 403 page (matches existing owner-only routes).
+  // Role guard — owner only. Mirror billing/monetisation/sales pattern.
   $effect(() => {
     if (data.userRole !== 'owner') {
       goto('/studio');
@@ -61,37 +80,63 @@
   const isOwner = $derived(data.userRole === 'owner');
   const orgId = $derived(data.org.id);
 
-  // ─── Filter state ──────────────────────────────────────────────────────
-  // Snapshot-style — every change re-runs the remote query. No
-  // optimistic UI / local mutation since this is a read-only surface.
-
-  type StatusFilter = 'all' | 'pending' | 'resolved' | 'failed';
-  let statusFilter = $state<StatusFilter>('all');
-  let page = $state(1);
+  // ── URL-derived state ────────────────────────────────────────────────
+  const currentUrlPage = $derived(
+    parseInt(page.url.searchParams.get('page') ?? '1', 10) || 1
+  );
+  const rangeFilter = $derived(
+    (page.url.searchParams.get('range') as DateRange) || '30'
+  );
+  const statusFilter = $derived(
+    (page.url.searchParams.get('status') as StatusFilter) || 'all'
+  );
   const limit = 20;
 
-  const statusOptions: Array<{ value: StatusFilter; label: string }> = [
-    { value: 'all', label: 'All statuses' },
-    { value: 'pending', label: 'Pending' },
-    { value: 'resolved', label: 'Resolved' },
-    { value: 'failed', label: 'Failed' },
-  ];
+  // ── Date-range → ISO bounds (window applies to both list + summary) ──
+  const dateBounds = $derived.by(() => {
+    if (rangeFilter === 'all') return { fromDate: undefined };
+    const days = rangeFilter === '7' ? 7 : rangeFilter === '90' ? 90 : 30;
+    const from = new Date();
+    from.setUTCDate(from.getUTCDate() - days);
+    return { fromDate: from.toISOString() };
+  });
 
-  // ─── Remote query ──────────────────────────────────────────────────────
-  // `$derived` re-runs when orgId / statusFilter / page change. We pass the
-  // tagged arg object verbatim — Zod coerces strings/numbers server-side.
+  // ── Remote queries ───────────────────────────────────────────────────
   const payoutsQuery = $derived(
     isOwner && orgId
-      ? listPayouts({ organizationId: orgId, status: statusFilter, page, limit })
+      ? listPayouts({
+          organizationId: orgId,
+          status: statusFilter,
+          page: currentUrlPage,
+          limit,
+          ...(dateBounds.fromDate && { fromDate: dateBounds.fromDate }),
+        })
+      : null
+  );
+
+  const summaryQuery = $derived(
+    isOwner && orgId
+      ? getPayoutSummary({
+          organizationId: orgId,
+          ...(dateBounds.fromDate && { fromDate: dateBounds.fromDate }),
+        })
       : null
   );
 
   const payoutsData = $derived(
     (payoutsQuery as QueryResult<PayoutsPage> | null)?.current
   );
+  const summary = $derived(
+    (summaryQuery as QueryResult<PayoutSummary> | null)?.current
+  );
+
   const loading = $derived(
     (payoutsQuery as QueryResult<PayoutsPage> | null)?.loading ?? true
   );
+  const summaryLoading = $derived(
+    (summaryQuery as QueryResult<PayoutSummary> | null)?.loading ?? true
+  );
+
   const queryError = $derived(
     (payoutsQuery as QueryResult<PayoutsPage> | null)?.error?.message ?? null
   );
@@ -100,23 +145,58 @@
   const pagination = $derived(payoutsData?.pagination);
   const isEmpty = $derived(!loading && items.length === 0);
 
-  // ─── Filter handlers ───────────────────────────────────────────────────
-  function onStatusChange(next: string | undefined) {
-    if (!next) return;
-    statusFilter = next as StatusFilter;
-    page = 1; // reset to first page on filter change
+  // ── Filter handlers ──────────────────────────────────────────────────
+  // Default values per URL key — same pattern as /studio/sales:
+  // setUrlParam strips a key from the URL when its value matches the
+  // default, keeping URLs short while preserving any non-default state.
+  const URL_DEFAULTS: Record<string, string> = {
+    range: '30',
+    status: 'all',
+  };
+
+  function setUrlParam(key: string, value: string | null) {
+    const params = new URLSearchParams(page.url.searchParams);
+    if (value && value !== URL_DEFAULTS[key]) params.set(key, value);
+    else params.delete(key);
+    if (key !== 'page') params.delete('page');
+    const qs = params.toString();
+    goto(`/studio/payouts${qs ? `?${qs}` : ''}`, {
+      replaceState: true,
+      keepFocus: true,
+    });
   }
 
-  function nextPage() {
-    if (pagination && page < pagination.totalPages) page += 1;
-  }
-  function prevPage() {
-    if (page > 1) page -= 1;
-  }
+  const rangeOptions: Array<{ value: DateRange; label: string }> = [
+    { value: '7', label: 'Last 7 days' },
+    { value: '30', label: 'Last 30 days' },
+    { value: '90', label: 'Last 90 days' },
+    { value: 'all', label: 'All time' },
+  ];
 
-  // ─── Badge variant + label helpers ─────────────────────────────────────
-  // Token-aligned status mapping (epic Codex-kbfe3 decision):
-  //   pending = warning · resolved = success · failed = error.
+  const statusOptions: Array<{ value: StatusFilter; label: string }> = [
+    { value: 'all', label: 'All statuses' },
+    { value: 'paid', label: 'Paid' },
+    { value: 'pending', label: 'Pending' },
+    { value: 'failed', label: 'Failed' },
+    { value: 'needs_attention', label: 'Needs attention' },
+  ];
+
+  // KPI label dynamics — "Earned (last 7d)" etc. The "all time" case is
+  // collapsed to the same label as Total earned in practice; we still
+  // render the windowed card to keep the row stable.
+  const rangeLabel = $derived(
+    rangeFilter === 'all'
+      ? 'all time'
+      : rangeFilter === '7'
+        ? 'last 7 days'
+        : rangeFilter === '90'
+          ? 'last 90 days'
+          : 'last 30 days'
+  );
+
+  // ── Badge variant + label helpers ────────────────────────────────────
+  // Token-aligned status mapping: pending = warning, resolved/paid =
+  // success, failed = error.
   function statusVariant(
     status: PayoutWithCreator['status']
   ): 'warning' | 'success' | 'error' {
@@ -126,15 +206,26 @@
   }
 
   function statusLabel(status: PayoutWithCreator['status']): string {
-    if (status === 'resolved') return 'Resolved';
+    if (status === 'resolved') return 'Paid';
     if (status === 'failed') return 'Failed';
     return 'Pending';
   }
 
   /**
-   * Human-readable reason string for the `reason` column in the table.
-   * The DB enum is `connect_not_ready | connect_restricted | transfer_failed
-   * | min_transfer_floor` — keep these strings short and operator-friendly.
+   * Human-readable label for `payouts.payoutType` enum:
+   *   - organization_fee → "Org fee"
+   *   - creator_payout_to_owner → "Creator pool"
+   *   - creator_payout → "Creator share"
+   */
+  function typeLabel(t: PayoutWithCreator['payoutType']): string {
+    if (t === 'organization_fee') return 'Org fee';
+    if (t === 'creator_payout_to_owner') return 'Creator pool';
+    return 'Creator share';
+  }
+
+  /**
+   * Human-readable reason string. The DB enum is `connect_not_ready |
+   * connect_restricted | transfer_failed | min_transfer_floor`.
    */
   function reasonLabel(reason: string): string {
     switch (reason) {
@@ -152,9 +243,9 @@
   }
 
   /**
-   * Truncate a Stripe Transfer ID (`tr_xxxxxxxxxxxxxxxxxx`) to
-   * `tr_xxxx…xxxx` so the table cell stays readable. The full id is
-   * retained as a `title` tooltip and copy-button payload.
+   * Truncate a Stripe Transfer ID (`tr_xxxxxxxxxxxxxxxxxx`) to a compact
+   * `tr_xxxx…xxxx`. The full id is preserved as a tooltip and copy-button
+   * payload.
    */
   function truncateTransferId(id: string): string {
     if (id.length <= 12) return id;
@@ -173,9 +264,13 @@
         copiedTransferId = null;
       }, 2000);
     } catch {
-      // navigator.clipboard can be blocked (non-secure context / permissions)
-      // — fail silently; the title attribute lets the user copy manually.
+      // navigator.clipboard can be blocked (non-secure context); fail
+      // silently — the title attribute lets the user copy manually.
     }
+  }
+
+  function stripeTransferUrl(id: string): string {
+    return `https://dashboard.stripe.com/connect/transfers/${id}`;
   }
 </script>
 
@@ -185,17 +280,58 @@
 </svelte:head>
 
 {#if !isOwner}
-  <!-- Redirecting to /studio... -->
+  <!-- Redirecting to /studio… -->
 {:else}
   <div class="payouts">
     <header class="payouts-header">
       <h1 class="payouts-title">Payouts</h1>
       <p class="payouts-subtitle">
-        Pending and resolved creator payouts for this organisation. Payouts
-        appear here once a subscription invoice is paid and Stripe transfers
-        the creator's share.
+        Every transfer Stripe makes on your organisation's behalf.
+        Subscription invoices split into an organisation fee plus one
+        creator-share row per beneficiary.
       </p>
     </header>
+
+    <!-- ── KPI row ──────────────────────────────────────────────────── -->
+    <div class="kpi-row">
+      <KPICard
+        label="Earned ({rangeLabel})"
+        value={summary?.earnedInPeriodCents ?? 0}
+        format="money"
+        loading={summaryLoading}
+      />
+      <KPICard
+        label="Total earned"
+        value={summary?.totalEarnedCents ?? 0}
+        format="money"
+        loading={summaryLoading}
+      />
+      <KPICard
+        label="In transit"
+        value={summary?.inTransitCents ?? 0}
+        format="money"
+        loading={summaryLoading}
+      />
+    </div>
+
+    <!-- ── Exception banner (only when needsAttention > 0) ──────────── -->
+    {#if summary && summary.needsAttentionCount > 0 && statusFilter !== 'needs_attention'}
+      <Alert variant="warning">
+        <span class="banner-text">
+          <AlertTriangleIcon size={16} />
+          <strong>{summary.needsAttentionCount}</strong>
+          payout{summary.needsAttentionCount === 1 ? '' : 's'} need attention
+          — Connect onboarding incomplete, transfers failed, or amounts
+          below the minimum-transfer floor.
+        </span>
+        <Button
+          variant="secondary"
+          onclick={() => setUrlParam('status', 'needs_attention')}
+        >
+          Review
+        </Button>
+      </Alert>
+    {/if}
 
     <Card.Root>
       <Card.Header>
@@ -204,8 +340,15 @@
             options={statusOptions}
             value={statusFilter}
             label="Filter by status"
-            onValueChange={onStatusChange}
+            onValueChange={(v) => v && setUrlParam('status', v)}
             class="status-filter"
+          />
+          <Select
+            options={rangeOptions}
+            value={rangeFilter}
+            label="Date range"
+            onValueChange={(v) => v && setUrlParam('range', v)}
+            class="range-filter"
           />
         </div>
       </Card.Header>
@@ -220,18 +363,19 @@
             <Skeleton width="100%" height="var(--space-10)" />
             {#each Array(5) as _, i (i)}
               <div class="table-skeleton-row">
+                <Skeleton width="14%" height="var(--space-5)" />
                 <Skeleton width="22%" height="var(--space-5)" />
-                <Skeleton width="22%" height="var(--space-5)" />
                 <Skeleton width="14%" height="var(--space-5)" />
-                <Skeleton width="14%" height="var(--space-5)" />
-                <Skeleton width="14%" height="var(--space-5)" />
+                <Skeleton width="18%" height="var(--space-5)" />
+                <Skeleton width="12%" height="var(--space-5)" />
+                <Skeleton width="20%" height="var(--space-5)" />
               </div>
             {/each}
           </div>
         {:else if isEmpty}
           <EmptyState
             title="No payouts yet"
-            description="Payouts will appear here once subscriptions resolve and Stripe transfers the creator's share."
+            description="Payouts will appear here once subscription invoices land and Stripe transfers the org and creator shares."
             icon={BanknoteIcon}
           >
             {#snippet action()}
@@ -246,11 +390,12 @@
               <Table.Header>
                 <Table.Row>
                   <Table.Head>Date</Table.Head>
-                  <Table.Head>Creator</Table.Head>
+                  <Table.Head>From</Table.Head>
+                  <Table.Head>Type</Table.Head>
+                  <Table.Head>Beneficiary</Table.Head>
                   <Table.Head class="amount-head">Amount</Table.Head>
                   <Table.Head>Status</Table.Head>
                   <Table.Head>Transfer / Reason</Table.Head>
-                  <Table.Head>Resolved</Table.Head>
                 </Table.Row>
               </Table.Header>
               <Table.Body>
@@ -266,6 +411,20 @@
                     </Table.Cell>
 
                     <Table.Cell>
+                      <span class="from-cell">
+                        {payout.subscriberName ??
+                          payout.subscriberEmail ??
+                          '—'}
+                      </span>
+                    </Table.Cell>
+
+                    <Table.Cell>
+                      <Badge variant="info">
+                        {typeLabel(payout.payoutType)}
+                      </Badge>
+                    </Table.Cell>
+
+                    <Table.Cell>
                       <span class="creator-cell">
                         <Avatar class="creator-avatar">
                           {#if payout.creatorAvatarUrl}
@@ -275,11 +434,16 @@
                             />
                           {/if}
                           <AvatarFallback>
-                            {getInitials(payout.creatorName, payout.creatorEmail)}
+                            {getInitials(
+                              payout.creatorName,
+                              payout.creatorEmail
+                            )}
                           </AvatarFallback>
                         </Avatar>
                         <span class="creator-name">
-                          {payout.creatorName ?? payout.creatorEmail ?? 'Unknown creator'}
+                          {payout.creatorName ??
+                            payout.creatorEmail ??
+                            'Unknown'}
                         </span>
                       </span>
                     </Table.Cell>
@@ -297,13 +461,17 @@
                     <Table.Cell>
                       {#if payout.status === 'resolved' && payout.stripeTransferId}
                         <span class="transfer-cell">
-                          <code class="transfer-id" title={payout.stripeTransferId}>
+                          <code
+                            class="transfer-id"
+                            title={payout.stripeTransferId}
+                          >
                             {truncateTransferId(payout.stripeTransferId)}
                           </code>
                           <button
                             type="button"
-                            class="copy-btn"
-                            onclick={() => copyTransferId(payout.stripeTransferId!)}
+                            class="icon-btn"
+                            onclick={() =>
+                              copyTransferId(payout.stripeTransferId!)}
                             aria-label="Copy Stripe transfer ID {payout.stripeTransferId}"
                             title={copiedTransferId === payout.stripeTransferId
                               ? 'Copied!'
@@ -311,6 +479,16 @@
                           >
                             <CopyIcon size={14} />
                           </button>
+                          <a
+                            class="icon-btn"
+                            href={stripeTransferUrl(payout.stripeTransferId)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label="Open transfer in Stripe Dashboard"
+                            title="Open in Stripe Dashboard"
+                          >
+                            <ExternalLinkIcon size={14} />
+                          </a>
                         </span>
                       {:else}
                         <span
@@ -324,12 +502,6 @@
                         </span>
                       {/if}
                     </Table.Cell>
-
-                    <Table.Cell>
-                      <span class="date-cell">
-                        {payout.resolvedAt ? formatDate(payout.resolvedAt) : '–'}
-                      </span>
-                    </Table.Cell>
                   </Table.Row>
                 {/each}
               </Table.Body>
@@ -340,21 +512,25 @@
             <nav class="pagination" aria-label="Payout pagination">
               <Button
                 variant="secondary"
-                disabled={page <= 1}
-                onclick={prevPage}
+                disabled={currentUrlPage <= 1}
+                onclick={() =>
+                  setUrlParam('page', String(currentUrlPage - 1))}
               >
                 Previous
               </Button>
               <span class="pagination-status">
                 Page {pagination.page} of {pagination.totalPages}
                 <span class="pagination-total">
-                  · {pagination.total} payout{pagination.total === 1 ? '' : 's'}
+                  · {pagination.total} payout{pagination.total === 1
+                    ? ''
+                    : 's'}
                 </span>
               </span>
               <Button
                 variant="secondary"
-                disabled={page >= pagination.totalPages}
-                onclick={nextPage}
+                disabled={currentUrlPage >= pagination.totalPages}
+                onclick={() =>
+                  setUrlParam('page', String(currentUrlPage + 1))}
               >
                 Next
               </Button>
@@ -397,6 +573,25 @@
     margin: 0;
   }
 
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+
+  @media (max-width: 720px) {
+    .kpi-row {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .banner-text {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex: 1;
+  }
+
   .filters {
     display: flex;
     flex-wrap: wrap;
@@ -404,10 +599,10 @@
     align-items: flex-end;
   }
 
-  /* Constrain the status select so it doesn't span the full header */
-  .filters :global(.status-filter) {
-    min-width: 220px;
-    max-width: 280px;
+  .filters :global(.status-filter),
+  .filters :global(.range-filter) {
+    min-width: 200px;
+    max-width: 260px;
   }
 
   .table-wrapper {
@@ -434,15 +629,22 @@
     font-variant-numeric: tabular-nums;
   }
 
+  .from-cell {
+    font-size: var(--text-sm);
+    color: var(--color-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 20ch;
+    display: inline-block;
+  }
+
   .creator-cell {
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
   }
 
-  /* Avatar primitive sets size via its own scoped .avatar class. Force
-     here with !important to match the StudioSidebar avatar pattern —
-     primitive specificity (0,2,0) beats consumer :global (0,1,0). */
   :global(.creator-avatar) {
     width: var(--space-7) !important;
     height: var(--space-7) !important;
@@ -456,7 +658,7 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 16ch;
+    max-width: 14ch;
   }
 
   :global(.amount-head),
@@ -481,7 +683,7 @@
     border-radius: var(--radius-sm);
   }
 
-  .copy-btn {
+  .icon-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -492,15 +694,16 @@
     border-radius: var(--radius-sm);
     color: var(--color-text-muted);
     cursor: pointer;
+    text-decoration: none;
     transition: var(--transition-colors);
   }
 
-  .copy-btn:hover {
+  .icon-btn:hover {
     background-color: var(--color-surface-secondary);
     color: var(--color-text);
   }
 
-  .copy-btn:focus-visible {
+  .icon-btn:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
   }

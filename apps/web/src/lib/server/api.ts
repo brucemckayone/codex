@@ -56,6 +56,7 @@ import type {
   UserData,
 } from '@codex/shared-types';
 import type {
+  PayoutSummary,
   PayoutWithCreator,
   SubscriberListItem,
 } from '@codex/subscription';
@@ -1707,6 +1708,17 @@ export function createServerApi(
         request<PaginatedListResponse<PayoutWithCreator>>(
           'ecom',
           withOrg('/subscriptions/payouts', organizationId, params)
+        ),
+
+      /**
+       * Aggregate KPI numbers for the studio payouts page header
+       * (Codex-05vp8). Lifetime totals + a windowed `earnedInPeriod`.
+       * Owner-only; same scoping invariant as `listPayouts`.
+       */
+      getPayoutSummary: (organizationId: string, params?: URLSearchParams) =>
+        request<PayoutSummary>(
+          'ecom',
+          withOrg('/subscriptions/payouts/summary', organizationId, params)
         ),
     },
 

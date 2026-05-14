@@ -4657,6 +4657,555 @@ describe('SubscriptionService', () => {
       });
       expect(page3.items).toHaveLength(1);
     });
+
+    // ─── PR3 (Codex-05vp8) extensions ───────────────────────────────────
+    // New status values (paid, needs_attention) + payoutType projection +
+    // subscriber denorm via aliased users join.
+
+    it("status='needs_attention' returns pending + failed (excludes paid)", async () => {
+      const { org, tier1 } = await createFullOrg('05vp8-needs-attention');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'na'
+      );
+
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 200,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 300,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_05vp8_na_paid',
+          status: 'paid',
+          payoutType: 'creator_payout',
+        },
+      ]);
+
+      const result = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 20,
+        status: 'needs_attention',
+      });
+
+      expect(result.items).toHaveLength(2);
+      const statuses = result.items.map((r) => r.status).sort();
+      expect(statuses).toEqual(['failed', 'pending']);
+      // 'resolved' (paid) must be absent.
+      expect(result.items.some((r) => r.status === 'resolved')).toBe(false);
+    });
+
+    it("status='paid' (canonical) returns only paid rows — mirrors 'resolved' alias", async () => {
+      const { org, tier1 } = await createFullOrg('05vp8-canonical-paid');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'cp'
+      );
+
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 250,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_05vp8_canonical_paid',
+          status: 'paid',
+          payoutType: 'creator_payout',
+        },
+      ]);
+
+      const result = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 20,
+        status: 'paid',
+      });
+      expect(result.items).toHaveLength(1);
+      // UI-derived display status is still 'resolved' until PR4 drops the alias.
+      expect(result.items[0]!.status).toBe('resolved');
+      expect(result.items[0]!.amountCents).toBe(250);
+      expect(result.items[0]!.stripeTransferId).toBe(
+        'tr_05vp8_canonical_paid'
+      );
+    });
+
+    it('projects payoutType from the payouts row', async () => {
+      const { org, tier1 } = await createFullOrg('05vp8-payout-type');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'pt'
+      );
+
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'organization_fee',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 200,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        },
+      ]);
+
+      const result = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 20,
+      });
+
+      expect(result.items).toHaveLength(2);
+      const byAmount = new Map(result.items.map((r) => [r.amountCents, r]));
+      expect(byAmount.get(100)?.payoutType).toBe('organization_fee');
+      expect(byAmount.get(200)?.payoutType).toBe('creator_payout');
+    });
+
+    it('surfaces subscriberName + subscriberEmail via the aliased subscriber join', async () => {
+      const { org, tier1 } = await createFullOrg('05vp8-subscriber-join');
+      // The subscriber is a separate user from the creator beneficiary.
+      const [subscriberUid] = await seedTestUsers(db, 1);
+      const { eq } = await import('drizzle-orm');
+      const [subscriberRow] = await db
+        .select({ name: users.name, email: users.email })
+        .from(users)
+        .where(eq(users.id, subscriberUid));
+
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(subscriberUid, org.id, tier1.id, {
+            status: 'active',
+            stripeSubscriptionId: `sub_05vp8_${createUniqueSlug('subj')}`,
+          })
+        )
+        .returning();
+
+      await db.insert(payoutsTable).values({
+        userId: otherCreatorId,
+        organizationId: org.id,
+        subscriptionId: sub.id,
+        amountCents: 500,
+        currency: 'gbp',
+        reason: 'connect_not_ready',
+        resolvedAt: new Date(),
+        stripeTransferId: 'tr_05vp8_subscriber_join',
+        status: 'paid',
+        payoutType: 'creator_payout',
+      });
+
+      const result = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 20,
+      });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]!.subscriberName).toBe(subscriberRow!.name);
+      expect(result.items[0]!.subscriberEmail).toBe(subscriberRow!.email);
+    });
+
+    it('subscriber fields are null when subscriptionId is null', async () => {
+      const { org } = await createFullOrg('05vp8-null-subscription');
+
+      await db.insert(payoutsTable).values({
+        userId: otherCreatorId,
+        organizationId: org.id,
+        subscriptionId: null,
+        amountCents: 100,
+        currency: 'gbp',
+        reason: 'connect_not_ready',
+        status: 'pending',
+        payoutType: 'creator_payout',
+      });
+
+      const result = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 20,
+      });
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]!.subscriberName).toBeNull();
+      expect(result.items[0]!.subscriberEmail).toBeNull();
+    });
+  });
+
+  // ─── getPayoutSummary (Codex-05vp8) ────────────────────────────────────────
+  //
+  // Four parallel aggregates powering the studio /payouts summary row.
+  // Critical: every aggregate is org-scoped — a creator can belong to
+  // multiple orgs and we must NEVER leak revenue numbers across orgs.
+
+  describe('getPayoutSummary', () => {
+    async function seedSubscriptionForOrg(
+      orgId: string,
+      tierId: string,
+      userId: string,
+      slug: string
+    ) {
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(userId, orgId, tierId, {
+            status: 'active',
+            stripeSubscriptionId: `sub_05vp8_sum_${createUniqueSlug(slug)}`,
+          })
+        )
+        .returning();
+      return sub;
+    }
+
+    it('returns all-zero aggregates when org has no payouts', async () => {
+      const { org } = await createFullOrg('05vp8-sum-empty');
+      const result = await service.getPayoutSummary(org.id);
+      expect(result).toEqual({
+        earnedInPeriodCents: 0,
+        totalEarnedCents: 0,
+        inTransitCents: 0,
+        needsAttentionCount: 0,
+      });
+    });
+
+    it("totalEarnedCents sums status='paid' only (excludes pending + failed)", async () => {
+      const { org, tier1 } = await createFullOrg('05vp8-sum-total');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        't'
+      );
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 1000,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_05vp8_sum_total_a',
+          status: 'paid',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 2000,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_05vp8_sum_total_b',
+          status: 'paid',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 9999,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 8888,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'creator_payout',
+        },
+      ]);
+
+      const result = await service.getPayoutSummary(org.id);
+      expect(result.totalEarnedCents).toBe(3000); // 1000 + 2000 only
+    });
+
+    it('earnedInPeriodCents honours fromDate; totalEarnedCents stays lifetime', async () => {
+      const { org, tier1 } = await createFullOrg('05vp8-sum-window');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'w'
+      );
+      const now = new Date();
+      const old = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000); // 60d ago
+      const fromDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); // 30d ago window-start
+
+      // Two paid rows: one inside window (recent), one outside (old).
+      // Use db.update to backdate createdAt for the old row.
+      const [oldRow] = await db
+        .insert(payoutsTable)
+        .values({
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 5000,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: old,
+          stripeTransferId: 'tr_05vp8_sum_window_old',
+          status: 'paid',
+          payoutType: 'creator_payout',
+        })
+        .returning();
+      const { eq: eqOp } = await import('drizzle-orm');
+      await db
+        .update(payoutsTable)
+        .set({ createdAt: old })
+        .where(eqOp(payoutsTable.id, oldRow!.id));
+
+      await db.insert(payoutsTable).values({
+        userId: otherCreatorId,
+        organizationId: org.id,
+        subscriptionId: sub.id,
+        amountCents: 700,
+        currency: 'gbp',
+        reason: 'connect_not_ready',
+        resolvedAt: now,
+        stripeTransferId: 'tr_05vp8_sum_window_new',
+        status: 'paid',
+        payoutType: 'creator_payout',
+      });
+
+      const result = await service.getPayoutSummary(org.id, {
+        fromDate: fromDate.toISOString(),
+      });
+      expect(result.earnedInPeriodCents).toBe(700); // only the new row
+      expect(result.totalEarnedCents).toBe(5700); // both rows
+    });
+
+    it("inTransitCents sums status='pending' only (excludes paid + failed)", async () => {
+      const { org, tier1 } = await createFullOrg('05vp8-sum-in-transit');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'it'
+      );
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 150,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 250,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 999,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_05vp8_sum_intransit_paid',
+          status: 'paid',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 888,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'creator_payout',
+        },
+      ]);
+
+      const result = await service.getPayoutSummary(org.id);
+      expect(result.inTransitCents).toBe(400); // 150 + 250 only
+    });
+
+    it("needsAttentionCount counts pending + failed rows (excludes paid)", async () => {
+      const { org, tier1 } = await createFullOrg('05vp8-sum-needs-attn');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'na'
+      );
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 200,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 300,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_05vp8_sum_needsattn_paid',
+          status: 'paid',
+          payoutType: 'creator_payout',
+        },
+      ]);
+
+      const result = await service.getPayoutSummary(org.id);
+      expect(result.needsAttentionCount).toBe(2);
+    });
+
+    it('CROSS-ORG ISOLATION: aggregates never include another org rows', async () => {
+      // Security invariant — mirrors the listPayoutsByOrg scoping test.
+      const { org: orgA, tier1: tA } = await createFullOrg('05vp8-sum-iso-a');
+      const { org: orgB, tier1: tB } = await createFullOrg('05vp8-sum-iso-b');
+      const subA = await seedSubscriptionForOrg(
+        orgA.id,
+        tA.id,
+        otherCreatorId,
+        'iso-a'
+      );
+      const subB = await seedSubscriptionForOrg(
+        orgB.id,
+        tB.id,
+        otherCreatorId,
+        'iso-b'
+      );
+
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: orgA.id,
+          subscriptionId: subA.id,
+          amountCents: 1111,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_05vp8_iso_a_paid',
+          status: 'paid',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: orgA.id,
+          subscriptionId: subA.id,
+          amountCents: 222,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: orgB.id,
+          subscriptionId: subB.id,
+          amountCents: 9999,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_05vp8_iso_b_paid',
+          status: 'paid',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: orgB.id,
+          subscriptionId: subB.id,
+          amountCents: 8888,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'creator_payout',
+        },
+      ]);
+
+      const a = await service.getPayoutSummary(orgA.id);
+      expect(a.totalEarnedCents).toBe(1111);
+      expect(a.inTransitCents).toBe(222);
+      expect(a.needsAttentionCount).toBe(1);
+
+      const b = await service.getPayoutSummary(orgB.id);
+      expect(b.totalEarnedCents).toBe(9999);
+      expect(b.inTransitCents).toBe(0);
+      expect(b.needsAttentionCount).toBe(1);
+    });
   });
 
   // ─── resolvePendingPayouts (Codex-w4jjk) ───────────────────────────────────
