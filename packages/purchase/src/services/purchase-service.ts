@@ -61,6 +61,7 @@ import {
   isNull,
   lte,
   or,
+  type SQL,
   sql,
 } from 'drizzle-orm';
 import type Stripe from 'stripe';
@@ -116,6 +117,36 @@ import {
  */
 interface PurchaseServiceConfig extends ServiceConfig {
   feeConfig?: FeeConfigService;
+}
+
+/**
+ * Build SQL conditions for the studio Sales date window. The window applies
+ * to `purchases.purchasedAt` for completed rows AND `purchases.createdAt` for
+ * pending/failed rows (which never set `purchasedAt`) — so a support operator
+ * looking for a row by the attempted-payment date still finds it.
+ *
+ * Returns 0, 1, or 2 SQL clauses based on which bounds are provided. The
+ * caller pushes the result into its conditions array via spread.
+ */
+function purchaseDateWindow(fromDate?: string, toDate?: string): SQL[] {
+  const conditions: SQL[] = [];
+  if (fromDate) {
+    const from = new Date(fromDate);
+    const cond = or(
+      gte(purchases.purchasedAt, from),
+      and(isNull(purchases.purchasedAt), gte(purchases.createdAt, from))
+    );
+    if (cond) conditions.push(cond);
+  }
+  if (toDate) {
+    const to = new Date(toDate);
+    const cond = or(
+      lte(purchases.purchasedAt, to),
+      and(isNull(purchases.purchasedAt), lte(purchases.createdAt, to))
+    );
+    if (cond) conditions.push(cond);
+  }
+  return conditions;
 }
 
 /**
@@ -1245,24 +1276,9 @@ export class PurchaseService extends BaseService {
       // `createdAt` so pending/failed rows (which never set `purchasedAt`)
       // still surface inside the window — useful for support triage where the
       // operator is looking for a row by the date the customer attempted to pay.
-      if (validated.fromDate) {
-        const from = new Date(validated.fromDate);
-        conditions.push(
-          or(
-            gte(purchases.purchasedAt, from),
-            and(isNull(purchases.purchasedAt), gte(purchases.createdAt, from))
-          )!
-        );
-      }
-      if (validated.toDate) {
-        const to = new Date(validated.toDate);
-        conditions.push(
-          or(
-            lte(purchases.purchasedAt, to),
-            and(isNull(purchases.purchasedAt), lte(purchases.createdAt, to))
-          )!
-        );
-      }
+      conditions.push(
+        ...purchaseDateWindow(validated.fromDate, validated.toDate)
+      );
 
       const offset = (validated.page - 1) * validated.limit;
 
@@ -1362,24 +1378,9 @@ export class PurchaseService extends BaseService {
     try {
       const conditions = [eq(purchases.organizationId, orgId)];
 
-      if (validated.fromDate) {
-        const from = new Date(validated.fromDate);
-        conditions.push(
-          or(
-            gte(purchases.purchasedAt, from),
-            and(isNull(purchases.purchasedAt), gte(purchases.createdAt, from))
-          )!
-        );
-      }
-      if (validated.toDate) {
-        const to = new Date(validated.toDate);
-        conditions.push(
-          or(
-            lte(purchases.purchasedAt, to),
-            and(isNull(purchases.purchasedAt), lte(purchases.createdAt, to))
-          )!
-        );
-      }
+      conditions.push(
+        ...purchaseDateWindow(validated.fromDate, validated.toDate)
+      );
 
       const [agg] = await this.db
         .select({
