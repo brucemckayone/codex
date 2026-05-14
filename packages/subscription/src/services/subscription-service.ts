@@ -3215,7 +3215,7 @@ export class SubscriptionService extends BaseService {
     // Transfer org fee
     if (orgConnect?.chargesEnabled && orgFeeCents > 0) {
       try {
-        await this.stripe.transfers.create(
+        const transfer = await this.stripe.transfers.create(
           {
             amount: orgFeeCents,
             currency: CURRENCY.GBP,
@@ -3229,6 +3229,37 @@ export class SubscriptionService extends BaseService {
           },
           { idempotencyKey: `${chargeId}_org_fee` }
         );
+        // Record success in the ledger. The unique partial index on
+        // stripe_transfer_id collapses webhook double-fires to a single row;
+        // any other DB error gets logged loud — money moved but the ledger
+        // missed the entry, which is a data-integrity event worth paging on.
+        try {
+          await this.db.insert(payouts).values({
+            userId: orgConnect.userId,
+            organizationId: orgId,
+            subscriptionId,
+            amountCents: orgFeeCents,
+            payoutType: 'organization_fee',
+            status: 'paid',
+            stripeTransferId: transfer.id,
+            stripeChargeId: chargeId,
+            transferGroup,
+            resolvedAt: new Date(),
+          });
+        } catch (insertError) {
+          if (!isUniqueViolation(insertError)) {
+            this.obs.error(
+              'Org transfer succeeded but payouts ledger insert failed',
+              {
+                subscriptionId,
+                organizationId: orgId,
+                stripeTransferId: transfer.id,
+                amountCents: orgFeeCents,
+                error: (insertError as Error).message,
+              }
+            );
+          }
+        }
       } catch (transferError) {
         this.obs.error('Org transfer failed, accumulating as pending payout', {
           subscriptionId,
@@ -3309,7 +3340,7 @@ export class SubscriptionService extends BaseService {
       // Transfer remaining to the org Connect account as creator payout
       if (orgConnect?.chargesEnabled && creatorPayoutCents > 0) {
         try {
-          await this.stripe.transfers.create(
+          const transfer = await this.stripe.transfers.create(
             {
               amount: creatorPayoutCents,
               currency: CURRENCY.GBP,
@@ -3323,6 +3354,33 @@ export class SubscriptionService extends BaseService {
             },
             { idempotencyKey: `${chargeId}_creator_pool_owner` }
           );
+          try {
+            await this.db.insert(payouts).values({
+              userId: orgConnect.userId,
+              organizationId: orgId,
+              subscriptionId,
+              amountCents: creatorPayoutCents,
+              payoutType: 'creator_payout_to_owner',
+              status: 'paid',
+              stripeTransferId: transfer.id,
+              stripeChargeId: chargeId,
+              transferGroup,
+              resolvedAt: new Date(),
+            });
+          } catch (insertError) {
+            if (!isUniqueViolation(insertError)) {
+              this.obs.error(
+                'Creator-pool transfer to owner succeeded but payouts ledger insert failed',
+                {
+                  subscriptionId,
+                  organizationId: orgId,
+                  stripeTransferId: transfer.id,
+                  amountCents: creatorPayoutCents,
+                  error: (insertError as Error).message,
+                }
+              );
+            }
+          }
         } catch (transferError) {
           this.obs.error(
             'Creator pool transfer to owner failed, accumulating',
@@ -3434,7 +3492,7 @@ export class SubscriptionService extends BaseService {
 
       if (creatorConnect?.chargesEnabled) {
         try {
-          await this.stripe.transfers.create(
+          const transfer = await this.stripe.transfers.create(
             {
               amount: creatorAmount,
               currency: CURRENCY.GBP,
@@ -3449,6 +3507,33 @@ export class SubscriptionService extends BaseService {
             },
             { idempotencyKey: `${chargeId}_creator_${agreement.creatorId}` }
           );
+          try {
+            await this.db.insert(payouts).values({
+              userId: agreement.creatorId,
+              organizationId: orgId,
+              subscriptionId,
+              amountCents: creatorAmount,
+              payoutType: 'creator_payout',
+              status: 'paid',
+              stripeTransferId: transfer.id,
+              stripeChargeId: chargeId,
+              transferGroup,
+              resolvedAt: new Date(),
+            });
+          } catch (insertError) {
+            if (!isUniqueViolation(insertError)) {
+              this.obs.error(
+                'Creator transfer succeeded but payouts ledger insert failed',
+                {
+                  subscriptionId,
+                  creatorId: agreement.creatorId,
+                  stripeTransferId: transfer.id,
+                  amountCents: creatorAmount,
+                  error: (insertError as Error).message,
+                }
+              );
+            }
+          }
         } catch (transferError) {
           this.obs.error('Creator transfer failed, accumulating as pending', {
             subscriptionId,
