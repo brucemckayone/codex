@@ -13,11 +13,11 @@ DROP INDEX IF EXISTS "idx_unique_content_slug_per_org";
 DROP INDEX IF EXISTS "idx_unique_content_slug_personal";
 
 -- Recreate with soft-delete exclusion
-CREATE UNIQUE INDEX "idx_unique_content_slug_per_org"
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_unique_content_slug_per_org"
   ON "content" ("slug", "organization_id")
   WHERE "organization_id" IS NOT NULL AND "deleted_at" IS NULL;
 
-CREATE UNIQUE INDEX "idx_unique_content_slug_personal"
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_unique_content_slug_personal"
   ON "content" ("slug", "creator_id")
   WHERE "organization_id" IS NULL AND "deleted_at" IS NULL;
 
@@ -29,7 +29,7 @@ CREATE UNIQUE INDEX "idx_unique_content_slug_personal"
 ALTER TABLE "organizations" DROP CONSTRAINT IF EXISTS "organizations_slug_unique";
 
 -- Create partial unique index excluding soft-deleted orgs
-CREATE UNIQUE INDEX "idx_unique_org_slug"
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_unique_org_slug"
   ON "organizations" ("slug")
   WHERE "deleted_at" IS NULL;
 
@@ -41,7 +41,7 @@ CREATE UNIQUE INDEX "idx_unique_org_slug"
 ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_username_unique";
 
 -- Create partial unique index excluding soft-deleted users
-CREATE UNIQUE INDEX "idx_unique_username"
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_unique_username"
   ON "users" ("username")
   WHERE "deleted_at" IS NULL;
 
@@ -52,7 +52,7 @@ CREATE UNIQUE INDEX "idx_unique_username"
 -- Drop existing constraint (was a plain unique, now becomes a partial unique index)
 ALTER TABLE "subscription_tiers" DROP CONSTRAINT IF EXISTS "uq_subscription_tiers_org_sort";
 
-CREATE UNIQUE INDEX "uq_subscription_tiers_org_sort"
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_subscription_tiers_org_sort"
   ON "subscription_tiers" ("organization_id", "sort_order")
   WHERE "deleted_at" IS NULL;
 
@@ -60,7 +60,7 @@ CREATE UNIQUE INDEX "uq_subscription_tiers_org_sort"
 -- 5. Active subscription uniqueness per user per org
 -- ================================================================
 
-CREATE UNIQUE INDEX "uq_active_subscription_per_user_org"
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_active_subscription_per_user_org"
   ON "subscriptions" ("user_id", "organization_id")
   WHERE "status" IN ('active', 'past_due', 'cancelling');
 
@@ -68,7 +68,7 @@ CREATE UNIQUE INDEX "uq_active_subscription_per_user_org"
 -- 6. Composite index for library query join path
 -- ================================================================
 
-CREATE INDEX "idx_purchases_customer_status_content"
+CREATE INDEX IF NOT EXISTS "idx_purchases_customer_status_content"
   ON "purchases" ("customer_id", "status", "content_id");
 
 -- ================================================================

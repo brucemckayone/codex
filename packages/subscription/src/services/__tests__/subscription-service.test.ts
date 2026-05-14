@@ -2600,16 +2600,14 @@ describe('SubscriptionService', () => {
     it('filters by tierId', async () => {
       const { org, tier1, tier2 } = await createFullOrg('list-subs-tier');
       const [u1, u2] = await seedTestUsers(db, 2);
-      await db
-        .insert(subscriptions)
-        .values([
-          createTestSubscriptionInput(u1, org.id, tier1.id, {
-            status: 'active',
-          }),
-          createTestSubscriptionInput(u2, org.id, tier2.id, {
-            status: 'active',
-          }),
-        ]);
+      await db.insert(subscriptions).values([
+        createTestSubscriptionInput(u1, org.id, tier1.id, {
+          status: 'active',
+        }),
+        createTestSubscriptionInput(u2, org.id, tier2.id, {
+          status: 'active',
+        }),
+      ]);
 
       const result = await service.listSubscribers(org.id, {
         page: 1,
