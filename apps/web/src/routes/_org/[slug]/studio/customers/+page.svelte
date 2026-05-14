@@ -23,6 +23,7 @@
   import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import { getCustomers, listAdminContent } from '$lib/remote/admin.remote';
   import { formatPrice } from '$lib/utils/format';
+  import { downloadCsv } from '$lib/utils/csv-export';
   import { toast } from '$lib/components/ui/Toast/toast-store';
 
   let { data }: { data: PageData } = $props();
@@ -214,30 +215,20 @@
   }
 
   // ── CSV Export ─────────────────────────────────────────────────────
-  function escapeCsvField(value: string): string {
-    if (value.includes(',') || value.includes('"') || value.includes('\n')) {
-      return `"${value.replace(/"/g, '""')}"`;
-    }
-    return value;
-  }
-
   function exportCsv() {
     const headers = ['Name', 'Email', 'Purchases', 'Total Spent (GBP)', 'Joined'];
     const rows = sortedCustomers.map((c) => [
-      escapeCsvField(c.name ?? ''),
-      escapeCsvField(c.email),
+      c.name ?? '',
+      c.email,
       String(c.totalPurchases),
       (c.totalSpentCents / 100).toFixed(2),
       new Date(c.createdAt).toISOString().split('T')[0],
     ]);
-    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `customers-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadCsv(
+      `customers-${new Date().toISOString().split('T')[0]}.csv`,
+      headers,
+      rows
+    );
   }
 
   // ── Pagination baseUrl (preserves search + limit) ──────────────────

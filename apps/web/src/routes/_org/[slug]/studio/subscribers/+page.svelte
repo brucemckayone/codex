@@ -27,6 +27,7 @@
     listTiers,
   } from '$lib/remote/subscription.remote';
   import { formatDate, formatPrice } from '$lib/utils/format';
+  import { downloadCsv } from '$lib/utils/csv-export';
   import type { SubscriberListItem } from '@codex/subscription';
 
   interface QueryResult<T> {
@@ -171,13 +172,6 @@
   }
 
   // ── CSV export ───────────────────────────────────────────────────────
-  function escapeCsv(v: string): string {
-    if (v.includes(',') || v.includes('"') || v.includes('\n')) {
-      return `"${v.replace(/"/g, '""')}"`;
-    }
-    return v;
-  }
-
   function exportCsv() {
     const headers = [
       'Name',
@@ -190,23 +184,20 @@
       'Joined',
     ];
     const rows = items.map((s) => [
-      escapeCsv(s.userName ?? ''),
-      escapeCsv(s.userEmail),
-      escapeCsv(s.tierName),
+      s.userName ?? '',
+      s.userEmail,
+      s.tierName,
       s.status,
       s.billingInterval,
       (s.amountCents / 100).toFixed(2),
       s.currentPeriodEnd ? s.currentPeriodEnd.split('T')[0] : '',
       s.createdAt.split('T')[0],
     ]);
-    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `subscribers-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadCsv(
+      `subscribers-${new Date().toISOString().split('T')[0]}.csv`,
+      headers,
+      rows
+    );
   }
 </script>
 

@@ -29,6 +29,7 @@
   import KPICard from '$lib/components/studio/analytics/KPICard.svelte';
   import { listSales, getSalesStats } from '$lib/remote/sales.remote';
   import { formatDate, formatPrice } from '$lib/utils/format';
+  import { downloadCsv } from '$lib/utils/csv-export';
   import type { SaleListItem, SalesStats } from '@codex/purchase';
 
   interface QueryResult<T> {
@@ -195,13 +196,6 @@
   }
 
   // ── CSV export ───────────────────────────────────────────────────────
-  function escapeCsv(v: string): string {
-    if (v.includes(',') || v.includes('"') || v.includes('\n')) {
-      return `"${v.replace(/"/g, '""')}"`;
-    }
-    return v;
-  }
-
   function exportCsv() {
     const headers = [
       'Date',
@@ -218,25 +212,22 @@
     ];
     const rows = items.map((s) => [
       (s.purchasedAt ?? s.createdAt).split('T')[0],
-      escapeCsv(s.customerName ?? ''),
-      escapeCsv(s.customerEmail),
-      escapeCsv(s.contentTitle),
+      s.customerName ?? '',
+      s.customerEmail,
+      s.contentTitle,
       (s.amountPaidCents / 100).toFixed(2),
       (s.creatorPayoutCents / 100).toFixed(2),
       s.status,
       s.refundAmountCents != null ? (s.refundAmountCents / 100).toFixed(2) : '',
-      escapeCsv(s.refundReason ?? ''),
+      s.refundReason ?? '',
       s.disputedAt ? 'yes' : '',
       s.stripePaymentIntentId,
     ]);
-    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `sales-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadCsv(
+      `sales-${new Date().toISOString().split('T')[0]}.csv`,
+      headers,
+      rows
+    );
   }
 </script>
 
