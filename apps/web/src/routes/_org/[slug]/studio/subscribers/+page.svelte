@@ -26,8 +26,7 @@
     listSubscribers,
     listTiers,
   } from '$lib/remote/subscription.remote';
-  import { formatDate, formatPrice } from '$lib/utils/format';
-  import { getInitials } from '$lib/utils/initials';
+  import { formatDate, formatPrice, getInitials } from '$lib/utils/format';
   import { downloadCsv } from '$lib/utils/csv-export';
   import type { SubscriberListItem } from '@codex/subscription';
   import type { QueryResult } from '$lib/remote/query-result';

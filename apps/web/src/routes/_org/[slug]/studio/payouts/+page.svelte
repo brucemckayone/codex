@@ -33,8 +33,7 @@
   import AvatarImage from '$lib/components/ui/Avatar/AvatarImage.svelte';
   import AvatarFallback from '$lib/components/ui/Avatar/AvatarFallback.svelte';
   import { listPayouts } from '$lib/remote/subscription.remote';
-  import { formatDate, formatPrice } from '$lib/utils/format';
-  import { getInitials } from '$lib/utils/initials';
+  import { formatDate, formatPrice, getInitials } from '$lib/utils/format';
   import type { PayoutWithCreator } from '@codex/subscription';
   import type { QueryResult } from '$lib/remote/query-result';
 
