@@ -42,7 +42,7 @@
   } from '$lib/remote/subscription.remote';
   import { getOrgSettings } from '$lib/remote/org.remote';
   import { formatDate, formatPrice } from '$lib/utils/format';
-  import { humanizeRequirement } from '@codex/subscription';
+  import { humanizeRequirement } from '$lib/utils/connect-requirement-humanization';
   import type { ConnectRequirements, SubscriptionTier } from '$lib/types';
 
   /** Shape returned by SvelteKit's query() when called client-side */

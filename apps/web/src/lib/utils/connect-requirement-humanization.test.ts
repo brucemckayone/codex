@@ -1,7 +1,5 @@
 /**
  * Tests for the Stripe Connect requirement humanization map.
- *
- * Lives under `__tests__` (vitest pattern; matches the rest of the package).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -9,7 +7,7 @@ import {
   humanizeRequirement,
   isKnownRequirement,
   REQUIREMENT_HUMANIZATION,
-} from '../requirement-humanization';
+} from './connect-requirement-humanization';
 
 describe('REQUIREMENT_HUMANIZATION', () => {
   it('covers the top common Stripe Connect requirement fields', () => {
