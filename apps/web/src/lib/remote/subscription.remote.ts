@@ -440,11 +440,30 @@ export const listSubscribers = query(
 
 const listPayoutsQueryArgsSchema = z.object({
   organizationId: z.string().uuid(),
-  status: z.enum(['all', 'pending', 'resolved', 'failed']).default('all'),
+  // Status taxonomy widened in PR3 (Codex-05vp8):
+  //  - 'paid' replaces 'resolved' as the canonical name; 'resolved' is kept
+  //    as a URL alias for one release and dropped in PR4.
+  //  - 'needs_attention' combines pending + failed for the banner CTA.
+  status: z
+    .enum([
+      'all',
+      'pending',
+      'paid',
+      'resolved',
+      'failed',
+      'needs_attention',
+    ])
+    .default('all'),
   fromDate: z.string().datetime().optional(),
   toDate: z.string().datetime().optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+const getPayoutSummaryArgsSchema = z.object({
+  organizationId: z.string().uuid(),
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
 });
 
 /**
@@ -471,6 +490,25 @@ export const listPayouts = query(
     params.set('page', String(page));
     params.set('limit', String(limit));
     return api.subscription.listPayouts(organizationId, params);
+  }
+);
+
+/**
+ * Aggregate KPI numbers for the studio payouts page header (Codex-05vp8).
+ *
+ * Returns lifetime totals + an `earnedInPeriodCents` aggregate bounded by
+ * `fromDate` / `toDate`. Owner-only — the worker re-derives scope from the
+ * session membership.
+ */
+export const getPayoutSummary = query(
+  getPayoutSummaryArgsSchema,
+  async ({ organizationId, fromDate, toDate }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    const params = new URLSearchParams();
+    if (fromDate) params.set('fromDate', fromDate);
+    if (toDate) params.set('toDate', toDate);
+    return api.subscription.getPayoutSummary(organizationId, params);
   }
 );
 

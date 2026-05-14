@@ -189,13 +189,21 @@ export const listSubscribersQuerySchema = paginationSchema.extend({
 export const payoutStatusFilterEnum = z.enum([
   'all',
   'pending',
-  'resolved',
+  'paid',
+  'resolved', // legacy URL alias for 'paid' (PR3); dropped in PR4
   'failed',
+  'needs_attention',
 ]);
 
 export const listPayoutsQuerySchema = paginationSchema.extend({
   organizationId: uuidSchema,
   status: payoutStatusFilterEnum.default('all'),
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
+});
+
+export const getPayoutSummaryQuerySchema = z.object({
+  organizationId: uuidSchema,
   fromDate: z.string().datetime().optional(),
   toDate: z.string().datetime().optional(),
 });
@@ -249,6 +257,9 @@ export type ReactivateSubscriptionInput = z.infer<
 export type ResumeSubscriptionInput = z.infer<typeof resumeSubscriptionSchema>;
 export type PayoutStatusFilter = z.infer<typeof payoutStatusFilterEnum>;
 export type ListPayoutsQueryInput = z.infer<typeof listPayoutsQuerySchema>;
+export type GetPayoutSummaryQueryInput = z.infer<
+  typeof getPayoutSummaryQuerySchema
+>;
 
 export type ListSubscribersQueryInput = z.infer<
   typeof listSubscribersQuerySchema

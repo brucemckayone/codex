@@ -42,6 +42,7 @@ import {
   organizationMemberships,
   organizations,
   payouts,
+  type PayoutType,
   stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
@@ -61,7 +62,7 @@ import {
   UnsupportedCurrencyError,
 } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
-import { and, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { aliasedTable, and, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   AlreadySubscribedError,
@@ -172,6 +173,26 @@ export interface PayoutWithCreator {
   resolvedAt: string | null;
   stripeTransferId: string | null;
   createdAt: string;
+  // PR3 additions (Codex-05vp8): payoutType + subscriber denorm
+  payoutType: PayoutType;
+  subscriberName: string | null;
+  subscriberEmail: string | null;
+}
+
+/**
+ * Aggregate KPI numbers powering the `/studio/payouts` summary row.
+ *
+ * - `earnedInPeriodCents` honours the date window passed by the UI (default 30d)
+ * - `totalEarnedCents` / `inTransitCents` / `needsAttentionCount` are lifetime
+ *
+ * All four aggregates share the org-scoping invariant — never relax to
+ * user-only scoping; a creator can belong to multiple orgs.
+ */
+export interface PayoutSummary {
+  earnedInPeriodCents: number;
+  totalEarnedCents: number;
+  inTransitCents: number;
+  needsAttentionCount: number;
 }
 
 /**
@@ -2503,7 +2524,7 @@ export class SubscriptionService extends BaseService {
     options: {
       page: number;
       limit: number;
-      status?: 'all' | 'pending' | 'resolved' | 'failed';
+      status?: 'all' | 'pending' | 'paid' | 'resolved' | 'failed' | 'needs_attention';
       fromDate?: string;
       toDate?: string;
     }
@@ -2515,13 +2536,24 @@ export class SubscriptionService extends BaseService {
 
     if (status === 'pending') {
       conditions.push(eq(payouts.status, 'pending'));
-    } else if (status === 'resolved') {
+    } else if (status === 'paid' || status === 'resolved') {
+      // 'resolved' is the legacy URL alias (PR3 introduces 'paid' as the
+      // canonical chip value; PR4 drops the alias).
       conditions.push(eq(payouts.status, 'paid'));
     } else if (status === 'failed') {
       conditions.push(eq(payouts.status, 'failed'));
+    } else if (status === 'needs_attention') {
+      // Single chip combining pending + failed for the exception-banner CTA.
+      conditions.push(inArray(payouts.status, ['pending', 'failed']));
     }
 
     conditions.push(...dateWindow(payouts.createdAt, fromDate, toDate));
+
+    // Alias the users table a second time so we can left-join the
+    // subscriber (customer who paid the invoice) alongside the existing
+    // creator (beneficiary) join. Drizzle aliasedTable returns a typed
+    // proxy that participates in joins + select projection naturally.
+    const subscriber = aliasedTable(users, 'subscriber');
 
     const [items, [totalResult]] = await Promise.all([
       this.db
@@ -2535,12 +2567,17 @@ export class SubscriptionService extends BaseService {
           currency: payouts.currency,
           reason: payouts.reason,
           status: payouts.status,
+          payoutType: payouts.payoutType,
           resolvedAt: payouts.resolvedAt,
           stripeTransferId: payouts.stripeTransferId,
           createdAt: payouts.createdAt,
+          subscriberName: subscriber.name,
+          subscriberEmail: subscriber.email,
         })
         .from(payouts)
         .leftJoin(users, eq(payouts.userId, users.id))
+        .leftJoin(subscriptions, eq(payouts.subscriptionId, subscriptions.id))
+        .leftJoin(subscriber, eq(subscriptions.userId, subscriber.id))
         .where(and(...conditions))
         .orderBy(desc(payouts.createdAt))
         .limit(limit)
@@ -2567,6 +2604,9 @@ export class SubscriptionService extends BaseService {
         resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
         stripeTransferId: row.stripeTransferId,
         createdAt: row.createdAt.toISOString(),
+        payoutType: row.payoutType as PayoutType,
+        subscriberName: row.subscriberName ?? null,
+        subscriberEmail: row.subscriberEmail ?? null,
       })),
       pagination: {
         page,
@@ -2574,6 +2614,76 @@ export class SubscriptionService extends BaseService {
         total,
         totalPages: Math.ceil(total / limit),
       },
+    };
+  }
+
+  /**
+   * Aggregate KPI numbers for the studio payouts summary row (Codex-05vp8).
+   *
+   * Four parallel aggregates — pattern from
+   * `AdminAnalyticsService.getRevenueByCreator`. All scoped by org; the
+   * date window only narrows `earnedInPeriodCents`. `inTransitCents` and
+   * `needsAttentionCount` are lifetime so creators always see what's stuck
+   * regardless of date filter.
+   */
+  async getPayoutSummary(
+    orgId: string,
+    options: { fromDate?: string; toDate?: string } = {}
+  ): Promise<PayoutSummary> {
+    const { fromDate, toDate } = options;
+
+    const [earnedInPeriod, totalEarned, inTransit, needsAttention] =
+      await Promise.all([
+        this.db
+          .select({
+            sum: sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`,
+          })
+          .from(payouts)
+          .where(
+            and(
+              eq(payouts.organizationId, orgId),
+              eq(payouts.status, 'paid'),
+              ...dateWindow(payouts.createdAt, fromDate, toDate)
+            )
+          ),
+        this.db
+          .select({
+            sum: sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`,
+          })
+          .from(payouts)
+          .where(
+            and(
+              eq(payouts.organizationId, orgId),
+              eq(payouts.status, 'paid')
+            )
+          ),
+        this.db
+          .select({
+            sum: sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`,
+          })
+          .from(payouts)
+          .where(
+            and(
+              eq(payouts.organizationId, orgId),
+              eq(payouts.status, 'pending')
+            )
+          ),
+        this.db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(payouts)
+          .where(
+            and(
+              eq(payouts.organizationId, orgId),
+              inArray(payouts.status, ['pending', 'failed'])
+            )
+          ),
+      ]);
+
+    return {
+      earnedInPeriodCents: earnedInPeriod[0]?.sum ?? 0,
+      totalEarnedCents: totalEarned[0]?.sum ?? 0,
+      inTransitCents: inTransit[0]?.sum ?? 0,
+      needsAttentionCount: needsAttention[0]?.count ?? 0,
     };
   }
 

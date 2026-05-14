@@ -22,6 +22,7 @@ import {
   createSubscriptionCheckoutSchema,
   getCurrentSubscriptionQuerySchema,
   getSubscriptionStatsQuerySchema,
+  getPayoutSummaryQuerySchema,
   listPayoutsQuerySchema,
   listSubscribersQuerySchema,
   reactivateSubscriptionSchema,
@@ -392,6 +393,30 @@ subscriptions.get(
         }
       );
       return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * GET /subscriptions/payouts/summary
+ *
+ * Codex-05vp8: aggregate KPI numbers for the studio payouts page header
+ * (earned in period, total earned, in transit, needs-attention count).
+ * Owner/admin only via `requireOrgManagement` — same scoping invariant as
+ * `/payouts`. `organizationId` is taken from `ctx.organizationId` (set by
+ * `requireOrgManagement` from the user's membership row), never from the
+ * client.
+ */
+subscriptions.get(
+  '/payouts/summary',
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: { query: getPayoutSummaryQuerySchema },
+    handler: async (ctx) => {
+      return ctx.services.subscription.getPayoutSummary(ctx.organizationId, {
+        fromDate: ctx.input.query.fromDate,
+        toDate: ctx.input.query.toDate,
+      });
     },
   })
 );
