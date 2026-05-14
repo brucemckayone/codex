@@ -2797,6 +2797,153 @@ describe('SubscriptionService', () => {
       expect(result).toBeUndefined();
     });
 
+    // Codex-zdbhg: real Stripe 2024+ webhook payloads do NOT include
+    // expanded `payments.data` on the inline invoice object. The handler
+    // must retrieve the invoice with `expand: ['payments']` to recover
+    // the charge — without that fallback, executeTransfers never runs
+    // and payouts ledger rows never get written. The shape used here
+    // matches the production event payload Stripe actually delivers
+    // (no `payments` field at all), NOT the test-fixture shape that
+    // pre-populates `payments.data[0]`.
+    it('resolves charge via invoices.retrieve({ expand: [payments] }) when inline payments are absent (Stripe 2024+ shape)', async () => {
+      const { org, tier1 } = await createFullOrg('invoice-no-inline-payments');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      // Real webhook shape: no `payments` field at all.
+      const realChargeId = 'ch_resolved_via_expand';
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: undefined,
+      }) as unknown as Stripe.Invoice;
+
+      // Override the default empty-payments mock so retrieve returns the
+      // fully expanded shape Stripe yields when `expand: ['payments']`.
+      (
+        stripe as unknown as { invoices: { retrieve: ReturnType<typeof vi.fn> } }
+      ).invoices.retrieve.mockResolvedValueOnce({
+        id: mockInvoice.id,
+        payments: {
+          data: [{ payment: { charge: realChargeId, payment_intent: null } }],
+        },
+      });
+
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      expect(stripe.invoices.retrieve).toHaveBeenCalledWith(
+        mockInvoice.id,
+        expect.objectContaining({ expand: ['payments'] })
+      );
+      expect(stripe.transfers.create).toHaveBeenCalled();
+      const calls = (stripe.transfers.create as ReturnType<typeof vi.fn>).mock
+        .calls;
+      for (const [, opts] of calls) {
+        expect(opts?.idempotencyKey).toMatch(
+          new RegExp(`^${realChargeId}_`)
+        );
+      }
+    });
+
+    it('falls back to charges.list when paymentIntent has no latest_charge (race after PI confirmation)', async () => {
+      const { org, tier1 } = await createFullOrg('invoice-charges-list-fallback');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const piId = 'pi_pending_latest_charge';
+      const chargeViaList = 'ch_recovered_via_list';
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: undefined,
+      }) as unknown as Stripe.Invoice;
+
+      // Expanded invoice has only PI, no charge.
+      (
+        stripe as unknown as { invoices: { retrieve: ReturnType<typeof vi.fn> } }
+      ).invoices.retrieve.mockResolvedValueOnce({
+        id: mockInvoice.id,
+        payments: {
+          data: [{ payment: { charge: null, payment_intent: piId } }],
+        },
+      });
+      // PI retrieve still missing latest_charge.
+      (
+        stripe as unknown as {
+          paymentIntents: { retrieve: ReturnType<typeof vi.fn> };
+        }
+      ).paymentIntents.retrieve.mockResolvedValueOnce({
+        id: piId,
+        latest_charge: null,
+      });
+      // charges.list closes the gap.
+      (
+        stripe as unknown as { charges: { list: ReturnType<typeof vi.fn> } }
+      ).charges.list.mockResolvedValueOnce({
+        object: 'list',
+        data: [{ id: chargeViaList }],
+        has_more: false,
+      });
+
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      expect(stripe.charges.list).toHaveBeenCalledWith(
+        expect.objectContaining({ payment_intent: piId, limit: 1 })
+      );
+      expect(stripe.transfers.create).toHaveBeenCalled();
+    });
+
+    it('still skips with WARN (not crash) when no charge can be resolved at any layer', async () => {
+      // Negative path per feedback_security_deep_test — if every fallback
+      // returns empty, the handler must log + return cleanly, never crash.
+      const { org, tier1 } = await createFullOrg('invoice-truly-no-charge');
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: undefined,
+      }) as unknown as Stripe.Invoice;
+
+      // Expanded retrieve returns empty too.
+      (
+        stripe as unknown as { invoices: { retrieve: ReturnType<typeof vi.fn> } }
+      ).invoices.retrieve.mockResolvedValueOnce({
+        id: mockInvoice.id,
+        payments: { data: [] },
+      });
+
+      await expect(
+        service.handleInvoicePaymentSucceeded(mockInvoice)
+      ).resolves.not.toThrow();
+      expect(stripe.transfers.create).not.toHaveBeenCalled();
+    });
+
     // Codex-8wfnv: explicit idempotency assertions for the renewal path.
     // handleSubscriptionCreated has a uniqueness-constraint short-circuit
     // (line 519). handleInvoicePaymentSucceeded has no such short-circuit

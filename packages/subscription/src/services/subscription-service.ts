@@ -416,6 +416,23 @@ type TierPriceChangeMailer = (params: {
   data: Record<string, string | number | boolean>;
 }) => void;
 
+/**
+ * Read the source-charge id from an invoice's inline `payments.data[0]`.
+ * Returns null when payments are not expanded — see resolveInvoiceCharge
+ * for the full fallback chain to recover the charge in that case.
+ */
+function extractInvoiceCharge(invoice: Stripe.Invoice): string | null {
+  const payment = invoice.payments?.data?.[0];
+  const charge = payment?.payment?.charge;
+  return typeof charge === 'string' ? charge : null;
+}
+
+function extractInvoicePaymentIntent(invoice: Stripe.Invoice): string | null {
+  const payment = invoice.payments?.data?.[0];
+  const pi = payment?.payment?.payment_intent;
+  return typeof pi === 'string' ? pi : null;
+}
+
 export class SubscriptionService extends BaseService {
   private readonly stripe: Stripe;
   private readonly cache: VersionedCache | undefined;
@@ -1023,6 +1040,49 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
+   * Resolve the source charge id for a paid invoice.
+   *
+   * Why: Stripe 2024+ invoice payloads omit `payments.data` unless the
+   * invoice is retrieved with `expand: ['payments']`. The raw webhook
+   * event is an immutable snapshot, so the inline shape is almost always
+   * empty in production. Without this fallback chain, executeTransfers
+   * never runs (Codex-zdbhg).
+   *
+   * Order of resolution:
+   *   1. Inline `payments.data[0]` on the supplied invoice (test fixtures + cache hits)
+   *   2. Retrieve the invoice with `expand: ['payments']` (canonical Stripe 2024+ path)
+   *   3. If we have a payment_intent but no charge, `paymentIntents.retrieve → latest_charge`
+   *   4. Final fallback: `charges.list({ payment_intent })` — rare race after PI confirmation
+   */
+  private async resolveInvoiceCharge(
+    stripeInvoice: Stripe.Invoice
+  ): Promise<string | null> {
+    let chargeId = extractInvoiceCharge(stripeInvoice);
+    let piId = extractInvoicePaymentIntent(stripeInvoice);
+
+    if (!chargeId && !piId && stripeInvoice.id) {
+      const expanded = await this.stripe.invoices.retrieve(stripeInvoice.id, {
+        expand: ['payments'],
+      });
+      chargeId = extractInvoiceCharge(expanded);
+      piId = extractInvoicePaymentIntent(expanded);
+    }
+
+    if (chargeId) return chargeId;
+    if (!piId) return null;
+
+    const pi = await this.stripe.paymentIntents.retrieve(piId);
+    if (typeof pi.latest_charge === 'string') return pi.latest_charge;
+
+    const charges = await this.stripe.charges.list({
+      payment_intent: piId,
+      limit: 1,
+    });
+    const first = charges.data?.[0];
+    return typeof first?.id === 'string' ? first.id : null;
+  }
+
+  /**
    * Handle invoice.payment_succeeded for subscription renewals.
    * Extends subscription period and creates revenue transfers.
    *
@@ -1044,41 +1104,17 @@ export class SubscriptionService extends BaseService {
         : (subDetails?.subscription?.id ?? null);
     if (!stripeSubId) return;
 
-    // Get charge ID from the invoice's payment intent
-    // In v19+, payments are in invoice.payments.data[]
-    const payment = stripeInvoice.payments?.data?.[0];
-    const chargeId =
-      typeof payment?.payment?.charge === 'string'
-        ? payment.payment.charge
-        : null;
-    // Fall back to payment_intent if no direct charge
-    const paymentIntentId =
-      typeof payment?.payment?.payment_intent === 'string'
-        ? payment.payment.payment_intent
-        : null;
-
-    if (!chargeId && !paymentIntentId) {
+    // Resolve the source charge for transfers. Webhook payloads in Stripe
+    // 2024+ do NOT include expanded `payments.data` by default — the field
+    // is only populated when explicitly expanded on retrieve. Without the
+    // expand-fallback chain below, every real invoice.payment_succeeded
+    // event silently skipped transfers (Codex-zdbhg).
+    const sourceTransaction = await this.resolveInvoiceCharge(stripeInvoice);
+    if (!sourceTransaction) {
       this.obs.warn(
         'Invoice has no charge or payment intent, skipping transfers',
-        {
-          invoiceId: stripeInvoice.id,
-        }
+        { invoiceId: stripeInvoice.id }
       );
-      return;
-    }
-
-    // For transfers, we need the charge ID. If we only have PI, retrieve it.
-    let sourceTransaction = chargeId;
-    if (!sourceTransaction && paymentIntentId) {
-      const pi = await this.stripe.paymentIntents.retrieve(paymentIntentId);
-      sourceTransaction =
-        typeof pi.latest_charge === 'string' ? pi.latest_charge : null;
-    }
-
-    if (!sourceTransaction) {
-      this.obs.warn('Could not resolve charge for transfers', {
-        invoiceId: stripeInvoice.id,
-      });
       return;
     }
 
