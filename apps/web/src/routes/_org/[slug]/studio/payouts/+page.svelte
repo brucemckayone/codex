@@ -184,15 +184,13 @@
   // KPI label dynamics — "Earned (last 7d)" etc. The "all time" case is
   // collapsed to the same label as Total earned in practice; we still
   // render the windowed card to keep the row stable.
-  const rangeLabel = $derived(
-    rangeFilter === 'all'
-      ? 'all time'
-      : rangeFilter === '7'
-        ? 'last 7 days'
-        : rangeFilter === '90'
-          ? 'last 90 days'
-          : 'last 30 days'
-  );
+  const RANGE_LABELS: Record<DateRange, string> = {
+    '7': 'last 7 days',
+    '30': 'last 30 days',
+    '90': 'last 90 days',
+    all: 'all time',
+  };
+  const rangeLabel = $derived(RANGE_LABELS[rangeFilter]);
 
   // ── Badge variant + label helpers ────────────────────────────────────
   // Token-aligned status mapping: pending = warning, resolved/paid =

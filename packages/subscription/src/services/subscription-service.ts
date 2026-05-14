@@ -2632,56 +2632,50 @@ export class SubscriptionService extends BaseService {
   ): Promise<PayoutSummary> {
     const { fromDate, toDate } = options;
 
-    const [earnedInPeriod, totalEarned, inTransit, needsAttention] =
-      await Promise.all([
-        this.db
-          .select({
-            sum: sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`,
-          })
-          .from(payouts)
-          .where(
-            and(
-              eq(payouts.organizationId, orgId),
-              eq(payouts.status, 'paid'),
-              ...dateWindow(payouts.createdAt, fromDate, toDate)
-            )
-          ),
-        this.db
-          .select({
-            sum: sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`,
-          })
-          .from(payouts)
-          .where(
-            and(
-              eq(payouts.organizationId, orgId),
-              eq(payouts.status, 'paid')
-            )
-          ),
-        this.db
-          .select({
-            sum: sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`,
-          })
-          .from(payouts)
-          .where(
-            and(
-              eq(payouts.organizationId, orgId),
-              eq(payouts.status, 'pending')
-            )
-          ),
-        this.db
-          .select({ count: sql<number>`count(*)::int` })
-          .from(payouts)
-          .where(
-            and(
-              eq(payouts.organizationId, orgId),
-              inArray(payouts.status, ['pending', 'failed'])
-            )
-          ),
-      ]);
+    // Three parallel aggregates:
+    // 1. Paid earnings — one query returns both lifetime + windowed via
+    //    CASE WHEN, saving a round-trip vs. two separate SUMs over the
+    //    same WHERE clause.
+    // 2. In-transit (status='pending') sum.
+    // 3. Needs-attention (pending OR failed) count.
+    const dateConditions = dateWindow(payouts.createdAt, fromDate, toDate);
+    const inPeriodPredicate =
+      dateConditions.length > 0
+        ? sql`(${and(...dateConditions)})`
+        : sql`TRUE`;
+
+    const [paid, inTransit, needsAttention] = await Promise.all([
+      this.db
+        .select({
+          inPeriod: sql<number>`COALESCE(SUM(CASE WHEN ${inPeriodPredicate} THEN ${payouts.amountCents} ELSE 0 END),0)::int`,
+          total: sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`,
+        })
+        .from(payouts)
+        .where(
+          and(eq(payouts.organizationId, orgId), eq(payouts.status, 'paid'))
+        ),
+      this.db
+        .select({
+          sum: sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`,
+        })
+        .from(payouts)
+        .where(
+          and(eq(payouts.organizationId, orgId), eq(payouts.status, 'pending'))
+        ),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(payouts)
+        .where(
+          and(
+            eq(payouts.organizationId, orgId),
+            inArray(payouts.status, ['pending', 'failed'])
+          )
+        ),
+    ]);
 
     return {
-      earnedInPeriodCents: earnedInPeriod[0]?.sum ?? 0,
-      totalEarnedCents: totalEarned[0]?.sum ?? 0,
+      earnedInPeriodCents: paid[0]?.inPeriod ?? 0,
+      totalEarnedCents: paid[0]?.total ?? 0,
       inTransitCents: inTransit[0]?.sum ?? 0,
       needsAttentionCount: needsAttention[0]?.count ?? 0,
     };
