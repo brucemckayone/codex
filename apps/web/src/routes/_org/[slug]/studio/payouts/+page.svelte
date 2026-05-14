@@ -35,13 +35,7 @@
   import { listPayouts } from '$lib/remote/subscription.remote';
   import { formatDate, formatPrice } from '$lib/utils/format';
   import type { PayoutWithCreator } from '@codex/subscription';
-
-  /** Shape returned by SvelteKit's query() when called client-side */
-  interface QueryResult<T> {
-    current: T | undefined;
-    loading?: boolean;
-    error?: { message?: string } | null;
-  }
+  import type { QueryResult } from '$lib/remote/query-result';
 
   type PayoutsPage = {
     items: PayoutWithCreator[];

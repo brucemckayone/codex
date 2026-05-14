@@ -29,12 +29,7 @@
   import { formatDate, formatPrice } from '$lib/utils/format';
   import { downloadCsv } from '$lib/utils/csv-export';
   import type { SubscriberListItem } from '@codex/subscription';
-
-  interface QueryResult<T> {
-    current: T | undefined;
-    loading?: boolean;
-    error?: { message?: string } | null;
-  }
+  import type { QueryResult } from '$lib/remote/query-result';
 
   type SubscribersPage = {
     items: SubscriberListItem[];
