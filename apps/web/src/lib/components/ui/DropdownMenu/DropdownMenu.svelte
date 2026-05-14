@@ -17,7 +17,11 @@
 		loop,
 		closeOnItemClick,
 		closeOnOutsideClick,
-		portal = true, // Default to true for Storybook compatibility
+		// Melt UI's portal option accepts `string | HTMLElement | null` — boolean
+		// `true` is a no-op (usePortal returns early). Default to `'body'` so the
+		// menu escapes overflow/transform ancestors (e.g. studio sidebar's
+		// `overflow:hidden` flex column would otherwise displace the layout).
+		portal = 'body',
 		forceVisible = true,
 		defaultOpen,
 		open = $bindable(),
