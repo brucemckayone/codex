@@ -1593,7 +1593,7 @@ export function createServerApi(
       getCurrent: (organizationId: string) =>
         request<CurrentSubscription | null>(
           'ecom',
-          `/subscriptions/current?organizationId=${encodeURIComponent(organizationId)}`
+          withOrg('/subscriptions/current', organizationId)
         ),
 
       /**
@@ -1659,7 +1659,7 @@ export function createServerApi(
       getStats: (organizationId: string) =>
         request<SubscriptionStats>(
           'ecom',
-          `/subscriptions/stats?organizationId=${encodeURIComponent(organizationId)}`
+          withOrg('/subscriptions/stats', organizationId)
         ),
 
       /**
