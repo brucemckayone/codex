@@ -188,14 +188,17 @@
   }
 
   // ── Display helpers ──────────────────────────────────────────────────
-  function statusVariant(
-    s: SaleListItem['status']
-  ): 'success' | 'warning' | 'error' | 'neutral' {
-    if (s === 'completed') return 'success';
-    if (s === 'pending') return 'warning';
-    if (s === 'failed') return 'error';
-    if (s === 'refunded') return 'neutral';
-    return 'neutral';
+  const SALE_STATUS_VARIANT: Record<
+    string,
+    'success' | 'warning' | 'error' | 'neutral'
+  > = {
+    completed: 'success',
+    pending: 'warning',
+    failed: 'error',
+    refunded: 'neutral',
+  };
+  function statusVariant(s: SaleListItem['status']) {
+    return SALE_STATUS_VARIANT[s] ?? 'neutral';
   }
   function statusLabel(s: string): string {
     return s.charAt(0).toUpperCase() + s.slice(1);

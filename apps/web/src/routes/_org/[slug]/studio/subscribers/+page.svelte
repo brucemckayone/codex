@@ -142,14 +142,17 @@
   }
 
   // ── Display helpers ──────────────────────────────────────────────────
-  function statusVariant(
-    status: string
-  ): 'success' | 'warning' | 'error' | 'neutral' {
-    if (status === 'active') return 'success';
-    if (status === 'cancelling') return 'warning';
-    if (status === 'past_due') return 'error';
-    if (status === 'cancelled') return 'neutral';
-    return 'neutral';
+  const SUBSCRIBER_STATUS_VARIANT: Record<
+    string,
+    'success' | 'warning' | 'error' | 'neutral'
+  > = {
+    active: 'success',
+    cancelling: 'warning',
+    past_due: 'error',
+    cancelled: 'neutral',
+  };
+  function statusVariant(status: string) {
+    return SUBSCRIBER_STATUS_VARIANT[status] ?? 'neutral';
   }
 
   function statusLabel(s: string): string {
