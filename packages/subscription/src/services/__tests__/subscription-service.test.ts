@@ -5477,6 +5477,109 @@ describe('SubscriptionService', () => {
       expect(result.items[0]!.subscriberName).toBeNull();
       expect(result.items[0]!.subscriberEmail).toBeNull();
     });
+
+    // REGRESSION (PR #204 deep-review F-26, bead Codex-e2773) — pagination
+    // must respect transferGroup atomicity so client-side grouping in
+    // /studio/payouts can produce correct per-transaction totals.
+    //
+    // listPayoutsByOrg currently paginates by ROW (LIMIT/OFFSET on the raw
+    // SELECT). A single charge fanning out into 1 platform_fee + 1
+    // organization_fee + N creator_payouts (where N >= 3 is normal in a
+    // multi-creator org with creatorOrganizationAgreements) can straddle a
+    // page boundary at limit=20.
+    //
+    // The +page.svelte client then renders the partial group with a totalCents
+    // that's just the visible-rows sum — NOT the real charge amount — and
+    // the sibling rows appear as a second "transaction" on the next page.
+    //
+    // The invariant we want: for every transferGroup that appears in a
+    // page's items, ALL its sibling rows must appear in that same page.
+    // Equivalent fix: switch to group-based pagination (N groups per page).
+    it.fails('pagination keeps transferGroup siblings together on the same page (multi-creator regression)', async () => {
+      const { org, tier1 } = await createFullOrg('zqaxo-pagegroup');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'pagegroup'
+      );
+
+      // Build 21 rows: rows 1-19 are nineteen 1-row groups, then a single
+      // transferGroup of 2 sibling rows for the last "transaction".
+      // With limit=20, page 1 returns rows 1-20: that's 19 single-row
+      // groups + the FIRST row of the multi-row group. Page 2 returns the
+      // second sibling — orphaned from its group.
+      const SPAN_GROUP = 'tg_zqaxo_span_boundary';
+      const singletons = Array.from({ length: 19 }, (_, i) => ({
+        userId: otherCreatorId,
+        organizationId: org.id,
+        subscriptionId: sub.id,
+        amountCents: 1000,
+        currency: 'gbp' as const,
+        reason: 'connect_not_ready',
+        resolvedAt: new Date(Date.now() - i * 1000), // descending createdAt
+        stripeTransferId: `tr_zqaxo_solo_${i}`,
+        status: 'paid' as const,
+        payoutType: 'creator_payout' as const,
+        transferGroup: `tg_zqaxo_solo_${i}`,
+      }));
+      const siblings = [
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 5000,
+          currency: 'gbp' as const,
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(Date.now() - 20 * 1000),
+          stripeTransferId: 'tr_zqaxo_sib_creator',
+          status: 'paid' as const,
+          payoutType: 'creator_payout' as const,
+          transferGroup: SPAN_GROUP,
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 2000,
+          currency: 'gbp' as const,
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(Date.now() - 20 * 1000 - 1),
+          stripeTransferId: 'tr_zqaxo_sib_org',
+          status: 'paid' as const,
+          payoutType: 'organization_fee' as const,
+          transferGroup: SPAN_GROUP,
+        },
+      ];
+      await db.insert(payoutsTable).values([...singletons, ...siblings]);
+
+      const page1 = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 20,
+      });
+
+      // INVARIANT: if any row from SPAN_GROUP appears on page 1, ALL its
+      // siblings must appear on page 1 too. Currently fails — production
+      // returns 20 rows where one of them is half of SPAN_GROUP.
+      const groupRowsOnPage1 = page1.items.filter(
+        (r) => r.transferGroup === SPAN_GROUP
+      );
+      if (groupRowsOnPage1.length > 0) {
+        expect(groupRowsOnPage1).toHaveLength(2);
+      }
+
+      // Equivalent positive form: total rows for SPAN_GROUP across all
+      // pages should still be 2 (atomicity, not loss).
+      const page2 = await service.listPayoutsByOrg(org.id, {
+        page: 2,
+        limit: 20,
+      });
+      const groupRowsAllPages = [
+        ...groupRowsOnPage1,
+        ...page2.items.filter((r) => r.transferGroup === SPAN_GROUP),
+      ];
+      expect(groupRowsAllPages).toHaveLength(2);
+    });
   });
 
   // ─── getPayoutSummary (Codex-05vp8) ────────────────────────────────────────

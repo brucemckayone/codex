@@ -239,7 +239,24 @@ Read `CreatorBreakdownRail.svelte` + `CreatorBreakdownCard.svelte`. Five finding
 | F-22 | 🟡 | Skeleton count hardcoded to 3 — CLS for varying creator counts (DQ-15). Bead Codex-0sz4j. |
 | F-25 | 🟡 | £0.00 headline visual hierarchy when only pending (DQ-14) |
 
-## Beads filed (cycles 1-4)
+## Cycle 5 — /studio/payouts/+page.svelte audit
+
+Read the full page (1008 lines). One critical multi-creator bug + several derivative concerns:
+
+| Tag | Status | Title |
+|---|---|---|
+| F-26 | 🔴 | **Pagination splits transferGroup siblings across pages** — multi-creator transactions with 5+ rows straddle the 20-row page boundary. `group.totalCents` lies, `group.subscriberName` may show "—" even when subscriber exists. Bead Codex-e2773 P1. **Failing backend test landed.** |
+| F-27 | 🟢 | (subsumed by F-26 — totalCents calc is correct algorithmically, just operates on partial input) |
+| F-28 | 🟡 | `group.source` set from first encountered row — defensive concern if a transferGroup ever had mixed sourceType. Schema-enforceable; low priority. |
+| F-29 | 🟡 | `group.subscriberName` / `Email` derived from first row only. Worth a defensive coalesce — pick first non-null across rows. |
+| F-30 | 🟢 | (subsumed by F-26 — same root cause) |
+| F-31 | 🟢 | `currentUrlPage` parsing accepts unusual values silently — backend zod validates, low priority. |
+| F-32 | 🟢 | Owner-redirect via `$effect` (not server-side). Consistent with sibling studio pages, studio is `ssr=false` so server guard is at the layout level. OK. |
+| F-33 | 🟡 | Stripe Dashboard URL hardcodes live mode (`/connect/transfers/`) — test-mode UI links 404. Worth a P2/P3 bead later. |
+| F-34 | 🟢 | `statusVariant`/`statusLabel` handles legacy `'resolved'` — backwards-compat for `derivePayoutStatus`, intentional. |
+| F-35 | 🟢 | Map insertion-order grouping is correct given server's `ORDER BY createdAt DESC`. OK. |
+
+## Beads filed (cycles 1-5)
 
 | Bead | Priority | Title | Test |
 |---|---|---|---|
@@ -248,16 +265,18 @@ Read `CreatorBreakdownRail.svelte` + `CreatorBreakdownCard.svelte`. Five finding
 | Codex-h3864 | P1 | F-3 breakdown conflates org_fee | ✅ |
 | Codex-5794i | P1 | F-7 sweep wrong fee policy | ✅ |
 | Codex-iivne | P1 | F-13 pile-up under min-transfer floor | ✅ |
+| Codex-e2773 | P1 | F-26 pagination splits transferGroup | ✅ |
 | Codex-biiqd | P2 | F-19 "Unknown creator" fallback (UI) | ✅ (component) |
 | Codex-0sz4j | P3 | F-22 fixed skeleton count (UI) | ⏳ (UX-only) |
 
 ## Outstanding
 
-- `/studio/payouts/+page.svelte` page restructure — grid layout, sticky rail behaviour, mobile <1024px stacking, transaction grouping correctness
 - Remote function `subscription.remote.ts` — TanStack query key shape, auth scoping
 - API route `workers/ecom-api/src/routes/subscriptions.ts` — procedure() policy, zod validation, rate limiting
 - Schema CHECK constraints negative tests (`check_payouts_user_required`, `check_payouts_paid_invariant`)
 - F-12 small fix (explicit `sourceType` in subscription inserts)
+- F-29 defensive coalesce on `group.subscriberName` across siblings
+- F-33 Stripe Dashboard test-mode URL prefix
 - `revenue-calculator.ts` audit — rounding behaviour at multi-creator scale
 - `/review` and `/simplify` formal passes
 
