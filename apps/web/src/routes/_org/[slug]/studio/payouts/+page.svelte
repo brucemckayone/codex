@@ -38,12 +38,15 @@
   import AvatarImage from '$lib/components/ui/Avatar/AvatarImage.svelte';
   import AvatarFallback from '$lib/components/ui/Avatar/AvatarFallback.svelte';
   import KPICard from '$lib/components/studio/analytics/KPICard.svelte';
+  import CreatorBreakdownRail from '$lib/components/studio/payouts/CreatorBreakdownRail.svelte';
   import {
     getPayoutSummary,
+    getPayoutsByCreatorBreakdown,
     listPayouts,
   } from '$lib/remote/subscription.remote';
   import { formatDate, formatPrice, getInitials } from '$lib/utils/format';
   import type {
+    CreatorPayoutBreakdown,
     PayoutSummary,
     PayoutWithCreator,
   } from '@codex/subscription';
@@ -129,6 +132,30 @@
       : null
   );
 
+  // Per-creator breakdown for the right rail — same filter args as the
+  // table so both surfaces stay in sync. Always issues when owner
+  // resolves, regardless of pagination (the rail aggregates the whole
+  // filtered set, not the current page).
+  const creatorBreakdownQuery = $derived(
+    isOwner && orgId
+      ? getPayoutsByCreatorBreakdown({
+          organizationId: orgId,
+          status: statusFilter,
+          source: sourceFilter,
+          ...(dateBounds.fromDate && { fromDate: dateBounds.fromDate }),
+        })
+      : null
+  );
+
+  const creatorBreakdown = $derived(
+    (creatorBreakdownQuery as QueryResult<CreatorPayoutBreakdown[]> | null)
+      ?.current ?? []
+  );
+  const creatorBreakdownLoading = $derived(
+    (creatorBreakdownQuery as QueryResult<CreatorPayoutBreakdown[]> | null)
+      ?.loading ?? true
+  );
+
   const payoutsData = $derived(
     (payoutsQuery as QueryResult<PayoutsPage> | null)?.current
   );
@@ -150,6 +177,68 @@
   const items = $derived(payoutsData?.items ?? []);
   const pagination = $derived(payoutsData?.pagination);
   const isEmpty = $derived(!loading && items.length === 0);
+
+  // ── Transaction grouping (Codex-6nt4l) ───────────────────────────────
+  // Every charge generates 3 sibling rows (platform_fee + organization_fee
+  // + creator_payout) sharing the same `transferGroup`. Group them so the
+  // table reads as "one transaction per group header + indented children"
+  // rather than 3× as many flat rows. Pre-h69cg historical rows have no
+  // `transferGroup` — fall back to row id so they render as a 1-row group
+  // (still gets a header, just with a one-row child list).
+  type PayoutGroup = {
+    key: string;
+    source: PayoutWithCreator['sourceType'];
+    subscriberName: string | null;
+    subscriberEmail: string | null;
+    createdAt: string;
+    rows: PayoutWithCreator[];
+    totalCents: number;
+  };
+
+  // Render order within a group: ledger flow follows the money outward
+  // from the platform → org → creator. `creator_payout_to_owner` sits
+  // between because it routes the org owner's share of multi-creator pools.
+  const PAYOUT_TYPE_ORDER: Record<PayoutWithCreator['payoutType'], number> = {
+    platform_fee: 0,
+    organization_fee: 1,
+    creator_payout_to_owner: 2,
+    creator_payout: 3,
+  };
+
+  const groupedTransactions = $derived.by<PayoutGroup[]>(() => {
+    const map = new Map<string, PayoutGroup>();
+    for (const row of items) {
+      const key = row.transferGroup ?? row.id;
+      let g = map.get(key);
+      if (!g) {
+        g = {
+          key,
+          source: row.sourceType,
+          subscriberName: row.subscriberName,
+          subscriberEmail: row.subscriberEmail,
+          createdAt: row.createdAt,
+          rows: [],
+          totalCents: 0,
+        };
+        map.set(key, g);
+      }
+      g.rows.push(row);
+      g.totalCents += row.amountCents;
+    }
+    for (const g of map.values()) {
+      g.rows.sort(
+        (a, b) =>
+          (PAYOUT_TYPE_ORDER[a.payoutType] ?? 99) -
+          (PAYOUT_TYPE_ORDER[b.payoutType] ?? 99)
+      );
+    }
+    // Groups sort by createdAt desc to match the table's existing
+    // server-side ORDER BY desc(payouts.createdAt).
+    return Array.from(map.values()).sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  });
 
   // ── Filter handlers ──────────────────────────────────────────────────
   // Default values per URL key — same pattern as /studio/sales:
@@ -309,6 +398,8 @@
       </p>
     </header>
 
+    <div class="payouts-grid">
+    <div class="payouts-main">
     <!-- ── KPI row ──────────────────────────────────────────────────── -->
     <div class="kpi-row">
       <KPICard
@@ -423,124 +514,138 @@
                 </Table.Row>
               </Table.Header>
               <Table.Body>
-                {#each items as payout (payout.id)}
-                  <Table.Row>
-                    <Table.Cell>
-                      <span
-                        class="date-cell"
-                        title={new Date(payout.createdAt).toISOString()}
-                      >
-                        {formatDate(payout.createdAt)}
-                      </span>
-                    </Table.Cell>
-
-                    <Table.Cell>
-                      <span class="from-cell">
-                        {payout.subscriberName ??
-                          payout.subscriberEmail ??
-                          '—'}
-                      </span>
-                    </Table.Cell>
-
-                    <Table.Cell>
-                      <span class="type-cell">
-                        <Badge variant="info">
-                          {typeLabel(payout.payoutType)}
-                        </Badge>
-                        <span
-                          class="source-label"
-                          title="Payout source"
-                        >
-                          · {sourceLabel(payout.sourceType)}
-                        </span>
-                      </span>
-                    </Table.Cell>
-
-                    <Table.Cell>
-                      {#if payout.payoutType === 'platform_fee'}
-                        <span class="creator-cell platform-cell">
-                          <span class="creator-name">Platform</span>
-                        </span>
-                      {:else}
-                        <span class="creator-cell">
-                          <Avatar class="creator-avatar">
-                            {#if payout.creatorAvatarUrl}
-                              <AvatarImage
-                                src={payout.creatorAvatarUrl}
-                                alt={payout.creatorName ?? payout.creatorEmail ?? ''}
-                              />
-                            {/if}
-                            <AvatarFallback>
-                              {getInitials(
-                                payout.creatorName,
-                                payout.creatorEmail
-                              )}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span class="creator-name">
-                            {payout.creatorName ??
-                              payout.creatorEmail ??
-                              'Unknown'}
+                {#each groupedTransactions as group (group.key)}
+                  <!-- Group header: one row per transaction, banner-styled
+                       with date + source pill + subscriber + gross total.
+                       colspan=7 spans the whole table width. -->
+                  <Table.Row data-row-kind="header">
+                    <Table.Cell colspan={7} class="group-header-cell">
+                      <span class="group-header">
+                        <span class="group-header__left">
+                          <span
+                            class="date-cell"
+                            title={new Date(group.createdAt).toISOString()}
+                          >
+                            {formatDate(group.createdAt)}
+                          </span>
+                          <Badge variant="info">
+                            {sourceLabel(group.source)}
+                          </Badge>
+                          <span class="group-header__subscriber">
+                            From: {group.subscriberName ??
+                              group.subscriberEmail ??
+                              '—'}
                           </span>
                         </span>
-                      {/if}
-                    </Table.Cell>
-
-                    <Table.Cell class="amount-cell">
-                      {formatPrice(payout.amountCents)}
-                    </Table.Cell>
-
-                    <Table.Cell>
-                      <Badge variant={statusVariant(payout.status)}>
-                        {statusLabel(payout.status)}
-                      </Badge>
-                    </Table.Cell>
-
-                    <Table.Cell>
-                      {#if payout.status === 'resolved' && payout.stripeTransferId}
-                        <span class="transfer-cell">
-                          <code
-                            class="transfer-id"
-                            title={payout.stripeTransferId}
-                          >
-                            {truncateTransferId(payout.stripeTransferId)}
-                          </code>
-                          <button
-                            type="button"
-                            class="icon-btn"
-                            onclick={() =>
-                              copyTransferId(payout.stripeTransferId!)}
-                            aria-label="Copy Stripe transfer ID {payout.stripeTransferId}"
-                            title={copiedTransferId === payout.stripeTransferId
-                              ? 'Copied!'
-                              : 'Copy transfer ID'}
-                          >
-                            <CopyIcon size={14} />
-                          </button>
-                          <a
-                            class="icon-btn"
-                            href={stripeTransferUrl(payout.stripeTransferId)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            aria-label="Open transfer in Stripe Dashboard"
-                            title="Open in Stripe Dashboard"
-                          >
-                            <ExternalLinkIcon size={14} />
-                          </a>
+                        <span class="group-header__total">
+                          {formatPrice(group.totalCents)}
                         </span>
-                      {:else}
-                        <span
-                          class="reason-cell"
-                          class:reason-cell--failed={payout.status === 'failed'}
-                        >
-                          {#if payout.status === 'failed'}
-                            <AlertTriangleIcon size={14} />
-                          {/if}
-                          {reasonLabel(payout.reason)}
-                        </span>
-                      {/if}
+                      </span>
                     </Table.Cell>
                   </Table.Row>
+
+                  {#each group.rows as payout (payout.id)}
+                    <Table.Row data-row-kind="child">
+                      <!-- Date + From are blank for child rows; the header
+                           carries them so the indent reads as "this row
+                           belongs to the transaction above". -->
+                      <Table.Cell class="child-spacer-cell"></Table.Cell>
+                      <Table.Cell></Table.Cell>
+
+                      <Table.Cell>
+                        <span class="type-cell">
+                          <Badge variant="info">
+                            {typeLabel(payout.payoutType)}
+                          </Badge>
+                        </span>
+                      </Table.Cell>
+
+                      <Table.Cell>
+                        {#if payout.payoutType === 'platform_fee'}
+                          <span class="creator-cell platform-cell">
+                            <span class="creator-name">Platform</span>
+                          </span>
+                        {:else}
+                          <span class="creator-cell">
+                            <Avatar class="creator-avatar">
+                              {#if payout.creatorAvatarUrl}
+                                <AvatarImage
+                                  src={payout.creatorAvatarUrl}
+                                  alt={payout.creatorName ?? payout.creatorEmail ?? ''}
+                                />
+                              {/if}
+                              <AvatarFallback>
+                                {getInitials(
+                                  payout.creatorName,
+                                  payout.creatorEmail
+                                )}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span class="creator-name">
+                              {payout.creatorName ??
+                                payout.creatorEmail ??
+                                'Unknown'}
+                            </span>
+                          </span>
+                        {/if}
+                      </Table.Cell>
+
+                      <Table.Cell class="amount-cell">
+                        {formatPrice(payout.amountCents)}
+                      </Table.Cell>
+
+                      <Table.Cell>
+                        <Badge variant={statusVariant(payout.status)}>
+                          {statusLabel(payout.status)}
+                        </Badge>
+                      </Table.Cell>
+
+                      <Table.Cell>
+                        {#if payout.status === 'resolved' && payout.stripeTransferId}
+                          <span class="transfer-cell">
+                            <code
+                              class="transfer-id"
+                              title={payout.stripeTransferId}
+                            >
+                              {truncateTransferId(payout.stripeTransferId)}
+                            </code>
+                            <button
+                              type="button"
+                              class="icon-btn"
+                              onclick={() =>
+                                copyTransferId(payout.stripeTransferId!)}
+                              aria-label="Copy Stripe transfer ID {payout.stripeTransferId}"
+                              title={copiedTransferId === payout.stripeTransferId
+                                ? 'Copied!'
+                                : 'Copy transfer ID'}
+                            >
+                              <CopyIcon size={14} />
+                            </button>
+                            <a
+                              class="icon-btn"
+                              href={stripeTransferUrl(payout.stripeTransferId)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label="Open transfer in Stripe Dashboard"
+                              title="Open in Stripe Dashboard"
+                            >
+                              <ExternalLinkIcon size={14} />
+                            </a>
+                          </span>
+                        {:else}
+                          <span
+                            class="reason-cell"
+                            class:reason-cell--failed={payout.status === 'failed'}
+                          >
+                            {#if payout.status === 'failed'}
+                              <AlertTriangleIcon size={14} />
+                            {/if}
+                            {reasonLabel(payout.reason)}
+                          </span>
+                        {/if}
+                      </Table.Cell>
+                    </Table.Row>
+                  {/each}
                 {/each}
               </Table.Body>
             </Table.Root>
@@ -577,6 +682,20 @@
         {/if}
       </Card.Content>
     </Card.Root>
+    </div>
+
+    <div class="payouts-rail">
+      <CreatorBreakdownRail
+        breakdown={creatorBreakdown}
+        loading={creatorBreakdownLoading}
+        activeFilters={{
+          status: statusFilter,
+          source: sourceFilter,
+          range: rangeFilter,
+        }}
+      />
+    </div>
+    </div>
   </div>
 {/if}
 
@@ -585,7 +704,39 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    max-width: 1200px;
+    max-width: 1280px;
+  }
+
+  /* Two-column shell: main content on the left (KPIs + filters +
+     transaction table), sticky per-creator rail on the right. Below
+     1024px the rail stacks below the main content as a regular section
+     — preserves the rail's affordance without crowding narrower screens. */
+  .payouts-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: var(--space-6);
+    align-items: start;
+  }
+
+  .payouts-main {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+    min-width: 0;
+  }
+
+  .payouts-rail {
+    position: sticky;
+    top: var(--space-6);
+  }
+
+  @media (max-width: 1024px) {
+    .payouts-grid {
+      grid-template-columns: 1fr;
+    }
+    .payouts-rail {
+      position: static;
+    }
   }
 
   .payouts-header {
@@ -801,5 +952,56 @@
   .empty-link {
     text-decoration: none;
     color: inherit;
+  }
+
+  /* ── Transaction grouping (Codex-6nt4l) ──────────────────────────── */
+
+  /* Group header row: full-width banner on tinted surface so the eye
+     sees "one transaction" before reading its 3 indented children. */
+  :global(tr[data-row-kind='header']) {
+    background-color: var(--color-surface-secondary);
+  }
+
+  :global(tr[data-row-kind='header']:hover) {
+    background-color: var(--color-surface-secondary);
+  }
+
+  :global(.group-header-cell) {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  .group-header__left {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  .group-header__subscriber {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text);
+  }
+
+  .group-header__total {
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Indent the first child cell so siblings read as belonging to the
+     group above. Using padding-inline-start on the first cell keeps the
+     remaining column grid intact. */
+  :global(tr[data-row-kind='child'] .child-spacer-cell) {
+    padding-inline-start: var(--space-6);
   }
 </style>
