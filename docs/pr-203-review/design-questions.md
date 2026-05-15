@@ -318,4 +318,31 @@ Even the docstring of `calculateRevenueSplit` ("Round platform/org fees UP - pla
 
 ---
 
+---
+
+## DQ-19 — Sales ↔ Payouts UX symmetry for multi-creator orgs
+
+**Context.** PR-204 shipped a per-creator rail on `/studio/payouts` (money OUT). The sibling `/studio/sales` surface (money IN) remained org-aggregate-only and pre-dates PR-203. For a multi-creator org, the operator's two natural questions are:
+
+- **Sales side**: "Which creator's content drove this month's revenue?"
+- **Payouts side**: "Which creator owes me what for next transfer?"
+
+Currently only the second has a UI answer. The first requires the operator to join `sales × content × creator` mentally because:
+
+- `listSales` doesn't project `content.creatorId`
+- `SaleListItem` has no creator field
+- `getSalesStats` aggregates org-level only
+- No `creatorId` filter on `listSales`
+
+**Options.**
+- (a) Mirror the PR-204 pattern verbatim on Sales: add `getSalesByCreatorBreakdown` + rail + creator filter + `creatorId` projection.
+- (b) Lift the per-creator surface OUT of both pages into a new `/studio/creators/[id]` drill-down — single canonical place to view a creator's contribution across both directions.
+- (c) Skip for now; Sales is owner-tier already, so worst case the owner can export and pivot in Excel.
+
+**Recommendation.** (a) for ROI parity with Payouts — same pattern, low risk, immediate operator value. Bead Codex-y76g2 captures the implementation spec. (b) is a better long-term shape but a bigger refactor across two routes.
+
+**Status.** Open. Implementation spec in bead Codex-y76g2 P2.
+
+---
+
 _Add new questions below; renumber if any are removed._

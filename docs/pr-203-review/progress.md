@@ -455,7 +455,7 @@ Every scenario from cycle 1's threat model is now either 🟢 confirmed clean by
 
 ## Beads filed (final, cycles 1-10)
 
-**14 beads · 3 P0 · 5 P1 · 3 P2 · 3 P3**
+**15 beads · 3 P0 · 5 P1 · 4 P2 · 3 P3** (cycle 11 added Codex-y76g2)
 
 | Bead | Pri | Title | Test |
 |---|---|---|---|
@@ -474,9 +474,25 @@ Every scenario from cycle 1's threat model is now either 🟢 confirmed clean by
 | Codex-0sz4j | P3 | F-22 fixed skeleton count (UI) | ⏳ |
 | Codex-p6sy6 | P3 | F-41 no rate limit on payouts reads | ⏳ |
 
-## 🎯 War path verdict
+## Cycle 11 — adjacent surface: studio Sales UX
 
-**Every multi-creator scenario is covered.** The loop's end-condition is met.
+Extended the war path beyond PR-203's payouts ledger to its sibling surface — `/studio/sales` (purchase-service.ts `listSales` + `getSalesStats`). PR-204 closed the per-creator gap for Payouts but Sales remains org-aggregate-only.
+
+Three new findings bundled as one feature gap:
+
+| Tag | Title | File:Line |
+|---|---|---|
+| F-52 | `listSales` doesn't project `content.creatorId` | `purchase-service.ts:1697-1700` |
+| F-53 | `getSalesStats` is org-aggregate-only, no per-creator breakdown | `purchase-service.ts:1763-1800` |
+| F-56 | `listSales` lacks a `creatorId` filter | `purchase-service.ts:1668-1673` |
+
+**Bead Codex-y76g2 P2** bundles them as one implementation spec — mirror the PR-204 Payouts pattern (per-creator breakdown helper + rail component + shared `buildSalesConditions` WHERE clause). DQ-19 captures the design choice (mirror vs unified `/studio/creators/[id]` drill-down).
+
+No failing test this cycle — these are missing-feature gaps, not buggy code paths. The bead description IS the implementation spec.
+
+## 🎯 War path verdict (re-asserted post-extension)
+
+**Every multi-creator scenario in PR-203's scope is covered, AND the adjacent sibling surface (Sales) has been audited and beaded.** The loop's end-condition holds.
 
 - **64 catalogued findings** across 10 cycles (51 self-review + 8 reviewer + 5 simplifier)
 - **14 beads filed** — every P0/P1 bug has a failing regression test
