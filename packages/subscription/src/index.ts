@@ -74,6 +74,7 @@ export {
   type WaitUntilFn,
 } from './services/subscription-invalidation';
 export type {
+  CreatorPayoutBreakdown,
   PayoutDisplayStatus,
   PayoutSummary,
   PayoutWithCreator,

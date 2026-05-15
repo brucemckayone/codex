@@ -68,6 +68,7 @@ import {
   desc,
   eq,
   inArray,
+  isNotNull,
   isNull,
   lt,
   sql,
@@ -195,7 +196,68 @@ export interface PayoutWithCreator {
   // Codex-h69cg: tri-party ledger source — drives the studio Source filter
   // chip and lets the UI render "Purchase · Org fee" vs "Subscription · Org fee".
   sourceType: 'purchase' | 'subscription';
+  // Codex-6nt4l: transaction grouping. All 3 sibling rows of one charge share
+  // the same `transferGroup` value (set by ledger writers in h69cg). The UI
+  // groups by this key into a header + indented children layout.
+  // Nullable for pre-h69cg historical rows — UI falls back to row.id.
+  transferGroup: string | null;
+  purchaseId: string | null;
+  subscriptionId: string | null;
+  stripeChargeId: string | null;
 }
+
+/**
+ * Per-creator aggregate row for the `/studio/payouts` right rail
+ * (Codex-6nt4l). One row per user who has received a `creator_payout` or
+ * `organization_fee` payout — `platform_fee` rows are excluded because the
+ * platform is not a per-creator recipient.
+ *
+ * Aggregation runs in-memory over the same row set as `listPayoutsByOrg`
+ * (shared filter clause via `buildPayoutConditions`) so filter chips reshape
+ * both surfaces consistently. Mirrors `AdminAnalyticsService.getRevenueByCreator`
+ * — Map-based accumulation over a single SELECT, not SQL GROUP BY.
+ *
+ * `userId` is non-nullable: the DB CHECK constraint on `payouts` enforces
+ * `payout_type = 'platform_fee' OR user_id IS NOT NULL`, and we filter out
+ * platform_fee rows at query time. The org owner appears here too, flagged
+ * via `isOrgOwner` for the role badge — they are not split into a separate
+ * section.
+ */
+export interface CreatorPayoutBreakdown {
+  userId: string;
+  name: string | null;
+  email: string | null;
+  avatarUrl: string | null;
+  isOrgOwner: boolean;
+  totalPaidCents: number;
+  purchasePaidCents: number;
+  subscriptionPaidCents: number;
+  transactionCount: number;
+  needsAttentionCount: number;
+  lastPaidAt: string | null;
+}
+
+/**
+ * Filter options shared by `listPayoutsByOrg` and
+ * `getPayoutsByCreatorBreakdown`. Extracted so both surfaces reshape together
+ * when the user toggles a filter chip — see `buildPayoutConditions`.
+ *
+ * `status='all'` and `sourceType='all'` are explicit no-ops; absence of the
+ * field is treated identically (default applied at the validation boundary).
+ */
+type PayoutFilterOptions = {
+  status?:
+    | 'all'
+    | 'pending'
+    | 'paid'
+    | 'resolved'
+    | 'failed'
+    | 'reversed'
+    | 'needs_attention';
+  sourceType?: 'all' | 'purchase' | 'subscription';
+  fromDate?: string;
+  toDate?: string;
+};
 
 /**
  * Aggregate KPI numbers powering the `/studio/payouts` summary row.
@@ -2722,49 +2784,34 @@ export class SubscriptionService extends BaseService {
    * The creator name/avatar denorm comes from a LEFT JOIN on `users` so a
    * deleted user row does not drop the payout from the table.
    */
-  async listPayoutsByOrg(
-    orgId: string,
-    options: {
-      page: number;
-      limit: number;
-      status?:
-        | 'all'
-        | 'pending'
-        | 'paid'
-        | 'resolved'
-        | 'failed'
-        | 'reversed'
-        | 'needs_attention';
-      // Codex-h69cg: tri-party source filter chip on /studio/payouts.
-      sourceType?: 'all' | 'purchase' | 'subscription';
-      fromDate?: string;
-      toDate?: string;
-    }
-  ): Promise<PaginatedListResponse<PayoutWithCreator>> {
-    const {
-      page,
-      limit,
-      status = 'all',
-      sourceType = 'all',
-      fromDate,
-      toDate,
-    } = options;
-    const offset = (page - 1) * limit;
-
+  /**
+   * Build the WHERE-clause predicate array shared by `listPayoutsByOrg` and
+   * `getPayoutsByCreatorBreakdown`. Extracted so the table and the rail
+   * always read from the SAME row set — when the user toggles a filter chip,
+   * both surfaces reshape together rather than diverging.
+   *
+   * Status semantics match `listPayoutsByOrg`'s original inline logic:
+   *  - `'paid'` and `'resolved'` both map to the persisted `status='paid'`
+   *    (the legacy 'resolved' URL alias survives one release).
+   *  - `'needs_attention'` is a single chip combining pending + failed.
+   *  - `'all'` and missing status apply NO predicate.
+   *
+   * Date conditions use the helper `dateWindow(createdAt, from, to)` so empty
+   * args produce no SQL clauses (rather than `WHERE TRUE`).
+   */
+  private buildPayoutConditions(orgId: string, options: PayoutFilterOptions) {
+    const { status = 'all', sourceType = 'all', fromDate, toDate } = options;
     const conditions = [eq(payouts.organizationId, orgId)];
 
     if (status === 'pending') {
       conditions.push(eq(payouts.status, 'pending'));
     } else if (status === 'paid' || status === 'resolved') {
-      // 'resolved' is the legacy URL alias (PR3 introduces 'paid' as the
-      // canonical chip value; PR4 drops the alias).
       conditions.push(eq(payouts.status, 'paid'));
     } else if (status === 'failed') {
       conditions.push(eq(payouts.status, 'failed'));
     } else if (status === 'reversed') {
       conditions.push(eq(payouts.status, 'reversed'));
     } else if (status === 'needs_attention') {
-      // Single chip combining pending + failed for the exception-banner CTA.
       conditions.push(inArray(payouts.status, ['pending', 'failed']));
     }
 
@@ -2773,6 +2820,21 @@ export class SubscriptionService extends BaseService {
     }
 
     conditions.push(...dateWindow(payouts.createdAt, fromDate, toDate));
+
+    return conditions;
+  }
+
+  async listPayoutsByOrg(
+    orgId: string,
+    options: {
+      page: number;
+      limit: number;
+    } & PayoutFilterOptions
+  ): Promise<PaginatedListResponse<PayoutWithCreator>> {
+    const { page, limit } = options;
+    const offset = (page - 1) * limit;
+
+    const conditions = this.buildPayoutConditions(orgId, options);
 
     // Alias the users table a second time so we can left-join the
     // subscriber (customer who paid the invoice) alongside the existing
@@ -2799,6 +2861,11 @@ export class SubscriptionService extends BaseService {
           subscriberName: subscriber.name,
           subscriberEmail: subscriber.email,
           sourceType: payouts.sourceType,
+          // Codex-6nt4l: transaction grouping + drill-down hooks.
+          transferGroup: payouts.transferGroup,
+          purchaseId: payouts.purchaseId,
+          subscriptionId: payouts.subscriptionId,
+          stripeChargeId: payouts.stripeChargeId,
         })
         .from(payouts)
         .leftJoin(users, eq(payouts.userId, users.id))
@@ -2834,6 +2901,10 @@ export class SubscriptionService extends BaseService {
         subscriberName: row.subscriberName ?? null,
         subscriberEmail: row.subscriberEmail ?? null,
         sourceType: row.sourceType as 'purchase' | 'subscription',
+        transferGroup: row.transferGroup ?? null,
+        purchaseId: row.purchaseId ?? null,
+        subscriptionId: row.subscriptionId ?? null,
+        stripeChargeId: row.stripeChargeId ?? null,
       })),
       pagination: {
         page,
@@ -2907,6 +2978,135 @@ export class SubscriptionService extends BaseService {
       inTransitCents: inTransit[0]?.sum ?? 0,
       needsAttentionCount: needsAttention[0]?.count ?? 0,
     };
+  }
+
+  /**
+   * Codex-6nt4l: per-creator aggregate for the `/studio/payouts` right rail.
+   *
+   * Returns one row per user who has received a `creator_payout` or
+   * `organization_fee` payout for the org. `platform_fee` rows are excluded
+   * (the platform isn't a per-creator recipient) — enforced by `IS NOT NULL`
+   * on `payouts.userId`, which is the same predicate the DB CHECK constraint
+   * uses to distinguish platform rows from beneficiary rows.
+   *
+   * The filter clause is shared with `listPayoutsByOrg` via
+   * `buildPayoutConditions`, so toggling a Source/Status/Date chip reshapes
+   * the table AND the rail consistently.
+   *
+   * Aggregation runs in-memory after a single SELECT, mirroring
+   * `AdminAnalyticsService.getRevenueByCreator`. This keeps the surface
+   * narrow (one row per payout × one Map merge) and avoids fragmenting the
+   * filter logic across the SQL aggregator.
+   *
+   * `isOrgOwner` comes from a LEFT JOIN on `organizationMemberships` scoped
+   * to (userId, organizationId). External creators paid via a
+   * `creatorOrganizationAgreement` (no membership row) get `isOrgOwner:
+   * false` — the LEFT JOIN yields a null role.
+   *
+   * Sorted by `totalPaidCents` desc — the operator's headline question is
+   * "who has earned the most under this filter".
+   */
+  async getPayoutsByCreatorBreakdown(
+    orgId: string,
+    options: PayoutFilterOptions = {}
+  ): Promise<CreatorPayoutBreakdown[]> {
+    const conditions = this.buildPayoutConditions(orgId, options);
+    conditions.push(isNotNull(payouts.userId));
+
+    const rows = await this.db
+      .select({
+        userId: payouts.userId,
+        payoutId: payouts.id,
+        name: users.name,
+        email: users.email,
+        avatarUrl: users.image,
+        membershipRole: organizationMemberships.role,
+        amountCents: payouts.amountCents,
+        status: payouts.status,
+        sourceType: payouts.sourceType,
+        transferGroup: payouts.transferGroup,
+        resolvedAt: payouts.resolvedAt,
+      })
+      .from(payouts)
+      .leftJoin(users, eq(payouts.userId, users.id))
+      .leftJoin(
+        organizationMemberships,
+        and(
+          eq(organizationMemberships.userId, payouts.userId),
+          eq(organizationMemberships.organizationId, orgId)
+        )
+      )
+      .where(and(...conditions));
+
+    // Per-user accumulator — Sets for distinct-counting and a tracked max
+    // timestamp for `lastPaidAt` so we can run one pass without a second
+    // sort or SQL `MAX()` aggregate.
+    type Accumulator = CreatorPayoutBreakdown & {
+      _transferGroups: Set<string>;
+      _lastPaidAtMs: number;
+    };
+    const byUser = new Map<string, Accumulator>();
+
+    for (const row of rows) {
+      // The `IS NOT NULL` predicate filters at SQL level; this re-check
+      // narrows the row.userId TypeScript type and is a no-op at runtime.
+      if (!row.userId) continue;
+
+      let acc = byUser.get(row.userId);
+      if (!acc) {
+        acc = {
+          userId: row.userId,
+          name: row.name ?? null,
+          email: row.email ?? null,
+          avatarUrl: row.avatarUrl ?? null,
+          isOrgOwner: row.membershipRole === 'owner',
+          totalPaidCents: 0,
+          purchasePaidCents: 0,
+          subscriptionPaidCents: 0,
+          transactionCount: 0,
+          needsAttentionCount: 0,
+          lastPaidAt: null,
+          _transferGroups: new Set<string>(),
+          _lastPaidAtMs: 0,
+        };
+        byUser.set(row.userId, acc);
+      }
+
+      if (row.status === 'paid') {
+        acc.totalPaidCents += row.amountCents;
+        if (row.sourceType === 'purchase') {
+          acc.purchasePaidCents += row.amountCents;
+        } else if (row.sourceType === 'subscription') {
+          acc.subscriptionPaidCents += row.amountCents;
+        }
+        if (row.resolvedAt) {
+          // Drizzle hands back `Date` for timestamp columns; defensive cast
+          // covers driver variants that emit ISO strings.
+          const ms =
+            row.resolvedAt instanceof Date
+              ? row.resolvedAt.getTime()
+              : new Date(row.resolvedAt).getTime();
+          if (Number.isFinite(ms) && ms > acc._lastPaidAtMs) {
+            acc._lastPaidAtMs = ms;
+            acc.lastPaidAt = toIso(row.resolvedAt);
+          }
+        }
+      } else if (row.status === 'pending' || row.status === 'failed') {
+        acc.needsAttentionCount += 1;
+      }
+
+      // Pre-h69cg historical rows have no `transferGroup`. Falling back to
+      // the row id keeps the dedup correct (1 row = 1 transaction) rather
+      // than collapsing all ungrouped rows into a single bucket.
+      acc._transferGroups.add(row.transferGroup ?? row.payoutId);
+    }
+
+    return Array.from(byUser.values())
+      .map(({ _transferGroups, _lastPaidAtMs: _unused, ...rest }) => ({
+        ...rest,
+        transactionCount: _transferGroups.size,
+      }))
+      .sort((a, b) => b.totalPaidCents - a.totalPaidCents);
   }
 
   // ─── Pending Payout Resolution ──────────────────────────────────────────
