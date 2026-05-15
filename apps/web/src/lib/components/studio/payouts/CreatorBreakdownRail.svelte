@@ -17,16 +17,21 @@
 -->
 <script lang="ts">
   import { Skeleton } from '$lib/components/ui';
-  import type { CreatorPayoutBreakdown } from '@codex/subscription';
+  import type {
+    CreatorPayoutBreakdown,
+    PayoutSourceFilter,
+    PayoutStatusFilter,
+  } from '@codex/subscription';
+  import type { DateRange } from '@codex/shared-types';
   import CreatorBreakdownCard from './CreatorBreakdownCard.svelte';
 
   interface Props {
     breakdown: CreatorPayoutBreakdown[];
     loading: boolean;
     activeFilters?: {
-      status: string;
-      source: string;
-      range: string;
+      status: PayoutStatusFilter;
+      source: PayoutSourceFilter;
+      range: DateRange;
     };
   }
 
@@ -56,7 +61,7 @@
 
   {#if loading}
     <div class="rail__list" aria-busy="true">
-      {#each Array(3) as _, i (i)}
+      {#each Array.from({ length: 3 }) as _, i (i)}
         <div class="rail__skeleton">
           <Skeleton width="60%" height="var(--space-5)" />
           <Skeleton width="40%" height="var(--space-7)" />

@@ -3,14 +3,14 @@
   import type { HTMLTdAttributes } from 'svelte/elements';
 
   interface Props extends HTMLTdAttributes {
-    children: Snippet;
+    children?: Snippet;
   }
 
   const { children, class: className, ...restProps }: Props = $props();
 </script>
 
 <td class="table-cell {className}" {...restProps}>
-  {@render children()}
+  {#if children}{@render children()}{/if}
 </td>
 
 <style>

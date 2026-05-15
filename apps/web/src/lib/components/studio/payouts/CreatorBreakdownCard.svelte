@@ -50,6 +50,16 @@
   const transactionLabel = $derived(
     breakdown.transactionCount === 1 ? 'transaction' : 'transactions'
   );
+
+  // Owner-card composition disclosure (Codex-6nt4l). The owner's
+  // `totalPaidCents` mixes `organization_fee` rows with any
+  // `creator_payout_to_owner` slice — non-owner creators see only their
+  // own `creator_payout` rows. Surfacing the org-fee subset keeps the
+  // owner card visually comparable with the rest of the rail rather
+  // than always headlining "biggest number" for accounting reasons.
+  const showOrgFeeBreakdown = $derived(
+    breakdown.isOrgOwner && breakdown.orgFeePaidCents > 0
+  );
 </script>
 
 <article
@@ -79,6 +89,12 @@
   </header>
 
   <p class="creator-card__total">{formatPrice(breakdown.totalPaidCents)}</p>
+
+  {#if showOrgFeeBreakdown}
+    <p class="creator-card__org-fee">
+      of which {formatPrice(breakdown.orgFeePaidCents)} org fee
+    </p>
+  {/if}
 
   {#if hasSourceBreakdown}
     <p class="creator-card__split">
@@ -219,5 +235,13 @@
     margin: 0;
     font-size: var(--text-xs);
     color: var(--color-text-muted);
+  }
+
+  .creator-card__org-fee {
+    margin: calc(-1 * var(--space-1)) 0 0 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    font-style: italic;
+    font-variant-numeric: tabular-nums;
   }
 </style>

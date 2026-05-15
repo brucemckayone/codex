@@ -37,6 +37,9 @@ export type { RevenueSplit } from './financial';
 // Organization and Member types
 export type { OrgMemberContext, OrgMemberRole } from './member-types';
 
+// Studio UI filter primitives (lookback windows, etc.)
+export type { DateRange } from './studio-filters';
+
 // Worker types
 export type {
   AuthenticatedContext,

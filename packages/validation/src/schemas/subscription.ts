@@ -289,6 +289,7 @@ export type ReactivateSubscriptionInput = z.infer<
 >;
 export type ResumeSubscriptionInput = z.infer<typeof resumeSubscriptionSchema>;
 export type PayoutStatusFilter = z.infer<typeof payoutStatusFilterEnum>;
+export type PayoutSourceFilter = z.infer<typeof payoutSourceFilterEnum>;
 export type ListPayoutsQueryInput = z.infer<typeof listPayoutsQuerySchema>;
 export type GetPayoutSummaryQueryInput = z.infer<
   typeof getPayoutSummaryQuerySchema

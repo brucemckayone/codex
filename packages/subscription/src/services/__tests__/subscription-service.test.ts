@@ -6233,6 +6233,230 @@ describe('SubscriptionService', () => {
         listSubs.items.filter((r) => r.payoutType !== 'platform_fee')
       ).toHaveLength(2);
     });
+
+    // ── Multi-creator org scenarios (Codex-6nt4l) ──────────────────────
+    // The h69cg tri-party model + multi-creator revshare creates edge
+    // cases the per-user accumulator must handle correctly. These tests
+    // pin the contract.
+
+    it('multi-creator: needsAttentionCount dedupes sibling rows sharing a transferGroup', async () => {
+      // One failed charge produces TWO owner-attributed rows under
+      // multi-creator revshare: an `organization_fee` AND a
+      // `creator_payout_to_owner`. Both share one transferGroup. Pre-fix
+      // the owner card showed "1 transaction · 2 needs attention" for a
+      // single stuck payout — counting per-row instead of per-group.
+      const { org, tier1 } = await createFullOrg('6nt4l-multi-dedup');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'mcd'
+      );
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'organization_fee',
+          transferGroup: 'tg_6nt4l_mcd_FAIL',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 200,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'creator_payout_to_owner',
+          transferGroup: 'tg_6nt4l_mcd_FAIL',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      expect(result).toHaveLength(1);
+      // 2 rows, 1 transferGroup → 1 transaction, 1 needsAttention.
+      expect(result[0].transactionCount).toBe(1);
+      expect(result[0].needsAttentionCount).toBe(1);
+    });
+
+    it('multi-creator: orgFeePaidCents tracks organization_fee subset for the owner card', async () => {
+      // Owner gets BOTH `organization_fee` AND `creator_payout_to_owner`
+      // rows. Headline totalPaidCents sums both — orgFeePaidCents
+      // discloses the org-fee slice so the owner's card is visually
+      // comparable to non-owner creators.
+      const { org, tier1 } = await createFullOrg('6nt4l-orgfee');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'orgfee'
+      );
+      const { organizationMemberships } = await import(
+        '@codex/database/schema'
+      );
+      await db.insert(organizationMemberships).values({
+        organizationId: org.id,
+        userId: otherCreatorId,
+        role: 'owner',
+        status: 'active',
+      });
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 150,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_orgfee_a',
+          status: 'paid',
+          payoutType: 'organization_fee',
+          transferGroup: 'tg_6nt4l_orgfee_1',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 850,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_orgfee_b',
+          status: 'paid',
+          payoutType: 'creator_payout_to_owner',
+          transferGroup: 'tg_6nt4l_orgfee_1',
+        },
+        // Add a non-owner creator with NO org_fee rows — must show
+        // orgFeePaidCents=0 (it's an owner-only concept).
+        {
+          userId: thirdUserId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 400,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_orgfee_c',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_orgfee_2',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      const owner = result.find((r) => r.userId === otherCreatorId);
+      const creator = result.find((r) => r.userId === thirdUserId);
+      expect(owner?.isOrgOwner).toBe(true);
+      expect(owner?.totalPaidCents).toBe(1000); // 150 + 850
+      expect(owner?.orgFeePaidCents).toBe(150); // organization_fee only
+      expect(creator?.isOrgOwner).toBe(false);
+      expect(creator?.totalPaidCents).toBe(400);
+      expect(creator?.orgFeePaidCents).toBe(0);
+    });
+
+    it('multi-creator: min_transfer_floor rows are excluded from needsAttentionCount', async () => {
+      // Tiny per-creator revshares get held below Stripe's minimum
+      // transfer floor — pending until a sweep aggregates them. They
+      // are NOT operator exceptions and must not bloat the
+      // needsAttention badge across the rail.
+      const { org, tier1 } = await createFullOrg('6nt4l-floor');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'floor'
+      );
+      await db.insert(payoutsTable).values([
+        // Floor-held row — MUST be excluded.
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 50,
+          currency: 'gbp',
+          reason: 'min_transfer_floor',
+          status: 'pending',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_floor_1',
+        },
+        // Genuine transfer_failed — MUST be counted.
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 200,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_floor_2',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      expect(result).toHaveLength(1);
+      // Floor row excluded, only the transfer_failed counts.
+      expect(result[0].needsAttentionCount).toBe(1);
+      // transactionCount still sees both groups — floor row IS a
+      // transaction, just not an exception.
+      expect(result[0].transactionCount).toBe(2);
+    });
+
+    it('multi-creator: tie-broken by lastPaidAt desc when totalPaidCents matches', async () => {
+      // Two creators on identical revshare percentages will hit
+      // identical totals across reloads. Without a tie-breaker the
+      // rail order is non-deterministic. Secondary sort: lastPaidAt
+      // desc — most-recently-paid first reads as "freshest" data.
+      const { org, tier1 } = await createFullOrg('6nt4l-tie');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'tie'
+      );
+      const oldDate = new Date('2026-04-01T00:00:00Z');
+      const newDate = new Date('2026-05-01T00:00:00Z');
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: oldDate,
+          stripeTransferId: 'tr_6nt4l_tie_old',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_tie_old',
+        },
+        {
+          userId: thirdUserId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: newDate,
+          stripeTransferId: 'tr_6nt4l_tie_new',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_tie_new',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      expect(result).toHaveLength(2);
+      // Identical totalPaidCents — most-recently-paid first.
+      expect(result[0].userId).toBe(thirdUserId);
+      expect(result[1].userId).toBe(otherCreatorId);
+    });
   });
 
   // ─── resolvePendingPayouts (Codex-w4jjk) ───────────────────────────────────

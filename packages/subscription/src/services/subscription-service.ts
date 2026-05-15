@@ -133,16 +133,6 @@ export type PayoutDisplayStatus =
   | 'reversed';
 
 /**
- * Read-model returned by `SubscriptionService.listPayoutsByOrg`. The
- * creator denorm fields (`creatorName`, `creatorEmail`, `creatorAvatarUrl`)
- * come from a LEFT JOIN on `users` — null when the user row has been
- * removed but the payout history remains.
- *
- * Dates are serialised as ISO strings so the worker→Hono→JSON boundary
- * is lossless and the SvelteKit remote-function consumer can pass them
- * straight to `formatDate`.
- */
-/**
  * Read-model returned by `SubscriptionService.listSubscribers` (studio
  * Subscribers page — Codex-z27ml).
  *
@@ -174,6 +164,16 @@ export interface SubscriberListItem {
   createdAt: string;
 }
 
+/**
+ * Read-model returned by `SubscriptionService.listPayoutsByOrg`. The
+ * creator denorm fields (`creatorName`, `creatorEmail`, `creatorAvatarUrl`)
+ * come from a LEFT JOIN on `users` — null when the user row has been
+ * removed but the payout history remains.
+ *
+ * Dates are serialised as ISO strings so the worker→Hono→JSON boundary
+ * is lossless and the SvelteKit remote-function consumer can pass them
+ * straight to `formatDate`.
+ */
 export interface PayoutWithCreator {
   id: string;
   // Null for `platform_fee` rows — the platform isn't a user, so there is no
@@ -222,6 +222,12 @@ export interface PayoutWithCreator {
  * platform_fee rows at query time. The org owner appears here too, flagged
  * via `isOrgOwner` for the role badge — they are not split into a separate
  * section.
+ *
+ * Owner attribution: `organization_fee` rows write `userId = orgOwnerId`,
+ * so the owner's totals INCLUDE the org fee share alongside any
+ * `creator_payout` rows they personally received. Non-owner creators see
+ * only their `creator_payout` rows. The badge is the visual cue for this
+ * asymmetry.
  */
 export interface CreatorPayoutBreakdown {
   userId: string;
@@ -232,6 +238,11 @@ export interface CreatorPayoutBreakdown {
   totalPaidCents: number;
   purchasePaidCents: number;
   subscriptionPaidCents: number;
+  // Codex-6nt4l: subset of `totalPaidCents` from `organization_fee` rows.
+  // Always 0 for non-owners. For org owners this is the slice of their
+  // headline total that's the platform's per-charge org cut — surfaced
+  // on the card so the owner's apples-to-creators comparison stays honest.
+  orgFeePaidCents: number;
   transactionCount: number;
   needsAttentionCount: number;
   lastPaidAt: string | null;
@@ -3024,6 +3035,8 @@ export class SubscriptionService extends BaseService {
         amountCents: payouts.amountCents,
         status: payouts.status,
         sourceType: payouts.sourceType,
+        payoutType: payouts.payoutType,
+        reason: payouts.reason,
         transferGroup: payouts.transferGroup,
         resolvedAt: payouts.resolvedAt,
       })
@@ -3043,6 +3056,7 @@ export class SubscriptionService extends BaseService {
     // sort or SQL `MAX()` aggregate.
     type Accumulator = CreatorPayoutBreakdown & {
       _transferGroups: Set<string>;
+      _needsAttentionGroups: Set<string>;
       _lastPaidAtMs: number;
     };
     const byUser = new Map<string, Accumulator>();
@@ -3063,10 +3077,12 @@ export class SubscriptionService extends BaseService {
           totalPaidCents: 0,
           purchasePaidCents: 0,
           subscriptionPaidCents: 0,
+          orgFeePaidCents: 0,
           transactionCount: 0,
           needsAttentionCount: 0,
           lastPaidAt: null,
           _transferGroups: new Set<string>(),
+          _needsAttentionGroups: new Set<string>(),
           _lastPaidAtMs: 0,
         };
         byUser.set(row.userId, acc);
@@ -3078,6 +3094,12 @@ export class SubscriptionService extends BaseService {
           acc.purchasePaidCents += row.amountCents;
         } else if (row.sourceType === 'subscription') {
           acc.subscriptionPaidCents += row.amountCents;
+        }
+        // Track the `organization_fee` slice separately so the owner
+        // card can disclose "of which £X org fee" — keeps the owner's
+        // headline comparable to non-owner creator cards.
+        if (row.payoutType === 'organization_fee') {
+          acc.orgFeePaidCents += row.amountCents;
         }
         if (row.resolvedAt) {
           // Drizzle hands back `Date` for timestamp columns; defensive cast
@@ -3091,22 +3113,59 @@ export class SubscriptionService extends BaseService {
             acc.lastPaidAt = toIso(row.resolvedAt);
           }
         }
-      } else if (row.status === 'pending' || row.status === 'failed') {
-        acc.needsAttentionCount += 1;
       }
 
       // Pre-h69cg historical rows have no `transferGroup`. Falling back to
       // the row id keeps the dedup correct (1 row = 1 transaction) rather
       // than collapsing all ungrouped rows into a single bucket.
-      acc._transferGroups.add(row.transferGroup ?? row.payoutId);
+      const groupKey = row.transferGroup ?? row.payoutId;
+      acc._transferGroups.add(groupKey);
+
+      // `needsAttentionCount` dedupes by the SAME key as `transactionCount`
+      // — under h69cg's 3-sibling-row model, one failed charge produces 3
+      // pending/failed rows that share a transferGroup. Counting per-row
+      // would render "1 transaction · 3 needs attention" for one stuck
+      // payout, which reads as 3 separate problems.
+      //
+      // `min_transfer_floor` is excluded: rows below Stripe's minimum
+      // transfer threshold are held as pending until aggregate-and-sweep
+      // catches up — they're not an exception the operator needs to act
+      // on. Multi-creator orgs with small revshares hit this constantly.
+      if (
+        (row.status === 'pending' || row.status === 'failed') &&
+        row.reason !== 'min_transfer_floor'
+      ) {
+        acc._needsAttentionGroups.add(groupKey);
+      }
     }
 
-    return Array.from(byUser.values())
-      .map(({ _transferGroups, _lastPaidAtMs: _unused, ...rest }) => ({
-        ...rest,
-        transactionCount: _transferGroups.size,
-      }))
-      .sort((a, b) => b.totalPaidCents - a.totalPaidCents);
+    return (
+      Array.from(byUser.values())
+        .map(
+          ({
+            _transferGroups,
+            _needsAttentionGroups,
+            _lastPaidAtMs,
+            ...rest
+          }) => ({
+            ...rest,
+            transactionCount: _transferGroups.size,
+            needsAttentionCount: _needsAttentionGroups.size,
+            _lastPaidAtMs,
+          })
+        )
+        // Primary sort: totalPaidCents desc. Secondary tie-breaker:
+        // lastPaidAt desc (most-recently-paid first when totals match) —
+        // matters for multi-creator orgs where N creators on identical
+        // revshare percentages can hit the same totals across reloads.
+        .sort((a, b) => {
+          if (b.totalPaidCents !== a.totalPaidCents) {
+            return b.totalPaidCents - a.totalPaidCents;
+          }
+          return b._lastPaidAtMs - a._lastPaidAtMs;
+        })
+        .map(({ _lastPaidAtMs: _unused, ...rest }) => rest)
+    );
   }
 
   // ─── Pending Payout Resolution ──────────────────────────────────────────

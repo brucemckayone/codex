@@ -47,9 +47,12 @@
   import { formatDate, formatPrice, getInitials } from '$lib/utils/format';
   import type {
     CreatorPayoutBreakdown,
+    PayoutSourceFilter,
+    PayoutStatusFilter,
     PayoutSummary,
     PayoutWithCreator,
   } from '@codex/subscription';
+  import type { DateRange } from '@codex/shared-types';
   import type { QueryResult } from '$lib/remote/query-result';
 
   type PayoutsPage = {
@@ -62,16 +65,12 @@
     };
   };
 
-  type DateRange = '7' | '30' | '90' | 'all';
-  type StatusFilter =
-    | 'all'
-    | 'paid'
-    | 'resolved' // legacy URL alias for 'paid'
-    | 'pending'
-    | 'failed'
-    | 'reversed'
-    | 'needs_attention';
-  type SourceFilter = 'all' | 'purchase' | 'subscription';
+  // Filter unions reused from shared packages — DateRange is generic
+  // (sales page consumes the same), Status/Source are payout-specific
+  // (canonical enums live in @codex/validation, re-exported via
+  // @codex/subscription).
+  type StatusFilter = PayoutStatusFilter;
+  type SourceFilter = PayoutSourceFilter;
 
   let { data } = $props();
 
@@ -549,8 +548,8 @@
                       <!-- Date + From are blank for child rows; the header
                            carries them so the indent reads as "this row
                            belongs to the transaction above". -->
-                      <Table.Cell class="child-spacer-cell"></Table.Cell>
-                      <Table.Cell></Table.Cell>
+                      <Table.Cell class="child-spacer-cell" />
+                      <Table.Cell />
 
                       <Table.Cell>
                         <span class="type-cell">
@@ -802,12 +801,6 @@
     white-space: nowrap;
   }
 
-  .source-label {
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    font-variant-numeric: tabular-nums;
-  }
-
   .platform-cell {
     font-style: italic;
     color: var(--color-text-secondary);
@@ -835,16 +828,6 @@
     color: var(--color-text-secondary);
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
-  }
-
-  .from-cell {
-    font-size: var(--text-sm);
-    color: var(--color-text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 20ch;
-    display: inline-block;
   }
 
   .creator-cell {
