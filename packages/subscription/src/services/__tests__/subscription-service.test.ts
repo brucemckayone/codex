@@ -6233,6 +6233,93 @@ describe('SubscriptionService', () => {
         listSubs.items.filter((r) => r.payoutType !== 'platform_fee')
       ).toHaveLength(2);
     });
+
+    // REGRESSION (PR #204 deep-review F-3, DQ-8) — multi-creator orgs.
+    // `writePurchasePayouts` writes `organization_fee` rows with
+    // `userId = orgConnect.userId` (typically the org owner). Production
+    // currently accumulates that row under the owner's `totalPaidCents`,
+    // conflating org-admin slice with personal earnings. The rail then
+    // shows the owner with inflated personal earnings + "Org owner" badge,
+    // when the owner may have done zero creator-work this period.
+    //
+    // Marked `it.fails` so CI stays green WHILE the bug exists; when the
+    // breakdown is fixed (DQ-8 option (a): exclude organization_fee from
+    // per-creator totals), the assertions pass, vitest flips this red,
+    // the fixer removes `.fails`. See docs/pr-203-review/design-questions.md.
+    it.fails('excludes organization_fee from per-creator totalPaidCents (multi-creator regression)', async () => {
+      const { org, tier1 } = await createFullOrg('6nt4l-orgfee');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'orgfee'
+      );
+      const { organizationMemberships } = await import(
+        '@codex/database/schema'
+      );
+      // Owner = otherCreatorId (also holds the org Connect account).
+      // Co-creator who actually authored the content = thirdUserId.
+      await db.insert(organizationMemberships).values([
+        {
+          organizationId: org.id,
+          userId: otherCreatorId,
+          role: 'owner',
+          status: 'active',
+        },
+        {
+          organizationId: org.id,
+          userId: thirdUserId,
+          role: 'creator',
+          status: 'active',
+        },
+      ]);
+      // One £20 purchase of thirdUserId's content. Splits 10/15/76.5:
+      //   creator_payout £15.30 → thirdUserId
+      //   organization_fee £2.70 → owner's Connect (userId=otherCreatorId)
+      //   platform_fee £2.00 → userId=NULL (already excluded from breakdown)
+      await db.insert(payoutsTable).values([
+        {
+          userId: thirdUserId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 1530,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_orgfee_creator',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          sourceType: 'purchase',
+          transferGroup: 'tg_6nt4l_orgfee',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 270,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_orgfee_org',
+          status: 'paid',
+          payoutType: 'organization_fee',
+          sourceType: 'purchase',
+          transferGroup: 'tg_6nt4l_orgfee',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      const byUser = new Map(result.map((r) => [r.userId, r]));
+
+      // Co-creator (thirdUserId): £15.30 personal earnings — correct.
+      expect(byUser.get(thirdUserId)?.totalPaidCents).toBe(1530);
+
+      // Owner (otherCreatorId): £0 personal earnings — they received only
+      // the org-admin slice, not a creator_payout. The rail's "per-creator
+      // earnings" semantic must not surface org slice as personal.
+      // Currently fails: production reports 270 here.
+      expect(byUser.get(otherCreatorId)?.totalPaidCents).toBe(0);
+    });
   });
 
   // ─── resolvePendingPayouts (Codex-w4jjk) ───────────────────────────────────

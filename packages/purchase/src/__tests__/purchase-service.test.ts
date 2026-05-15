@@ -1509,6 +1509,144 @@ describe('PurchaseService Integration', () => {
       // transfer existed; both refund calls were content-status-only).
       expect(reversal).not.toHaveBeenCalled();
     });
+
+    // REGRESSION (PR #203 deep-review F-1, DQ-7) — partial refunds must
+    // proportionally reverse the creator + org transfers, not the full
+    // slices. Current production code in `reversePayoutsForPurchase`
+    // (purchase-service.ts:1289-1297) passes `amount: row.amountCents`
+    // regardless of the partial-refund ratio, so a £5 partial refund on
+    // a £20 charge fully zeroes the creator's £15.30 slice and the org's
+    // £2.70 slice — net £13 of unaccounted loss. See
+    // docs/pr-203-review/design-questions.md DQ-7.
+    //
+    // Marked `it.fails` so CI currently reports green WHILE the bug exists;
+    // when someone fixes the partial-refund path the assertions go true,
+    // vitest flips this red, the fixer removes `.fails`.
+    it.fails('partial refund proportionally reverses creator + org transfers (BUG: currently full-reverses)', async () => {
+      const stubFeeConfig = {
+        getFeesForCreator: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000, // 10%
+          orgFeePercent: 1500, // 15% of post-platform
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+
+      const [partialOrg] = await db
+        .insert(organizations)
+        .values({
+          name: 'Partial Refund Org',
+          slug: createUniqueSlug('partial-refund'),
+          ownerId: userId,
+        })
+        .returning();
+      await db.insert(schema.stripeConnectAccounts).values({
+        userId,
+        organizationId: partialOrg.id,
+        stripeAccountId: `acct_partial_${Date.now()}`,
+        status: 'active',
+        chargesEnabled: true,
+        payoutsEnabled: true,
+      });
+
+      const orgTransferId = `tr_partial_org_${Date.now()}`;
+      const creatorTransferId = `tr_partial_creator_${Date.now()}`;
+      const reversalCalls: { transferId: string; amount: number }[] = [];
+      const stubStripe = {
+        ...mockStripe,
+        transfers: {
+          create: vi
+            .fn()
+            .mockImplementation((args: { metadata?: { type?: string } }) => {
+              const id =
+                args?.metadata?.type === 'creator_payout'
+                  ? creatorTransferId
+                  : orgTransferId;
+              return Promise.resolve({ id });
+            }),
+          createReversal: vi
+            .fn()
+            .mockImplementation((id: string, args: { amount: number }) => {
+              reversalCalls.push({ transferId: id, amount: args.amount });
+              return Promise.resolve({ id: `trr_${id}` });
+            }),
+        },
+        refunds: { create: vi.fn() },
+      } as unknown as Stripe;
+      const partialService = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      const media = await mediaService.create(
+        {
+          title: 'Partial Refund Content',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/partial-refund/master.m3u8',
+          thumbnailKey: 'thumbnails/partial-refund.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+      const content = await contentService.create(
+        {
+          organizationId: partialOrg.id,
+          title: 'Partial Refund Content',
+          slug: createUniqueSlug('partial-refund'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 2000,
+        },
+        userId
+      );
+      await contentService.publish(content.id, userId);
+
+      const chargeId = `ch_partial_${Date.now()}`;
+      const paymentIntentId = `pi_partial_${Date.now()}`;
+      // £20 purchase. Splits with 10% platform / 15% org-of-remainder:
+      //   platform £2.00 (kept on balance, no transfer)
+      //   org      £2.70 (transfer)
+      //   creator  £15.30 (transfer)
+      await partialService.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId: partialOrg.id,
+        amountPaidCents: 2000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+      });
+
+      // £5 partial refund (25% of £20).
+      await partialService.processRefund(paymentIntentId, {
+        stripeRefundId: 're_partial_001',
+        refundAmountCents: 500,
+        refundReason: 'requested_by_customer',
+      });
+
+      // Proportional reversal: 25% of each slice (floor to whole pence).
+      //   creator: floor(1530 * 0.25) = 382
+      //   org:     floor(270  * 0.25) =  67
+      //   residual: 1 cent — design choice in DQ-7 (recommendation: → platform).
+      const creatorReversal = reversalCalls.find(
+        (c) => c.transferId === creatorTransferId
+      );
+      const orgReversal = reversalCalls.find(
+        (c) => c.transferId === orgTransferId
+      );
+      expect(creatorReversal?.amount).toBe(382);
+      expect(orgReversal?.amount).toBe(67);
+    });
   });
 
   describe('verifyPurchase', () => {
