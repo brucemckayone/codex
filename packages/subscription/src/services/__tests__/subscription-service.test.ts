@@ -2829,7 +2829,9 @@ describe('SubscriptionService', () => {
       // Override the default empty-payments mock so retrieve returns the
       // fully expanded shape Stripe yields when `expand: ['payments']`.
       (
-        stripe as unknown as { invoices: { retrieve: ReturnType<typeof vi.fn> } }
+        stripe as unknown as {
+          invoices: { retrieve: ReturnType<typeof vi.fn> };
+        }
       ).invoices.retrieve.mockResolvedValueOnce({
         id: mockInvoice.id,
         payments: {
@@ -2847,9 +2849,7 @@ describe('SubscriptionService', () => {
       const calls = (stripe.transfers.create as ReturnType<typeof vi.fn>).mock
         .calls;
       for (const [, opts] of calls) {
-        expect(opts?.idempotencyKey).toMatch(
-          new RegExp(`^${realChargeId}_`)
-        );
+        expect(opts?.idempotencyKey).toMatch(new RegExp(`^${realChargeId}_`));
       }
     });
 
@@ -2875,7 +2875,9 @@ describe('SubscriptionService', () => {
       }) as unknown as Stripe.Invoice;
 
       (
-        stripe as unknown as { invoices: { retrieve: ReturnType<typeof vi.fn> } }
+        stripe as unknown as {
+          invoices: { retrieve: ReturnType<typeof vi.fn> };
+        }
       ).invoices.retrieve.mockResolvedValueOnce({
         id: mockInvoice.id,
         payments: {
@@ -2899,14 +2901,14 @@ describe('SubscriptionService', () => {
       const calls = (stripe.transfers.create as ReturnType<typeof vi.fn>).mock
         .calls;
       for (const [, opts] of calls) {
-        expect(opts?.idempotencyKey).toMatch(
-          new RegExp(`^${chargeViaPi}_`)
-        );
+        expect(opts?.idempotencyKey).toMatch(new RegExp(`^${chargeViaPi}_`));
       }
     });
 
     it('falls back to charges.list when paymentIntent has no latest_charge (race after PI confirmation)', async () => {
-      const { org, tier1 } = await createFullOrg('invoice-charges-list-fallback');
+      const { org, tier1 } = await createFullOrg(
+        'invoice-charges-list-fallback'
+      );
       const [sub] = await db
         .insert(subscriptions)
         .values(
@@ -2928,7 +2930,9 @@ describe('SubscriptionService', () => {
 
       // Expanded invoice has only PI, no charge.
       (
-        stripe as unknown as { invoices: { retrieve: ReturnType<typeof vi.fn> } }
+        stripe as unknown as {
+          invoices: { retrieve: ReturnType<typeof vi.fn> };
+        }
       ).invoices.retrieve.mockResolvedValueOnce({
         id: mockInvoice.id,
         payments: {
@@ -2984,7 +2988,9 @@ describe('SubscriptionService', () => {
 
       // Expanded retrieve returns empty too.
       (
-        stripe as unknown as { invoices: { retrieve: ReturnType<typeof vi.fn> } }
+        stripe as unknown as {
+          invoices: { retrieve: ReturnType<typeof vi.fn> };
+        }
       ).invoices.retrieve.mockResolvedValueOnce({
         id: mockInvoice.id,
         payments: { data: [] },
@@ -3796,6 +3802,404 @@ describe('SubscriptionService', () => {
       expect(result).toBeDefined();
       expect(result?.userId).toBeUndefined();
       expect(result?.orgId).toBeUndefined();
+    });
+  });
+
+  // ─── Webhook ordering self-heal (Codex-t7psp) ─────────────────────
+  //
+  // Stripe does NOT guarantee webhook delivery order. On a fresh
+  // subscription, `invoice.payment_succeeded` and `invoice.payment_failed`
+  // can arrive BEFORE `customer.subscription.created`. Before this fix,
+  // those handlers logged "Invoice for unknown subscription" and silently
+  // dropped the first payout (race #1) or the past_due flip (race #2).
+  //
+  // Fix: `ensureSubscriptionDataPresent` retrieves the sub from Stripe
+  // when the DB row is missing and inserts subscription + follower +
+  // membership in one transaction. Side effects (welcome email, cache
+  // invalidation) stay on the create-event handler so they don't get
+  // dropped by the unique-violation swallow when the real
+  // `customer.subscription.created` lands later.
+  describe('Webhook ordering self-heal (Codex-t7psp)', () => {
+    /** Unique stripe-sub id per call — avoids cross-run collisions in the shared test DB. */
+    function uniqueStripeSubId(prefix: string) {
+      return `sub_${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    /** Build a Stripe subscription mock with the metadata our helper expects. */
+    function buildStripeSubMock(args: {
+      stripeSubId: string;
+      stripeCustomerId: string;
+      userId: string;
+      orgId: string;
+      tierId: string;
+    }) {
+      return createMockStripeSubscription({
+        id: args.stripeSubId,
+        customer: args.stripeCustomerId,
+        metadata: {
+          codex_user_id: args.userId,
+          codex_organization_id: args.orgId,
+          codex_tier_id: args.tierId,
+        },
+      }) as unknown as Stripe.Subscription;
+    }
+
+    it('race #1: invoice.payment_succeeded self-heals missing subscription row and runs transfers', async () => {
+      const { org, tier1 } = await createFullOrg('selfheal-race1');
+      const stripeSubId = uniqueStripeSubId('race1');
+      const stripeCustomerId = `cus_${stripeSubId}`;
+      const chargeId = `ch_${stripeSubId}`;
+
+      // Pre-condition: NO subscriptions row exists for this Stripe sub.
+      // Stripe sub retrieve returns a fully-formed sub with our metadata.
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(
+        buildStripeSubMock({
+          stripeSubId,
+          stripeCustomerId,
+          userId: otherCreatorId,
+          orgId: org.id,
+          tierId: tier1.id,
+        })
+      );
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        parent: {
+          subscription_details: { subscription: stripeSubId },
+        },
+        payments: {
+          data: [{ payment: { charge: chargeId, payment_intent: null } }],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const result = await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      // Helper inserted the subscription + follower + membership rows.
+      const { eq, and } = await import('drizzle-orm');
+      const { organizationFollowers, organizationMemberships } = await import(
+        '@codex/database/schema'
+      );
+      const [inserted] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
+        .limit(1);
+      expect(inserted).toBeDefined();
+      expect(inserted.userId).toBe(otherCreatorId);
+      expect(inserted.organizationId).toBe(org.id);
+
+      const [follower] = await db
+        .select()
+        .from(organizationFollowers)
+        .where(
+          and(
+            eq(organizationFollowers.organizationId, org.id),
+            eq(organizationFollowers.userId, otherCreatorId)
+          )
+        )
+        .limit(1);
+      expect(follower).toBeDefined();
+
+      const [membership] = await db
+        .select()
+        .from(organizationMemberships)
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, org.id),
+            eq(organizationMemberships.userId, otherCreatorId)
+          )
+        )
+        .limit(1);
+      expect(membership).toBeDefined();
+      expect(membership.role).toBe('subscriber');
+
+      // Money path resumed: transfers fired with chargeId-derived keys.
+      expect(stripe.transfers.create).toHaveBeenCalled();
+      const transferCalls = (
+        stripe.transfers.create as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      for (const [, opts] of transferCalls) {
+        expect(opts?.idempotencyKey).toMatch(new RegExp(`^${chargeId}_`));
+      }
+
+      // Handler returns invalidation tuple so the route bumps caches.
+      expect(result?.userId).toBe(otherCreatorId);
+      expect(result?.orgId).toBe(org.id);
+    });
+
+    it('race #2: invoice.payment_failed self-heals missing row then flips status to past_due', async () => {
+      const { org, tier1 } = await createFullOrg('selfheal-race2');
+      const stripeSubId = uniqueStripeSubId('race2');
+      const stripeCustomerId = `cus_${stripeSubId}`;
+
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(
+        buildStripeSubMock({
+          stripeSubId,
+          stripeCustomerId,
+          userId: otherCreatorId,
+          orgId: org.id,
+          tierId: tier1.id,
+        })
+      );
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_due: 499,
+        customer_email: 'failed@example.com',
+        parent: {
+          subscription_details: { subscription: stripeSubId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const result = await service.handleInvoicePaymentFailed(mockInvoice);
+
+      const { eq } = await import('drizzle-orm');
+      const [row] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
+        .limit(1);
+      expect(row).toBeDefined();
+      expect(row.status).toBe('past_due');
+      expect(result?.userId).toBe(otherCreatorId);
+      expect(result?.orgId).toBe(org.id);
+    });
+
+    it('Stripe 404 on retrieve: handler returns cleanly, no transfer, no row inserted', async () => {
+      const stripeSubId = uniqueStripeSubId('stripe404');
+
+      // Simulate Stripe returning 404 — type marker matches the
+      // detection branch in ensureSubscriptionDataPresent.
+      const stripe404 = new Error('No such subscription') as Error & {
+        type?: string;
+      };
+      stripe404.type = 'StripeInvalidRequestError';
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockRejectedValueOnce(stripe404);
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        parent: {
+          subscription_details: { subscription: stripeSubId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const callsBefore = (stripe.transfers.create as ReturnType<typeof vi.fn>)
+        .mock.calls.length;
+      const result = await service.handleInvoicePaymentSucceeded(mockInvoice);
+      const callsAfter = (stripe.transfers.create as ReturnType<typeof vi.fn>)
+        .mock.calls.length;
+
+      expect(result).toBeUndefined();
+      expect(callsAfter).toBe(callsBefore);
+
+      const { eq } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
+      expect(rows).toHaveLength(0);
+    });
+
+    it('metadata missing on retrieved sub: helper returns null, no row inserted', async () => {
+      const stripeSubId = uniqueStripeSubId('nometa');
+
+      // Default mock returns a sub with empty metadata — exactly the
+      // shape that should trip the "missing metadata" guard.
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(
+        createMockStripeSubscription({
+          id: stripeSubId,
+          metadata: {},
+        }) as unknown as Stripe.Subscription
+      );
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        parent: {
+          subscription_details: { subscription: stripeSubId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const result = await service.handleInvoicePaymentSucceeded(mockInvoice);
+      expect(result).toBeUndefined();
+
+      const { eq } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
+      expect(rows).toHaveLength(0);
+    });
+
+    it('concurrent self-heal: two parallel invoice handlers insert exactly one row, both run transfers', async () => {
+      const { org, tier1 } = await createFullOrg('selfheal-concurrent');
+      const stripeSubId = uniqueStripeSubId('concurrent');
+      const stripeCustomerId = `cus_${stripeSubId}`;
+      const chargeId = `ch_${stripeSubId}`;
+
+      // Both parallel invocations will call retrieve — return the same
+      // metadata on every call so the second insert sees a unique-violation.
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockImplementation(() =>
+        buildStripeSubMock({
+          stripeSubId,
+          stripeCustomerId,
+          userId: otherCreatorId,
+          orgId: org.id,
+          tierId: tier1.id,
+        })
+      );
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        parent: {
+          subscription_details: { subscription: stripeSubId },
+        },
+        payments: {
+          data: [{ payment: { charge: chargeId, payment_intent: null } }],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      // Fire both handlers in parallel — exactly the racing-webhooks shape.
+      await Promise.all([
+        service.handleInvoicePaymentSucceeded(mockInvoice),
+        service.handleInvoicePaymentSucceeded(mockInvoice),
+      ]);
+
+      const { eq } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
+      expect(rows).toHaveLength(1);
+
+      // Both invocations ran transfers, every call carries a chargeId-derived
+      // idempotency key — Stripe will dedupe the duplicate transfer at its end.
+      const transferCalls = (
+        stripe.transfers.create as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      expect(transferCalls.length).toBeGreaterThanOrEqual(2);
+      for (const [, opts] of transferCalls) {
+        expect(opts?.idempotencyKey).toMatch(new RegExp(`^${chargeId}_`));
+      }
+    });
+
+    it('regression: customer.subscription.created lands AFTER self-heal pre-insert → side effects still fire', async () => {
+      // Sequence:
+      //   1. invoice.payment_succeeded arrives FIRST → self-heal inserts row
+      //   2. customer.subscription.created arrives SECOND → must NOT swallow
+      //      the welcome email + cache invalidation just because the row
+      //      pre-existed. This is the regression-prevention guarantee.
+      const { org, tier1 } = await createFullOrg('selfheal-create-after');
+      const stripeSubId = uniqueStripeSubId('createafter');
+      const stripeCustomerId = `cus_${stripeSubId}`;
+
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(
+        buildStripeSubMock({
+          stripeSubId,
+          stripeCustomerId,
+          userId: otherCreatorId,
+          orgId: org.id,
+          tierId: tier1.id,
+        })
+      );
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        parent: {
+          subscription_details: { subscription: stripeSubId },
+        },
+        payments: {
+          data: [
+            { payment: { charge: `ch_${stripeSubId}`, payment_intent: null } },
+          ],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      // Step 1: invoice arrives first, self-heals row.
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      // Step 2: real create event arrives — the Stripe sub object the
+      // ecom-api webhook would dispatch to handleSubscriptionCreated.
+      const mockCreateEventSub = buildStripeSubMock({
+        stripeSubId,
+        stripeCustomerId,
+        userId: otherCreatorId,
+        orgId: org.id,
+        tierId: tier1.id,
+      });
+
+      const result =
+        await service.handleSubscriptionCreated(mockCreateEventSub);
+
+      // The previous unique-violation swallow returned `void` here, dropping
+      // the welcome email + cache invalidation. After the fix, the handler
+      // MUST return `{ userId, orgId }` so the route bumps both caches and
+      // dispatches the welcome email.
+      expect(result).toBeDefined();
+      expect(result?.userId).toBe(otherCreatorId);
+      expect(result?.orgId).toBe(org.id);
+    });
+
+    it('regression: Stripe redelivers create event after 5xx-after-insert → side effects fire on redelivery', async () => {
+      // Pre-insert via self-heal to simulate "first delivery 5xx'd
+      // after we inserted the row" — the second attempt finds the row
+      // already present. With the old swallow, the email was lost
+      // forever; the new behavior fires it on redelivery.
+      const { org, tier1 } = await createFullOrg('selfheal-redeliver');
+      const stripeSubId = uniqueStripeSubId('redeliver');
+      const stripeCustomerId = `cus_${stripeSubId}`;
+
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(
+        buildStripeSubMock({
+          stripeSubId,
+          stripeCustomerId,
+          userId: otherCreatorId,
+          orgId: org.id,
+          tierId: tier1.id,
+        })
+      );
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        parent: {
+          subscription_details: { subscription: stripeSubId },
+        },
+        payments: {
+          data: [
+            { payment: { charge: `ch_${stripeSubId}`, payment_intent: null } },
+          ],
+        },
+      }) as unknown as Stripe.Invoice;
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      // Now fire the create event TWICE — simulating Stripe redelivery.
+      const createSub = buildStripeSubMock({
+        stripeSubId,
+        stripeCustomerId,
+        userId: otherCreatorId,
+        orgId: org.id,
+        tierId: tier1.id,
+      });
+      const first = await service.handleSubscriptionCreated(createSub);
+      const second = await service.handleSubscriptionCreated(createSub);
+
+      // Both invocations return invalidation tuples — neither swallows
+      // the side effects despite the row already being present.
+      expect(first?.userId).toBe(otherCreatorId);
+      expect(first?.orgId).toBe(org.id);
+      expect(second?.userId).toBe(otherCreatorId);
+      expect(second?.orgId).toBe(org.id);
     });
   });
 
@@ -4961,9 +5365,7 @@ describe('SubscriptionService', () => {
       // UI-derived display status is still 'resolved' until PR4 drops the alias.
       expect(result.items[0]!.status).toBe('resolved');
       expect(result.items[0]!.amountCents).toBe(250);
-      expect(result.items[0]!.stripeTransferId).toBe(
-        'tr_05vp8_canonical_paid'
-      );
+      expect(result.items[0]!.stripeTransferId).toBe('tr_05vp8_canonical_paid');
     });
 
     it('projects payoutType from the payouts row', async () => {
@@ -5284,7 +5686,7 @@ describe('SubscriptionService', () => {
       expect(result.inTransitCents).toBe(400); // 150 + 250 only
     });
 
-    it("needsAttentionCount counts pending + failed rows (excludes paid)", async () => {
+    it('needsAttentionCount counts pending + failed rows (excludes paid)', async () => {
       const { org, tier1 } = await createFullOrg('05vp8-sum-needs-attn');
       const sub = await seedSubscriptionForOrg(
         org.id,
@@ -6858,7 +7260,9 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
           subscription_details: { subscription: sub.stripeSubscriptionId },
         },
         payments: {
-          data: [{ payment: { charge: chargeId, payment_intent: 'pi_orgfee' } }],
+          data: [
+            { payment: { charge: chargeId, payment_intent: 'pi_orgfee' } },
+          ],
         },
       }) as unknown as Stripe.Invoice;
 
@@ -7004,22 +7408,24 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       // the partial-unique-index path.
       const transferSpy = vi.mocked(stripe.transfers.create);
       const byKey = new Map<string, string>();
-      transferSpy.mockImplementation((params: Record<string, unknown>, opts) => {
-        const o = opts as { idempotencyKey?: string } | undefined;
-        const key = o?.idempotencyKey ?? '';
-        let id = byKey.get(key);
-        if (!id) {
-          id = `tr_idem_${createUniqueSlug('t')}`;
-          byKey.set(key, id);
+      transferSpy.mockImplementation(
+        (params: Record<string, unknown>, opts) => {
+          const o = opts as { idempotencyKey?: string } | undefined;
+          const key = o?.idempotencyKey ?? '';
+          let id = byKey.get(key);
+          if (!id) {
+            id = `tr_idem_${createUniqueSlug('t')}`;
+            byKey.set(key, id);
+          }
+          return Promise.resolve({
+            id,
+            amount: params.amount,
+            currency: params.currency,
+            destination: params.destination,
+            metadata: params.metadata ?? {},
+          }) as unknown as ReturnType<typeof transferSpy>;
         }
-        return Promise.resolve({
-          id,
-          amount: params.amount,
-          currency: params.currency,
-          destination: params.destination,
-          metadata: params.metadata ?? {},
-        }) as unknown as ReturnType<typeof transferSpy>;
-      });
+      );
 
       const chargeId = 'ch_e9v3b_idem_fixed';
       const mockInvoice = createMockStripeInvoice({
