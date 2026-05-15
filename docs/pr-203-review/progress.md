@@ -290,13 +290,43 @@ The most important multi-creator security invariant in PR #204 (`/payouts/by-cre
 | Codex-0sz4j | P3 | F-22 fixed skeleton count (UI) | ⏳ (UX-only) |
 | Codex-p6sy6 | P3 | F-41 no rate limit on payouts reads | ⏳ (consistent with siblings) |
 
+## Cycle 7 — revenue-calculator.ts audit (🟢 clean math, 🟡 fairness policy questions)
+
+Read `packages/purchase/src/services/revenue-calculator.ts` (206 lines). Verdict: math is sound. `calculateRevenueSplit` validates inputs as integers, raises explicit `RevenueCalculationError` on out-of-range bps, sanity-checks `Σ == total`, and asserts non-negative. `applyMinPlatformFeeFloor` is correctly kept separate from the pure split math.
+
+Cross-checked against existing test "share-sum 10000 bps with 3-way odd split (3334/3333/3333)" (subscription-service.test.ts:3360) — confirms the platform-keeps-residual behaviour is **intentional**, **documented in test name**, and asserted by existing coverage. No new failing test landed; would be tautology.
+
+| Tag | Status | Title |
+|---|---|---|
+| F-46 | 🟢 RETRACTED | Per-creator floor residual silently stays on platform — confirmed intentional + tested. No bug. |
+| F-47 | 🟡 → DQ-17 | `applyMinPlatformFeeFloor` reduces creator pool first, then org. Multi-creator orgs: all N creators bear the floor cost while org keeps slice. Documented + intentional, but worth a product policy decision. |
+| F-48 | 🟡 → DQ-18 | Cumulative rounding loss against creators (ceil at split level + floor at fan-out). ~3p/invoice × 1000 invoices/yr ≈ £30/yr leakage for a 4-creator org. No ledger row captures the residual; observability gap. |
+| F-49 | 🟢 | Edge cases tested (amount=0, amount=1, amount=99 odd-divisor) all preserve `Σ == total`. |
+| F-50 | 🟢 | Floor-before-fan-out ordering is correct: pool is reduced at the split level, then per-creator weights divide whatever's left. |
+
+Design questions DQ-17 and DQ-18 added — both about multi-creator fairness, neither a coding bug.
+
+## Beads filed (cycles 1-7)
+
+| Bead | Priority | Title | Test |
+|---|---|---|---|
+| Codex-d9t5r | P0 | F-1 partial refund full-reverses | ✅ |
+| Codex-92ej7 | P0 | F-2 pending rows mis-marked reversed | ✅ |
+| Codex-h3864 | P1 | F-3 breakdown conflates org_fee | ✅ |
+| Codex-5794i | P1 | F-7 sweep wrong fee policy | ✅ |
+| Codex-iivne | P1 | F-13 pile-up under min-transfer floor | ✅ |
+| Codex-e2773 | P1 | F-26 pagination splits transferGroup | ✅ |
+| Codex-biiqd | P2 | F-19 "Unknown creator" fallback (UI) | ✅ (component) |
+| Codex-ajbja | P2 | F-45 route-level test gap (3 payouts endpoints) | (this bead IS the test work) |
+| Codex-0sz4j | P3 | F-22 fixed skeleton count (UI) | ⏳ (UX-only) |
+| Codex-p6sy6 | P3 | F-41 no rate limit on payouts reads | ⏳ (consistent with siblings) |
+
 ## Outstanding
 
 - Schema CHECK constraints negative tests (`check_payouts_user_required`, `check_payouts_paid_invariant`)
 - F-12 small fix (explicit `sourceType` in subscription inserts)
 - F-29 defensive coalesce on `group.subscriberName` across siblings
 - F-33 Stripe Dashboard test-mode URL prefix
-- `revenue-calculator.ts` audit — rounding behaviour at multi-creator scale
 - `/review` and `/simplify` formal passes
 
 ## Design questions

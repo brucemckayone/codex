@@ -275,4 +275,47 @@ Even after F-3 is fixed (excluding org_fee from totals), the rail still has no U
 
 ---
 
+---
+
+## DQ-17 — Min-platform-fee floor: creators-first reduction order
+
+**Context.** `applyMinPlatformFeeFloor` (revenue-calculator.ts:187-205) shifts the floor's shortfall by reducing creator pool FIRST, then org fee. Documented at L178-181: "the shortfall is taken from the creator pool first, then the org fee."
+
+For a single-creator purchase this is one creator bearing the cost; for a multi-creator subscription invoice, ALL N creators share the burden (proportionally to their shareBps), while the org keeps its slice undamaged. The org owner benefits at every creator's expense whenever the platform's min-fee floor bites.
+
+**Options.**
+- (a) Current — creator pool first, then org. Org always defended.
+- (b) Reversed — org first, then creator. Creators always defended.
+- (c) Proportional — split the floor shortfall across creator pool + org by their share ratio.
+- (d) Configurable per org / per fee config row.
+
+**Recommendation.** (c) for fairness. Two creators in a multi-creator org shouldn't each lose £0.20 to a platform-floor enforcement while the org owner keeps £2.70 of org slice from the same invoice. Proportional is the policy that most product platforms (e.g. Patreon-style splits) use.
+
+**Status.** Open. Policy decision; no implementation change without product alignment.
+
+---
+
+## DQ-18 — Cumulative multi-creator rounding loss
+
+**Context.** Two rounding events compound against creators in the multi-creator path:
+
+1. `calculateRevenueSplit` (revenue-calculator.ts:104, 113) `Math.ceil`s both platform and org fees. Creator pool is exact remainder — already 0-2 pence smaller than the "fair" share.
+2. `executeTransfers` (subscription-service.ts:4029) `Math.floor`s each per-creator share. Residual (up to N-1 pence) stays on the platform's Stripe balance with no ledger row.
+
+For a 4-creator org on £20 invoices monthly, that's ~3p of rounding loss per invoice against creators × 1000 invoices/yr ≈ £30/yr the creator pool effectively gives away to the platform. Small per-invoice; compounds at scale.
+
+Even the docstring of `calculateRevenueSplit` ("Round platform/org fees UP - platform/org get full cents. Creator gets exact remainder") doesn't acknowledge the multi-creator case where "creator" is the *pool*, not any individual.
+
+**Options.**
+- (a) Round-robin / largest-share-first residual distribution. The platform's `Math.floor` residual is allocated to the creator with the largest share (or rotated round-robin across creators across consecutive invoices).
+- (b) Write a `platform_residual` payouts row for transparency — keep the money on the platform but record where it came from, so the ledger is complete.
+- (c) Change `Math.floor` → `Math.round` per-creator. Some creators get +1 cent, others get –1 cent, evens out over time. Risks Σ > pool.
+- (d) Accept the loss; update docstrings to make the multi-creator case explicit.
+
+**Recommendation.** (b) is the minimum bar — full ledger completeness costs nothing. (a) is the right product fix if creators ever notice and push back. (d) without (b) leaves an opaque accounting gap.
+
+**Status.** Open. Documentation update + ledger row are cheap; product policy is a bigger conversation.
+
+---
+
 _Add new questions below; renumber if any are removed._
