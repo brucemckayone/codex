@@ -444,6 +444,7 @@ const listPayoutsQueryArgsSchema = z.object({
   //  - 'paid' replaces 'resolved' as the canonical name; 'resolved' is kept
   //    as a URL alias for one release and dropped in PR4.
   //  - 'needs_attention' combines pending + failed for the banner CTA.
+  //  - 'reversed' added by Codex-h69cg (refund-reversed rows).
   status: z
     .enum([
       'all',
@@ -451,9 +452,12 @@ const listPayoutsQueryArgsSchema = z.object({
       'paid',
       'resolved',
       'failed',
+      'reversed',
       'needs_attention',
     ])
     .default('all'),
+  // Codex-h69cg: tri-party source filter chip on /studio/payouts.
+  source: z.enum(['all', 'purchase', 'subscription']).default('all'),
   fromDate: z.string().datetime().optional(),
   toDate: z.string().datetime().optional(),
   page: z.coerce.number().int().min(1).default(1),
@@ -480,11 +484,12 @@ const getPayoutSummaryArgsSchema = z.object({
  */
 export const listPayouts = query(
   listPayoutsQueryArgsSchema,
-  async ({ organizationId, status, fromDate, toDate, page, limit }) => {
+  async ({ organizationId, status, source, fromDate, toDate, page, limit }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
     const params = new URLSearchParams();
     if (status) params.set('status', status);
+    if (source) params.set('source', source);
     if (fromDate) params.set('fromDate', fromDate);
     if (toDate) params.set('toDate', toDate);
     params.set('page', String(page));

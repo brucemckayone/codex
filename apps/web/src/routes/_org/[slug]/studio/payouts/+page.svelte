@@ -66,7 +66,9 @@
     | 'resolved' // legacy URL alias for 'paid'
     | 'pending'
     | 'failed'
+    | 'reversed'
     | 'needs_attention';
+  type SourceFilter = 'all' | 'purchase' | 'subscription';
 
   let { data } = $props();
 
@@ -90,6 +92,9 @@
   const statusFilter = $derived(
     (page.url.searchParams.get('status') as StatusFilter) || 'all'
   );
+  const sourceFilter = $derived(
+    (page.url.searchParams.get('source') as SourceFilter) || 'all'
+  );
   const limit = 20;
 
   // ── Date-range → ISO bounds (window applies to both list + summary) ──
@@ -107,6 +112,7 @@
       ? listPayouts({
           organizationId: orgId,
           status: statusFilter,
+          source: sourceFilter,
           page: currentUrlPage,
           limit,
           ...(dateBounds.fromDate && { fromDate: dateBounds.fromDate }),
@@ -152,6 +158,7 @@
   const URL_DEFAULTS: Record<string, string> = {
     range: '30',
     status: 'all',
+    source: 'all',
   };
 
   function setUrlParam(key: string, value: string | null) {
@@ -178,7 +185,14 @@
     { value: 'paid', label: 'Paid' },
     { value: 'pending', label: 'Pending' },
     { value: 'failed', label: 'Failed' },
+    { value: 'reversed', label: 'Reversed' },
     { value: 'needs_attention', label: 'Needs attention' },
+  ];
+
+  const sourceOptions: Array<{ value: SourceFilter; label: string }> = [
+    { value: 'all', label: 'All sources' },
+    { value: 'purchase', label: 'Purchase' },
+    { value: 'subscription', label: 'Subscription' },
   ];
 
   const RANGE_LABELS: Record<DateRange, string> = {
@@ -194,28 +208,36 @@
   // success, failed = error.
   function statusVariant(
     status: PayoutWithCreator['status']
-  ): 'warning' | 'success' | 'error' {
+  ): 'warning' | 'success' | 'error' | 'info' {
     if (status === 'resolved') return 'success';
     if (status === 'failed') return 'error';
+    if (status === 'reversed') return 'info';
     return 'warning';
   }
 
   function statusLabel(status: PayoutWithCreator['status']): string {
     if (status === 'resolved') return 'Paid';
     if (status === 'failed') return 'Failed';
+    if (status === 'reversed') return 'Reversed';
     return 'Pending';
   }
 
   /**
    * Human-readable label for `payouts.payoutType` enum:
+   *   - platform_fee → "Platform fee" (Codex-h69cg tri-party row)
    *   - organization_fee → "Org fee"
    *   - creator_payout_to_owner → "Creator pool"
    *   - creator_payout → "Creator share"
    */
   function typeLabel(t: PayoutWithCreator['payoutType']): string {
+    if (t === 'platform_fee') return 'Platform fee';
     if (t === 'organization_fee') return 'Org fee';
     if (t === 'creator_payout_to_owner') return 'Creator pool';
     return 'Creator share';
+  }
+
+  function sourceLabel(s: PayoutWithCreator['sourceType']): string {
+    return s === 'purchase' ? 'Purchase' : 'Subscription';
   }
 
   /**
@@ -339,6 +361,13 @@
             class="status-filter"
           />
           <Select
+            options={sourceOptions}
+            value={sourceFilter}
+            label="Source"
+            onValueChange={(v) => v && setUrlParam('source', v)}
+            class="source-filter"
+          />
+          <Select
             options={rangeOptions}
             value={rangeFilter}
             label="Date range"
@@ -414,33 +443,47 @@
                     </Table.Cell>
 
                     <Table.Cell>
-                      <Badge variant="info">
-                        {typeLabel(payout.payoutType)}
-                      </Badge>
+                      <span class="type-cell">
+                        <Badge variant="info">
+                          {typeLabel(payout.payoutType)}
+                        </Badge>
+                        <span
+                          class="source-label"
+                          title="Payout source"
+                        >
+                          · {sourceLabel(payout.sourceType)}
+                        </span>
+                      </span>
                     </Table.Cell>
 
                     <Table.Cell>
-                      <span class="creator-cell">
-                        <Avatar class="creator-avatar">
-                          {#if payout.creatorAvatarUrl}
-                            <AvatarImage
-                              src={payout.creatorAvatarUrl}
-                              alt={payout.creatorName ?? payout.creatorEmail ?? ''}
-                            />
-                          {/if}
-                          <AvatarFallback>
-                            {getInitials(
-                              payout.creatorName,
-                              payout.creatorEmail
-                            )}
-                          </AvatarFallback>
-                        </Avatar>
-                        <span class="creator-name">
-                          {payout.creatorName ??
-                            payout.creatorEmail ??
-                            'Unknown'}
+                      {#if payout.payoutType === 'platform_fee'}
+                        <span class="creator-cell platform-cell">
+                          <span class="creator-name">Platform</span>
                         </span>
-                      </span>
+                      {:else}
+                        <span class="creator-cell">
+                          <Avatar class="creator-avatar">
+                            {#if payout.creatorAvatarUrl}
+                              <AvatarImage
+                                src={payout.creatorAvatarUrl}
+                                alt={payout.creatorName ?? payout.creatorEmail ?? ''}
+                              />
+                            {/if}
+                            <AvatarFallback>
+                              {getInitials(
+                                payout.creatorName,
+                                payout.creatorEmail
+                              )}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span class="creator-name">
+                            {payout.creatorName ??
+                              payout.creatorEmail ??
+                              'Unknown'}
+                          </span>
+                        </span>
+                      {/if}
                     </Table.Cell>
 
                     <Table.Cell class="amount-cell">
@@ -595,9 +638,28 @@
   }
 
   .filters :global(.status-filter),
+  .filters :global(.source-filter),
   .filters :global(.range-filter) {
     min-width: 200px;
     max-width: 260px;
+  }
+
+  .type-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    white-space: nowrap;
+  }
+
+  .source-label {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .platform-cell {
+    font-style: italic;
+    color: var(--color-text-secondary);
   }
 
   .table-wrapper {
