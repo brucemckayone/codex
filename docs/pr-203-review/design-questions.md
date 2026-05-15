@@ -160,4 +160,23 @@ But the refund DID reduce the platform's owed liability — the customer got the
 
 ---
 
+---
+
+## DQ-10 — Display "effective share" vs raw share in the per-creator rail
+
+**Context.** `executeTransfers` normalises the creator pool by `totalShareBps = Σ activeAgreements.sharePercent`, not by 10000bps. A creator told "you have 25% share" who is the sole active creator receives 100% of the pool (25/25). With three other co-creators each at 25%, they receive 25% of the pool (25/100).
+
+This is documented + tested behaviour, but the per-creator rail today renders `sharePercent` verbatim. Creators will reconcile their payouts against the wrong number.
+
+**Options.**
+- (a) Render "effective share = sharePercent / totalShareBps × 100%" alongside the raw value.
+- (b) Render only effective share; hide raw.
+- (c) Don't display share at all; only render actual amount + count.
+
+**Recommendation.** (a) — both numbers tell different stories. The org owner can verify the agreement; the creator can predict next month's earnings.
+
+**Status.** Open — UI-only change, no backend impact. File when the rail UI work starts.
+
+---
+
 _Add new questions below; renumber if any are removed._

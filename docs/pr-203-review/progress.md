@@ -164,15 +164,77 @@ Caveat: see F-1 (amount) and F-2 (status for pending rows).
 
 ---
 
+## Cycle 2 — subscription invoice path
+
+Investigated `executeTransfers` (L3734-4153) + `handleInvoicePaymentSucceeded` (L1328+).
+
+### F-12 🟡 Subscription inserts rely on schema default `sourceType='subscription'`
+
+`executeTransfers` does NOT explicitly pass `sourceType` on any insert except `platform_fee` (L3777). All other inserts (org_fee at L3822/3856/3885, creator_payout_to_owner at L3943/3982, creator_payout at L4053/4096/4132) rely on the schema default `'subscription'`.
+
+The purchase pipeline (`writePurchasePayouts`) explicitly passes `sourceType: 'purchase'` on every insert as defence-in-depth. The asymmetry is fragile — if a future migration changes/removes the default, every subscription pending row would silently land with the wrong sourceType, which then drives sweep behaviour, breakdown filtering, and partial-aggregate math.
+
+**Fix.** Mirror the purchase pipeline — pass explicit `sourceType: 'subscription'` on every insert. One-line change, defence-in-depth.
+
+---
+
+### F-13 🔴 Per-row min-transfer floor pile-up — Bead Codex-iivne
+
+`resolvePendingPayouts` (L3175-3209) iterates pending rows individually and checks each row against `minTransferCents` in isolation. **No SUM aggregation across pending rows for the same (orgId, userId).**
+
+**Multi-creator scenario.** Org with 4 creators, each 25% share of a £5/mo creator pool. Each invoice → 4 × `floor(125/4)=125` pence pending rows (one per creator). If a creator's `minTransferCents=300`, every monthly £1.25 pending row is individually below the floor → skipped forever. Money piles up indefinitely, never clears.
+
+**Fix.** In `resolvePendingPayouts`, group pending rows by (userId, sourceType), `SUM(amountCents)`, and if the sum ≥ floor, batch-pay in one transfer (or aggregate into a single resolved row with chained idempotency key). See bead description for design.
+
+**Test.** Pending — needs FeeConfigService injection to drive a non-zero floor. Existing subscription tests do not stub FeeConfig (they use the constants fallback where floor=0, masking the bug). Write in cycle 3.
+
+---
+
+### F-14 🟢 RETRACTED — `assertGbpOnly` IS called
+
+CLAUDE.md hard invariant: "Every `transfers.create()` call... preceded by `assertGbpOnly`." Verified at L1398: `handleInvoicePaymentSucceeded` calls `assertGbpOnly(stripeInvoice.currency, ...)` before invoking `executeTransfers`. Hard invariant satisfied at the right boundary (entry point, not per-call). No issue.
+
+---
+
+### F-15 🟢 `creatorOrganizationAgreement` lookup uses `effectiveUntil` not `deletedAt`
+
+By design — existing test "mid-period creator removal: expired agreement (effective_until in the past)" confirms this is the canonical mechanism. Not a bug. But worth a follow-up note: if an admin soft-deletes an agreement row via `deletedAt` WITHOUT setting `effectiveUntil`, the creator continues to receive payouts. Worth a code comment or a CHECK constraint that enforces "deletedAt IS NULL OR effectiveUntil <= now()" — defence-in-depth.
+
+---
+
+### F-16 🟡 `totalShareBps` divisor normalises to actual sum, not 10000bps
+
+L4010-4031: `totalShareBps` is the SUM of active agreements, not a fixed 10000bps reference. Three creators each with 25% share → totalShareBps=7500, each receives `floor(pool * 2500/7500) = pool/3` (full pool split equally), not 25% of pool with 25% going to org.
+
+Existing test "share-sum UNDER 10000 bps (4000+4000=8000): production normalises by totalShareBps, so creators split the full pool" confirms this is INTENTIONAL.
+
+This is a documented design choice but it's a multi-creator UX trap: a creator told "you have 25% share" actually receives 25%/Σshares × pool. If Σshares < 100%, they receive MORE than 25% of the pool; if Σshares > 100% (impossible per CHECK constraints?), they receive less.
+
+**Action.** No code change. Add a row to design-questions.md (DQ-10) flagging that the rail should display "effective share" (sharePercent/totalShareBps) rather than the raw `sharePercent` to avoid creator confusion.
+
+---
+
+## Beads filed (cycle 2)
+
+| Bead | Priority | Title | Test |
+|---|---|---|---|
+| Codex-d9t5r | P0 | F-1 partial refund full-reverses | ✅ landed (purchase) |
+| Codex-92ej7 | P0 | F-2 pending rows mis-marked reversed | ⏳ cycle 3 |
+| Codex-h3864 | P1 | F-3 breakdown conflates org_fee | ✅ landed (subscription) |
+| Codex-5794i | P1 | F-7 sweep wrong fee policy | ⏳ cycle 3 |
+| Codex-iivne | P1 | F-13 pile-up under min-transfer floor | ⏳ cycle 3 |
+
 ## Outstanding
 
-- Subscription write path on invoice.paid (`handleInvoicePaymentSucceeded` and `executeTransfers`)
-- Schema CHECK constraints exercised by unit tests
+- Failing tests for F-2 (needs purchase fixture with Connect-not-ready), F-7 (needs feeConfig stub), F-13 (needs feeConfig stub)
 - Frontend rail components (CreatorBreakdownRail/Card)
-- /studio/payouts page restructure (grid, sticky rail, mobile stacking)
-- Remote function + API route auth scoping
+- /studio/payouts page restructure (grid, sticky rail, mobile stacking, a11y)
+- Remote function `subscription.remote.ts` — TanStack query key shape, auth scoping
+- API route `workers/ecom-api/src/routes/subscriptions.ts` — procedure() policy, zod validation, rate limiting
+- Schema CHECK constraints negative tests (`check_payouts_user_required`, `check_payouts_paid_invariant`)
+- F-12 small fix (explicit sourceType in subscription inserts)
 - /review and /simplify formal passes
 
 ## Design questions
 
-See `design-questions.md`.
+See `design-questions.md` for DQ-1 (resolved), DQ-2 to DQ-9. DQ-10 to be added next cycle for F-16 effective-share UX.
