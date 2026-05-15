@@ -8388,6 +8388,103 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
         .catch((e) => e);
       expectCheckViolation(err, 'check_payouts_amount_positive');
     });
+
+    // PR #203 deep-review cycle 8: pin the multi-creator-critical constraint
+    // `check_payouts_user_required` introduced by migration
+    // 0065_acoustic_spirit. The constraint is:
+    //
+    //   CHECK ( payoutType = 'platform_fee' OR userId IS NOT NULL )
+    //
+    // It's the LAST line of defence against silently writing a creator_payout
+    // or organization_fee row with no human beneficiary. Without coverage, a
+    // future migration could drop the constraint and the regression would be
+    // invisible at unit-test level — the codepath above (writePurchasePayouts
+    // / executeTransfers) always supplies a userId when payoutType is not
+    // platform_fee, so removal would only surface in production from a path
+    // we haven't built yet (e.g. F-3's bi-party / orgless flow Codex-ne89a).
+
+    it('check_payouts_user_required: creator_payout with userId=null is rejected (multi-creator attribution)', async () => {
+      const base = await baseValues('e9v3b-check-user-creator');
+      const err = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          userId: null,
+          payoutType: 'creator_payout' as const,
+        })
+        .catch((e) => e);
+      expectCheckViolation(err, 'check_payouts_user_required');
+    });
+
+    it('check_payouts_user_required: organization_fee with userId=null is rejected', async () => {
+      const base = await baseValues('e9v3b-check-user-orgfee');
+      const err = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          userId: null,
+          payoutType: 'organization_fee' as const,
+          // org_fee must clear the paid invariant if status='paid'; use
+          // pending here so this test isolates to user_required.
+          status: 'pending' as const,
+          reason: 'connect_not_ready' as const,
+        })
+        .catch((e) => e);
+      expectCheckViolation(err, 'check_payouts_user_required');
+    });
+
+    it('check_payouts_user_required: platform_fee with userId=null is ACCEPTED (no human beneficiary)', async () => {
+      const base = await baseValues('e9v3b-check-user-platform');
+      // Positive case: platform_fee is THE exception to user_required.
+      // Supply a chargeId + resolvedAt to clear the paid invariant.
+      const result = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          userId: null,
+          payoutType: 'platform_fee' as const,
+          status: 'paid' as const,
+          reason: null,
+          stripeChargeId: `ch_test_${createUniqueSlug('plat')}`,
+          resolvedAt: new Date(),
+        })
+        .returning();
+      expect(result).toHaveLength(1);
+      expect(result[0]?.userId).toBeNull();
+      expect(result[0]?.payoutType).toBe('platform_fee');
+    });
+
+    it('check_payouts_source: sourceType=gift (not in {purchase,subscription}) is rejected', async () => {
+      const base = await baseValues('e9v3b-check-source');
+      const err = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          // 'gift' is not in the enum — CHECK must reject it.
+          sourceType: 'gift' as unknown as 'subscription',
+        })
+        .catch((e) => e);
+      expectCheckViolation(err, 'check_payouts_source');
+    });
+
+    it('check_payouts_paid_invariant: status=paid with stripeChargeId set but resolvedAt=null is rejected (AND clause)', async () => {
+      const base = await baseValues('e9v3b-check-paid-resolved');
+      // The constraint requires BOTH (transferId OR chargeId) AND
+      // resolvedAt IS NOT NULL. Setting chargeId without resolvedAt
+      // tests the AND part — a regression where the constraint
+      // collapsed to a single OR clause would silently accept this.
+      const err = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          status: 'paid' as const,
+          reason: null,
+          stripeChargeId: `ch_test_${createUniqueSlug('paid-noresolve')}`,
+          resolvedAt: null,
+        })
+        .catch((e) => e);
+      expectCheckViolation(err, 'check_payouts_paid_invariant');
+    });
   });
 
   // ─── E. Drain status transitions ────────────────────────────────────

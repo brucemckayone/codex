@@ -321,9 +321,51 @@ Design questions DQ-17 and DQ-18 added — both about multi-creator fairness, ne
 | Codex-0sz4j | P3 | F-22 fixed skeleton count (UI) | ⏳ (UX-only) |
 | Codex-p6sy6 | P3 | F-41 no rate limit on payouts reads | ⏳ (consistent with siblings) |
 
+## Cycle 8 — schema CHECK constraint tripwire coverage
+
+Read migration `0065_acoustic_spirit.sql`. Five CHECK constraints introduced/restored by PR #203:
+
+1. `check_payouts_source` — sourceType IN ('purchase', 'subscription')
+2. `check_payouts_user_required` — payoutType='platform_fee' OR userId IS NOT NULL ← **multi-creator critical**
+3. `check_payouts_status` — status IN ('paid','pending','failed','reversed')
+4. `check_payouts_type` — payoutType enum
+5. `check_payouts_paid_invariant` — (paid|reversed) requires (transferId OR chargeId) AND resolvedAt NOT NULL
+
+Existing test coverage at `subscription-service.test.ts:8280-8390` covered 4 of 5 constraints but missed **`check_payouts_user_required`** entirely — the constraint that prevents writing a creator_payout / organization_fee row with no human beneficiary. F-51 closes the gap.
+
+### F-51 🟢 → ✅ Closed by tripwire tests
+
+Added 5 new tests in `describe('C. CHECK constraints')`:
+
+| Test | Purpose |
+|---|---|
+| `check_payouts_user_required: creator_payout with userId=null is rejected` | **Multi-creator attribution invariant** — locks in the schema's defence against orphan creator_payout rows |
+| `check_payouts_user_required: organization_fee with userId=null is rejected` | Same invariant for org_fee rows |
+| `check_payouts_user_required: platform_fee with userId=null is ACCEPTED` | Positive case — platform_fee is THE exception |
+| `check_payouts_source: sourceType='gift' is rejected` | Pins the source enum |
+| `check_payouts_paid_invariant: status=paid + chargeId + resolvedAt=null is rejected` | Pins the AND clause — a regression collapsing to single OR would silently accept |
+
+All five pass today (constraints work correctly). They exist as regression tripwires: if a future migration drops or weakens a constraint, the corresponding test goes red.
+
+Why this matters for multi-creator: when PR Codex-ne89a lands the bi-party / orgless creator flow, the codepath will route around the existing writePurchasePayouts / executeTransfers. The CHECK constraint is the LAST line of defence catching a bad-attribution row at insert time. Without these tests, a constraint drop is a silent multi-creator security regression.
+
+## Beads filed (cycles 1-8)
+
+| Bead | Priority | Title | Test |
+|---|---|---|---|
+| Codex-d9t5r | P0 | F-1 partial refund full-reverses | ✅ |
+| Codex-92ej7 | P0 | F-2 pending rows mis-marked reversed | ✅ |
+| Codex-h3864 | P1 | F-3 breakdown conflates org_fee | ✅ |
+| Codex-5794i | P1 | F-7 sweep wrong fee policy | ✅ |
+| Codex-iivne | P1 | F-13 pile-up under min-transfer floor | ✅ |
+| Codex-e2773 | P1 | F-26 pagination splits transferGroup | ✅ |
+| Codex-biiqd | P2 | F-19 "Unknown creator" fallback (UI) | ✅ (component) |
+| Codex-ajbja | P2 | F-45 route-level test gap (3 payouts endpoints) | (the bead IS the work) |
+| Codex-0sz4j | P3 | F-22 fixed skeleton count (UI) | ⏳ |
+| Codex-p6sy6 | P3 | F-41 no rate limit on payouts reads | ⏳ |
+
 ## Outstanding
 
-- Schema CHECK constraints negative tests (`check_payouts_user_required`, `check_payouts_paid_invariant`)
 - F-12 small fix (explicit `sourceType` in subscription inserts)
 - F-29 defensive coalesce on `group.subscriberName` across siblings
 - F-33 Stripe Dashboard test-mode URL prefix
