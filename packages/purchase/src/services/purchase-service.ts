@@ -302,16 +302,26 @@ export class PurchaseService extends BaseService {
         )
         .limit(1);
 
-      // Calculate application fee (platform's cut) for destination charges.
-      // Uses calculateRevenueSplit() — the single source of truth shared with
-      // completePurchase() — so the Stripe-collected fee can never diverge
-      // from the DB-recorded platform fee.
-      const applicationFeeCents = creatorConnect?.chargesEnabled
+      // Application fee for the destination charge MUST cover the platform
+      // slice AND the org slice (Codex-h69cg). Stripe routes
+      // `charge.amount - application_fee_amount` directly to the creator's
+      // Connect account; the remainder lands in the platform's balance.
+      // From that platform balance we make a SECOND `transfers.create` to
+      // the org (in `writePurchasePayouts`) — that transfer is NOT linked
+      // to the charge via `source_transaction` because the destination-
+      // charge mechanism has already scheduled all non-application-fee
+      // funds for transfer to the creator. Allocating the org's share via
+      // a separate `transfers.create` from the platform's general balance
+      // is the only correct shape.
+      const splitForFee = creatorConnect?.chargesEnabled
         ? calculateRevenueSplit(
             contentRecord.priceCents,
             DEFAULT_PLATFORM_FEE_PERCENTAGE,
             DEFAULT_ORG_FEE_PERCENTAGE
-          ).platformFeeCents
+          )
+        : undefined;
+      const applicationFeeCents = splitForFee
+        ? splitForFee.platformFeeCents + splitForFee.organizationFeeCents
         : undefined;
 
       if (!creatorConnect?.chargesEnabled) {
@@ -828,16 +838,23 @@ export class PurchaseService extends BaseService {
     }
 
     try {
+      // No `source_transaction` here: the destination charge already
+      // scheduled `charge.amount - application_fee_amount` to the creator's
+      // Connect account, leaving zero source-transaction balance for a
+      // secondary transfer linked to that charge. `application_fee_amount`
+      // was inflated in `createCheckoutSession` to cover platform + org,
+      // so the org's slice sits in the platform's general balance and the
+      // transfer just pulls from there.
       const transfer = await this.stripe.transfers.create(
         {
           amount: revenueSplit.organizationFeeCents,
           currency: CURRENCY.GBP,
           destination: orgConnect.stripeAccountId,
-          source_transaction: stripeChargeId,
           transfer_group: transferGroup,
           metadata: {
             purchase_id: purchase.id,
             type: 'organization_fee',
+            stripe_charge_id: stripeChargeId,
           },
         },
         { idempotencyKey: `${stripeChargeId}_org_fee` }

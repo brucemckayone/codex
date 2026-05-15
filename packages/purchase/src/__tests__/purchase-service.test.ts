@@ -1012,10 +1012,19 @@ describe('PurchaseService Integration', () => {
         expect.objectContaining({
           amount: 900,
           currency: 'gbp',
-          source_transaction: chargeId,
+          // No source_transaction: destination charges leave no balance
+          // linked to the charge id (Codex-h69cg follow-up fix).
+          // application_fee_amount on the charge already covered the org
+          // slice; this transfer pulls from the platform's general balance.
         }),
         expect.objectContaining({ idempotencyKey: `${chargeId}_org_fee` })
       );
+      // Explicitly assert source_transaction is absent
+      const callArgs = createTransfer.mock.calls[0]?.[0] as Record<
+        string,
+        unknown
+      >;
+      expect(callArgs).not.toHaveProperty('source_transaction');
 
       const platformRow = rows.find((r) => r.payoutType === 'platform_fee');
       const orgRow = rows.find((r) => r.payoutType === 'organization_fee');
