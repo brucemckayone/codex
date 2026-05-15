@@ -7078,6 +7078,65 @@ describe('SubscriptionService', () => {
       warnSpy.mockRestore();
     });
 
+    // REGRESSION (PR #203 deep-review N-1, bead Codex-dbzkg P0) — sweep /
+    // Connect-activated retry path drops `source_transaction` on
+    // `stripe.transfers.create`. For purchase-sourced pending rows landed
+    // under Option B (platform-charge model), the transfer MUST link back
+    // to the original charge via source_transaction; otherwise the funds
+    // come from the platform's general available balance instead of the
+    // charge's source-linked bucket. Net effect: platform double-pays the
+    // creator when Connect activates after the purchase.
+    //
+    // Production resolvePendingPayouts (subscription-service.ts:3211-3223)
+    // passes `destination`, `currency`, `amount`, and `metadata` — but no
+    // `source_transaction`. This test seeds a purchase-sourced pending row
+    // with stripeChargeId set, and asserts the retry call includes
+    // source_transaction matching the original charge.
+    it.fails('forwards source_transaction on retry for purchase-sourced pending payouts (BUG: drops it, pays from wrong fund)', async () => {
+      const { org, sub, stripeAccountId } =
+        await seedConnectAndSubscription('w4jjk-source-tx');
+
+      // Seed a purchase-sourced pending row carrying the original charge id.
+      const PURCHASE_CHARGE = 'ch_n1_source_tx_origin';
+      await db.insert(payoutsTable).values({
+        userId: creatorId,
+        organizationId: org.id,
+        subscriptionId: sub.id,
+        amountCents: 500,
+        currency: 'gbp',
+        reason: 'connect_not_ready',
+        status: 'pending',
+        payoutType: 'creator_payout',
+        sourceType: 'purchase',
+        stripeChargeId: PURCHASE_CHARGE,
+      });
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      await service.resolvePendingPayouts(org.id, stripeAccountId);
+
+      // Find the call that targeted this creator's Connect.
+      const call = transferSpy.mock.calls.find(([params]) => {
+        const p = params as { destination?: string };
+        return p?.destination === stripeAccountId;
+      });
+      expect(
+        call,
+        'expected resolvePendingPayouts to call transfers.create'
+      ).toBeDefined();
+
+      const params = call?.[0] as {
+        source_transaction?: string;
+        metadata?: Record<string, unknown>;
+      };
+
+      // The CRITICAL assertion — production omits source_transaction.
+      // Without it, Stripe routes the transfer from general platform
+      // balance instead of the source-linked charge bucket.
+      expect(params.source_transaction).toBe(PURCHASE_CHARGE);
+    });
+
     // REGRESSION (PR #203 deep-review F-7, bead Codex-5794i) — sweep applies
     // subscription fee policy to purchase-sourced pending rows.
     //

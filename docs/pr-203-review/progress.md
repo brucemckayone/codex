@@ -349,27 +349,83 @@ All five pass today (constraints work correctly). They exist as regression tripw
 
 Why this matters for multi-creator: when PR Codex-ne89a lands the bi-party / orgless creator flow, the codepath will route around the existing writePurchasePayouts / executeTransfers. The CHECK constraint is the LAST line of defence catching a bad-attribution row at insert time. Without these tests, a constraint drop is a silent multi-creator security regression.
 
-## Beads filed (cycles 1-8)
+## Cycle 9 — formal /review and /simplify passes (external eyes)
+
+Launched `pr-review-toolkit:code-reviewer` and `pr-review-toolkit:code-simplifier` agents in parallel with tight report-only scope. Briefed both on the existing 51-finding catalog so attention budget went to genuinely-new gaps, not duplicates. Both returned within 4 minutes.
+
+### Reviewer (N-* findings — 8 new, 3 money-correctness)
+
+**N-1 🔴 P0** | `resolvePendingPayouts` drops `source_transaction` on retry | Bead Codex-dbzkg | ✅ failing test landed
+
+For purchase-sourced pending rows under Option B (platform charge), the sweep / Connect-activated retry calls `stripe.transfers.create` WITHOUT `source_transaction`. Funds come from the platform's general available balance instead of the charge's source-linked bucket. **Platform double-pays the creator when Connect activates post-purchase.** Combines with F-7 (Codex-5794i) — multi-creator activation path broken twice over (wrong fee policy AND wrong fund).
+
+**N-2 🔴 P1** | `writePurchasePayouts` picks arbitrary org Connect row | Bead Codex-sec7i | ⏳ test deferred to cycle 10
+
+`purchase-service.ts:758-764` does `.where(eq(organizationId, organizationId)).limit(1)` — driver-deterministic. Subscription path uses `resolvePrimaryConnect(orgId)`. In a multi-creator org where members have personal Connect rows, org-fee transfer routes to a random member's account → silent attribution + revenue routing mistake.
+
+**N-4 🔴 P1** | Platform_fee insert is check-then-insert, no unique constraint | Bead Codex-g9owu | ⏳ test deferred (needs concurrency simulation)
+
+`SELECT then INSERT` pattern with no unique constraint covering `(subscriptionId, stripeChargeId) WHERE payout_type='platform_fee'`. Webhook redelivery race → duplicate platform_fee rows → doubled KPI totals.
+
+**N-3 🟡 P2-P3** | Welcome-email duplicate on Stripe redelivery accepted as known trade-off — depends on Codex-257ia (event-id dedupe) status. Verify before merge.
+
+**N-5 🟡 P2** | `colspan=7` group-header row breaks screen-reader semantics. a11y regression. Multi-creator transactions harder for AT users.
+
+**N-6 🟡 P3** | `derivePayoutStatus` type leak — `'paid'` AND `'resolved'` both surface in UI helpers without narrowing. Breeds drift.
+
+**N-7 🟡 P2** | `executePurchaseTransfer` failure-path insert drops `stripeChargeId` + `transferGroup`. Loses ops correlation.
+
+**N-8 🟢** | Defensive cast pattern on `resolvedAt` (handles ISO string variant) — runtime-safe but signals hidden polymorphism. Code smell, not a bug.
+
+### Simplifier (S-* findings — 5 refactor suggestions, all behaviour-preserving)
+
+**S-1 P2** | `executeTransfers` has 4 copy-paste try/insert/catch blocks | Bead Codex-k9qpd
+
+Mirror `executePurchaseTransfer` extraction. ~-180 lines. Pairs with F-12 (sourceType explicit) and DQ-18 (platform_residual row) — the new helper is the natural home for both fixes.
+
+**S-2** | F-12 reaffirmed by independent audit — fold into S-1.
+
+**S-3** | `errMessage(e: unknown): string` helper eliminates ~30 lines of `instanceof Error ? .message : String()` boilerplate. Bundled with S-1 in Codex-k9qpd.
+
+**S-4** | Move pure label helpers (statusLabel, typeLabel, sourceLabel, etc.) to `apps/web/src/lib/components/studio/payouts/labels.ts`. Prevents rail/table copy drift.
+
+**S-5** | `listPayoutsByOrg` inline status literal should use `PayoutDisplayStatus` union — adding a new status currently requires editing two unions.
+
+### Reviewer-affirmed clean axes (no findings)
+
+- No SQL injection (Drizzle parameterisation consistent)
+- No secret exposure
+- No auth bypass — `requireOrgManagement` correctly gates all three payouts endpoints (confirms F-36 cycle 6)
+- CHECK constraint loosening on `check_payouts_paid_invariant` (transfer-id OR charge-id) sound for Option B
+
+## Beads filed (cycles 1-9)
 
 | Bead | Priority | Title | Test |
 |---|---|---|---|
 | Codex-d9t5r | P0 | F-1 partial refund full-reverses | ✅ |
 | Codex-92ej7 | P0 | F-2 pending rows mis-marked reversed | ✅ |
+| Codex-dbzkg | P0 | N-1 resolvePendingPayouts drops source_transaction | ✅ |
 | Codex-h3864 | P1 | F-3 breakdown conflates org_fee | ✅ |
 | Codex-5794i | P1 | F-7 sweep wrong fee policy | ✅ |
 | Codex-iivne | P1 | F-13 pile-up under min-transfer floor | ✅ |
 | Codex-e2773 | P1 | F-26 pagination splits transferGroup | ✅ |
+| Codex-sec7i | P1 | N-2 arbitrary org Connect lookup | ⏳ cycle 10 |
+| Codex-g9owu | P1 | N-4 platform_fee race / no unique constraint | ⏳ cycle 10 |
 | Codex-biiqd | P2 | F-19 "Unknown creator" fallback (UI) | ✅ (component) |
 | Codex-ajbja | P2 | F-45 route-level test gap (3 payouts endpoints) | (the bead IS the work) |
+| Codex-k9qpd | P2 | S-1 executeTransfers refactor (mirror purchase pipeline) | (refactor task) |
 | Codex-0sz4j | P3 | F-22 fixed skeleton count (UI) | ⏳ |
 | Codex-p6sy6 | P3 | F-41 no rate limit on payouts reads | ⏳ |
 
+**14 beads total**: 3 P0, 5 P1, 3 P2, 3 P3.
+
 ## Outstanding
 
-- F-12 small fix (explicit `sourceType` in subscription inserts)
-- F-29 defensive coalesce on `group.subscriberName` across siblings
-- F-33 Stripe Dashboard test-mode URL prefix
-- `/review` and `/simplify` formal passes
+- N-2, N-4 failing tests (cycle 10 — needs additional fixture work)
+- N-5 a11y fix (P2)
+- N-7 ops-correlation fix on failure-path insert (P2)
+- F-12 / F-29 / F-33 small fixes
+- DQ resolution conversations with product team
 
 ## Design questions
 
