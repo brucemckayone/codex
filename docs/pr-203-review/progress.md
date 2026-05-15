@@ -214,26 +214,40 @@ This is a documented design choice but it's a multi-creator UX trap: a creator t
 
 ---
 
-## Beads filed (cycle 2)
+## Cycle 3 — failing tests for F-2, F-7, F-13
+
+All three findings now have `it.fails` regression tests pinning the bug. Each test compiles cleanly under tsc; CI runs them as expected-to-fail so the bug-fixer turning them green has a tripwire to remove the marker.
+
+| Bead | Finding | Test file | Test name |
+|---|---|---|---|
+| Codex-92ej7 | F-2 pending mis-marked reversed | `purchase/.../purchase-service.test.ts` | "refund leaves connect_not_ready pending payouts untouched" |
+| Codex-5794i | F-7 wrong fee policy | `subscription/.../subscription-service.test.ts` | "uses one_off fee policy when resolving purchase-sourced pending payouts" |
+| Codex-iivne | F-13 pile-up | same | "aggregates per-creator pending rows so combined-sum above floor clears" |
+
+Pattern for F-7 and F-13: construct a separate `SubscriptionService` instance per test with a stubbed `FeeConfigService` returning controlled `minTransferCents`. The shared `service` instance in the test scope uses no feeConfig (defaults to 0 floor), so the only path to demonstrate the bug is via a custom service.
+
+## Beads filed (cycles 1-3)
 
 | Bead | Priority | Title | Test |
 |---|---|---|---|
-| Codex-d9t5r | P0 | F-1 partial refund full-reverses | ✅ landed (purchase) |
-| Codex-92ej7 | P0 | F-2 pending rows mis-marked reversed | ⏳ cycle 3 |
-| Codex-h3864 | P1 | F-3 breakdown conflates org_fee | ✅ landed (subscription) |
-| Codex-5794i | P1 | F-7 sweep wrong fee policy | ⏳ cycle 3 |
-| Codex-iivne | P1 | F-13 pile-up under min-transfer floor | ⏳ cycle 3 |
+| Codex-d9t5r | P0 | F-1 partial refund full-reverses | ✅ |
+| Codex-92ej7 | P0 | F-2 pending rows mis-marked reversed | ✅ |
+| Codex-h3864 | P1 | F-3 breakdown conflates org_fee | ✅ |
+| Codex-5794i | P1 | F-7 sweep wrong fee policy | ✅ |
+| Codex-iivne | P1 | F-13 pile-up under min-transfer floor | ✅ |
+
+All 5 high-impact findings now have: a filed bead, a documented failing test, a pointer in this progress doc and a corresponding entry in `design-questions.md` where relevant.
 
 ## Outstanding
 
-- Failing tests for F-2 (needs purchase fixture with Connect-not-ready), F-7 (needs feeConfig stub), F-13 (needs feeConfig stub)
-- Frontend rail components (CreatorBreakdownRail/Card)
-- /studio/payouts page restructure (grid, sticky rail, mobile stacking, a11y)
+- Frontend rail components (`CreatorBreakdownRail.svelte`, `CreatorBreakdownCard.svelte`) — multi-creator UI scenarios, responsive grid below 1024px, empty-state, a11y
+- `/studio/payouts` page restructure — sticky rail, layout, mobile stacking
 - Remote function `subscription.remote.ts` — TanStack query key shape, auth scoping
 - API route `workers/ecom-api/src/routes/subscriptions.ts` — procedure() policy, zod validation, rate limiting
 - Schema CHECK constraints negative tests (`check_payouts_user_required`, `check_payouts_paid_invariant`)
-- F-12 small fix (explicit sourceType in subscription inserts)
-- /review and /simplify formal passes
+- F-12 small fix (explicit `sourceType` in subscription inserts)
+- `revenue-calculator.ts` audit — rounding behaviour at multi-creator scale
+- `/review` and `/simplify` formal passes
 
 ## Design questions
 

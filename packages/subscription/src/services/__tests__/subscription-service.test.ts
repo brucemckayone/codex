@@ -6974,6 +6974,180 @@ describe('SubscriptionService', () => {
 
       warnSpy.mockRestore();
     });
+
+    // REGRESSION (PR #203 deep-review F-7, bead Codex-5794i) — sweep applies
+    // subscription fee policy to purchase-sourced pending rows.
+    //
+    // resolveSubscriptionFees (subscription-service.ts:540-555) is hardcoded
+    // to the 'subscription' fee kind. resolvePendingPayouts calls it
+    // unconditionally (L3193) even for rows where `sourceType='purchase'`.
+    // If an org's `one_off` fee config has a LOWER `minTransferCents` than
+    // its `subscription` config, a purchase-sourced pending row that COULD
+    // qualify under the `one_off` floor is incorrectly skipped under the
+    // subscription floor and remains stuck pending forever.
+    //
+    // Fix: branch on `payout.sourceType` and call
+    // `getFeesForCreator(orgId, userId, payout.sourceType === 'purchase' ? 'one_off' : 'subscription')`.
+    it.fails('uses one_off fee policy when resolving purchase-sourced pending payouts (BUG: hardcoded to subscription)', async () => {
+      const { org, sub, stripeAccountId } =
+        await seedConnectAndSubscription('w4jjk-sourcetype');
+
+      // FeeConfig that returns DIFFERENT min-transfer floors per kind.
+      //   subscription kind: minTransferCents = 800  (high — would block £5)
+      //   one_off kind:      minTransferCents = 100  (low  — admits £5)
+      const stubFeeConfig = {
+        getFeesForCreator: vi
+          .fn()
+          .mockImplementation(
+            async (
+              _orgId: string,
+              _creatorId: string | undefined,
+              kind: 'subscription' | 'one_off'
+            ) => ({
+              platformFeePercent: 1000,
+              orgFeePercent: 1500,
+              minPlatformFeeCents: 0,
+              minTransferCents: kind === 'subscription' ? 800 : 100,
+            })
+          ),
+        getFeesForOrg: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 1500,
+          minPlatformFeeCents: 0,
+          minTransferCents: 800,
+        }),
+      };
+
+      const customService = new SubscriptionService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stripe
+      );
+
+      // Seed one purchase-sourced pending row: amount £5 (between floors).
+      await db.insert(payoutsTable).values({
+        userId: creatorId,
+        organizationId: org.id,
+        subscriptionId: sub.id,
+        amountCents: 500,
+        currency: 'gbp',
+        reason: 'connect_not_ready',
+        status: 'pending',
+        payoutType: 'creator_payout',
+        sourceType: 'purchase',
+      });
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await customService.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      // Under the correct policy (one_off, floor £1), the £5 row resolves.
+      // Currently fails: production uses subscription floor (£8), skips it.
+      expect(result.resolved).toBe(1);
+      expect(transferSpy).toHaveBeenCalledTimes(1);
+
+      // And the feeConfig should have been asked for `one_off` (not `subscription`).
+      const seenKinds = stubFeeConfig.getFeesForCreator.mock.calls.map(
+        (c) => c[2]
+      );
+      expect(seenKinds).toContain('one_off');
+    });
+
+    // REGRESSION (PR #203 deep-review F-13, bead Codex-iivne) — per-row
+    // min-transfer floor pile-up.
+    //
+    // resolvePendingPayouts (subscription-service.ts:3175-3209) evaluates
+    // each pending row against `minTransferCents` IN ISOLATION. Multi-creator
+    // orgs with high min-transfer floors and low-share creators accumulate
+    // pending rows that individually never qualify, even though they sum
+    // above the floor. Money locks indefinitely.
+    //
+    // Fix per bead Codex-iivne: group pending rows by (userId, sourceType),
+    // SUM amountCents, and if the sum ≥ floor, batch-pay them in one transfer
+    // (or aggregate into a single resolved row with chained idempotency key).
+    it.fails('aggregates per-creator pending rows so combined-sum above floor clears (BUG: each row evaluated alone)', async () => {
+      const { org, sub, stripeAccountId } =
+        await seedConnectAndSubscription('w4jjk-pileup');
+
+      // Floor £8 (800 cents) — both rows individually below, sum above.
+      const stubFeeConfig = {
+        getFeesForCreator: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 1500,
+          minPlatformFeeCents: 0,
+          minTransferCents: 800,
+        }),
+        getFeesForOrg: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 1500,
+          minPlatformFeeCents: 0,
+          minTransferCents: 800,
+        }),
+      };
+
+      const customService = new SubscriptionService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stripe
+      );
+
+      // Two £5 pending rows for the same creator. Each < £8 floor; sum £10.
+      await db.insert(payoutsTable).values([
+        {
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 500,
+          currency: 'gbp',
+          reason: 'min_transfer_floor',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 500,
+          currency: 'gbp',
+          reason: 'min_transfer_floor',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        },
+      ]);
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await customService.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      // Combined sum £10 >= £8 floor, so BOTH rows must clear (either as
+      // two separate transfers, or as one aggregated transfer with both
+      // rows updated to status='paid'). The crucial invariant is
+      // `result.resolved >= 1` — production today returns 0 because each
+      // row is checked individually against the floor.
+      expect(result.resolved).toBeGreaterThanOrEqual(1);
+      expect(transferSpy).toHaveBeenCalled();
+
+      // Verify both DB rows transitioned to status='paid' regardless of
+      // whether the implementation does 1 batched transfer or N transfers.
+      const after = await db
+        .select()
+        .from(payoutsTable)
+        .where(
+          and(
+            eq(payoutsTable.organizationId, org.id),
+            eq(payoutsTable.userId, creatorId)
+          )
+        );
+      expect(after.every((r) => r.status === 'paid')).toBe(true);
+    });
   });
 
   // ─── sweepUnresolvedPayouts — hybrid event+sweep resolution (Codex-vv77x) ───

@@ -1647,6 +1647,154 @@ describe('PurchaseService Integration', () => {
       expect(creatorReversal?.amount).toBe(382);
       expect(orgReversal?.amount).toBe(67);
     });
+
+    // REGRESSION (PR #203 deep-review F-2, bead Codex-92ej7, DQ-9) — when a
+    // purchase completes with Connect-not-ready, the creator_payout +
+    // organization_fee rows land as `status='pending'` with no
+    // `stripeTransferId` (no Stripe call was made). If the buyer then refunds
+    // before Connect onboarding completes, `reversePayoutsForPurchase`
+    // (purchase-service.ts:1278-1331) marks ALL non-already-reversed rows as
+    // 'reversed' — including the pending ones that never had a transfer.
+    //
+    // The sweep cron filters by `status='pending'`, so once these rows
+    // become 'reversed' the sweep stops seeing them. If Connect onboarding
+    // later completes, the creator's queued payout is silently lost.
+    //
+    // The expected behaviour is:
+    //   - platform_fee (was status='paid', no transfer needed) → 'reversed'
+    //   - creator_payout (status='pending', never transferred) → STAY 'pending'
+    //   - organization_fee (status='pending', never transferred) → STAY 'pending'
+    // (Or a separate 'cancelled_by_refund' status per DQ-9 — either way, NOT
+    // 'reversed', which implies a Stripe reversal occurred.)
+    it.fails('refund leaves connect_not_ready pending payouts untouched (BUG: currently marks them reversed)', async () => {
+      const stubFeeConfig = {
+        getFeesForCreator: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 1500,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+
+      // New org whose Connect account is NOT ready — pending path triggers.
+      const [pendingOrg] = await db
+        .insert(organizations)
+        .values({
+          name: 'Pending Refund Org',
+          slug: createUniqueSlug('pending-refund'),
+          ownerId: userId,
+        })
+        .returning();
+      await db.insert(schema.stripeConnectAccounts).values({
+        userId,
+        organizationId: pendingOrg.id,
+        stripeAccountId: `acct_pending_${Date.now()}`,
+        status: 'pending',
+        chargesEnabled: false, // ← key: not ready
+        payoutsEnabled: false,
+      });
+
+      const reversalCalls: string[] = [];
+      const stubStripe = {
+        ...mockStripe,
+        transfers: {
+          create: vi.fn(), // must NOT be called — Connect not ready
+          createReversal: vi.fn().mockImplementation((id: string) => {
+            reversalCalls.push(id);
+            return Promise.resolve({ id: `trr_${id}` });
+          }),
+        },
+        refunds: { create: vi.fn() },
+      } as unknown as Stripe;
+      const pendingService = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      const media = await mediaService.create(
+        {
+          title: 'Pending Refund Content',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/pending-refund/master.m3u8',
+          thumbnailKey: 'thumbnails/pending-refund.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+      const content = await contentService.create(
+        {
+          organizationId: pendingOrg.id,
+          title: 'Pending Refund Content',
+          slug: createUniqueSlug('pending-refund'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 1000,
+        },
+        userId
+      );
+      await contentService.publish(content.id, userId);
+
+      const chargeId = `ch_pending_${Date.now()}`;
+      const paymentIntentId = `pi_pending_${Date.now()}`;
+      const purchase = await pendingService.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId: pendingOrg.id,
+        amountPaidCents: 1000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+      });
+
+      // Sanity: 3 rows; platform_fee paid, creator + org pending.
+      const before = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+      expect(before).toHaveLength(3);
+      const beforeByType = new Map(before.map((r) => [r.payoutType, r]));
+      expect(beforeByType.get('platform_fee')?.status).toBe('paid');
+      expect(beforeByType.get('creator_payout')?.status).toBe('pending');
+      expect(beforeByType.get('organization_fee')?.status).toBe('pending');
+
+      // Refund the purchase.
+      await pendingService.processRefund(paymentIntentId, {
+        stripeRefundId: 're_pending_001',
+        refundAmountCents: 1000,
+        refundReason: 'requested_by_customer',
+      });
+
+      // No transfers ever happened → createReversal must not have fired
+      // (there's nothing to reverse on the Stripe side).
+      expect(reversalCalls).toHaveLength(0);
+
+      const after = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+      const afterByType = new Map(after.map((r) => [r.payoutType, r]));
+
+      // platform_fee was paid (retained on platform balance) → can be marked reversed.
+      expect(afterByType.get('platform_fee')?.status).toBe('reversed');
+
+      // creator_payout had NO Stripe transfer (Connect not ready) → must
+      // remain 'pending' so the sweep can still resolve it when Connect
+      // onboards. Currently fails: production sets it to 'reversed'.
+      expect(afterByType.get('creator_payout')?.status).toBe('pending');
+
+      // Same for organization_fee.
+      expect(afterByType.get('organization_fee')?.status).toBe('pending');
+    });
   });
 
   describe('verifyPurchase', () => {
