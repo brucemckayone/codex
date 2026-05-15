@@ -3404,20 +3404,40 @@ export class SubscriptionService extends BaseService {
     // platform_fee row per invoice so /studio/payouts can attribute platform
     // revenue alongside org_fee + creator_payout. status='paid' is satisfied
     // by stripeChargeId per the OR-allow paid invariant.
+    //
+    // Webhook-replay safe: platform_fee rows have a null stripeTransferId so
+    // the `uq_payouts_stripe_transfer_id` partial unique index does NOT catch
+    // a duplicate insert on the second webhook fire. Pre-check via SELECT for
+    // an existing row keyed on (subscriptionId, stripeChargeId, 'platform_fee')
+    // — exactly one such row should exist per invoice charge.
     if (platformFeeCents > 0) {
       try {
-        await this.db.insert(payouts).values({
-          userId: null,
-          organizationId: orgId,
-          subscriptionId,
-          amountCents: platformFeeCents,
-          payoutType: 'platform_fee',
-          status: 'paid',
-          sourceType: 'subscription',
-          stripeChargeId: chargeId,
-          transferGroup,
-          resolvedAt: new Date(),
-        });
+        const existingPlatformRow = await this.db
+          .select({ id: payouts.id })
+          .from(payouts)
+          .where(
+            and(
+              eq(payouts.subscriptionId, subscriptionId),
+              eq(payouts.stripeChargeId, chargeId),
+              eq(payouts.payoutType, 'platform_fee')
+            )
+          )
+          .limit(1);
+
+        if (existingPlatformRow.length === 0) {
+          await this.db.insert(payouts).values({
+            userId: null,
+            organizationId: orgId,
+            subscriptionId,
+            amountCents: platformFeeCents,
+            payoutType: 'platform_fee',
+            status: 'paid',
+            sourceType: 'subscription',
+            stripeChargeId: chargeId,
+            transferGroup,
+            resolvedAt: new Date(),
+          });
+        }
       } catch (insertError) {
         if (!isUniqueViolation(insertError)) {
           this.obs.error('Failed to insert platform_fee payout row', {

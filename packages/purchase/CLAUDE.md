@@ -47,9 +47,9 @@ const service = new PurchaseService(
 
 | Recipient | Default | Notes |
 |---|---|---|
-| Platform | 10% | `DEFAULT_PLATFORM_FEE_PERCENTAGE = 1000` bps |
-| Organization | 0% | Reserved for future use |
-| Creator | 90% | Remainder after platform fee |
+| Platform | 10% of gross | `DEFAULT_PLATFORM_FEE_PERCENTAGE = 1000` bps |
+| Organization | 10% of post-platform | `DEFAULT_ORG_FEE_PERCENTAGE = 1000` bps. Codex-h69cg shipped the secondary `transfers.create` + ledger row that delivers this slice to the org Connect account. Override per-org via `fee_config_org.one_off_org_fee_percent`. |
+| Creator | 90% of post-platform | Remainder. Routed via destination charge at the moment of purchase. |
 
 **Currency: GBP (£), amounts in pence.**
 

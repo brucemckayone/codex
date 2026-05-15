@@ -751,11 +751,14 @@ describe('PurchaseService Integration', () => {
       expect(purchase.status).toBe('completed');
       expect(purchase.stripePaymentIntentId).toBe(paymentIntentId);
 
-      // Verify revenue split (default 10% platform, 0% org, 90% creator)
-      // Platform: ceil(2999 * 1000 / 10000) = ceil(299.9) = 300
+      // Verify revenue split (default 10% platform / 10% org of post-platform
+      // / 81% creator of gross, post-h69cg)
+      // Platform: ceil(2999 * 1000 / 10000) = 300
+      // Post-platform: 2699 → Org: ceil(2699 * 1000 / 10000) = 270
+      // Creator: 2999 - 300 - 270 = 2429
       expect(purchase.platformFeeCents).toBe(300);
-      expect(purchase.organizationFeeCents).toBe(0);
-      expect(purchase.creatorPayoutCents).toBe(2699);
+      expect(purchase.organizationFeeCents).toBe(270);
+      expect(purchase.creatorPayoutCents).toBe(2429);
 
       // Verify sum
       expect(
@@ -970,7 +973,7 @@ describe('PurchaseService Integration', () => {
       };
     }
 
-    it('writes platform_fee + creator_payout rows and fires the org-fee transfer when pct > 0', async () => {
+    it('writes all 3 tri-party rows + fires the org-fee transfer under the default split', async () => {
       const { content, chargeId, paymentIntentId, stripeAccountId } =
         await setupPaidContentWithConnect({
           title: 'Tri-party Standard',
@@ -982,15 +985,11 @@ describe('PurchaseService Integration', () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       (mockStripe as any).transfers = { create: createTransfer };
 
-      // Use a feeConfig that gives org a non-zero slice (default config in this
-      // test setup uses DEFAULT_*; we test the legacy fallback path here which
-      // produces orgFeeCents = 0. Build a real FeeConfigService-aware purchase
-      // service for this specific test by inserting a fee_config_platform row.)
-      // Simpler approach: provide feeConfig override via a fresh service with
-      // an inline minimal FeeConfigService stub. Given the legacy fallback in
-      // PurchaseService produces orgFeeCents=0 (DEFAULT_ORG_FEE_PERCENTAGE), we
-      // exercise the no-org-fee branch here and the org-fee branch in the next
-      // test using a feeConfig stub.
+      // Default split for £100 with DEFAULT_PLATFORM_FEE_PERCENTAGE = 1000
+      // and DEFAULT_ORG_FEE_PERCENTAGE = 1000 (post-h69cg follow-up):
+      //   platform = ceil(10000 * 10%)         = 1000
+      //   org      = ceil((10000-1000) * 10%)  = 900
+      //   creator  = 10000 - 1000 - 900        = 8100
       const purchase = await purchaseService.completePurchase(paymentIntentId, {
         customerId: otherUserId,
         contentId: content.id,
@@ -1005,17 +1004,28 @@ describe('PurchaseService Integration', () => {
         .from(schema.payouts)
         .where(eq(schema.payouts.purchaseId, purchase.id));
 
-      // With DEFAULT_ORG_FEE_PERCENTAGE = 0 fallback, no org_fee row is written
-      // and no transfer is fired. We get 2 rows: platform_fee + creator_payout.
-      expect(rows).toHaveLength(2);
-      expect(createTransfer).not.toHaveBeenCalled();
+      // 3 rows: platform_fee + organization_fee + creator_payout
+      expect(rows).toHaveLength(3);
+      // Org-fee transfer must have fired exactly once with the deterministic key
+      expect(createTransfer).toHaveBeenCalledTimes(1);
+      expect(createTransfer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amount: 900,
+          currency: 'gbp',
+          source_transaction: chargeId,
+        }),
+        expect.objectContaining({ idempotencyKey: `${chargeId}_org_fee` })
+      );
 
       const platformRow = rows.find((r) => r.payoutType === 'platform_fee');
+      const orgRow = rows.find((r) => r.payoutType === 'organization_fee');
       const creatorRow = rows.find((r) => r.payoutType === 'creator_payout');
       expect(platformRow).toBeDefined();
+      expect(orgRow).toBeDefined();
       expect(creatorRow).toBeDefined();
 
       // platform_fee invariants
+      expect(platformRow?.amountCents).toBe(1000);
       expect(platformRow?.status).toBe('paid');
       expect(platformRow?.sourceType).toBe('purchase');
       expect(platformRow?.stripeChargeId).toBe(chargeId);
@@ -1023,7 +1033,15 @@ describe('PurchaseService Integration', () => {
       expect(platformRow?.userId).toBeNull();
       expect(platformRow?.purchaseId).toBe(purchase.id);
 
+      // organization_fee invariants
+      expect(orgRow?.amountCents).toBe(900);
+      expect(orgRow?.status).toBe('paid');
+      expect(orgRow?.sourceType).toBe('purchase');
+      expect(orgRow?.stripeChargeId).toBe(chargeId);
+      expect(orgRow?.stripeTransferId).toBe(transferId);
+
       // creator_payout invariants
+      expect(creatorRow?.amountCents).toBe(8100);
       expect(creatorRow?.status).toBe('paid');
       expect(creatorRow?.sourceType).toBe('purchase');
       expect(creatorRow?.stripeChargeId).toBe(chargeId);

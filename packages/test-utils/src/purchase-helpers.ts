@@ -27,7 +27,7 @@ export interface SeedPurchaseWithAccessInput {
   amountPaidCents: number;
   /** Platform fee in basis points. Default: `FEES.PLATFORM_PERCENT` (10%). */
   platformFeePercentage?: number;
-  /** Org fee in basis points. Default: `FEES.ORG_PERCENT` (0%). */
+  /** Org fee in basis points (of post-platform). Default: `FEES.ORG_PERCENT` (10%). */
   organizationFeePercentage?: number;
   /** Stripe intent ID. Auto-generated unique value if omitted. */
   stripePaymentIntentId?: string;
