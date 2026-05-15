@@ -838,19 +838,28 @@ export class PurchaseService extends BaseService {
     }
 
     try {
-      // No `source_transaction` here: the destination charge already
-      // scheduled `charge.amount - application_fee_amount` to the creator's
-      // Connect account, leaving zero source-transaction balance for a
-      // secondary transfer linked to that charge. `application_fee_amount`
-      // was inflated in `createCheckoutSession` to cover platform + org,
-      // so the org's slice sits in the platform's general balance and the
-      // transfer just pulls from there.
+      // `source_transaction` is REQUIRED here: the destination charge's
+      // funds sit in the platform's pending balance until `available_on`
+      // (~T+2 for GBP). Without source_transaction the transfer pulls from
+      // available balance and fails with "insufficient funds" until that
+      // window passes. source_transaction bypasses the wait by linking
+      // the transfer to the application_fee_amount allocation against the
+      // charge — which we inflated in `createCheckoutSession` to cover
+      // platform + org slices.
+      //
+      // `transfer_group` is OMITTED on purpose: destination charges auto-
+      // set their own transfer_group for the creator-bound auto-transfer,
+      // and Stripe rejects passing both source_transaction and a custom
+      // transfer_group together with `"You cannot use transfer_group if
+      // the source_transaction already has one set."`. The charge id
+      // remains traceable via metadata.stripe_charge_id and the row's
+      // own `stripeChargeId` column.
       const transfer = await this.stripe.transfers.create(
         {
           amount: revenueSplit.organizationFeeCents,
           currency: CURRENCY.GBP,
           destination: orgConnect.stripeAccountId,
-          transfer_group: transferGroup,
+          source_transaction: stripeChargeId,
           metadata: {
             purchase_id: purchase.id,
             type: 'organization_fee',

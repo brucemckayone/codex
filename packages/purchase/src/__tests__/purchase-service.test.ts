@@ -1012,19 +1012,20 @@ describe('PurchaseService Integration', () => {
         expect.objectContaining({
           amount: 900,
           currency: 'gbp',
-          // No source_transaction: destination charges leave no balance
-          // linked to the charge id (Codex-h69cg follow-up fix).
-          // application_fee_amount on the charge already covered the org
-          // slice; this transfer pulls from the platform's general balance.
+          // source_transaction IS passed: it bypasses the T+2 pending-
+          // balance wait by linking the secondary transfer to the
+          // application_fee allocation against the source charge.
+          source_transaction: chargeId,
         }),
         expect.objectContaining({ idempotencyKey: `${chargeId}_org_fee` })
       );
-      // Explicitly assert source_transaction is absent
+      // transfer_group MUST be absent — destination charges auto-set one
+      // and Stripe rejects passing both together with source_transaction.
       const callArgs = createTransfer.mock.calls[0]?.[0] as Record<
         string,
         unknown
       >;
-      expect(callArgs).not.toHaveProperty('source_transaction');
+      expect(callArgs).not.toHaveProperty('transfer_group');
 
       const platformRow = rows.find((r) => r.payoutType === 'platform_fee');
       const orgRow = rows.find((r) => r.payoutType === 'organization_fee');
