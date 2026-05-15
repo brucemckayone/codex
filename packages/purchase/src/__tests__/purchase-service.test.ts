@@ -1288,6 +1288,161 @@ describe('PurchaseService Integration', () => {
         })
       ).rejects.toThrow();
     });
+
+    // REGRESSION (PR #203 deep-review N-2, bead Codex-sec7i P1) — multi-creator
+    // org_fee mis-attribution.
+    //
+    // writePurchasePayouts looks up the org Connect via:
+    //   .from(stripeConnectAccounts).where(eq(organizationId, …)).limit(1)
+    // with NO primary-account pinning, NO chargesEnabled filter, NO ORDER BY.
+    // In a multi-creator org where members have their own Connect rows
+    // alongside the owner, .limit(1) returns whichever row the planner picks
+    // — typically insertion order in Postgres without ORDER BY.
+    //
+    // Result: the org_fee transfer can route to a random member's Connect
+    // account, AND the resulting payouts row carries that member's userId
+    // — silently mis-attributing org revenue.
+    //
+    // The subscription path uses resolvePrimaryConnect(orgId) which honours
+    // organizations.ownerId / primary_connect_account_user_id. Purchase
+    // path was never updated to match.
+    //
+    // Failing assertion: org_fee transfer destination matches the OWNER's
+    // Connect account, not the member's. To make the test deterministic and
+    // FAILING today, we insert the member's Connect FIRST so .limit(1)
+    // picks it.
+    it.fails('writePurchasePayouts routes org_fee to the org owner Connect, not an arbitrary member (multi-creator regression)', async () => {
+      const stubFeeConfig = {
+        getFeesForCreator: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 1500,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+
+      // New org owned by `userId`.
+      const [multiOrg] = await db
+        .insert(organizations)
+        .values({
+          name: 'Multi-creator Org',
+          slug: createUniqueSlug('multi-creator'),
+          ownerId: userId,
+        })
+        .returning();
+
+      // Insert MEMBER's Connect row FIRST. Production `.limit(1)` will
+      // pick this without an ORDER BY clause.
+      const [memberUser] = await db
+        .insert(schema.users)
+        .values({
+          email: `co-creator-${Date.now()}@test.com`,
+          name: 'Co-Creator',
+        })
+        .returning();
+      const MEMBER_STRIPE_ACCT = `acct_member_${Date.now()}`;
+      await db.insert(schema.stripeConnectAccounts).values({
+        userId: memberUser.id,
+        organizationId: multiOrg.id,
+        stripeAccountId: MEMBER_STRIPE_ACCT,
+        status: 'active',
+        chargesEnabled: true,
+        payoutsEnabled: true,
+      });
+
+      // Insert OWNER's Connect SECOND — the canonical org slice recipient.
+      const OWNER_STRIPE_ACCT = `acct_owner_${Date.now()}`;
+      await db.insert(schema.stripeConnectAccounts).values({
+        userId,
+        organizationId: multiOrg.id,
+        stripeAccountId: OWNER_STRIPE_ACCT,
+        status: 'active',
+        chargesEnabled: true,
+        payoutsEnabled: true,
+      });
+
+      const transferCalls: Array<{
+        destination?: string;
+        metadata?: { type?: string };
+      }> = [];
+      const stubStripe = {
+        ...mockStripe,
+        transfers: {
+          create: vi.fn().mockImplementation((args: unknown) => {
+            const a = args as {
+              destination?: string;
+              metadata?: { type?: string };
+            };
+            transferCalls.push({
+              destination: a?.destination,
+              metadata: a?.metadata,
+            });
+            return Promise.resolve({
+              id: `tr_${a?.metadata?.type ?? 'unknown'}_${Date.now()}`,
+            });
+          }),
+          createReversal: vi.fn(),
+        },
+        refunds: { create: vi.fn() },
+      } as unknown as Stripe;
+
+      const multiService = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      const media = await mediaService.create(
+        {
+          title: 'Multi-creator Content',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/multi-creator/master.m3u8',
+          thumbnailKey: 'thumbnails/multi-creator.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+      const content = await contentService.create(
+        {
+          organizationId: multiOrg.id,
+          title: 'Multi-creator Content',
+          slug: createUniqueSlug('multi-creator'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 1000,
+        },
+        userId
+      );
+      await contentService.publish(content.id, userId);
+
+      const chargeId = `ch_multi_${Date.now()}`;
+      await multiService.completePurchase(`pi_multi_${Date.now()}`, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId: multiOrg.id,
+        amountPaidCents: 1000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+      });
+
+      // CRITICAL ASSERTION: org_fee must route to OWNER's Connect, not
+      // the member's. Today, .limit(1) picks the member (inserted first).
+      const orgFeeCall = transferCalls.find(
+        (c) => c.metadata?.type === 'organization_fee'
+      );
+      expect(orgFeeCall, 'org_fee transfer must fire').toBeDefined();
+      expect(orgFeeCall?.destination).toBe(OWNER_STRIPE_ACCT);
+    });
   });
 
   describe('processRefund — payouts reversal (Codex-h69cg)', () => {

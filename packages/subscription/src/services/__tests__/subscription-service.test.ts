@@ -8544,6 +8544,60 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
         .catch((e) => e);
       expectCheckViolation(err, 'check_payouts_paid_invariant');
     });
+
+    // REGRESSION (PR #203 deep-review N-4, bead Codex-g9owu P1) — webhook
+    // replay race on platform_fee insert.
+    //
+    // executeTransfers writes platform_fee rows via SELECT (by subscriptionId,
+    // chargeId, payout_type='platform_fee') then INSERT. There is no unique
+    // constraint covering this case — the existing partial unique index on
+    // stripe_transfer_id does NOT catch platform_fee rows because they have
+    // null stripeTransferId.
+    //
+    // Two simultaneous webhook deliveries (Stripe retries on a 5xx, or two
+    // worker replicas processing the same event) can both pass the SELECT
+    // check and both INSERT. Result: duplicate platform_fee rows for one
+    // invoice → doubled platform-revenue numbers in studio KPIs.
+    //
+    // Schema-level fix: a partial unique index on
+    //   (subscriptionId, stripeChargeId) WHERE payout_type = 'platform_fee'
+    // This test directly inserts two identical platform_fee rows and asserts
+    // the second is rejected. Today it succeeds (no constraint exists), so
+    // this test fails — exactly the tripwire we need for the fix migration.
+    it.fails('platform_fee rows for the same (subscriptionId, chargeId) are unique (webhook-replay safety)', async () => {
+      const base = await baseValues('e9v3b-check-platform-unique');
+      const chargeId = `ch_n4_unique_${createUniqueSlug('a')}`;
+      const platformValues = {
+        ...base,
+        userId: null,
+        payoutType: 'platform_fee' as const,
+        status: 'paid' as const,
+        reason: null,
+        stripeChargeId: chargeId,
+        resolvedAt: new Date(),
+        // sourceType inherits the schema default 'subscription'.
+      };
+
+      // First insert succeeds.
+      const first = await db
+        .insert(payoutsTable)
+        .values(platformValues)
+        .returning();
+      expect(first).toHaveLength(1);
+
+      // Second insert with IDENTICAL (subscriptionId, chargeId, platform_fee)
+      // — simulating a webhook replay race. MUST be rejected by the
+      // schema-level constraint that doesn't exist yet.
+      const err = await db
+        .insert(payoutsTable)
+        .values(platformValues)
+        .catch((e) => e);
+      expect(err).toBeDefined();
+      const e = err as { code?: string; cause?: { code?: string } };
+      const code = e.code ?? e.cause?.code;
+      // 23505 = Postgres unique_violation SQLSTATE.
+      expect(code).toBe('23505');
+    });
   });
 
   // ─── E. Drain status transitions ────────────────────────────────────

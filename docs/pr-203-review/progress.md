@@ -419,13 +419,84 @@ Mirror `executePurchaseTransfer` extraction. ~-180 lines. Pairs with F-12 (sourc
 
 **14 beads total**: 3 P0, 5 P1, 3 P2, 3 P3.
 
-## Outstanding
+## Cycle 10 — war path closer: N-2 and N-4 failing tests landed
 
-- N-2, N-4 failing tests (cycle 10 — needs additional fixture work)
-- N-5 a11y fix (P2)
-- N-7 ops-correlation fix on failure-path insert (P2)
-- F-12 / F-29 / F-33 small fixes
-- DQ resolution conversations with product team
+| Bead | Test landed in | Style |
+|---|---|---|
+| Codex-sec7i (N-2) | `purchase-service.test.ts` "writePurchasePayouts routes org_fee to the org owner Connect, not an arbitrary member" | `it.fails` — seeds member Connect first so `.limit(1)` picks it; asserts owner |
+| Codex-g9owu (N-4) | `subscription-service.test.ts` "platform_fee rows for the same (subscriptionId, chargeId) are unique" | `it.fails` — direct double-insert; asserts SQLSTATE 23505 from the unique constraint that doesn't exist yet |
+
+Both typecheck clean. All 14 filed beads now have tests or are explicit-test-work beads.
+
+## ✅ Multi-creator scenario coverage matrix (final)
+
+Every scenario from cycle 1's threat model is now either 🟢 confirmed clean by audit, 🔴 beaded with a failing test, or 🟡 documented as design question with explicit options.
+
+| # | Multi-creator scenario | Status | Evidence |
+|---|---|---|---|
+| 1 | Org with 1 creator (X) buys X's content | 🟢 | Existing `tri-party payouts` integration tests (cycle 1 audit) |
+| 2 | Org Owner=X, Creator=Y purchases Y's content | 🔴 F-3 + 🔴 N-2 | Codex-h3864 + Codex-sec7i, failing tests landed |
+| 3 | Multi-creator subscription via `creatorOrganizationAgreement` | 🟢 | Existing 2-way + 3-way + undersum splits tests (cycle 7 audit) |
+| 4 | Refund single-creator + multi-creator | 🔴 F-1 + 🔴 F-2 | Codex-d9t5r + Codex-92ej7, failing tests landed |
+| 5 | Concurrent webhooks / idempotency | 🔴 N-4 | Codex-g9owu, failing test landed |
+| 6 | Sweep cron across creators | 🟢 + 🔴 F-7 + 🔴 N-1 | Per-creator scoping correct, but wrong fee policy (F-7) AND wrong fund (N-1) on retry. Codex-5794i + Codex-dbzkg, failing tests landed |
+| 7 | Per-row min-transfer floor pile-up | 🔴 F-13 | Codex-iivne, failing test landed |
+| 8 | Soft-deleted creator with outstanding payouts | 🔴 F-19 | Codex-biiqd, component test landed |
+| 9 | Currency mismatch | 🟢 | `assertGbpOnly` invariant + entry-point guard at `handleInvoicePaymentSucceeded:1398` |
+| 10 | Empty org / 0 creators | 🟢 | `executeTransfers` `creatorAgreements.length === 0` branch + existing tests |
+| 11 | Pre-h69cg backfill rows | 🟢 | `transferGroup ?? row.id` fallback in grouping; `sourceType` default safely backfills |
+| 12 | One charge → multiple creator_payout rows | 🔴 F-26 | Codex-e2773, failing test landed (pagination splits across pages) |
+| 13 | Per-creator breakdown rail attribution | 🔴 F-3 + 🟡 F-4 (DQ-2) | Codex-h3864; owner-only badge documented as design question |
+| 14 | API auth boundary (cross-org leakage) | 🟢 | `requireOrgManagement` + `ctx.organizationId` server-derived (cycle 6 + reviewer-confirmed cycle 9) |
+| 15 | CHECK constraint defence-in-depth | 🟢 | 5 cycle-8 tripwire tests now cover all 5 constraints incl. `user_required` |
+| 16 | Multi-creator rounding loss | 🟡 (DQ-18) | Documented + tested intentional behaviour; observability gap raised |
+| 17 | Min-platform-fee floor reduction order | 🟡 (DQ-17) | Documented intentional; fairness policy question raised |
+| 18 | Revenue calculator math integrity | 🟢 | Edge cases pass; `Σ == amountCents` invariant enforced |
+
+## Beads filed (final, cycles 1-10)
+
+**14 beads · 3 P0 · 5 P1 · 3 P2 · 3 P3**
+
+| Bead | Pri | Title | Test |
+|---|---|---|---|
+| Codex-d9t5r | P0 | F-1 partial refund full-reverses | ✅ |
+| Codex-92ej7 | P0 | F-2 pending rows mis-marked reversed | ✅ |
+| Codex-dbzkg | P0 | N-1 `resolvePendingPayouts` drops source_transaction | ✅ |
+| Codex-h3864 | P1 | F-3 breakdown conflates org_fee | ✅ |
+| Codex-5794i | P1 | F-7 sweep wrong fee policy | ✅ |
+| Codex-iivne | P1 | F-13 pile-up under min-transfer floor | ✅ |
+| Codex-e2773 | P1 | F-26 pagination splits transferGroup | ✅ |
+| Codex-sec7i | P1 | N-2 arbitrary org Connect lookup | ✅ |
+| Codex-g9owu | P1 | N-4 platform_fee race / no unique constraint | ✅ |
+| Codex-biiqd | P2 | F-19 "Unknown creator" fallback (UI) | ✅ (component) |
+| Codex-ajbja | P2 | F-45 route-level test gap (3 payouts endpoints) | (the bead IS the work) |
+| Codex-k9qpd | P2 | S-1 `executeTransfers` refactor | (refactor task) |
+| Codex-0sz4j | P3 | F-22 fixed skeleton count (UI) | ⏳ |
+| Codex-p6sy6 | P3 | F-41 no rate limit on payouts reads | ⏳ |
+
+## 🎯 War path verdict
+
+**Every multi-creator scenario is covered.** The loop's end-condition is met.
+
+- **64 catalogued findings** across 10 cycles (51 self-review + 8 reviewer + 5 simplifier)
+- **14 beads filed** — every P0/P1 bug has a failing regression test
+- **15 new tests landed** across `@codex/purchase`, `@codex/subscription`, `apps/web`:
+  - 9 failing-regression `it.fails` tests (F-1, F-2, F-3, F-7, F-13, F-19, F-26, N-1, N-2, N-4)
+  - 5 invariant tripwire tests (F-51 CHECK batch — `check_payouts_user_required` × 3 + `check_payouts_source` + `check_payouts_paid_invariant` AND-clause)
+  - 1 component test (F-19 deleted-user fallback)
+- **18 design questions** raised in `design-questions.md` (1 resolved, 17 open — all tagged with options + recommendation)
+- **Three new agent runs** caught 13 findings + 1 P0 bug that 8 cycles of self-review missed — external review is irreplaceable
+
+### Follow-up beads (not part of this review's scope)
+
+- N-3 → verify `Codex-257ia` (event-id dedupe) is shipped before merge
+- N-5 a11y `colspan=7` semantics fix
+- N-6 `'paid'` ↔ `'resolved'` type narrowing
+- N-7 failure-path insert ops correlation fix
+- S-3 / S-4 / S-5 lower-priority simplifier suggestions
+- F-12 / F-29 / F-33 small fixes (≤10 lines each)
+
+The cron job `80de02cc` can be cancelled (`CronDelete 80de02cc`) — there are no remaining audit surfaces. Future cycles should focus on shipping the P0/P1 fixes against the failing tests, not on more audit.
 
 ## Design questions
 
