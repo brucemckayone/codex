@@ -22,6 +22,7 @@ import {
   createSubscriptionCheckoutSchema,
   getCurrentSubscriptionQuerySchema,
   getPayoutSummaryQuerySchema,
+  getPayoutsByCreatorBreakdownQuerySchema,
   getSubscriptionStatsQuerySchema,
   listPayoutsQuerySchema,
   listSubscribersQuerySchema,
@@ -418,6 +419,38 @@ subscriptions.get(
         fromDate: ctx.input.query.fromDate,
         toDate: ctx.input.query.toDate,
       });
+    },
+  })
+);
+
+/**
+ * GET /subscriptions/payouts/by-creator
+ *
+ * Codex-6nt4l: per-creator aggregate for the studio payouts right rail.
+ * Owner/admin only via `requireOrgManagement` — same scoping invariant as
+ * `/payouts` and `/payouts/summary`. The service shares its WHERE-clause
+ * helper with `listPayoutsByOrg` so the table and the rail respond to the
+ * same filter chips (status / source / date) symmetrically.
+ *
+ * Returns `{ data: CreatorPayoutBreakdown[] }` via the procedure envelope —
+ * a single-item return, not a paginated list, because the rail intentionally
+ * surfaces every creator under the current filter rather than paginating.
+ */
+subscriptions.get(
+  '/payouts/by-creator',
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: { query: getPayoutsByCreatorBreakdownQuerySchema },
+    handler: async (ctx) => {
+      return ctx.services.subscription.getPayoutsByCreatorBreakdown(
+        ctx.organizationId,
+        {
+          status: ctx.input.query.status,
+          sourceType: ctx.input.query.source,
+          fromDate: ctx.input.query.fromDate,
+          toDate: ctx.input.query.toDate,
+        }
+      );
     },
   })
 );

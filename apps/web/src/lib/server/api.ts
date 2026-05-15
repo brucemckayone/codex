@@ -56,6 +56,7 @@ import type {
   UserData,
 } from '@codex/shared-types';
 import type {
+  CreatorPayoutBreakdown,
   PayoutSummary,
   PayoutWithCreator,
   SubscriberListItem,
@@ -1719,6 +1720,24 @@ export function createServerApi(
         request<PayoutSummary>(
           'ecom',
           withOrg('/subscriptions/payouts/summary', organizationId, params)
+        ),
+
+      /**
+       * Per-creator payout breakdown for the studio payouts right rail
+       * (Codex-6nt4l). Returns one entry per user who received a
+       * `creator_payout` or `organization_fee` row under the current
+       * filters; `platform_fee` rows are excluded. Owner-only.
+       *
+       * Returns a plain array (not paginated) — the rail surfaces every
+       * matched creator under the filter, not a page slice.
+       */
+      getPayoutsByCreatorBreakdown: (
+        organizationId: string,
+        params?: URLSearchParams
+      ) =>
+        request<CreatorPayoutBreakdown[]>(
+          'ecom',
+          withOrg('/subscriptions/payouts/by-creator', organizationId, params)
         ),
     },
 

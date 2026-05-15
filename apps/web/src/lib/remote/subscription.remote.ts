@@ -517,6 +517,52 @@ export const getPayoutSummary = query(
   }
 );
 
+/**
+ * Per-creator payout breakdown for the studio payouts right rail
+ * (Codex-6nt4l). Returns one entry per user who received a
+ * `creator_payout` or `organization_fee` row under the current filters;
+ * `platform_fee` rows are excluded. Owner-only.
+ *
+ * Args mirror `listPayouts` minus pagination — the rail intentionally
+ * aggregates the whole row set, not a page slice. Filter chips on the
+ * page reshape both the table AND the rail by passing the same args to
+ * both queries.
+ */
+const getPayoutsByCreatorBreakdownArgsSchema = z.object({
+  organizationId: z.string().uuid(),
+  status: z
+    .enum([
+      'all',
+      'pending',
+      'paid',
+      'resolved',
+      'failed',
+      'reversed',
+      'needs_attention',
+    ])
+    .default('all'),
+  source: z.enum(['all', 'purchase', 'subscription']).default('all'),
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
+});
+
+export const getPayoutsByCreatorBreakdown = query(
+  getPayoutsByCreatorBreakdownArgsSchema,
+  async ({ organizationId, status, source, fromDate, toDate }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (source) params.set('source', source);
+    if (fromDate) params.set('fromDate', fromDate);
+    if (toDate) params.set('toDate', toDate);
+    return api.subscription.getPayoutsByCreatorBreakdown(
+      organizationId,
+      params
+    );
+  }
+);
+
 const connectDashboardCommandSchema = z.object({
   organizationId: z.string().uuid(),
 });
