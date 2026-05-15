@@ -973,15 +973,27 @@ describe('PurchaseService Integration', () => {
       };
     }
 
-    it('writes all 3 tri-party rows + fires the org-fee transfer under the default split', async () => {
+    it('writes all 3 tri-party rows + fires creator + org transfers under the default split', async () => {
       const { content, chargeId, paymentIntentId, stripeAccountId } =
         await setupPaidContentWithConnect({
           title: 'Tri-party Standard',
           priceCents: 10000, // £100
         });
 
-      const transferId = `tr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const createTransfer = vi.fn().mockResolvedValue({ id: transferId });
+      // Option B (Codex-h69cg): TWO secondary transfers fire — one for the
+      // creator, one for the org. Mock returns a deterministic id per call so
+      // we can pin each ledger row's stripeTransferId.
+      const orgTransferId = `tr_org_${Date.now()}`;
+      const creatorTransferId = `tr_creator_${Date.now()}`;
+      const createTransfer = vi
+        .fn()
+        .mockImplementation((args: { metadata?: { type?: string } }) => {
+          const id =
+            args?.metadata?.type === 'creator_payout'
+              ? creatorTransferId
+              : orgTransferId;
+          return Promise.resolve({ id });
+        });
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       (mockStripe as any).transfers = { create: createTransfer };
 
@@ -1006,26 +1018,34 @@ describe('PurchaseService Integration', () => {
 
       // 3 rows: platform_fee + organization_fee + creator_payout
       expect(rows).toHaveLength(3);
-      // Org-fee transfer must have fired exactly once with the deterministic key
-      expect(createTransfer).toHaveBeenCalledTimes(1);
+
+      // BOTH transfers must have fired with deterministic idempotency keys
+      expect(createTransfer).toHaveBeenCalledTimes(2);
+      expect(createTransfer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amount: 8100,
+          currency: 'gbp',
+          // source_transaction caps the transfer against charge.amount and
+          // bypasses available_on wait — works for platform charges.
+          source_transaction: chargeId,
+        }),
+        expect.objectContaining({ idempotencyKey: `${chargeId}_creator` })
+      );
       expect(createTransfer).toHaveBeenCalledWith(
         expect.objectContaining({
           amount: 900,
           currency: 'gbp',
-          // source_transaction IS passed: it bypasses the T+2 pending-
-          // balance wait by linking the secondary transfer to the
-          // application_fee allocation against the source charge.
           source_transaction: chargeId,
         }),
         expect.objectContaining({ idempotencyKey: `${chargeId}_org_fee` })
       );
-      // transfer_group MUST be absent — destination charges auto-set one
-      // and Stripe rejects passing both together with source_transaction.
-      const callArgs = createTransfer.mock.calls[0]?.[0] as Record<
-        string,
-        unknown
-      >;
-      expect(callArgs).not.toHaveProperty('transfer_group');
+
+      // transfer_group MUST be absent on both calls — source_transaction sets
+      // it implicitly and Stripe rejects passing both together.
+      for (const call of createTransfer.mock.calls) {
+        const args = call[0] as Record<string, unknown>;
+        expect(args).not.toHaveProperty('transfer_group');
+      }
 
       const platformRow = rows.find((r) => r.payoutType === 'platform_fee');
       const orgRow = rows.find((r) => r.payoutType === 'organization_fee');
@@ -1034,7 +1054,7 @@ describe('PurchaseService Integration', () => {
       expect(orgRow).toBeDefined();
       expect(creatorRow).toBeDefined();
 
-      // platform_fee invariants
+      // platform_fee invariants — no transfer, retained on platform balance
       expect(platformRow?.amountCents).toBe(1000);
       expect(platformRow?.status).toBe('paid');
       expect(platformRow?.sourceType).toBe('purchase');
@@ -1048,14 +1068,14 @@ describe('PurchaseService Integration', () => {
       expect(orgRow?.status).toBe('paid');
       expect(orgRow?.sourceType).toBe('purchase');
       expect(orgRow?.stripeChargeId).toBe(chargeId);
-      expect(orgRow?.stripeTransferId).toBe(transferId);
+      expect(orgRow?.stripeTransferId).toBe(orgTransferId);
 
-      // creator_payout invariants
+      // creator_payout invariants — NOW has stripeTransferId under Option B
       expect(creatorRow?.amountCents).toBe(8100);
       expect(creatorRow?.status).toBe('paid');
       expect(creatorRow?.sourceType).toBe('purchase');
       expect(creatorRow?.stripeChargeId).toBe(chargeId);
-      expect(creatorRow?.stripeTransferId).toBeNull();
+      expect(creatorRow?.stripeTransferId).toBe(creatorTransferId);
       expect(creatorRow?.userId).toBe(userId); // creator is the org owner here
 
       // Unused stripeAccountId to satisfy lint while keeping the helper return shape
@@ -1226,14 +1246,26 @@ describe('PurchaseService Integration', () => {
         .from(schema.payouts)
         .where(eq(schema.payouts.purchaseId, purchase.id));
 
-      // 3 rows: platform_fee + creator_payout (both paid, no transfer needed)
-      // + organization_fee (pending, connect_not_ready)
+      // Option B (Codex-h69cg): both creator_payout AND organization_fee
+      // require a secondary transfer. With the same Connect account (org owner
+      // == creator here) disabled, BOTH end up pending+connect_not_ready.
+      // platform_fee stays paid (no transfer call). 3 rows total.
       expect(rows).toHaveLength(3);
+
       const orgFeeRow = rows.find((r) => r.payoutType === 'organization_fee');
       expect(orgFeeRow).toBeDefined();
       expect(orgFeeRow?.status).toBe('pending');
       expect(orgFeeRow?.reason).toBe('connect_not_ready');
       expect(orgFeeRow?.sourceType).toBe('purchase');
+
+      const creatorRow = rows.find((r) => r.payoutType === 'creator_payout');
+      expect(creatorRow).toBeDefined();
+      expect(creatorRow?.status).toBe('pending');
+      expect(creatorRow?.reason).toBe('connect_not_ready');
+      expect(creatorRow?.sourceType).toBe('purchase');
+
+      const platformRow = rows.find((r) => r.payoutType === 'platform_fee');
+      expect(platformRow?.status).toBe('paid');
 
       // No Stripe transfer call should have fired
       // biome-ignore lint/suspicious/noExplicitAny: test mock
@@ -1290,12 +1322,24 @@ describe('PurchaseService Integration', () => {
         payoutsEnabled: true,
       });
 
-      const transferId = `tr_refund_${Date.now()}`;
+      // Option B (Codex-h69cg): TWO secondary transfers fire (creator + org)
+      // so the refund must reverse both. Mock returns a deterministic id per
+      // call so we can confirm each got reversed.
+      const orgTransferId = `tr_refund_org_${Date.now()}`;
+      const creatorTransferId = `tr_refund_creator_${Date.now()}`;
       const refundedTransferIds: string[] = [];
       const stubStripe = {
         ...mockStripe,
         transfers: {
-          create: vi.fn().mockResolvedValue({ id: transferId }),
+          create: vi
+            .fn()
+            .mockImplementation((args: { metadata?: { type?: string } }) => {
+              const id =
+                args?.metadata?.type === 'creator_payout'
+                  ? creatorTransferId
+                  : orgTransferId;
+              return Promise.resolve({ id });
+            }),
           createReversal: vi.fn().mockImplementation((id: string) => {
             refundedTransferIds.push(id);
             return Promise.resolve({ id: `trr_${id}` });
@@ -1370,11 +1414,14 @@ describe('PurchaseService Integration', () => {
         refundReason: 'requested_by_customer',
       });
 
-      // Stripe reversal must have fired for the org_fee transfer
+      // Option B: Stripe reversal fires for BOTH creator + org transfers.
+      // platform_fee never had a transfer so it's marked reversed without a
+      // Stripe call.
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       const reversal = (stubStripe as any).transfers.createReversal;
-      expect(reversal).toHaveBeenCalledTimes(1);
-      expect(refundedTransferIds).toContain(transferId);
+      expect(reversal).toHaveBeenCalledTimes(2);
+      expect(refundedTransferIds).toContain(orgTransferId);
+      expect(refundedTransferIds).toContain(creatorTransferId);
 
       // All 3 rows must now be 'reversed'
       const after = await db

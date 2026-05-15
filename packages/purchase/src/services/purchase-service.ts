@@ -287,54 +287,26 @@ export class PurchaseService extends BaseService {
         throw new AlreadyPurchasedError(validated.contentId, customerId);
       }
 
-      // Step 3: Look up creator's Connect account for revenue transfer
-      const [creatorConnect] = await this.db
-        .select()
-        .from(stripeConnectAccounts)
-        .where(
-          and(
-            eq(stripeConnectAccounts.userId, contentRecord.creatorId),
-            eq(
-              stripeConnectAccounts.organizationId,
-              contentRecord.organizationId!
-            )
-          )
-        )
-        .limit(1);
-
-      // Application fee for the destination charge MUST cover the platform
-      // slice AND the org slice (Codex-h69cg). Stripe routes
-      // `charge.amount - application_fee_amount` directly to the creator's
-      // Connect account; the remainder lands in the platform's balance.
-      // From that platform balance we make a SECOND `transfers.create` to
-      // the org (in `writePurchasePayouts`) — that transfer is NOT linked
-      // to the charge via `source_transaction` because the destination-
-      // charge mechanism has already scheduled all non-application-fee
-      // funds for transfer to the creator. Allocating the org's share via
-      // a separate `transfers.create` from the platform's general balance
-      // is the only correct shape.
-      const splitForFee = creatorConnect?.chargesEnabled
-        ? calculateRevenueSplit(
-            contentRecord.priceCents,
-            DEFAULT_PLATFORM_FEE_PERCENTAGE,
-            DEFAULT_ORG_FEE_PERCENTAGE
-          )
-        : undefined;
-      const applicationFeeCents = splitForFee
-        ? splitForFee.platformFeeCents + splitForFee.organizationFeeCents
-        : undefined;
-
-      if (!creatorConnect?.chargesEnabled) {
-        this.obs.warn(
-          'Creator Connect account not ready — purchase will proceed but revenue stays in platform account',
-          {
-            creatorId: contentRecord.creatorId,
-            organizationId: contentRecord.organizationId,
-            contentId: validated.contentId,
-            connectStatus: creatorConnect?.status ?? 'missing',
-          }
-        );
-      }
+      // Codex-h69cg (Option B): purchases use the PLATFORM CHARGE model, not
+      // destination charges. The charge lands fully on the platform's balance,
+      // and `writePurchasePayouts` issues TWO secondary transfers (creator +
+      // org) using `source_transaction: chargeId` post-webhook.
+      //
+      // Why the switch from destination charges (Option A):
+      //   - Destination charges auto-create a transfer for the FULL charge
+      //     amount to the destination Connect account, consuming the entire
+      //     source-linked balance. A secondary `transfers.create` with
+      //     `source_transaction` then fails:
+      //       "Transfers using this transaction as a source must not exceed
+      //        the source amount." (there's already one for £X using it)
+      //   - Inflating `application_fee_amount` to cover platform+org does NOT
+      //     carve out a source-linked slice for a third party — the app fee
+      //     reimburses the platform after the destination transfer, leaving
+      //     zero source-linked balance.
+      //   - Confirmed against Stripe docs (Context7): platform charges allow
+      //     multiple transfers from one source_transaction up to charge.amount.
+      //
+      // No application_fee_amount, no transfer_data.destination here.
 
       // Step 4: Create Stripe Checkout session
       // Convert TipTap JSON description to plain text for Stripe
@@ -407,18 +379,11 @@ export class PurchaseService extends BaseService {
                 quantity: 1,
               },
             ],
-            // Destination charges: Stripe routes payment to creator, platform keeps fee
-            ...(creatorConnect?.chargesEnabled &&
-            applicationFeeCents !== undefined
-              ? {
-                  payment_intent_data: {
-                    application_fee_amount: applicationFeeCents,
-                    transfer_data: {
-                      destination: creatorConnect.stripeAccountId,
-                    },
-                  },
-                }
-              : {}),
+            // Codex-h69cg Option B: platform charge — no transfer_data,
+            // no application_fee_amount. Funds land on the platform's
+            // balance and are split via secondary transfers in
+            // `writePurchasePayouts` (creator + org), each linked to the
+            // charge via `source_transaction`.
             success_url: validated.successUrl,
             cancel_url: validated.cancelUrl,
             metadata: {
@@ -702,23 +667,28 @@ export class PurchaseService extends BaseService {
 
   /**
    * Write tri-party payouts ledger rows for a freshly-completed purchase and
-   * execute the secondary organization-fee transfer (Option A hybrid model).
+   * execute the secondary creator + organization transfers (Option B platform
+   * charge model — Codex-h69cg).
    *
-   * - `platform_fee`: status='paid' immediately; the platform retains its
-   *   slice via `application_fee_amount` on the destination charge — no
-   *   transfer call needed. `stripeChargeId` satisfies the paid invariant.
-   * - `creator_payout`: status='paid' immediately; the destination charge
-   *   already routed creator funds at charge time. `stripeChargeId` satisfies
-   *   the paid invariant (no `stripeTransferId` for destination charges).
-   * - `organization_fee`: requires a follow-up `transfers.create` pulling
-   *   from the creator's destination-charged balance via `source_transaction`.
-   *   On success: status='paid' with `stripeTransferId`. On Connect-not-ready:
-   *   status='pending' with reason='connect_not_ready' for sweep to retry.
-   *   On Stripe failure: status='failed' with reason='transfer_failed'.
+   * Charge lands fully on the platform's balance. Two secondary transfers
+   * carve out the creator + org slices, both linked to the source charge via
+   * `source_transaction` (sum is bounded by the charge amount — see Stripe
+   * docs on multiple transfers from one source_transaction).
+   *
+   * - `platform_fee`: status='paid', retained on platform balance — no
+   *   transfer call. `stripeChargeId` satisfies the paid invariant.
+   * - `creator_payout`: `transfers.create` with `source_transaction=chargeId`
+   *   to the creator's Connect account. On success: status='paid' with
+   *   `stripeTransferId`. On Connect-not-ready: status='pending' with
+   *   reason='connect_not_ready'. On Stripe failure: status='failed' with
+   *   reason='transfer_failed'.
+   * - `organization_fee`: same shape as `creator_payout` but to the org's
+   *   Connect account. Same pending/failed branches.
    *
    * Per-row error isolation: a failure in any one branch logs + continues so
-   * one bad insert never poisons the rest of the ledger writes. Mirrors the
-   * pattern enforced for subscription executeTransfers (Codex-vv77x).
+   * one bad transfer or insert never poisons the rest of the ledger writes.
+   * Mirrors the pattern enforced for subscription executeTransfers
+   * (Codex-vv77x).
    */
   private async writePurchasePayouts(params: {
     purchase: Purchase;
@@ -741,7 +711,7 @@ export class PurchaseService extends BaseService {
     const transferGroup = `purchase_${purchase.id}`;
     const now = new Date();
 
-    // 1. Platform fee — retained via application_fee_amount, no transfer call.
+    // 1. Platform fee — retained on platform balance, no transfer call.
     if (revenueSplit.platformFeeCents > 0) {
       try {
         await this.db.insert(payouts).values({
@@ -768,53 +738,112 @@ export class PurchaseService extends BaseService {
       }
     }
 
-    // 2. Creator payout — destination charge already moved money.
+    // Look up Connect accounts up front. We need creator's (the org owner / a
+    // member, scoped by creatorId + organizationId) and org's (any active row
+    // for the org). The latter falls back to the same lookup as before.
+    const [creatorConnect] =
+      revenueSplit.creatorPayoutCents > 0
+        ? await this.db
+            .select()
+            .from(stripeConnectAccounts)
+            .where(
+              and(
+                eq(stripeConnectAccounts.userId, creatorId),
+                eq(stripeConnectAccounts.organizationId, organizationId)
+              )
+            )
+            .limit(1)
+        : [undefined];
+
+    const [orgConnect] =
+      revenueSplit.organizationFeeCents > 0
+        ? await this.db
+            .select()
+            .from(stripeConnectAccounts)
+            .where(eq(stripeConnectAccounts.organizationId, organizationId))
+            .limit(1)
+        : [undefined];
+
+    // 2. Creator payout — secondary transfer with source_transaction.
     if (revenueSplit.creatorPayoutCents > 0) {
-      try {
-        await this.db.insert(payouts).values({
-          userId: creatorId,
-          organizationId,
-          purchaseId: purchase.id,
-          amountCents: revenueSplit.creatorPayoutCents,
-          payoutType: 'creator_payout',
-          status: 'paid',
-          sourceType: 'purchase',
-          stripeChargeId,
-          transferGroup,
-          resolvedAt: now,
-        });
-      } catch (err) {
-        if (!isUniqueViolation(err)) {
-          this.obs.error('Failed to insert creator_payout payout row', {
-            purchaseId: purchase.id,
-            creatorId,
-            stripeChargeId,
-            amountCents: revenueSplit.creatorPayoutCents,
-            error: err instanceof Error ? err.message : String(err),
-          });
+      await this.executePurchaseTransfer({
+        purchase,
+        organizationId,
+        amountCents: revenueSplit.creatorPayoutCents,
+        payoutType: 'creator_payout',
+        rowUserId: creatorId,
+        connect: creatorConnect,
+        stripeChargeId,
+        transferGroup,
+        idempotencyKey: `${stripeChargeId}_creator`,
+        now,
+      });
+    }
+
+    // 3. Organization fee — secondary transfer with source_transaction.
+    if (revenueSplit.organizationFeeCents > 0) {
+      await this.executePurchaseTransfer({
+        purchase,
+        organizationId,
+        amountCents: revenueSplit.organizationFeeCents,
+        payoutType: 'organization_fee',
+        rowUserId: orgConnect?.userId ?? null,
+        connect: orgConnect,
+        stripeChargeId,
+        transferGroup,
+        idempotencyKey: `${stripeChargeId}_org_fee`,
+        now,
+      });
+    }
+  }
+
+  /**
+   * Execute a single secondary transfer (creator or organization slice) and
+   * write the corresponding payouts ledger row.
+   *
+   * Per-row error isolation: success → paid+stripeTransferId; Connect not
+   * ready → pending+connect_not_ready; Stripe failure → failed+transfer_failed.
+   * NEVER throws — the caller relies on this method's branches to keep going.
+   */
+  private async executePurchaseTransfer(params: {
+    purchase: Purchase;
+    organizationId: string;
+    amountCents: number;
+    payoutType: 'creator_payout' | 'organization_fee';
+    rowUserId: string | null;
+    connect:
+      | {
+          userId: string;
+          stripeAccountId: string;
+          chargesEnabled: boolean;
         }
-      }
-    }
+      | undefined;
+    stripeChargeId: string;
+    transferGroup: string;
+    idempotencyKey: string;
+    now: Date;
+  }): Promise<void> {
+    const {
+      purchase,
+      organizationId,
+      amountCents,
+      payoutType,
+      rowUserId,
+      connect,
+      stripeChargeId,
+      transferGroup,
+      idempotencyKey,
+      now,
+    } = params;
 
-    // 3. Organization fee — requires a secondary transfer (Option A hybrid).
-    if (revenueSplit.organizationFeeCents <= 0) {
-      return;
-    }
-
-    const [orgConnect] = await this.db
-      .select()
-      .from(stripeConnectAccounts)
-      .where(eq(stripeConnectAccounts.organizationId, organizationId))
-      .limit(1);
-
-    if (!orgConnect?.chargesEnabled) {
+    if (!connect?.chargesEnabled) {
       try {
         await this.db.insert(payouts).values({
-          userId: orgConnect?.userId ?? null,
+          userId: rowUserId,
           organizationId,
           purchaseId: purchase.id,
-          amountCents: revenueSplit.organizationFeeCents,
-          payoutType: 'organization_fee',
+          amountCents,
+          payoutType,
           status: 'pending',
           sourceType: 'purchase',
           reason: 'connect_not_ready',
@@ -824,11 +853,11 @@ export class PurchaseService extends BaseService {
       } catch (err) {
         if (!isUniqueViolation(err)) {
           this.obs.error(
-            'Failed to record pending org_fee payout (connect_not_ready)',
+            `Failed to record pending ${payoutType} payout (connect_not_ready)`,
             {
               purchaseId: purchase.id,
               organizationId,
-              amountCents: revenueSplit.organizationFeeCents,
+              amountCents,
               error: err instanceof Error ? err.message : String(err),
             }
           );
@@ -838,43 +867,39 @@ export class PurchaseService extends BaseService {
     }
 
     try {
-      // `source_transaction` is REQUIRED here: the destination charge's
-      // funds sit in the platform's pending balance until `available_on`
-      // (~T+2 for GBP). Without source_transaction the transfer pulls from
-      // available balance and fails with "insufficient funds" until that
-      // window passes. source_transaction bypasses the wait by linking
-      // the transfer to the application_fee_amount allocation against the
-      // charge — which we inflated in `createCheckoutSession` to cover
-      // platform + org slices.
+      // `source_transaction` links this transfer to the platform charge.
+      // Stripe permits multiple transfers from the same source_transaction
+      // as long as their sum does not exceed charge.amount, AND bypasses
+      // the T+2 available_on wait by tracking funds against the source.
       //
-      // `transfer_group` is OMITTED on purpose: destination charges auto-
-      // set their own transfer_group for the creator-bound auto-transfer,
-      // and Stripe rejects passing both source_transaction and a custom
-      // transfer_group together with `"You cannot use transfer_group if
-      // the source_transaction already has one set."`. The charge id
-      // remains traceable via metadata.stripe_charge_id and the row's
-      // own `stripeChargeId` column.
+      // `transfer_group` is OMITTED here. Multiple transfers from the same
+      // source_transaction inherit Stripe's auto-generated transfer group;
+      // passing a custom one alongside source_transaction is rejected with
+      // "You cannot use transfer_group if the source_transaction already
+      // has one set." (Same constraint as Option A.) Charge traceability
+      // is preserved via metadata.stripe_charge_id and the row's own
+      // stripeChargeId column.
       const transfer = await this.stripe.transfers.create(
         {
-          amount: revenueSplit.organizationFeeCents,
+          amount: amountCents,
           currency: CURRENCY.GBP,
-          destination: orgConnect.stripeAccountId,
+          destination: connect.stripeAccountId,
           source_transaction: stripeChargeId,
           metadata: {
             purchase_id: purchase.id,
-            type: 'organization_fee',
+            type: payoutType,
             stripe_charge_id: stripeChargeId,
           },
         },
-        { idempotencyKey: `${stripeChargeId}_org_fee` }
+        { idempotencyKey }
       );
       try {
         await this.db.insert(payouts).values({
-          userId: orgConnect.userId,
+          userId: rowUserId,
           organizationId,
           purchaseId: purchase.id,
-          amountCents: revenueSplit.organizationFeeCents,
-          payoutType: 'organization_fee',
+          amountCents,
+          payoutType,
           status: 'paid',
           sourceType: 'purchase',
           stripeTransferId: transfer.id,
@@ -885,12 +910,12 @@ export class PurchaseService extends BaseService {
       } catch (insertErr) {
         if (!isUniqueViolation(insertErr)) {
           this.obs.error(
-            'Org-fee transfer succeeded but payouts ledger insert failed',
+            `${payoutType} transfer succeeded but payouts ledger insert failed`,
             {
               purchaseId: purchase.id,
               organizationId,
               stripeTransferId: transfer.id,
-              amountCents: revenueSplit.organizationFeeCents,
+              amountCents,
               error:
                 insertErr instanceof Error
                   ? insertErr.message
@@ -900,10 +925,10 @@ export class PurchaseService extends BaseService {
         }
       }
     } catch (transferErr) {
-      this.obs.error('Org-fee transfer failed', {
+      this.obs.error(`${payoutType} transfer failed`, {
         purchaseId: purchase.id,
         organizationId,
-        amountCents: revenueSplit.organizationFeeCents,
+        amountCents,
         error:
           transferErr instanceof Error
             ? transferErr.message
@@ -911,21 +936,21 @@ export class PurchaseService extends BaseService {
       });
       try {
         await this.db.insert(payouts).values({
-          userId: orgConnect.userId,
+          userId: rowUserId,
           organizationId,
           purchaseId: purchase.id,
-          amountCents: revenueSplit.organizationFeeCents,
-          payoutType: 'organization_fee',
+          amountCents,
+          payoutType,
           status: 'failed',
           sourceType: 'purchase',
           reason: 'transfer_failed',
         });
       } catch (insertErr) {
         if (!isUniqueViolation(insertErr)) {
-          this.obs.error('Failed to record failed org_fee payout row', {
+          this.obs.error(`Failed to record failed ${payoutType} payout row`, {
             purchaseId: purchase.id,
             organizationId,
-            amountCents: revenueSplit.organizationFeeCents,
+            amountCents,
             error:
               insertErr instanceof Error
                 ? insertErr.message
@@ -1228,17 +1253,17 @@ export class PurchaseService extends BaseService {
   }
 
   /**
-   * Reverse the payouts ledger rows + secondary org-fee transfer for a
-   * refunded purchase.
+   * Reverse the payouts ledger rows + secondary transfers for a refunded
+   * purchase (Option B platform-charge model — Codex-h69cg).
    *
-   * - Destination-charge legs (`platform_fee`, `creator_payout`): the actual
-   *   money movement is auto-reversed by Stripe when `refunds.create` runs
-   *   against the source charge (with default settings). We mark these rows
-   *   `status='reversed'` so the ledger reflects reality.
-   * - Secondary `organization_fee` transfer: not auto-reversed by Stripe (it
-   *   was a separate `transfers.create` call). Issue `transfers.createReversal`
-   *   for each row with a `stripeTransferId`, with a deterministic idempotency
-   *   key so webhook replays are safe.
+   * - `platform_fee`: no transfer existed; the platform retained the slice
+   *   on its balance. Marking the row `status='reversed'` is sufficient —
+   *   the refund itself returns money from the platform balance.
+   * - `creator_payout` AND `organization_fee`: each had a secondary
+   *   `transfers.create` call against the source charge. Both must be
+   *   reversed via `transfers.createReversal` with a deterministic
+   *   idempotency key so webhook replays are safe. Stripe does NOT
+   *   auto-reverse these for us — they're separate transfers.
    *
    * Idempotent: rows already at `status='reversed'` are no-ops.
    */
@@ -1253,9 +1278,10 @@ export class PurchaseService extends BaseService {
     for (const row of rows) {
       if (row.status === 'reversed') continue;
 
-      // Reverse the Stripe transfer when one exists. Only `organization_fee`
-      // rows from the secondary transfer carry `stripeTransferId` on the
-      // purchase pipeline; destination-charge legs do not.
+      // Reverse the Stripe transfer when one exists. Under Option B both
+      // `creator_payout` AND `organization_fee` rows carry a
+      // `stripeTransferId` — each had a separate `transfers.create` against
+      // the source charge. `platform_fee` never carries one.
       if (row.stripeTransferId) {
         try {
           await this.stripe.transfers.createReversal(
