@@ -21,8 +21,8 @@ import {
   changeTierSchema,
   createSubscriptionCheckoutSchema,
   getCurrentSubscriptionQuerySchema,
-  getSubscriptionStatsQuerySchema,
   getPayoutSummaryQuerySchema,
+  getSubscriptionStatsQuerySchema,
   listPayoutsQuerySchema,
   listSubscribersQuerySchema,
   reactivateSubscriptionSchema,
@@ -388,6 +388,7 @@ subscriptions.get(
           page: ctx.input.query.page,
           limit: ctx.input.query.limit,
           status: ctx.input.query.status,
+          sourceType: ctx.input.query.source,
           fromDate: ctx.input.query.fromDate,
           toDate: ctx.input.query.toDate,
         }

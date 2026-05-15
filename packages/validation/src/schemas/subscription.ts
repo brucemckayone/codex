@@ -192,12 +192,26 @@ export const payoutStatusFilterEnum = z.enum([
   'paid',
   'resolved', // legacy URL alias for 'paid' (PR3); dropped in PR4
   'failed',
+  'reversed', // Codex-h69cg: refund-reversed rows
   'needs_attention',
+]);
+
+/**
+ * Codex-h69cg: tri-party ledger source filter for /studio/payouts.
+ *   'all'          → purchases + subscriptions (default, backwards-compatible)
+ *   'purchase'     → one-time-purchase rows only
+ *   'subscription' → recurring-subscription rows only
+ */
+export const payoutSourceFilterEnum = z.enum([
+  'all',
+  'purchase',
+  'subscription',
 ]);
 
 export const listPayoutsQuerySchema = paginationSchema.extend({
   organizationId: uuidSchema,
   status: payoutStatusFilterEnum.default('all'),
+  source: payoutSourceFilterEnum.default('all'),
   fromDate: z.string().datetime().optional(),
   toDate: z.string().datetime().optional(),
 });

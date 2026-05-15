@@ -58,6 +58,9 @@ export interface CompletePurchaseMetadata {
   currency?: string;
   /** Application fee Stripe actually collected (from PaymentIntent), for reconciliation */
   stripeApplicationFeeCents?: number | null;
+  /** Stripe charge id (PaymentIntent.latest_charge). Required for payouts ledger writes
+   * and as `source_transaction` for the secondary organization-fee transfer. */
+  stripeChargeId?: string | null;
 }
 
 /**

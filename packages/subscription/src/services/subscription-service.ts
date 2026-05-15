@@ -41,8 +41,8 @@ import {
   organizationFollowers,
   organizationMemberships,
   organizations,
-  payouts,
   type PayoutType,
+  payouts,
   stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
@@ -62,7 +62,16 @@ import {
   UnsupportedCurrencyError,
 } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
-import { aliasedTable, and, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
+import {
+  aliasedTable,
+  and,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  lt,
+  sql,
+} from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   AlreadySubscribedError,
@@ -116,7 +125,11 @@ interface SubscriptionStats {
  * `stripeTransferId`, and `reason` columns — there is no `status` column
  * on the table itself.
  */
-export type PayoutDisplayStatus = 'pending' | 'resolved' | 'failed';
+export type PayoutDisplayStatus =
+  | 'pending'
+  | 'resolved'
+  | 'failed'
+  | 'reversed';
 
 /**
  * Read-model returned by `SubscriptionService.listPayoutsByOrg`. The
@@ -162,7 +175,9 @@ export interface SubscriberListItem {
 
 export interface PayoutWithCreator {
   id: string;
-  creatorId: string;
+  // Null for `platform_fee` rows — the platform isn't a user, so there is no
+  // recipient creatorId. UI must handle this case (e.g. render "Platform" label).
+  creatorId: string | null;
   creatorName: string | null;
   creatorEmail: string | null;
   creatorAvatarUrl: string | null;
@@ -177,6 +192,9 @@ export interface PayoutWithCreator {
   payoutType: PayoutType;
   subscriberName: string | null;
   subscriberEmail: string | null;
+  // Codex-h69cg: tri-party ledger source — drives the studio Source filter
+  // chip and lets the UI render "Purchase · Org fee" vs "Subscription · Org fee".
+  sourceType: 'purchase' | 'subscription';
 }
 
 /**
@@ -207,6 +225,7 @@ export interface PayoutSummary {
 function derivePayoutStatus(status: string): PayoutDisplayStatus {
   if (status === 'paid') return 'resolved';
   if (status === 'failed') return 'failed';
+  if (status === 'reversed') return 'reversed';
   return 'pending';
 }
 
@@ -1180,6 +1199,7 @@ export class SubscriptionService extends BaseService {
       sub.id,
       sub.organizationId,
       sourceTransaction,
+      split.platformFeeCents,
       split.organizationFeeCents,
       split.creatorPayoutCents
     );
@@ -2565,12 +2585,28 @@ export class SubscriptionService extends BaseService {
     options: {
       page: number;
       limit: number;
-      status?: 'all' | 'pending' | 'paid' | 'resolved' | 'failed' | 'needs_attention';
+      status?:
+        | 'all'
+        | 'pending'
+        | 'paid'
+        | 'resolved'
+        | 'failed'
+        | 'reversed'
+        | 'needs_attention';
+      // Codex-h69cg: tri-party source filter chip on /studio/payouts.
+      sourceType?: 'all' | 'purchase' | 'subscription';
       fromDate?: string;
       toDate?: string;
     }
   ): Promise<PaginatedListResponse<PayoutWithCreator>> {
-    const { page, limit, status = 'all', fromDate, toDate } = options;
+    const {
+      page,
+      limit,
+      status = 'all',
+      sourceType = 'all',
+      fromDate,
+      toDate,
+    } = options;
     const offset = (page - 1) * limit;
 
     const conditions = [eq(payouts.organizationId, orgId)];
@@ -2583,9 +2619,15 @@ export class SubscriptionService extends BaseService {
       conditions.push(eq(payouts.status, 'paid'));
     } else if (status === 'failed') {
       conditions.push(eq(payouts.status, 'failed'));
+    } else if (status === 'reversed') {
+      conditions.push(eq(payouts.status, 'reversed'));
     } else if (status === 'needs_attention') {
       // Single chip combining pending + failed for the exception-banner CTA.
       conditions.push(inArray(payouts.status, ['pending', 'failed']));
+    }
+
+    if (sourceType === 'purchase' || sourceType === 'subscription') {
+      conditions.push(eq(payouts.sourceType, sourceType));
     }
 
     conditions.push(...dateWindow(payouts.createdAt, fromDate, toDate));
@@ -2614,6 +2656,7 @@ export class SubscriptionService extends BaseService {
           createdAt: payouts.createdAt,
           subscriberName: subscriber.name,
           subscriberEmail: subscriber.email,
+          sourceType: payouts.sourceType,
         })
         .from(payouts)
         .leftJoin(users, eq(payouts.userId, users.id))
@@ -2648,6 +2691,7 @@ export class SubscriptionService extends BaseService {
         payoutType: row.payoutType as PayoutType,
         subscriberName: row.subscriberName ?? null,
         subscriberEmail: row.subscriberEmail ?? null,
+        sourceType: row.sourceType as 'purchase' | 'subscription',
       })),
       pagination: {
         page,
@@ -2806,7 +2850,7 @@ export class SubscriptionService extends BaseService {
         // it up — no new row inserted to avoid duplicating the amount on retry.
         const payoutFees = await this.resolveSubscriptionFees(
           orgId,
-          payout.userId
+          payout.userId ?? undefined
         );
         if (payout.amountCents < payoutFees.minTransferCents) {
           this.obs.info(
@@ -3349,10 +3393,43 @@ export class SubscriptionService extends BaseService {
     subscriptionId: string,
     orgId: string,
     chargeId: string,
+    platformFeeCents: number,
     orgFeeCents: number,
     creatorPayoutCents: number
   ): Promise<void> {
     const transferGroup = `sub_${subscriptionId}`;
+
+    // Platform fee — retained in the platform Stripe balance at charge time;
+    // no transfer call needed. Tri-party ledger parity (Codex-h69cg): one
+    // platform_fee row per invoice so /studio/payouts can attribute platform
+    // revenue alongside org_fee + creator_payout. status='paid' is satisfied
+    // by stripeChargeId per the OR-allow paid invariant.
+    if (platformFeeCents > 0) {
+      try {
+        await this.db.insert(payouts).values({
+          userId: null,
+          organizationId: orgId,
+          subscriptionId,
+          amountCents: platformFeeCents,
+          payoutType: 'platform_fee',
+          status: 'paid',
+          sourceType: 'subscription',
+          stripeChargeId: chargeId,
+          transferGroup,
+          resolvedAt: new Date(),
+        });
+      } catch (insertError) {
+        if (!isUniqueViolation(insertError)) {
+          this.obs.error('Failed to insert platform_fee payout row', {
+            subscriptionId,
+            organizationId: orgId,
+            chargeId,
+            amountCents: platformFeeCents,
+            error: (insertError as Error).message,
+          });
+        }
+      }
+    }
 
     // Get org's Connect account via the canonical primary user FK so
     // transfers route to the same account checkout validated against.
@@ -3854,6 +3931,14 @@ export class SubscriptionService extends BaseService {
     }
 
     for (const group of groups) {
+      // Codex-h69cg: payouts.userId and .organizationId are nullable to admit
+      // platform_fee rows. Those are always status='paid' so they would never
+      // appear in this sweep, but defence-in-depth: skip any group missing
+      // either field — it can't be routed to a Connect account anyway.
+      if (!group.organizationId || !group.userId) {
+        groupsSkipped++;
+        continue;
+      }
       try {
         // Find the Connect account row for this (orgId, userId) so we can
         // look up the stripeAccountId. If the row is missing (rare — a
