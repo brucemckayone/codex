@@ -226,7 +226,20 @@ All three findings now have `it.fails` regression tests pinning the bug. Each te
 
 Pattern for F-7 and F-13: construct a separate `SubscriptionService` instance per test with a stubbed `FeeConfigService` returning controlled `minTransferCents`. The shared `service` instance in the test scope uses no feeConfig (defaults to 0 floor), so the only path to demonstrate the bug is via a custom service.
 
-## Beads filed (cycles 1-3)
+## Cycle 4 — frontend rail audit
+
+Read `CreatorBreakdownRail.svelte` + `CreatorBreakdownCard.svelte`. Five findings:
+
+| Tag | Status | Title |
+|---|---|---|
+| F-17 | 🟡 | Source pills show sourceType not payoutType — derivative of F-3 (DQ-12) |
+| F-18 | 🟢 | `data-org-owner` attribute set but unused (DQ-13) |
+| F-19 | 🔴 | "Unknown creator" fallback for soft-deleted users breaks audit trail (DQ-11). Bead Codex-biiqd. **Failing component test landed** in `CreatorBreakdownCard.svelte.test.ts`. |
+| F-21 | 🟢 | `lastPaidAt` format/timezone — minor |
+| F-22 | 🟡 | Skeleton count hardcoded to 3 — CLS for varying creator counts (DQ-15). Bead Codex-0sz4j. |
+| F-25 | 🟡 | £0.00 headline visual hierarchy when only pending (DQ-14) |
+
+## Beads filed (cycles 1-4)
 
 | Bead | Priority | Title | Test |
 |---|---|---|---|
@@ -235,13 +248,12 @@ Pattern for F-7 and F-13: construct a separate `SubscriptionService` instance pe
 | Codex-h3864 | P1 | F-3 breakdown conflates org_fee | ✅ |
 | Codex-5794i | P1 | F-7 sweep wrong fee policy | ✅ |
 | Codex-iivne | P1 | F-13 pile-up under min-transfer floor | ✅ |
-
-All 5 high-impact findings now have: a filed bead, a documented failing test, a pointer in this progress doc and a corresponding entry in `design-questions.md` where relevant.
+| Codex-biiqd | P2 | F-19 "Unknown creator" fallback (UI) | ✅ (component) |
+| Codex-0sz4j | P3 | F-22 fixed skeleton count (UI) | ⏳ (UX-only) |
 
 ## Outstanding
 
-- Frontend rail components (`CreatorBreakdownRail.svelte`, `CreatorBreakdownCard.svelte`) — multi-creator UI scenarios, responsive grid below 1024px, empty-state, a11y
-- `/studio/payouts` page restructure — sticky rail, layout, mobile stacking
+- `/studio/payouts/+page.svelte` page restructure — grid layout, sticky rail behaviour, mobile <1024px stacking, transaction grouping correctness
 - Remote function `subscription.remote.ts` — TanStack query key shape, auth scoping
 - API route `workers/ecom-api/src/routes/subscriptions.ts` — procedure() policy, zod validation, rate limiting
 - Schema CHECK constraints negative tests (`check_payouts_user_required`, `check_payouts_paid_invariant`)

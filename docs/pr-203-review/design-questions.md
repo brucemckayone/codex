@@ -179,4 +179,83 @@ This is documented + tested behaviour, but the per-creator rail today renders `s
 
 ---
 
+---
+
+## DQ-11 — Identifying fragment for soft-deleted creators in the rail
+
+**Context.** `getPayoutsByCreatorBreakdown` LEFT JOINs `users`. A soft-deleted user's `name`/`email`/`image` columns are null in the join result. `CreatorBreakdownCard.svelte:37-39` falls back to "Unknown creator". Multiple deleted creators with outstanding payouts render identically; auditors and operators can't trace any individual row.
+
+**Options.**
+- (a) Render last 6 chars of userId: `Deleted creator (usr_…abc123)`.
+- (b) Filter `users.deletedAt` at the SQL boundary; project a `userDeleted` flag; render tombstone card with userId + a "View row" link to a triage page.
+- (c) Show userId in full as a `<code>` tag in the fallback.
+
+**Recommendation.** (b) — filter at SQL, return a `userDeleted: true` flag, design a tombstone state. Anything less is a lossy audit trail.
+
+**Status.** Open. Bead Codex-biiqd filed.
+
+---
+
+## DQ-12 — Source pills surface `sourceType` but not `payoutType`
+
+**Context.** `CreatorBreakdownCard` shows pills labelled "purchases" / "subscriptions" (the `sourceType` axis). But the F-3 conflation bug means a creator who only ever received `organization_fee` rows shows £N "purchases" — which sounds like personal earnings.
+
+Even after F-3 is fixed (excluding org_fee from totals), the rail still has no UI distinguishing "personal creator_payout" from "org admin slice routed via my Connect."
+
+**Options.**
+- (a) Add a third pill: "platform" / "org admin". Hide when the user is just a creator.
+- (b) Two-tier rail: top section "Per-creator earnings", bottom section "Org admin slices".
+- (c) Tooltip / drawer on a "?" icon explaining "These totals include £X of org admin slice routed via your Connect."
+
+**Recommendation.** (b) for clarity, fall back to (a) if space-constrained. (c) is a UX bandaid.
+
+**Status.** Open. Backend change required first (breakdown needs to project payoutType buckets).
+
+---
+
+## DQ-13 — `data-org-owner` attribute set but unused
+
+**Context.** `CreatorBreakdownCard.svelte:57` sets `data-org-owner={breakdown.isOrgOwner ? 'true' : 'false'}` but no CSS selector references it. The `Badge` component handles the visible "Org owner" indicator. The attribute may be intended for E2E test selectors or future styling.
+
+**Options.**
+- (a) Remove the attribute (dead code).
+- (b) Add a CSS rule: tint card background slightly when `data-org-owner='true'`.
+- (c) Keep it for E2E selectors; add a `// kept for E2E tests` comment.
+
+**Recommendation.** (a) unless an E2E test grep finds usage — keep the component lean. If the visual differentiation is wanted, do (b) explicitly.
+
+**Status.** Open. Low priority.
+
+---
+
+## DQ-14 — £0.00 headline + needs-attention subline visual hierarchy
+
+**Context.** A creator with ONLY pending/failed rows appears in the breakdown with `totalPaidCents=0` + `needsAttentionCount=N>0`. Card today leads with giant "£0.00" headline and de-emphasised "needs attention" pill. The £0.00 dominates but is the LEAST interesting number on the card.
+
+**Options.**
+- (a) When `totalPaidCents=0 && needsAttentionCount > 0`, swap hierarchy: lead with a prominent "Needs attention" callout (red surface), demote total to subline.
+- (b) Suppress the £0.00 when zero AND there are pending rows; replace with the needs-attention count as headline.
+- (c) Keep current; assume operators understand zero-totals.
+
+**Recommendation.** (a) — pending money is the actionable signal; £0.00 is not. Operators triage by attention count, not by zero balance.
+
+**Status.** Open.
+
+---
+
+## DQ-15 — Skeleton card count heuristic
+
+**Context.** `CreatorBreakdownRail.svelte:59` hardcodes `Array(3)` skeletons. Orgs with 1 or 12 creators get a CLS layout shift.
+
+**Options.**
+- (a) Cache the prior creator count per orgId in localStorage; render that many skeletons. Cap at 10.
+- (b) Render 1 skeleton + "loading more" indicator below.
+- (c) Render an explicit "Loading breakdown for {creatorCountHint} creators" line.
+
+**Recommendation.** (a) — same pattern as the rest of the studio's localStorage cache, simplest fix.
+
+**Status.** Open. Bead Codex-0sz4j filed.
+
+---
+
 _Add new questions below; renumber if any are removed._
