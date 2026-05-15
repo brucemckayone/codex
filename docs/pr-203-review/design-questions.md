@@ -258,4 +258,21 @@ Even after F-3 is fixed (excluding org_fee from totals), the rail still has no U
 
 ---
 
+---
+
+## DQ-16 — Audit log for /payouts reads (defense in depth)
+
+**Context.** The three payouts routes correctly enforce `requireOrgManagement` and scope by `ctx.organizationId`. There is no `obs.info` audit-log entry recording WHO viewed payouts WHEN. Financial-data reads — even by authorised owners — typically warrant a one-line breadcrumb for compliance + intrusion detection (post-breach forensics).
+
+**Options.**
+- (a) Add `this.obs.info('payouts.read', { orgId, userId, route, filterArgs })` at the head of each of the three service methods.
+- (b) Route-level middleware: a `procedure({ audit: 'financial-read' })` option that emits a structured log entry uniformly across all financial-data routes (broader change).
+- (c) Skip — accept that DB query logs at the Neon layer carry sufficient trail.
+
+**Recommendation.** (a) as a one-line addition per service method. Cheap, immediately useful in incident triage. (b) is the right long-term shape but a bigger refactor.
+
+**Status.** Open. Defense in depth; not blocking.
+
+---
+
 _Add new questions below; renumber if any are removed._

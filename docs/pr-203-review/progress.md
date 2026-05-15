@@ -256,7 +256,26 @@ Read the full page (1008 lines). One critical multi-creator bug + several deriva
 | F-34 | 🟢 | `statusVariant`/`statusLabel` handles legacy `'resolved'` — backwards-compat for `derivePayoutStatus`, intentional. |
 | F-35 | 🟢 | Map insertion-order grouping is correct given server's `ORDER BY createdAt DESC`. OK. |
 
-## Beads filed (cycles 1-5)
+## Cycle 6 — API auth surface audit (🟢 clean)
+
+Read `workers/ecom-api/src/routes/subscriptions.ts` (lines 380-456) + `apps/web/src/lib/remote/subscription.remote.ts` (lines 485-564). The three payouts endpoints (`/payouts`, `/payouts/summary`, `/payouts/by-creator`) all share the same policy + scoping pattern, and it's CORRECT.
+
+| Tag | Status | Title |
+|---|---|---|
+| F-36 | 🟢 | Auth scoped via `ctx.organizationId`, client-supplied value ignored (per docstring L372-378). Multi-creator org boundary tight. |
+| F-37 | 🟢 | `requireOrgManagement` admits owner + admin consistently across all three routes. |
+| F-38 | 🟢 | `'resolved'` legacy alias normalized in shared `buildPayoutConditions` SQL helper. |
+| F-39 | 🟢 | Per-org membership correctly resolved at middleware: a user with management in Org A cannot exfil Org B. |
+| F-40 | 🟢 | URLSearchParams handling — style, not a bug. |
+| F-41 | 🟡 | No `rateLimit: 'api'` on read endpoints. Consistent with sibling `/stats` and `/subscribers` (platform-wide pattern). Bead Codex-p6sy6 P3. |
+| F-42 | 🟡 | No audit log on payouts read (defense in depth). DQ-16 raised. |
+| F-43 | 🟢 | URL param defaults — style. |
+| F-44 | 🟡 | No live cache invalidation of payouts query on new webhook (slight staleness). Acceptable for studio surfaces. |
+| F-45 | 🟡 | **Test-gap**: route-level integration tests missing for all three payouts endpoints. Bead Codex-ajbja P2. The service layer is well-tested at unit level; the policy + scoping wiring at the route boundary has zero coverage. |
+
+The most important multi-creator security invariant in PR #204 (`/payouts/by-creator` cannot leak across orgs) is correctly implemented and explicitly documented in the route's docstring. No code change recommended at this layer.
+
+## Beads filed (cycles 1-6)
 
 | Bead | Priority | Title | Test |
 |---|---|---|---|
@@ -267,12 +286,12 @@ Read the full page (1008 lines). One critical multi-creator bug + several deriva
 | Codex-iivne | P1 | F-13 pile-up under min-transfer floor | ✅ |
 | Codex-e2773 | P1 | F-26 pagination splits transferGroup | ✅ |
 | Codex-biiqd | P2 | F-19 "Unknown creator" fallback (UI) | ✅ (component) |
+| Codex-ajbja | P2 | F-45 route-level test gap (3 payouts endpoints) | (this bead IS the test work) |
 | Codex-0sz4j | P3 | F-22 fixed skeleton count (UI) | ⏳ (UX-only) |
+| Codex-p6sy6 | P3 | F-41 no rate limit on payouts reads | ⏳ (consistent with siblings) |
 
 ## Outstanding
 
-- Remote function `subscription.remote.ts` — TanStack query key shape, auth scoping
-- API route `workers/ecom-api/src/routes/subscriptions.ts` — procedure() policy, zod validation, rate limiting
 - Schema CHECK constraints negative tests (`check_payouts_user_required`, `check_payouts_paid_invariant`)
 - F-12 small fix (explicit `sourceType` in subscription inserts)
 - F-29 defensive coalesce on `group.subscriberName` across siblings
