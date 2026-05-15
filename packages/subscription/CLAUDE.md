@@ -74,6 +74,26 @@ Tier-gated (`accessType='subscribers'`) content is **orthogonal** to this hierar
 
 Revenue split defaults: Platform 10%, Org 15% of post-platform, Creators 75% of post-platform. Amounts are in pence (GBP). Defaults are **overridable** via the DB-configurable fee model — see `docs/payouts/fee-configuration.md`.
 
+### Webhook ordering resilience (Codex-t7psp)
+
+Stripe does **NOT** guarantee webhook delivery order. On a fresh subscription, `invoice.payment_succeeded` and `invoice.payment_failed` can arrive **before** `customer.subscription.created`. Without resilience the first payout (race #1) and the first past_due flip (race #2) were silently dropped.
+
+`SubscriptionService.ensureSubscriptionDataPresent(stripeSubId, context)` is the central self-heal helper. It:
+
+1. Fast-paths: SELECT subscription. If present → `{ subscription, justInserted: false }`.
+2. Slow-path: retrieves the subscription from Stripe (or uses caller's `knownStripeSub`), validates `codex_user_id` / `codex_organization_id` / `codex_tier_id` metadata, and inserts `subscriptions` + `organizationFollowers` + `organizationMemberships` rows in one transaction.
+3. On `isUniqueViolation`: another handler raced us — re-SELECT and return `justInserted: false`.
+4. On Stripe 404 or missing metadata: WARN + return `null` (caller exits cleanly with 200).
+5. On Stripe 5xx / DB error: bubble (caller returns 5xx, Stripe retries).
+
+`handleSubscriptionCreated` always fires welcome-email + cache invalidation, even when `justInserted: false` — the old "swallow on unique-violation" was incompatible with self-heal because it silently dropped 5 side effects when self-heal pre-inserted the row. Cost: a rare Stripe redelivery of the create event may send the welcome email twice. Mitigated long-term by event-id dedupe (Layer D, Codex-257ia).
+
+**Hard invariants** (regression-tested):
+- Invoice handlers never log "Invoice for unknown subscription" — they self-heal instead.
+- A `customer.subscription.created` arriving AFTER self-heal still emits welcome email + bumps caches.
+- Concurrent self-heal + create-event yield exactly one row (unique constraint), both invocations complete cleanly.
+- Stripe 404 / metadata-missing on retrieve never crashes the handler — they exit 200.
+
 ### Payout pipeline (audit closed 2026-05-13)
 
 The invoice → transfer → pending-payout → drain flow is documented end-to-end in **`docs/payouts/payout-pipeline.md`**. Read that doc before touching any of:

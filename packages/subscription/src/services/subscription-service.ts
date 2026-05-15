@@ -849,24 +849,82 @@ export class SubscriptionService extends BaseService {
   // ─── Webhook Handlers ──────────────────────────────────────────────────────
 
   /**
-   * Handle checkout.session.completed for subscription mode.
-   * Creates the subscription record in our database.
-   * Idempotent via stripeSubscriptionId unique constraint.
+   * Ensure subscription, follower, and membership rows exist for the given
+   * Stripe subscription. Idempotent — safe to call from both the create-event
+   * handler and the self-heal path in invoice handlers.
    *
-   * Returns a result object with:
-   * - userId for cache invalidation
-   * - email payload for the subscription-created notification
+   * Stripe does not guarantee webhook delivery order (Codex-t7psp): on a
+   * fresh subscription, `invoice.payment_succeeded` can arrive BEFORE
+   * `customer.subscription.created`. Without self-heal the invoice handler
+   * would log "Invoice for unknown subscription" and drop the first payout.
    *
-   * @param stripeSubscription The Stripe subscription object
-   * @param webAppUrl The web app base URL for email links (optional)
+   * If the row is missing, retrieves the subscription from Stripe and
+   * inserts subscription + follower + membership in one transaction. The
+   * unique constraint on `stripe_subscription_id` makes this safe under
+   * concurrent self-heal + create-event delivery.
+   *
+   * Does NOT fire side effects (welcome email, cache invalidation) — those
+   * remain the create-event handler's responsibility so they run once per
+   * Stripe delivery of `customer.subscription.created`, regardless of
+   * whether the row was pre-inserted by self-heal.
+   *
+   * Returns:
+   * - `{ subscription, justInserted: true }`  — we inserted the row in this call.
+   * - `{ subscription, justInserted: false }` — row already existed (raced or earlier event).
+   * - `null` — permanent failure (Stripe 404, missing metadata). Caller exits cleanly.
+   *
+   * Bubbles transient errors (Stripe 5xx, DB connection) so the procedure
+   * layer returns 5xx and Stripe retries.
    */
-  async handleSubscriptionCreated(
-    stripeSubscription: Stripe.Subscription,
-    webAppUrl?: string
-  ): Promise<WebhookHandlerResult | void> {
-    const stripeSubId = stripeSubscription.id;
-    const metadata = stripeSubscription.metadata;
+  private async ensureSubscriptionDataPresent(
+    stripeSubId: string,
+    context: {
+      invoiceId?: string;
+      eventType: string;
+      /** Pre-loaded Stripe subscription, avoids a second retrieve on the create path. */
+      knownStripeSub?: Stripe.Subscription;
+    }
+  ): Promise<{ subscription: Subscription; justInserted: boolean } | null> {
+    // Fast path: row already exists. No Stripe call, no insert.
+    const [existing] = await this.db
+      .select()
+      .from(subscriptions)
+      .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
+      .limit(1);
+    if (existing) {
+      return { subscription: existing, justInserted: false };
+    }
 
+    // Slow path: row missing. Retrieve from Stripe unless caller already has it.
+    let stripeSub: Stripe.Subscription;
+    if (context.knownStripeSub) {
+      stripeSub = context.knownStripeSub;
+    } else {
+      try {
+        stripeSub = await this.stripe.subscriptions.retrieve(stripeSubId);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          'type' in error &&
+          (error as { type?: string }).type === 'StripeInvalidRequestError'
+        ) {
+          this.obs.warn(
+            'Subscription self-heal failed: Stripe returned not-found',
+            {
+              stripeSubscriptionId: stripeSubId,
+              invoiceId: context.invoiceId,
+              eventType: context.eventType,
+            }
+          );
+          return null;
+        }
+        throw error;
+      }
+    }
+
+    // Defensive `?? {}` — handles minimal Stripe mocks in test harnesses
+    // that omit the metadata field. Production payloads always have it.
+    const metadata = stripeSub.metadata ?? {};
     const userId = metadata.codex_user_id;
     const orgId = metadata.codex_organization_id;
     const tierId = metadata.codex_tier_id;
@@ -876,45 +934,31 @@ export class SubscriptionService extends BaseService {
         stripeSubscriptionId: stripeSubId,
         metadata,
       });
-      return;
+      return null;
     }
 
-    // Get amount actually charged from the latest invoice (respects coupons, trials, prorations)
-    // Matches the pattern used in handleInvoicePaymentSucceeded() — use amount_paid, not unit_amount
+    // Initial amount: latest_invoice.amount_paid — matches handleInvoicePaymentSucceeded.
+    // Subsequent invoice.payment_succeeded writes overwrite this with the actual
+    // charged amount, so a 0 from a trial-only sub heals to the real amount on first bill.
     let amountCents = 0;
-    const latestInvoice = stripeSubscription.latest_invoice;
+    const latestInvoice = stripeSub.latest_invoice;
     if (latestInvoice && typeof latestInvoice === 'object') {
-      // latest_invoice is expanded — use amount_paid directly
       amountCents = latestInvoice.amount_paid;
     } else if (typeof latestInvoice === 'string') {
-      // latest_invoice is just an ID — retrieve the full invoice
       const invoice = await this.stripe.invoices.retrieve(latestInvoice);
       amountCents = invoice.amount_paid;
     }
-    // If latest_invoice is null (e.g. trial with no invoice yet), amountCents stays 0
 
-    const item = stripeSubscription.items.data[0];
+    const item = stripeSub.items.data[0];
     const billingInterval =
       item?.price?.recurring?.interval === 'year'
         ? BILLING_INTERVAL.YEAR
         : BILLING_INTERVAL.MONTH;
-
-    // Calculate revenue split using DB-configurable fees (Codex-m644n).
-    // FeeConfigService falls back to FEES.* constants when no fee row exists,
-    // preserving pre-m644n bit-for-bit behaviour on fresh installs.
-    const split = await this.computeSubscriptionSplit(orgId, amountCents);
-
-    // In Stripe v19+, period dates are on the subscription item, not the subscription
     const periodStart = item?.current_period_start ?? 0;
     const periodEnd = item?.current_period_end ?? 0;
 
-    // Atomic: subscription insert + follower upsert + membership upsert must
-    // all commit together. Partial state (e.g. subscription row exists but
-    // follower/membership missing) leaves the user in an inconsistent
-    // state that library queries and role-gated paths read incorrectly.
-    // The unique constraint on stripe_subscription_id still provides
-    // webhook-replay idempotency — the whole transaction rolls back on
-    // duplicate insert and we return normally.
+    const split = await this.computeSubscriptionSplit(orgId, amountCents);
+
     try {
       await (this.db as typeof import('@codex/database').dbWs).transaction(
         async (tx) => {
@@ -924,9 +968,9 @@ export class SubscriptionService extends BaseService {
             tierId,
             stripeSubscriptionId: stripeSubId,
             stripeCustomerId:
-              typeof stripeSubscription.customer === 'string'
-                ? stripeSubscription.customer
-                : stripeSubscription.customer.id,
+              typeof stripeSub.customer === 'string'
+                ? stripeSub.customer
+                : stripeSub.customer.id,
             status: SUBSCRIPTION_STATUS.ACTIVE,
             billingInterval,
             currentPeriodStart: new Date(periodStart * 1000),
@@ -945,9 +989,7 @@ export class SubscriptionService extends BaseService {
             .onConflictDoNothing();
 
           // BUG-016: Upsert membership with role=subscriber (backward compat).
-          // TODO(Phase 3): Remove once frontend no longer reads membership
-          // roles for library access badges. Preserve higher roles (owner/
-          // admin/creator) on conflict.
+          // Preserve higher roles (owner/admin/creator) on conflict.
           await tx
             .insert(organizationMemberships)
             .values({
@@ -969,24 +1011,130 @@ export class SubscriptionService extends BaseService {
             });
         }
       );
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        // Concurrent self-heal or create-event raced us to insert. Re-select
+        // and return justInserted=false so caller skips the "just inserted"
+        // log line — the row is now present either way.
+        const [raced] = await this.db
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
+          .limit(1);
+        if (raced) {
+          return { subscription: raced, justInserted: false };
+        }
+        throw error;
+      }
+      throw error;
+    }
 
+    const [inserted] = await this.db
+      .select()
+      .from(subscriptions)
+      .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
+      .limit(1);
+    if (!inserted) {
+      // Should be unreachable — INSERT just succeeded. Defensive throw so a
+      // truly impossible state surfaces as 5xx (Stripe retry) instead of NPE.
+      throw new InternalServiceError(
+        'ensureSubscriptionDataPresent: row missing after successful insert',
+        { stripeSubscriptionId: stripeSubId }
+      );
+    }
+
+    if (context.knownStripeSub) {
       this.obs.info('Subscription created from webhook', {
         stripeSubscriptionId: stripeSubId,
         organizationId: orgId,
         tierId,
         amountCents,
       });
-    } catch (error) {
-      if (isUniqueViolation(error)) {
-        this.obs.info('Subscription already recorded (idempotent)', {
-          stripeSubscriptionId: stripeSubId,
-        });
-        return;
-      }
-      throw error;
+    } else {
+      // Self-heal path: the invoice handler (or similar) pre-inserted the row
+      // before the create event arrived. Distinct log line so it's
+      // greppable in production.
+      this.obs.info('Subscription self-healed from Stripe API', {
+        stripeSubscriptionId: stripeSubId,
+        organizationId: orgId,
+        tierId,
+        invoiceId: context.invoiceId,
+        eventType: context.eventType,
+      });
     }
 
-    // Build email notification data — look up tier name from DB
+    return { subscription: inserted, justInserted: true };
+  }
+
+  /**
+   * Handle customer.subscription.created.
+   * Ensures the subscription row exists (idempotent — honours prior
+   * self-heal pre-insert) and fires create-event side effects: welcome
+   * email + library/badge cache invalidation.
+   *
+   * Side effects ALWAYS fire on this event, even when the row pre-existed
+   * (Codex-t7psp regression prevention). The previous "swallow on unique
+   * violation" was incompatible with the self-heal pattern because it
+   * silently dropped the welcome email + cache bump when self-heal got
+   * here first. Cost: a Stripe redelivery of the create event will send
+   * the welcome email twice. Mitigated long-term by event-id dedupe
+   * (Codex-257ia, Layer D).
+   *
+   * @param stripeSubscription The Stripe subscription object
+   * @param webAppUrl The web app base URL for email links (optional)
+   */
+  async handleSubscriptionCreated(
+    stripeSubscription: Stripe.Subscription,
+    webAppUrl?: string
+  ): Promise<WebhookHandlerResult | void> {
+    const stripeSubId = stripeSubscription.id;
+    const metadata = stripeSubscription.metadata ?? {};
+    const userId = metadata.codex_user_id;
+    const orgId = metadata.codex_organization_id;
+    const tierId = metadata.codex_tier_id;
+
+    if (!userId || !orgId || !tierId) {
+      this.obs.warn('Subscription webhook missing metadata', {
+        stripeSubscriptionId: stripeSubId,
+        metadata,
+      });
+      return;
+    }
+
+    const result = await this.ensureSubscriptionDataPresent(stripeSubId, {
+      eventType: 'customer.subscription.created',
+      knownStripeSub: stripeSubscription,
+    });
+    if (!result) return;
+
+    if (!result.justInserted) {
+      // Row was pre-inserted by an earlier self-heal or a prior delivery
+      // attempt that 5xx'd after INSERT. Fire side effects anyway — the
+      // duplicate-email risk on redelivery is a known trade-off.
+      this.obs.info(
+        'Subscription already recorded, firing create-event side effects',
+        { stripeSubscriptionId: stripeSubId }
+      );
+    }
+
+    // Compute the amount actually charged for the welcome-email payload.
+    // Matches handleInvoicePaymentSucceeded — use amount_paid, not unit_amount,
+    // so trials/coupons/prorations show the correct figure.
+    let amountCents = 0;
+    const latestInvoice = stripeSubscription.latest_invoice;
+    if (latestInvoice && typeof latestInvoice === 'object') {
+      amountCents = latestInvoice.amount_paid;
+    } else if (typeof latestInvoice === 'string') {
+      const invoice = await this.stripe.invoices.retrieve(latestInvoice);
+      amountCents = invoice.amount_paid;
+    }
+
+    const item = stripeSubscription.items.data[0];
+    const billingInterval =
+      item?.price?.recurring?.interval === 'year'
+        ? BILLING_INTERVAL.YEAR
+        : BILLING_INTERVAL.MONTH;
+
     const email = await this.buildSubscriptionCreatedEmail(
       userId,
       tierId,
@@ -997,8 +1145,7 @@ export class SubscriptionService extends BaseService {
     );
 
     // Orchestrator hook: bump per-user library + per-org subscription
-    // version keys. Runs AFTER the DB writes above succeeded; a thrown
-    // error earlier in this method would bypass this call entirely.
+    // version keys. Runs AFTER the row is guaranteed present.
     this.invalidateIfConfigured(userId, orgId, 'subscription_created');
 
     return { userId, orgId, email: email ?? undefined };
@@ -1142,19 +1289,17 @@ export class SubscriptionService extends BaseService {
       return;
     }
 
-    // Find our subscription record
-    const [sub] = await this.db
-      .select()
-      .from(subscriptions)
-      .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
-      .limit(1);
-
-    if (!sub) {
-      this.obs.warn('Invoice for unknown subscription', {
-        stripeSubscriptionId: stripeSubId,
-      });
-      return;
-    }
+    // Self-heal: if the subscription row is missing, retrieve from Stripe
+    // and insert it (Codex-t7psp). Stripe does not guarantee webhook
+    // delivery order — invoice.payment_succeeded routinely arrives before
+    // customer.subscription.created on fresh subs. Without self-heal the
+    // first payout would be silently lost.
+    const presence = await this.ensureSubscriptionDataPresent(stripeSubId, {
+      eventType: 'invoice.payment_succeeded',
+      invoiceId: stripeInvoice.id,
+    });
+    if (!presence) return;
+    const { subscription: sub } = presence;
 
     // Fetch the Stripe subscription for period dates (v19+: on items)
     const stripeSub = await this.stripe.subscriptions.retrieve(stripeSubId);
@@ -1273,18 +1418,33 @@ export class SubscriptionService extends BaseService {
         ? subDetails.subscription
         : (subDetails?.subscription?.id ?? null);
 
+    // Self-heal: ensure the subscription row exists before flipping status.
+    // Same ordering race as race #1 — invoice.payment_failed can arrive
+    // before customer.subscription.created on first-bill failure.
+    let userId: string | undefined;
+    let orgId: string | undefined;
     if (stripeSubId) {
-      await this.db
-        .update(subscriptions)
-        .set({
-          status: SUBSCRIPTION_STATUS.PAST_DUE,
-          updatedAt: new Date(),
-        })
-        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
-
-      this.obs.info('Subscription status updated to past_due', {
-        stripeSubscriptionId: stripeSubId,
+      const presence = await this.ensureSubscriptionDataPresent(stripeSubId, {
+        eventType: 'invoice.payment_failed',
+        invoiceId: stripeInvoice.id,
       });
+      if (presence) {
+        const { subscription: sub } = presence;
+        userId = sub.userId;
+        orgId = sub.organizationId;
+
+        await this.db
+          .update(subscriptions)
+          .set({
+            status: SUBSCRIPTION_STATUS.PAST_DUE,
+            updatedAt: new Date(),
+          })
+          .where(eq(subscriptions.id, sub.id));
+
+        this.obs.info('Subscription status updated to past_due', {
+          stripeSubscriptionId: stripeSubId,
+        });
+      }
     }
 
     // Build payment-failed email
@@ -1307,24 +1467,6 @@ export class SubscriptionService extends BaseService {
           updatePaymentUrl: `${webAppUrl || ''}/account/subscriptions`,
         },
       };
-    }
-
-    // Look up userId + orgId from subscription record for cache invalidation.
-    // Both caches (COLLECTION_USER_LIBRARY and per-org COLLECTION_USER_SUBSCRIPTION)
-    // need to flip to 'past_due' for cross-device staleness detection.
-    let userId: string | undefined;
-    let orgId: string | undefined;
-    if (stripeSubId) {
-      const [sub] = await this.db
-        .select({
-          userId: subscriptions.userId,
-          organizationId: subscriptions.organizationId,
-        })
-        .from(subscriptions)
-        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
-        .limit(1);
-      userId = sub?.userId;
-      orgId = sub?.organizationId;
     }
 
     // Orchestrator hook: payment failure flips status to past_due → bump
