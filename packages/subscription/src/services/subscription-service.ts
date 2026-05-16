@@ -3267,14 +3267,25 @@ export class SubscriptionService extends BaseService {
           continue;
         }
 
+        // Codex-dbzkg: when the row was funded by a tracked platform charge
+        // (purchase or subscription), pass source_transaction so the retry
+        // draws from THAT charge's source-linked balance, not general
+        // platform balance. Without it the platform double-pays — the
+        // original charge sits source-linked indefinitely and the retry
+        // pulls unrelated funds.
         const transfer = await this.stripe.transfers.create(
           {
             amount: payout.amountCents,
             currency: payoutCurrency,
             destination: stripeAccountId,
+            ...(payout.stripeChargeId
+              ? { source_transaction: payout.stripeChargeId }
+              : {}),
             metadata: {
               pending_payout_id: payout.id,
               subscription_id: payout.subscriptionId,
+              purchase_id: payout.purchaseId,
+              source_type: payout.sourceType,
               type: 'pending_payout_resolution',
             },
           },

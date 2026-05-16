@@ -7200,6 +7200,95 @@ describe('SubscriptionService', () => {
 
       warnSpy.mockRestore();
     });
+
+    // Codex-dbzkg: retry must pass source_transaction so the transfer
+    // pulls from the original charge's source-linked balance, not
+    // general platform balance — otherwise the platform double-pays
+    // (the charge sits source-linked, the retry uses unrelated funds).
+    // Also forwards source_type metadata for Stripe-side reconciliation
+    // across both subscription- and purchase-sourced retries.
+    it('forwards source_transaction + source_type metadata on tracked retries; omits source_transaction on legacy rows', async () => {
+      const { org, sub, stripeAccountId } =
+        await seedConnectAndSubscription('w4jjk-source-tx');
+      const subChargeId = `ch_${createUniqueSlug('sub')}`;
+      const purchaseChargeId = `ch_${createUniqueSlug('pch')}`;
+
+      await db.insert(payoutsTable).values([
+        {
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          stripeChargeId: subChargeId,
+          sourceType: 'subscription',
+          amountCents: 1500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: creatorId,
+          organizationId: org.id,
+          stripeChargeId: purchaseChargeId,
+          sourceType: 'purchase',
+          amountCents: 800,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          sourceType: 'subscription',
+          amountCents: 400,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        },
+      ]);
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      await service.resolvePendingPayouts(org.id, stripeAccountId);
+
+      const findCall = (chargeId: string | undefined) =>
+        transferSpy.mock.calls.find(
+          ([params]) =>
+            (params as { source_transaction?: string }).source_transaction ===
+            chargeId
+        );
+
+      const subCall = findCall(subChargeId);
+      expect(
+        subCall,
+        'sub-sourced retry must carry source_transaction'
+      ).toBeDefined();
+      expect(subCall![0]).toMatchObject({
+        source_transaction: subChargeId,
+        metadata: { source_type: 'subscription', subscription_id: sub.id },
+      });
+
+      const purchaseCall = findCall(purchaseChargeId);
+      expect(
+        purchaseCall,
+        'purchase-sourced retry must carry source_transaction'
+      ).toBeDefined();
+      expect(purchaseCall![0]).toMatchObject({
+        source_transaction: purchaseChargeId,
+        metadata: { source_type: 'purchase' },
+      });
+
+      const legacyCall = findCall(undefined);
+      expect(
+        legacyCall,
+        'row without stripeChargeId must omit source_transaction'
+      ).toBeDefined();
+      expect(legacyCall![0]).not.toHaveProperty('source_transaction');
+    });
   });
 
   // ─── sweepUnresolvedPayouts — hybrid event+sweep resolution (Codex-vv77x) ───
