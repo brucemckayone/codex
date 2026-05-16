@@ -2874,46 +2874,75 @@ export class SubscriptionService extends BaseService {
     // proxy that participates in joins + select projection naturally.
     const subscriber = aliasedTable(users, 'subscriber');
 
-    const [items, [totalResult]] = await Promise.all([
+    // Codex-e2773: paginate by transferGroup, not by row, so all siblings
+    // of one charge land on the same page. NULL transferGroup (legacy
+    // rows / writers that didn't set it) falls back to the row id so
+    // each becomes its own pseudo-group. The "total" exposed to the UI
+    // is the number of DISTINCT groups — pagination reflects the
+    // operator's mental model (one charge = one row + banner).
+    const groupKeyExpr = sql<string>`COALESCE(${payouts.transferGroup}, ${payouts.id}::text)`;
+    const groupLatestExpr = sql<string>`MAX(${payouts.createdAt})`;
+
+    const [windowedGroups, [totalResult]] = await Promise.all([
       this.db
-        .select({
-          id: payouts.id,
-          creatorId: payouts.userId,
-          creatorName: users.name,
-          creatorEmail: users.email,
-          creatorAvatarUrl: users.image,
-          amountCents: payouts.amountCents,
-          currency: payouts.currency,
-          reason: payouts.reason,
-          status: payouts.status,
-          payoutType: payouts.payoutType,
-          resolvedAt: payouts.resolvedAt,
-          stripeTransferId: payouts.stripeTransferId,
-          createdAt: payouts.createdAt,
-          subscriberName: subscriber.name,
-          subscriberEmail: subscriber.email,
-          sourceType: payouts.sourceType,
-          // Codex-6nt4l: transaction grouping + drill-down hooks.
-          transferGroup: payouts.transferGroup,
-          purchaseId: payouts.purchaseId,
-          subscriptionId: payouts.subscriptionId,
-          stripeChargeId: payouts.stripeChargeId,
-        })
+        .select({ groupKey: groupKeyExpr })
         .from(payouts)
-        .leftJoin(users, eq(payouts.userId, users.id))
-        .leftJoin(subscriptions, eq(payouts.subscriptionId, subscriptions.id))
-        .leftJoin(subscriber, eq(subscriptions.userId, subscriber.id))
         .where(and(...conditions))
-        .orderBy(desc(payouts.createdAt))
+        .groupBy(groupKeyExpr)
+        .orderBy(desc(groupLatestExpr))
         .limit(limit)
         .offset(offset),
       this.db
-        .select({ count: sql<number>`count(*)::int` })
+        .select({
+          count: sql<number>`COUNT(DISTINCT ${groupKeyExpr})::int`,
+        })
         .from(payouts)
         .where(and(...conditions)),
     ]);
 
+    const groupKeys = windowedGroups.map((g) => g.groupKey);
     const total = totalResult?.count ?? 0;
+
+    const items =
+      groupKeys.length === 0
+        ? []
+        : await this.db
+            .select({
+              id: payouts.id,
+              creatorId: payouts.userId,
+              creatorName: users.name,
+              creatorEmail: users.email,
+              creatorAvatarUrl: users.image,
+              amountCents: payouts.amountCents,
+              currency: payouts.currency,
+              reason: payouts.reason,
+              status: payouts.status,
+              payoutType: payouts.payoutType,
+              resolvedAt: payouts.resolvedAt,
+              stripeTransferId: payouts.stripeTransferId,
+              createdAt: payouts.createdAt,
+              subscriberName: subscriber.name,
+              subscriberEmail: subscriber.email,
+              sourceType: payouts.sourceType,
+              // Codex-6nt4l: transaction grouping + drill-down hooks.
+              transferGroup: payouts.transferGroup,
+              purchaseId: payouts.purchaseId,
+              subscriptionId: payouts.subscriptionId,
+              stripeChargeId: payouts.stripeChargeId,
+            })
+            .from(payouts)
+            .leftJoin(users, eq(payouts.userId, users.id))
+            .leftJoin(
+              subscriptions,
+              eq(payouts.subscriptionId, subscriptions.id)
+            )
+            .leftJoin(subscriber, eq(subscriptions.userId, subscriber.id))
+            .where(and(...conditions, inArray(groupKeyExpr, groupKeys)))
+            // Codex-e2773: siblings in one transferGroup share createdAt to
+            // ms precision (same webhook handler). Secondary keys on
+            // payoutType + id stabilise the within-group order so the
+            // banner-first/children-after render stays predictable.
+            .orderBy(desc(payouts.createdAt), payouts.payoutType, payouts.id);
 
     return {
       items: items.map((row) => ({

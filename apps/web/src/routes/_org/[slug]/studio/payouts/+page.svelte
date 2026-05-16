@@ -666,7 +666,7 @@
               <span class="pagination-status">
                 Page {pagination.page} of {pagination.totalPages}
                 <span class="pagination-total">
-                  · {pagination.total} payout{pagination.total === 1
+                  · {pagination.total} transaction{pagination.total === 1
                     ? ''
                     : 's'}
                 </span>

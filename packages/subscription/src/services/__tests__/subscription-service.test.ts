@@ -5477,6 +5477,112 @@ describe('SubscriptionService', () => {
       expect(result.items[0]!.subscriberName).toBeNull();
       expect(result.items[0]!.subscriberEmail).toBeNull();
     });
+
+    // Codex-e2773: rows that share a transferGroup must NEVER split
+    // across pagination pages. Group-aware pagination treats each
+    // distinct transferGroup as one page slot; rows with NULL
+    // transferGroup become their own pseudo-groups.
+    it('keeps all rows of a transferGroup on the same page (Codex-e2773)', async () => {
+      const { org, tier1 } = await createFullOrg('e2773-grouped');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'grouped'
+      );
+
+      // 3 groups × 7 rows each = 21 rows. Even with limit=20 the old
+      // by-row pagination would split group #2 across pages 1 and 2.
+      const groupKeyA = `tg_${createUniqueSlug('a')}`;
+      const groupKeyB = `tg_${createUniqueSlug('b')}`;
+      const groupKeyC = `tg_${createUniqueSlug('c')}`;
+      const baseRow = {
+        userId: otherCreatorId,
+        organizationId: org.id,
+        subscriptionId: sub.id,
+        amountCents: 100,
+        currency: 'gbp',
+        reason: 'connect_not_ready',
+        status: 'pending' as const,
+        payoutType: 'creator_payout' as const,
+      };
+      const sevenRows = (transferGroup: string, baseMs: number) =>
+        Array.from({ length: 7 }, (_, i) => ({
+          ...baseRow,
+          transferGroup,
+          createdAt: new Date(baseMs + i),
+        }));
+
+      await db.insert(payoutsTable).values([
+        // Group C is oldest, B middle, A newest. Default sort = desc(createdAt).
+        ...sevenRows(groupKeyC, 1_000_000),
+        ...sevenRows(groupKeyB, 2_000_000),
+        ...sevenRows(groupKeyA, 3_000_000),
+      ]);
+
+      // Page 1 with limit=2 should return groups A + B (the 2 most
+      // recent groups) — 14 rows total, NO split.
+      const page1 = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 2,
+      });
+
+      const groupsOnPage1 = new Set(
+        page1.items.map((r) => r.transferGroup).filter((g): g is string => !!g)
+      );
+      expect(groupsOnPage1.has(groupKeyA)).toBe(true);
+      expect(groupsOnPage1.has(groupKeyB)).toBe(true);
+      expect(groupsOnPage1.has(groupKeyC)).toBe(false);
+      expect(page1.items).toHaveLength(14);
+
+      // Pagination reports group count, not row count.
+      expect(page1.pagination.total).toBe(3);
+      expect(page1.pagination.totalPages).toBe(2);
+
+      // Page 2 returns the remaining group (C) with its 7 sibling rows.
+      const page2 = await service.listPayoutsByOrg(org.id, {
+        page: 2,
+        limit: 2,
+      });
+      expect(page2.items).toHaveLength(7);
+      expect(page2.items.every((r) => r.transferGroup === groupKeyC)).toBe(
+        true
+      );
+    });
+
+    // Codex-e2773: rows with NULL transferGroup each get their own page
+    // slot so the legacy (pre-grouping) data shape doesn't regress.
+    it('treats null-transferGroup rows as singletons in pagination (Codex-e2773)', async () => {
+      const { org, tier1 } = await createFullOrg('e2773-null-tg');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'null-tg'
+      );
+
+      await db.insert(payoutsTable).values(
+        Array.from({ length: 3 }, (_, i) => ({
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100 + i,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending' as const,
+          payoutType: 'creator_payout' as const,
+          createdAt: new Date(1_000_000 + i),
+        }))
+      );
+
+      const result = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 10,
+      });
+
+      expect(result.items).toHaveLength(3);
+      expect(result.pagination.total).toBe(3);
+    });
   });
 
   // ─── getPayoutSummary (Codex-05vp8) ────────────────────────────────────────
