@@ -1676,10 +1676,7 @@ describe('PurchaseService Integration', () => {
     // £2.70 slice — net £13 of unaccounted loss. See
     // docs/pr-203-review/design-questions.md DQ-7.
     //
-    // Marked `it.fails` so CI currently reports green WHILE the bug exists;
-    // when someone fixes the partial-refund path the assertions go true,
-    // vitest flips this red, the fixer removes `.fails`.
-    it.fails('partial refund proportionally reverses creator + org transfers (BUG: currently full-reverses)', async () => {
+    it('partial refund proportionally reverses creator + org transfers (DQ-7)', async () => {
       const stubFeeConfig = {
         getFeesForCreator: vi.fn().mockResolvedValue({
           platformFeePercent: 1000, // 10%
@@ -1803,6 +1800,152 @@ describe('PurchaseService Integration', () => {
       );
       expect(creatorReversal?.amount).toBe(382);
       expect(orgReversal?.amount).toBe(67);
+    });
+
+    // Codex-d9t5r sentinel layer (DQ-7 part 2): when Stripe rejects the
+    // reversal with insufficient_funds (creator already withdrew their
+    // slice before the refund landed), the payouts row stays
+    // status='paid' (the original transfer succeeded) and a row in
+    // refund_reviews captures the unresolved clawback for ops.
+    it('writes refund_reviews row on Stripe insufficient_funds reversal', async () => {
+      const stubFeeConfig = {
+        getFeesForCreator: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 1500,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+
+      const [sentinelOrg] = await db
+        .insert(organizations)
+        .values({
+          name: 'Sentinel Refund Org',
+          slug: createUniqueSlug('sentinel-refund'),
+          primaryConnectAccountUserId: userId,
+        })
+        .returning();
+      await db.insert(schema.stripeConnectAccounts).values({
+        userId,
+        organizationId: sentinelOrg.id,
+        stripeAccountId: `acct_sentinel_${Date.now()}`,
+        status: 'active',
+        chargesEnabled: true,
+        payoutsEnabled: true,
+      });
+
+      const creatorTransferId = `tr_sentinel_creator_${Date.now()}`;
+      const orgTransferId = `tr_sentinel_org_${Date.now()}`;
+      const insufficientFundsError = Object.assign(
+        new Error('Insufficient funds in Stripe Connect account'),
+        { code: 'insufficient_funds' }
+      );
+      const stubStripe = {
+        ...mockStripe,
+        transfers: {
+          create: vi
+            .fn()
+            .mockImplementation((args: { metadata?: { type?: string } }) => {
+              const id =
+                args?.metadata?.type === 'creator_payout'
+                  ? creatorTransferId
+                  : orgTransferId;
+              return Promise.resolve({ id });
+            }),
+          // Only the creator reversal hits insufficient_funds; the org
+          // reversal succeeds, so we can isolate the sentinel path.
+          createReversal: vi.fn().mockImplementation((id: string) => {
+            if (id === creatorTransferId) {
+              return Promise.reject(insufficientFundsError);
+            }
+            return Promise.resolve({ id: `trr_${id}` });
+          }),
+        },
+        refunds: { create: vi.fn() },
+      } as unknown as Stripe;
+      const sentinelService = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      const media = await mediaService.create(
+        {
+          title: 'Sentinel Refund Content',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/sentinel-refund/master.m3u8',
+          thumbnailKey: 'thumbnails/sentinel-refund.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+      const content = await contentService.create(
+        {
+          organizationId: sentinelOrg.id,
+          title: 'Sentinel Refund Content',
+          slug: createUniqueSlug('sentinel-refund'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 1000,
+        },
+        userId
+      );
+      await contentService.publish(content.id, userId);
+
+      const chargeId = `ch_sentinel_${Date.now()}`;
+      const paymentIntentId = `pi_sentinel_${Date.now()}`;
+      const purchase = await sentinelService.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId: sentinelOrg.id,
+        amountPaidCents: 1000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+      });
+
+      await sentinelService.processRefund(paymentIntentId, {
+        stripeRefundId: 're_sentinel_001',
+        refundAmountCents: 1000,
+        refundReason: 'requested_by_customer',
+      });
+
+      // The payouts row whose reversal failed must STAY status='paid' —
+      // the original transfer succeeded; only the reversal failed.
+      const after = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+      const creatorRow = after.find((r) => r.payoutType === 'creator_payout');
+      expect(creatorRow?.status).toBe('paid');
+
+      // Other slices reverse cleanly.
+      const orgRow = after.find((r) => r.payoutType === 'organization_fee');
+      expect(orgRow?.status).toBe('reversed');
+
+      // A refund_reviews row records the unresolved clawback.
+      const reviews = await db
+        .select()
+        .from(schema.refundReviews)
+        .where(eq(schema.refundReviews.purchaseId, purchase.id));
+      expect(reviews).toHaveLength(1);
+      expect(reviews[0]).toMatchObject({
+        payoutId: creatorRow?.id,
+        creatorUserId: userId,
+        errorCode: 'insufficient_funds',
+        resolution: null,
+        resolvedAt: null,
+      });
+      expect(reviews[0].attemptedReversalCents).toBeGreaterThan(0);
     });
 
     // REGRESSION (PR #203 deep-review F-2, bead Codex-92ej7, DQ-9) — when a
