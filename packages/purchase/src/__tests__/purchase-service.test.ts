@@ -1817,13 +1817,12 @@ describe('PurchaseService Integration', () => {
     // become 'reversed' the sweep stops seeing them. If Connect onboarding
     // later completes, the creator's queued payout is silently lost.
     //
-    // The expected behaviour is:
-    //   - platform_fee (was status='paid', no transfer needed) → 'reversed'
-    //   - creator_payout (status='pending', never transferred) → STAY 'pending'
-    //   - organization_fee (status='pending', never transferred) → STAY 'pending'
-    // (Or a separate 'cancelled_by_refund' status per DQ-9 — either way, NOT
-    // 'reversed', which implies a Stripe reversal occurred.)
-    it.fails('refund leaves connect_not_ready pending payouts untouched (BUG: currently marks them reversed)', async () => {
+    // DQ-9 resolution: rows that never transferred get
+    // `status='cancelled_by_refund'` (option (a) — explicit cancellation
+    // of the obligation, no pretend reversal). The sweep cron filters on
+    // `status='pending'` so it correctly skips these and the creator can
+    // see in the studio UI why they didn't get the payout.
+    it('refund cancels connect_not_ready rows with cancelled_by_refund (not reversed)', async () => {
       const stubFeeConfig = {
         getFeesForCreator: vi.fn().mockResolvedValue({
           platformFeePercent: 1000,
@@ -1846,7 +1845,7 @@ describe('PurchaseService Integration', () => {
         userId,
         organizationId: pendingOrg.id,
         stripeAccountId: `acct_pending_${Date.now()}`,
-        status: 'pending',
+        status: 'onboarding',
         chargesEnabled: false, // ← key: not ready
         payoutsEnabled: false,
       });
@@ -1944,13 +1943,17 @@ describe('PurchaseService Integration', () => {
       // platform_fee was paid (retained on platform balance) → can be marked reversed.
       expect(afterByType.get('platform_fee')?.status).toBe('reversed');
 
-      // creator_payout had NO Stripe transfer (Connect not ready) → must
-      // remain 'pending' so the sweep can still resolve it when Connect
-      // onboards. Currently fails: production sets it to 'reversed'.
-      expect(afterByType.get('creator_payout')?.status).toBe('pending');
+      // creator_payout had NO Stripe transfer (Connect not ready) →
+      // cancelled_by_refund per DQ-9. Sweep filters on 'pending' so this
+      // row is correctly excluded from retry attempts.
+      expect(afterByType.get('creator_payout')?.status).toBe(
+        'cancelled_by_refund'
+      );
 
       // Same for organization_fee.
-      expect(afterByType.get('organization_fee')?.status).toBe('pending');
+      expect(afterByType.get('organization_fee')?.status).toBe(
+        'cancelled_by_refund'
+      );
     });
   });
 

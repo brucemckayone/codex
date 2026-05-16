@@ -274,6 +274,7 @@
     { value: 'pending', label: 'Pending' },
     { value: 'failed', label: 'Failed' },
     { value: 'reversed', label: 'Reversed' },
+    { value: 'cancelled_by_refund', label: 'Cancelled (refund)' },
     { value: 'needs_attention', label: 'Needs attention' },
   ];
 
@@ -300,6 +301,7 @@
     if (status === 'resolved') return 'success';
     if (status === 'failed') return 'error';
     if (status === 'reversed') return 'info';
+    if (status === 'cancelled_by_refund') return 'info';
     return 'warning';
   }
 
@@ -307,6 +309,7 @@
     if (status === 'resolved') return 'Paid';
     if (status === 'failed') return 'Failed';
     if (status === 'reversed') return 'Reversed';
+    if (status === 'cancelled_by_refund') return 'Cancelled (refund)';
     return 'Pending';
   }
 

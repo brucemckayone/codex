@@ -9,6 +9,10 @@
  * - Connect account management
  */
 
+import {
+  payoutSourceFilterEnum,
+  payoutStatusFilterEnum,
+} from '@codex/validation';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { ApiError } from '$lib/api/errors';
@@ -440,24 +444,8 @@ export const listSubscribers = query(
 
 const listPayoutsQueryArgsSchema = z.object({
   organizationId: z.string().uuid(),
-  // Status taxonomy widened in PR3 (Codex-05vp8):
-  //  - 'paid' replaces 'resolved' as the canonical name; 'resolved' is kept
-  //    as a URL alias for one release and dropped in PR4.
-  //  - 'needs_attention' combines pending + failed for the banner CTA.
-  //  - 'reversed' added by Codex-h69cg (refund-reversed rows).
-  status: z
-    .enum([
-      'all',
-      'pending',
-      'paid',
-      'resolved',
-      'failed',
-      'reversed',
-      'needs_attention',
-    ])
-    .default('all'),
-  // Codex-h69cg: tri-party source filter chip on /studio/payouts.
-  source: z.enum(['all', 'purchase', 'subscription']).default('all'),
+  status: payoutStatusFilterEnum.default('all'),
+  source: payoutSourceFilterEnum.default('all'),
   fromDate: z.string().datetime().optional(),
   toDate: z.string().datetime().optional(),
   page: z.coerce.number().int().min(1).default(1),
@@ -530,18 +518,8 @@ export const getPayoutSummary = query(
  */
 const getPayoutsByCreatorBreakdownArgsSchema = z.object({
   organizationId: z.string().uuid(),
-  status: z
-    .enum([
-      'all',
-      'pending',
-      'paid',
-      'resolved',
-      'failed',
-      'reversed',
-      'needs_attention',
-    ])
-    .default('all'),
-  source: z.enum(['all', 'purchase', 'subscription']).default('all'),
+  status: payoutStatusFilterEnum.default('all'),
+  source: payoutSourceFilterEnum.default('all'),
   fromDate: z.string().datetime().optional(),
   toDate: z.string().datetime().optional(),
 });

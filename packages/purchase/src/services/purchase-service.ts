@@ -1274,7 +1274,9 @@ export class PurchaseService extends BaseService {
     if (rows.length === 0) return;
 
     for (const row of rows) {
-      if (row.status === 'reversed') continue;
+      if (row.status === 'reversed' || row.status === 'cancelled_by_refund') {
+        continue;
+      }
 
       // Reverse the Stripe transfer when one exists. Under Option B both
       // `creator_payout` AND `organization_fee` rows carry a
@@ -1308,19 +1310,32 @@ export class PurchaseService extends BaseService {
         }
       }
 
+      // Codex-92ej7 / DQ-9: pending/failed rows (transfer never happened)
+      // become 'cancelled_by_refund' — explicitly cancels the obligation
+      // without claiming a transfer existed, and keeps them out of the
+      // sweep cron's pending-row scan. Paid rows (creator/org transfers
+      // AND platform_fee retention) become 'reversed' — money moved
+      // (either to Connect or onto the platform balance) and is now
+      // being undone.
+      const nextStatus =
+        row.status === 'pending' || row.status === 'failed'
+          ? ('cancelled_by_refund' as const)
+          : ('reversed' as const);
+
       try {
         await this.db
           .update(payouts)
           .set({
-            status: 'reversed',
+            status: nextStatus,
             resolvedAt: row.resolvedAt ?? new Date(),
             updatedAt: new Date(),
           })
           .where(eq(payouts.id, row.id));
       } catch (updateErr) {
-        this.obs.error('Failed to mark payouts row as reversed', {
+        this.obs.error('Failed to update payouts row after refund', {
           purchaseId,
           payoutId: row.id,
+          nextStatus,
           error:
             updateErr instanceof Error ? updateErr.message : String(updateErr),
         });

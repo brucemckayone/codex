@@ -63,8 +63,8 @@ export const payouts = pgTable(
     // 'platform_fee' | 'organization_fee' | 'creator_payout' | 'creator_payout_to_owner'
     payoutType: varchar('payout_type', { length: 32 }).notNull(),
 
-    // 'paid' | 'pending' | 'failed' | 'reversed'
-    status: varchar('status', { length: 16 }).notNull(),
+    // 'paid' | 'pending' | 'failed' | 'reversed' | 'cancelled_by_refund'
+    status: varchar('status', { length: 32 }).notNull(),
 
     // 'purchase' | 'subscription' — denormalized for cheap source filtering on
     // /studio/payouts. Populated by writers at insert time; never derived.
@@ -125,7 +125,7 @@ export const payouts = pgTable(
     check('check_payouts_amount_positive', sql`${table.amountCents} > 0`),
     check(
       'check_payouts_status',
-      sql`${table.status} IN ('paid', 'pending', 'failed', 'reversed')`
+      sql`${table.status} IN ('paid', 'pending', 'failed', 'reversed', 'cancelled_by_refund')`
     ),
     check(
       'check_payouts_reason',
@@ -178,7 +178,12 @@ export const payoutsRelations = relations(payouts, ({ one }) => ({
 export type Payout = typeof payouts.$inferSelect;
 export type NewPayout = typeof payouts.$inferInsert;
 
-export type PayoutStatus = 'paid' | 'pending' | 'failed' | 'reversed';
+export type PayoutStatus =
+  | 'paid'
+  | 'pending'
+  | 'failed'
+  | 'reversed'
+  | 'cancelled_by_refund';
 export type PayoutReason =
   | 'connect_not_ready'
   | 'connect_restricted'

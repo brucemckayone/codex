@@ -132,7 +132,8 @@ export type PayoutDisplayStatus =
   | 'pending'
   | 'resolved'
   | 'failed'
-  | 'reversed';
+  | 'reversed'
+  | 'cancelled_by_refund';
 
 /**
  * Read-model returned by `SubscriptionService.listSubscribers` (studio
@@ -266,6 +267,7 @@ type PayoutFilterOptions = {
     | 'resolved'
     | 'failed'
     | 'reversed'
+    | 'cancelled_by_refund'
     | 'needs_attention';
   sourceType?: 'all' | 'purchase' | 'subscription';
   fromDate?: string;
@@ -301,6 +303,7 @@ function derivePayoutStatus(status: string): PayoutDisplayStatus {
   if (status === 'paid') return 'resolved';
   if (status === 'failed') return 'failed';
   if (status === 'reversed') return 'reversed';
+  if (status === 'cancelled_by_refund') return 'cancelled_by_refund';
   return 'pending';
 }
 
@@ -2838,6 +2841,8 @@ export class SubscriptionService extends BaseService {
       conditions.push(eq(payouts.status, 'failed'));
     } else if (status === 'reversed') {
       conditions.push(eq(payouts.status, 'reversed'));
+    } else if (status === 'cancelled_by_refund') {
+      conditions.push(eq(payouts.status, 'cancelled_by_refund'));
     } else if (status === 'needs_attention') {
       conditions.push(inArray(payouts.status, ['pending', 'failed']));
     }

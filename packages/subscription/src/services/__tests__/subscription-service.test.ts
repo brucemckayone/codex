@@ -8384,11 +8384,27 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
         .values({
           ...base,
           // 'resolved' is the URL alias, NOT a valid DB status — the
-          // CHECK only accepts paid/pending/failed.
+          // CHECK only accepts paid/pending/failed/reversed/cancelled_by_refund.
           status: 'resolved' as unknown as 'pending',
         })
         .catch((e) => e);
       expectCheckViolation(err, 'check_payouts_status');
+    });
+
+    // Codex-92ej7 / DQ-9: cancelled_by_refund must satisfy the CHECK so
+    // production reversePayoutsForPurchase can write it on connect_not_ready
+    // rows after a refund.
+    it("check_payouts_status: status='cancelled_by_refund' is accepted (DQ-9)", async () => {
+      const base = await baseValues('e9v3b-cancelled-refund');
+      const [row] = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          status: 'cancelled_by_refund' as unknown as 'pending',
+          resolvedAt: new Date(),
+        })
+        .returning();
+      expect(row.status).toBe('cancelled_by_refund');
     });
 
     it("check_payouts_reason: reason='made_up' (not in allowed set) is rejected", async () => {

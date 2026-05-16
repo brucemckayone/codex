@@ -193,6 +193,7 @@ export const payoutStatusFilterEnum = z.enum([
   'resolved', // legacy URL alias for 'paid' (PR3); dropped in PR4
   'failed',
   'reversed', // Codex-h69cg: refund-reversed rows
+  'cancelled_by_refund', // Codex-92ej7 / DQ-9: refund hit before Connect activated
   'needs_attention',
 ]);
 
