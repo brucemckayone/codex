@@ -52,6 +52,7 @@ import {
   applyMinPlatformFeeFloor,
   type FeeConfig,
   type FeeConfigService,
+  type FeeContext,
   withStaleCustomerRecovery,
 } from '@codex/purchase';
 import {
@@ -544,25 +545,39 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * Resolve fee config for the subscription path (Codex-m644n).
-   * Delegates to `FeeConfigService` when injected; falls back to `FEES.*`
-   * constants when no resolver is available (legacy unit tests, fresh installs).
+   * Resolve fee config for a payout (Codex-m644n, Codex-5794i).
+   *
+   * `ctx` selects the policy: `'subscription'` carries SUBSCRIPTION_ORG_PERCENT
+   * (15%), `'one_off'` carries ORG_PERCENT (10%). The fallback path (no
+   * FeeConfigService injected) honours the same split via constants — so
+   * legacy unit tests don't accidentally drift between policies.
+   *
+   * Used by:
+   * - subscription invoice path (per-org + per-creator) with `'subscription'`
+   * - resolvePendingPayouts retry — `'one_off'` for purchase-sourced rows,
+   *   `'subscription'` for sub-sourced rows. Without this branch a low
+   *   purchase payout could pile up indefinitely behind the subscription
+   *   min-transfer floor.
    */
-  private async resolveSubscriptionFees(
+  private async resolvePayoutFees(
     orgId: string,
+    ctx: FeeContext,
     creatorId?: string
   ): Promise<FeeConfig> {
     if (!this.feeConfig) {
       return {
         platformFeePercent: FEES.PLATFORM_PERCENT,
-        orgFeePercent: FEES.SUBSCRIPTION_ORG_PERCENT,
+        orgFeePercent:
+          ctx === 'subscription'
+            ? FEES.SUBSCRIPTION_ORG_PERCENT
+            : FEES.ORG_PERCENT,
         minPlatformFeeCents: 0,
         minTransferCents: 0,
       };
     }
     return creatorId
-      ? this.feeConfig.getFeesForCreator(orgId, creatorId, 'subscription')
-      : this.feeConfig.getFeesForOrg(orgId, 'subscription');
+      ? this.feeConfig.getFeesForCreator(orgId, creatorId, ctx)
+      : this.feeConfig.getFeesForOrg(orgId, ctx);
   }
 
   /**
@@ -582,7 +597,7 @@ export class SubscriptionService extends BaseService {
     organizationFeeCents: number;
     creatorPayoutCents: number;
   }> {
-    const orgFees = await this.resolveSubscriptionFees(orgId);
+    const orgFees = await this.resolvePayoutFees(orgId, 'subscription');
     const rawSplit = calculateRevenueSplit(
       amountCents,
       orgFees.platformFeePercent,
@@ -3249,8 +3264,10 @@ export class SubscriptionService extends BaseService {
         // while a high-volume creator clears immediately. Leaves the existing
         // pending row in place (unresolved) so a later resolution attempt picks
         // it up — no new row inserted to avoid duplicating the amount on retry.
-        const payoutFees = await this.resolveSubscriptionFees(
+        // Codex-5794i: policy follows the row's sourceType (see resolvePayoutFees).
+        const payoutFees = await this.resolvePayoutFees(
           orgId,
+          payout.sourceType === 'purchase' ? 'one_off' : 'subscription',
           payout.userId ?? undefined
         );
         if (payout.amountCents < payoutFees.minTransferCents) {
@@ -4108,8 +4125,9 @@ export class SubscriptionService extends BaseService {
       // When the calculated amount falls below this creator's floor, accumulate
       // as pending with reason='min_transfer_floor' instead of firing a Stripe
       // transfer. The next invoice payment will re-roll the floor evaluation.
-      const creatorFees = await this.resolveSubscriptionFees(
+      const creatorFees = await this.resolvePayoutFees(
         orgId,
+        'subscription',
         agreement.creatorId
       );
       if (creatorAmount < creatorFees.minTransferCents) {

@@ -487,4 +487,119 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
       );
     expect(unresolved.length).toBeGreaterThanOrEqual(1);
   });
+
+  // Codex-5794i: resolvePendingPayouts must consult the fee policy that
+  // matches the row's sourceType. Before the fix the sweep hardcoded
+  // 'subscription', so a small purchase-sourced row would be held back by
+  // the SUBSCRIPTION floor even when the org's one_off floor would let it
+  // clear — leaving funds stuck in pending state indefinitely.
+  it('routes purchase-sourced rows through the one_off fee policy, not subscription', async () => {
+    const { org, stripeAccountId } = await seed('fc-policy-route');
+
+    // Distinct floors so the policy branch is observable: subscription
+    // is high (£10), one_off is low (£1). A £5 row clears one_off only.
+    const feeConfig = {
+      getFeesForCreator: vi.fn(
+        async (
+          _orgId: string,
+          _creatorId: string,
+          ctx: 'subscription' | 'one_off'
+        ) => ({
+          platformFeePercent: 1000,
+          orgFeePercent: 0,
+          minPlatformFeeCents: 0,
+          minTransferCents: ctx === 'subscription' ? 1000 : 100,
+        })
+      ),
+      getFeesForOrg: vi.fn(),
+      getFeesPlatform: vi.fn(),
+    } as unknown as FeeConfigService;
+
+    const service = new SubscriptionService(
+      { db, environment: 'test', feeConfig },
+      stripe
+    );
+
+    const [row] = await db
+      .insert(payoutsTable)
+      .values({
+        userId: payoutUserId,
+        organizationId: org.id,
+        sourceType: 'purchase',
+        stripeChargeId: `ch_${createUniqueSlug('p')}`,
+        amountCents: 500,
+        currency: 'gbp',
+        reason: 'connect_not_ready',
+        status: 'pending',
+        payoutType: 'creator_payout',
+      })
+      .returning();
+
+    const transferSpy = vi.mocked(stripe.transfers.create);
+    transferSpy.mockClear();
+
+    const result = await service.resolvePendingPayouts(org.id, stripeAccountId);
+
+    expect(feeConfig.getFeesForCreator).toHaveBeenCalledWith(
+      org.id,
+      payoutUserId,
+      'one_off'
+    );
+    expect(result).toEqual({ resolved: 1, failed: 0 });
+    expect(transferSpy).toHaveBeenCalledTimes(1);
+
+    const [reread] = await db
+      .select()
+      .from(payoutsTable)
+      .where(eq(payoutsTable.id, row.id))
+      .limit(1);
+    expect(reread.status).toBe('paid');
+    expect(reread.resolvedAt).not.toBeNull();
+  });
+
+  it('still routes subscription-sourced rows through the subscription policy', async () => {
+    const { org, sub, stripeAccountId } = await seed('fc-policy-sub');
+
+    const feeConfig = {
+      getFeesForCreator: vi.fn(
+        async (
+          _orgId: string,
+          _creatorId: string,
+          ctx: 'subscription' | 'one_off'
+        ) => ({
+          platformFeePercent: 1000,
+          orgFeePercent: 0,
+          minPlatformFeeCents: 0,
+          minTransferCents: ctx === 'subscription' ? 100 : 1000,
+        })
+      ),
+      getFeesForOrg: vi.fn(),
+      getFeesPlatform: vi.fn(),
+    } as unknown as FeeConfigService;
+
+    const service = new SubscriptionService(
+      { db, environment: 'test', feeConfig },
+      stripe
+    );
+
+    await db.insert(payoutsTable).values({
+      userId: payoutUserId,
+      organizationId: org.id,
+      subscriptionId: sub.id,
+      sourceType: 'subscription',
+      amountCents: 500,
+      currency: 'gbp',
+      reason: 'connect_not_ready',
+      status: 'pending',
+      payoutType: 'creator_payout',
+    });
+
+    await service.resolvePendingPayouts(org.id, stripeAccountId);
+
+    expect(feeConfig.getFeesForCreator).toHaveBeenCalledWith(
+      org.id,
+      payoutUserId,
+      'subscription'
+    );
+  });
 });
