@@ -287,6 +287,45 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
     expect(mockResolvePendingPayouts).not.toHaveBeenCalled();
   });
 
+  // PR-203 review cycle 12, bead Codex-ohjvn (F-57 + F-63).
+  // The two it.fails tests below pin the desired behaviour AFTER the fix:
+  // on an active transition with missing or malformed org metadata, the
+  // handler MUST surface a WARN (not silently skip). Today it logs INFO
+  // for missing metadata and passes garbage strings straight through to
+  // the lookup query. When the fix lands, remove the it.fails marker.
+  it.fails('F-57: WARNS (not just skips) when active transition has missing org metadata', async () => {
+    dbState = { chargesEnabled: false, payoutsEnabled: false };
+    const event = createAccountUpdatedEvent({
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      orgId: null,
+    });
+    const { context, mock } = createContext();
+
+    await handleConnectWebhook(event, mockStripe, context);
+
+    expect(mock._obs.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/missing|invalid/i),
+      expect.objectContaining({ accountId: 'acct_test_123' })
+    );
+    expect(mockResolvePendingPayouts).not.toHaveBeenCalled();
+  });
+
+  it.fails('F-63: rejects non-UUID metadata.codex_organization_id without querying', async () => {
+    dbState = { chargesEnabled: false, payoutsEnabled: false };
+    const event = createAccountUpdatedEvent({
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      orgId: 'not-a-valid-uuid',
+    });
+    const { context, mock } = createContext();
+
+    await handleConnectWebhook(event, mockStripe, context);
+
+    expect(mock._obs.warn).toHaveBeenCalled();
+    expect(mockResolvePendingPayouts).not.toHaveBeenCalled();
+  });
+
   it('does NOT fire payouts on inactive update (charges on, payouts off)', async () => {
     dbState = { chargesEnabled: false, payoutsEnabled: false };
     const event = createAccountUpdatedEvent({

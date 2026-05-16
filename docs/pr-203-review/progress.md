@@ -490,29 +490,77 @@ Three new findings bundled as one feature gap:
 
 No failing test this cycle — these are missing-feature gaps, not buggy code paths. The bead description IS the implementation spec.
 
-## 🎯 War path verdict (re-asserted post-extension)
+## Cycle 12 — connect-webhook handler audit
 
-**Every multi-creator scenario in PR-203's scope is covered, AND the adjacent sibling surface (Sales) has been audited and beaded.** The loop's end-condition holds.
+External Explore agent audit of `workers/ecom-api/src/handlers/connect-webhook.ts` (handler that activates pending payouts when a creator's Connect account becomes ready). Adjacent surface to N-1: connect-webhook is the TRIGGER that calls `resolvePendingPayouts`. Verdict: 2 P1 input-validation gaps + 2 clean-axis confirmations.
 
-- **64 catalogued findings** across 10 cycles (51 self-review + 8 reviewer + 5 simplifier)
-- **14 beads filed** — every P0/P1 bug has a failing regression test
-- **15 new tests landed** across `@codex/purchase`, `@codex/subscription`, `apps/web`:
-  - 9 failing-regression `it.fails` tests (F-1, F-2, F-3, F-7, F-13, F-19, F-26, N-1, N-2, N-4)
-  - 5 invariant tripwire tests (F-51 CHECK batch — `check_payouts_user_required` × 3 + `check_payouts_source` + `check_payouts_paid_invariant` AND-clause)
+| Tag | Status | Title |
+|---|---|---|
+| F-57 | 🔴 P1 | Missing-orgId path silently skips with INFO log — can't distinguish "Connect account legitimately has no org" from "Stripe payload mutated" |
+| F-58 | 🟡 DUP | No event-id dedup at webhook factory — **but Codex-257ia already covers this exactly**, gating at `createWebhookHandler` |
+| F-59 | 🟡 P3 | Doc-only: `wasActive` read race window between redelivered events. Acceptable under fire-and-forget; worth a code comment |
+| F-60 | 🟢 | Stripe signature verified BEFORE state mutation — clean |
+| F-61 | 🟢 | Cache invalidation correctly wired through `VersionedCache` — clean |
+| F-62 | 🟢 | DB cleanup contract enforced in finally block — clean |
+| F-63 | 🔴 P2→bundled | No UUID format validation on extracted orgId — passes garbage to Drizzle `eq()` predicate. Bundled with F-57 |
+
+**Bead Codex-ohjvn P1** bundles F-57 + F-63: Zod validation at handler entry, WARN on missing/malformed metadata during an active transition. Two `it.fails` tests landed in `connect-webhook.test.ts` (F-57 WARN-on-missing, F-63 reject-non-UUID).
+
+**F-58 closed as duplicate of Codex-257ia** — the existing event-id-dedup feature gates at `createWebhookHandler` factory, which all webhook handlers (incl. connect-webhook) go through. No new bead.
+
+## Cycle 13 — `creatorOrganizationAgreement` schema audit (F-15 RETRACTED)
+
+External Explore agent investigation of the `effectiveUntil` vs `deletedAt` divergence raised in cycle 2 F-15. Verdict: **impossible by design.**
+
+The `creatorOrganizationAgreements` table **does not have a `deletedAt` column at all**. The schema (`packages/database/src/schema/ecommerce.ts:169-211`, migration `0006_breezy_slipstream.sql`) uses temporal `effectiveFrom` / `effectiveUntil` exclusively. The CLAUDE.md universal soft-delete rule has an intentional exception for this table — agreements are temporal, not mutable.
+
+| Tag | Status | Title |
+|---|---|---|
+| F-15 | 🟢 RETRACTED | Hypothesis was that an admin could soft-delete via `deletedAt` without setting `effectiveUntil`. Impossible — no `deletedAt` column exists. Lookup query at `subscription-service.ts:3918` correctly filters `effectiveUntil IS NULL OR > now()` |
+
+No bead filed. The asymmetry vs the soft-delete universal rule is worth a one-line schema comment, but doesn't rise to bead-level work.
+
+## Cycle 14 — `derivePayoutStatus` type drift audit (N-6 deep dive)
+
+External Explore agent audit of the `'paid'` (DB) ↔ `'resolved'` (UI legacy) status enum boundary. Verdict: confirmed type-hygiene debt (not money correctness). Server-to-wire boundary is correctly narrowed at exactly one site (`derivePayoutStatus`), UI helpers render both values identically.
+
+| Tag | Status | Title |
+|---|---|---|
+| F-65 | 🟡 P3 | `PayoutFilterOptions` accepts pre-migration `'paid'` AND legacy `'resolved'` URL aliases. `buildPayoutConditions` normalises both to DB `'paid'` — works, but conflates input + display unions |
+| F-66 | 🟡 P3 | `'resolved'` URL alias slated for removal in "PR4" per inline comment — when it goes, branches still referencing it become dead code that linters won't flag |
+| F-67 | 🟢 | Server never emits raw DB `'paid'` to UI — `derivePayoutStatus` transforms on every server response. Clean boundary |
+| F-68 | 🟢 | `statusVariant` / `statusLabel` render `'paid'` and `'resolved'` IDENTICALLY (both → 'success' + 'Paid'). No divergent rendering bug |
+
+**Bead Codex-i4gv0 P3** bundles F-65 + F-66: split into `PayoutInputStatus` (URL filter) and `PayoutDisplayStatus` (wire format), narrow at `buildPayoutConditions` entry, add `@deprecated` JSDoc on the `'resolved'` alias. Optional companion follow-up: "Drop 'resolved' from PayoutFilterOptions in PR4 + grep dead branches."
+
+No failing test landed — type-narrowing is enforced by TypeScript, not runtime tests. The fix shape IS the verification.
+
+## 🎯 War path verdict (re-asserted post-extensions)
+
+**Every multi-creator scenario in PR-203's scope is covered, the adjacent sibling surface (Sales) is beaded, and three optional extension surfaces (connect-webhook, agreement schema, status enum drift) have been audited.** Audit war path closed.
+
+- **72 catalogued findings** across 14 cycles (51 self-review + 8 reviewer + 5 simplifier + 4 cycle-12 + 1 cycle-13 RETRACT + 4 cycle-14)
+- **16 beads filed** — every P0/P1 bug has a failing regression test (cycle 12 added Codex-ohjvn P1; cycle 14 added Codex-i4gv0 P3)
+- **17 new tests landed** across `@codex/purchase`, `@codex/subscription`, `apps/web`, `workers/ecom-api`:
+  - 11 failing-regression `it.fails` tests (F-1, F-2, F-3, F-7, F-13, F-19, F-26, F-57, F-63, N-1, N-2, N-4)
+  - 5 invariant tripwire tests (F-51 CHECK batch)
   - 1 component test (F-19 deleted-user fallback)
-- **18 design questions** raised in `design-questions.md` (1 resolved, 17 open — all tagged with options + recommendation)
-- **Three new agent runs** caught 13 findings + 1 P0 bug that 8 cycles of self-review missed — external review is irreplaceable
+- **18 design questions** raised in `design-questions.md` (1 resolved, 17 open)
+- **F-15 RETRACTED** by cycle 13 — column doesn't exist, hypothesis impossible by design
+- **F-58 closed as duplicate** of Codex-257ia (existing event-id-dedup feature already covers it at the right layer)
+- **Five external agent runs** (cycle 9 reviewer + cycle 9 simplifier + cycle 12 + cycle 13 + cycle 14) caught 14 findings + 1 P0 bug that 8 cycles of self-review missed
 
 ### Follow-up beads (not part of this review's scope)
 
-- N-3 → verify `Codex-257ia` (event-id dedupe) is shipped before merge
+- N-3 → verify `Codex-257ia` (event-id dedupe) is shipped before merge — **confirmed scope covers connect-webhook (cycle 12)**
 - N-5 a11y `colspan=7` semantics fix
-- N-6 `'paid'` ↔ `'resolved'` type narrowing
 - N-7 failure-path insert ops correlation fix
 - S-3 / S-4 / S-5 lower-priority simplifier suggestions
-- F-12 / F-29 / F-33 small fixes (≤10 lines each)
+- F-12 / F-29 / F-33 / F-59 small fixes / comments (≤10 lines each)
+- One-line schema comment on `creatorOrganizationAgreements` documenting the CLAUDE.md soft-delete exception (cycle 13)
+- PR4 cleanup bead: drop `'resolved'` URL alias from `PayoutFilterOptions` + grep dead branches (cycle 14 companion)
 
-The cron job `80de02cc` can be cancelled (`CronDelete 80de02cc`) — there are no remaining audit surfaces. Future cycles should focus on shipping the P0/P1 fixes against the failing tests, not on more audit.
+The cron job `80de02cc` is already cancelled. Future cycles should focus on shipping the P0/P1 fixes against the failing tests, not on more audit.
 
 ## Design questions
 
