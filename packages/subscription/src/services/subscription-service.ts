@@ -3869,27 +3869,16 @@ export class SubscriptionService extends BaseService {
     // revenue alongside org_fee + creator_payout. status='paid' is satisfied
     // by stripeChargeId per the OR-allow paid invariant.
     //
-    // Webhook-replay safe: platform_fee rows have a null stripeTransferId so
-    // the `uq_payouts_stripe_transfer_id` partial unique index does NOT catch
-    // a duplicate insert on the second webhook fire. Pre-check via SELECT for
-    // an existing row keyed on (subscriptionId, stripeChargeId, 'platform_fee')
-    // — exactly one such row should exist per invoice charge.
+    // Codex-g9owu: exactly one platform_fee row per charge. The partial
+    // unique index uq_payouts_platform_fee_per_charge enforces it; the
+    // ON CONFLICT clause collapses the second concurrent webhook delivery
+    // without raising. No SELECT pre-check — that pattern races between
+    // two concurrent workers (both see "no row", both INSERT).
     if (platformFeeCents > 0) {
       try {
-        const existingPlatformRow = await this.db
-          .select({ id: payouts.id })
-          .from(payouts)
-          .where(
-            and(
-              eq(payouts.subscriptionId, subscriptionId),
-              eq(payouts.stripeChargeId, chargeId),
-              eq(payouts.payoutType, 'platform_fee')
-            )
-          )
-          .limit(1);
-
-        if (existingPlatformRow.length === 0) {
-          await this.db.insert(payouts).values({
+        await this.db
+          .insert(payouts)
+          .values({
             userId: null,
             organizationId: orgId,
             subscriptionId,
@@ -3900,18 +3889,19 @@ export class SubscriptionService extends BaseService {
             stripeChargeId: chargeId,
             transferGroup,
             resolvedAt: new Date(),
+          })
+          .onConflictDoNothing({
+            target: payouts.stripeChargeId,
+            where: sql`${payouts.payoutType} = 'platform_fee'`,
           });
-        }
       } catch (insertError) {
-        if (!isUniqueViolation(insertError)) {
-          this.obs.error('Failed to insert platform_fee payout row', {
-            subscriptionId,
-            organizationId: orgId,
-            chargeId,
-            amountCents: platformFeeCents,
-            error: (insertError as Error).message,
-          });
-        }
+        this.obs.error('Failed to insert platform_fee payout row', {
+          subscriptionId,
+          organizationId: orgId,
+          chargeId,
+          amountCents: platformFeeCents,
+          error: (insertError as Error).message,
+        });
       }
     }
 

@@ -714,29 +714,36 @@ export class PurchaseService extends BaseService {
     const now = new Date();
 
     // 1. Platform fee — retained on platform balance, no transfer call.
+    // Codex-g9owu: ON CONFLICT against the partial unique index
+    // uq_payouts_platform_fee_per_charge so concurrent webhook
+    // redeliveries don't double-insert.
     if (revenueSplit.platformFeeCents > 0) {
       try {
-        await this.db.insert(payouts).values({
-          userId: null,
-          organizationId,
-          purchaseId: purchase.id,
-          amountCents: revenueSplit.platformFeeCents,
-          payoutType: 'platform_fee',
-          status: 'paid',
-          sourceType: 'purchase',
-          stripeChargeId,
-          transferGroup,
-          resolvedAt: now,
-        });
-      } catch (err) {
-        if (!isUniqueViolation(err)) {
-          this.obs.error('Failed to insert platform_fee payout row', {
+        await this.db
+          .insert(payouts)
+          .values({
+            userId: null,
+            organizationId,
             purchaseId: purchase.id,
-            stripeChargeId,
             amountCents: revenueSplit.platformFeeCents,
-            error: err instanceof Error ? err.message : String(err),
+            payoutType: 'platform_fee',
+            status: 'paid',
+            sourceType: 'purchase',
+            stripeChargeId,
+            transferGroup,
+            resolvedAt: now,
+          })
+          .onConflictDoNothing({
+            target: payouts.stripeChargeId,
+            where: sql`${payouts.payoutType} = 'platform_fee'`,
           });
-        }
+      } catch (err) {
+        this.obs.error('Failed to insert platform_fee payout row', {
+          purchaseId: purchase.id,
+          stripeChargeId,
+          amountCents: revenueSplit.platformFeeCents,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 

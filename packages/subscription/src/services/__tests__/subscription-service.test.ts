@@ -8468,6 +8468,31 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       ).toBe(true);
     }
 
+    // Codex-g9owu: parallel helper for unique-index violations. Walks the
+    // same code/cause/message chain as expectCheckViolation so the driver's
+    // wrapping shape isn't a single point of brittleness across tests.
+    function expectUniqueViolation(err: unknown, constraint: string) {
+      expect(err).toBeDefined();
+      const e = err as {
+        code?: string;
+        constraint?: string;
+        cause?: { code?: string; constraint?: string; message?: string };
+        message?: string;
+      };
+      const code = e.code ?? e.cause?.code;
+      const cname = e.constraint ?? e.cause?.constraint;
+      const msg = `${e.message ?? ''} ${e.cause?.message ?? ''}`;
+      const matched =
+        code === '23505' ||
+        cname === constraint ||
+        msg.includes('23505') ||
+        msg.includes(constraint);
+      expect(
+        matched,
+        `expected unique violation (${constraint}); got code=${code} constraint=${cname} message=${msg}`
+      ).toBe(true);
+    }
+
     it('check_payouts_paid_invariant: status=paid with stripeTransferId=null is rejected', async () => {
       const base = await baseValues('e9v3b-check-paid-invariant');
       const err = await db
@@ -8511,6 +8536,69 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
         })
         .returning();
       expect(row.status).toBe('cancelled_by_refund');
+    });
+
+    // Codex-g9owu: a second platform_fee row for the same charge must be
+    // rejected by the partial unique index uq_payouts_platform_fee_per_charge.
+    // Without this, concurrent webhook redeliveries race past the SELECT
+    // pre-check and silently double-insert platform revenue.
+    it('uq_payouts_platform_fee_per_charge: second platform_fee row for same charge is rejected (Codex-g9owu)', async () => {
+      const base = await baseValues('e9v3b-platform-fee-unique');
+      const chargeId = `ch_unique_pf_${createUniqueSlug('x')}`;
+
+      const [first] = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          userId: null,
+          payoutType: 'platform_fee',
+          status: 'paid',
+          stripeChargeId: chargeId,
+          resolvedAt: new Date(),
+        })
+        .returning();
+      expect(first.payoutType).toBe('platform_fee');
+
+      const err = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          userId: null,
+          payoutType: 'platform_fee',
+          status: 'paid',
+          stripeChargeId: chargeId,
+          resolvedAt: new Date(),
+        })
+        .catch((e) => e);
+      expectUniqueViolation(err, 'uq_payouts_platform_fee_per_charge');
+    });
+
+    // Codex-g9owu: the partial index is scoped to payoutType='platform_fee',
+    // so non-platform_fee rows with a shared stripeChargeId are unaffected
+    // (a charge funds platform_fee + org_fee + creator_payout siblings).
+    it('uq_payouts_platform_fee_per_charge: does NOT reject non-platform_fee rows with shared chargeId (Codex-g9owu)', async () => {
+      const base = await baseValues('e9v3b-platform-fee-shared');
+      const chargeId = `ch_shared_${createUniqueSlug('x')}`;
+
+      await db.insert(payoutsTable).values({
+        ...base,
+        userId: null,
+        payoutType: 'platform_fee',
+        status: 'paid',
+        stripeChargeId: chargeId,
+        resolvedAt: new Date(),
+      });
+
+      // creator_payout row for the same chargeId must succeed.
+      const [creatorRow] = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          payoutType: 'creator_payout',
+          stripeChargeId: chargeId,
+        })
+        .returning();
+      expect(creatorRow.payoutType).toBe('creator_payout');
     });
 
     it("check_payouts_reason: reason='made_up' (not in allowed set) is rejected", async () => {

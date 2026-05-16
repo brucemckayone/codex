@@ -122,6 +122,17 @@ export const payouts = pgTable(
       table.createdAt.desc()
     ),
 
+    // Codex-g9owu: exactly one platform_fee row per charge. Without this
+    // partial unique index, concurrent webhook redeliveries can race past
+    // the SELECT pre-check in executeTransfers / writePurchasePayouts and
+    // both INSERT — duplicating platform revenue. The check the existing
+    // uq_payouts_stripe_transfer_id provides doesn't apply: platform_fee
+    // rows have NULL stripeTransferId (no transfer happens; the slice
+    // retains on platform balance).
+    uniqueIndex('uq_payouts_platform_fee_per_charge')
+      .on(table.stripeChargeId)
+      .where(sql`${table.payoutType} = 'platform_fee'`),
+
     check('check_payouts_amount_positive', sql`${table.amountCents} > 0`),
     check(
       'check_payouts_status',
