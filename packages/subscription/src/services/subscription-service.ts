@@ -3281,50 +3281,105 @@ export class SubscriptionService extends BaseService {
       count: unresolvedPayouts.length,
     });
 
+    // Codex-iivne: group pending rows by sourceType so a creator with
+    // many sub-threshold pending rows (multi-creator split scenarios)
+    // gets resolved when the SUM clears the min-transfer floor —
+    // rather than every row failing the per-row floor check and piling
+    // up indefinitely. Fee policy depends on sourceType, so the group
+    // key reflects it. Two possible groups: 'purchase' + 'subscription'.
+    const groups: Record<
+      'purchase' | 'subscription',
+      typeof unresolvedPayouts
+    > = { purchase: [], subscription: [] };
     for (const payout of unresolvedPayouts) {
+      const key =
+        payout.sourceType === 'purchase' ? 'purchase' : 'subscription';
+      groups[key].push(payout);
+    }
+
+    for (const [sourceType, group] of Object.entries(groups) as Array<
+      ['purchase' | 'subscription', typeof unresolvedPayouts]
+    >) {
+      if (group.length === 0) continue;
+      const groupResult = await this.transferPendingGroup(
+        group,
+        sourceType,
+        orgId,
+        stripeAccountId,
+        connectAccount.userId
+      );
+      resolved += groupResult.resolved;
+      failed += groupResult.failed;
+    }
+
+    this.obs.info('Pending payout resolution complete', {
+      organizationId: orgId,
+      stripeAccountId,
+      resolved,
+      failed,
+      total: unresolvedPayouts.length,
+    });
+
+    return { resolved, failed };
+  }
+
+  /**
+   * Codex-iivne: resolve one (userId, sourceType) group of pending
+   * payouts. Caller has already filtered by Connect account userId, so
+   * every row in `group` shares one recipient. Fee policy is looked up
+   * once per call (was: per-row); floor evaluates against the SUM
+   * (was: each row individually).
+   *
+   * The schema invariant `uq_payouts_stripe_transfer_id` forbids
+   * shared stripeTransferId across rows, so per-row transfers fire
+   * after the group passes the floor gate.
+   */
+  private async transferPendingGroup(
+    group: (typeof payouts.$inferSelect)[],
+    sourceType: 'purchase' | 'subscription',
+    orgId: string,
+    stripeAccountId: string,
+    userId: string
+  ): Promise<{ resolved: number; failed: number }> {
+    let resolved = 0;
+    let failed = 0;
+
+    const payoutFees = await this.resolvePayoutFees(
+      orgId,
+      sourceType === 'purchase' ? 'one_off' : 'subscription',
+      userId
+    );
+    const totalCents = group.reduce((sum, row) => sum + row.amountCents, 0);
+
+    if (totalCents < payoutFees.minTransferCents) {
+      this.obs.info(
+        'resolvePendingPayouts: skipping group below aggregate min-transfer floor',
+        {
+          organizationId: orgId,
+          userId,
+          sourceType,
+          totalCents,
+          rowCount: group.length,
+          minTransferCents: payoutFees.minTransferCents,
+        }
+      );
+      return { resolved: 0, failed: 0 };
+    }
+
+    for (const payout of group) {
       try {
-        // GBP-only enforcement (Codex-yv18n): honour the row's currency but
-        // explicitly reject any non-GBP value. Historical rows that somehow
-        // lack the column fall back to CURRENCY.GBP (schema default is 'gbp'
-        // but defence-in-depth never hurts).
+        // GBP-only enforcement (Codex-yv18n) lives INSIDE the per-row
+        // try/catch so a non-GBP row counts as a per-row failure (not a
+        // group abort) — keeps mixed-currency batches partially recoverable.
         const payoutCurrency = (payout.currency || CURRENCY.GBP).toLowerCase();
         this.assertGbpOnly(payoutCurrency, {
           pendingPayoutId: payout.id,
           subscriptionId: payout.subscriptionId,
           organizationId: orgId,
         });
-
-        // Codex-m644n: min-transfer floor gate. Walk the per-creator override
-        // chain so a low-volume creator with a high floor accumulates further
-        // while a high-volume creator clears immediately. Leaves the existing
-        // pending row in place (unresolved) so a later resolution attempt picks
-        // it up — no new row inserted to avoid duplicating the amount on retry.
-        // Codex-5794i: policy follows the row's sourceType (see resolvePayoutFees).
-        const payoutFees = await this.resolvePayoutFees(
-          orgId,
-          payout.sourceType === 'purchase' ? 'one_off' : 'subscription',
-          payout.userId ?? undefined
-        );
-        if (payout.amountCents < payoutFees.minTransferCents) {
-          this.obs.info(
-            'resolvePendingPayouts: skipping payout below min-transfer floor',
-            {
-              pendingPayoutId: payout.id,
-              userId: payout.userId,
-              organizationId: orgId,
-              amountCents: payout.amountCents,
-              minTransferCents: payoutFees.minTransferCents,
-            }
-          );
-          continue;
-        }
-
-        // Codex-dbzkg: when the row was funded by a tracked platform charge
-        // (purchase or subscription), pass source_transaction so the retry
-        // draws from THAT charge's source-linked balance, not general
-        // platform balance. Without it the platform double-pays — the
-        // original charge sits source-linked indefinitely and the retry
-        // pulls unrelated funds.
+        // Codex-dbzkg: pass source_transaction when the row was funded
+        // by a tracked platform charge so the retry pulls from THAT
+        // charge's source-linked balance, not general platform balance.
         const transfer = await this.stripe.transfers.create(
           {
             amount: payout.amountCents,
@@ -3360,19 +3415,13 @@ export class SubscriptionService extends BaseService {
           pendingPayoutId: payout.id,
           subscriptionId: payout.subscriptionId,
           amountCents: payout.amountCents,
+          sourceType,
           error: (error as Error).message,
         });
-        // Continue to next payout — don't fail the whole batch
+        // Codex-vv77x: per-row error isolation — one Stripe failure
+        // never blocks the remaining rows in the group.
       }
     }
-
-    this.obs.info('Pending payout resolution complete', {
-      organizationId: orgId,
-      stripeAccountId,
-      resolved,
-      failed,
-      total: unresolvedPayouts.length,
-    });
 
     return { resolved, failed };
   }

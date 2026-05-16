@@ -35,7 +35,7 @@ import {
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -68,6 +68,17 @@ function makeFeeConfigStub(
     getFeesForOrg: vi.fn(async () => orgFees),
     getFeesPlatform: vi.fn(async () => orgFees),
   } as unknown as FeeConfigService;
+}
+
+// The partial unique index uq_payouts_stripe_transfer_id rejects rows
+// sharing a stripeTransferId, so mocks that resolve many transfers in
+// one test must hand out distinct IDs per call.
+function makeUniqueTransferIdMock(prefix: string) {
+  let idx = 0;
+  return () =>
+    Promise.resolve({ id: `${prefix}_${idx++}` }) as ReturnType<
+      typeof stripe.transfers.create
+    >;
 }
 
 describe('SubscriptionService × FeeConfigService — pending payouts', () => {
@@ -254,7 +265,12 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     expect(reread.stripeTransferId).toBe('tr_fc_clear');
   });
 
-  it('two payouts, one below floor and one above — only the larger transfers', async () => {
+  // Codex-iivne: pre-fix this test pinned per-row floor gating: small=50
+  // would skip while large=500 fires. Post-fix the floor evaluates against
+  // the GROUP SUM, so 50+500=550 clears the floor=100 and BOTH rows fire.
+  // The new behaviour is the desired one — small rows would otherwise pile
+  // up indefinitely behind the per-row floor.
+  it('two payouts, one below floor and one above — group SUM clears floor so BOTH fire (Codex-iivne)', async () => {
     const { org, sub, stripeAccountId } = await seed('fc-floor-mixed');
 
     const feeConfig = makeFeeConfigStub(
@@ -306,13 +322,12 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
 
     const transferSpy = vi.mocked(stripe.transfers.create);
     transferSpy.mockClear();
-    transferSpy.mockResolvedValue({ id: 'tr_fc_mixed' } as Stripe.Transfer);
+    transferSpy.mockImplementation(makeUniqueTransferIdMock('tr_fc_mixed'));
 
     const result = await service.resolvePendingPayouts(org.id, stripeAccountId);
-    expect(result.resolved).toBe(1);
-    expect(transferSpy).toHaveBeenCalledTimes(1);
+    expect(result.resolved).toBe(2);
+    expect(transferSpy).toHaveBeenCalledTimes(2);
 
-    // Verify which row resolved.
     const [smallRow] = inserted.filter((r) => r.amountCents === 50);
     const [largeRow] = inserted.filter((r) => r.amountCents === 500);
 
@@ -327,8 +342,142 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
       .where(eq(payoutsTable.id, largeRow.id))
       .limit(1);
 
-    expect(smallAfter.resolvedAt).toBeNull();
+    // Both rows reach status='paid' once the GROUP SUM clears the floor.
+    expect(smallAfter.resolvedAt).not.toBeNull();
     expect(largeAfter.resolvedAt).not.toBeNull();
+  });
+
+  // Codex-iivne: the original bug. Many invoices for one creator each
+  // produce a row below the floor; pre-fix every retry walked the
+  // per-row floor, every row stayed pending, the obligation piled up
+  // indefinitely. Post-fix the SUM crosses the floor and all rows fire.
+  it('aggregate SUM clears floor on a backlog of below-floor rows (Codex-iivne)', async () => {
+    const { org, sub, stripeAccountId } = await seed('fc-aggregate-floor');
+
+    // Floor = £3 (300p). Four monthly rows at £1.25 each (125p) — each
+    // individually below floor; SUM = 500p clears it.
+    const feeConfig = makeFeeConfigStub(
+      {
+        [payoutUserId]: {
+          platformFeePercent: 1000,
+          orgFeePercent: 0,
+          minPlatformFeeCents: 0,
+          minTransferCents: 300,
+        },
+      },
+      {
+        platformFeePercent: 1000,
+        orgFeePercent: 0,
+        minPlatformFeeCents: 0,
+        minTransferCents: 0,
+      }
+    );
+    const service = new SubscriptionService(
+      { db, environment: 'test', feeConfig },
+      stripe
+    );
+
+    const rows = await db
+      .insert(payoutsTable)
+      .values(
+        Array.from({ length: 4 }, () => ({
+          userId: payoutUserId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 125,
+          currency: 'gbp' as const,
+          reason: 'min_transfer_floor' as const,
+          status: 'pending' as const,
+          payoutType: 'creator_payout' as const,
+        }))
+      )
+      .returning();
+
+    const transferSpy = vi.mocked(stripe.transfers.create);
+    transferSpy.mockClear();
+    transferSpy.mockImplementation(makeUniqueTransferIdMock('tr_fc_agg'));
+
+    const result = await service.resolvePendingPayouts(org.id, stripeAccountId);
+
+    expect(result).toEqual({ resolved: 4, failed: 0 });
+    expect(transferSpy).toHaveBeenCalledTimes(4);
+
+    const after = await db
+      .select()
+      .from(payoutsTable)
+      .where(
+        inArray(
+          payoutsTable.id,
+          rows.map((r) => r.id)
+        )
+      );
+    expect(after.every((r) => r.status === 'paid')).toBe(true);
+    expect(after.every((r) => r.resolvedAt !== null)).toBe(true);
+  });
+
+  // Codex-iivne: complementary negative test — when the SUM is STILL
+  // below floor, every row stays pending so the next sweep can pick
+  // them up after another invoice lands.
+  it('aggregate SUM below floor leaves all rows pending (Codex-iivne)', async () => {
+    const { org, sub, stripeAccountId } = await seed('fc-aggregate-below');
+
+    // Floor = £3 (300p). Two rows at £1 each → SUM = 200p, still below.
+    const feeConfig = makeFeeConfigStub(
+      {
+        [payoutUserId]: {
+          platformFeePercent: 1000,
+          orgFeePercent: 0,
+          minPlatformFeeCents: 0,
+          minTransferCents: 300,
+        },
+      },
+      {
+        platformFeePercent: 1000,
+        orgFeePercent: 0,
+        minPlatformFeeCents: 0,
+        minTransferCents: 0,
+      }
+    );
+    const service = new SubscriptionService(
+      { db, environment: 'test', feeConfig },
+      stripe
+    );
+
+    const rows = await db
+      .insert(payoutsTable)
+      .values(
+        Array.from({ length: 2 }, () => ({
+          userId: payoutUserId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100,
+          currency: 'gbp' as const,
+          reason: 'min_transfer_floor' as const,
+          status: 'pending' as const,
+          payoutType: 'creator_payout' as const,
+        }))
+      )
+      .returning();
+
+    const transferSpy = vi.mocked(stripe.transfers.create);
+    transferSpy.mockClear();
+
+    const result = await service.resolvePendingPayouts(org.id, stripeAccountId);
+
+    expect(result).toEqual({ resolved: 0, failed: 0 });
+    expect(transferSpy).not.toHaveBeenCalled();
+
+    const after = await db
+      .select()
+      .from(payoutsTable)
+      .where(
+        inArray(
+          payoutsTable.id,
+          rows.map((r) => r.id)
+        )
+      );
+    expect(after.every((r) => r.status === 'pending')).toBe(true);
+    expect(after.every((r) => r.resolvedAt === null)).toBe(true);
   });
 
   it('without feeConfig injected, all payouts transfer (legacy FEES.* fallback — no floor)', async () => {
@@ -360,7 +509,11 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     expect(transferSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('queries FeeConfigService once per pending payout (per-row resolution)', async () => {
+  // Codex-iivne: post-fix the fee policy is looked up ONCE per
+  // (userId, sourceType) group rather than per-row, because the
+  // floor evaluates against the group SUM. Rewritten from the
+  // pre-fix "once per pending payout" assertion.
+  it('queries FeeConfigService once per (userId, sourceType) group (Codex-iivne)', async () => {
     const { org, sub, stripeAccountId } = await seed('fc-per-row');
 
     const feeConfig = makeFeeConfigStub(
@@ -417,21 +570,24 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
       },
     ]);
 
-    vi.mocked(stripe.transfers.create).mockResolvedValue({
-      id: 'tr_fc_perrow',
-    } as Stripe.Transfer);
+    vi.mocked(stripe.transfers.create).mockImplementation(
+      makeUniqueTransferIdMock('tr_fc_perrow')
+    );
 
     await service.resolvePendingPayouts(org.id, stripeAccountId);
 
-    // resolvePendingPayouts walks the per-creator override chain for EACH
-    // pending row (per-creator floor can differ). Locking this contract in.
-    expect(feeConfig.getFeesForCreator).toHaveBeenCalledTimes(3);
-    for (const call of (feeConfig.getFeesForCreator as ReturnType<typeof vi.fn>)
-      .mock.calls) {
-      expect(call[0]).toBe(org.id);
-      expect(call[1]).toBe(payoutUserId);
-      expect(call[2]).toBe('subscription');
-    }
+    // resolvePendingPayouts walks the per-creator override chain ONCE
+    // per (userId, sourceType) group — the floor evaluates against the
+    // SUM of pending rows for that group. All 3 rows share
+    // userId=payoutUserId AND sourceType='subscription', so one lookup
+    // covers them.
+    expect(feeConfig.getFeesForCreator).toHaveBeenCalledTimes(1);
+    const [orgArg, creatorArg, ctxArg] = (
+      feeConfig.getFeesForCreator as ReturnType<typeof vi.fn>
+    ).mock.calls[0]!;
+    expect(orgArg).toBe(org.id);
+    expect(creatorArg).toBe(payoutUserId);
+    expect(ctxArg).toBe('subscription');
   });
 
   it('preserves unresolved rows scoped by (userId, orgId, resolvedAt IS NULL)', async () => {
