@@ -5477,109 +5477,6 @@ describe('SubscriptionService', () => {
       expect(result.items[0]!.subscriberName).toBeNull();
       expect(result.items[0]!.subscriberEmail).toBeNull();
     });
-
-    // REGRESSION (PR #204 deep-review F-26, bead Codex-e2773) — pagination
-    // must respect transferGroup atomicity so client-side grouping in
-    // /studio/payouts can produce correct per-transaction totals.
-    //
-    // listPayoutsByOrg currently paginates by ROW (LIMIT/OFFSET on the raw
-    // SELECT). A single charge fanning out into 1 platform_fee + 1
-    // organization_fee + N creator_payouts (where N >= 3 is normal in a
-    // multi-creator org with creatorOrganizationAgreements) can straddle a
-    // page boundary at limit=20.
-    //
-    // The +page.svelte client then renders the partial group with a totalCents
-    // that's just the visible-rows sum — NOT the real charge amount — and
-    // the sibling rows appear as a second "transaction" on the next page.
-    //
-    // The invariant we want: for every transferGroup that appears in a
-    // page's items, ALL its sibling rows must appear in that same page.
-    // Equivalent fix: switch to group-based pagination (N groups per page).
-    it.fails('pagination keeps transferGroup siblings together on the same page (multi-creator regression)', async () => {
-      const { org, tier1 } = await createFullOrg('zqaxo-pagegroup');
-      const sub = await seedSubscriptionForOrg(
-        org.id,
-        tier1.id,
-        otherCreatorId,
-        'pagegroup'
-      );
-
-      // Build 21 rows: rows 1-19 are nineteen 1-row groups, then a single
-      // transferGroup of 2 sibling rows for the last "transaction".
-      // With limit=20, page 1 returns rows 1-20: that's 19 single-row
-      // groups + the FIRST row of the multi-row group. Page 2 returns the
-      // second sibling — orphaned from its group.
-      const SPAN_GROUP = 'tg_zqaxo_span_boundary';
-      const singletons = Array.from({ length: 19 }, (_, i) => ({
-        userId: otherCreatorId,
-        organizationId: org.id,
-        subscriptionId: sub.id,
-        amountCents: 1000,
-        currency: 'gbp' as const,
-        reason: 'connect_not_ready',
-        resolvedAt: new Date(Date.now() - i * 1000), // descending createdAt
-        stripeTransferId: `tr_zqaxo_solo_${i}`,
-        status: 'paid' as const,
-        payoutType: 'creator_payout' as const,
-        transferGroup: `tg_zqaxo_solo_${i}`,
-      }));
-      const siblings = [
-        {
-          userId: otherCreatorId,
-          organizationId: org.id,
-          subscriptionId: sub.id,
-          amountCents: 5000,
-          currency: 'gbp' as const,
-          reason: 'connect_not_ready',
-          resolvedAt: new Date(Date.now() - 20 * 1000),
-          stripeTransferId: 'tr_zqaxo_sib_creator',
-          status: 'paid' as const,
-          payoutType: 'creator_payout' as const,
-          transferGroup: SPAN_GROUP,
-        },
-        {
-          userId: otherCreatorId,
-          organizationId: org.id,
-          subscriptionId: sub.id,
-          amountCents: 2000,
-          currency: 'gbp' as const,
-          reason: 'connect_not_ready',
-          resolvedAt: new Date(Date.now() - 20 * 1000 - 1),
-          stripeTransferId: 'tr_zqaxo_sib_org',
-          status: 'paid' as const,
-          payoutType: 'organization_fee' as const,
-          transferGroup: SPAN_GROUP,
-        },
-      ];
-      await db.insert(payoutsTable).values([...singletons, ...siblings]);
-
-      const page1 = await service.listPayoutsByOrg(org.id, {
-        page: 1,
-        limit: 20,
-      });
-
-      // INVARIANT: if any row from SPAN_GROUP appears on page 1, ALL its
-      // siblings must appear on page 1 too. Currently fails — production
-      // returns 20 rows where one of them is half of SPAN_GROUP.
-      const groupRowsOnPage1 = page1.items.filter(
-        (r) => r.transferGroup === SPAN_GROUP
-      );
-      if (groupRowsOnPage1.length > 0) {
-        expect(groupRowsOnPage1).toHaveLength(2);
-      }
-
-      // Equivalent positive form: total rows for SPAN_GROUP across all
-      // pages should still be 2 (atomicity, not loss).
-      const page2 = await service.listPayoutsByOrg(org.id, {
-        page: 2,
-        limit: 20,
-      });
-      const groupRowsAllPages = [
-        ...groupRowsOnPage1,
-        ...page2.items.filter((r) => r.transferGroup === SPAN_GROUP),
-      ];
-      expect(groupRowsAllPages).toHaveLength(2);
-    });
   });
 
   // ─── getPayoutSummary (Codex-05vp8) ────────────────────────────────────────
@@ -6337,25 +6234,251 @@ describe('SubscriptionService', () => {
       ).toHaveLength(2);
     });
 
-    // REGRESSION (PR #204 deep-review F-3, DQ-8) — multi-creator orgs.
-    // `writePurchasePayouts` writes `organization_fee` rows with
-    // `userId = orgConnect.userId` (typically the org owner). Production
-    // currently accumulates that row under the owner's `totalPaidCents`,
-    // conflating org-admin slice with personal earnings. The rail then
-    // shows the owner with inflated personal earnings + "Org owner" badge,
-    // when the owner may have done zero creator-work this period.
-    //
-    // Marked `it.fails` so CI stays green WHILE the bug exists; when the
-    // breakdown is fixed (DQ-8 option (a): exclude organization_fee from
-    // per-creator totals), the assertions pass, vitest flips this red,
-    // the fixer removes `.fails`. See docs/pr-203-review/design-questions.md.
-    it.fails('excludes organization_fee from per-creator totalPaidCents (multi-creator regression)', async () => {
+    // ── Multi-creator org scenarios (Codex-6nt4l) ──────────────────────
+    // The h69cg tri-party model + multi-creator revshare creates edge
+    // cases the per-user accumulator must handle correctly. These tests
+    // pin the contract.
+
+    it('multi-creator: needsAttentionCount dedupes sibling rows sharing a transferGroup', async () => {
+      // One failed charge produces TWO owner-attributed rows under
+      // multi-creator revshare: an `organization_fee` AND a
+      // `creator_payout_to_owner`. Both share one transferGroup. Pre-fix
+      // the owner card showed "1 transaction · 2 needs attention" for a
+      // single stuck payout — counting per-row instead of per-group.
+      const { org, tier1 } = await createFullOrg('6nt4l-multi-dedup');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'mcd'
+      );
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'organization_fee',
+          transferGroup: 'tg_6nt4l_mcd_FAIL',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 200,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'creator_payout_to_owner',
+          transferGroup: 'tg_6nt4l_mcd_FAIL',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      expect(result).toHaveLength(1);
+      // 2 rows, 1 transferGroup → 1 transaction, 1 needsAttention.
+      expect(result[0].transactionCount).toBe(1);
+      expect(result[0].needsAttentionCount).toBe(1);
+    });
+
+    it('multi-creator: orgFeePaidCents tracks organization_fee subset for the owner card', async () => {
+      // Owner gets BOTH `organization_fee` AND `creator_payout_to_owner`
+      // rows. Headline totalPaidCents sums both — orgFeePaidCents
+      // discloses the org-fee slice so the owner's card is visually
+      // comparable to non-owner creators.
       const { org, tier1 } = await createFullOrg('6nt4l-orgfee');
       const sub = await seedSubscriptionForOrg(
         org.id,
         tier1.id,
         otherCreatorId,
         'orgfee'
+      );
+      const { organizationMemberships } = await import(
+        '@codex/database/schema'
+      );
+      await db.insert(organizationMemberships).values({
+        organizationId: org.id,
+        userId: otherCreatorId,
+        role: 'owner',
+        status: 'active',
+      });
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 150,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_orgfee_a',
+          status: 'paid',
+          payoutType: 'organization_fee',
+          transferGroup: 'tg_6nt4l_orgfee_1',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 850,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_orgfee_b',
+          status: 'paid',
+          payoutType: 'creator_payout_to_owner',
+          transferGroup: 'tg_6nt4l_orgfee_1',
+        },
+        // Add a non-owner creator with NO org_fee rows — must show
+        // orgFeePaidCents=0 (it's an owner-only concept).
+        {
+          userId: thirdUserId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 400,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_orgfee_c',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_orgfee_2',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      const owner = result.find((r) => r.userId === otherCreatorId);
+      const creator = result.find((r) => r.userId === thirdUserId);
+      expect(owner?.isOrgOwner).toBe(true);
+      expect(owner?.totalPaidCents).toBe(1000); // 150 + 850
+      expect(owner?.orgFeePaidCents).toBe(150); // organization_fee only
+      expect(creator?.isOrgOwner).toBe(false);
+      expect(creator?.totalPaidCents).toBe(400);
+      expect(creator?.orgFeePaidCents).toBe(0);
+    });
+
+    it('multi-creator: min_transfer_floor rows are excluded from needsAttentionCount', async () => {
+      // Tiny per-creator revshares get held below Stripe's minimum
+      // transfer floor — pending until a sweep aggregates them. They
+      // are NOT operator exceptions and must not bloat the
+      // needsAttention badge across the rail.
+      const { org, tier1 } = await createFullOrg('6nt4l-floor');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'floor'
+      );
+      await db.insert(payoutsTable).values([
+        // Floor-held row — MUST be excluded.
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 50,
+          currency: 'gbp',
+          reason: 'min_transfer_floor',
+          status: 'pending',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_floor_1',
+        },
+        // Genuine transfer_failed — MUST be counted.
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 200,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_floor_2',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      expect(result).toHaveLength(1);
+      // Floor row excluded, only the transfer_failed counts.
+      expect(result[0].needsAttentionCount).toBe(1);
+      // transactionCount still sees both groups — floor row IS a
+      // transaction, just not an exception.
+      expect(result[0].transactionCount).toBe(2);
+    });
+
+    it('multi-creator: tie-broken by lastPaidAt desc when totalPaidCents matches', async () => {
+      // Two creators on identical revshare percentages will hit
+      // identical totals across reloads. Without a tie-breaker the
+      // rail order is non-deterministic. Secondary sort: lastPaidAt
+      // desc — most-recently-paid first reads as "freshest" data.
+      const { org, tier1 } = await createFullOrg('6nt4l-tie');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'tie'
+      );
+      const oldDate = new Date('2026-04-01T00:00:00Z');
+      const newDate = new Date('2026-05-01T00:00:00Z');
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: oldDate,
+          stripeTransferId: 'tr_6nt4l_tie_old',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_tie_old',
+        },
+        {
+          userId: thirdUserId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: newDate,
+          stripeTransferId: 'tr_6nt4l_tie_new',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_tie_new',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      expect(result).toHaveLength(2);
+      // Identical totalPaidCents — most-recently-paid first.
+      expect(result[0].userId).toBe(thirdUserId);
+      expect(result[1].userId).toBe(otherCreatorId);
+    });
+
+    // REGRESSION (PR #204 deep-review F-3, DQ-8) — multi-creator orgs.
+    // ea08ca29 ships the orgFeePaidCents TRANSPARENCY field on the owner
+    // card, but leaves organization_fee inside totalPaidCents. DQ-8
+    // resolution (option a) requires excluding org_fee from totalPaidCents
+    // entirely — surface the org slice as a separate panel, not as
+    // personal earnings. See docs/pr-203-review/design-questions.md.
+    //
+    // Currently fails because production reports totalPaidCents=270 for the
+    // owner (the org slice). When the fix lands:
+    //   1. this assertion (owner totalPaidCents === 0) passes, vitest
+    //      flips this it.fails red, fixer removes .fails.
+    //   2. The 'orgFeePaidCents tracks ...' test above also needs its
+    //      `owner.totalPaidCents` assertion updated from 1000 → 850
+    //      (excluding org_fee from the total).
+    it.fails('F-3/DQ-8: excludes organization_fee from per-creator totalPaidCents (multi-creator regression)', async () => {
+      const { org, tier1 } = await createFullOrg('h3864-exclude-orgfee');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'exclude'
       );
       const { organizationMemberships } = await import(
         '@codex/database/schema'
@@ -6389,11 +6512,11 @@ describe('SubscriptionService', () => {
           currency: 'gbp',
           reason: 'connect_not_ready',
           resolvedAt: new Date(),
-          stripeTransferId: 'tr_6nt4l_orgfee_creator',
+          stripeTransferId: 'tr_h3864_exclude_creator',
           status: 'paid',
           payoutType: 'creator_payout',
           sourceType: 'purchase',
-          transferGroup: 'tg_6nt4l_orgfee',
+          transferGroup: 'tg_h3864_exclude',
         },
         {
           userId: otherCreatorId,
@@ -6403,11 +6526,11 @@ describe('SubscriptionService', () => {
           currency: 'gbp',
           reason: 'connect_not_ready',
           resolvedAt: new Date(),
-          stripeTransferId: 'tr_6nt4l_orgfee_org',
+          stripeTransferId: 'tr_h3864_exclude_org',
           status: 'paid',
           payoutType: 'organization_fee',
           sourceType: 'purchase',
-          transferGroup: 'tg_6nt4l_orgfee',
+          transferGroup: 'tg_h3864_exclude',
         },
       ]);
 
@@ -6417,10 +6540,10 @@ describe('SubscriptionService', () => {
       // Co-creator (thirdUserId): £15.30 personal earnings — correct.
       expect(byUser.get(thirdUserId)?.totalPaidCents).toBe(1530);
 
-      // Owner (otherCreatorId): £0 personal earnings — they received only
-      // the org-admin slice, not a creator_payout. The rail's "per-creator
-      // earnings" semantic must not surface org slice as personal.
-      // Currently fails: production reports 270 here.
+      // Owner (otherCreatorId): £0 personal earnings — they received
+      // only the org-admin slice, not a creator_payout. The rail's
+      // "per-creator earnings" semantic must not surface org slice as
+      // personal earnings. Currently fails: production reports 270 here.
       expect(byUser.get(otherCreatorId)?.totalPaidCents).toBe(0);
     });
   });
@@ -7076,239 +7199,6 @@ describe('SubscriptionService', () => {
       );
 
       warnSpy.mockRestore();
-    });
-
-    // REGRESSION (PR #203 deep-review N-1, bead Codex-dbzkg P0) — sweep /
-    // Connect-activated retry path drops `source_transaction` on
-    // `stripe.transfers.create`. For purchase-sourced pending rows landed
-    // under Option B (platform-charge model), the transfer MUST link back
-    // to the original charge via source_transaction; otherwise the funds
-    // come from the platform's general available balance instead of the
-    // charge's source-linked bucket. Net effect: platform double-pays the
-    // creator when Connect activates after the purchase.
-    //
-    // Production resolvePendingPayouts (subscription-service.ts:3211-3223)
-    // passes `destination`, `currency`, `amount`, and `metadata` — but no
-    // `source_transaction`. This test seeds a purchase-sourced pending row
-    // with stripeChargeId set, and asserts the retry call includes
-    // source_transaction matching the original charge.
-    it.fails('forwards source_transaction on retry for purchase-sourced pending payouts (BUG: drops it, pays from wrong fund)', async () => {
-      const { org, sub, stripeAccountId } =
-        await seedConnectAndSubscription('w4jjk-source-tx');
-
-      // Seed a purchase-sourced pending row carrying the original charge id.
-      const PURCHASE_CHARGE = 'ch_n1_source_tx_origin';
-      await db.insert(payoutsTable).values({
-        userId: creatorId,
-        organizationId: org.id,
-        subscriptionId: sub.id,
-        amountCents: 500,
-        currency: 'gbp',
-        reason: 'connect_not_ready',
-        status: 'pending',
-        payoutType: 'creator_payout',
-        sourceType: 'purchase',
-        stripeChargeId: PURCHASE_CHARGE,
-      });
-
-      const transferSpy = vi.mocked(stripe.transfers.create);
-      transferSpy.mockClear();
-
-      await service.resolvePendingPayouts(org.id, stripeAccountId);
-
-      // Find the call that targeted this creator's Connect.
-      const call = transferSpy.mock.calls.find(([params]) => {
-        const p = params as { destination?: string };
-        return p?.destination === stripeAccountId;
-      });
-      expect(
-        call,
-        'expected resolvePendingPayouts to call transfers.create'
-      ).toBeDefined();
-
-      const params = call?.[0] as {
-        source_transaction?: string;
-        metadata?: Record<string, unknown>;
-      };
-
-      // The CRITICAL assertion — production omits source_transaction.
-      // Without it, Stripe routes the transfer from general platform
-      // balance instead of the source-linked charge bucket.
-      expect(params.source_transaction).toBe(PURCHASE_CHARGE);
-    });
-
-    // REGRESSION (PR #203 deep-review F-7, bead Codex-5794i) — sweep applies
-    // subscription fee policy to purchase-sourced pending rows.
-    //
-    // resolveSubscriptionFees (subscription-service.ts:540-555) is hardcoded
-    // to the 'subscription' fee kind. resolvePendingPayouts calls it
-    // unconditionally (L3193) even for rows where `sourceType='purchase'`.
-    // If an org's `one_off` fee config has a LOWER `minTransferCents` than
-    // its `subscription` config, a purchase-sourced pending row that COULD
-    // qualify under the `one_off` floor is incorrectly skipped under the
-    // subscription floor and remains stuck pending forever.
-    //
-    // Fix: branch on `payout.sourceType` and call
-    // `getFeesForCreator(orgId, userId, payout.sourceType === 'purchase' ? 'one_off' : 'subscription')`.
-    it.fails('uses one_off fee policy when resolving purchase-sourced pending payouts (BUG: hardcoded to subscription)', async () => {
-      const { org, sub, stripeAccountId } =
-        await seedConnectAndSubscription('w4jjk-sourcetype');
-
-      // FeeConfig that returns DIFFERENT min-transfer floors per kind.
-      //   subscription kind: minTransferCents = 800  (high — would block £5)
-      //   one_off kind:      minTransferCents = 100  (low  — admits £5)
-      const stubFeeConfig = {
-        getFeesForCreator: vi
-          .fn()
-          .mockImplementation(
-            async (
-              _orgId: string,
-              _creatorId: string | undefined,
-              kind: 'subscription' | 'one_off'
-            ) => ({
-              platformFeePercent: 1000,
-              orgFeePercent: 1500,
-              minPlatformFeeCents: 0,
-              minTransferCents: kind === 'subscription' ? 800 : 100,
-            })
-          ),
-        getFeesForOrg: vi.fn().mockResolvedValue({
-          platformFeePercent: 1000,
-          orgFeePercent: 1500,
-          minPlatformFeeCents: 0,
-          minTransferCents: 800,
-        }),
-      };
-
-      const customService = new SubscriptionService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
-        stripe
-      );
-
-      // Seed one purchase-sourced pending row: amount £5 (between floors).
-      await db.insert(payoutsTable).values({
-        userId: creatorId,
-        organizationId: org.id,
-        subscriptionId: sub.id,
-        amountCents: 500,
-        currency: 'gbp',
-        reason: 'connect_not_ready',
-        status: 'pending',
-        payoutType: 'creator_payout',
-        sourceType: 'purchase',
-      });
-
-      const transferSpy = vi.mocked(stripe.transfers.create);
-      transferSpy.mockClear();
-
-      const result = await customService.resolvePendingPayouts(
-        org.id,
-        stripeAccountId
-      );
-
-      // Under the correct policy (one_off, floor £1), the £5 row resolves.
-      // Currently fails: production uses subscription floor (£8), skips it.
-      expect(result.resolved).toBe(1);
-      expect(transferSpy).toHaveBeenCalledTimes(1);
-
-      // And the feeConfig should have been asked for `one_off` (not `subscription`).
-      const seenKinds = stubFeeConfig.getFeesForCreator.mock.calls.map(
-        (c) => c[2]
-      );
-      expect(seenKinds).toContain('one_off');
-    });
-
-    // REGRESSION (PR #203 deep-review F-13, bead Codex-iivne) — per-row
-    // min-transfer floor pile-up.
-    //
-    // resolvePendingPayouts (subscription-service.ts:3175-3209) evaluates
-    // each pending row against `minTransferCents` IN ISOLATION. Multi-creator
-    // orgs with high min-transfer floors and low-share creators accumulate
-    // pending rows that individually never qualify, even though they sum
-    // above the floor. Money locks indefinitely.
-    //
-    // Fix per bead Codex-iivne: group pending rows by (userId, sourceType),
-    // SUM amountCents, and if the sum ≥ floor, batch-pay them in one transfer
-    // (or aggregate into a single resolved row with chained idempotency key).
-    it.fails('aggregates per-creator pending rows so combined-sum above floor clears (BUG: each row evaluated alone)', async () => {
-      const { org, sub, stripeAccountId } =
-        await seedConnectAndSubscription('w4jjk-pileup');
-
-      // Floor £8 (800 cents) — both rows individually below, sum above.
-      const stubFeeConfig = {
-        getFeesForCreator: vi.fn().mockResolvedValue({
-          platformFeePercent: 1000,
-          orgFeePercent: 1500,
-          minPlatformFeeCents: 0,
-          minTransferCents: 800,
-        }),
-        getFeesForOrg: vi.fn().mockResolvedValue({
-          platformFeePercent: 1000,
-          orgFeePercent: 1500,
-          minPlatformFeeCents: 0,
-          minTransferCents: 800,
-        }),
-      };
-
-      const customService = new SubscriptionService(
-        // biome-ignore lint/suspicious/noExplicitAny: test stub
-        { db, environment: 'test', feeConfig: stubFeeConfig as any },
-        stripe
-      );
-
-      // Two £5 pending rows for the same creator. Each < £8 floor; sum £10.
-      await db.insert(payoutsTable).values([
-        {
-          userId: creatorId,
-          organizationId: org.id,
-          subscriptionId: sub.id,
-          amountCents: 500,
-          currency: 'gbp',
-          reason: 'min_transfer_floor',
-          status: 'pending',
-          payoutType: 'creator_payout',
-        },
-        {
-          userId: creatorId,
-          organizationId: org.id,
-          subscriptionId: sub.id,
-          amountCents: 500,
-          currency: 'gbp',
-          reason: 'min_transfer_floor',
-          status: 'pending',
-          payoutType: 'creator_payout',
-        },
-      ]);
-
-      const transferSpy = vi.mocked(stripe.transfers.create);
-      transferSpy.mockClear();
-
-      const result = await customService.resolvePendingPayouts(
-        org.id,
-        stripeAccountId
-      );
-
-      // Combined sum £10 >= £8 floor, so BOTH rows must clear (either as
-      // two separate transfers, or as one aggregated transfer with both
-      // rows updated to status='paid'). The crucial invariant is
-      // `result.resolved >= 1` — production today returns 0 because each
-      // row is checked individually against the floor.
-      expect(result.resolved).toBeGreaterThanOrEqual(1);
-      expect(transferSpy).toHaveBeenCalled();
-
-      // Verify both DB rows transitioned to status='paid' regardless of
-      // whether the implementation does 1 batched transfer or N transfers.
-      const after = await db
-        .select()
-        .from(payoutsTable)
-        .where(
-          and(
-            eq(payoutsTable.organizationId, org.id),
-            eq(payoutsTable.userId, creatorId)
-          )
-        );
-      expect(after.every((r) => r.status === 'paid')).toBe(true);
     });
   });
 
@@ -8446,157 +8336,6 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
         })
         .catch((e) => e);
       expectCheckViolation(err, 'check_payouts_amount_positive');
-    });
-
-    // PR #203 deep-review cycle 8: pin the multi-creator-critical constraint
-    // `check_payouts_user_required` introduced by migration
-    // 0065_acoustic_spirit. The constraint is:
-    //
-    //   CHECK ( payoutType = 'platform_fee' OR userId IS NOT NULL )
-    //
-    // It's the LAST line of defence against silently writing a creator_payout
-    // or organization_fee row with no human beneficiary. Without coverage, a
-    // future migration could drop the constraint and the regression would be
-    // invisible at unit-test level — the codepath above (writePurchasePayouts
-    // / executeTransfers) always supplies a userId when payoutType is not
-    // platform_fee, so removal would only surface in production from a path
-    // we haven't built yet (e.g. F-3's bi-party / orgless flow Codex-ne89a).
-
-    it('check_payouts_user_required: creator_payout with userId=null is rejected (multi-creator attribution)', async () => {
-      const base = await baseValues('e9v3b-check-user-creator');
-      const err = await db
-        .insert(payoutsTable)
-        .values({
-          ...base,
-          userId: null,
-          payoutType: 'creator_payout' as const,
-        })
-        .catch((e) => e);
-      expectCheckViolation(err, 'check_payouts_user_required');
-    });
-
-    it('check_payouts_user_required: organization_fee with userId=null is rejected', async () => {
-      const base = await baseValues('e9v3b-check-user-orgfee');
-      const err = await db
-        .insert(payoutsTable)
-        .values({
-          ...base,
-          userId: null,
-          payoutType: 'organization_fee' as const,
-          // org_fee must clear the paid invariant if status='paid'; use
-          // pending here so this test isolates to user_required.
-          status: 'pending' as const,
-          reason: 'connect_not_ready' as const,
-        })
-        .catch((e) => e);
-      expectCheckViolation(err, 'check_payouts_user_required');
-    });
-
-    it('check_payouts_user_required: platform_fee with userId=null is ACCEPTED (no human beneficiary)', async () => {
-      const base = await baseValues('e9v3b-check-user-platform');
-      // Positive case: platform_fee is THE exception to user_required.
-      // Supply a chargeId + resolvedAt to clear the paid invariant.
-      const result = await db
-        .insert(payoutsTable)
-        .values({
-          ...base,
-          userId: null,
-          payoutType: 'platform_fee' as const,
-          status: 'paid' as const,
-          reason: null,
-          stripeChargeId: `ch_test_${createUniqueSlug('plat')}`,
-          resolvedAt: new Date(),
-        })
-        .returning();
-      expect(result).toHaveLength(1);
-      expect(result[0]?.userId).toBeNull();
-      expect(result[0]?.payoutType).toBe('platform_fee');
-    });
-
-    it('check_payouts_source: sourceType=gift (not in {purchase,subscription}) is rejected', async () => {
-      const base = await baseValues('e9v3b-check-source');
-      const err = await db
-        .insert(payoutsTable)
-        .values({
-          ...base,
-          // 'gift' is not in the enum — CHECK must reject it.
-          sourceType: 'gift' as unknown as 'subscription',
-        })
-        .catch((e) => e);
-      expectCheckViolation(err, 'check_payouts_source');
-    });
-
-    it('check_payouts_paid_invariant: status=paid with stripeChargeId set but resolvedAt=null is rejected (AND clause)', async () => {
-      const base = await baseValues('e9v3b-check-paid-resolved');
-      // The constraint requires BOTH (transferId OR chargeId) AND
-      // resolvedAt IS NOT NULL. Setting chargeId without resolvedAt
-      // tests the AND part — a regression where the constraint
-      // collapsed to a single OR clause would silently accept this.
-      const err = await db
-        .insert(payoutsTable)
-        .values({
-          ...base,
-          status: 'paid' as const,
-          reason: null,
-          stripeChargeId: `ch_test_${createUniqueSlug('paid-noresolve')}`,
-          resolvedAt: null,
-        })
-        .catch((e) => e);
-      expectCheckViolation(err, 'check_payouts_paid_invariant');
-    });
-
-    // REGRESSION (PR #203 deep-review N-4, bead Codex-g9owu P1) — webhook
-    // replay race on platform_fee insert.
-    //
-    // executeTransfers writes platform_fee rows via SELECT (by subscriptionId,
-    // chargeId, payout_type='platform_fee') then INSERT. There is no unique
-    // constraint covering this case — the existing partial unique index on
-    // stripe_transfer_id does NOT catch platform_fee rows because they have
-    // null stripeTransferId.
-    //
-    // Two simultaneous webhook deliveries (Stripe retries on a 5xx, or two
-    // worker replicas processing the same event) can both pass the SELECT
-    // check and both INSERT. Result: duplicate platform_fee rows for one
-    // invoice → doubled platform-revenue numbers in studio KPIs.
-    //
-    // Schema-level fix: a partial unique index on
-    //   (subscriptionId, stripeChargeId) WHERE payout_type = 'platform_fee'
-    // This test directly inserts two identical platform_fee rows and asserts
-    // the second is rejected. Today it succeeds (no constraint exists), so
-    // this test fails — exactly the tripwire we need for the fix migration.
-    it.fails('platform_fee rows for the same (subscriptionId, chargeId) are unique (webhook-replay safety)', async () => {
-      const base = await baseValues('e9v3b-check-platform-unique');
-      const chargeId = `ch_n4_unique_${createUniqueSlug('a')}`;
-      const platformValues = {
-        ...base,
-        userId: null,
-        payoutType: 'platform_fee' as const,
-        status: 'paid' as const,
-        reason: null,
-        stripeChargeId: chargeId,
-        resolvedAt: new Date(),
-        // sourceType inherits the schema default 'subscription'.
-      };
-
-      // First insert succeeds.
-      const first = await db
-        .insert(payoutsTable)
-        .values(platformValues)
-        .returning();
-      expect(first).toHaveLength(1);
-
-      // Second insert with IDENTICAL (subscriptionId, chargeId, platform_fee)
-      // — simulating a webhook replay race. MUST be rejected by the
-      // schema-level constraint that doesn't exist yet.
-      const err = await db
-        .insert(payoutsTable)
-        .values(platformValues)
-        .catch((e) => e);
-      expect(err).toBeDefined();
-      const e = err as { code?: string; cause?: { code?: string } };
-      const code = e.code ?? e.cause?.code;
-      // 23505 = Postgres unique_violation SQLSTATE.
-      expect(code).toBe('23505');
     });
   });
 

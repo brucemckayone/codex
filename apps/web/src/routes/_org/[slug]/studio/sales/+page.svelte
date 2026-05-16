@@ -31,6 +31,7 @@
   import { formatDate, formatPrice } from '$lib/utils/format';
   import { downloadCsv } from '$lib/utils/csv-export';
   import type { SaleListItem, SalesStats } from '@codex/purchase';
+  import type { DateRange } from '@codex/shared-types';
   import type { QueryResult } from '$lib/remote/query-result';
 
   type SalesPage = {
@@ -43,7 +44,8 @@
     };
   };
 
-  type DateRange = '7' | '30' | '90' | 'all';
+  // DateRange lifted to @codex/shared-types (Codex-6nt4l) — payouts page
+  // and any new studio surface share this lookback vocabulary.
   type StatusFilter =
     | 'all'
     | 'completed'
