@@ -147,7 +147,15 @@ If a non-owner creator can reach this page, they would see their peers' payout t
 
 **Recommendation.** (a) for now. The rail is "Per-creator earnings"; org slice is an org-level concept. A separate org-owner card or top-of-rail line item solves the surface need without aggregation drift.
 
-**Status.** **RESOLVED 2026-05-16** — choice (a). Exclude `organization_fee` from per-creator totals (filter at SQL `WHERE payoutType != 'organization_fee'`). Surface the org slice as a separate panel at the top of the rail. Fixes F-3 / Codex-h3864 P1.
+**Status.** **RESOLVED 2026-05-16** — choice (a) **partially shipped by `ea08ca29` (merged cycle 15)**.
+
+**Already landed**: new `orgFeePaidCents` field on `CreatorPayoutBreakdown` projects the organization_fee subset; UI shows "of which £X org fee" subline on the owner card.
+
+**Still pending (Codex-h3864 fix scope)**:
+1. SQL exclusion: `WHERE payoutType != 'organization_fee'` in `getPayoutsByCreatorBreakdown`'s aggregation for `totalPaidCents`. Currently `totalPaidCents` still INCLUDES org_fee.
+2. Surface the org slice as a separate panel at the top of the rail (DQ-12's two-tier layout — owner's `orgFeePaidCents` becomes the source of truth for that panel).
+3. Update the upstream `'orgFeePaidCents tracks ...'` test in subscription-service.test.ts: when the SQL exclusion lands, the assertion `expect(owner?.totalPaidCents).toBe(1000)` must change to `expect(owner?.totalPaidCents).toBe(850)` (excluding the £1.50 organization_fee row).
+4. Our `it.fails('F-3/DQ-8: excludes organization_fee ...')` regression test goes green; remove the `.fails` marker.
 
 ---
 

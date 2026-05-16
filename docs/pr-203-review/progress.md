@@ -562,6 +562,47 @@ No failing test landed — type-narrowing is enforced by TypeScript, not runtime
 
 The cron job `80de02cc` is already cancelled. Future cycles should focus on shipping the P0/P1 fixes against the failing tests, not on more audit.
 
+## Cycle 15 — PR-204 sync + DQ resolution round (2026-05-16)
+
+Two milestones landed this cycle: (1) walked + resolved all 17 open design questions with implementation specs; (2) synced our worktree with `ea08ca29` from PR-204 (commit `feat(payouts): multi-creator breakdown polish + shared filter types`).
+
+### DQ resolution outcomes
+
+19 DQs total: 1 was resolved pre-cycle (DQ-1), 18 walked this cycle. ALL resolved as-recommended; design-questions.md is now an authoritative implementation reference, not a question doc. Each resolution includes numbered code+test+migration steps a fresh agent can pick up directly.
+
+**New bead spawned this cycle**: Codex-aqk92 (P2) — Refund policy: liquidity + clawback recovery + customer-facing policy. Captures the unresolved product/operational questions surfaced by DQ-7 (who absorbs refund cost, how the platform stays liquid, refund window, etc). Does NOT block Codex-d9t5r (math ships regardless).
+
+### ea08ca29 merge — what advanced
+
+Merge commit `d1000196`. Branch absorbs one upstream commit that lands partial fixes for two of our open beads and a chunk of type hygiene:
+
+| Their change | Our bead | Effect |
+|---|---|---|
+| New `orgFeePaidCents` field on `CreatorPayoutBreakdown` + UI subline "of which £X org fee" | Codex-h3864 (F-3/DQ-8) | **PARTIAL** — projects org-fee subset as transparency field, but `totalPaidCents` STILL includes org_fee. DQ-8 option (a) exclusion is still pending. |
+| `needsAttentionCount` dedupes by transferGroup | Codex-iivne (F-13) | **PARTIAL UX-only** — fixes the *visual* inflation of needsAttention count for owner-attributed sibling rows. Underlying pile-up bug (rows never clear because each is below floor) is unchanged. |
+| `min_transfer_floor` rows excluded from `needsAttentionCount` | Codex-iivne (F-13) | **UI fix** — hides the pile-up symptoms from operators. Bead still needed for the actual aggregation fix. |
+| `DateRange` lifted to `@codex/shared-types` + `PayoutSourceFilter` lifted to `@codex/validation` | Codex-i4gv0 (N-6) | **PARTIAL** — moves a step toward type narrowing. The `PayoutDisplayStatus` vs `PayoutInputStatus` split (the harder N-6 work) is still pending. |
+| `lastPaidAt desc` sort tie-breaker | n/a | Small clean-up; not in our backlog. |
+| 4 new tests in `subscription-service.test.ts` | n/a | Multi-creator coverage adjacent to our failing tests. |
+
+### Test-file merge conflict + resolution
+
+Both branches added different tests at the same `describe` block boundary. Resolution: kept all 5 tests (4 from ea08ca29 + 1 it.fails F-3/DQ-8 regression). Renamed our test's slug from `'6nt4l-orgfee'` to `'h3864-exclude-orgfee'` to avoid collision with the upstream test using the same slug. Both tests now coexist as independent regressions; documented inline that when DQ-8 ships, ea08ca29's `'orgFeePaidCents tracks ...'` test will need its `totalPaidCents` assertion updated from 1000 → 850.
+
+### PR-204 fate
+
+Closed as superseded by `worktree-pr-203-review` — its content now lives in this branch + adds the audit cycles 1-14 + DQ resolutions + cycle 15 merge. Zero comments or reviews on PR-204 at the time of close, so no review thread lost. The branch `feat/Codex-6nt4l-payouts-grouping-rail` is retained (not deleted) so its commits remain in git history. PR-203 remains open with `main` as base — its branch (`fix/Codex-h69cg-purchase-payouts-parity`) is unchanged.
+
+### Plan forward
+
+Implementation phase begins. Next session opens a fresh PR (`worktree-pr-203-review` → `main`) that consolidates:
+- All of PR-203's tri-party ledger code
+- All of PR-204's per-creator rail code
+- All audit findings as failing regression tests (it.fails markers)
+- All beads as a tracked fix list
+
+The implementation prompt should focus on shipping the 3 P0 + 5 P1 beads, each against its existing failing test, in priority order. Codex-d9t5r (partial refund) → Codex-92ej7 (pending mis-marked) → Codex-dbzkg (source_transaction). Then the P1 beads. Each fix removes one `it.fails` marker.
+
 ## Design questions
 
 See `design-questions.md` for DQ-1 (resolved), DQ-2 to DQ-9. DQ-10 to be added next cycle for F-16 effective-share UX.
