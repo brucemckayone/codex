@@ -74,6 +74,7 @@ import {
   PaymentProcessingError,
   PurchaseNotFoundError,
 } from '../errors';
+import { resolvePrimaryConnect } from '../utils/resolve-primary-connect';
 import { withStaleCustomerRecovery } from './resolve-customer';
 
 /**
@@ -755,14 +756,11 @@ export class PurchaseService extends BaseService {
             .limit(1)
         : [undefined];
 
-    const [orgConnect] =
+    // Codex-sec7i: org slice routes to the pinned Connect account.
+    const orgConnect =
       revenueSplit.organizationFeeCents > 0
-        ? await this.db
-            .select()
-            .from(stripeConnectAccounts)
-            .where(eq(stripeConnectAccounts.organizationId, organizationId))
-            .limit(1)
-        : [undefined];
+        ? await resolvePrimaryConnect(this.db, organizationId)
+        : undefined;
 
     // 2. Creator payout — secondary transfer with source_transaction.
     if (revenueSplit.creatorPayoutCents > 0) {

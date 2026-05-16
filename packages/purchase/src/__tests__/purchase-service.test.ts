@@ -1311,7 +1311,7 @@ describe('PurchaseService Integration', () => {
     // Connect account, not the member's. To make the test deterministic and
     // FAILING today, we insert the member's Connect FIRST so .limit(1)
     // picks it.
-    it.fails('writePurchasePayouts routes org_fee to the org owner Connect, not an arbitrary member (multi-creator regression)', async () => {
+    it('writePurchasePayouts routes org_fee to the org owner Connect, not an arbitrary member (multi-creator regression)', async () => {
       const stubFeeConfig = {
         getFeesForCreator: vi.fn().mockResolvedValue({
           platformFeePercent: 1000,
@@ -1321,13 +1321,14 @@ describe('PurchaseService Integration', () => {
         }),
       };
 
-      // New org owned by `userId`.
+      // New org with `userId` as the canonical Connect owner. The pin
+      // is the production mechanism resolvePrimaryConnect honours.
       const [multiOrg] = await db
         .insert(organizations)
         .values({
           name: 'Multi-creator Org',
           slug: createUniqueSlug('multi-creator'),
-          ownerId: userId,
+          primaryConnectAccountUserId: userId,
         })
         .returning();
 
@@ -1336,6 +1337,7 @@ describe('PurchaseService Integration', () => {
       const [memberUser] = await db
         .insert(schema.users)
         .values({
+          id: crypto.randomUUID(),
           email: `co-creator-${Date.now()}@test.com`,
           name: 'Co-Creator',
         })
