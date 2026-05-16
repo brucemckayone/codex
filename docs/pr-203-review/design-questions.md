@@ -32,7 +32,10 @@ Multi-creator orgs can have:
 
 **Recommendation.** (b) for studio surface — admins have payout-relevant powers and should be visually distinguishable. Defer (b) if `organizationMemberships.role` doesn't currently model admin.
 
-**Status.** Open.
+**Status.** **RESOLVED 2026-05-16** — choice (b). Implementation:
+1. Verify `organizationMemberships.role` enum currently includes a distinct `'admin'` value (audit `packages/database/schema/organizations.ts`). If yes, proceed; if no, file a schema migration first.
+2. Update `getPayoutsByCreatorBreakdown` to return `membershipRole: 'owner' | 'admin' | 'member' | null` (currently returns `isOrgOwner` boolean — replace with the richer field).
+3. UI: render `Owner` badge for role='owner', `Admin` badge for role='admin' (lighter variant), no badge for member/null. Closes DQ-13 by making `data-org-owner` truly redundant — delete it.
 
 ---
 
@@ -51,7 +54,7 @@ The PR test says "4 rows / 2 groups → 2" — that's the single-creator case. T
 
 **Recommendation.** (a) — per-creator dedupe matches the "per-creator stats" framing of the rail. Add a test with one transferGroup spanning two creators.
 
-**Status.** Open — needs code read to confirm which form is implemented.
+**Status.** **RESOLVED 2026-05-16** — choice (a). Per-creator dedupe of `transactionCount` by `transferGroup` (within each map entry, NOT globally). Follow-up test required: 1 transferGroup spanning 2 creators → each sees `transactionCount=1`. Confirm current code matches; file a defect bead if it doesn't.
 
 ---
 
@@ -68,7 +71,7 @@ If a non-owner creator can reach this page, they would see their peers' payout t
 
 **Recommendation.** (b) — match the existing studio-page guard. Add an explicit role check (`requireOrgRole('owner','admin')`) on the new `/subscriptions/payouts/by-creator` route.
 
-**Status.** Open — needs API route audit.
+**Status.** **RESOLVED 2026-05-16** — choice (b). Rail is owner + admin only. Cycle 6 F-37 confirmed `requireOrgManagement` (which admits owner + admin uniformly) IS already wired on all three payouts routes. No new code needed — the audit gate holds. Action: add a route-level integration test (Codex-ajbja covers this) verifying that a member-role user receives 403 on `/payouts/by-creator`.
 
 ---
 
@@ -83,7 +86,7 @@ If a non-owner creator can reach this page, they would see their peers' payout t
 
 **Recommendation.** (b) IF an audit query confirms zero pre-h69cg rows have a non-null `purchaseId`. Otherwise (a). Add a one-line note in `payouts.ts` schema explaining the default.
 
-**Status.** Open.
+**Status.** **RESOLVED 2026-05-16** — choice "(b) with audit gate". Action: run the one-time audit query `SELECT COUNT(*) FROM payouts WHERE source_type='subscription' AND purchase_id IS NOT NULL` against production. If COUNT=0, trust the default; add a schema-level comment in `packages/database/src/schema/payouts.ts` documenting the rationale. If COUNT>0, run a corrective `UPDATE payouts SET source_type='purchase' WHERE purchase_id IS NOT NULL`. File a small task bead to execute this audit pre-merge of any DQ-8 / DQ-18 work that depends on sourceType correctness.
 
 ---
 
@@ -98,7 +101,7 @@ If a non-owner creator can reach this page, they would see their peers' payout t
 
 **Recommendation.** (a) for this stack. File a follow-up bead to revisit when membership-redesign Phase 2 lands.
 
-**Status.** Open.
+**Status.** **RESOLVED 2026-05-16** — choice (a). Rail correctly shows org owner as a "creator" row for subscription revenue today. When membership-redesign Phase 2 ships per-content-creator subscription splits, revisit this DQ + the rail logic. File a follow-up bead pointing at Phase 2 dependency (Codex-8k2k epic).
 
 ---
 
@@ -120,7 +123,16 @@ If a non-owner creator can reach this page, they would see their peers' payout t
 
 **Recommendation.** (b). Use integer math (pence) with a deterministic rounding rule (residual → platform). Add idempotency key suffix `_${refundedAt}` or `_${refundAmountCents}` so multiple partial refunds against the same purchase don't replay the first reversal.
 
-**Status.** Open — file as P0 bead. Real-money path, no current test coverage.
+**Status.** **RESOLVED 2026-05-16** — **HYBRID: (b) + (c)**. Ship proportional reversal as the math layer, AND add a "review-needed" sentinel that fires reactively when Stripe Connect returns `insufficient_funds` on the reversal call (creator already withdrew their slice → balance below reversal amount → platform absorbs the loss until creator earns again).
+
+**Implementation plan for Codex-d9t5r:**
+1. **Math layer**: pass `refundAmountCents` into `reversePayoutsForPurchase`. Compute `ratio = refundAmountCents / amountPaidCents`. Reverse `floor(row.amountCents * ratio)` per slice. Idempotency suffix `_${refundAmountCents}` so multiple partial refunds against same charge don't collide.
+2. **Sentinel layer**: wrap each `transfers.createReversal` call in a try/catch. On Stripe error code `'insufficient_funds'`, write a `refund_review` audit row (new table OR a `status='review_needed'` extension on the payouts row — TBD migration shape) capturing `{ purchaseId, creatorUserId, attemptedReversalCents, currentBalanceCents, refundedAt }`. Keep the original payout row as `status='paid'` (since the original transfer succeeded) but flag the reversal failure separately. The customer's refund still completes (Stripe issued it from platform balance); the platform now has an unresolved clawback obligation.
+3. **Surface (follow-up bead)**: studio admin page listing review-needed rows for ops to resolve. Decision per row: "pursue creator" (creator stays negative until earnings catch up — current default), "platform absorbs" (write off, log obs.warn), or "manual reverse" (cancel a future creator payment by hand).
+
+**Product-policy conversation**: tracked in **bead Codex-aqk92 (P2)** — "Refund policy: liquidity + clawback recovery + customer-facing policy". Covers: who absorbs cost (creator vs platform vs hybrid), liquidity strategy (platform float vs delayed payouts vs reactive clawback), refund window, initiation channels, negative-balance recovery, customer-facing copy, Connect agreement clauses. Does NOT block Codex-d9t5r (math ships regardless).
+
+**Why this still ships proportional today**: regardless of policy, Stripe Dashboard CAN issue partial refunds at any time. The math must be correct first; the sentinel makes the operational risk visible; the product conversation determines what ops does with the review queue.
 
 ---
 
@@ -135,7 +147,7 @@ If a non-owner creator can reach this page, they would see their peers' payout t
 
 **Recommendation.** (a) for now. The rail is "Per-creator earnings"; org slice is an org-level concept. A separate org-owner card or top-of-rail line item solves the surface need without aggregation drift.
 
-**Status.** Open. Implementation-blocker for PR #204 if accepted.
+**Status.** **RESOLVED 2026-05-16** — choice (a). Exclude `organization_fee` from per-creator totals (filter at SQL `WHERE payoutType != 'organization_fee'`). Surface the org slice as a separate panel at the top of the rail. Fixes F-3 / Codex-h3864 P1.
 
 ---
 
@@ -156,7 +168,11 @@ But the refund DID reduce the platform's owed liability — the customer got the
 
 **Recommendation.** (a). Reverses the obligation explicitly, doesn't pretend a transfer happened. Failing-into-failed (option b) creates noisy alerts. Current behaviour (c) is misleading on the ledger.
 
-**Status.** Open.
+**Status.** **RESOLVED 2026-05-16** — choice (a). Add `cancelled_by_refund` to the `payouts.status` enum. Migration must:
+1. Drop and recreate the `check_payouts_status` CHECK constraint to include the new value.
+2. Update `reversePayoutsForPurchase` to set `status='cancelled_by_refund'` ONLY on rows where `stripeTransferId IS NULL` (i.e. the row never actually paid out). Rows with a transfer keep `status='reversed'`.
+3. Update `derivePayoutStatus` UI mapping + `statusLabel` / `statusVariant` to render the new status (label: "Cancelled (refund)", variant: 'info' or muted-warning).
+4. Add a CHECK constraint tripwire test mirroring cycle 8 pattern. Fixes F-2 / Codex-92ej7 P0.
 
 ---
 
@@ -175,7 +191,7 @@ This is documented + tested behaviour, but the per-creator rail today renders `s
 
 **Recommendation.** (a) — both numbers tell different stories. The org owner can verify the agreement; the creator can predict next month's earnings.
 
-**Status.** Open — UI-only change, no backend impact. File when the rail UI work starts.
+**Status.** **RESOLVED 2026-05-16** — choice (a). Card displays effective % + raw % side-by-side, e.g. "Receiving 33% of pool (25% raw share — 1 of 3 creators active)". Tooltip explains the normalisation rule (`totalShareBps = Σ active agreements`, effective = sharePercent / totalShareBps × 100). Backend returns both `sharePercent` and `effectiveSharePercent` from `getPayoutsByCreatorBreakdown`. UI-only fix once backend exposes the field; bundle into the Codex-h3864 (DQ-8) rail refactor.
 
 ---
 
@@ -192,7 +208,11 @@ This is documented + tested behaviour, but the per-creator rail today renders `s
 
 **Recommendation.** (b) — filter at SQL, return a `userDeleted: true` flag, design a tombstone state. Anything less is a lossy audit trail.
 
-**Status.** Open. Bead Codex-biiqd filed.
+**Status.** **RESOLVED 2026-05-16** — choice (b). Implementation in **bead Codex-biiqd**:
+1. Add `isNull(users.deletedAt)` filter on the JOIN, OR project `users.deletedAt` and compute `userDeleted = u.deletedAt !== null` in the projection (preferred — keeps the row visible for audit).
+2. Service returns `breakdown.userDeleted: boolean` + `breakdown.userIdLastChars: string` (last 6 chars).
+3. `CreatorBreakdownCard.svelte` renders tombstone state when `userDeleted`: muted background, "Deleted creator (usr_…abc123)" title, no avatar, a "View source rows" link to a triage page (separate route — file follow-up bead for the triage page itself).
+4. Component test (already landed for the fallback case in cycle 4) needs an it.fails marker flipped once the fix lands.
 
 ---
 
@@ -209,7 +229,11 @@ Even after F-3 is fixed (excluding org_fee from totals), the rail still has no U
 
 **Recommendation.** (b) for clarity, fall back to (a) if space-constrained. (c) is a UX bandaid.
 
-**Status.** Open. Backend change required first (breakdown needs to project payoutType buckets).
+**Status.** **RESOLVED 2026-05-16** — choice (b). Two-tier rail. Implementation order:
+1. Backend (`getPayoutsByCreatorBreakdown`): project `creatorEarningsCents` (sum of `creator_payout` rows) AND `orgAdminSliceCents` (sum of `organization_fee` rows attributed to this userId). Note: DQ-8 excludes org_fee from `totalPaidCents` — this DQ adds the org slice back as a SEPARATE projected field.
+2. UI top section "Per-creator earnings": iterate breakdown rows where `creatorEarningsCents > 0`.
+3. UI bottom section "Org admin slices": iterate breakdown rows where `orgAdminSliceCents > 0` (often just the org owner). Render with a distinct heading + `Admin` badge from DQ-2.
+4. Source pills inside per-creator cards stay as today (purchases / subscriptions = sourceType axis); the section split carries the payoutType axis.
 
 ---
 
@@ -224,7 +248,7 @@ Even after F-3 is fixed (excluding org_fee from totals), the rail still has no U
 
 **Recommendation.** (a) unless an E2E test grep finds usage — keep the component lean. If the visual differentiation is wanted, do (b) explicitly.
 
-**Status.** Open. Low priority.
+**Status.** **RESOLVED 2026-05-16** — choice (a). Delete the `data-org-owner` attribute from `CreatorBreakdownCard.svelte:57`. DQ-2's resolution (Owner + Admin badges) replaces any visual need; cycle 4 F-18 audit confirmed no CSS selector references the attribute. Pre-deletion check: grep `apps/web/tests/` and `apps/web/e2e/` for `data-org-owner` — if a Playwright selector exists, switch the test to query by badge text/role first, then delete. Folds into the same PR as the Codex-h3864 (DQ-8) rail rendering changes.
 
 ---
 
@@ -239,7 +263,7 @@ Even after F-3 is fixed (excluding org_fee from totals), the rail still has no U
 
 **Recommendation.** (a) — pending money is the actionable signal; £0.00 is not. Operators triage by attention count, not by zero balance.
 
-**Status.** Open.
+**Status.** **RESOLVED 2026-05-16** — choice (a). When `totalPaidCents === 0 && needsAttentionCount > 0`, swap card hierarchy: prominent "Needs attention" callout (red `--color-status-error` surface with the count, e.g. "3 pending — needs attention"), demote £0.00 total to a small subline. When `totalPaidCents > 0`, keep current layout. Add a Svelte 5 `$derived` for the swap predicate. No backend change.
 
 ---
 
@@ -254,7 +278,12 @@ Even after F-3 is fixed (excluding org_fee from totals), the rail still has no U
 
 **Recommendation.** (a) — same pattern as the rest of the studio's localStorage cache, simplest fix.
 
-**Status.** Open. Bead Codex-0sz4j filed.
+**Status.** **RESOLVED 2026-05-16** — choice (a). Implementation in **bead Codex-0sz4j**:
+1. Per-orgId localStorage key (`payouts:rail:creator-count:${orgId}`) cached count from last server response.
+2. On mount, read cached count (default 3 if missing). Render that many skeletons. Cap at 10 to bound DOM.
+3. After server response arrives, update the cache with the new count.
+4. Cleared on logout (use existing localStorage scope clearing hook).
+5. Browser-guard the localStorage access per [[feedback_local_storage_browser_guard]] (skip if server-rendered / hydration mismatch).
 
 ---
 
@@ -271,7 +300,14 @@ Even after F-3 is fixed (excluding org_fee from totals), the rail still has no U
 
 **Recommendation.** (a) as a one-line addition per service method. Cheap, immediately useful in incident triage. (b) is the right long-term shape but a bigger refactor.
 
-**Status.** Open. Defense in depth; not blocking.
+**Status.** **RESOLVED 2026-05-16** — choice (a). Add `this.obs.info('payouts.read', { orgId, userId, route, filterArgs })` at the head of:
+1. `SubscriptionService.listPayoutsByOrg` (the existing payouts list)
+2. `SubscriptionService.getPayoutsByCreatorBreakdown` (PR-204 rail)
+3. `SubscriptionService.getPayoutsSummary` (summary card)
+
+The `route` field comes from the calling route's path (`/payouts`, `/payouts/by-creator`, `/payouts/summary`). `filterArgs` redacts any sensitive query params per `@codex/observability` PII redaction rules (none expected for payouts reads). Three-line change; folds into the next PR touching SubscriptionService.
+
+**Future**: when worker-utils gets `procedure({ audit: 'financial-read' })` (option b), retire the per-service-method calls. Track that as a separate observability epic, not this fix.
 
 ---
 
@@ -291,7 +327,11 @@ For a single-creator purchase this is one creator bearing the cost; for a multi-
 
 **Recommendation.** (c) for fairness. Two creators in a multi-creator org shouldn't each lose £0.20 to a platform-floor enforcement while the org owner keeps £2.70 of org slice from the same invoice. Proportional is the policy that most product platforms (e.g. Patreon-style splits) use.
 
-**Status.** Open. Policy decision; no implementation change without product alignment.
+**Status.** **RESOLVED 2026-05-16** — choice (c). Rewrite `applyMinPlatformFeeFloor` (revenue-calculator.ts:187-205) to:
+1. Compute the floor shortfall = `minPlatformFeeCents - platformFeeCents` (clamped to >=0).
+2. Distribute the shortfall across creator pool + org slice proportionally to their pre-floor sizes: `creatorReduction = floor(shortfall * creatorPoolCents / (creatorPoolCents + orgFeeCents))`, `orgReduction = shortfall - creatorReduction`. Use integer math; residual cent goes to whichever side is larger to keep Σ exact.
+3. Update existing tests pinning the "creators first" behaviour — invert/replace as proportional becomes canonical.
+4. Add a multi-creator test: 4 creators each 25% share, low-value invoice triggers floor; verify each creator's payout slice is reduced AND org slice is reduced, proportionally.
 
 ---
 
@@ -314,7 +354,12 @@ Even the docstring of `calculateRevenueSplit` ("Round platform/org fees UP - pla
 
 **Recommendation.** (b) is the minimum bar — full ledger completeness costs nothing. (a) is the right product fix if creators ever notice and push back. (d) without (b) leaves an opaque accounting gap.
 
-**Status.** Open. Documentation update + ledger row are cheap; product policy is a bigger conversation.
+**Status.** **RESOLVED 2026-05-16** — choice (b). Implementation:
+1. Add `platform_residual` to the `payouts.payoutType` enum (migration + CHECK constraint update).
+2. In `executeTransfers` and `writePurchasePayouts`, after the per-creator `floor()` splits, compute `residualCents = poolCents - Σ creatorSlices`. If `residualCents > 0`, write a payouts row with `payoutType='platform_residual'`, `userId=null` (permitted by `check_payouts_user_required` — platform_fee + platform_residual are the two exceptions), `amountCents=residualCents`, `sourceType` mirrors the originating invoice/purchase, `status='paid'` (money is on platform balance already, no transfer needed).
+3. Add a tripwire test mirroring cycle 8's CHECK-constraint pattern: `check_payouts_user_required` accepts `payoutType='platform_residual'` with userId=null.
+4. Update `getPayoutsByCreatorBreakdown` to exclude `platform_residual` rows from per-creator aggregation (similar to the DQ-8 `organization_fee` exclusion). Surface the residual in a separate org-level panel if visible at all (often not surfaced).
+5. New bead: implement this in the same PR as the Codex-h3864 (DQ-8) fix since both add SQL exclusion filters on the same query.
 
 ---
 
