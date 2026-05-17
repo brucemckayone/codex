@@ -122,8 +122,8 @@ export default {
   fetch: app.fetch,
   async scheduled(
     _event: ScheduledEvent,
-    env: Record<string, unknown>,
-    ctx: ExecutionContext
+    _env: Record<string, unknown>,
+    _ctx: ExecutionContext
   ) {
     // Weekly digest cron handler
     // Configured in wrangler.toml: crons = ["0 9 * * 1"] (Monday 09:00 UTC)
