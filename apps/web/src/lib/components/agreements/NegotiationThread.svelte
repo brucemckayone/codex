@@ -15,7 +15,7 @@
   renders buttons for whatever callbacks it received.
 -->
 <script lang="ts">
-  import type { AgreementProposal } from '@codex/agreements';
+  import { type AgreementProposal, formatRevenueTypeLabel } from '@codex/agreements';
 
   type RevenueType = 'subscription' | 'content_purchase';
 
@@ -92,9 +92,7 @@
     }
   }
 
-  const revenueLabel = $derived(
-    revenueType === 'subscription' ? 'subscription' : 'content-purchase'
-  );
+  const revenueLabel = $derived(formatRevenueTypeLabel(revenueType));
 
   // The latest proposal — open ones are the only actionable rows.
   const latestProposal = $derived(proposals.at(-1) ?? null);
@@ -240,7 +238,7 @@
 
   .negotiation-thread__item[data-status='superseded'],
   .negotiation-thread__item[data-status='withdrawn'] {
-    opacity: var(--opacity-60, 0.6);
+    opacity: var(--opacity-60);
   }
 
   .negotiation-thread__item-head {

@@ -18,6 +18,7 @@
   pre-fills the slider with the current share).
 -->
 <script lang="ts">
+  import { formatRevenueTypeLabel } from '@codex/agreements';
   import BrandSliderField from '$lib/components/brand-editor/BrandSliderField.svelte';
   import { DialogForm } from '$lib/components/ui/DialogForm';
 
@@ -41,8 +42,13 @@
       termMonths: number;
       note?: string;
     }) => Promise<void>;
-    /** Used in the dialog title — "Propose…" vs "Amend…". */
-    mode?: 'propose' | 'amend';
+    /**
+     * Title + submit-label variant. Distinguishes a round-1 propose flow
+     * from an amendment to an existing active agreement, and from a counter
+     * to a creator-initiated proposal — the form fields are identical but
+     * the copy must match the user's actual action.
+     */
+    mode?: 'propose' | 'amend' | 'counter';
   }
 
   const {
@@ -83,9 +89,7 @@
     }
   });
 
-  const revenueLabel = $derived(
-    revenueType === 'subscription' ? 'subscription' : 'content-purchase'
-  );
+  const revenueLabel = $derived(formatRevenueTypeLabel(revenueType));
   const sharePercent = $derived(shareBp / 100);
   const formattedShare = $derived(
     Number.isInteger(sharePercent)
@@ -146,9 +150,26 @@
     onOpenChange(next);
   }
 
-  const dialogTitle = $derived(
-    `${mode === 'amend' ? 'Amend' : 'Propose'} ${revenueLabel} agreement with ${creatorName}`
-  );
+  const dialogTitle = $derived.by(() => {
+    switch (mode) {
+      case 'amend':
+        return `Amend ${revenueLabel} agreement with ${creatorName}`;
+      case 'counter':
+        return `Counter ${revenueLabel} proposal from ${creatorName}`;
+      default:
+        return `Propose ${revenueLabel} agreement with ${creatorName}`;
+    }
+  });
+  const submitLabel = $derived.by(() => {
+    switch (mode) {
+      case 'amend':
+        return 'Send amendment';
+      case 'counter':
+        return 'Send counter';
+      default:
+        return 'Send proposal';
+    }
+  });
   const dialogDescription =
     'Share is calculated against post-platform revenue. The platform fee is taken first; this percentage applies to what remains.';
 </script>
@@ -161,7 +182,7 @@
   {error}
   onsubmit={handleSubmit}
   onOpenChange={handleOpenChange}
-  submitLabel={mode === 'amend' ? 'Send amendment' : 'Send proposal'}
+  {submitLabel}
 >
   <div class="propose-form">
     <BrandSliderField

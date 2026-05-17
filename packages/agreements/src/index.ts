@@ -35,6 +35,7 @@ export {
   type CounterProposeInput,
   creatorShareFromLegacyOrgFee,
   type DeclineProposalInput,
+  formatRevenueTypeLabel,
   legacyOrgFeeFromCreatorShare,
   type ProposeAgreementInput,
   sumActiveCreatorShares,

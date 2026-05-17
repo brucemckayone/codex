@@ -64,6 +64,7 @@ import type {
 } from '../types';
 import {
   creatorShareFromLegacyOrgFee,
+  formatRevenueTypeLabel,
   legacyOrgFeeFromCreatorShare,
   validateProposedShare,
 } from './agreement-math';
@@ -1236,15 +1237,6 @@ export class AgreementService extends BaseService {
   }
 
   /**
-   * Map the schema's revenue_type enum to the human-readable label
-   * embedded in template subjects + bodies. English-only for now;
-   * i18n is a future scope per the WP-5 brief.
-   */
-  private formatRevenueTypeLabel(revenueType: RevenueType): string {
-    return revenueType === 'subscription' ? 'subscription' : 'content-purchase';
-  }
-
-  /**
    * Format a Date for display inside email body. ISO date (YYYY-MM-DD)
    * stays locale-neutral and machine-readable. The web UI can render
    * the absolute date in the recipient's timezone via the embedded
@@ -1397,7 +1389,7 @@ export class AgreementService extends BaseService {
       recipientName: recipient.name,
       orgName: orgName ?? 'Your organization',
       otherPartyName: counterparty?.name ?? 'The other party',
-      revenueTypeLabel: this.formatRevenueTypeLabel(params.revenueType),
+      revenueTypeLabel: formatRevenueTypeLabel(params.revenueType),
       sharePercentDisplay: this.formatSharePercent(params.sharePercent),
       termMonthsDisplay: this.formatTermMonths(params.termMonths),
       deepLinkUrl: this.buildNegotiationDeepLink(

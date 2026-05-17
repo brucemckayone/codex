@@ -20,6 +20,11 @@
 <script lang="ts">
   import { browser } from '$app/environment';
   import { goto } from '$app/navigation';
+  import {
+    type CreatorOrganizationAgreement,
+    formatRevenueTypeLabel,
+  } from '@codex/agreements';
+  import { FEES } from '@codex/constants';
   import AgreementCard from '$lib/components/agreements/AgreementCard.svelte';
   import NegotiationThread from '$lib/components/agreements/NegotiationThread.svelte';
   import ProposeAgreementDialog from '$lib/components/agreements/ProposeAgreementDialog.svelte';
@@ -73,9 +78,11 @@
 
   // ─── Derived: per-creator + pending proposal maps ────────────────────────
 
-  type ActiveAgreementRow = NonNullable<
-    typeof agreementsQuery
-  >['current'] extends { items: infer T } ? (T extends readonly (infer U)[] ? U : never) : never;
+  // Use the canonical row type from @codex/agreements directly. The earlier
+  // conditional `infer` chain collapsed to `never` under Vite SSR module-load
+  // cascades (see [[vite_ssr_module_load_cascade]]) when one of the
+  // intermediate imports failed; the explicit import is robust to that.
+  type ActiveAgreementRow = CreatorOrganizationAgreement;
 
   const activeAgreements = $derived(
     (agreementsQuery?.current?.items ?? []) as ActiveAgreementRow[]
@@ -89,6 +96,15 @@
         name: m.name ?? m.email,
         avatarUrl: m.avatarUrl,
       }))
+  );
+
+  // The org-members remote caps at 100 rows per page (no pagination UI
+  // here yet — TODO once orgs grow large enough). When we receive a full
+  // 100-row page, surface an inline note so owners with bigger teams
+  // aren't silently missing creators from the cards grid.
+  const MEMBERS_PAGE_CAP = 100;
+  const membersPageCapHit = $derived(
+    (membersQuery?.current?.items?.length ?? 0) >= MEMBERS_PAGE_CAP
   );
 
   /**
@@ -105,10 +121,14 @@
 
   // ─── Pie data ────────────────────────────────────────────────────────────
 
-  // Platform fee — read fresh from constants. Per Decision Q2, platform
-  // fee is the platform's operational lever, not snapshotted on agreements.
-  // 1000 bp = 10% (matches `FEES.PLATFORM_PERCENT` from @codex/constants).
-  const platformFeeBp = 1000;
+  // Illustrative — real payouts read from feeConfigService per WP-4 (the
+  // org may run a custom rate). Sourced here from @codex/constants so the
+  // default-rate display can't drift from the SDK constant. Per Decision
+  // Q2 the platform fee is the platform's operational lever, not
+  // snapshotted on agreements.
+  // TODO(codex-hrqz6 follow-up): pipe the live FeeConfigService rate to
+  // this remote so per-org overrides also show through here.
+  const platformFeeBp = FEES.PLATFORM_PERCENT;
 
   /**
    * Pie slices for the "Team Budget" overview. Each active creator on the
@@ -166,14 +186,14 @@
   let proposeCreatorId = $state<string | null>(null);
   let proposeCreatorName = $state('');
   let proposeRevenueType = $state<RevenueType>('subscription');
-  let proposeMode = $state<'propose' | 'amend'>('propose');
+  let proposeMode = $state<'propose' | 'amend' | 'counter'>('propose');
   let proposeInitialShareBp = $state(3000);
 
   function openProposeDialog(
     creatorId: string,
     creatorName: string,
     revenueType: RevenueType,
-    mode: 'propose' | 'amend',
+    mode: 'propose' | 'amend' | 'counter',
     initialShareBp = 3000
   ) {
     proposeCreatorId = creatorId;
@@ -414,6 +434,18 @@
           <a href="/studio/team">team page</a> to start a revenue-share agreement.
         </p>
       {:else}
+        {#if membersPageCapHit}
+          <p
+            class="revenue-share-page__cap-warning"
+            role="status"
+            aria-live="polite"
+          >
+            Showing the first {MEMBERS_PAGE_CAP} team members. Pagination
+            support is on the roadmap — until then, manage agreements for
+            additional creators via direct propose links from the
+            <a href="/studio/team">team page</a>.
+          </p>
+        {/if}
         <div class="revenue-share-page__cards-grid">
           {#each teamMembers as creator (creator.id)}
             <AgreementCard
@@ -458,10 +490,9 @@
             {@const sharePctDisplay = Number.isInteger(sharePct)
               ? `${sharePct}%`
               : `${sharePct.toFixed(1)}%`}
-            {@const revLabel =
-              agreement.revenueType === 'subscription'
-                ? 'subscription'
-                : 'content-purchase'}
+            {@const revLabel = formatRevenueTypeLabel(
+              agreement.revenueType as RevenueType
+            )}
             <li class="revenue-share-page__active-item">
               <div class="revenue-share-page__active-info">
                 <span class="revenue-share-page__active-creator">{creatorName}</span>
@@ -521,7 +552,7 @@
       creatorName={counterCreatorName}
       revenueType={counterRevenueType}
       initialShareBp={counterInitialShareBp}
-      mode="propose"
+      mode="counter"
       onSubmit={handleCounterSubmit}
     />
 
@@ -646,6 +677,21 @@
 
   .revenue-share-page__empty a {
     color: var(--color-interactive);
+    text-decoration: underline;
+  }
+
+  .revenue-share-page__cap-warning {
+    margin: 0 0 var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--color-warning-50);
+    border: var(--border-width) var(--border-style) var(--color-warning-200);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    color: var(--color-warning-700);
+  }
+
+  .revenue-share-page__cap-warning a {
+    color: inherit;
     text-decoration: underline;
   }
 

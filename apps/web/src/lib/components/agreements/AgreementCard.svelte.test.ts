@@ -186,8 +186,11 @@ describe('AgreementCard', () => {
     expect(document.body.textContent).toContain('Waiting on creator');
     expect(document.body.textContent).toContain('Round 1');
     expect(document.body.textContent).toContain('35%');
+    // Body copy uses the canonical hyphenated label from
+    // `formatRevenueTypeLabel('content_purchase')` so it matches the
+    // revenue_type enum value and reads identically across surfaces.
     expect(document.body.textContent).toContain(
-      'post-platform content purchase revenue'
+      'post-platform content-purchase revenue'
     );
   });
 });
