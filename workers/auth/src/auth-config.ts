@@ -214,7 +214,24 @@ export function createAuthInstance(options: AuthConfigOptions) {
     },
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.WEB_APP_URL,
-    trustedOrigins: getTrustedOrigins(env),
+    // A/B probe: inline the trustedOrigins array instead of calling
+    // getTrustedOrigins(env). Investigation agent flagged 100% correlation
+    // between extracting the helper and CI /health 503. Logic intentionally
+    // mirrors getTrustedOrigins (still exported for unit tests).
+    trustedOrigins: [
+      env.WEB_APP_URL,
+      env.API_URL,
+      ...(env.ENVIRONMENT === ENV_NAMES.DEVELOPMENT ||
+      env.ENVIRONMENT === ENV_NAMES.TEST
+        ? [
+            'http://localhost:42069', // Auth worker's own URL for E2E fixture calls
+            'http://localhost:8787', // apps/web wrangler dev (E2E browser Origin)
+            'http://lvh.me:3000', // Dev app (cross-subdomain cookies)
+            'http://lvh.me:5173', // Vite dev server
+            'http://*.nip.io', // Phone/LAN testing (any {ip}.nip.io subdomain)
+          ]
+        : []),
+    ].filter((url): url is string => Boolean(url)),
 
     // Cross-subdomain cookie support
     // Allows sessions from lvh.me:3000 to work on {slug}.lvh.me:3000
