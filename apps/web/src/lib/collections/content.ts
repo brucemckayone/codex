@@ -15,18 +15,21 @@
  */
 
 import { createCollection } from '@tanstack/db';
-import type { QueryClient } from '@tanstack/query-core';
 import { queryCollectionOptions } from '@tanstack/query-db-collection';
 import { listContent } from '$lib/remote/content.remote';
 import type { ContentWithRelations } from '$lib/types';
 import { queryClient } from './query-client';
 
-// TanStack DB v0.5 split collection result types into `SingleResult` vs
-// `NonSingleResult`; `createCollection<T, K>()` defaults to `SingleResult`
-// (one-row collection), but passing `queryCollectionOptions(...)` makes it
-// `NonSingleResult` (many-row catalogue). Derive the alias from the actual
-// builder so the type follows the runtime shape.
-function makeContentCollection(orgId: string, qc: QueryClient) {
+// Build through a wrapper so ReturnType<typeof buildOrgContentCollection>
+// flows through overload resolution against the actual options shape (no
+// `singleResult: true` -> NonSingleResult variant). Writing
+// `ReturnType<typeof createCollection<T, K>>` directly would pick the LAST
+// declared overload (a SingleResult one), which mismatches the runtime
+// type assigned below.
+function buildOrgContentCollection(
+  orgId: string,
+  qc: NonNullable<typeof queryClient>
+) {
   return createCollection<ContentWithRelations, string>(
     queryCollectionOptions({
       queryKey: ['content', orgId],
@@ -43,7 +46,7 @@ function makeContentCollection(orgId: string, qc: QueryClient) {
   );
 }
 
-type ContentCollection = ReturnType<typeof makeContentCollection>;
+type ContentCollection = ReturnType<typeof buildOrgContentCollection>;
 
 const orgCollections = new Map<string, ContentCollection>();
 
@@ -63,7 +66,7 @@ export function getContentCollection(
   const cached = orgCollections.get(orgId);
   if (cached) return cached;
 
-  const collection = makeContentCollection(orgId, queryClient);
+  const collection = buildOrgContentCollection(orgId, queryClient);
   orgCollections.set(orgId, collection);
   return collection;
 }
