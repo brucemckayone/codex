@@ -19,6 +19,8 @@ export * from './image';
 export * from './primitives';
 // Access schemas
 export * from './schemas/access';
+// Agreements schemas (Codex-hqke2 — WP-3 of Codex-nk4km)
+export * from './schemas/agreements';
 // Fee configuration schemas (Codex-m644n)
 export * from './schemas/fee-config';
 // File upload schemas
