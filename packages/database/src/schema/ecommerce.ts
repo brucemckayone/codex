@@ -598,6 +598,7 @@ export const creatorOrganizationAgreementsRelations = relations(
     creator: one(users, {
       fields: [creatorOrganizationAgreements.creatorId],
       references: [users.id],
+      relationName: 'creatorOrganizationAgreementCreator',
     }),
     organization: one(organizations, {
       fields: [creatorOrganizationAgreements.organizationId],
@@ -625,6 +626,7 @@ export const agreementProposalsRelations = relations(
     creator: one(users, {
       fields: [agreementProposals.creatorId],
       references: [users.id],
+      relationName: 'agreementProposalCreator',
     }),
     proposedBy: one(users, {
       fields: [agreementProposals.proposedByUserId],

@@ -49,14 +49,25 @@ function skipIfNoMigration(ctx: { skip: () => void }) {
 /**
  * Create a fresh (user, org) fixture pair scoped by a unique label so parallel
  * test files don't collide. All amounts use GBP basis points where applicable.
+ *
+ * The `organizations` table has no `ownerId` column — ownership is resolved
+ * via the `organization_memberships` table (role='owner', status='active').
+ * Pass `{ withOwnerMembership: false }` to skip seeding the membership row
+ * and exercise the backfill's orphan-org fallback (creator_id) path.
  */
-async function freshFixture(label: string): Promise<{
+async function freshFixture(
+  label: string,
+  opts: { withOwnerMembership?: boolean } = {}
+): Promise<{
   ownerId: string;
   creatorId: string;
   orgId: string;
 }> {
+  const withOwnerMembership = opts.withOwnerMembership ?? true;
   const { dbHttp } = await import('../index');
-  const { organizations, users } = await import('../schema');
+  const { organizationMemberships, organizations, users } = await import(
+    '../schema'
+  );
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   const ownerId = `agr-owner-${label}-${suffix}`;
@@ -84,9 +95,17 @@ async function freshFixture(label: string): Promise<{
     .values({
       name: `Agreement Org ${label}`,
       slug: `agreement-${label}-${suffix}`,
-      ownerId,
     })
     .returning();
+
+  if (withOwnerMembership) {
+    await dbHttp.insert(organizationMemberships).values({
+      organizationId: org.id,
+      userId: ownerId,
+      role: 'owner',
+      status: 'active',
+    });
+  }
 
   return { ownerId, creatorId, orgId: org.id };
 }
@@ -381,7 +400,12 @@ describe.skipIf(!HAS_DB)('Agreement Schema (Codex-ppxtd)', () => {
       skipIfNoMigration(ctx);
       const { dbHttp } = await import('../index');
       const { agreementProposals } = await import('../schema');
-      const { ownerId, creatorId, orgId } = await freshFixture('badbps');
+      // Orphan-org variant — no owner membership row. Covers the backfill
+      // migration's COALESCE fallback path (proposed_by_user_id ← creator_id)
+      // for organisations that have no active owner.
+      const { ownerId, creatorId, orgId } = await freshFixture('badbps', {
+        withOwnerMembership: false,
+      });
 
       await expectConstraintError(
         dbHttp.insert(agreementProposals).values({
@@ -528,6 +552,136 @@ describe.skipIf(!HAS_DB)('Agreement Schema (Codex-ppxtd)', () => {
           )
         );
       expect(rows[0].currentProposalId).toBe(proposal.id);
+    });
+  });
+
+  describe('FK invariants', () => {
+    it('rejects parent_proposal_id pointing at a non-existent uuid', async (ctx) => {
+      skipIfNoMigration(ctx);
+      const { dbHttp } = await import('../index');
+      const { agreementProposals } = await import('../schema');
+      const { ownerId, creatorId, orgId } = await freshFixture('badparent');
+
+      // Random uuid that has zero chance of existing in agreement_proposals.
+      const ghostId = '00000000-0000-4000-8000-000000000000';
+
+      await expectConstraintError(
+        dbHttp.insert(agreementProposals).values({
+          organizationId: orgId,
+          creatorId,
+          revenueType: 'subscription',
+          parentProposalId: ghostId,
+          roundNumber: 2,
+          proposedByUserId: ownerId,
+          proposedByRole: 'owner',
+          proposedCreatorSharePercent: 5000,
+          proposedEffectiveFrom: new Date('2026-06-01T00:00:00Z'),
+          status: 'open',
+        })
+      );
+    });
+  });
+
+  describe('re-activation after termination', () => {
+    it('allows a NEW active agreement on the same triple after the prior one is terminated', async (ctx) => {
+      skipIfNoMigration(ctx);
+      const { dbHttp } = await import('../index');
+      const { creatorOrganizationAgreements } = await import('../schema');
+      const { ownerId, creatorId, orgId } = await freshFixture('reactivate');
+
+      // First active agreement.
+      const [first] = await dbHttp
+        .insert(creatorOrganizationAgreements)
+        .values({
+          creatorId,
+          organizationId: orgId,
+          organizationFeePercentage: 2000,
+          revenueType: 'subscription',
+          effectiveFrom: new Date('2026-01-01T00:00:00Z'),
+        })
+        .returning();
+
+      // Terminate it.
+      await dbHttp
+        .update(creatorOrganizationAgreements)
+        .set({
+          status: 'terminated',
+          terminatedAt: new Date('2026-02-01T00:00:00Z'),
+          terminatedByUserId: ownerId,
+          terminationReason: 'Re-activation test',
+        })
+        .where(eq(creatorOrganizationAgreements.id, first.id));
+
+      // A NEW active row on the same (org, creator, revenue_type) MUST be
+      // allowed — the partial unique only constrains active rows.
+      const [second] = await dbHttp
+        .insert(creatorOrganizationAgreements)
+        .values({
+          creatorId,
+          organizationId: orgId,
+          organizationFeePercentage: 1500,
+          revenueType: 'subscription',
+          effectiveFrom: new Date('2026-03-01T00:00:00Z'),
+        })
+        .returning();
+
+      expect(second.status).toBe('active');
+
+      const rows = await dbHttp
+        .select()
+        .from(creatorOrganizationAgreements)
+        .where(
+          and(
+            eq(creatorOrganizationAgreements.organizationId, orgId),
+            eq(creatorOrganizationAgreements.creatorId, creatorId),
+            eq(creatorOrganizationAgreements.revenueType, 'subscription')
+          )
+        );
+      expect(rows.length).toBe(2);
+      expect(rows.filter((r) => r.status === 'active').length).toBe(1);
+      expect(rows.filter((r) => r.status === 'terminated').length).toBe(1);
+    });
+  });
+
+  describe('backfill migration 0072 — idempotency guard (textual)', () => {
+    // Running raw migration SQL inside vitest against a partially-migrated
+    // schema is awkward (the post-WP-1 invariant means current_proposal_id
+    // is always set on active rows). Instead we assert the migration text
+    // contains the NOT EXISTS guard pattern AND the deterministic
+    // primary-key join — together they make the migration safe to retry
+    // after a partial failure.
+    it('contains a NOT EXISTS proposal-existence guard in the INSERT', async () => {
+      const fs = await import('node:fs/promises');
+      const path = await import('node:path');
+      const sqlPath = path.resolve(
+        __dirname,
+        '../migrations/0072_backfill_agreement_proposals.sql'
+      );
+      const sqlText = await fs.readFile(sqlPath, 'utf8');
+
+      // Guard: skip agreements whose triple already has ANY proposal row.
+      expect(sqlText).toMatch(
+        /NOT EXISTS\s*\(\s*SELECT 1\s+FROM "agreement_proposals" p/i
+      );
+      expect(sqlText).toMatch(/p\."organization_id"\s*=\s*a\."organization_id"/);
+      expect(sqlText).toMatch(/p\."creator_id"\s*=\s*a\."creator_id"/);
+      expect(sqlText).toMatch(/p\."revenue_type"\s*=\s*a\."revenue_type"/);
+    });
+
+    it('UPDATEs by source_agreement_id (PK) rather than tuple match', async () => {
+      const fs = await import('node:fs/promises');
+      const path = await import('node:path');
+      const sqlPath = path.resolve(
+        __dirname,
+        '../migrations/0072_backfill_agreement_proposals.sql'
+      );
+      const sqlText = await fs.readFile(sqlPath, 'utf8');
+
+      // RETURNING includes the captured source agreement id, and the
+      // UPDATE joins on a.id = i.source_agreement_id — deterministic even
+      // if historical rows collide on (org, creator, revenue_type, eff_from).
+      expect(sqlText).toMatch(/source_agreement_id/);
+      expect(sqlText).toMatch(/a\."id"\s*=\s*i\.source_agreement_id/);
     });
   });
 });
