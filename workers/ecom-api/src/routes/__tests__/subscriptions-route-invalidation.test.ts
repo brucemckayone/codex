@@ -428,7 +428,6 @@ describe.each(CASES)('$label — route → service contract', ({
   it('negative body: missing organizationId → 400 Zod validation, helper NOT called', async () => {
     const bundle = buildApp();
     // Strip organizationId from the body to force a Zod failure.
-    // biome-ignore lint/correctness/noUnusedVariables: destructuring to drop key
     const { organizationId: _drop, ...rest } = validBody;
     const res = await bundle.app.request(postJson(path, rest));
     expect(res.status).toBe(400);
