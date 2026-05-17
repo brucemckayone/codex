@@ -20,9 +20,33 @@ import { listContent } from '$lib/remote/content.remote';
 import type { ContentWithRelations } from '$lib/types';
 import { queryClient } from './query-client';
 
-type ContentCollection = ReturnType<
-  typeof createCollection<ContentWithRelations, string>
->;
+// Build through a wrapper so ReturnType<typeof buildOrgContentCollection>
+// flows through overload resolution against the actual options shape (no
+// `singleResult: true` -> NonSingleResult variant). Writing
+// `ReturnType<typeof createCollection<T, K>>` directly would pick the LAST
+// declared overload (a SingleResult one), which mismatches the runtime
+// type assigned below.
+function buildOrgContentCollection(
+  orgId: string,
+  qc: NonNullable<typeof queryClient>
+) {
+  return createCollection<ContentWithRelations, string>(
+    queryCollectionOptions({
+      queryKey: ['content', orgId],
+      queryFn: async () => {
+        const result = await listContent({
+          organizationId: orgId,
+          status: 'published',
+        });
+        return result?.items ?? [];
+      },
+      queryClient: qc,
+      getKey: (item) => item.id,
+    })
+  );
+}
+
+type ContentCollection = ReturnType<typeof buildOrgContentCollection>;
 
 const orgCollections = new Map<string, ContentCollection>();
 
@@ -42,20 +66,7 @@ export function getContentCollection(
   const cached = orgCollections.get(orgId);
   if (cached) return cached;
 
-  const collection = createCollection<ContentWithRelations, string>(
-    queryCollectionOptions({
-      queryKey: ['content', orgId],
-      queryFn: async () => {
-        const result = await listContent({
-          organizationId: orgId,
-          status: 'published',
-        });
-        return result?.items ?? [];
-      },
-      queryClient,
-      getKey: (item) => item.id,
-    })
-  );
+  const collection = buildOrgContentCollection(orgId, queryClient);
   orgCollections.set(orgId, collection);
   return collection;
 }
