@@ -27,6 +27,7 @@
   "dependencies": {
     "@codex/access": "workspace:*",
     "@codex/admin": "workspace:*",
+    "@codex/agreements": "workspace:*",
     "@codex/cache": "workspace:*",
     "@codex/constants": "workspace:*",
     "@codex/database": "workspace:*",
