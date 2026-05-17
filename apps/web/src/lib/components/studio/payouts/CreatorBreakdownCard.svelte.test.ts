@@ -66,7 +66,10 @@ describe('CreatorBreakdownCard', () => {
 
     expect(screen.getByText('Alice Creator')).toBeTruthy();
     expect(screen.getByText('£15.30')).toBeTruthy();
-    expect(screen.getByText(/1 transaction/)).toBeTruthy();
+    // Svelte 5 renders `{count} {label}` as separate text nodes; assert against
+    // the parent's aggregated textContent rather than getByText (which only
+    // sees per-node text). Same pattern as the F-19 sibling test below.
+    expect(document.body.textContent ?? '').toMatch(/1\s+transaction/);
   });
 
   // REGRESSION (PR #204 deep-review F-19, DQ-11) — when a user is soft-deleted
