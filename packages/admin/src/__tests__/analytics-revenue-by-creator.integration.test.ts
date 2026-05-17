@@ -260,7 +260,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
         status: 'paid',
         reason: null,
         resolvedAt: resolvedDate,
-        stripeTransferId: 'tr_old',
+        stripeTransferId: `tr_old_${crypto.randomUUID()}`,
       },
       {
         userId: creatorId,
@@ -271,7 +271,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
         status: 'paid',
         reason: null,
         resolvedAt: moreRecentResolvedDate,
-        stripeTransferId: 'tr_new',
+        stripeTransferId: `tr_new_${crypto.randomUUID()}`,
       },
       {
         userId: creatorId,
@@ -499,7 +499,7 @@ describe('AdminAnalyticsService.getRevenueByCreator (real DB)', () => {
         status: 'paid',
         reason: null,
         resolvedAt: new Date('2026-04-01T00:00:00Z'),
-        stripeTransferId: 'tr_paid_excluded',
+        stripeTransferId: `tr_paid_excluded_${crypto.randomUUID()}`,
       },
     ]);
 
