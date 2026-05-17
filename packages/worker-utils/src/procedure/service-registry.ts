@@ -418,18 +418,18 @@ export function createServiceRegistry(
 
     /**
      * Codex-tnft0 (WP-2 of Codex-nk4km): revenue-share AgreementService.
-     * Depends on FeeConfigService for the current platform fee (per
-     * decision #2: platform fee read fresh at propose/accept time, never
-     * snapshotted on the agreement row). Uses the shared per-request
-     * WebSocket client so accept/terminate transactions reuse the
-     * existing connection.
+     * Uses the shared per-request WebSocket client so accept/terminate
+     * transactions reuse the existing connection. Per the PR #210
+     * review, share-validation is platform-fee-independent (it reasons
+     * purely about the post-platform pool — see `agreement-math.ts`),
+     * so no `feeConfig` dep is threaded through here. WP-4 reads the
+     * platform fee fresh in the payout pipeline.
      */
     get agreements() {
       if (!_agreements) {
         _agreements = new AgreementService({
           db: getSharedDb(),
           environment: getEnvironment(),
-          feeConfig: registry.feeConfig,
         });
       }
       return _agreements;

@@ -13,15 +13,22 @@
  *     (three load-bearing constraints below — owner-resolution via
  *     memberships, dual-write legacy fee column, Drizzle relationName).
  *   - `~/.claude/projects/.../memory/project_revenue_share_decisions.md`
- *     (creator share snapshotted; platform fee read fresh).
+ *     (creator share snapshotted; platform fee read fresh in the payout
+ *     pipeline — but NOT in share-validation, see `agreement-math.ts`).
  *
  * Every multi-step write goes through `this.db.transaction()` so the
  * database is never left in a half-applied state — agreement acceptance
  * in particular touches three tables (proposal, prior active agreement,
  * new active agreement) plus marks siblings superseded.
+ *
+ * Concurrency: all five mutation methods (propose/counter/accept/
+ * decline/withdraw + terminate) acquire row-level `SELECT FOR UPDATE`
+ * locks on the target proposal / agreement row inside the transaction
+ * before the status check, closing the READ COMMITTED window in which
+ * two concurrent callers could both observe `status='open'` and both
+ * proceed.
  */
 
-import { FEES } from '@codex/constants';
 import { whereNotDeleted } from '@codex/database';
 import {
   agreementProposals,
@@ -29,11 +36,11 @@ import {
   organizationMemberships,
   organizations,
 } from '@codex/database/schema';
-import type { FeeConfigService, FeeContext } from '@codex/purchase';
 import {
   BaseService,
   ForbiddenError,
   InternalServiceError,
+  NotFoundError,
   type ServiceConfig,
 } from '@codex/service-errors';
 import { and, asc, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
@@ -44,6 +51,7 @@ import type {
   RevenueType,
 } from '../types';
 import {
+  creatorShareFromLegacyOrgFee,
   legacyOrgFeeFromCreatorShare,
   validateProposedShare,
 } from './agreement-math';
@@ -104,25 +112,27 @@ export interface TerminateAgreementInput {
 // ─── Service config ───────────────────────────────────────────────────────
 
 /**
- * Constructor config. `feeConfig` is required because validateProposedShare
- * needs the *current* platform fee (per epic decision #2 — fee is read
- * fresh at propose/accept time, never snapshotted on the agreement row).
- *
- * Workers wire this through `service-registry.ts`; tests inject a minimal
- * stub or the real `FeeConfigService` with a stub `cache`.
+ * Constructor config. As of the PR #210 review, the service no longer
+ * threads `FeeConfigService` through share validation — `agreement-math`
+ * reasons purely about the post-platform pool. Platform fee is still
+ * read fresh in the WP-4 payout pipeline; if a future feature needs it
+ * inside this service (e.g. a /preview endpoint that breaks down org
+ * residual after platform fee), re-add the dep at that point.
  */
-export interface AgreementServiceConfig extends ServiceConfig {
-  feeConfig: FeeConfigService;
-}
+export type AgreementServiceConfig = ServiceConfig;
 
 // ─── Service ──────────────────────────────────────────────────────────────
 
-export class AgreementService extends BaseService {
-  private readonly feeConfig: FeeConfigService;
+/**
+ * Transaction handle type — the parameter the callback receives from
+ * `db.transaction()`. Extracted once here so the helper signatures don't
+ * each repeat the nested `Parameters<Parameters<...>[0]>[0]` chain.
+ */
+type Tx = Parameters<Parameters<AgreementService['db']['transaction']>[0]>[0];
 
+export class AgreementService extends BaseService {
   constructor(config: AgreementServiceConfig) {
     super(config);
-    this.feeConfig = config.feeConfig;
   }
 
   // ── Public: propose ─────────────────────────────────────────────────────
@@ -141,21 +151,14 @@ export class AgreementService extends BaseService {
    *   3. no other proposal in this (org, creator, revenue_type) thread
    *      is currently `open` or `countered` (one negotiation at a time
    *      per bucket — keeps the UI sane)
-   *   4. proposed share + active sibling shares + current platform fee
-   *      ≤ 100%
+   *   4. proposed share + active sibling shares ≤ 100% of the
+   *      post-platform pool (see `agreement-math.ts` header for the
+   *      unit semantics)
    */
   async proposeAgreement(
     input: ProposeAgreementInput
   ): Promise<AgreementProposal> {
     try {
-      // Resolve platform fee outside the transaction — the FeeConfig
-      // service can hit KV cache and has its own DB pool semantics; we
-      // want to keep this transaction tight to the write set.
-      const platformFee = await this.resolvePlatformFee(
-        input.organizationId,
-        input.revenueType
-      );
-
       return await this.db.transaction(async (tx) => {
         await this.assertActiveOwner(
           tx,
@@ -189,7 +192,6 @@ export class AgreementService extends BaseService {
         validateProposedShare({
           proposedSharePercent: input.sharePercent,
           existingActiveShares,
-          platformFeePercent: platformFee,
         });
 
         const [row] = await tx
@@ -235,7 +237,10 @@ export class AgreementService extends BaseService {
   async counterPropose(input: CounterProposeInput): Promise<AgreementProposal> {
     try {
       return await this.db.transaction(async (tx) => {
-        const parent = await this.findProposalOrThrow(tx, input.proposalId);
+        const parent = await this.findProposalForUpdateOrThrow(
+          tx,
+          input.proposalId
+        );
 
         if (parent.status !== 'open') {
           throw new InvalidProposalStateError(
@@ -271,10 +276,6 @@ export class AgreementService extends BaseService {
 
         // Re-check share against current world. The counter may land
         // months after the parent — sibling agreements may have shifted.
-        const platformFee = await this.resolvePlatformFee(
-          parent.organizationId,
-          parent.revenueType as RevenueType
-        );
         const existingActiveShares = await this.fetchExistingActiveShares(
           tx,
           parent.organizationId,
@@ -284,7 +285,6 @@ export class AgreementService extends BaseService {
         validateProposedShare({
           proposedSharePercent: input.sharePercent,
           existingActiveShares,
-          platformFeePercent: platformFee,
         });
 
         // Parent → countered. responded_* captures who closed the parent
@@ -356,7 +356,10 @@ export class AgreementService extends BaseService {
   ): Promise<CreatorOrganizationAgreement> {
     try {
       return await this.db.transaction(async (tx) => {
-        const proposal = await this.findProposalOrThrow(tx, input.proposalId);
+        const proposal = await this.findProposalForUpdateOrThrow(
+          tx,
+          input.proposalId
+        );
 
         if (proposal.status !== 'open') {
           throw new InvalidProposalStateError(
@@ -391,10 +394,6 @@ export class AgreementService extends BaseService {
         }
 
         // Re-validate share at accept time — siblings may have moved.
-        const platformFee = await this.resolvePlatformFee(
-          proposal.organizationId,
-          proposal.revenueType as RevenueType
-        );
         const existingActiveShares = await this.fetchExistingActiveShares(
           tx,
           proposal.organizationId,
@@ -404,7 +403,6 @@ export class AgreementService extends BaseService {
         validateProposedShare({
           proposedSharePercent: proposal.proposedCreatorSharePercent,
           existingActiveShares,
-          platformFeePercent: platformFee,
         });
 
         const now = new Date();
@@ -505,7 +503,10 @@ export class AgreementService extends BaseService {
   ): Promise<AgreementProposal> {
     try {
       return await this.db.transaction(async (tx) => {
-        const proposal = await this.findProposalOrThrow(tx, input.proposalId);
+        const proposal = await this.findProposalForUpdateOrThrow(
+          tx,
+          input.proposalId
+        );
 
         if (proposal.status !== 'open') {
           throw new InvalidProposalStateError(
@@ -564,7 +565,10 @@ export class AgreementService extends BaseService {
   ): Promise<AgreementProposal> {
     try {
       return await this.db.transaction(async (tx) => {
-        const proposal = await this.findProposalOrThrow(tx, input.proposalId);
+        const proposal = await this.findProposalForUpdateOrThrow(
+          tx,
+          input.proposalId
+        );
 
         if (proposal.status !== 'open') {
           throw new InvalidProposalStateError(
@@ -627,7 +631,7 @@ export class AgreementService extends BaseService {
   ): Promise<CreatorOrganizationAgreement> {
     try {
       return await this.db.transaction(async (tx) => {
-        const agreement = await this.findAgreementOrThrow(
+        const agreement = await this.findAgreementForUpdateOrThrow(
           tx,
           input.agreementId
         );
@@ -772,14 +776,17 @@ export class AgreementService extends BaseService {
    * ownership is encoded by `organization_memberships.role='owner' AND
    * status='active'`. There may be 0 or many such rows.
    *
+   * Implementation: two targeted queries. The first asks "is THIS user
+   * an active owner?" and short-circuits the happy path. If no, we
+   * issue a second query to distinguish "you are not an owner" (some
+   * owner exists, just not you) from "no owner exists at all" (orphan
+   * org) — useful telemetry and a precise error message for the UI.
+   *
    * Throws `ForbiddenError` when the user is not an active owner, or
    * when the org has no active owner at all (orphaned organisations).
-   * Documented choice: we don't silently fall through to "no owner = no
-   * agreement possible" — the call site asked for an owner check, the
-   * service refuses rather than guess.
    */
   private async assertActiveOwner(
-    tx: Parameters<Parameters<typeof this.db.transaction>[0]>[0],
+    tx: Tx,
     organizationId: string,
     userId: string
   ): Promise<void> {
@@ -793,34 +800,44 @@ export class AgreementService extends BaseService {
       columns: { id: true },
     });
     if (!org) {
-      throw new AgreementNotFoundError('Organization not found', {
-        agreementId: organizationId,
+      throw new NotFoundError('Organization not found', {
+        resource: 'organization',
+        organizationId,
       });
     }
 
-    const owners = await tx
-      .select({ userId: organizationMemberships.userId })
-      .from(organizationMemberships)
-      .where(
-        and(
-          eq(organizationMemberships.organizationId, organizationId),
-          eq(organizationMemberships.role, 'owner'),
-          eq(organizationMemberships.status, 'active')
-        )
-      )
-      .orderBy(asc(organizationMemberships.createdAt));
+    // Targeted lookup: is THIS user an active owner? Single-row hit.
+    const myOwnership = await tx.query.organizationMemberships.findFirst({
+      where: and(
+        eq(organizationMemberships.organizationId, organizationId),
+        eq(organizationMemberships.userId, userId),
+        eq(organizationMemberships.role, 'owner'),
+        eq(organizationMemberships.status, 'active')
+      ),
+      columns: { id: true },
+    });
+    if (myOwnership) return;
 
-    if (owners.length === 0) {
+    // Not this user — distinguish "no owner exists" from "you aren't
+    // the owner". Both are 403; the message + context differ so the UI
+    // can render the right next step.
+    const anyOwner = await tx.query.organizationMemberships.findFirst({
+      where: and(
+        eq(organizationMemberships.organizationId, organizationId),
+        eq(organizationMemberships.role, 'owner'),
+        eq(organizationMemberships.status, 'active')
+      ),
+      columns: { id: true },
+    });
+    if (!anyOwner) {
       throw new ForbiddenError('Organization has no active owner', {
         organizationId,
       });
     }
-    if (!owners.some((o) => o.userId === userId)) {
-      throw new ForbiddenError(
-        'Only an active organization owner may perform this action',
-        { organizationId, userId }
-      );
-    }
+    throw new ForbiddenError(
+      'Only an active organization owner may perform this action',
+      { organizationId, userId }
+    );
   }
 
   /**
@@ -830,7 +847,7 @@ export class AgreementService extends BaseService {
    * pre-empt the org-keeps-100% fallback path).
    */
   private async assertActiveMember(
-    tx: Parameters<Parameters<typeof this.db.transaction>[0]>[0],
+    tx: Tx,
     organizationId: string,
     userId: string
   ): Promise<void> {
@@ -861,7 +878,7 @@ export class AgreementService extends BaseService {
    * passes because the previous thread is fully terminal.
    */
   private async assertNoOpenThread(
-    tx: Parameters<Parameters<typeof this.db.transaction>[0]>[0],
+    tx: Tx,
     organizationId: string,
     creatorId: string,
     revenueType: RevenueType
@@ -906,7 +923,7 @@ export class AgreementService extends BaseService {
    * breakdown in `ShareExceedsAvailableError.context.existingActiveShares`.
    */
   private async fetchExistingActiveShares(
-    tx: Parameters<Parameters<typeof this.db.transaction>[0]>[0],
+    tx: Tx,
     organizationId: string,
     revenueType: RevenueType,
     options: { excludeCreatorId?: string } = {}
@@ -929,46 +946,12 @@ export class AgreementService extends BaseService {
       .from(creatorOrganizationAgreements)
       .where(and(...conditions));
 
-    return rows.map((r) => legacyOrgFeeFromCreatorShare(r.orgFee));
-  }
-
-  /**
-   * Read platform fee for (org, revenueType) at the current moment.
-   *
-   * Per decision #2, platform fee is NEVER snapshotted on the
-   * agreement — it's read fresh at propose/accept time. The
-   * `feeConfig.getFeesForOrg(...)` call walks the 3-tier fallback
-   * chain (creator-override → org → platform → constants).
-   *
-   * Note: `FeeConfig` uses `'subscription' | 'one_off'` for its
-   * context label, while our domain uses
-   * `'subscription' | 'content_purchase'`. Translate at the boundary
-   * so we don't leak FeeConfig's vocabulary into the agreement API.
-   */
-  private async resolvePlatformFee(
-    organizationId: string,
-    revenueType: RevenueType
-  ): Promise<number> {
-    const ctx: FeeContext =
-      revenueType === 'subscription' ? 'subscription' : 'one_off';
-    try {
-      const fees = await this.feeConfig.getFeesForOrg(organizationId, ctx);
-      return fees.platformFeePercent;
-    } catch (error) {
-      // Don't let a fee-config blip kill an agreement read — fall back
-      // to the platform-level default constant. We log so the failure
-      // is visible; the propose / accept flow degrades to a strict but
-      // not-org-tuned validation.
-      this.obs.warn(
-        'Falling back to default platform fee for share validation',
-        {
-          organizationId,
-          revenueType,
-          errorName: error instanceof Error ? error.name : 'unknown',
-        }
-      );
-      return FEES.PLATFORM_PERCENT;
-    }
+    // Inverse of the dual-write invariant: org fee → creator share.
+    // Same arithmetic as `legacyOrgFeeFromCreatorShare` (10000 - x is
+    // its own inverse), but the helper-name documents the direction at
+    // the call site — important for WP-4 when the read path swaps off
+    // the legacy column entirely.
+    return rows.map((r) => creatorShareFromLegacyOrgFee(r.orgFee));
   }
 
   /**
@@ -988,26 +971,51 @@ export class AgreementService extends BaseService {
     return d;
   }
 
-  private async findProposalOrThrow(
-    tx: Parameters<Parameters<typeof this.db.transaction>[0]>[0],
+  /**
+   * Locked proposal lookup — `SELECT ... FOR UPDATE` on the proposal
+   * row inside the calling transaction. Closes the READ COMMITTED race
+   * window where two concurrent callers could both observe
+   * `status='open'`, both proceed, and corrupt the audit trail.
+   *
+   * Used by all five proposal-mutating methods (counter / accept /
+   * decline / withdraw + the agreement counterpart `terminate`). The
+   * unlocked read path (`findProposalOrThrow`) is reserved for the
+   * non-mutating endpoints we don't yet have but might add (e.g. a
+   * /preview surface).
+   */
+  private async findProposalForUpdateOrThrow(
+    tx: Tx,
     proposalId: string
   ): Promise<AgreementProposal> {
-    const row = await tx.query.agreementProposals.findFirst({
-      where: eq(agreementProposals.id, proposalId),
-    });
+    const rows = await tx
+      .select()
+      .from(agreementProposals)
+      .where(eq(agreementProposals.id, proposalId))
+      .for('update');
+    const row = rows[0];
     if (!row) {
       throw new AgreementNotFoundError('Proposal not found', { proposalId });
     }
     return row;
   }
 
-  private async findAgreementOrThrow(
-    tx: Parameters<Parameters<typeof this.db.transaction>[0]>[0],
+  /**
+   * Locked agreement lookup — counterpart of
+   * {@link findProposalForUpdateOrThrow} for the
+   * `creator_organization_agreements` table. Called by
+   * `terminateAgreement` so the active → terminated transition is
+   * serialised against any concurrent caller.
+   */
+  private async findAgreementForUpdateOrThrow(
+    tx: Tx,
     agreementId: string
   ): Promise<CreatorOrganizationAgreement> {
-    const row = await tx.query.creatorOrganizationAgreements.findFirst({
-      where: eq(creatorOrganizationAgreements.id, agreementId),
-    });
+    const rows = await tx
+      .select()
+      .from(creatorOrganizationAgreements)
+      .where(eq(creatorOrganizationAgreements.id, agreementId))
+      .for('update');
+    const row = rows[0];
     if (!row) {
       throw new AgreementNotFoundError('Agreement not found', { agreementId });
     }

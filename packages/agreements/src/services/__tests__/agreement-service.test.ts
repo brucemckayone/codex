@@ -16,9 +16,9 @@
  * letters and the assertion will silently pass on the wrong type.
  */
 
+import { randomUUID } from 'node:crypto';
 import * as schema from '@codex/database/schema';
-import { FeeConfigService } from '@codex/purchase';
-import { ForbiddenError } from '@codex/service-errors';
+import { ForbiddenError, NotFoundError } from '@codex/service-errors';
 import {
   cleanupDatabase,
   createUniqueSlug,
@@ -111,7 +111,6 @@ async function seedOrgFixture(
 describe('AgreementService', () => {
   let db: Database;
   let service: AgreementService;
-  let feeConfig: FeeConfigService;
 
   beforeAll(async () => {
     db = setupTestDatabase();
@@ -125,11 +124,13 @@ describe('AgreementService', () => {
       throw error;
     }
 
-    feeConfig = new FeeConfigService({ db, environment: 'test' });
+    // Per PR #210 review, AgreementService no longer threads
+    // FeeConfigService — share-validation reasons purely about the
+    // post-platform pool. WP-4's payout pipeline reads the platform
+    // fee fresh at invoice time elsewhere.
     service = new AgreementService({
       db,
       environment: 'test',
-      feeConfig,
     });
   });
 
@@ -140,8 +141,15 @@ describe('AgreementService', () => {
   // Each test starts with a clean slate. We use the shared cleanupDatabase
   // helper because it already orders FK deletions correctly (purchases
   // and contentAccess reference organizations with onDelete: 'restrict',
-  // so they must go first). Memberships cascade with organizations.
-  // Users are preserved across tests for cheapness.
+  // so they must go first). Users are preserved across tests for cheapness.
+  //
+  // Note: `cleanupDatabase` does NOT delete `organizationMemberships` —
+  // the schema declares those FKs as `onDelete: 'cascade'` from
+  // organizations, so the membership rows are wiped automatically when
+  // the org rows go. The explicit delete here is defence-in-depth in
+  // case a prior test happened to seed memberships against an org that
+  // got rolled back; cheap insurance against test-ordering side effects
+  // ([[feedback-test-cleanup-fk-ordering]]).
   beforeEach(async () => {
     await cleanupDatabase(db);
     await db.delete(schema.organizationMemberships);
@@ -208,24 +216,23 @@ describe('AgreementService', () => {
       }
     });
 
-    it('throws ShareExceedsAvailableError when proposal + active + fee > 100%', async () => {
+    it('throws ShareExceedsAvailableError when proposal + active > 100% of post-platform pool', async () => {
       const fx = await seedOrgFixture(db);
-      // Active 50% subscription agreement to creator B already.
+      // Active 70% subscription agreement to creator B (orgFee=3000).
       await db.insert(schema.creatorOrganizationAgreements).values({
         organizationId: fx.orgId,
         creatorId: fx.creatorBId,
-        organizationFeePercentage: 5000, // creator B has 50% share
+        organizationFeePercentage: 3000, // creator B has 70% share
         revenueType: 'subscription',
         status: 'active',
       });
-      // Default platform fee = FEES.PLATFORM_PERCENT = 1000. 50% existing
-      // + 10% fee = 60% taken. A 50% proposal would total 110%.
+      // 70% existing + 31% proposed = 101% of post-platform pool → fail.
       try {
         await service.proposeAgreement({
           organizationId: fx.orgId,
           creatorId: fx.creatorAId,
           revenueType: 'subscription',
-          sharePercent: 5000,
+          sharePercent: 3100,
           termMonths: 6,
           proposedByUserId: fx.ownerId,
         });
@@ -278,6 +285,137 @@ describe('AgreementService', () => {
         expect((err as Error).name).toBe('InvalidProposalStateError');
       }
     });
+
+    it('throws NotFoundError when organization id does not exist (I2)', async () => {
+      // Per PR #210 review, missing-org throws the shared `NotFoundError`
+      // with `{ resource: 'organization', organizationId }`. Previously
+      // this leaked through `AgreementNotFoundError` with the wrong
+      // context key (`agreementId`).
+      // Note: shared NotFoundError doesn't set `this.name` so Vite/esbuild
+      // minification collapses err.name to single letters under build.
+      // We use `toBeInstanceOf` + the error CODE for type discrimination,
+      // not err.name. ([[feedback-service-error-test-instanceof]])
+      const bogusOrgId = randomUUID();
+      try {
+        await service.proposeAgreement({
+          organizationId: bogusOrgId,
+          creatorId: 'whatever',
+          revenueType: 'subscription',
+          sharePercent: 3000,
+          termMonths: 6,
+          proposedByUserId: 'whatever',
+        });
+        expect.fail('Expected NotFoundError');
+      } catch (err) {
+        expect(err).toBeInstanceOf(NotFoundError);
+        const e = err as NotFoundError;
+        expect(e.code).toBe('NOT_FOUND');
+        const ctx = e.context as Record<string, unknown>;
+        expect(ctx.resource).toBe('organization');
+        expect(ctx.organizationId).toBe(bogusOrgId);
+      }
+    });
+
+    // I4: re-opening a thread after every fully-terminal end state.
+    // The implementation comment on `assertNoOpenThread` documents that
+    // after declined/withdrawn/superseded/accepted (all terminal),
+    // the bucket is free for a fresh round-1 proposal. Locking in
+    // tests so a future refactor can't silently break the UX.
+
+    it('allows re-opening a fully-terminal thread (after decline) — I4', async () => {
+      const fx = await seedOrgFixture(db);
+      const first = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      await service.declineProposal({
+        proposalId: first.id,
+        declinedByUserId: fx.creatorAId,
+      });
+      const second = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 2500,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      expect(second.status).toBe('open');
+      expect(second.roundNumber).toBe(1);
+      expect(second.parentProposalId).toBeNull();
+    });
+
+    it('allows re-opening after a withdraw — I4', async () => {
+      const fx = await seedOrgFixture(db);
+      const first = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      await service.withdrawProposal({
+        proposalId: first.id,
+        withdrawnByUserId: fx.ownerId,
+      });
+      const second = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 2500,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      expect(second.status).toBe('open');
+      expect(second.roundNumber).toBe(1);
+      expect(second.parentProposalId).toBeNull();
+    });
+
+    it('allows re-opening after terminating an active agreement — I4', async () => {
+      const fx = await seedOrgFixture(db);
+      const r1 = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      const agreement = await service.acceptProposal({
+        proposalId: r1.id,
+        acceptedByUserId: fx.creatorAId,
+      });
+      await service.terminateAgreement({
+        agreementId: agreement.id,
+        terminatedByUserId: fx.ownerId,
+      });
+      // Accepted proposal is terminal; thread is fully terminal once
+      // the active agreement is terminated. Bucket is free.
+      const second = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 2000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      expect(second.status).toBe('open');
+      expect(second.roundNumber).toBe(1);
+      expect(second.parentProposalId).toBeNull();
+    });
+
+    // I1: concurrency. A deterministic test would need controlled
+    // scheduling we don't have here — locking in `it.todo` as a
+    // tracking point. The implementation uses `SELECT ... FOR UPDATE`
+    // on every status-mutating proposal/agreement lookup.
+    it.todo(
+      'locks proposal row to prevent concurrent accept/decline race — I1'
+    );
   });
 
   // ── counterPropose ────────────────────────────────────────────────────
@@ -391,7 +529,7 @@ describe('AgreementService', () => {
 
     it('rejects when share exceeds available pool', async () => {
       const fx = await seedOrgFixture(db);
-      // Active 80% subscription agreement to creator B.
+      // Active 80% subscription agreement to creator B (orgFee=2000).
       await db.insert(schema.creatorOrganizationAgreements).values({
         organizationId: fx.orgId,
         creatorId: fx.creatorBId,
@@ -407,11 +545,11 @@ describe('AgreementService', () => {
         termMonths: 6,
         proposedByUserId: fx.ownerId,
       });
-      // 10% platform + 80% B + 11% creator A counter = 101%.
+      // 80% B + 21% creator A counter = 101% of post-platform pool → fail.
       try {
         await service.counterPropose({
           proposalId: r1.id,
-          sharePercent: 1100,
+          sharePercent: 2100,
           termMonths: 6,
           counteredByUserId: fx.creatorAId,
         });
@@ -571,17 +709,18 @@ describe('AgreementService', () => {
 
     it('re-validates share at accept-time → throws if siblings have moved', async () => {
       const fx = await seedOrgFixture(db);
-      // Propose 50% to creator A.
+      // Propose 60% to creator A.
       const r1 = await service.proposeAgreement({
         organizationId: fx.orgId,
         creatorId: fx.creatorAId,
         revenueType: 'subscription',
-        sharePercent: 5000,
+        sharePercent: 6000,
         termMonths: 6,
         proposedByUserId: fx.ownerId,
       });
-      // Between propose and accept, a 50% agreement lands for creator B.
-      // That eats the remaining headroom (10% platform fee + 50% B + 50% A = 110%).
+      // Between propose and accept, a 50% agreement lands for creator B
+      // (orgFee=5000 → share=5000). Now 50% B + 60% A = 110% of the
+      // post-platform pool — accept-time re-validation must reject.
       await db.insert(schema.creatorOrganizationAgreements).values({
         organizationId: fx.orgId,
         creatorId: fx.creatorBId,
