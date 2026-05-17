@@ -16,7 +16,6 @@ import { closeDbPool, dbHttp, schema } from '@codex/database';
 import {
   authFixture,
   expectErrorResponse,
-  expectForbidden,
   httpClient,
   unwrapApiResponse,
 } from '@codex/test-utils/e2e';
@@ -46,7 +45,7 @@ describe('Admin Dashboard', () => {
     });
 
     test('should reject non-platform-owner users', async () => {
-      // Create a regular creator user (NOT platform owner)
+      // Create a regular creator user (NOT platform owner) with no org
       const creatorEmail = `creator-reject-${Date.now()}@example.com`;
       const { cookie: creatorCookie } = await authFixture.registerUser({
         email: creatorEmail,
@@ -55,7 +54,12 @@ describe('Admin Dashboard', () => {
         role: 'creator',
       });
 
-      // Try to access admin analytics - should fail with 403
+      // Try to access admin analytics with no org context.
+      // The procedure policy is `requireOrgManagement: true` which resolves
+      // an org from URL param / subdomain / query / request body. A creator
+      // with no org context provides none → ValidationError(ORG_CONTEXT_REQUIRED, 400).
+      // This is the documented contract — see packages/worker-utils/src/procedure/helpers.ts
+      // and the matching unit test enforce-policy-inline.test.ts.
       const response = await httpClient.get(
         `${WORKER_URLS.admin}/api/admin/analytics/revenue`,
         {
@@ -63,8 +67,8 @@ describe('Admin Dashboard', () => {
         }
       );
 
-      expect(response.status).toBe(403);
-      await expectForbidden(response);
+      expect(response.status).toBe(400);
+      await expectErrorResponse(response, 'ORG_CONTEXT_REQUIRED', 400);
     });
 
     test('should accept platform_owner user', async () => {
