@@ -104,18 +104,19 @@ export type AgreementIdParamInput = z.infer<typeof agreementIdParamSchema>;
 /**
  * POST /agreements/propose — owner-initiated round 1 proposal.
  *
- * `organizationId` is in the body so the existing `requireOrgMembership`
- * gate in `procedure()` can resolve `ctx.organizationId` from the query
- * fallback path (it already accepts `organizationId` from query OR
- * subdomain). The service then enforces `assertActiveOwner` against the
- * actor — the route layer doesn't re-check ownership.
+ * `organizationId` is NOT in the body — it lives in the query string
+ * (see `proposeAgreementQuerySchema`). Rationale: `procedure()`'s
+ * `resolveOrganizationId()` reads URL params, subdomain, or `?organizationId`
+ * query — NEVER the body. And policy enforcement (Step 1) runs BEFORE
+ * input validation (Step 3), so the body has not been parsed by the time
+ * the org resolver needs the id. Putting orgId in the body silently
+ * 400s with ORG_CONTEXT_REQUIRED on every real request.
+ *
+ * The service then enforces `assertActiveOwner` against the actor — the
+ * route layer doesn't re-check ownership.
  */
 export const proposeAgreementInputSchema = z.object({
-  organizationId: uuidSchema,
-  creatorId: z
-    .string()
-    .min(1, { message: 'creatorId is required' })
-    .max(64, { message: 'creatorId is too long' }),
+  creatorId: uuidSchema,
   revenueType: agreementRevenueTypeEnum,
   sharePercent: sharePercentSchema,
   termMonths: termMonthsSchema,
@@ -128,6 +129,19 @@ export const proposeAgreementInputSchema = z.object({
   effectiveFrom: z.coerce.date().optional(),
 });
 export type ProposeAgreementInput = z.infer<typeof proposeAgreementInputSchema>;
+
+/**
+ * POST /agreements/propose — query string. Carries `organizationId` so
+ * `procedure()`'s membership gate can resolve `ctx.organizationId` from
+ * the query fallback path. See `proposeAgreementInputSchema` doc for the
+ * full reason this can't live in the body.
+ */
+export const proposeAgreementQuerySchema = z.object({
+  organizationId: uuidSchema,
+});
+export type ProposeAgreementQueryInput = z.infer<
+  typeof proposeAgreementQuerySchema
+>;
 
 /**
  * POST /agreements/:proposalId/counter — alternates roles round-by-round.
@@ -194,7 +208,7 @@ export type TerminateAgreementInput = z.infer<
  */
 export const listAgreementsQuerySchema = paginationSchema.extend({
   organizationId: uuidSchema.optional(),
-  creatorId: z.string().min(1).max(64).optional(),
+  creatorId: uuidSchema.optional(),
   revenueType: agreementRevenueTypeEnum.optional(),
 });
 export type ListAgreementsQueryInput = z.infer<
@@ -219,9 +233,6 @@ export type GetNegotiationThreadQueryInput = z.infer<
  * GET /agreements/threads/:creatorId — owner-view thread params.
  */
 export const ownerThreadParamSchema = z.object({
-  creatorId: z
-    .string()
-    .min(1, { message: 'creatorId is required' })
-    .max(64, { message: 'creatorId is too long' }),
+  creatorId: uuidSchema,
 });
 export type OwnerThreadParamInput = z.infer<typeof ownerThreadParamSchema>;

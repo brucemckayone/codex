@@ -54,7 +54,6 @@
 import { NotFoundError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
 import {
-  acceptProposalInputSchema,
   agreementIdParamSchema,
   counterProposeInputSchema,
   declineProposalInputSchema,
@@ -63,8 +62,8 @@ import {
   ownerThreadParamSchema,
   proposalIdParamSchema,
   proposeAgreementInputSchema,
+  proposeAgreementQuerySchema,
   terminateAgreementInputSchema,
-  withdrawProposalInputSchema,
 } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
@@ -74,12 +73,17 @@ const agreements = new Hono<HonoEnv>();
 // ─── Owner-side mutations ─────────────────────────────────────────────────
 
 /**
- * POST /agreements/propose
+ * POST /agreements/propose?organizationId=<uuid>
  *
- * Owner-initiated round 1 proposal. The body carries the target
- * `organizationId` (resolved by `procedure()`'s membership gate into
- * `ctx.organizationId`) and creator / revenue-type / share / term /
- * note. The service enforces:
+ * Owner-initiated round 1 proposal. The target `organizationId` is in
+ * the QUERY STRING (not the body) — `procedure()`'s `resolveOrganizationId`
+ * only reads URL params, subdomain, or query string. Policy enforcement
+ * runs before input validation, so a body-only orgId never reaches the
+ * resolver and the request 400s with `ORG_CONTEXT_REQUIRED`. The body
+ * carries the per-agreement fields: creator / revenue-type / share /
+ * term / note / effectiveFrom.
+ *
+ * The service enforces:
  *   - actor is an active owner of the org (`assertActiveOwner`)
  *   - target user is an active member of the org (`assertActiveMember`)
  *   - no thread is already in flight for the same triple
@@ -92,13 +96,16 @@ agreements.post(
   '/propose',
   procedure({
     policy: { auth: 'required', requireOrgMembership: true },
-    input: { body: proposeAgreementInputSchema },
+    input: {
+      query: proposeAgreementQuerySchema,
+      body: proposeAgreementInputSchema,
+    },
     successStatus: 201,
     handler: async (ctx) => {
-      // Forward `ctx.organizationId` (resolved from membership, not from
-      // the client body) so a client cannot redirect the propose into a
-      // different org by spoofing the body field. This mirrors the
-      // hardening pattern documented in `routes/sales.ts`.
+      // Forward `ctx.organizationId` (resolved from `?organizationId=`
+      // in the query by `procedure()`'s membership gate) so a client
+      // cannot redirect the propose into a different org. This mirrors
+      // the hardening pattern documented in `routes/sales.ts`.
       return await ctx.services.agreements.proposeAgreement({
         organizationId: ctx.organizationId,
         creatorId: ctx.input.body.creatorId,
@@ -153,8 +160,9 @@ agreements.post(
  * (mark accepted → supersede siblings → terminate predecessor active
  * agreement → insert new active row with dual-write of the legacy
  * `organization_fee_percentage` column). Returns the new active
- * `CreatorOrganizationAgreement` row with 200 — this is a state-change
- * verb on an existing resource, not a create.
+ * `CreatorOrganizationAgreement` row with 201 — accepting a proposal
+ * CREATES a new active agreement row + supersedes prior, so the
+ * create-semantic status applies even though the verb is "accept".
  */
 agreements.post(
   '/:proposalId/accept',
@@ -162,8 +170,8 @@ agreements.post(
     policy: { auth: 'required' },
     input: {
       params: proposalIdParamSchema,
-      body: acceptProposalInputSchema,
     },
+    successStatus: 201,
     handler: async (ctx) => {
       return await ctx.services.agreements.acceptProposal({
         proposalId: ctx.input.params.proposalId,
@@ -209,7 +217,6 @@ agreements.post(
     policy: { auth: 'required' },
     input: {
       params: proposalIdParamSchema,
-      body: withdrawProposalInputSchema,
     },
     handler: async (ctx) => {
       return await ctx.services.agreements.withdrawProposal({
@@ -254,9 +261,12 @@ agreements.post(
 /**
  * GET /agreements?organizationId=...
  *
- * Owner-view list of active agreements on the org. The service receives
- * `ctx.organizationId` (resolved from membership, not body) so a forged
- * `organizationId` query param cannot redirect the read to another org.
+ * Owner/admin-view list of active agreements on the org. Gated with
+ * `requireOrgManagement: true` (owner OR admin only) — rank-and-file
+ * members must NOT see peer creator shares. The service receives
+ * `ctx.organizationId` (resolved from membership, not the body) so a
+ * forged `organizationId` query param cannot redirect the read to
+ * another org.
  *
  * Returns a paginated envelope even though the service returns the full
  * list — keeps the contract consistent with every other list endpoint in
@@ -266,7 +276,7 @@ agreements.post(
 agreements.get(
   '/',
   procedure({
-    policy: { auth: 'required', requireOrgMembership: true },
+    policy: { auth: 'required', requireOrgManagement: true },
     input: { query: listAgreementsQuerySchema },
     handler: async (ctx) => {
       const items = await ctx.services.agreements.getActiveAgreements({
@@ -278,6 +288,10 @@ agreements.get(
       const filtered = ctx.input.query.revenueType
         ? items.filter((a) => a.revenueType === ctx.input.query.revenueType)
         : items;
+      // TODO(pagination): proper page+limit support when row counts grow
+      // beyond a single studio-page render. Today the synthetic envelope
+      // returns all rows as one page; the service is the natural place
+      // to push offset/limit when that ceiling is reached.
       return new PaginatedResult(filtered, {
         page: 1,
         limit: filtered.length,
@@ -291,18 +305,20 @@ agreements.get(
 /**
  * GET /agreements/threads/:creatorId?revenueType=...
  *
- * Owner-view negotiation thread for one (creator, revenueType) triple
- * on this org. Returns chronological proposal history — used by the
- * studio settings/revenue-share page to render the negotiation timeline.
+ * Owner/admin-view negotiation thread for one (creator, revenueType)
+ * triple on this org. Returns chronological proposal history — used by
+ * the studio settings/revenue-share page to render the negotiation
+ * timeline.
  *
- * `requireOrgMembership: true` resolves `ctx.organizationId`; the
- * service will fall through with an empty array if no thread exists yet
- * for the triple.
+ * Gated with `requireOrgManagement: true` (owner OR admin only) — same
+ * reasoning as GET /agreements: rank-and-file members must not see peer
+ * negotiation details. The service will fall through with an empty
+ * array if no thread exists yet for the triple.
  */
 agreements.get(
   '/threads/:creatorId',
   procedure({
-    policy: { auth: 'required', requireOrgMembership: true },
+    policy: { auth: 'required', requireOrgManagement: true },
     input: {
       params: ownerThreadParamSchema,
       query: getNegotiationThreadQuerySchema,
@@ -337,15 +353,25 @@ interface CreatorAgreementWithPeers {
   organizationFeePercentage: number;
   currentProposalId: string | null;
   terminatedAt: Date | null;
-  /** Anonymised aggregate of every OTHER active creator on the same org. */
+  /**
+   * Anonymised aggregate of every OTHER active creator in the SAME
+   * (orgId, revenueType) pool. Subscription peers and content_purchase
+   * peers are NEVER combined — they are separate revenue pools per the
+   * locked epic decision Q1 (see `project_revenue_share_decisions.md`).
+   */
   peers: {
     count: number;
     /**
-     * Sum of basis-point shares across peer creators. Computed from
-     * `10000 - organizationFeePercentage` per row (legacy column;
-     * dual-written by `acceptProposal`). When WP-4 swaps the read path
-     * to `current_proposal_id.proposed_creator_share_percent`, this
-     * computation should track.
+     * Sum of basis-point shares across peer creators in this SAME
+     * (orgId, revenueType) pool, 0–10000. Used by the UI to show "your
+     * share vs. the rest of the team in this pool". Per the locked epic
+     * decision Q1, subscription and content_purchase are separate
+     * pools — peers across pools are never aggregated together.
+     *
+     * Computed from `10000 - organizationFeePercentage` per row (legacy
+     * column; dual-written by `acceptProposal`). When WP-4 swaps the
+     * read path to `current_proposal_id.proposed_creator_share_percent`,
+     * this computation should track.
      */
     aggregateSharePercent: number;
   };
@@ -386,7 +412,11 @@ agreements.get(
         new Set(own.map((a) => a.organizationId))
       );
 
-      const peerByOrg = new Map<
+      // Peer aggregate keyed on `(orgId, revenueType)`. Per the locked
+      // epic decision Q1 (`project_revenue_share_decisions.md`),
+      // subscription and content_purchase are SEPARATE revenue pools —
+      // peers must never be aggregated across pools.
+      const peerByOrgAndType = new Map<
         string,
         { count: number; aggregateSharePercent: number }
       >();
@@ -395,23 +425,30 @@ agreements.get(
           const all = await ctx.services.agreements.getActiveAgreements({
             organizationId: orgId,
           });
-          const peers = all.filter((row) => row.creatorId !== ctx.user.id);
-          // The legacy `organization_fee_percentage` column is the
-          // dual-write source of truth for active rows today (per WP-1
-          // discoveries). `share = 10000 - fee`.
-          const aggregate = peers.reduce(
-            (sum, p) => sum + (10000 - p.organizationFeePercentage),
-            0
-          );
-          peerByOrg.set(orgId, {
-            count: peers.length,
-            aggregateSharePercent: aggregate,
-          });
+          for (const revType of ['subscription', 'content_purchase'] as const) {
+            const peersInType = all.filter(
+              (row) =>
+                row.revenueType === revType && row.creatorId !== ctx.user.id
+            );
+            // The legacy `organization_fee_percentage` column is the
+            // dual-write source of truth for active rows today (per WP-1
+            // discoveries). `share = 10000 - fee`.
+            const aggregate = peersInType.reduce(
+              (sum, p) => sum + (10000 - p.organizationFeePercentage),
+              0
+            );
+            peerByOrgAndType.set(`${orgId}:${revType}`, {
+              count: peersInType.length,
+              aggregateSharePercent: aggregate,
+            });
+          }
         })
       );
 
       const enriched: CreatorAgreementWithPeers[] = own.map((row) => {
-        const peers = peerByOrg.get(row.organizationId) ?? {
+        const peers = peerByOrgAndType.get(
+          `${row.organizationId}:${row.revenueType}`
+        ) ?? {
           count: 0,
           aggregateSharePercent: 0,
         };
@@ -473,24 +510,35 @@ agreements.get(
         creatorId: ctx.user.id,
       });
 
-      // Build the candidate set of threads keyed on the (org,
-      // revenueType) pairs the caller participates in. A creator may
-      // have terminated agreements that don't appear in `own` — those
-      // threads remain accessible only if the caller has at least one
-      // surviving active agreement on that org. This is the intended
-      // visibility surface for the negotiations page.
-      for (const agreement of own) {
-        const thread = await ctx.services.agreements.getNegotiationThread({
-          organizationId: agreement.organizationId,
-          creatorId: ctx.user.id,
-          revenueType: agreement.revenueType as
-            | 'subscription'
-            | 'content_purchase',
-        });
-        const match = thread.find((p) => p.id === ctx.input.params.proposalId);
-        if (match) {
-          return thread;
-        }
+      // Parallel fetch: each thread is one DB roundtrip; with M
+      // agreements across orgs this is M parallel queries, not M
+      // sequential. The DB CHECK constraint guarantees `revenueType` is
+      // one of the two enum values, but we runtime-guard before the
+      // narrowing cast so a future schema change surfaces loudly rather
+      // than silently lying to the type system.
+      const candidates = await Promise.all(
+        own.map((a) => {
+          if (
+            a.revenueType !== 'subscription' &&
+            a.revenueType !== 'content_purchase'
+          ) {
+            throw new Error(
+              `Unexpected revenueType on agreement ${a.id}: ${a.revenueType}`
+            );
+          }
+          return ctx.services.agreements.getNegotiationThread({
+            organizationId: a.organizationId,
+            creatorId: ctx.user.id,
+            revenueType: a.revenueType,
+          });
+        })
+      );
+
+      const match = candidates.find((thread) =>
+        thread.some((p) => p.id === ctx.input.params.proposalId)
+      );
+      if (match) {
+        return match;
       }
 
       // Fall through: the caller has no thread containing this

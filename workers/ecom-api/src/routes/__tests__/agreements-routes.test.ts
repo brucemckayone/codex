@@ -58,6 +58,7 @@ interface ProcedureConfig {
   policy?: {
     auth?: string;
     requireOrgMembership?: boolean;
+    requireOrgManagement?: boolean;
     rateLimit?: string;
   };
   input?: {
@@ -101,7 +102,10 @@ vi.mock('@codex/worker-utils', async (importOriginal) => {
 
         const orgRole = c.get('__testOrgRole') as string | undefined;
         const orgId = c.get('__testOrganizationId') as string | undefined;
-        if (config.policy?.requireOrgMembership) {
+        const needsOrg =
+          config.policy?.requireOrgMembership ||
+          config.policy?.requireOrgManagement;
+        if (needsOrg) {
           if (!orgId) {
             return c.json(
               {
@@ -119,6 +123,21 @@ vi.mock('@codex/worker-utils', async (importOriginal) => {
                 error: {
                   code: 'FORBIDDEN',
                   message: 'You are not a member of this organization',
+                },
+              },
+              403
+            );
+          }
+          if (
+            config.policy?.requireOrgManagement &&
+            orgRole !== 'owner' &&
+            orgRole !== 'admin'
+          ) {
+            return c.json(
+              {
+                error: {
+                  code: 'FORBIDDEN',
+                  message: 'Organization management access required',
                 },
               },
               403
@@ -275,14 +294,16 @@ import agreements from '../agreements';
 
 const MANAGED_ORG_ID = '323e4567-e89b-12d3-a456-426614174002';
 const ROGUE_ORG_ID = '999e4567-e89b-12d3-a456-426614174999';
-const TARGET_CREATOR_ID = 'usr_target_creator_001';
-const PEER_CREATOR_ID_1 = 'usr_peer_creator_001';
-const PEER_CREATOR_ID_2 = 'usr_peer_creator_002';
-const OWNER_USER_ID = 'usr_owner_001';
-const CALLER_CREATOR_ID = 'usr_caller_creator_001';
-// Real UUIDs (must pass `z.uuid()` strict regex: version digit [1-8] and
-// variant [89abAB] in the correct positions). All-1s / all-2s placeholders
-// fail Zod v4's UUID format check.
+// User / creator ids — real UUIDs (must pass `z.uuid()` strict regex:
+// version digit [1-8] and variant [89abAB] in the correct positions).
+// `usr_xxx` placeholders fail Zod v4's UUID format check.
+const TARGET_CREATOR_ID = '44444444-4444-4444-9444-444444444444';
+const PEER_CREATOR_ID_1 = '55555555-5555-4555-9555-555555555555';
+const PEER_CREATOR_ID_2 = '66666666-6666-4666-9666-666666666666';
+const OWNER_USER_ID = '77777777-7777-4777-9777-777777777777';
+const ADMIN_USER_ID = '88888888-8888-4888-9888-888888888888';
+const MEMBER_USER_ID = '99999999-9999-4999-9999-999999999999';
+const CALLER_CREATOR_ID = 'aaaaaaaa-aaaa-4aaa-9aaa-aaaaaaaaaaaa';
 const PROPOSAL_ID = '11111111-1111-4111-9111-111111111111';
 const AGREEMENT_ID = '22222222-2222-4222-9222-222222222222';
 
@@ -472,21 +493,31 @@ function getReq(path: string): Request {
 describe('POST /agreements/propose — owner-side mutation', () => {
   beforeEach(() => vi.clearAllMocks());
 
+  // NOTE: The route resolves `organizationId` from the QUERY STRING, not
+  // the body. The real `procedure()` framework's `resolveOrganizationId`
+  // (packages/worker-utils/src/procedure/helpers.ts:317-360) reads URL
+  // params, subdomain, or query — NEVER body — and policy enforcement
+  // (Step 1) runs BEFORE input validation (Step 3), so a body-only
+  // orgId never reaches the resolver and would 400 ORG_CONTEXT_REQUIRED
+  // in production. The mocked procedure stub above injects
+  // `ctx.organizationId` directly via `__testOrganizationId`, so these
+  // tests confirm the handler-side contract (forward ctx.organizationId
+  // to the service). The query-string placement is asserted indirectly
+  // via the schema-level body test ("body must NOT carry organizationId")
+  // below.
   const validBody = {
-    organizationId: MANAGED_ORG_ID,
     creatorId: TARGET_CREATOR_ID,
     revenueType: 'subscription',
     sharePercent: 3000,
     termMonths: 12,
     note: 'Initial proposal',
   };
+  const proposePath = `/agreements/propose?organizationId=${MANAGED_ORG_ID}`;
 
-  it('positive: owner POST with valid body → 201, service called with ctx.organizationId', async () => {
+  it('positive: owner POST with valid body + query orgId → 201, service called with ctx.organizationId', async () => {
     const services = { agreements: createAgreementServiceMock() };
     const bundle = buildApp({ services });
-    const res = await bundle.app.request(
-      postReq('/agreements/propose', validBody)
-    );
+    const res = await bundle.app.request(postReq(proposePath, validBody));
     expect(res.status).toBe(201);
     expect(services.agreements.proposeAgreement).toHaveBeenCalledTimes(1);
     const [arg] = services.agreements.proposeAgreement.mock.calls[0]!;
@@ -498,17 +529,18 @@ describe('POST /agreements/propose — owner-side mutation', () => {
     );
   });
 
-  it('cross-org safety: ctx.organizationId wins over body.organizationId', async () => {
+  it('cross-org safety: ctx.organizationId (from query resolver) wins, body never carries orgId', async () => {
     const services = { agreements: createAgreementServiceMock() };
     const bundle = buildApp({ services });
-    // Client sends a different org id in the body; the route MUST
-    // forward `ctx.organizationId` (resolved from membership) to the
-    // service.
+    // Even if a client smuggles `organizationId` into the body (which
+    // the schema now rejects, but procedure body-strip would also drop),
+    // the route MUST forward `ctx.organizationId` (resolved from
+    // query/subdomain by `procedure()`) to the service.
     const res = await bundle.app.request(
-      postReq('/agreements/propose', {
+      postReq(proposePath, {
         ...validBody,
         organizationId: ROGUE_ORG_ID,
-      })
+      } as unknown as typeof validBody)
     );
     expect(res.status).toBe(201);
     const [arg] = services.agreements.proposeAgreement.mock.calls[0]!;
@@ -523,9 +555,7 @@ describe('POST /agreements/propose — owner-side mutation', () => {
   it('negative auth: no session → 401, service NOT called', async () => {
     const services = { agreements: createAgreementServiceMock() };
     const bundle = buildApp({ user: null, services });
-    const res = await bundle.app.request(
-      postReq('/agreements/propose', validBody)
-    );
+    const res = await bundle.app.request(postReq(proposePath, validBody));
     expect(res.status).toBe(401);
     expect(services.agreements.proposeAgreement).not.toHaveBeenCalled();
   });
@@ -533,9 +563,7 @@ describe('POST /agreements/propose — owner-side mutation', () => {
   it('negative authz: non-member on the org → 403, service NOT called', async () => {
     const services = { agreements: createAgreementServiceMock() };
     const bundle = buildApp({ orgRole: null, services });
-    const res = await bundle.app.request(
-      postReq('/agreements/propose', validBody)
-    );
+    const res = await bundle.app.request(postReq(proposePath, validBody));
     expect(res.status).toBe(403);
     expect(services.agreements.proposeAgreement).not.toHaveBeenCalled();
   });
@@ -544,7 +572,7 @@ describe('POST /agreements/propose — owner-side mutation', () => {
     const services = { agreements: createAgreementServiceMock() };
     const bundle = buildApp({ services });
     const res = await bundle.app.request(
-      postReq('/agreements/propose', { ...validBody, sharePercent: 15000 })
+      postReq(proposePath, { ...validBody, sharePercent: 15000 })
     );
     expect(res.status).toBe(400);
     expect(services.agreements.proposeAgreement).not.toHaveBeenCalled();
@@ -554,7 +582,7 @@ describe('POST /agreements/propose — owner-side mutation', () => {
     const services = { agreements: createAgreementServiceMock() };
     const bundle = buildApp({ services });
     const res = await bundle.app.request(
-      postReq('/agreements/propose', { ...validBody, sharePercent: -1 })
+      postReq(proposePath, { ...validBody, sharePercent: -1 })
     );
     expect(res.status).toBe(400);
     expect(services.agreements.proposeAgreement).not.toHaveBeenCalled();
@@ -564,7 +592,7 @@ describe('POST /agreements/propose — owner-side mutation', () => {
     const services = { agreements: createAgreementServiceMock() };
     const bundle = buildApp({ services });
     const res = await bundle.app.request(
-      postReq('/agreements/propose', { ...validBody, termMonths: 0 })
+      postReq(proposePath, { ...validBody, termMonths: 0 })
     );
     expect(res.status).toBe(400);
     expect(services.agreements.proposeAgreement).not.toHaveBeenCalled();
@@ -574,7 +602,7 @@ describe('POST /agreements/propose — owner-side mutation', () => {
     const services = { agreements: createAgreementServiceMock() };
     const bundle = buildApp({ services });
     const res = await bundle.app.request(
-      postReq('/agreements/propose', {
+      postReq(proposePath, {
         ...validBody,
         revenueType: 'nonsense',
       })
@@ -587,8 +615,19 @@ describe('POST /agreements/propose — owner-side mutation', () => {
     const services = { agreements: createAgreementServiceMock() };
     const bundle = buildApp({ services });
     const { creatorId: _omitted, ...incomplete } = validBody;
+    const res = await bundle.app.request(postReq(proposePath, incomplete));
+    expect(res.status).toBe(400);
+    expect(services.agreements.proposeAgreement).not.toHaveBeenCalled();
+  });
+
+  it('negative validation: non-UUID creatorId → 400, service NOT called', async () => {
+    // Hardening: creatorId is uuidSchema, not arbitrary string. A
+    // placeholder like `usr_xxx` no longer passes — caller must use a
+    // real UUID matching BetterAuth's user.id format.
+    const services = { agreements: createAgreementServiceMock() };
+    const bundle = buildApp({ services });
     const res = await bundle.app.request(
-      postReq('/agreements/propose', incomplete)
+      postReq(proposePath, { ...validBody, creatorId: 'usr_not_a_uuid' })
     );
     expect(res.status).toBe(400);
     expect(services.agreements.proposeAgreement).not.toHaveBeenCalled();
@@ -602,9 +641,7 @@ describe('POST /agreements/propose — owner-side mutation', () => {
       })
     );
     const bundle = buildApp({ services });
-    const res = await bundle.app.request(
-      postReq('/agreements/propose', validBody)
-    );
+    const res = await bundle.app.request(postReq(proposePath, validBody));
     expect(res.status).toBe(422);
     const payload = (await res.json()) as { error?: { code?: string } };
     // Per feedback_not_found_error_name_minification — assert err.code
@@ -617,7 +654,7 @@ describe('POST /agreements/propose — owner-side mutation', () => {
 describe('POST /agreements/:proposalId/accept — counterparty mutation', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('positive: counterparty creator POST → 200, service called with proposalId + acceptedByUserId', async () => {
+  it('positive: counterparty creator POST → 201 (create semantic: new active agreement row), service called with proposalId + acceptedByUserId', async () => {
     const services = { agreements: createAgreementServiceMock() };
     const bundle = buildApp({
       services,
@@ -626,7 +663,10 @@ describe('POST /agreements/:proposalId/accept — counterparty mutation', () => 
     const res = await bundle.app.request(
       postReq(`/agreements/${PROPOSAL_ID}/accept`, {})
     );
-    expect(res.status).toBe(200);
+    // Accepting a proposal creates a new active agreement row + supersedes
+    // prior. 201 reflects the new resource (per HTTP semantics + the
+    // worker's rest of POST-create endpoints).
+    expect(res.status).toBe(201);
     expect(services.agreements.acceptProposal).toHaveBeenCalledTimes(1);
     const [arg] = services.agreements.acceptProposal.mock.calls[0]!;
     expect((arg as { proposalId: string }).proposalId).toBe(PROPOSAL_ID);
@@ -974,6 +1014,35 @@ describe('GET /agreements — owner-view list', () => {
     expect(services.agreements.getActiveAgreements).not.toHaveBeenCalled();
   });
 
+  it('negative authz: rank-and-file member on the org → 403 (requireOrgManagement), service NOT called', async () => {
+    // Defence-in-depth: a regular member of the org can still leak
+    // every peer creator's share percent if this endpoint only gates
+    // on `requireOrgMembership`. The route uses `requireOrgManagement`
+    // (owner OR admin only) — this test guards against a regression
+    // back to the broader gate.
+    const services = { agreements: createAgreementServiceMock() };
+    const bundle = buildApp({
+      orgRole: 'member',
+      services,
+      user: { id: MEMBER_USER_ID },
+    });
+    const res = await bundle.app.request(getReq('/agreements'));
+    expect(res.status).toBe(403);
+    expect(services.agreements.getActiveAgreements).not.toHaveBeenCalled();
+  });
+
+  it('positive authz: admin role on the org → 200 (requireOrgManagement allows admin)', async () => {
+    const services = { agreements: createAgreementServiceMock() };
+    const bundle = buildApp({
+      orgRole: 'admin',
+      services,
+      user: { id: ADMIN_USER_ID },
+    });
+    const res = await bundle.app.request(getReq('/agreements'));
+    expect(res.status).toBe(200);
+    expect(services.agreements.getActiveAgreements).toHaveBeenCalledTimes(1);
+  });
+
   it('negative validation: invalid revenueType query → 400', async () => {
     const services = { agreements: createAgreementServiceMock() };
     const bundle = buildApp({ services });
@@ -990,7 +1059,7 @@ describe('GET /agreements — owner-view list', () => {
 describe('GET /agreements/me — creator-view portfolio (ANONYMISATION CONTRACT)', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('positive: creator GET → 200, response includes peers aggregate ONLY (no peer ids)', async () => {
+  it('positive: creator GET → 200, response includes peers aggregate ONLY (no peer ids) AND aggregates only within the SAME (orgId, revenueType) pool', async () => {
     const services = { agreements: createAgreementServiceMock() };
     const bundle = buildApp({
       services,
@@ -1002,6 +1071,7 @@ describe('GET /agreements/me — creator-view portfolio (ANONYMISATION CONTRACT)
     const payload = (await res.json()) as {
       items: Array<{
         creatorId: string;
+        revenueType: string;
         peers: { count: number; aggregateSharePercent: number };
       }>;
     };
@@ -1011,16 +1081,136 @@ describe('GET /agreements/me — creator-view portfolio (ANONYMISATION CONTRACT)
     // Caller's own row: their own creatorId IS allowed (they are
     // looking at their own slice).
     expect(row.creatorId).toBe(CALLER_CREATOR_ID);
+    expect(row.revenueType).toBe('subscription');
 
-    // Peers aggregate: 2 other active creators on the org.
-    // PEER_CREATOR_ID_1 has share = 10000 - 8000 = 2000 (subscription)
-    // PEER_CREATOR_ID_2 has share = 10000 - 9000 = 1000 (content_purchase)
-    expect(row.peers.count).toBe(2);
-    expect(row.peers.aggregateSharePercent).toBe(3000);
+    // Per the locked epic decision Q1 (project_revenue_share_decisions.md),
+    // subscription and content_purchase are SEPARATE pools. The fixture
+    // has 1 subscription peer (PEER_1, share = 10000 - 8000 = 2000) and
+    // 1 content_purchase peer (PEER_2, share = 10000 - 9000 = 1000).
+    // The caller's subscription row must show ONLY the subscription
+    // peer (count=1, aggregate=2000) — the content_purchase peer is in
+    // a different pool and must NOT contribute.
+    expect(row.peers.count).toBe(1);
+    expect(row.peers.aggregateSharePercent).toBe(2000);
 
     // The load-bearing invariant: NO peer identifying fields appear
     // anywhere in the serialised response. Grep the entire body for
     // each peer's userId.
+    const bodyText = JSON.stringify(payload);
+    expect(bodyText).not.toContain(PEER_CREATOR_ID_1);
+    expect(bodyText).not.toContain(PEER_CREATOR_ID_2);
+  });
+
+  it('cross-type isolation: caller with BOTH subscription AND content_purchase agreements sees per-pool peers only', async () => {
+    const services = { agreements: createAgreementServiceMock() };
+    // Caller has BOTH a subscription AND a content_purchase agreement
+    // on the same org. Each row must see ONLY peers in the same pool.
+    services.agreements.getActiveAgreementsForCreator.mockResolvedValue([
+      {
+        id: 'agr_caller_sub',
+        organizationId: MANAGED_ORG_ID,
+        creatorId: CALLER_CREATOR_ID,
+        revenueType: 'subscription',
+        status: 'active',
+        organizationFeePercentage: 7000, // share = 3000
+        currentProposalId: PROPOSAL_ID,
+        terminatedAt: null,
+        effectiveFrom: new Date('2026-01-01'),
+        effectiveUntil: null,
+      },
+      {
+        id: 'agr_caller_cp',
+        organizationId: MANAGED_ORG_ID,
+        creatorId: CALLER_CREATOR_ID,
+        revenueType: 'content_purchase',
+        status: 'active',
+        organizationFeePercentage: 6000, // share = 4000
+        currentProposalId: 'prop_caller_cp',
+        terminatedAt: null,
+        effectiveFrom: new Date('2026-01-02'),
+        effectiveUntil: null,
+      },
+    ]);
+    // Org-wide rows: caller's two + one peer in each pool.
+    services.agreements.getActiveAgreements.mockResolvedValue([
+      {
+        id: 'agr_caller_sub',
+        organizationId: MANAGED_ORG_ID,
+        creatorId: CALLER_CREATOR_ID,
+        revenueType: 'subscription',
+        status: 'active',
+        organizationFeePercentage: 7000,
+        currentProposalId: PROPOSAL_ID,
+        terminatedAt: null,
+        effectiveFrom: new Date('2026-01-01'),
+        effectiveUntil: null,
+      },
+      {
+        id: 'agr_caller_cp',
+        organizationId: MANAGED_ORG_ID,
+        creatorId: CALLER_CREATOR_ID,
+        revenueType: 'content_purchase',
+        status: 'active',
+        organizationFeePercentage: 6000,
+        currentProposalId: 'prop_caller_cp',
+        terminatedAt: null,
+        effectiveFrom: new Date('2026-01-02'),
+        effectiveUntil: null,
+      },
+      {
+        id: 'agr_peer_sub',
+        organizationId: MANAGED_ORG_ID,
+        creatorId: PEER_CREATOR_ID_1,
+        revenueType: 'subscription',
+        status: 'active',
+        organizationFeePercentage: 8000, // share = 2000
+        currentProposalId: 'prop_peer_sub',
+        terminatedAt: null,
+        effectiveFrom: new Date('2026-01-03'),
+        effectiveUntil: null,
+      },
+      {
+        id: 'agr_peer_cp',
+        organizationId: MANAGED_ORG_ID,
+        creatorId: PEER_CREATOR_ID_2,
+        revenueType: 'content_purchase',
+        status: 'active',
+        organizationFeePercentage: 9000, // share = 1000
+        currentProposalId: 'prop_peer_cp',
+        terminatedAt: null,
+        effectiveFrom: new Date('2026-01-04'),
+        effectiveUntil: null,
+      },
+    ]);
+    const bundle = buildApp({
+      services,
+      user: { id: CALLER_CREATOR_ID },
+    });
+    const res = await bundle.app.request(getReq('/agreements/me'));
+    expect(res.status).toBe(200);
+
+    const payload = (await res.json()) as {
+      items: Array<{
+        revenueType: string;
+        peers: { count: number; aggregateSharePercent: number };
+      }>;
+    };
+    expect(payload.items).toHaveLength(2);
+
+    const sub = payload.items.find((r) => r.revenueType === 'subscription');
+    const cp = payload.items.find((r) => r.revenueType === 'content_purchase');
+    expect(sub).toBeDefined();
+    expect(cp).toBeDefined();
+
+    // Subscription row sees ONLY the subscription peer (share=2000).
+    expect(sub!.peers.count).toBe(1);
+    expect(sub!.peers.aggregateSharePercent).toBe(2000);
+
+    // Content-purchase row sees ONLY the content-purchase peer (share=1000).
+    expect(cp!.peers.count).toBe(1);
+    expect(cp!.peers.aggregateSharePercent).toBe(1000);
+
+    // Anonymisation still holds.
     const bodyText = JSON.stringify(payload);
     expect(bodyText).not.toContain(PEER_CREATOR_ID_1);
     expect(bodyText).not.toContain(PEER_CREATOR_ID_2);
@@ -1112,6 +1302,40 @@ describe('GET /agreements/threads/:creatorId — owner-view negotiation thread',
     );
     expect(res.status).toBe(403);
     expect(services.agreements.getNegotiationThread).not.toHaveBeenCalled();
+  });
+
+  it('negative authz: rank-and-file member → 403 (requireOrgManagement), service NOT called', async () => {
+    // Same defence-in-depth pin as GET /agreements: a regular org
+    // member cannot view peer-creator negotiation threads.
+    const services = { agreements: createAgreementServiceMock() };
+    const bundle = buildApp({
+      orgRole: 'member',
+      services,
+      user: { id: MEMBER_USER_ID },
+    });
+    const res = await bundle.app.request(
+      getReq(
+        `/agreements/threads/${TARGET_CREATOR_ID}?revenueType=subscription`
+      )
+    );
+    expect(res.status).toBe(403);
+    expect(services.agreements.getNegotiationThread).not.toHaveBeenCalled();
+  });
+
+  it('positive authz: admin role → 200 (requireOrgManagement allows admin)', async () => {
+    const services = { agreements: createAgreementServiceMock() };
+    const bundle = buildApp({
+      orgRole: 'admin',
+      services,
+      user: { id: ADMIN_USER_ID },
+    });
+    const res = await bundle.app.request(
+      getReq(
+        `/agreements/threads/${TARGET_CREATOR_ID}?revenueType=subscription`
+      )
+    );
+    expect(res.status).toBe(200);
+    expect(services.agreements.getNegotiationThread).toHaveBeenCalledTimes(1);
   });
 
   it('negative validation: missing revenueType → 400', async () => {
