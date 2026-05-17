@@ -264,10 +264,10 @@ describe('FilterDrawer — desktop (default jsdom matchMedia)', () => {
 
 describe('FilterDrawer — mobile (matchMedia matches)', () => {
   let component: ReturnType<typeof mount> | null = null;
-  let mq: ReturnType<typeof stubMatchMedia>;
+  let _mq: ReturnType<typeof stubMatchMedia>;
 
   beforeEach(() => {
-    mq = stubMatchMedia(true);
+    _mq = stubMatchMedia(true);
   });
 
   afterEach(() => {
