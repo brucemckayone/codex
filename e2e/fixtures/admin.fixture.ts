@@ -135,12 +135,20 @@ export const adminFixture = {
 
   /**
    * GET /api/admin/analytics/revenue
+   *
+   * Admin-api routes are gated by `requireOrgMembership` + `requireOrgManagement`
+   * with `auth: 'required'` (not `auth: 'platform_owner'`), so the procedure
+   * does NOT auto-resolve the org from the platform_owner user. The fixture
+   * must pass `organizationId` explicitly via query string — that's the
+   * supported resolver path for routes without a UUID URL param.
    */
   async getRevenueStats(
     cookie: string,
+    organizationId: string,
     params?: { startDate?: string; endDate?: string }
   ): Promise<RevenueStats> {
     const url = new URL(`${WORKER_URLS.admin}/api/admin/analytics/revenue`);
+    url.searchParams.set('organizationId', organizationId);
     if (params?.startDate) url.searchParams.set('startDate', params.startDate);
     if (params?.endDate) url.searchParams.set('endDate', params.endDate);
 
@@ -163,16 +171,18 @@ export const adminFixture = {
   /**
    * GET /api/admin/analytics/customers
    */
-  async getCustomerStats(cookie: string): Promise<CustomerStats> {
-    const response = await httpClient.get(
-      `${WORKER_URLS.admin}/api/admin/analytics/customers`,
-      {
-        headers: {
-          Cookie: cookie,
-          Origin: WORKER_URLS.admin,
-        },
-      }
-    );
+  async getCustomerStats(
+    cookie: string,
+    organizationId: string
+  ): Promise<CustomerStats> {
+    const url = new URL(`${WORKER_URLS.admin}/api/admin/analytics/customers`);
+    url.searchParams.set('organizationId', organizationId);
+    const response = await httpClient.get(url.toString(), {
+      headers: {
+        Cookie: cookie,
+        Origin: WORKER_URLS.admin,
+      },
+    });
 
     if (!response.ok) {
       const error = await response.text();
@@ -189,9 +199,11 @@ export const adminFixture = {
    */
   async getTopContent(
     cookie: string,
+    organizationId: string,
     limit?: number
   ): Promise<TopContentItem[]> {
     const url = new URL(`${WORKER_URLS.admin}/api/admin/analytics/top-content`);
+    url.searchParams.set('organizationId', organizationId);
     if (limit) url.searchParams.set('limit', limit.toString());
 
     const response = await httpClient.get(url.toString(), {
@@ -220,9 +232,11 @@ export const adminFixture = {
    */
   async listAllContent(
     cookie: string,
+    organizationId: string,
     params?: { page?: number; limit?: number; status?: string }
   ): Promise<AdminPaginatedResponse<AdminContentItem>> {
     const url = new URL(`${WORKER_URLS.admin}/api/admin/content`);
+    url.searchParams.set('organizationId', organizationId);
     if (params?.page) url.searchParams.set('page', params.page.toString());
     if (params?.limit) url.searchParams.set('limit', params.limit.toString());
     if (params?.status) url.searchParams.set('status', params.status);
@@ -326,9 +340,11 @@ export const adminFixture = {
    */
   async listCustomers(
     cookie: string,
+    organizationId: string,
     params?: { page?: number; limit?: number }
   ): Promise<AdminPaginatedResponse<CustomerWithStats>> {
     const url = new URL(`${WORKER_URLS.admin}/api/admin/customers`);
+    url.searchParams.set('organizationId', organizationId);
     if (params?.page) url.searchParams.set('page', params.page.toString());
     if (params?.limit) url.searchParams.set('limit', params.limit.toString());
 
@@ -350,20 +366,26 @@ export const adminFixture = {
 
   /**
    * GET /api/admin/customers/:id
+   *
+   * The `:id` route param holds a Better Auth user ID (alphanumeric, not a
+   * UUID) so the resolver's param-UUID path falls through and we provide
+   * orgId via query — the supported resolver path for non-UUID `:id` routes.
    */
   async getCustomerDetails(
     cookie: string,
+    organizationId: string,
     customerId: string
   ): Promise<CustomerDetails> {
-    const response = await httpClient.get(
-      `${WORKER_URLS.admin}/api/admin/customers/${customerId}`,
-      {
-        headers: {
-          Cookie: cookie,
-          Origin: WORKER_URLS.admin,
-        },
-      }
+    const url = new URL(
+      `${WORKER_URLS.admin}/api/admin/customers/${customerId}`
     );
+    url.searchParams.set('organizationId', organizationId);
+    const response = await httpClient.get(url.toString(), {
+      headers: {
+        Cookie: cookie,
+        Origin: WORKER_URLS.admin,
+      },
+    });
 
     if (!response.ok) {
       const error = await response.text();
@@ -378,21 +400,26 @@ export const adminFixture = {
 
   /**
    * POST /api/admin/customers/:customerId/grant-access/:contentId
+   *
+   * Named route params (`customerId`, `contentId`) don't match the resolver's
+   * `id || orgId || organizationId` lookup, so org must come from query.
    */
   async grantContentAccess(
     cookie: string,
+    organizationId: string,
     customerId: string,
     contentId: string
   ): Promise<boolean> {
-    const response = await httpClient.post(
-      `${WORKER_URLS.admin}/api/admin/customers/${customerId}/grant-access/${contentId}`,
-      {
-        headers: {
-          Cookie: cookie,
-          Origin: WORKER_URLS.admin,
-        },
-      }
+    const url = new URL(
+      `${WORKER_URLS.admin}/api/admin/customers/${customerId}/grant-access/${contentId}`
     );
+    url.searchParams.set('organizationId', organizationId);
+    const response = await httpClient.post(url.toString(), {
+      headers: {
+        Cookie: cookie,
+        Origin: WORKER_URLS.admin,
+      },
+    });
 
     if (!response.ok) {
       const error = await response.text();
