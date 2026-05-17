@@ -226,7 +226,11 @@ describe('ObservabilityClient', () => {
       const loggedData = JSON.parse(
         consoleSpy.info.mock.calls[0]?.[0] as string
       );
-      expect(loggedData.metadata.password).toBe('[REDACTED]');
+      // Production uses hash mode (per packages/observability/CLAUDE.md):
+      // sensitive values are replaced with `hash:<sha256-prefix>` so they're
+      // correlatable across logs without exposing the original.
+      expect(loggedData.metadata.password).toMatch(/^hash:[0-9a-f]+$/);
+      expect(loggedData.metadata.password).not.toContain('secret123');
       expect(loggedData.metadata.username).toBe('john');
     });
   });
@@ -255,8 +259,10 @@ describe('ObservabilityClient', () => {
       const loggedData = JSON.parse(
         consoleSpy.info.mock.calls[0]?.[0] as string
       );
-      // Production uses hash mode - completely redacted
-      expect(loggedData.metadata.apiKey).toBe('[REDACTED]');
+      // Production hash mode: SHA-256 hash prefix replaces the secret so
+      // operators can correlate occurrences without ever seeing the raw key.
+      expect(loggedData.metadata.apiKey).toMatch(/^hash:[0-9a-f]+$/);
+      expect(loggedData.metadata.apiKey).not.toContain('sk_live_');
     });
   });
 
