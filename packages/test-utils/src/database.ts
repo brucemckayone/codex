@@ -186,19 +186,23 @@ export function setupTestDatabase(): Database {
  *
  * Deletion order (respects foreign keys):
  * 1. video_playback (references content, users)
- * 2. purchases (references content, users, organizations)
- * 3. content_access (references content, users, organizations)
- * 4. creator_organization_agreements (references users, organizations)
- * 5. organization_platform_agreements (references organizations)
- * 6. content (references media_items, organizations, users)
- * 7. media_items (references users)
- * 8. organizations (no foreign keys from other content tables)
+ * 2. refund_reviews (references purchases, payouts, users — restrict)
+ * 3. payouts (references organizations, users, subscriptions, purchases)
+ * 4. purchases (references content, users, organizations)
+ * 5. content_access (references content, users, organizations)
+ * 6. creator_organization_agreements (references users, organizations)
+ * 7. organization_platform_agreements (references organizations)
+ * 8. content (references media_items, organizations, users)
+ * 9. media_items (references users)
+ * 10. organizations (no foreign keys from other content tables)
  *
  * @param db - Database client
  */
 export async function cleanupDatabase(db: Database): Promise<void> {
   // Delete in order that respects foreign key constraints
   await db.delete(schema.videoPlayback);
+  await db.delete(schema.refundReviews);
+  await db.delete(schema.payouts);
   await db.delete(schema.purchases);
   await db.delete(schema.contentAccess);
   await db.delete(schema.creatorOrganizationAgreements);
@@ -220,6 +224,8 @@ export async function cleanupDatabase(db: Database): Promise<void> {
 export async function cleanupDatabaseComplete(db: Database): Promise<void> {
   // Delete in order that respects foreign key constraints
   await db.delete(schema.videoPlayback);
+  await db.delete(schema.refundReviews);
+  await db.delete(schema.payouts);
   await db.delete(schema.purchases);
   await db.delete(schema.contentAccess);
   await db.delete(schema.creatorOrganizationAgreements);
