@@ -343,6 +343,13 @@ describe('response schemas', () => {
         fontHeading: null,
         radiusValue: 0.5,
         densityValue: 1,
+        introVideoMediaItemId: null,
+        introVideoUrl: null,
+        tokenOverrides: null,
+        darkModeOverrides: null,
+        darkTokenOverrides: null,
+        heroLayout: 'default',
+        pricingFaq: null,
       };
       expect(brandingSettingsSchema.parse(valid)).toEqual(valid);
     });
@@ -358,6 +365,13 @@ describe('response schemas', () => {
         fontHeading: null,
         radiusValue: 0.5,
         densityValue: 1,
+        introVideoMediaItemId: null,
+        introVideoUrl: null,
+        tokenOverrides: null,
+        darkModeOverrides: null,
+        darkTokenOverrides: null,
+        heroLayout: 'default',
+        pricingFaq: null,
       };
       expect(brandingSettingsSchema.parse(valid)).toEqual(valid);
     });
@@ -387,7 +401,11 @@ describe('response schemas', () => {
 
   describe('featureSettingsSchema', () => {
     it('should validate feature response shape', () => {
-      const valid = { enableSignups: true, enablePurchases: true };
+      const valid = {
+        enableSignups: true,
+        enablePurchases: true,
+        enableSubscriptions: true,
+      };
       expect(featureSettingsSchema.parse(valid)).toEqual(valid);
     });
   });
@@ -405,6 +423,13 @@ describe('response schemas', () => {
           fontHeading: null,
           radiusValue: 0.5,
           densityValue: 1,
+          introVideoMediaItemId: null,
+          introVideoUrl: null,
+          tokenOverrides: null,
+          darkModeOverrides: null,
+          darkTokenOverrides: null,
+          heroLayout: 'default',
+          pricingFaq: null,
         },
         contact: {
           platformName: 'Test',
@@ -412,7 +437,11 @@ describe('response schemas', () => {
           contactUrl: null,
           timezone: 'UTC',
         },
-        features: { enableSignups: true, enablePurchases: true },
+        features: {
+          enableSignups: true,
+          enablePurchases: true,
+          enableSubscriptions: true,
+        },
       };
       expect(allSettingsSchema.parse(valid)).toEqual(valid);
     });
@@ -464,6 +493,7 @@ describe('default constants', () => {
     expect(DEFAULT_FEATURES).toEqual({
       enableSignups: true,
       enablePurchases: true,
+      enableSubscriptions: false,
     });
     expect(featureSettingsSchema.parse(DEFAULT_FEATURES)).toEqual(
       DEFAULT_FEATURES
