@@ -84,7 +84,7 @@ describe('ContentService', () => {
           description: 'Test description',
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -101,7 +101,7 @@ describe('ContentService', () => {
         expect(result.contentType).toBe('video');
         expect(result.mediaItemId).toBe(media.id);
         expect(result.status).toBe('draft'); // Always starts as draft
-        expect(result.visibility).toBe('public');
+        expect(result.accessType).toBe('free');
         expect(result.priceCents).toBe(0);
         expect(result.publishedAt).toBeNull();
         expect(result.viewCount).toBe(0);
@@ -126,7 +126,7 @@ describe('ContentService', () => {
           description: 'Test audio',
           contentType: 'audio',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -147,7 +147,7 @@ describe('ContentService', () => {
           description: 'Test written content',
           contentType: 'written',
           contentBody: 'This is the written content body.',
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -184,7 +184,7 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -213,7 +213,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('personal'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -244,7 +244,7 @@ describe('ContentService', () => {
           mediaItemId: media.id,
           category: 'tutorials',
           tags: ['vitest', 'testing', 'typescript'],
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
         };
 
@@ -256,7 +256,7 @@ describe('ContentService', () => {
         expect(result.tags).toEqual(['vitest', 'testing', 'typescript']);
       });
 
-      it('should create paid content with purchased_only visibility', async () => {
+      it('should create paid content with paid accessType', async () => {
         // Arrange
         const [media] = await db
           .insert(mediaItems)
@@ -273,7 +273,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('paid'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 999, // $9.99
           tags: [],
         };
@@ -282,7 +282,7 @@ describe('ContentService', () => {
         const result = await service.create(input, creatorId);
 
         // Assert
-        expect(result.visibility).toBe('purchased_only');
+        expect(result.accessType).toBe('paid');
         expect(result.priceCents).toBe(999);
       });
     });
@@ -295,7 +295,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('test'),
           contentType: 'video',
           mediaItemId: '00000000-0000-0000-0000-000000000000', // Non-existent
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -323,7 +323,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('test'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -351,7 +351,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('test'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -382,7 +382,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('test'),
           contentType: 'video', // Mismatch: video content with audio media
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -410,7 +410,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('test'),
           contentType: 'audio', // Mismatch: audio content with video media
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -441,7 +441,7 @@ describe('ContentService', () => {
           slug,
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -454,7 +454,7 @@ describe('ContentService', () => {
           slug, // Same slug
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -488,7 +488,7 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -502,7 +502,7 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org.id, // Same org
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -543,7 +543,7 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org1.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -554,7 +554,7 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org2.id, // Different org
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -594,7 +594,7 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           // No organizationId = personal
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -606,7 +606,7 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: org.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         };
@@ -641,7 +641,7 @@ describe('ContentService', () => {
         slug: createUniqueSlug('get-test'),
         contentType: 'video',
         mediaItemId: media.id,
-        visibility: 'public',
+        accessType: 'free',
         priceCents: 0,
         tags: [],
       };
@@ -687,7 +687,7 @@ describe('ContentService', () => {
         slug: createUniqueSlug('other'),
         contentType: 'video',
         mediaItemId: media.id,
-        visibility: 'public',
+        accessType: 'free',
         priceCents: 0,
         tags: [],
       };
@@ -718,7 +718,7 @@ describe('ContentService', () => {
         slug: createUniqueSlug('delete'),
         contentType: 'video',
         mediaItemId: media.id,
-        visibility: 'public',
+        accessType: 'free',
         priceCents: 0,
         tags: [],
       };
@@ -752,7 +752,7 @@ describe('ContentService', () => {
         slug: createUniqueSlug('update'),
         contentType: 'video',
         mediaItemId: media.id,
-        visibility: 'public',
+        accessType: 'free',
         priceCents: 0,
         tags: [],
       };
@@ -792,7 +792,7 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           description: 'Old description',
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         },
@@ -810,7 +810,7 @@ describe('ContentService', () => {
       expect(updated.description).toBe('New description');
     });
 
-    it('should update content visibility and price', async () => {
+    it('should update content accessType and price', async () => {
       // Arrange
       const [media] = await db
         .insert(mediaItems)
@@ -828,7 +828,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('price'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         },
@@ -839,14 +839,14 @@ describe('ContentService', () => {
       const updated = await service.update(
         created.id,
         {
-          visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 1999, // $19.99
         },
         creatorId
       );
 
       // Assert
-      expect(updated.visibility).toBe('purchased_only');
+      expect(updated.accessType).toBe('paid');
       expect(updated.priceCents).toBe(1999);
     });
 
@@ -879,7 +879,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('other'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         },
@@ -912,7 +912,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('publish'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         },
@@ -948,7 +948,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('idempotent'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         },
@@ -989,7 +989,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('not-ready'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         },
@@ -1016,7 +1016,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('written'),
           contentType: 'written',
           contentBody: 'Content body',
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         },
@@ -1051,7 +1051,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('unpublish'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         },
@@ -1096,7 +1096,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('delete'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         },
@@ -1136,7 +1136,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('other'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         },
@@ -1176,7 +1176,7 @@ describe('ContentService', () => {
             slug: createUniqueSlug(`list-${i}`),
             contentType: 'video',
             mediaItemId: media.id,
-            visibility: 'public',
+            accessType: 'free',
             priceCents: 0,
             tags: [],
           },
@@ -1269,10 +1269,10 @@ describe('ContentService', () => {
       });
     });
 
-    it('should filter by visibility', async () => {
+    it('should filter by accessType', async () => {
       // Act
       const publicContent = await service.list(creatorId, {
-        visibility: 'public',
+        accessType: 'free',
       });
 
       // Assert: All our created content is public
@@ -1283,7 +1283,7 @@ describe('ContentService', () => {
         );
       }
       publicContent.items.forEach((item) => {
-        expect(item.visibility).toBe('public');
+        expect(item.accessType).toBe('free');
       });
     });
 
@@ -1305,7 +1305,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('other'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         },
@@ -1364,8 +1364,8 @@ describe('ContentService', () => {
           title: 'Free Article',
           slug: createUniqueSlug('free-article'),
           contentType: 'written',
-          visibility: 'public',
           accessType: 'free',
+          organizationId: org.id,
           priceCents: 0,
           tags: [],
           contentBody: 'This is the freely readable article body.',
@@ -1379,7 +1379,6 @@ describe('ContentService', () => {
           title: 'Followers Only Article',
           slug: createUniqueSlug('followers-article'),
           contentType: 'written',
-          visibility: 'public',
           accessType: 'followers',
           organizationId: org.id,
           priceCents: 0,
@@ -1390,12 +1389,15 @@ describe('ContentService', () => {
       );
       await service.publish(followersArticle.id, creatorId);
 
-      // Act: call the public listing (no user context — as if a random
-      // visitor were hitting /api/content/public).
+      // Act: call the public listing scoped to this test's org so we don't
+      // collide with content seeded by sibling tests in the same file (the
+      // test DB is per-file, not per-test, and Postgres orders NULL
+      // publishedAt FIRST in DESC, crowding the page 1 results).
       const result = await service.listPublic({
         page: 1,
         limit: 20,
         sort: 'newest',
+        orgId: org.id,
       });
 
       const free = result.items.find((i) => i.id === freeArticle.id);
