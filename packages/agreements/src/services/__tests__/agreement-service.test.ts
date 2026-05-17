@@ -1109,4 +1109,267 @@ describe('AgreementService', () => {
       expect(thread).toEqual([]);
     });
   });
+
+  // ── WP-4 payout-pipeline read filters (Codex-rzfjw) ────────────────────
+  //
+  // The payout pipeline at invoice time needs three new query shapes:
+  //   - filter by revenueType (subscription vs content_purchase)
+  //   - filter by activeAt (active-as-of-invoice-date — Decision Q3, no
+  //     pro-rating)
+  //   - lookup a single (org, creator, revenueType) tuple — the
+  //     content-purchase pipeline does this per purchase keyed on the
+  //     uploader (Decision Q1 — creator's-own-content scope)
+  //
+  // Money code. Positive + negative + edge tests each.
+  describe('WP-4 payout-pipeline read filters', () => {
+    it('getActiveAgreements filters by revenueType', async () => {
+      const fx = await seedOrgFixture(db);
+      await db.insert(schema.creatorOrganizationAgreements).values([
+        {
+          organizationId: fx.orgId,
+          creatorId: fx.creatorAId,
+          organizationFeePercentage: 7000,
+          revenueType: 'subscription',
+          status: 'active',
+        },
+        {
+          organizationId: fx.orgId,
+          creatorId: fx.creatorBId,
+          organizationFeePercentage: 5000,
+          revenueType: 'content_purchase',
+          status: 'active',
+        },
+      ]);
+      const subOnly = await service.getActiveAgreements({
+        organizationId: fx.orgId,
+        revenueType: 'subscription',
+      });
+      expect(subOnly).toHaveLength(1);
+      expect(subOnly[0]?.creatorId).toBe(fx.creatorAId);
+      const cpOnly = await service.getActiveAgreements({
+        organizationId: fx.orgId,
+        revenueType: 'content_purchase',
+      });
+      expect(cpOnly).toHaveLength(1);
+      expect(cpOnly[0]?.creatorId).toBe(fx.creatorBId);
+    });
+
+    it('getActiveAgreements: terminated_at > activeAt still surfaces (Q3 no pro-rating)', async () => {
+      // Decision Q3: whoever holds an active agreement at invoice fire
+      // time receives the full cut. Terminated AFTER invoice date is
+      // still active AS OF the invoice date.
+      const fx = await seedOrgFixture(db);
+      const invoiceAt = new Date('2026-01-15T00:00:00Z');
+      const terminatedAt = new Date('2026-01-20T00:00:00Z'); // 5 days later
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        organizationFeePercentage: 7000,
+        revenueType: 'subscription',
+        status: 'terminated', // status was flipped on termination
+        terminatedAt,
+        effectiveFrom: new Date('2025-12-01T00:00:00Z'),
+      });
+      const results = await service.getActiveAgreements({
+        organizationId: fx.orgId,
+        activeAt: invoiceAt,
+      });
+      expect(results).toHaveLength(1);
+      expect(results[0]?.creatorId).toBe(fx.creatorAId);
+    });
+
+    it('getActiveAgreements: terminated_at <= activeAt does NOT surface', async () => {
+      const fx = await seedOrgFixture(db);
+      const invoiceAt = new Date('2026-01-15T00:00:00Z');
+      const terminatedAt = new Date('2026-01-10T00:00:00Z'); // 5 days before
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        organizationFeePercentage: 7000,
+        revenueType: 'subscription',
+        status: 'terminated',
+        terminatedAt,
+        effectiveFrom: new Date('2025-12-01T00:00:00Z'),
+      });
+      const results = await service.getActiveAgreements({
+        organizationId: fx.orgId,
+        activeAt: invoiceAt,
+      });
+      expect(results).toHaveLength(0);
+    });
+
+    it('getActiveAgreements: effective_from > activeAt does NOT surface (future agreement)', async () => {
+      const fx = await seedOrgFixture(db);
+      const invoiceAt = new Date('2026-01-15T00:00:00Z');
+      const effectiveFrom = new Date('2026-02-01T00:00:00Z'); // future
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        organizationFeePercentage: 7000,
+        revenueType: 'subscription',
+        status: 'active',
+        effectiveFrom,
+      });
+      const results = await service.getActiveAgreements({
+        organizationId: fx.orgId,
+        activeAt: invoiceAt,
+      });
+      expect(results).toHaveLength(0);
+    });
+
+    it('getActiveAgreements: effective_until <= activeAt does NOT surface (legacy time-slice)', async () => {
+      // Defence in depth: legacy `effective_until` filter still trims
+      // any rows whose explicit end-date is in the past.
+      const fx = await seedOrgFixture(db);
+      const invoiceAt = new Date('2026-01-15T00:00:00Z');
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        organizationFeePercentage: 7000,
+        revenueType: 'subscription',
+        status: 'active',
+        effectiveFrom: new Date('2025-12-01T00:00:00Z'),
+        effectiveUntil: new Date('2026-01-01T00:00:00Z'), // ended before invoice
+      });
+      const results = await service.getActiveAgreements({
+        organizationId: fx.orgId,
+        activeAt: invoiceAt,
+      });
+      expect(results).toHaveLength(0);
+    });
+
+    it('getActiveAgreement (singular): returns matching active row', async () => {
+      const fx = await seedOrgFixture(db);
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        organizationFeePercentage: 7000,
+        revenueType: 'content_purchase',
+        status: 'active',
+      });
+      const result = await service.getActiveAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'content_purchase',
+      });
+      expect(result).not.toBeNull();
+      expect(result?.creatorId).toBe(fx.creatorAId);
+      expect(result?.revenueType).toBe('content_purchase');
+    });
+
+    it('getActiveAgreement: returns null when no matching agreement', async () => {
+      const fx = await seedOrgFixture(db);
+      const result = await service.getActiveAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+      });
+      expect(result).toBeNull();
+    });
+
+    it('getActiveAgreement: wrong revenueType returns null', async () => {
+      const fx = await seedOrgFixture(db);
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        organizationFeePercentage: 7000,
+        revenueType: 'subscription',
+        status: 'active',
+      });
+      const result = await service.getActiveAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'content_purchase',
+      });
+      expect(result).toBeNull();
+    });
+
+    it('getActiveAgreement: terminated before activeAt returns null', async () => {
+      const fx = await seedOrgFixture(db);
+      const invoiceAt = new Date('2026-01-15T00:00:00Z');
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        organizationFeePercentage: 7000,
+        revenueType: 'subscription',
+        status: 'terminated',
+        terminatedAt: new Date('2026-01-10T00:00:00Z'),
+        effectiveFrom: new Date('2025-12-01T00:00:00Z'),
+      });
+      const result = await service.getActiveAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        activeAt: invoiceAt,
+      });
+      expect(result).toBeNull();
+    });
+
+    it('getActiveAgreement: terminated AFTER activeAt still returns the agreement (Q3)', async () => {
+      const fx = await seedOrgFixture(db);
+      const invoiceAt = new Date('2026-01-15T00:00:00Z');
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        organizationFeePercentage: 7000,
+        revenueType: 'subscription',
+        status: 'terminated',
+        terminatedAt: new Date('2026-01-20T00:00:00Z'), // terminated AFTER invoice
+        effectiveFrom: new Date('2025-12-01T00:00:00Z'),
+      });
+      const result = await service.getActiveAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        activeAt: invoiceAt,
+      });
+      expect(result).not.toBeNull();
+    });
+
+    it('getActiveAgreement: effective_from > activeAt returns null (not yet active)', async () => {
+      const fx = await seedOrgFixture(db);
+      const invoiceAt = new Date('2026-01-15T00:00:00Z');
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        organizationFeePercentage: 7000,
+        revenueType: 'subscription',
+        status: 'active',
+        effectiveFrom: new Date('2026-02-01T00:00:00Z'),
+      });
+      const result = await service.getActiveAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        activeAt: invoiceAt,
+      });
+      expect(result).toBeNull();
+    });
+
+    it('getActiveAgreementsForCreator: revenueType filter scopes the portfolio', async () => {
+      const fx = await seedOrgFixture(db);
+      await db.insert(schema.creatorOrganizationAgreements).values([
+        {
+          organizationId: fx.orgId,
+          creatorId: fx.creatorAId,
+          organizationFeePercentage: 7000,
+          revenueType: 'subscription',
+          status: 'active',
+        },
+        {
+          organizationId: fx.orgId,
+          creatorId: fx.creatorAId,
+          organizationFeePercentage: 5000,
+          revenueType: 'content_purchase',
+          status: 'active',
+        },
+      ]);
+      const subOnly = await service.getActiveAgreementsForCreator({
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+      });
+      expect(subOnly).toHaveLength(1);
+      expect(subOnly[0]?.revenueType).toBe('subscription');
+    });
+  });
 });

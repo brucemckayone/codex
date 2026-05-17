@@ -31,6 +31,7 @@ export {
   AgreementService,
   type AgreementServiceConfig,
   type CounterProposeInput,
+  creatorShareFromLegacyOrgFee,
   type DeclineProposalInput,
   legacyOrgFeeFromCreatorShare,
   type ProposeAgreementInput,

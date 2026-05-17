@@ -43,7 +43,18 @@ import {
   NotFoundError,
   type ServiceConfig,
 } from '@codex/service-errors';
-import { and, asc, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lte,
+  ne,
+  or,
+} from 'drizzle-orm';
 import { AgreementNotFoundError, InvalidProposalStateError } from '../errors';
 import type {
   AgreementProposal,
@@ -686,28 +697,58 @@ export class AgreementService extends BaseService {
   // ── Public: reads ───────────────────────────────────────────────────────
 
   /**
-   * Active agreements for an org — every `status='active'` row, both
-   * revenue types. Sorted by `effectiveFrom DESC` so the most recent
-   * agreements bubble up.
+   * Active agreements for an org. Sorted by `effectiveFrom DESC` so the
+   * most recent agreements bubble up.
+   *
+   * Filters (WP-4 / Codex-rzfjw):
+   * - `status='active'`
+   * - `terminatedAt IS NULL OR terminatedAt > activeAt` (Decision Q3:
+   *   no pro-rating — whoever holds an active agreement at invoice fire
+   *   time receives the full cut for that period)
+   * - `effectiveFrom <= activeAt` (an agreement scheduled to start in
+   *   the future never receives a payout for the current invoice)
+   * - `effectiveUntil IS NULL OR effectiveUntil > activeAt` (defence in
+   *   depth for the legacy time-sliced model)
+   * - optional `revenueType` filter (subscription | content_purchase)
+   *
+   * When `activeAt` is omitted, defaults to `new Date()`. The payout
+   * pipeline always passes the invoice's `created` timestamp so a
+   * webhook replay against the same invoice surfaces the same set of
+   * agreements regardless of clock drift.
    */
   async getActiveAgreements(input: {
     organizationId: string;
+    revenueType?: RevenueType;
+    activeAt?: Date;
   }): Promise<CreatorOrganizationAgreement[]> {
     try {
+      const at = input.activeAt ?? new Date();
       return await this.db.query.creatorOrganizationAgreements.findMany({
         where: and(
           eq(
             creatorOrganizationAgreements.organizationId,
             input.organizationId
           ),
-          eq(creatorOrganizationAgreements.status, 'active'),
-          // The agreements table doesn't carry a `deletedAt` column —
-          // termination is the soft-delete vector. The `terminatedAt`
-          // filter is defence-in-depth: a row in `active` should never
-          // also carry a `terminated_at` (enforced by
-          // `check_creator_org_agreement_terminated_shape`), but if a
-          // future bug skews them we still refuse to surface it.
-          isNull(creatorOrganizationAgreements.terminatedAt)
+          // Per Decision Q3: an agreement is "active at activeAt" if
+          // EITHER it is currently status='active' (never terminated,
+          // and the schema check enforces terminatedAt IS NULL), OR it
+          // was terminated AFTER activeAt (so it was still live at
+          // invoice fire time and earns the cut for that period).
+          or(
+            eq(creatorOrganizationAgreements.status, 'active'),
+            and(
+              eq(creatorOrganizationAgreements.status, 'terminated'),
+              gt(creatorOrganizationAgreements.terminatedAt, at)
+            )
+          ),
+          lte(creatorOrganizationAgreements.effectiveFrom, at),
+          or(
+            isNull(creatorOrganizationAgreements.effectiveUntil),
+            gt(creatorOrganizationAgreements.effectiveUntil, at)
+          ),
+          input.revenueType
+            ? eq(creatorOrganizationAgreements.revenueType, input.revenueType)
+            : undefined
         ),
         orderBy: [desc(creatorOrganizationAgreements.effectiveFrom)],
       });
@@ -717,18 +758,87 @@ export class AgreementService extends BaseService {
   }
 
   /**
+   * Single active agreement for one (org, creator, revenueType) triple,
+   * if any. Mirrors the partial unique
+   * `uq_creator_org_agreement_active_per_type` invariant — at most one
+   * row can be returned. Returns `null` when no active agreement
+   * matches.
+   *
+   * Used by the WP-4 content-purchase payout path (Codex-rzfjw): the
+   * uploader (`content.creatorId`) is looked up against their
+   * `revenueType='content_purchase'` agreement at purchase time
+   * (Decision Q1 — creator's-own-content scope).
+   *
+   * `activeAt` semantics match {@link getActiveAgreements}.
+   */
+  async getActiveAgreement(input: {
+    organizationId: string;
+    creatorId: string;
+    revenueType: RevenueType;
+    activeAt?: Date;
+  }): Promise<CreatorOrganizationAgreement | null> {
+    try {
+      const at = input.activeAt ?? new Date();
+      const row = await this.db.query.creatorOrganizationAgreements.findFirst({
+        where: and(
+          eq(
+            creatorOrganizationAgreements.organizationId,
+            input.organizationId
+          ),
+          eq(creatorOrganizationAgreements.creatorId, input.creatorId),
+          eq(creatorOrganizationAgreements.revenueType, input.revenueType),
+          // Q3 semantics (see getActiveAgreements above):
+          or(
+            eq(creatorOrganizationAgreements.status, 'active'),
+            and(
+              eq(creatorOrganizationAgreements.status, 'terminated'),
+              gt(creatorOrganizationAgreements.terminatedAt, at)
+            )
+          ),
+          lte(creatorOrganizationAgreements.effectiveFrom, at),
+          or(
+            isNull(creatorOrganizationAgreements.effectiveUntil),
+            gt(creatorOrganizationAgreements.effectiveUntil, at)
+          )
+        ),
+      });
+      return row ?? null;
+    } catch (error) {
+      this.handleError(error, 'getActiveAgreement');
+    }
+  }
+
+  /**
    * Creator's portfolio across all orgs — used by the creator-studio
-   * /negotiations page. Filters to `status='active'` only.
+   * /negotiations page. Filters to `status='active'` only with the same
+   * temporal predicates as {@link getActiveAgreements}.
    */
   async getActiveAgreementsForCreator(input: {
     creatorId: string;
+    revenueType?: RevenueType;
+    activeAt?: Date;
   }): Promise<CreatorOrganizationAgreement[]> {
     try {
+      const at = input.activeAt ?? new Date();
       return await this.db.query.creatorOrganizationAgreements.findMany({
         where: and(
           eq(creatorOrganizationAgreements.creatorId, input.creatorId),
-          eq(creatorOrganizationAgreements.status, 'active'),
-          isNull(creatorOrganizationAgreements.terminatedAt)
+          // Q3 semantics (see getActiveAgreements above):
+          or(
+            eq(creatorOrganizationAgreements.status, 'active'),
+            and(
+              eq(creatorOrganizationAgreements.status, 'terminated'),
+              gt(creatorOrganizationAgreements.terminatedAt, at)
+            )
+          ),
+          lte(creatorOrganizationAgreements.effectiveFrom, at),
+          or(
+            isNull(creatorOrganizationAgreements.effectiveUntil),
+            gt(creatorOrganizationAgreements.effectiveUntil, at)
+          ),
+          input.revenueType
+            ? eq(creatorOrganizationAgreements.revenueType, input.revenueType)
+            : undefined
         ),
         orderBy: [desc(creatorOrganizationAgreements.effectiveFrom)],
       });
