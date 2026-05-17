@@ -12,6 +12,7 @@ import {
   AdminContentManagementService,
   AdminCustomerManagementService,
 } from '@codex/admin';
+import { AgreementService } from '@codex/agreements';
 import { VersionedCache } from '@codex/cache';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
 // Service imports
@@ -107,6 +108,7 @@ export function createServiceRegistry(
   let _subscription: SubscriptionService | undefined;
   let _tier: TierService | undefined;
   let _connectAccount: ConnectAccountService | undefined;
+  let _agreements: AgreementService | undefined;
 
   // Shared per-request DB client (for services needing transactions)
   let _sharedDbClient: ReturnType<typeof createPerRequestDbClient> | undefined;
@@ -412,6 +414,25 @@ export function createServiceRegistry(
         );
       }
       return _purchase;
+    },
+
+    /**
+     * Codex-tnft0 (WP-2 of Codex-nk4km): revenue-share AgreementService.
+     * Depends on FeeConfigService for the current platform fee (per
+     * decision #2: platform fee read fresh at propose/accept time, never
+     * snapshotted on the agreement row). Uses the shared per-request
+     * WebSocket client so accept/terminate transactions reuse the
+     * existing connection.
+     */
+    get agreements() {
+      if (!_agreements) {
+        _agreements = new AgreementService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          feeConfig: registry.feeConfig,
+        });
+      }
+      return _agreements;
     },
 
     // ========================================================================

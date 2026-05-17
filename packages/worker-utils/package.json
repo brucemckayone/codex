@@ -34,6 +34,7 @@
   "dependencies": {
     "@codex/access": "workspace:*",
     "@codex/admin": "workspace:*",
+    "@codex/agreements": "workspace:*",
     "@codex/cache": "workspace:*",
     "@codex/cloudflare-clients": "workspace:*",
     "@codex/constants": "workspace:*",

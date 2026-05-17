@@ -14,6 +14,7 @@ import type {
   AdminContentManagementService,
   AdminCustomerManagementService,
 } from '@codex/admin';
+import type { AgreementService } from '@codex/agreements';
 // Service type imports (for typing only)
 import type { ContentService, MediaItemService } from '@codex/content';
 import type { IdentityService } from '@codex/identity';
@@ -132,6 +133,13 @@ export interface ServiceRegistry {
    * version-cache invalidation. Lazily read by purchase + subscription.
    */
   feeConfig: FeeConfigService;
+  /**
+   * Revenue-share agreements (Codex-tnft0, WP-2 of Codex-nk4km). State
+   * machine for propose / counter / accept / decline / withdraw +
+   * agreement termination. Reads platform fee fresh from feeConfig at
+   * propose/accept time (per epic decision #2).
+   */
+  agreements: AgreementService;
 
   // Subscription domain
   subscription: SubscriptionService;
