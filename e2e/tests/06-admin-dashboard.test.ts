@@ -16,6 +16,7 @@ import { closeDbPool, dbHttp, schema } from '@codex/database';
 import {
   authFixture,
   expectErrorResponse,
+  expectForbidden,
   httpClient,
   unwrapApiResponse,
 } from '@codex/test-utils/e2e';
@@ -44,32 +45,37 @@ describe('Admin Dashboard', () => {
       await expectErrorResponse(response, 'UNAUTHORIZED', 401);
     });
 
-    test('should reject non-platform-owner users', async () => {
-      // Create a regular creator user (NOT platform owner) with no org
-      const creatorEmail = `creator-reject-${Date.now()}@example.com`;
-      const { cookie: creatorCookie } = await authFixture.registerUser({
-        email: creatorEmail,
-        password: 'SecurePassword123!',
-        name: 'Regular Creator',
-        role: 'creator',
-      });
+    test(
+      'should reject cross-org analytics access (no membership)',
+      { timeout: 120000 },
+      async () => {
+        // Two org owners with different orgs. Admin2 has management within
+        // their own org but is NOT a member of admin1's org. When admin2
+        // queries admin1's analytics, the procedure resolves orgId from the
+        // query string and the membership check fails → 403 FORBIDDEN.
+        const admin1 = await adminFixture.createOrgOwner({
+          email: `admin1-roleguard-${Date.now()}@example.com`,
+          password: 'SecurePassword123!',
+          orgName: `Roleguard Org 1 ${Date.now()}`,
+          orgSlug: `roleguard-org-1-${Date.now()}`,
+        });
 
-      // Try to access admin analytics with no org context.
-      // The procedure policy is `requireOrgManagement: true` which resolves
-      // an org from URL param / subdomain / query / request body. A creator
-      // with no org context provides none → ValidationError(ORG_CONTEXT_REQUIRED, 400).
-      // This is the documented contract — see packages/worker-utils/src/procedure/helpers.ts
-      // and the matching unit test enforce-policy-inline.test.ts.
-      const response = await httpClient.get(
-        `${WORKER_URLS.admin}/api/admin/analytics/revenue`,
-        {
-          headers: { Cookie: creatorCookie },
-        }
-      );
+        const admin2 = await adminFixture.createOrgOwner({
+          email: `admin2-roleguard-${Date.now()}@example.com`,
+          password: 'SecurePassword123!',
+          orgName: `Roleguard Org 2 ${Date.now()}`,
+          orgSlug: `roleguard-org-2-${Date.now()}`,
+        });
 
-      expect(response.status).toBe(400);
-      await expectErrorResponse(response, 'VALIDATION_ERROR', 400);
-    });
+        const response = await httpClient.get(
+          `${WORKER_URLS.admin}/api/admin/analytics/revenue?organizationId=${admin1.organization.id}`,
+          { headers: { Cookie: admin2.cookie } }
+        );
+
+        expect(response.status).toBe(403);
+        await expectForbidden(response);
+      }
+    );
 
     test('should accept platform_owner user', async () => {
       const admin = await adminFixture.createPlatformOwner({
