@@ -173,7 +173,7 @@ describe('Admin Dashboard', () => {
               contentType: 'video',
               mediaItemId: media.id,
               organizationId: admin.organization.id,
-              visibility: 'purchased_only',
+              accessType: 'paid',
               priceCents: 2999, // $29.99
             },
           }
@@ -316,7 +316,7 @@ describe('Admin Dashboard', () => {
               contentType: 'video',
               mediaItemId: media.id,
               organizationId: admin1.organization.id, // Admin1's org
-              visibility: 'purchased_only',
+              accessType: 'paid',
               priceCents: 1999,
             },
           }
@@ -452,7 +452,7 @@ describe('Admin Dashboard', () => {
               contentType: 'video',
               mediaItemId: media.id,
               organizationId: admin.organization.id,
-              visibility: 'purchased_only',
+              accessType: 'paid',
               priceCents: 999,
             },
           }
@@ -506,7 +506,7 @@ describe('Admin Dashboard', () => {
               contentType: 'video',
               mediaItemId: media2.id,
               organizationId: admin.organization.id,
-              visibility: 'purchased_only',
+              accessType: 'paid',
               priceCents: 999,
             },
           }
@@ -668,7 +668,7 @@ describe('Admin Dashboard', () => {
               contentType: 'written',
               contentBody: `Content body ${i}`,
               organizationId: admin.organization.id,
-              visibility: 'public',
+              accessType: 'free',
               priceCents: 0,
             },
           });
@@ -719,7 +719,7 @@ describe('Admin Dashboard', () => {
               contentType: 'written',
               contentBody: 'Draft body',
               organizationId: admin.organization.id,
-              visibility: 'public',
+              accessType: 'free',
               priceCents: 0,
             },
           }
@@ -740,7 +740,7 @@ describe('Admin Dashboard', () => {
               contentType: 'written',
               contentBody: 'Published body',
               organizationId: admin.organization.id,
-              visibility: 'public',
+              accessType: 'free',
               priceCents: 0,
             },
           }
@@ -807,7 +807,7 @@ describe('Admin Dashboard', () => {
               contentType: 'written',
               contentBody: 'Will be published',
               organizationId: admin.organization.id,
-              visibility: 'public',
+              accessType: 'free',
               priceCents: 0,
             },
           }
@@ -856,7 +856,7 @@ describe('Admin Dashboard', () => {
               contentType: 'written',
               contentBody: 'Will be unpublished',
               organizationId: admin.organization.id,
-              visibility: 'public',
+              accessType: 'free',
               priceCents: 0,
             },
           }
@@ -914,7 +914,7 @@ describe('Admin Dashboard', () => {
               contentType: 'written',
               contentBody: 'Will be deleted',
               organizationId: admin.organization.id,
-              visibility: 'public',
+              accessType: 'free',
               priceCents: 0,
             },
           }
@@ -977,7 +977,7 @@ describe('Admin Dashboard', () => {
               contentType: 'written',
               contentBody: 'Cross org content',
               organizationId: admin1.organization.id, // Admin1's org
-              visibility: 'public',
+              accessType: 'free',
               priceCents: 0,
             },
           }
@@ -1067,7 +1067,7 @@ describe('Admin Dashboard', () => {
               contentType: 'video',
               mediaItemId: media.id,
               organizationId: admin.organization.id,
-              visibility: 'purchased_only',
+              accessType: 'paid',
               priceCents: 1999,
             },
           }
@@ -1192,7 +1192,7 @@ describe('Admin Dashboard', () => {
               contentType: 'video',
               mediaItemId: media.id,
               organizationId: admin.organization.id,
-              visibility: 'purchased_only',
+              accessType: 'paid',
               priceCents: 2499,
             },
           }
@@ -1320,7 +1320,7 @@ describe('Admin Dashboard', () => {
             contentType: 'video',
             mediaItemId: media1.id,
             organizationId: admin.organization.id,
-            visibility: 'purchased_only',
+            accessType: 'paid',
             priceCents: 999,
           },
         }
@@ -1382,7 +1382,7 @@ describe('Admin Dashboard', () => {
             contentType: 'video',
             mediaItemId: media2.id,
             organizationId: admin.organization.id,
-            visibility: 'purchased_only',
+            accessType: 'paid',
             priceCents: 4999,
           },
         }
@@ -1517,7 +1517,7 @@ describe('Admin Dashboard', () => {
             contentType: 'video',
             mediaItemId: media.id,
             organizationId: admin.organization.id,
-            visibility: 'purchased_only',
+            accessType: 'paid',
             priceCents: 1999,
           },
         }

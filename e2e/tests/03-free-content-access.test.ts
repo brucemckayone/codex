@@ -91,7 +91,7 @@ describe('Free Content Access Flow', () => {
           description: 'This is a free educational resource',
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0, // FREE
           category: 'Education',
           tags: ['free', 'education', 'tutorial'],
@@ -211,7 +211,7 @@ describe('Free Content Access Flow', () => {
           slug: `draft-free-${Date.now()}`,
           contentType: 'written',
           contentBody: 'This is draft content',
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
         },
       }
@@ -317,7 +317,7 @@ describe('Free Content Access Flow', () => {
           description: 'A popular free educational video',
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
         },
       }
