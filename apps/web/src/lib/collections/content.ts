@@ -20,9 +20,27 @@ import { listContent } from '$lib/remote/content.remote';
 import type { ContentWithRelations } from '$lib/types';
 import { queryClient } from './query-client';
 
-type ContentCollection = ReturnType<
-  typeof createCollection<ContentWithRelations, string>
->;
+function createContentCollectionForOrg(
+  orgId: string,
+  qc: NonNullable<typeof queryClient>
+) {
+  return createCollection<ContentWithRelations, string>(
+    queryCollectionOptions({
+      queryKey: ['content', orgId],
+      queryFn: async () => {
+        const result = await listContent({
+          organizationId: orgId,
+          status: 'published',
+        });
+        return result?.items ?? [];
+      },
+      queryClient: qc,
+      getKey: (item) => item.id,
+    })
+  );
+}
+
+type ContentCollection = ReturnType<typeof createContentCollectionForOrg>;
 
 const orgCollections = new Map<string, ContentCollection>();
 
@@ -42,20 +60,7 @@ export function getContentCollection(
   const cached = orgCollections.get(orgId);
   if (cached) return cached;
 
-  const collection = createCollection<ContentWithRelations, string>(
-    queryCollectionOptions({
-      queryKey: ['content', orgId],
-      queryFn: async () => {
-        const result = await listContent({
-          organizationId: orgId,
-          status: 'published',
-        });
-        return result?.items ?? [];
-      },
-      queryClient,
-      getKey: (item) => item.id,
-    })
-  );
+  const collection = createContentCollectionForOrg(orgId, queryClient);
   orgCollections.set(orgId, collection);
   return collection;
 }

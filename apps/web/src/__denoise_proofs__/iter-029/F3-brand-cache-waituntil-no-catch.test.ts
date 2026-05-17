@@ -20,7 +20,7 @@
  * R13 (promoted iter-008, fingerprint `workers:waituntil-no-catch`)
  * states: "Every `executionCtx.waitUntil(...)` (or `ctx.waitUntil(...)`
  * in scheduled handlers) MUST chain `.catch(...)` on the inner promise
- * expression". The rule is currently scoped to `workers/*/ src; /**` in
+ * expression". The rule is currently scoped to workers source files in
  * its grep guard, but the same hazard exists wherever
  * `platform.context.waitUntil(...)` is reachable — including the
  * SvelteKit `apps/web` server runtime.
