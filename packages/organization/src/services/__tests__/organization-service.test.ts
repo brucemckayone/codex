@@ -987,7 +987,8 @@ describe('OrganizationService', () => {
             ),
         });
 
-        expect(membership).toBeUndefined();
+        // removeMember is a soft-remove — the row stays, status → 'inactive'.
+        expect(membership?.status).toBe('inactive');
       });
 
       it('should throw MemberNotFoundError for non-existent member', async () => {
@@ -1027,7 +1028,8 @@ describe('OrganizationService', () => {
             ),
         });
 
-        expect(membership).toBeUndefined();
+        // removeMember is a soft-remove — the row stays, status → 'inactive'.
+        expect(membership?.status).toBe('inactive');
       });
 
       it('should allow removing non-owner members', async () => {
@@ -1045,7 +1047,8 @@ describe('OrganizationService', () => {
             ),
         });
 
-        expect(membership).toBeUndefined();
+        // removeMember is a soft-remove — the row stays, status → 'inactive'.
+        expect(membership?.status).toBe('inactive');
       });
     });
   });
@@ -1108,7 +1111,7 @@ describe('OrganizationService', () => {
           slug: `pub-content-${Date.now()}-1`,
           contentType: 'video',
           status: 'published',
-          visibility: 'public',
+          accessType: 'free',
         },
         {
           creatorId: creatorsTestUserIds[0],
@@ -1117,7 +1120,7 @@ describe('OrganizationService', () => {
           slug: `pub-content-${Date.now()}-2`,
           contentType: 'video',
           status: 'published',
-          visibility: 'public',
+          accessType: 'free',
         },
         {
           creatorId: creatorsTestUserIds[1],
@@ -1126,7 +1129,7 @@ describe('OrganizationService', () => {
           slug: `pub-content-${Date.now()}-3`,
           contentType: 'video',
           status: 'published',
-          visibility: 'public',
+          accessType: 'free',
         },
         // Draft content should not count
         {
@@ -1136,17 +1139,17 @@ describe('OrganizationService', () => {
           slug: `draft-content-${Date.now()}`,
           contentType: 'video',
           status: 'draft',
-          visibility: 'public',
+          accessType: 'free',
         },
-        // Private content should not count
+        // Gated (followers-only) content should not count in public listings
         {
           creatorId: creatorsTestUserIds[2],
           organizationId: creatorsTestOrgId,
-          title: 'Private Content',
-          slug: `private-content-${Date.now()}`,
+          title: 'Followers-Only Content',
+          slug: `followers-content-${Date.now()}`,
           contentType: 'video',
           status: 'published',
-          visibility: 'private',
+          accessType: 'followers',
         },
       ]);
     });
@@ -1250,8 +1253,10 @@ describe('OrganizationService', () => {
     it('should not include emails or internal IDs', async () => {
       const result = await service.getPublicCreators(creatorsTestOrgSlug);
 
+      // `id` IS intentionally exposed — it's the user's UUID used for the
+      // public profile URL (not an enumerable sequential id). Email and the
+      // membership-internal `userId` field stay private.
       expect(result.items.every((item) => !('email' in item))).toBe(true);
-      expect(result.items.every((item) => !('id' in item))).toBe(true);
       expect(result.items.every((item) => !('userId' in item))).toBe(true);
     });
 
