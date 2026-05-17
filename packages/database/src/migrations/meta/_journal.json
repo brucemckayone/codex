@@ -498,6 +498,20 @@
       "when": 1778963275860,
       "tag": "0070_exotic_argent",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1779010621642,
+      "tag": "0071_confused_fenris",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1779010700000,
+      "tag": "0072_backfill_agreement_proposals",
+      "breakpoints": true
     }
   ]
 }
