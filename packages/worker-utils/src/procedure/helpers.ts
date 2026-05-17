@@ -309,9 +309,7 @@ function enforceRole(
 }
 
 /**
- * Resolve an organization ID from (in order): URL param, subdomain, query param,
- * JSON request body. Body-fallback only fires for POST/PUT/PATCH with a JSON
- * Content-Type (Hono caches the parsed body so the handler can re-read it).
+ * Resolve an organization ID from (in order): URL param, subdomain, query param.
  *
  * Returns the resolved org ID and whether the platform-owner bypass applies
  * (only when the URL param carries a valid UUID and the user is a platform owner).
@@ -356,36 +354,6 @@ async function resolveOrganizationId(
       userId: user.id,
     });
     return { organizationId: queryOrgId, skipMembershipCheck: false };
-  }
-
-  // Body-fallback for write requests with JSON content. Hono caches the
-  // parsed body so a subsequent c.req.json() in the handler returns the
-  // same object without re-parsing.
-  const method = c.req.method;
-  const hasWriteBody =
-    method === 'POST' || method === 'PUT' || method === 'PATCH';
-  if (hasWriteBody) {
-    const contentType = c.req.header('content-type');
-    if (contentType?.includes('application/json')) {
-      const body = await c.req.json().catch(() => null);
-      if (
-        body &&
-        typeof body === 'object' &&
-        'organizationId' in (body as Record<string, unknown>)
-      ) {
-        const bodyOrgId = (body as Record<string, unknown>).organizationId;
-        if (
-          typeof bodyOrgId === 'string' &&
-          uuidSchema.safeParse(bodyOrgId).success
-        ) {
-          obs?.info('Organization resolved from request body', {
-            organizationId: bodyOrgId,
-            userId: user.id,
-          });
-          return { organizationId: bodyOrgId, skipMembershipCheck: false };
-        }
-      }
-    }
   }
 
   return { organizationId: null, skipMembershipCheck: false };
