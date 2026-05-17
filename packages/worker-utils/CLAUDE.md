@@ -184,6 +184,24 @@ procedure({ policy: { auth: 'worker' }, ... })
 
 Stripe webhooks and RunPod webhooks use raw Hono handlers + `waitUntil(cleanup())` because they need HMAC-SHA256 validation before any parsing. They manage their own DB lifecycle with `createPerRequestDbClient` + `waitUntil(cleanup())`.
 
+## Bundler Regression: Don't Extract Inline Config
+
+**DO NOT** extract inline expressions inside `betterAuth({...})` config or `procedure()` policy chains into helper functions that get called from the production config — even when the extracted helper is semantically identical to the inline form.
+
+**Why:** Cloudflare Workers in this monorepo bundle via `vite build`. Vite/Rollup output reordering can move the helper call's emission in a way that subtly changes runtime module-load semantics. The compiled `workers/*/dist/index.js` ends up with the worker's `/health` returning 503 on boot. The source looks fine. Typecheck passes. Unit tests pass. Only CI E2E Debug catches it via the `/health` 503.
+
+Two incidents on PR #209 (2026-05-17):
+- `workers/auth/src/auth-config.ts` — extracting `trustedOrigins: [env.WEB_APP_URL, ...]` into `getTrustedOrigins(env)` broke `/health` in auth-worker for 3 CI runs. Reverting to inline restored boot.
+- `packages/worker-utils/src/procedure/helpers.ts` — adding a body-fallback branch inside `resolveOrganizationId` (semantically additive) broke `/health` in identity-api.
+
+**Safe approach:**
+- Keep `betterAuth({...})` config object literal-y. Inline expressions over helper calls.
+- Keep `procedure()` policy chains literal/inline at the call site.
+- If you need an exported helper for test coverage, keep the helper exported but **only call it from tests**. The production config path stays inline.
+- If you must add a new branch to `resolveOrganizationId` / `enforcePolicyInline`, extract the new logic into a **separate file** (e.g. `body-org-resolver.ts`) and load it via a dynamic `await import('./body-org-resolver')`. That's the same pattern as `extractOrganizationFromSubdomain` in `procedure/org-helpers.ts` — proven to dodge the reorder.
+
+**Detection signal:** if you make a worker-utils or auth-config refactor and CI's `E2E Debug Tests` job fails with `/health` 503 (no error in worker stdout, fresh Neon branch is fine), revert the call site to inline and probe A/B. Memory: `feedback_vite_helper_call_bundler_order`.
+
 ## Reference Files
 
 - `packages/worker-utils/src/procedure/procedure.ts` — procedure implementation
