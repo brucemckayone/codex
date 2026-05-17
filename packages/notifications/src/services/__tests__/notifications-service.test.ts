@@ -6,11 +6,12 @@ import { NotificationsService } from '../notifications-service';
 // Shared mock for hasOptedOut — individual tests override the resolved value
 const mockHasOptedOut = vi.fn().mockResolvedValue(false);
 
-// Mock the NotificationPreferencesService module
+// Mock the NotificationPreferencesService module — class literal (not arrow
+// fn) because the service calls `new NotificationPreferencesService(...)`.
 vi.mock('../notification-preferences-service', () => ({
-  NotificationPreferencesService: vi
-    .fn()
-    .mockImplementation(() => ({ hasOptedOut: mockHasOptedOut })),
+  NotificationPreferencesService: class {
+    hasOptedOut = mockHasOptedOut;
+  },
 }));
 
 // Mock dependencies
@@ -37,26 +38,21 @@ const mockEmailProvider = {
   send: vi.fn(),
 } as unknown as EmailProvider;
 
-// Mock platform-settings services
-// Since branding services are instantiated per-request with organizationId,
-// we mock the entire module to return mocked classes
-vi.mock('@codex/platform-settings', async () => {
-  const { vi } = await import('vitest');
-
-  return {
-    BrandingSettingsService: vi.fn().mockImplementation(() => ({
-      get: vi.fn().mockResolvedValue({
-        logoUrl: null,
-        primaryColorHex: '#ff0000',
-      }),
-    })),
-    ContactSettingsService: vi.fn().mockImplementation(() => ({
-      get: vi.fn().mockResolvedValue({
-        supportEmail: 'help@test.com',
-      }),
-    })),
-  };
-});
+// Mock platform-settings services. Class literals (not arrow factories)
+// because notifications-service does `new BrandingSettingsService(...)` etc.
+vi.mock('@codex/platform-settings', () => ({
+  BrandingSettingsService: class {
+    get = vi.fn().mockResolvedValue({
+      logoUrl: null,
+      primaryColorHex: '#ff0000',
+    });
+  },
+  ContactSettingsService: class {
+    get = vi.fn().mockResolvedValue({
+      supportEmail: 'help@test.com',
+    });
+  },
+}));
 
 describe('NotificationsService', () => {
   let service: NotificationsService;
