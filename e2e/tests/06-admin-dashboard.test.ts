@@ -68,7 +68,7 @@ describe('Admin Dashboard', () => {
       );
 
       expect(response.status).toBe(400);
-      await expectErrorResponse(response, 'ORG_CONTEXT_REQUIRED', 400);
+      await expectErrorResponse(response, 'VALIDATION_ERROR', 400);
     });
 
     test('should accept platform_owner user', async () => {
