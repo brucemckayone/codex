@@ -1,6 +1,7 @@
 import { BETTERAUTH_RATE_LIMITED_PATHS_SET, COOKIES } from '@codex/constants';
 import type { Context, Next } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
+import { getTrustedOrigins } from '../auth-config';
 
 describe('Auth Worker Middleware - Unit Tests', () => {
   describe('Sequence Handler', () => {
@@ -183,6 +184,97 @@ describe('Auth Worker Middleware - Unit Tests', () => {
         'http://localhost:8787',
       ]);
       expect(trustedOrigins.length).toBe(2);
+    });
+  });
+
+  describe('getTrustedOrigins (production code path)', () => {
+    // Partial env mock — only the fields getTrustedOrigins reads.
+    type EnvShape = Parameters<typeof getTrustedOrigins>[0];
+    const buildEnv = (overrides: {
+      ENVIRONMENT?: string;
+      WEB_APP_URL?: string;
+      API_URL?: string;
+    }): EnvShape => overrides as unknown as EnvShape;
+
+    it('TEST env: includes localhost:42069 (AUTH_URL the E2E fixture sends)', () => {
+      const result = getTrustedOrigins(
+        buildEnv({
+          ENVIRONMENT: 'test',
+          WEB_APP_URL: 'http://localhost:8787',
+        })
+      );
+      expect(result).toContain('http://localhost:42069');
+    });
+
+    it('TEST env: includes localhost:8787 (apps/web wrangler dev — Playwright browser Origin)', () => {
+      const result = getTrustedOrigins(
+        buildEnv({
+          ENVIRONMENT: 'test',
+          WEB_APP_URL: 'http://localhost:8787',
+        })
+      );
+      expect(result).toContain('http://localhost:8787');
+    });
+
+    it('DEVELOPMENT env: includes localhost:42069 + lvh.me dev URLs (preserves existing behavior)', () => {
+      const result = getTrustedOrigins(
+        buildEnv({
+          ENVIRONMENT: 'development',
+          WEB_APP_URL: 'http://lvh.me:5173',
+        })
+      );
+      expect(result).toContain('http://localhost:42069');
+      expect(result).toContain('http://lvh.me:3000');
+      expect(result).toContain('http://lvh.me:5173');
+      expect(result).toContain('http://*.nip.io');
+    });
+
+    it('PRODUCTION env: excludes ALL localhost/lvh.me/nip.io origins (security boundary)', () => {
+      const result = getTrustedOrigins(
+        buildEnv({
+          ENVIRONMENT: 'production',
+          WEB_APP_URL: 'https://codex.studio',
+          API_URL: 'https://api.codex.studio',
+        })
+      );
+      expect(result).toEqual([
+        'https://codex.studio',
+        'https://api.codex.studio',
+      ]);
+      expect(result).not.toContain('http://localhost:42069');
+      expect(result).not.toContain('http://localhost:8787');
+      expect(result).not.toContain('http://lvh.me:3000');
+      expect(result).not.toContain('http://*.nip.io');
+    });
+
+    it('STAGING env: excludes ALL localhost/lvh.me/nip.io origins (security boundary)', () => {
+      const result = getTrustedOrigins(
+        buildEnv({
+          ENVIRONMENT: 'staging',
+          WEB_APP_URL: 'https://staging.codex.studio',
+          API_URL: 'https://staging-api.codex.studio',
+        })
+      );
+      expect(result).toEqual([
+        'https://staging.codex.studio',
+        'https://staging-api.codex.studio',
+      ]);
+      expect(result).not.toContain('http://localhost:42069');
+    });
+
+    it('TEST env: filters undefined env.WEB_APP_URL / env.API_URL but keeps dev origins', () => {
+      const result = getTrustedOrigins(
+        buildEnv({
+          ENVIRONMENT: 'test',
+          WEB_APP_URL: undefined,
+          API_URL: undefined,
+        })
+      );
+      // No undefined entries leak into the list
+      expect(result.every((u) => typeof u === 'string')).toBe(true);
+      // Dev/test origins still present
+      expect(result).toContain('http://localhost:42069');
+      expect(result).toContain('http://localhost:8787');
     });
   });
 });
