@@ -7,10 +7,13 @@ import { NotificationsService } from '../notifications-service';
 const mockHasOptedOut = vi.fn().mockResolvedValue(false);
 
 // Mock the NotificationPreferencesService module
+// Vitest 4 requires `function` (not arrow) in mockImplementation for `new` to work.
 vi.mock('../notification-preferences-service', () => ({
-  NotificationPreferencesService: vi
-    .fn()
-    .mockImplementation(() => ({ hasOptedOut: mockHasOptedOut })),
+  NotificationPreferencesService: vi.fn().mockImplementation(function (
+    this: { hasOptedOut: typeof mockHasOptedOut }
+  ) {
+    this.hasOptedOut = mockHasOptedOut;
+  }),
 }));
 
 // Mock dependencies
@@ -44,17 +47,21 @@ vi.mock('@codex/platform-settings', async () => {
   const { vi } = await import('vitest');
 
   return {
-    BrandingSettingsService: vi.fn().mockImplementation(() => ({
-      get: vi.fn().mockResolvedValue({
+    BrandingSettingsService: vi.fn().mockImplementation(function (
+      this: { get: () => Promise<{ logoUrl: null; primaryColorHex: string }> }
+    ) {
+      this.get = vi.fn().mockResolvedValue({
         logoUrl: null,
         primaryColorHex: '#ff0000',
-      }),
-    })),
-    ContactSettingsService: vi.fn().mockImplementation(() => ({
-      get: vi.fn().mockResolvedValue({
+      });
+    }),
+    ContactSettingsService: vi.fn().mockImplementation(function (
+      this: { get: () => Promise<{ supportEmail: string }> }
+    ) {
+      this.get = vi.fn().mockResolvedValue({
         supportEmail: 'help@test.com',
-      }),
-    })),
+      });
+    }),
   };
 });
 
