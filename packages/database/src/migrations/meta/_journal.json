@@ -512,6 +512,13 @@
       "when": 1779010700000,
       "tag": "0072_backfill_agreement_proposals",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1779054739296,
+      "tag": "0073_bright_kylun",
+      "breakpoints": true
     }
   ]
 }

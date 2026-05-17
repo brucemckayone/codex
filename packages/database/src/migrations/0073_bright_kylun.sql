@@ -1,0 +1,1 @@
+ALTER TABLE "creator_organization_agreements" ADD COLUMN "expiring_soon_email_sent_at" timestamp with time zone;

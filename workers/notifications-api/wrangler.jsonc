@@ -10,6 +10,14 @@
     "enabled": true
   },
 
+  // Cron triggers (Codex-tugez):
+  //   - "0 8 * * *" — daily 08:00 UTC; fires the agreement-expiring-soon
+  //     sweep. Window: 30 days ahead of agreement effective_until.
+  //     Handler: src/handlers/agreement-expiring-sweep.ts
+  "triggers": {
+    "crons": ["0 8 * * *"]
+  },
+
   // KV Namespaces
   "kv_namespaces": [
     {
@@ -60,6 +68,9 @@
     // Production environment
     "production": {
       "name": "notifications-api-production",
+      "triggers": {
+        "crons": ["0 8 * * *"]
+      },
       "vars": {
         "ENVIRONMENT": "production",
         "DB_METHOD": "PRODUCTION",
@@ -87,6 +98,9 @@
     // Staging environment
     "staging": {
       "name": "notifications-api-staging",
+      "triggers": {
+        "crons": ["0 8 * * *"]
+      },
       "vars": {
         "ENVIRONMENT": "staging",
         "DB_METHOD": "PRODUCTION",
