@@ -71,6 +71,12 @@ export class MediaNotReadyError extends BusinessLogicError {
   }
 }
 
+export class ContentAlreadyPublishedError extends BusinessLogicError {
+  constructor(contentId: string) {
+    super('Content is already published', { contentId });
+  }
+}
+
 export class ContentTypeMismatchError extends BusinessLogicError {
   constructor(expectedType: string, actualType: string) {
     super('Content type does not match media type', {

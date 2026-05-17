@@ -92,7 +92,7 @@ describe('Content Creation Flow', () => {
           slug: `my-first-video-${Date.now()}`,
           description: 'Test video description',
           contentType: 'video',
-          visibility: 'public',
+          accessType: 'free',
           mediaItemId: media.id,
         },
       }
@@ -179,7 +179,7 @@ describe('Content Creation Flow', () => {
           title: 'Unready Content',
           slug: `unready-content-${Date.now()}`,
           contentType: 'video',
-          visibility: 'public',
+          accessType: 'free',
           mediaItemId: media.id,
         },
       }
@@ -257,7 +257,7 @@ describe('Content Creation Flow', () => {
           title: 'Creator 1 Content',
           slug: `creator1-content-${Date.now()}`,
           contentType: 'video',
-          visibility: 'public',
+          accessType: 'free',
           mediaItemId: media.id,
         },
       }

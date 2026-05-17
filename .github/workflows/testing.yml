@@ -572,9 +572,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Unique branch per run so we never collide with a concurrent CI run
+      # that has the branch in a partially-cleaned state (Codex-5q756). The
+      # create-branch-action errors with "branch already exists" instead of
+      # reusing, which leaves us pinned to a stale credential set.
       - name: Generate Neon Branch Name
         id: branch-name
-        run: echo "name=ci-e2e-api-tests" >> $GITHUB_OUTPUT
+        run: echo "name=ci-e2e-api-tests-${{ github.run_id }}" >> $GITHUB_OUTPUT
 
       - name: Create Neon branch for E2E API tests
         id: create-branch
@@ -724,10 +728,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Use a single reusable branch name for E2E web tests
+      # Unique branch per run so we never collide with a concurrent CI run
+      # that has the branch in a partially-cleaned state (Codex-5q756).
       - name: Generate Neon Branch Name
         id: branch-name
-        run: echo "name=ci-e2e-web-tests" >> $GITHUB_OUTPUT
+        run: echo "name=ci-e2e-web-tests-${{ github.run_id }}" >> $GITHUB_OUTPUT
 
       # Create Neon branch for E2E tests
       - name: Create Neon branch for E2E

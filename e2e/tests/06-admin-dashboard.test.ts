@@ -45,27 +45,37 @@ describe('Admin Dashboard', () => {
       await expectErrorResponse(response, 'UNAUTHORIZED', 401);
     });
 
-    test('should reject non-platform-owner users', async () => {
-      // Create a regular creator user (NOT platform owner)
-      const creatorEmail = `creator-reject-${Date.now()}@example.com`;
-      const { cookie: creatorCookie } = await authFixture.registerUser({
-        email: creatorEmail,
-        password: 'SecurePassword123!',
-        name: 'Regular Creator',
-        role: 'creator',
-      });
+    test(
+      'should reject cross-org analytics access (no membership)',
+      { timeout: 120000 },
+      async () => {
+        // Two org owners with different orgs. Admin2 has management within
+        // their own org but is NOT a member of admin1's org. When admin2
+        // queries admin1's analytics, the procedure resolves orgId from the
+        // query string and the membership check fails → 403 FORBIDDEN.
+        const admin1 = await adminFixture.createOrgOwner({
+          email: `admin1-roleguard-${Date.now()}@example.com`,
+          password: 'SecurePassword123!',
+          orgName: `Roleguard Org 1 ${Date.now()}`,
+          orgSlug: `roleguard-org-1-${Date.now()}`,
+        });
 
-      // Try to access admin analytics - should fail with 403
-      const response = await httpClient.get(
-        `${WORKER_URLS.admin}/api/admin/analytics/revenue`,
-        {
-          headers: { Cookie: creatorCookie },
-        }
-      );
+        const admin2 = await adminFixture.createOrgOwner({
+          email: `admin2-roleguard-${Date.now()}@example.com`,
+          password: 'SecurePassword123!',
+          orgName: `Roleguard Org 2 ${Date.now()}`,
+          orgSlug: `roleguard-org-2-${Date.now()}`,
+        });
 
-      expect(response.status).toBe(403);
-      await expectForbidden(response);
-    });
+        const response = await httpClient.get(
+          `${WORKER_URLS.admin}/api/admin/analytics/revenue?organizationId=${admin1.organization.id}`,
+          { headers: { Cookie: admin2.cookie } }
+        );
+
+        expect(response.status).toBe(403);
+        await expectForbidden(response);
+      }
+    );
 
     test('should accept platform_owner user', async () => {
       const admin = await adminFixture.createPlatformOwner({
@@ -77,7 +87,10 @@ describe('Admin Dashboard', () => {
       });
 
       // Access admin analytics - should succeed
-      const stats = await adminFixture.getRevenueStats(admin.cookie);
+      const stats = await adminFixture.getRevenueStats(
+        admin.cookie,
+        admin.organization.id
+      );
 
       expect(stats).toBeDefined();
       expect(stats.totalRevenueCents).toBe(0);
@@ -98,7 +111,10 @@ describe('Admin Dashboard', () => {
         orgSlug: `zero-org-${Date.now()}`,
       });
 
-      const stats = await adminFixture.getRevenueStats(admin.cookie);
+      const stats = await adminFixture.getRevenueStats(
+        admin.cookie,
+        admin.organization.id
+      );
 
       expect(stats.totalRevenueCents).toBe(0);
       expect(stats.totalPurchases).toBe(0);
@@ -173,7 +189,7 @@ describe('Admin Dashboard', () => {
               contentType: 'video',
               mediaItemId: media.id,
               organizationId: admin.organization.id,
-              visibility: 'purchased_only',
+              accessType: 'paid',
               priceCents: 2999, // $29.99
             },
           }
@@ -234,7 +250,10 @@ describe('Admin Dashboard', () => {
         );
 
         // 4. Verify revenue stats
-        const stats = await adminFixture.getRevenueStats(admin.cookie);
+        const stats = await adminFixture.getRevenueStats(
+          admin.cookie,
+          admin.organization.id
+        );
 
         expect(stats.totalRevenueCents).toBe(2999);
         expect(stats.totalPurchases).toBe(1);
@@ -316,7 +335,7 @@ describe('Admin Dashboard', () => {
               contentType: 'video',
               mediaItemId: media.id,
               organizationId: admin1.organization.id, // Admin1's org
-              visibility: 'purchased_only',
+              accessType: 'paid',
               priceCents: 1999,
             },
           }
@@ -372,12 +391,18 @@ describe('Admin Dashboard', () => {
         );
 
         // Admin1 should see the purchase
-        const admin1Stats = await adminFixture.getRevenueStats(admin1.cookie);
+        const admin1Stats = await adminFixture.getRevenueStats(
+          admin1.cookie,
+          admin1.organization.id
+        );
         expect(admin1Stats.totalPurchases).toBe(1);
         expect(admin1Stats.totalRevenueCents).toBe(1999);
 
         // Admin2 should NOT see admin1's purchase
-        const admin2Stats = await adminFixture.getRevenueStats(admin2.cookie);
+        const admin2Stats = await adminFixture.getRevenueStats(
+          admin2.cookie,
+          admin2.organization.id
+        );
         expect(admin2Stats.totalPurchases).toBe(0);
         expect(admin2Stats.totalRevenueCents).toBe(0);
       },
@@ -452,7 +477,7 @@ describe('Admin Dashboard', () => {
               contentType: 'video',
               mediaItemId: media.id,
               organizationId: admin.organization.id,
-              visibility: 'purchased_only',
+              accessType: 'paid',
               priceCents: 999,
             },
           }
@@ -506,7 +531,7 @@ describe('Admin Dashboard', () => {
               contentType: 'video',
               mediaItemId: media2.id,
               organizationId: admin.organization.id,
-              visibility: 'purchased_only',
+              accessType: 'paid',
               priceCents: 999,
             },
           }
@@ -601,7 +626,10 @@ describe('Admin Dashboard', () => {
         );
 
         // Customer stats should show 1 distinct customer
-        const customerStats = await adminFixture.getCustomerStats(admin.cookie);
+        const customerStats = await adminFixture.getCustomerStats(
+          admin.cookie,
+          admin.organization.id
+        );
         expect(customerStats.totalCustomers).toBe(1); // Same buyer = 1 distinct customer
       },
       { timeout: 180000 }
@@ -624,7 +652,11 @@ describe('Admin Dashboard', () => {
         });
 
         // Top content with limit=3 on empty org
-        const topContent = await adminFixture.getTopContent(admin.cookie, 3);
+        const topContent = await adminFixture.getTopContent(
+          admin.cookie,
+          admin.organization.id,
+          3
+        );
 
         expect(Array.isArray(topContent)).toBe(true);
         expect(topContent.length).toBeLessThanOrEqual(3);
@@ -668,17 +700,21 @@ describe('Admin Dashboard', () => {
               contentType: 'written',
               contentBody: `Content body ${i}`,
               organizationId: admin.organization.id,
-              visibility: 'public',
+              accessType: 'free',
               priceCents: 0,
             },
           });
         }
 
         // List with pagination
-        const result = await adminFixture.listAllContent(admin.cookie, {
-          page: 1,
-          limit: 2,
-        });
+        const result = await adminFixture.listAllContent(
+          admin.cookie,
+          admin.organization.id,
+          {
+            page: 1,
+            limit: 2,
+          }
+        );
 
         expect(result.items).toHaveLength(2);
         expect(result.pagination.page).toBe(1);
@@ -719,7 +755,7 @@ describe('Admin Dashboard', () => {
               contentType: 'written',
               contentBody: 'Draft body',
               organizationId: admin.organization.id,
-              visibility: 'public',
+              accessType: 'free',
               priceCents: 0,
             },
           }
@@ -740,7 +776,7 @@ describe('Admin Dashboard', () => {
               contentType: 'written',
               contentBody: 'Published body',
               organizationId: admin.organization.id,
-              visibility: 'public',
+              accessType: 'free',
               priceCents: 0,
             },
           }
@@ -760,6 +796,7 @@ describe('Admin Dashboard', () => {
         // Filter by published only
         const publishedResult = await adminFixture.listAllContent(
           admin.cookie,
+          admin.organization.id,
           { status: 'published' }
         );
 
@@ -768,9 +805,11 @@ describe('Admin Dashboard', () => {
         ).toBe(true);
 
         // Filter by draft only
-        const draftResult = await adminFixture.listAllContent(admin.cookie, {
-          status: 'draft',
-        });
+        const draftResult = await adminFixture.listAllContent(
+          admin.cookie,
+          admin.organization.id,
+          { status: 'draft' }
+        );
 
         expect(draftResult.items.every((c) => c.status === 'draft')).toBe(true);
       },
@@ -807,7 +846,7 @@ describe('Admin Dashboard', () => {
               contentType: 'written',
               contentBody: 'Will be published',
               organizationId: admin.organization.id,
-              visibility: 'public',
+              accessType: 'free',
               priceCents: 0,
             },
           }
@@ -856,7 +895,7 @@ describe('Admin Dashboard', () => {
               contentType: 'written',
               contentBody: 'Will be unpublished',
               organizationId: admin.organization.id,
-              visibility: 'public',
+              accessType: 'free',
               priceCents: 0,
             },
           }
@@ -914,7 +953,7 @@ describe('Admin Dashboard', () => {
               contentType: 'written',
               contentBody: 'Will be deleted',
               organizationId: admin.organization.id,
-              visibility: 'public',
+              accessType: 'free',
               priceCents: 0,
             },
           }
@@ -925,7 +964,10 @@ describe('Admin Dashboard', () => {
         await adminFixture.deleteContent(admin.cookie, content.id);
 
         // Verify content no longer in list
-        const contentList = await adminFixture.listAllContent(admin.cookie);
+        const contentList = await adminFixture.listAllContent(
+          admin.cookie,
+          admin.organization.id
+        );
         expect(
           contentList.items.find((c) => c.id === content.id)
         ).toBeUndefined();
@@ -977,7 +1019,7 @@ describe('Admin Dashboard', () => {
               contentType: 'written',
               contentBody: 'Cross org content',
               organizationId: admin1.organization.id, // Admin1's org
-              visibility: 'public',
+              accessType: 'free',
               priceCents: 0,
             },
           }
@@ -1067,7 +1109,7 @@ describe('Admin Dashboard', () => {
               contentType: 'video',
               mediaItemId: media.id,
               organizationId: admin.organization.id,
-              visibility: 'purchased_only',
+              accessType: 'paid',
               priceCents: 1999,
             },
           }
@@ -1121,7 +1163,10 @@ describe('Admin Dashboard', () => {
         );
 
         // List customers
-        const customers = await adminFixture.listCustomers(admin.cookie);
+        const customers = await adminFixture.listCustomers(
+          admin.cookie,
+          admin.organization.id
+        );
 
         expect(customers.items).toHaveLength(1);
         expect(customers.items[0].userId).toBe(buyer.id);
@@ -1192,7 +1237,7 @@ describe('Admin Dashboard', () => {
               contentType: 'video',
               mediaItemId: media.id,
               organizationId: admin.organization.id,
-              visibility: 'purchased_only',
+              accessType: 'paid',
               priceCents: 2499,
             },
           }
@@ -1247,6 +1292,7 @@ describe('Admin Dashboard', () => {
         // Get customer details
         const details = await adminFixture.getCustomerDetails(
           admin.cookie,
+          admin.organization.id,
           buyer.id
         );
 
@@ -1320,7 +1366,7 @@ describe('Admin Dashboard', () => {
             contentType: 'video',
             mediaItemId: media1.id,
             organizationId: admin.organization.id,
-            visibility: 'purchased_only',
+            accessType: 'paid',
             priceCents: 999,
           },
         }
@@ -1382,7 +1428,7 @@ describe('Admin Dashboard', () => {
             contentType: 'video',
             mediaItemId: media2.id,
             organizationId: admin.organization.id,
-            visibility: 'purchased_only',
+            accessType: 'paid',
             priceCents: 4999,
           },
         }
@@ -1438,6 +1484,7 @@ describe('Admin Dashboard', () => {
       // Admin grants complimentary access to second content
       const granted = await adminFixture.grantContentAccess(
         admin.cookie,
+        admin.organization.id,
         buyer.id,
         content2.id
       );
@@ -1517,7 +1564,7 @@ describe('Admin Dashboard', () => {
             contentType: 'video',
             mediaItemId: media.id,
             organizationId: admin.organization.id,
-            visibility: 'purchased_only',
+            accessType: 'paid',
             priceCents: 1999,
           },
         }
@@ -1572,6 +1619,7 @@ describe('Admin Dashboard', () => {
       // Customer already has access via purchase. Grant access twice.
       const first = await adminFixture.grantContentAccess(
         admin.cookie,
+        admin.organization.id,
         buyer.id,
         content.id
       );
@@ -1579,6 +1627,7 @@ describe('Admin Dashboard', () => {
 
       const second = await adminFixture.grantContentAccess(
         admin.cookie,
+        admin.organization.id,
         buyer.id,
         content.id
       );

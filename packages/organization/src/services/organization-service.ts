@@ -437,6 +437,11 @@ export class OrganizationService extends BaseService {
               eq(content.creatorId, users.id),
               eq(content.organizationId, org.id),
               eq(content.status, 'published'),
+              // Public creator listings count only publicly accessible content.
+              // Gated content (followers/subscribers/team/paid) is excluded so a
+              // creator's public-facing output count never reveals what they
+              // publish behind a paywall or follower gate.
+              eq(content.accessType, 'free'),
               isNull(content.deletedAt)
             )
           )

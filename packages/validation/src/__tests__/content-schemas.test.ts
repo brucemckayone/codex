@@ -282,7 +282,7 @@ describe('Content Schemas', () => {
         category: 'Programming',
         tags: ['typescript', 'javascript', 'tutorial'],
         thumbnailUrl: 'https://example.com/thumb.jpg',
-        visibility: 'public' as const,
+        accessType: 'paid' as const,
         priceCents: 999,
       };
 
@@ -299,23 +299,23 @@ describe('Content Schemas', () => {
       };
 
       const result = createContentSchema.parse(minimalContent);
-      expect(result.visibility).toBe('purchased_only'); // Default
+      expect(result.accessType).toBe('free'); // Default
       expect(result.tags).toEqual([]); // Default
     });
 
-    it('should validate free content with public visibility', () => {
+    it('should validate free content with free access type', () => {
       const freeContent = {
         title: 'Free Tutorial',
         slug: 'free-tutorial',
         contentType: 'video' as const,
         mediaItemId: '123e4567-e89b-12d3-a456-426614174000',
-        visibility: 'public' as const,
+        accessType: 'free' as const,
         priceCents: null,
       };
 
       const result = createContentSchema.parse(freeContent);
       expect(result.priceCents).toBeNull();
-      expect(result.visibility).toBe('public');
+      expect(result.accessType).toBe('free');
     });
 
     it('should reject video content without mediaItemId', () => {
@@ -362,17 +362,17 @@ describe('Content Schemas', () => {
       expect(result.contentBody).toBeDefined();
     });
 
-    it('should reject free content with purchased_only visibility', () => {
+    it('should reject free content with a price set', () => {
       expect(() =>
         createContentSchema.parse({
           title: 'Test',
           slug: 'test',
           contentType: 'video',
           mediaItemId: '123e4567-e89b-12d3-a456-426614174000',
-          visibility: 'purchased_only',
-          priceCents: null,
+          accessType: 'free',
+          priceCents: 100,
         })
-      ).toThrow('Free content cannot have purchased_only visibility');
+      ).toThrow('Free content cannot have a price');
 
       expect(() =>
         createContentSchema.parse({
@@ -380,10 +380,10 @@ describe('Content Schemas', () => {
           slug: 'test',
           contentType: 'video',
           mediaItemId: '123e4567-e89b-12d3-a456-426614174000',
-          visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 0,
         })
-      ).toThrow('Free content cannot have purchased_only visibility');
+      ).toThrow('Paid content requires a price greater than £0');
     });
 
     it('should reject price exceeding $100,000', () => {
@@ -606,7 +606,7 @@ describe('Query Schemas', () => {
         limit: 50,
         status: 'published' as const,
         contentType: 'video' as const,
-        visibility: 'public' as const,
+        accessType: 'free' as const,
         category: 'Programming',
         organizationId: '123e4567-e89b-12d3-a456-426614174000',
         creatorId: '123e4567-e89b-12d3-a456-426614174001',
@@ -878,15 +878,15 @@ describe('Security Validations', () => {
       ).toThrow();
     });
 
-    it('should enforce CHECK constraint on visibility', () => {
-      // Only specific visibility values allowed (matches line 149 in database schema)
+    it('should enforce CHECK constraint on accessType', () => {
+      // Only specific accessType values allowed — replaces the legacy visibility CHECK
       expect(() =>
         createContentSchema.parse({
           title: 'Test',
           slug: 'test',
           contentType: 'video',
           mediaItemId: '123e4567-e89b-12d3-a456-426614174000',
-          visibility: 'hidden', // Not in enum
+          accessType: 'hidden', // Not in enum
         })
       ).toThrow();
     });
