@@ -35,7 +35,6 @@ describe('CounterProposalDialog', () => {
       props: {
         open: true,
         onOpenChange: vi.fn(),
-        proposalId: '11111111-1111-1111-1111-111111111111',
         currentSharePercent: 4000,
         currentTermMonths: 12,
         ownerName: 'Acme Studio',
@@ -60,7 +59,6 @@ describe('CounterProposalDialog', () => {
       props: {
         open: true,
         onOpenChange: vi.fn(),
-        proposalId: '11111111-1111-1111-1111-111111111111',
         currentSharePercent: 3500,
         currentTermMonths: 6,
         ownerName: 'Acme Studio',
@@ -82,7 +80,6 @@ describe('CounterProposalDialog', () => {
       props: {
         open: true,
         onOpenChange: vi.fn(),
-        proposalId: '11111111-1111-1111-1111-111111111111',
         currentSharePercent: 2500,
         currentTermMonths: 12,
         ownerName: 'Acme Studio',
@@ -102,7 +99,6 @@ describe('CounterProposalDialog', () => {
       props: {
         open: true,
         onOpenChange: vi.fn(),
-        proposalId: '11111111-1111-1111-1111-111111111111',
         currentSharePercent: 3000,
         currentTermMonths: 24,
         ownerName: 'Acme Studio',
@@ -124,7 +120,6 @@ describe('CounterProposalDialog', () => {
       props: {
         open: false,
         onOpenChange,
-        proposalId: '11111111-1111-1111-1111-111111111111',
         currentSharePercent: 3000,
         currentTermMonths: 12,
         ownerName: 'Acme Studio',

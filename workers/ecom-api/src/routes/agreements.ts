@@ -509,9 +509,16 @@ agreements.get(
       // pulling all proposals where they're the named creator, then
       // dedup by (orgId, revenueType). This covers both active and
       // pending-only threads.
+      //
+      // I1 hardening: pass an explicit status filter so the enumeration
+      // doesn't fan out to terminal proposals we don't need for thread
+      // lookup. Only open + countered + accepted statuses can yield a
+      // thread the caller can act on or reference; declined/withdrawn/
+      // superseded are excluded.
       const ownProposals = await ctx.services.agreements.getProposalsForCreator(
         {
           creatorId: ctx.user.id,
+          status: ['open', 'countered', 'accepted'],
         }
       );
       const triples = new Map<
@@ -651,12 +658,28 @@ agreements.get(
       // enrichment, identical to GET /agreements/me) and every proposal
       // they're named on. The active rows + proposal list together
       // cover every section of the portfolio.
+      //
+      // I1 hardening: pass an explicit status filter so the enumeration
+      // is bounded to the statuses actually surfaced in the portfolio
+      // sections (active: derived from getActiveAgreementsForCreator;
+      // pending: open + countered; past: declined + withdrawn +
+      // superseded). The 90-day `past` cutoff is still applied at slice
+      // time below since pushing it into SQL would require a new query
+      // arg; tracked as a follow-up if the table grows.
       const [activeRows, ownProposals] = await Promise.all([
         ctx.services.agreements.getActiveAgreementsForCreator({
           creatorId: ctx.user.id,
         }),
         ctx.services.agreements.getProposalsForCreator({
           creatorId: ctx.user.id,
+          status: [
+            'open',
+            'countered',
+            'accepted',
+            'declined',
+            'withdrawn',
+            'superseded',
+          ],
         }),
       ]);
 

@@ -186,6 +186,14 @@
     return slices;
   });
 
+  // ─── Display helpers (referenced by handlers below — hoisted) ────────────
+  const ownerName = $derived(organizationName ?? 'The org owner');
+
+  function formatPercent(bp: number): string {
+    const pct = bp / 100;
+    return Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
+  }
+
   // ─── Counter dialog state ────────────────────────────────────────────────
   let counterDialogOpen = $state(false);
 
@@ -290,14 +298,7 @@
     }
   }
 
-  // ─── Display helpers ──────────────────────────────────────────────────────
-  const ownerName = $derived(organizationName ?? 'The org owner');
-
-  function formatPercent(bp: number): string {
-    const pct = bp / 100;
-    return Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
-  }
-
+  // ─── Display helpers (cont.) ─────────────────────────────────────────────
   function statusLabel(): string {
     if (activeAgreement) return 'Active';
     if (!latestProposal) return 'Unknown';
@@ -486,7 +487,6 @@
   <CounterProposalDialog
     open={counterDialogOpen}
     onOpenChange={handleCounterOpenChange}
-    proposalId={latestProposal.id}
     currentSharePercent={latestProposal.proposedCreatorSharePercent}
     currentTermMonths={latestProposal.proposedTermMonths}
     ownerName={ownerName}
@@ -500,7 +500,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-5);
-    max-width: 1100px;
+    max-width: var(--container-lg);
     container-type: inline-size;
   }
 
@@ -558,7 +558,7 @@
     font-weight: var(--font-medium);
     color: var(--color-text-muted);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: var(--tracking-wider);
   }
 
   .agreement-detail__lede {

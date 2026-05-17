@@ -443,7 +443,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    max-width: 1100px;
+    max-width: var(--container-lg);
     container-type: inline-size;
   }
 
@@ -633,7 +633,7 @@
   .negotiations-page__item-type {
     font-size: var(--text-xs);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: var(--tracking-wider);
     color: var(--color-text-muted);
   }
 

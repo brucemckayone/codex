@@ -27,7 +27,6 @@
   interface Props {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    proposalId: string;
     /** The owner's current proposed share % in basis points (0-10000). */
     currentSharePercent: number;
     /** The owner's current proposed term in months. */
@@ -49,7 +48,6 @@
   const {
     open,
     onOpenChange,
-    proposalId: _proposalId,
     currentSharePercent,
     currentTermMonths,
     ownerName,
