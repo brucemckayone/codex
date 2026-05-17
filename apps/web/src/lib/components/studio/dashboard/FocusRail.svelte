@@ -10,27 +10,36 @@
   intentionally quiet when empty ("All caught up") to avoid giving
   every creator the same five-bullet todo list.
 
-  @prop items  Ordered list of focus items (highest-signal first)
--->
-<script lang="ts">
-  import type { Component } from 'svelte';
-  import { ChevronRightIcon } from '$lib/components/ui/Icon';
+  Dismissal (WP-9 — Codex-k9no0):
+   - `dismissable: true` items render an inline "× Dismiss" button.
+   - The parent owns dismissal persistence (today: localStorage via
+     `$lib/collections/dismissals`) and re-filters the items list on the
+     next render. The rail itself stays presentational.
 
-  export interface FocusItem {
-    id: string;
-    eyebrow: string; // e.g. "2 drafts" — monospace meter
-    title: string; // e.g. "Ready to publish"
-    description?: string; // optional one-line supporting text
-    href: string;
-    tone?: 'action' | 'warning' | 'muted'; // colour accent
-    icon?: Component<{ size?: number | string; class?: string }>;
-  }
+  @prop items     Ordered list of focus items (highest-signal first)
+  @prop onDismiss Optional callback fired when a dismissable item is
+                  dismissed. Omit to disable dismissal entirely.
+-->
+<script lang="ts" module>
+  // The FocusItem shape lives in a sibling .ts module so non-Svelte
+  // consumers (the WP-9 aggregator, its unit tests) can import the type
+  // — `.svelte` files only expose default exports to non-Svelte
+  // importers. We re-export here so the original
+  // `import type { FocusItem } from './FocusRail.svelte'` path keeps
+  // working unchanged.
+  export type { FocusItem } from './focus-rail-types';
+</script>
+
+<script lang="ts">
+  import { ChevronRightIcon } from '$lib/components/ui/Icon';
+  import type { FocusItem } from './focus-rail-types';
 
   interface Props {
     items: FocusItem[];
+    onDismiss?: (itemId: string) => void;
   }
 
-  const { items }: Props = $props();
+  const { items, onDismiss }: Props = $props();
 </script>
 
 <aside class="focus-rail" aria-labelledby="focus-rail-heading">
@@ -67,6 +76,16 @@
               {/if}
             </span>
           </a>
+          {#if item.dismissable && onDismiss}
+            <button
+              type="button"
+              class="rail-dismiss"
+              aria-label={`Dismiss: ${item.title}`}
+              onclick={() => onDismiss(item.id)}
+            >
+              <span aria-hidden="true">×</span>
+            </button>
+          {/if}
         </li>
       {/each}
     </ol>
@@ -198,6 +217,45 @@
 
   .rail-link[data-tone='warning'] .rail-ordinal {
     color: var(--color-warning-700);
+  }
+
+  /* ── Item row (needed once dismiss button overlays the link) ─────── */
+  .rail-item {
+    position: relative;
+  }
+
+  /* ── Dismiss button (WP-9) ────────────────────────────────────────── */
+  .rail-dismiss {
+    position: absolute;
+    top: var(--space-1);
+    right: var(--space-1);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-6);
+    height: var(--space-6);
+    padding: 0;
+    border: var(--border-width) var(--border-style) transparent;
+    border-radius: var(--radius-full, 9999px);
+    background: transparent;
+    color: var(--color-text-muted);
+    font-family: var(--font-sans);
+    font-size: var(--text-lg);
+    line-height: 1;
+    cursor: pointer;
+    transition:
+      background-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
+  }
+
+  .rail-dismiss:hover {
+    background-color: var(--color-surface-secondary);
+    color: var(--color-text);
+  }
+
+  .rail-dismiss:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
   }
 
   /* ── Body ────────────────────────────────────────────────── */

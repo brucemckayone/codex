@@ -1304,6 +1304,95 @@ describe('AgreementService', () => {
     });
   });
 
+  // ── getProposalsForOrg (WP-9 — Codex-k9no0) ────────────────────────────
+  //
+  // Org-scoped mirror of getProposalsForCreator. Powers the FocusRail
+  // "counter-proposal received" signal on the owner studio dashboard.
+  // Status + proposedByRole filters narrow the result set to the
+  // "creator countered, waiting on owner" subset in a single round-trip.
+  describe('getProposalsForOrg', () => {
+    it('returns proposals where organizationId matches', async () => {
+      const fxA = await seedOrgFixture(db);
+      const fxB = await seedOrgFixture(db);
+      await service.proposeAgreement({
+        organizationId: fxA.orgId,
+        creatorId: fxA.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fxA.ownerId,
+      });
+      await service.proposeAgreement({
+        organizationId: fxB.orgId,
+        creatorId: fxB.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 4000,
+        termMonths: 6,
+        proposedByUserId: fxB.ownerId,
+      });
+      const forA = await service.getProposalsForOrg({
+        organizationId: fxA.orgId,
+      });
+      expect(forA).toHaveLength(1);
+      expect(forA[0]?.organizationId).toBe(fxA.orgId);
+    });
+
+    it('proposedByRole=creator narrows to creator-counter signals', async () => {
+      // Seed: owner proposes (round 1) → creator counters (round 2).
+      // proposedByRole filter for 'creator' must return ONLY the counter.
+      const fx = await seedOrgFixture(db);
+      const p1 = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      const p2 = await service.counterPropose({
+        proposalId: p1.id,
+        sharePercent: 4000,
+        termMonths: 6,
+        counteredByUserId: fx.creatorAId,
+      });
+      const counters = await service.getProposalsForOrg({
+        organizationId: fx.orgId,
+        status: ['open'],
+        proposedByRole: 'creator',
+      });
+      expect(counters).toHaveLength(1);
+      expect(counters[0]?.id).toBe(p2.id);
+      expect(counters[0]?.proposedByRole).toBe('creator');
+    });
+
+    it('cross-tenant pin: returns nothing for a different org', async () => {
+      // Proposal seeded on org A only; querying org B's id must return
+      // zero rows.
+      const fxA = await seedOrgFixture(db);
+      const fxB = await seedOrgFixture(db);
+      await service.proposeAgreement({
+        organizationId: fxA.orgId,
+        creatorId: fxA.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fxA.ownerId,
+      });
+      const forB = await service.getProposalsForOrg({
+        organizationId: fxB.orgId,
+      });
+      expect(forB).toEqual([]);
+    });
+
+    it('returns empty array when org has no proposals', async () => {
+      const fx = await seedOrgFixture(db);
+      const result = await service.getProposalsForOrg({
+        organizationId: fx.orgId,
+      });
+      expect(result).toEqual([]);
+    });
+  });
+
   describe('getOrgName', () => {
     it('returns the human-readable name for an existing org', async () => {
       // seedOrgFixture inserts orgs with name "Test Org" — assert.

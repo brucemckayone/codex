@@ -236,3 +236,23 @@ export const ownerThreadParamSchema = z.object({
   creatorId: uuidSchema,
 });
 export type OwnerThreadParamInput = z.infer<typeof ownerThreadParamSchema>;
+
+/**
+ * GET /agreements/pending — owner-view open-proposal feed (WP-9 — Codex-k9no0).
+ *
+ * Powers the FocusRail "counter-proposal received" signal on the owner
+ * studio dashboard. `proposedByRole='creator'` returns ONLY the open
+ * proposals where the creator countered (or initiated, in a future
+ * reverse-proposal world) — i.e. proposals waiting on owner action.
+ *
+ * `organizationId` is in the query string per the org-resolution
+ * contract (see `feedback_secure_route_org_resolution`); the service
+ * receives `ctx.organizationId` and ignores the body value.
+ */
+export const listPendingProposalsQuerySchema = z.object({
+  organizationId: uuidSchema.optional(),
+  proposedByRole: z.enum(['owner', 'creator']).optional(),
+});
+export type ListPendingProposalsQueryInput = z.infer<
+  typeof listPendingProposalsQuerySchema
+>;

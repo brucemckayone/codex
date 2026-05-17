@@ -59,6 +59,7 @@ import {
   declineProposalInputSchema,
   getNegotiationThreadQuerySchema,
   listAgreementsQuerySchema,
+  listPendingProposalsQuerySchema,
   ownerThreadParamSchema,
   proposalIdParamSchema,
   proposeAgreementInputSchema,
@@ -328,6 +329,46 @@ agreements.get(
         organizationId: ctx.organizationId,
         creatorId: ctx.input.params.creatorId,
         revenueType: ctx.input.query.revenueType,
+      });
+    },
+  })
+);
+
+/**
+ * GET /agreements/pending?organizationId=...&proposedByRole=creator
+ *
+ * Owner/admin-view open proposals on this org (WP-9 — Codex-k9no0).
+ * Powers the FocusRail "counter-proposal received" signal on the owner
+ * studio dashboard. Returns chronological proposals (oldest first).
+ *
+ * `proposedByRole=creator` narrows to the high-signal subset: creators
+ * who have countered (or, in a future reverse-proposal world, initiated)
+ * a proposal that the owner has not yet acted on. Without the role
+ * filter, the response also includes the owner's own outstanding
+ * proposals — which the dashboard already knows about and would
+ * double-count.
+ *
+ * Gated with `requireOrgManagement: true` for the same reason as
+ * `GET /agreements`: rank-and-file members must not see peer negotiation
+ * details.
+ */
+agreements.get(
+  '/pending',
+  procedure({
+    policy: { auth: 'required', requireOrgManagement: true },
+    input: { query: listPendingProposalsQuerySchema },
+    handler: async (ctx) => {
+      const proposals = await ctx.services.agreements.getProposalsForOrg({
+        organizationId: ctx.organizationId,
+        status: ['open'],
+        proposedByRole: ctx.input.query.proposedByRole,
+      });
+      // Synthetic envelope to match the rest of the worker's list contract.
+      return new PaginatedResult(proposals, {
+        page: 1,
+        limit: proposals.length,
+        total: proposals.length,
+        totalPages: 1,
       });
     },
   })

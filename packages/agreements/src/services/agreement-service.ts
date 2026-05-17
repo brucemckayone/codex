@@ -1194,6 +1194,56 @@ export class AgreementService extends BaseService {
   }
 
   /**
+   * All proposals on an organization, regardless of which creator they
+   * target. Mirrors {@link getProposalsForCreator} but org-scoped — used
+   * by WP-9 (Codex-k9no0) to surface "counter-proposal received" signals
+   * on the owner studio dashboard. The org-status composite index
+   * (`idx_agreement_proposals_org_status`) already exists on the schema,
+   * so the typical "open proposals on this org" query is index-served.
+   *
+   * Optional `proposedByRole` filter lets the FocusRail aggregator pull
+   * "open proposals from creators waiting on owner action" in a single
+   * round-trip instead of pulling all open proposals and filtering
+   * client-side.
+   *
+   * Returns chronological proposals (oldest first) — same ordering as
+   * {@link getProposalsForCreator} so consumers can reuse the same
+   * iteration code on both sides.
+   *
+   * Authorisation note: the SERVICE applies no auth gate; callers are
+   * expected to scope the request by an org the actor is already
+   * authorised to read (see the `requireOrgManagement` route gate in
+   * `workers/ecom-api/src/routes/agreements.ts`).
+   */
+  async getProposalsForOrg(input: {
+    organizationId: string;
+    status?: AgreementProposal['status'] | AgreementProposal['status'][];
+    proposedByRole?: 'owner' | 'creator';
+  }): Promise<AgreementProposal[]> {
+    try {
+      const statusFilter = (() => {
+        if (!input.status) return undefined;
+        const arr = Array.isArray(input.status) ? input.status : [input.status];
+        if (arr.length === 0) return undefined;
+        return inArray(agreementProposals.status, arr);
+      })();
+      const roleFilter = input.proposedByRole
+        ? eq(agreementProposals.proposedByRole, input.proposedByRole)
+        : undefined;
+      return await this.db.query.agreementProposals.findMany({
+        where: and(
+          eq(agreementProposals.organizationId, input.organizationId),
+          statusFilter,
+          roleFilter
+        ),
+        orderBy: [asc(agreementProposals.createdAt)],
+      });
+    } catch (error) {
+      this.handleError(error, 'getProposalsForOrg');
+    }
+  }
+
+  /**
    * Resolve a human-readable org name for one organization id. Returns
    * `null` for unknown / hard-deleted orgs (rare). Used by the
    * creator-side portfolio route to surface friendly org names — the

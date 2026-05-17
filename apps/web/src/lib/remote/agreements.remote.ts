@@ -28,6 +28,11 @@ const listAgreementsArgsSchema = z.object({
   revenueType: revenueTypeSchema.optional(),
 });
 
+const listPendingProposalsArgsSchema = z.object({
+  organizationId: z.string().uuid(),
+  proposedByRole: z.enum(['owner', 'creator']).optional(),
+});
+
 const getThreadArgsSchema = z.object({
   organizationId: z.string().uuid(),
   creatorId: z.string().uuid(),
@@ -79,6 +84,24 @@ export const listActiveAgreements = query(
     return api.agreements.list(
       organizationId,
       revenueType ? { revenueType } : undefined
+    );
+  }
+);
+
+/**
+ * Owner-view open proposals on the org (WP-9 — Codex-k9no0). Powers the
+ * FocusRail "counter-proposal received" signal on the owner studio
+ * dashboard. `proposedByRole='creator'` narrows to the subset waiting on
+ * owner action.
+ */
+export const listPendingProposals = query(
+  listPendingProposalsArgsSchema,
+  async ({ organizationId, proposedByRole }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.agreements.listPending(
+      organizationId,
+      proposedByRole ? { proposedByRole } : undefined
     );
   }
 );

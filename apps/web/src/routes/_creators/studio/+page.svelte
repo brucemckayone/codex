@@ -10,15 +10,20 @@
 <script lang="ts">
   import StatCard from '$lib/components/studio/StatCard.svelte';
   import ActivityFeed from '$lib/components/studio/ActivityFeed.svelte';
+  import FocusRail from '$lib/components/studio/dashboard/FocusRail.svelte';
+  import type { FocusItem } from '$lib/components/studio/dashboard/FocusRail.svelte';
+  import { buildCreatorAgreementFocusItems } from '$lib/components/studio/dashboard/agreement-focus-items';
   import {
     PlusIcon,
     UploadIcon,
     TrendingUpIcon,
     GlobeIcon,
   } from '$lib/components/ui/Icon';
+  import { dismiss, isDismissed } from '$lib/collections/dismissals';
   import { listContent } from '$lib/remote/content.remote';
   import { listMedia } from '$lib/remote/media.remote';
   import { getActivityFeed } from '$lib/remote/admin.remote';
+  import { getMyAgreementPortfolio } from '$lib/remote/agreements.remote';
   import type { Component } from 'svelte';
   import * as m from '$paraglide/messages';
 
@@ -33,6 +38,42 @@
 
   // Derive loading state: both stat queries must resolve
   const statsLoading = $derived(contentQuery?.loading || mediaQuery?.loading);
+
+  // ── Revenue-share focus signals (WP-9 — Codex-k9no0) ────────────────────
+  // Creator-side portfolio includes pending-action-required proposals
+  // (per [[pending-proposals-no-agreement-row]] these only exist as
+  // agreement_proposals rows until accept) and active agreements with
+  // their effectiveUntil for expiry warnings.
+  const portfolioQuery = $derived(getMyAgreementPortfolio());
+
+  // Bump on dismissal so derivations re-run (localStorage mutates
+  // synchronously but Svelte 5 needs an explicit trigger).
+  let dismissTick = $state(0);
+  function handleFocusDismiss(itemId: string) {
+    dismiss(itemId);
+    dismissTick += 1;
+  }
+
+  const focusItems = $derived.by<FocusItem[]>(() => {
+    void dismissTick;
+    const portfolio = portfolioQuery?.current;
+    if (!portfolio) return [];
+    return buildCreatorAgreementFocusItems({
+      pendingProposalsFromOrg: portfolio.pendingActionRequired.map((p) => ({
+        proposalId: p.proposalId,
+        organizationId: p.organizationId,
+        organizationName: p.organizationName,
+        revenueType: p.revenueType,
+        proposedSharePercent: p.proposedSharePercent,
+      })),
+      activeAgreements: portfolio.active.map((a) => ({
+        id: a.id,
+        organizationId: a.organizationId,
+        organizationName: a.organizationName,
+        effectiveUntil: a.effectiveUntil,
+      })),
+    }).filter((item) => !item.dismissable || !isDismissed(item.id));
+  });
 
   // ── Quick Actions ──────────────────────────────────────────────────────────
 
@@ -82,6 +123,13 @@
         value={mediaQuery?.current?.pagination?.total ?? '--'}
         loading={!mediaQuery?.current}
       />
+    </section>
+  {/if}
+
+  {#if focusItems.length > 0}
+    <section class="focus-section" aria-labelledby="creator-focus-heading">
+      <h2 id="creator-focus-heading" class="visually-hidden">Today's priorities</h2>
+      <FocusRail items={focusItems} onDismiss={handleFocusDismiss} />
     </section>
   {/if}
 
@@ -143,6 +191,25 @@
     color: var(--color-text-secondary);
     margin: 0;
     line-height: var(--leading-normal);
+  }
+
+  /* WP-9 — agreement focus rail section */
+  .focus-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
   }
 
   .stats-grid {

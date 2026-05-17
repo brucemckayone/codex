@@ -1824,6 +1824,26 @@ export function createServerApi(
       },
 
       /**
+       * Owner-view open proposals on this org (WP-9 — Codex-k9no0).
+       * Optional `proposedByRole` filter narrows to "counter-proposals
+       * from creators waiting on owner action" in a single round-trip.
+       * Same `requireOrgManagement` gate as `list`.
+       */
+      listPending: (
+        organizationId: string,
+        params?: { proposedByRole?: 'owner' | 'creator' }
+      ) => {
+        const search = new URLSearchParams();
+        if (params?.proposedByRole) {
+          search.set('proposedByRole', params.proposedByRole);
+        }
+        return request<PaginatedListResponse<AgreementProposal>>(
+          'ecom',
+          withOrg('/agreements/pending', organizationId, search)
+        );
+      },
+
+      /**
        * Owner-view negotiation thread for one (creator, revenueType) on
        * this org. Empty array if no thread exists.
        */
