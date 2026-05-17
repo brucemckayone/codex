@@ -8044,6 +8044,7 @@ describe('SubscriptionService', () => {
     it('returns zero counters and makes no Stripe calls when no pending rows exist', async () => {
       // Ensure no leftover pending rows from earlier tests
       const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM refund_reviews`);
       await db.execute(rawSql`DELETE FROM payouts`);
 
       const retrieveSpy = stubAccountsRetrieve(true);
@@ -8064,6 +8065,7 @@ describe('SubscriptionService', () => {
 
     it('resolves the group when the Connect account now reports charges_enabled && payouts_enabled', async () => {
       const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM refund_reviews`);
       await db.execute(rawSql`DELETE FROM payouts`);
 
       const { org, sub, stripeAccountId } =
@@ -8103,6 +8105,7 @@ describe('SubscriptionService', () => {
 
     it('skips the group (no transfer) when the Connect account is still not ready', async () => {
       const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM refund_reviews`);
       await db.execute(rawSql`DELETE FROM payouts`);
 
       const { org, sub } = await seedConnectAndSubscription('vv77x-not-ready');
@@ -8138,6 +8141,7 @@ describe('SubscriptionService', () => {
 
     it('groups by (orgId, userId) — N rows for one Connect account → one accounts.retrieve, one resolvePendingPayouts', async () => {
       const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM refund_reviews`);
       await db.execute(rawSql`DELETE FROM payouts`);
 
       const { org, sub, stripeAccountId } =
@@ -8204,6 +8208,7 @@ describe('SubscriptionService', () => {
 
     it('isolates per-group failure — one Stripe.accounts.retrieve throwing does not abort other groups', async () => {
       const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM refund_reviews`);
       await db.execute(rawSql`DELETE FROM payouts`);
 
       const failOrg = await seedConnectAndSubscription('vv77x-fail');
@@ -8270,6 +8275,7 @@ describe('SubscriptionService', () => {
 
     it('respects olderThanMinutes — rows newer than the threshold are NOT swept (webhook handles fresh rows)', async () => {
       const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM refund_reviews`);
       await db.execute(rawSql`DELETE FROM payouts`);
 
       const { org, sub } = await seedConnectAndSubscription('vv77x-fresh');
@@ -9329,6 +9335,7 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
 
     it("sweepUnresolvedPayouts only touches status='pending' rows — paid and failed rows are left untouched", async () => {
       const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM refund_reviews`);
       await db.execute(rawSql`DELETE FROM payouts`);
 
       const { org, sub, stripeAccountId } = await seedDrainScenario(
@@ -9426,6 +9433,7 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
 
     it('sweepUnresolvedPayouts uses attemptedAt (not createdAt) for the age threshold — recent createdAt + old attemptedAt is swept', async () => {
       const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM refund_reviews`);
       await db.execute(rawSql`DELETE FROM payouts`);
 
       const { org, sub, stripeAccountId } = await seedDrainScenario(
