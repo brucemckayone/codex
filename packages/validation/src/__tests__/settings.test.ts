@@ -333,6 +333,9 @@ describe('updateFeaturesSchema', () => {
 describe('response schemas', () => {
   describe('brandingSettingsSchema', () => {
     it('should validate branding response shape', () => {
+      // brandingSettingsSchema (settings.ts L201-239) requires the full set of
+      // branding fields including intro-video, token overrides, hero layout,
+      // and pricing FAQ — all introduced after the original tests were written.
       const valid = {
         logoUrl: 'https://example.com/logo.png',
         primaryColorHex: '#3B82F6',
@@ -343,6 +346,13 @@ describe('response schemas', () => {
         fontHeading: null,
         radiusValue: 0.5,
         densityValue: 1,
+        introVideoMediaItemId: null,
+        introVideoUrl: null,
+        tokenOverrides: null,
+        darkModeOverrides: null,
+        darkTokenOverrides: null,
+        heroLayout: 'default',
+        pricingFaq: null,
       };
       expect(brandingSettingsSchema.parse(valid)).toEqual(valid);
     });
@@ -358,6 +368,13 @@ describe('response schemas', () => {
         fontHeading: null,
         radiusValue: 0.5,
         densityValue: 1,
+        introVideoMediaItemId: null,
+        introVideoUrl: null,
+        tokenOverrides: null,
+        darkModeOverrides: null,
+        darkTokenOverrides: null,
+        heroLayout: 'default',
+        pricingFaq: null,
       };
       expect(brandingSettingsSchema.parse(valid)).toEqual(valid);
     });
@@ -387,13 +404,21 @@ describe('response schemas', () => {
 
   describe('featureSettingsSchema', () => {
     it('should validate feature response shape', () => {
-      const valid = { enableSignups: true, enablePurchases: true };
+      // featureSettingsSchema (settings.ts L259-263) requires
+      // enableSubscriptions in addition to the original two flags.
+      const valid = {
+        enableSignups: true,
+        enablePurchases: true,
+        enableSubscriptions: false,
+      };
       expect(featureSettingsSchema.parse(valid)).toEqual(valid);
     });
   });
 
   describe('allSettingsSchema', () => {
     it('should validate combined settings response', () => {
+      // Mirrors the full branding + features field-sets enforced by
+      // settings.ts L201-239 and L259-263.
       const valid = {
         branding: {
           logoUrl: null,
@@ -405,6 +430,13 @@ describe('response schemas', () => {
           fontHeading: null,
           radiusValue: 0.5,
           densityValue: 1,
+          introVideoMediaItemId: null,
+          introVideoUrl: null,
+          tokenOverrides: null,
+          darkModeOverrides: null,
+          darkTokenOverrides: null,
+          heroLayout: 'default',
+          pricingFaq: null,
         },
         contact: {
           platformName: 'Test',
@@ -412,7 +444,11 @@ describe('response schemas', () => {
           contactUrl: null,
           timezone: 'UTC',
         },
-        features: { enableSignups: true, enablePurchases: true },
+        features: {
+          enableSignups: true,
+          enablePurchases: true,
+          enableSubscriptions: false,
+        },
       };
       expect(allSettingsSchema.parse(valid)).toEqual(valid);
     });
@@ -461,9 +497,11 @@ describe('default constants', () => {
   });
 
   it('should have valid DEFAULT_FEATURES', () => {
+    // DEFAULT_FEATURES (settings.ts L321-325) now seeds enableSubscriptions:false.
     expect(DEFAULT_FEATURES).toEqual({
       enableSignups: true,
       enablePurchases: true,
+      enableSubscriptions: false,
     });
     expect(featureSettingsSchema.parse(DEFAULT_FEATURES)).toEqual(
       DEFAULT_FEATURES
