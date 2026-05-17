@@ -29,7 +29,15 @@ import {
   validateDatabaseConnection,
 } from '@codex/test-utils';
 import { eq } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import {
   AgreementNotFoundError,
   InvalidProposalStateError,
@@ -1370,6 +1378,344 @@ describe('AgreementService', () => {
       });
       expect(subOnly).toHaveLength(1);
       expect(subOnly[0]?.revenueType).toBe('subscription');
+    });
+  });
+
+  // ─── Lifecycle notification dispatch (WP-5 — Codex-90de9) ──────────────
+  //
+  // The lifecycle methods fire a `mailer(params)` callback AFTER the
+  // transaction commits. Tests below construct a NEW service instance
+  // with a mock mailer so we can assert the email contract directly:
+  // template name, recipient mapping, payload shape, and the
+  // critical invariant that mailer failures NEVER roll back the
+  // agreement state (notification is observation, not source of truth).
+
+  describe('lifecycle notification dispatch (WP-5)', () => {
+    function buildServiceWithMailer(): {
+      serviceWithMailer: AgreementService;
+      mailer: ReturnType<typeof vi.fn>;
+    } {
+      const mailer = vi.fn();
+      const serviceWithMailer = new AgreementService({
+        db,
+        environment: 'test',
+        mailer,
+        webAppUrl: 'https://app.example.test',
+      });
+      return { serviceWithMailer, mailer };
+    }
+
+    it('proposeAgreement triggers agreement-proposed-by-owner addressed to the creator', async () => {
+      const fx = await seedOrgFixture(db);
+      const { serviceWithMailer, mailer } = buildServiceWithMailer();
+      await serviceWithMailer.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        note: 'A note for the recipient.',
+        proposedByUserId: fx.ownerId,
+      });
+      expect(mailer).toHaveBeenCalledTimes(1);
+      const [call] = mailer.mock.calls;
+      const params = call?.[0] as Record<string, unknown>;
+      expect(params.templateName).toBe('agreement-proposed-by-owner');
+      expect(params.category).toBe('transactional');
+      expect(params.userId).toBe(fx.creatorAId);
+      expect(params.organizationId).toBe(fx.orgId);
+      const data = params.data as Record<string, string>;
+      expect(data.sharePercentDisplay).toBe('30%');
+      expect(data.termMonthsDisplay).toBe('6 months');
+      expect(data.revenueTypeLabel).toBe('subscription');
+      expect(data.note).toBe('A note for the recipient.');
+      // Deep link includes the absolute base + org id
+      expect(data.deepLinkUrl).toContain(
+        'https://app.example.test/studio/negotiations/'
+      );
+      expect(data.deepLinkUrl).toContain(`orgId=${fx.orgId}`);
+    });
+
+    it('counterPropose by creator triggers agreement-countered-by-creator addressed to the proposing owner', async () => {
+      const fx = await seedOrgFixture(db);
+      const { serviceWithMailer, mailer } = buildServiceWithMailer();
+      const proposal = await serviceWithMailer.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      mailer.mockClear();
+      await serviceWithMailer.counterPropose({
+        proposalId: proposal.id,
+        sharePercent: 4000,
+        termMonths: 6,
+        counteredByUserId: fx.creatorAId,
+      });
+      expect(mailer).toHaveBeenCalledTimes(1);
+      const params = mailer.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(params.templateName).toBe('agreement-countered-by-creator');
+      expect(params.userId).toBe(fx.ownerId);
+      const data = params.data as Record<string, string>;
+      expect(data.sharePercentDisplay).toBe('40%');
+    });
+
+    it('counterPropose by owner triggers agreement-countered-by-owner addressed to the creator', async () => {
+      const fx = await seedOrgFixture(db);
+      const { serviceWithMailer, mailer } = buildServiceWithMailer();
+      const proposal = await serviceWithMailer.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      const counter = await serviceWithMailer.counterPropose({
+        proposalId: proposal.id,
+        sharePercent: 4000,
+        termMonths: 6,
+        counteredByUserId: fx.creatorAId,
+      });
+      mailer.mockClear();
+      // Now the owner counters back
+      await serviceWithMailer.counterPropose({
+        proposalId: counter.id,
+        sharePercent: 3500,
+        termMonths: 6,
+        counteredByUserId: fx.ownerId,
+      });
+      expect(mailer).toHaveBeenCalledTimes(1);
+      const params = mailer.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(params.templateName).toBe('agreement-countered-by-owner');
+      expect(params.userId).toBe(fx.creatorAId);
+    });
+
+    it('acceptProposal triggers agreement-accepted to BOTH parties (creator + owner)', async () => {
+      const fx = await seedOrgFixture(db);
+      const { serviceWithMailer, mailer } = buildServiceWithMailer();
+      const proposal = await serviceWithMailer.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      mailer.mockClear();
+      await serviceWithMailer.acceptProposal({
+        proposalId: proposal.id,
+        acceptedByUserId: fx.creatorAId,
+      });
+      expect(mailer).toHaveBeenCalledTimes(2);
+      const recipientUserIds = mailer.mock.calls.map(
+        (call) => (call[0] as Record<string, unknown>).userId
+      );
+      expect(new Set(recipientUserIds)).toEqual(
+        new Set([fx.creatorAId, fx.ownerId])
+      );
+      for (const call of mailer.mock.calls) {
+        const params = call[0] as Record<string, unknown>;
+        expect(params.templateName).toBe('agreement-accepted');
+        const data = params.data as Record<string, string>;
+        expect(data.sharePercentDisplay).toBe('30%');
+        expect(data.effectiveFromDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      }
+    });
+
+    it('declineProposal triggers agreement-declined to BOTH parties', async () => {
+      const fx = await seedOrgFixture(db);
+      const { serviceWithMailer, mailer } = buildServiceWithMailer();
+      const proposal = await serviceWithMailer.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      mailer.mockClear();
+      await serviceWithMailer.declineProposal({
+        proposalId: proposal.id,
+        declinedByUserId: fx.creatorAId,
+        reason: 'Need a different deal',
+      });
+      expect(mailer).toHaveBeenCalledTimes(2);
+      const recipientUserIds = mailer.mock.calls.map(
+        (call) => (call[0] as Record<string, unknown>).userId
+      );
+      expect(new Set(recipientUserIds)).toEqual(
+        new Set([fx.creatorAId, fx.ownerId])
+      );
+      for (const call of mailer.mock.calls) {
+        const params = call[0] as Record<string, unknown>;
+        expect(params.templateName).toBe('agreement-declined');
+        const data = params.data as Record<string, string>;
+        expect(data.declineReason).toBe('Need a different deal');
+      }
+    });
+
+    it('terminateAgreement (by creator) triggers agreement-terminated addressed to the org owner', async () => {
+      const fx = await seedOrgFixture(db);
+      const { serviceWithMailer, mailer } = buildServiceWithMailer();
+      const proposal = await serviceWithMailer.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      const agreement = await serviceWithMailer.acceptProposal({
+        proposalId: proposal.id,
+        acceptedByUserId: fx.creatorAId,
+      });
+      mailer.mockClear();
+      await serviceWithMailer.terminateAgreement({
+        agreementId: agreement.id,
+        terminatedByUserId: fx.creatorAId, // creator terminates
+        reason: 'Switching focus',
+      });
+      expect(mailer).toHaveBeenCalledTimes(1);
+      const params = mailer.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(params.templateName).toBe('agreement-terminated');
+      // Recipient is the OTHER party — the org owner
+      expect(params.userId).toBe(fx.ownerId);
+      const data = params.data as Record<string, string>;
+      expect(data.terminationReason).toBe('Switching focus');
+      expect(data.effectiveTerminationDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('terminateAgreement (by owner) triggers agreement-terminated addressed to the creator', async () => {
+      const fx = await seedOrgFixture(db);
+      const { serviceWithMailer, mailer } = buildServiceWithMailer();
+      const proposal = await serviceWithMailer.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      const agreement = await serviceWithMailer.acceptProposal({
+        proposalId: proposal.id,
+        acceptedByUserId: fx.creatorAId,
+      });
+      mailer.mockClear();
+      await serviceWithMailer.terminateAgreement({
+        agreementId: agreement.id,
+        terminatedByUserId: fx.ownerId, // owner terminates
+      });
+      expect(mailer).toHaveBeenCalledTimes(1);
+      const params = mailer.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(params.templateName).toBe('agreement-terminated');
+      // Recipient is the OTHER party — the creator
+      expect(params.userId).toBe(fx.creatorAId);
+    });
+
+    it('withdrawProposal does NOT fire any notification (silent withdrawal per epic plan)', async () => {
+      const fx = await seedOrgFixture(db);
+      const { serviceWithMailer, mailer } = buildServiceWithMailer();
+      const proposal = await serviceWithMailer.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      mailer.mockClear();
+      await serviceWithMailer.withdrawProposal({
+        proposalId: proposal.id,
+        withdrawnByUserId: fx.ownerId,
+      });
+      expect(mailer).not.toHaveBeenCalled();
+    });
+
+    it('mailer throwing does NOT roll back the agreement transaction', async () => {
+      // Critical invariant: the agreement is the source of truth; the
+      // notification is observation. A mailer transport failure (e.g.
+      // notifications-api 500) must never undo the agreement state.
+      const fx = await seedOrgFixture(db);
+      const throwingMailer = vi.fn(() => {
+        throw new Error('Simulated transport failure');
+      });
+      const serviceWithThrowingMailer = new AgreementService({
+        db,
+        environment: 'test',
+        mailer: throwingMailer,
+        webAppUrl: 'https://app.example.test',
+      });
+      // Should NOT throw — the dispatcher catches + logs the mailer
+      // failure. Returned proposal is the persisted row.
+      const proposal = await serviceWithThrowingMailer.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      expect(proposal.id).toBeDefined();
+      expect(proposal.status).toBe('open');
+      // The DB row must exist
+      const persisted = await db.query.agreementProposals.findFirst({
+        where: eq(schema.agreementProposals.id, proposal.id),
+      });
+      expect(persisted).not.toBeUndefined();
+      expect(throwingMailer).toHaveBeenCalledTimes(1);
+    });
+
+    it('service without a mailer wired silently no-ops (graceful degrade)', async () => {
+      // Narrow unit tests / legacy harnesses without a mailer wired
+      // must still succeed. The service-level `service` instance built
+      // in `beforeAll` has no mailer; we reuse it here.
+      const fx = await seedOrgFixture(db);
+      const proposal = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      expect(proposal.id).toBeDefined();
+      expect(proposal.status).toBe('open');
+    });
+
+    it('formats indefinite term (termMonths=null) as "Indefinite"', async () => {
+      const fx = await seedOrgFixture(db);
+      const { serviceWithMailer, mailer } = buildServiceWithMailer();
+      await serviceWithMailer.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: null,
+        proposedByUserId: fx.ownerId,
+      });
+      const params = mailer.mock.calls[0]?.[0] as Record<string, unknown>;
+      const data = params.data as Record<string, string>;
+      expect(data.termMonthsDisplay).toBe('Indefinite');
+    });
+
+    it('formats content_purchase revenue type with hyphenated label', async () => {
+      const fx = await seedOrgFixture(db);
+      const { serviceWithMailer, mailer } = buildServiceWithMailer();
+      await serviceWithMailer.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'content_purchase',
+        sharePercent: 5000,
+        termMonths: 12,
+        proposedByUserId: fx.ownerId,
+      });
+      const params = mailer.mock.calls[0]?.[0] as Record<string, unknown>;
+      const data = params.data as Record<string, string>;
+      expect(data.revenueTypeLabel).toBe('content-purchase');
+      expect(data.sharePercentDisplay).toBe('50%');
     });
   });
 });

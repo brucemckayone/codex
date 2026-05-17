@@ -424,12 +424,52 @@ export function createServiceRegistry(
      * purely about the post-platform pool — see `agreement-math.ts`),
      * so no `feeConfig` dep is threaded through here. WP-4 reads the
      * platform fee fresh in the payout pipeline.
+     *
+     * WP-5 (Codex-90de9): wire a mailer thunk so every lifecycle
+     * mutation can fire a notification fire-and-forget AFTER the
+     * transaction commits. Same pattern as the SubscriptionService
+     * `mailer` slot — the service stays unaware of `Bindings` /
+     * `ExecutionContext`; `sendEmailToWorker` under the hood schedules
+     * the worker-to-worker fetch on `executionCtx.waitUntil`. When
+     * `executionCtx` is absent (shouldn't happen inside `procedure()`
+     * but be defensive), the mailer slot stays undefined and the
+     * service silently skips emails — agreement mutations still
+     * succeed.
      */
     get agreements() {
       if (!_agreements) {
+        const mailer = executionCtx
+          ? (params: {
+              to: string;
+              toName?: string;
+              templateName:
+                | 'agreement-proposed-by-owner'
+                | 'agreement-countered-by-creator'
+                | 'agreement-countered-by-owner'
+                | 'agreement-accepted'
+                | 'agreement-declined'
+                | 'agreement-terminated'
+                | 'agreement-expiring-soon';
+              category: 'transactional';
+              userId?: string;
+              organizationId?: string | null;
+              data: Record<string, string | number | boolean>;
+            }) => {
+              sendEmailToWorker(env, executionCtx, params);
+            }
+          : undefined;
+
+        // Web-app base URL powers the deep link embedded inside every
+        // agreement-lifecycle email. Mirrors the
+        // `subscription-tier-price-change` wiring on `subscription` —
+        // same `WEB_APP_URL` binding, same fallback semantics.
+        const webAppUrl = env.WEB_APP_URL;
+
         _agreements = new AgreementService({
           db: getSharedDb(),
           environment: getEnvironment(),
+          mailer,
+          webAppUrl,
         });
       }
       return _agreements;
