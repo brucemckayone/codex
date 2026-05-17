@@ -22,7 +22,8 @@ export type SidebarIcon =
   | 'settings'
   | 'billing'
   | 'monetisation'
-  | 'payouts';
+  | 'payouts'
+  | 'agreements';
 
 export interface SidebarLink extends NavLink {
   icon: SidebarIcon;
@@ -78,6 +79,7 @@ export const SIDEBAR_OWNER_LINKS: SidebarLink[] = [
 
 /** Studio sidebar — personal studio links (settings without admin gate) */
 export const SIDEBAR_PERSONAL_LINKS: SidebarLink[] = [
+  { href: '/studio/negotiations', label: 'Negotiations', icon: 'agreements' },
   { href: '/studio/settings', label: 'Settings', icon: 'settings' },
 ];
 

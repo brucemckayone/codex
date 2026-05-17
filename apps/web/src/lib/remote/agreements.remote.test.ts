@@ -57,4 +57,14 @@ describe('remote/agreements.remote', () => {
     const { terminateAgreement } = await import('./agreements.remote');
     expect(terminateAgreement).toBeDefined();
   });
+
+  it('exports getMyAgreementPortfolio query (for WP-8 creator surface)', async () => {
+    const { getMyAgreementPortfolio } = await import('./agreements.remote');
+    expect(getMyAgreementPortfolio).toBeDefined();
+  });
+
+  it('exports getMyAgreementThread query (for WP-8 creator detail page)', async () => {
+    const { getMyAgreementThread } = await import('./agreements.remote');
+    expect(getMyAgreementThread).toBeDefined();
+  });
 });

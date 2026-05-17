@@ -1865,6 +1865,79 @@ export function createServerApi(
         >('ecom', '/agreements/me'),
 
       /**
+       * Creator-view portfolio aggregator (WP-8). Returns active +
+       * pending-action-required + waiting-on-org + past in one round-trip.
+       * Anonymisation contract preserved: peer aggregates only, never peer
+       * identifiers.
+       */
+      getCreatorPortfolio: () =>
+        request<{
+          active: Array<{
+            id: string;
+            organizationId: string;
+            organizationName: string | null;
+            creatorId: string;
+            revenueType: string;
+            status: string;
+            effectiveFrom: string | Date;
+            effectiveUntil: string | Date | null;
+            organizationFeePercentage: number;
+            currentProposalId: string | null;
+            terminatedAt: string | Date | null;
+            peers: { count: number; aggregateSharePercent: number };
+          }>;
+          pendingActionRequired: Array<{
+            proposalId: string;
+            organizationId: string;
+            organizationName: string | null;
+            revenueType: string;
+            proposedSharePercent: number;
+            proposedTermMonths: number | null;
+            proposedByRole: string;
+            roundNumber: number;
+            createdAt: string | Date;
+            note: string | null;
+            threadProposalId: string;
+          }>;
+          pendingWaitingOnOrg: Array<{
+            proposalId: string;
+            organizationId: string;
+            organizationName: string | null;
+            revenueType: string;
+            proposedSharePercent: number;
+            proposedTermMonths: number | null;
+            proposedByRole: string;
+            roundNumber: number;
+            createdAt: string | Date;
+            note: string | null;
+            threadProposalId: string;
+          }>;
+          past: Array<{
+            proposalId: string;
+            organizationId: string;
+            organizationName: string | null;
+            revenueType: string;
+            status: string;
+            proposedSharePercent: number;
+            proposedByRole: string;
+            roundNumber: number;
+            endedAt: string | Date | null;
+            declineReason: string | null;
+          }>;
+        }>('ecom', '/agreements/me/portfolio'),
+
+      /**
+       * Creator-view negotiation thread by ANY proposal id within the
+       * thread. Worker enumerates threads where the caller is the named
+       * creator (including pending-only threads without an active row).
+       */
+      getMyThread: (proposalId: string) =>
+        request<AgreementProposal[]>(
+          'ecom',
+          `/agreements/me/threads/${encodeURIComponent(proposalId)}`
+        ),
+
+      /**
        * Round 1 owner-initiated proposal. `organizationId` lives in the
        * query string (procedure() resolveOrganizationId only reads query
        * fallback; body org would 400 with ORG_CONTEXT_REQUIRED).

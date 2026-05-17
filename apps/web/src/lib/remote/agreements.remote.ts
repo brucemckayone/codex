@@ -107,6 +107,36 @@ export const listMyAgreements = query(async () => {
   return api.agreements.listForCreator();
 });
 
+/**
+ * Creator-view portfolio aggregator (WP-8 — Codex-bw2wf). Drives the
+ * /studio/negotiations page: active + pending-action-required +
+ * waiting-on-org + past in a single round-trip.
+ *
+ * Anonymisation contract: peer aggregates only, never identifiers. The
+ * UI consumes the masked data as-is.
+ */
+export const getMyAgreementPortfolio = query(async () => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.agreements.getCreatorPortfolio();
+});
+
+/**
+ * Creator-view: full negotiation thread by ANY proposal id within the
+ * thread. Used by the agreement-detail page on /studio/negotiations/[id].
+ * Worker enumerates threads where the caller is the named creator,
+ * including pending-only threads (round-1 owner proposals not yet
+ * accepted).
+ */
+export const getMyAgreementThread = query(
+  proposalIdArgSchema,
+  async ({ proposalId }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.agreements.getMyThread(proposalId);
+  }
+);
+
 // ─── Commands ─────────────────────────────────────────────────────────────
 
 /**

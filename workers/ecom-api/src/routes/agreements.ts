@@ -491,10 +491,13 @@ agreements.get(
  * no anonymisation is needed — the proposals show owner and creator
  * actions side by side, both of which the creator is entitled to see.
  *
- * We use a service-level "list this thread by proposal id" composition
- * because the service intentionally doesn't expose a `getProposal(id)`
- * surface; we fetch the thread by triple, then narrow to the row(s)
- * matching the proposal id to assert membership.
+ * Enumeration source (WP-8 enhancement — Codex-bw2wf): we resolve which
+ * threads the caller participates in via `getProposalsForCreator` rather
+ * than `getActiveAgreementsForCreator`. The former includes orgs where
+ * the creator has any proposal (incl. pending round-1 with no active
+ * agreement yet); the latter misses those because no active row exists
+ * until accept. Without this, a creator clicking a pending-action notice
+ * would 404 on the detail page.
  */
 agreements.get(
   '/me/threads/:proposalId',
@@ -502,36 +505,47 @@ agreements.get(
     policy: { auth: 'required' },
     input: { params: proposalIdParamSchema },
     handler: async (ctx) => {
-      // Pull the creator's own agreements first to enumerate which
-      // (org, revenueType) threads they participate in, then locate the
-      // requested proposal among them. This keeps the service surface
-      // narrow and never reveals threads the caller isn't on.
-      const own = await ctx.services.agreements.getActiveAgreementsForCreator({
-        creatorId: ctx.user.id,
-      });
+      // Enumerate every (org, revenueType) thread the caller is on by
+      // pulling all proposals where they're the named creator, then
+      // dedup by (orgId, revenueType). This covers both active and
+      // pending-only threads.
+      const ownProposals = await ctx.services.agreements.getProposalsForCreator(
+        {
+          creatorId: ctx.user.id,
+        }
+      );
+      const triples = new Map<
+        string,
+        {
+          organizationId: string;
+          revenueType: 'subscription' | 'content_purchase';
+        }
+      >();
+      for (const p of ownProposals) {
+        if (
+          p.revenueType !== 'subscription' &&
+          p.revenueType !== 'content_purchase'
+        ) {
+          throw new Error(
+            `Unexpected revenueType on proposal ${p.id}: ${p.revenueType}`
+          );
+        }
+        triples.set(`${p.organizationId}:${p.revenueType}`, {
+          organizationId: p.organizationId,
+          revenueType: p.revenueType,
+        });
+      }
 
-      // Parallel fetch: each thread is one DB roundtrip; with M
-      // agreements across orgs this is M parallel queries, not M
-      // sequential. The DB CHECK constraint guarantees `revenueType` is
-      // one of the two enum values, but we runtime-guard before the
-      // narrowing cast so a future schema change surfaces loudly rather
-      // than silently lying to the type system.
+      // Parallel fetch: each thread is one DB roundtrip; for typical
+      // creators (1-3 orgs × 2 revenue types) this is a small fan-out.
       const candidates = await Promise.all(
-        own.map((a) => {
-          if (
-            a.revenueType !== 'subscription' &&
-            a.revenueType !== 'content_purchase'
-          ) {
-            throw new Error(
-              `Unexpected revenueType on agreement ${a.id}: ${a.revenueType}`
-            );
-          }
-          return ctx.services.agreements.getNegotiationThread({
-            organizationId: a.organizationId,
+        Array.from(triples.values()).map((t) =>
+          ctx.services.agreements.getNegotiationThread({
+            organizationId: t.organizationId,
             creatorId: ctx.user.id,
-            revenueType: a.revenueType,
-          });
-        })
+            revenueType: t.revenueType,
+          })
+        )
       );
 
       const match = candidates.find((thread) =>
@@ -548,6 +562,226 @@ agreements.get(
       throw new NotFoundError('Proposal thread not found', {
         proposalId: ctx.input.params.proposalId,
       });
+    },
+  })
+);
+
+/**
+ * Shape of the creator-portfolio payload (WP-8 — Codex-bw2wf).
+ *
+ * Each section is independently consumable by the UI and contains the
+ * minimum fields needed for the negotiations page sections:
+ *   - active            — agreements currently in force (peers anonymised)
+ *   - pendingActionRequired — open proposals waiting on the creator
+ *   - pendingWaitingOnOrg   — open proposals the creator has sent (waiting
+ *                              on the org)
+ *   - past              — terminal-state proposals (declined / withdrawn /
+ *                          superseded) and terminated agreements (last 90d)
+ *
+ * `organizationName` is denormalised onto every row so the UI does not
+ * need a follow-up lookup per row. NEVER include peer identifying fields
+ * — anonymisation contract is preserved across every section.
+ */
+interface CreatorPortfolioActiveRow extends CreatorAgreementWithPeers {
+  organizationName: string | null;
+}
+
+interface CreatorPortfolioPendingRow {
+  proposalId: string;
+  organizationId: string;
+  organizationName: string | null;
+  revenueType: string;
+  proposedSharePercent: number;
+  proposedTermMonths: number | null;
+  proposedByRole: string;
+  roundNumber: number;
+  createdAt: Date;
+  note: string | null;
+  /** Useful for linking to a detail page when no active agreement exists. */
+  threadProposalId: string;
+}
+
+interface CreatorPortfolioPastRow {
+  proposalId: string;
+  organizationId: string;
+  organizationName: string | null;
+  revenueType: string;
+  status: string;
+  proposedSharePercent: number;
+  proposedByRole: string;
+  roundNumber: number;
+  endedAt: Date | null;
+  declineReason: string | null;
+}
+
+interface CreatorPortfolioPayload {
+  active: CreatorPortfolioActiveRow[];
+  pendingActionRequired: CreatorPortfolioPendingRow[];
+  pendingWaitingOnOrg: CreatorPortfolioPendingRow[];
+  past: CreatorPortfolioPastRow[];
+}
+
+/**
+ * GET /agreements/me/portfolio
+ *
+ * Creator-side portfolio aggregator (WP-8 — Codex-bw2wf). Returns the
+ * four sections used by the /studio/negotiations page in a single
+ * round-trip, each one keyed by the creator's own identifier and
+ * anonymised against peer identifiers.
+ *
+ * Why a dedicated endpoint over assembling the data client-side:
+ *   - Pending round-1 proposals do NOT have a `creatorOrganizationAgreement`
+ *     row yet; `getActiveAgreementsForCreator` alone misses them, so the
+ *     creator would never see an owner's initial proposal until accept.
+ *   - Past states across orgs (declined / withdrawn) cannot be derived
+ *     from active rows alone for the same reason.
+ *
+ * Anonymisation contract: every section keeps the creator-only invariant.
+ * Active rows reuse the existing `CreatorAgreementWithPeers` shape — peer
+ * count + aggregate share only, no peer userId / creatorId / display
+ * fields. Pending + past sections never include peer rows at all; each
+ * row concerns the caller exclusively.
+ */
+agreements.get(
+  '/me/portfolio',
+  procedure({
+    policy: { auth: 'required' },
+    handler: async (ctx) => {
+      // Pull the creator's own active rows (with peer-aggregate
+      // enrichment, identical to GET /agreements/me) and every proposal
+      // they're named on. The active rows + proposal list together
+      // cover every section of the portfolio.
+      const [activeRows, ownProposals] = await Promise.all([
+        ctx.services.agreements.getActiveAgreementsForCreator({
+          creatorId: ctx.user.id,
+        }),
+        ctx.services.agreements.getProposalsForCreator({
+          creatorId: ctx.user.id,
+        }),
+      ]);
+
+      // Per-org peer aggregate (matches GET /agreements/me semantics).
+      const uniqueOrgIds = Array.from(
+        new Set([
+          ...activeRows.map((a) => a.organizationId),
+          ...ownProposals.map((p) => p.organizationId),
+        ])
+      );
+      const peerByOrgAndType = new Map<
+        string,
+        { count: number; aggregateSharePercent: number }
+      >();
+      const nameByOrg = new Map<string, string | null>();
+      await Promise.all(
+        uniqueOrgIds.map(async (orgId) => {
+          const [all, name] = await Promise.all([
+            ctx.services.agreements.getActiveAgreements({
+              organizationId: orgId,
+            }),
+            ctx.services.agreements.getOrgName(orgId),
+          ]);
+          nameByOrg.set(orgId, name);
+          for (const revType of ['subscription', 'content_purchase'] as const) {
+            const peersInType = all.filter(
+              (row) =>
+                row.revenueType === revType && row.creatorId !== ctx.user.id
+            );
+            const aggregate = peersInType.reduce(
+              (sum, p) => sum + (10000 - p.organizationFeePercentage),
+              0
+            );
+            peerByOrgAndType.set(`${orgId}:${revType}`, {
+              count: peersInType.length,
+              aggregateSharePercent: aggregate,
+            });
+          }
+        })
+      );
+
+      const active: CreatorPortfolioActiveRow[] = activeRows.map((row) => {
+        const peers = peerByOrgAndType.get(
+          `${row.organizationId}:${row.revenueType}`
+        ) ?? { count: 0, aggregateSharePercent: 0 };
+        return {
+          id: row.id,
+          organizationId: row.organizationId,
+          organizationName: nameByOrg.get(row.organizationId) ?? null,
+          creatorId: row.creatorId,
+          revenueType: row.revenueType,
+          status: row.status,
+          effectiveFrom: row.effectiveFrom,
+          effectiveUntil: row.effectiveUntil,
+          organizationFeePercentage: row.organizationFeePercentage,
+          currentProposalId: row.currentProposalId,
+          terminatedAt: row.terminatedAt,
+          peers,
+        };
+      });
+
+      // Pending: open proposals where the creator is named. Split by
+      // who is currently waited on. `proposedByRole === 'owner'` ⇒ owner
+      // proposed last, so the creator is the next-actor (action required).
+      // `proposedByRole === 'creator'` ⇒ creator countered last, so the
+      // owner is the next-actor (waiting on org).
+      const openProposals = ownProposals.filter((p) => p.status === 'open');
+      const pendingActionRequired: CreatorPortfolioPendingRow[] = [];
+      const pendingWaitingOnOrg: CreatorPortfolioPendingRow[] = [];
+      for (const p of openProposals) {
+        const row: CreatorPortfolioPendingRow = {
+          proposalId: p.id,
+          organizationId: p.organizationId,
+          organizationName: nameByOrg.get(p.organizationId) ?? null,
+          revenueType: p.revenueType,
+          proposedSharePercent: p.proposedCreatorSharePercent,
+          proposedTermMonths: p.proposedTermMonths,
+          proposedByRole: p.proposedByRole,
+          roundNumber: p.roundNumber,
+          createdAt: p.createdAt,
+          note: p.note,
+          threadProposalId: p.id,
+        };
+        if (p.proposedByRole === 'owner') {
+          pendingActionRequired.push(row);
+        } else {
+          pendingWaitingOnOrg.push(row);
+        }
+      }
+
+      // Past: terminal-state proposals. We deliberately use the proposal
+      // `updatedAt` rather than `respondedAt` so withdrawn proposals
+      // (which don't set `respondedAt`) still get a reasonable date.
+      const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+      const cutoff = new Date(Date.now() - NINETY_DAYS_MS);
+      const past: CreatorPortfolioPastRow[] = ownProposals
+        .filter(
+          (p) =>
+            (p.status === 'declined' ||
+              p.status === 'withdrawn' ||
+              p.status === 'superseded') &&
+            p.updatedAt > cutoff
+        )
+        .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+        .slice(0, 50)
+        .map((p) => ({
+          proposalId: p.id,
+          organizationId: p.organizationId,
+          organizationName: nameByOrg.get(p.organizationId) ?? null,
+          revenueType: p.revenueType,
+          status: p.status,
+          proposedSharePercent: p.proposedCreatorSharePercent,
+          proposedByRole: p.proposedByRole,
+          roundNumber: p.roundNumber,
+          endedAt: p.respondedAt ?? p.updatedAt,
+          declineReason: p.declineReason,
+        }));
+
+      const payload: CreatorPortfolioPayload = {
+        active,
+        pendingActionRequired,
+        pendingWaitingOnOrg,
+        past,
+      };
+      return payload;
     },
   })
 );
