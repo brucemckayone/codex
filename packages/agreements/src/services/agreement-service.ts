@@ -1038,57 +1038,6 @@ export class AgreementService extends BaseService {
   }
 
   /**
-   * Single active agreement for one (org, creator, revenueType) triple,
-   * if any. Mirrors the partial unique
-   * `uq_creator_org_agreement_active_per_type` invariant — at most one
-   * row can be returned. Returns `null` when no active agreement
-   * matches.
-   *
-   * Used by the WP-4 content-purchase payout path (Codex-rzfjw): the
-   * uploader (`content.creatorId`) is looked up against their
-   * `revenueType='content_purchase'` agreement at purchase time
-   * (Decision Q1 — creator's-own-content scope).
-   *
-   * `activeAt` semantics match {@link getActiveAgreements}.
-   */
-  async getActiveAgreement(input: {
-    organizationId: string;
-    creatorId: string;
-    revenueType: RevenueType;
-    activeAt?: Date;
-  }): Promise<CreatorOrganizationAgreement | null> {
-    try {
-      const at = input.activeAt ?? new Date();
-      const row = await this.db.query.creatorOrganizationAgreements.findFirst({
-        where: and(
-          eq(
-            creatorOrganizationAgreements.organizationId,
-            input.organizationId
-          ),
-          eq(creatorOrganizationAgreements.creatorId, input.creatorId),
-          eq(creatorOrganizationAgreements.revenueType, input.revenueType),
-          // Q3 semantics (see getActiveAgreements above):
-          or(
-            eq(creatorOrganizationAgreements.status, 'active'),
-            and(
-              eq(creatorOrganizationAgreements.status, 'terminated'),
-              gt(creatorOrganizationAgreements.terminatedAt, at)
-            )
-          ),
-          lte(creatorOrganizationAgreements.effectiveFrom, at),
-          or(
-            isNull(creatorOrganizationAgreements.effectiveUntil),
-            gt(creatorOrganizationAgreements.effectiveUntil, at)
-          )
-        ),
-      });
-      return row ?? null;
-    } catch (error) {
-      this.handleError(error, 'getActiveAgreement');
-    }
-  }
-
-  /**
    * Creator's portfolio across all orgs — used by the creator-studio
    * /negotiations page. Filters to `status='active'` only with the same
    * temporal predicates as {@link getActiveAgreements}.

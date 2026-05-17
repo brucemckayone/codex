@@ -1459,113 +1459,13 @@ describe('AgreementService', () => {
       expect(results).toHaveLength(0);
     });
 
-    it('getActiveAgreement (singular): returns matching active row', async () => {
-      const fx = await seedOrgFixture(db);
-      await db.insert(schema.creatorOrganizationAgreements).values({
-        organizationId: fx.orgId,
-        creatorId: fx.creatorAId,
-        organizationFeePercentage: 7000,
-        revenueType: 'content_purchase',
-        status: 'active',
-      });
-      const result = await service.getActiveAgreement({
-        organizationId: fx.orgId,
-        creatorId: fx.creatorAId,
-        revenueType: 'content_purchase',
-      });
-      expect(result).not.toBeNull();
-      expect(result?.creatorId).toBe(fx.creatorAId);
-      expect(result?.revenueType).toBe('content_purchase');
-    });
-
-    it('getActiveAgreement: returns null when no matching agreement', async () => {
-      const fx = await seedOrgFixture(db);
-      const result = await service.getActiveAgreement({
-        organizationId: fx.orgId,
-        creatorId: fx.creatorAId,
-        revenueType: 'subscription',
-      });
-      expect(result).toBeNull();
-    });
-
-    it('getActiveAgreement: wrong revenueType returns null', async () => {
-      const fx = await seedOrgFixture(db);
-      await db.insert(schema.creatorOrganizationAgreements).values({
-        organizationId: fx.orgId,
-        creatorId: fx.creatorAId,
-        organizationFeePercentage: 7000,
-        revenueType: 'subscription',
-        status: 'active',
-      });
-      const result = await service.getActiveAgreement({
-        organizationId: fx.orgId,
-        creatorId: fx.creatorAId,
-        revenueType: 'content_purchase',
-      });
-      expect(result).toBeNull();
-    });
-
-    it('getActiveAgreement: terminated before activeAt returns null', async () => {
-      const fx = await seedOrgFixture(db);
-      const invoiceAt = new Date('2026-01-15T00:00:00Z');
-      await db.insert(schema.creatorOrganizationAgreements).values({
-        organizationId: fx.orgId,
-        creatorId: fx.creatorAId,
-        organizationFeePercentage: 7000,
-        revenueType: 'subscription',
-        status: 'terminated',
-        terminatedAt: new Date('2026-01-10T00:00:00Z'),
-        effectiveFrom: new Date('2025-12-01T00:00:00Z'),
-      });
-      const result = await service.getActiveAgreement({
-        organizationId: fx.orgId,
-        creatorId: fx.creatorAId,
-        revenueType: 'subscription',
-        activeAt: invoiceAt,
-      });
-      expect(result).toBeNull();
-    });
-
-    it('getActiveAgreement: terminated AFTER activeAt still returns the agreement (Q3)', async () => {
-      const fx = await seedOrgFixture(db);
-      const invoiceAt = new Date('2026-01-15T00:00:00Z');
-      await db.insert(schema.creatorOrganizationAgreements).values({
-        organizationId: fx.orgId,
-        creatorId: fx.creatorAId,
-        organizationFeePercentage: 7000,
-        revenueType: 'subscription',
-        status: 'terminated',
-        terminatedAt: new Date('2026-01-20T00:00:00Z'), // terminated AFTER invoice
-        effectiveFrom: new Date('2025-12-01T00:00:00Z'),
-      });
-      const result = await service.getActiveAgreement({
-        organizationId: fx.orgId,
-        creatorId: fx.creatorAId,
-        revenueType: 'subscription',
-        activeAt: invoiceAt,
-      });
-      expect(result).not.toBeNull();
-    });
-
-    it('getActiveAgreement: effective_from > activeAt returns null (not yet active)', async () => {
-      const fx = await seedOrgFixture(db);
-      const invoiceAt = new Date('2026-01-15T00:00:00Z');
-      await db.insert(schema.creatorOrganizationAgreements).values({
-        organizationId: fx.orgId,
-        creatorId: fx.creatorAId,
-        organizationFeePercentage: 7000,
-        revenueType: 'subscription',
-        status: 'active',
-        effectiveFrom: new Date('2026-02-01T00:00:00Z'),
-      });
-      const result = await service.getActiveAgreement({
-        organizationId: fx.orgId,
-        creatorId: fx.creatorAId,
-        revenueType: 'subscription',
-        activeAt: invoiceAt,
-      });
-      expect(result).toBeNull();
-    });
+    // Codex-xz61z (I6): `getActiveAgreement` (singular) was dropped —
+    // no production consumer wired it up (the purchase pipeline still
+    // hand-rolls its own transaction-scoped JOIN with `tx`), and the
+    // plural `getActiveAgreements` + `getActiveAgreementsForCreator`
+    // cover the read patterns the service exposes today. The singular
+    // form can be reintroduced with `{ agreement, sharePercent }`
+    // when a non-transaction consumer needs it.
 
     it('getActiveAgreementsForCreator: revenueType filter scopes the portfolio', async () => {
       const fx = await seedOrgFixture(db);
