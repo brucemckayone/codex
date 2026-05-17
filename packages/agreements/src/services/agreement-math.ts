@@ -185,9 +185,24 @@ export function creatorShareFromLegacyOrgFee(orgFeePercent: number): number {
  * the same string — "content-purchase" (hyphen) matches the enum value
  * exactly and reads consistently across the product. English-only for
  * now; i18n is a future scope (WP-5 brief).
+ *
+ * Exhaustive `switch` with a `never` assertion (Codex-0omga polish):
+ * if a future migration adds a third revenue type and we forget to
+ * extend this mapper, the `_exhaustive: never` line is a compile
+ * error rather than a silent "content-purchase" fallback that could
+ * mislabel the share in a customer-facing email.
  */
 export function formatRevenueTypeLabel(
   revenueType: 'subscription' | 'content_purchase'
 ): string {
-  return revenueType === 'subscription' ? 'subscription' : 'content-purchase';
+  switch (revenueType) {
+    case 'subscription':
+      return 'subscription';
+    case 'content_purchase':
+      return 'content-purchase';
+    default: {
+      const _exhaustive: never = revenueType;
+      return _exhaustive;
+    }
+  }
 }

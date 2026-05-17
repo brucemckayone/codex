@@ -162,6 +162,13 @@ export type AgreementLifecycleMailer = (params: {
 }) => void;
 
 /**
+ * `ExecutionContext.waitUntil`-shaped hook. Inlined here (instead of
+ * importing from `@codex/cache`) to keep the service's dep surface
+ * minimal — same shape used across the registry's other services.
+ */
+export type AgreementWaitUntilFn = (promise: Promise<unknown>) => void;
+
+/**
  * Constructor config. As of the PR #210 review, the service no longer
  * threads `FeeConfigService` through share validation — `agreement-math`
  * reasons purely about the post-platform pool. Platform fee is still
@@ -174,15 +181,36 @@ export type AgreementLifecycleMailer = (params: {
  * When absent (narrow unit tests, legacy harnesses), all mutations
  * still succeed — only the email side-effect is skipped.
  *
- * `webAppUrl` is the absolute base used to construct deep links into
- * the negotiation / agreement pages embedded in the email body. When
- * absent, the template falls back to a relative path which still renders
- * correctly in most mail clients (links resolve against `<base>` or the
- * recipient's session).
+ * `webAppUrl` is MANDATORY (per WP-5 polish — Codex-0omga). It is the
+ * absolute base used to construct deep links into the negotiation /
+ * agreement pages embedded in the email body. The previous "relative
+ * fallback" never worked in practice — `z.string().url()` in the
+ * validation schema rejects relative paths, so a mailer call dispatched
+ * without `webAppUrl` would have failed downstream anyway. Failing fast
+ * at construction surfaces misconfiguration during wiring rather than at
+ * the first lifecycle notification.
+ *
+ * `waitUntil` (per Codex-0omga) is the optional `ExecutionContext.waitUntil`
+ * hook used to push the entire lifecycle dispatch (user / org lookups +
+ * mailer fire) off the request critical path. When omitted (narrow unit
+ * tests, legacy harnesses) the dispatch runs inline AFTER the agreement
+ * transaction commits, which is still correct — just slightly slower
+ * for the request response.
  */
 export interface AgreementServiceConfig extends ServiceConfig {
   mailer?: AgreementLifecycleMailer;
-  webAppUrl?: string;
+  /**
+   * Absolute base URL used to build email deep-links. Mandatory; the
+   * service throws at construction if unset.
+   */
+  webAppUrl: string;
+  /**
+   * Optional `ExecutionContext.waitUntil` (or equivalent). Production
+   * code threads the worker `ExecutionContext.waitUntil` through here so
+   * the lookup-and-dispatch phase of lifecycle notifications doesn't
+   * block the API response.
+   */
+  waitUntil?: AgreementWaitUntilFn;
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────
@@ -196,12 +224,25 @@ type Tx = Parameters<Parameters<AgreementService['db']['transaction']>[0]>[0];
 
 export class AgreementService extends BaseService {
   private readonly mailer: AgreementLifecycleMailer | undefined;
-  private readonly webAppUrl: string | undefined;
+  private readonly webAppUrl: string;
+  private readonly waitUntil: AgreementWaitUntilFn | undefined;
 
   constructor(config: AgreementServiceConfig) {
     super(config);
+    if (!config.webAppUrl) {
+      // Fail-fast on misconfiguration. The deep-link is validated
+      // downstream via `urlSchema` (HTTP/HTTPS only), so an empty /
+      // relative base would have surfaced as a 500 in the first
+      // lifecycle notification anyway — better to crash the worker at
+      // boot than silently lose a real notification.
+      throw new Error(
+        'AgreementService requires `webAppUrl` to be set for notification deep-links. ' +
+          'Check `env.WEB_APP_URL` in wrangler.jsonc and the service registry wiring.'
+      );
+    }
     this.mailer = config.mailer;
     this.webAppUrl = config.webAppUrl;
+    this.waitUntil = config.waitUntil;
   }
 
   // ── Public: propose ─────────────────────────────────────────────────────
@@ -1410,13 +1451,13 @@ export class AgreementService extends BaseService {
 
   /**
    * Build the absolute deep link to the negotiation thread + agreement.
-   * When `webAppUrl` is unset (narrow tests), falls back to a relative
-   * `/studio/negotiations/...` path which most mail clients render
-   * cleanly against the recipient's recent session base.
+   * `webAppUrl` is mandatory at construction (Codex-0omga polish) so the
+   * resulting URL always validates against the project's `urlSchema`
+   * (HTTP/HTTPS only).
    */
   private buildNegotiationDeepLink(orgId: string, threadId: string): string {
     const path = `/studio/negotiations/${threadId}?orgId=${orgId}`;
-    return this.webAppUrl ? `${this.webAppUrl}${path}` : path;
+    return `${this.webAppUrl}${path}`;
   }
 
   /**
@@ -1458,11 +1499,24 @@ export class AgreementService extends BaseService {
    * — the agreement transaction has already committed, and the
    * notification is observation, not source-of-truth.
    *
+   * Latency hardening (Codex-0omga polish): when a `waitUntil` hook was
+   * threaded through the constructor, the ENTIRE dispatch (DB lookups +
+   * mailer fire) is pushed off the request critical path. Inside
+   * `procedure()` handlers this means the API response no longer pays
+   * the ~one-DB-roundtrip lookup tax for every agreement mutation. When
+   * `waitUntil` is absent (narrow tests, legacy harnesses) the dispatch
+   * still runs awaited inline — slower, but correct.
+   *
+   * The returned promise resolves only AFTER `waitUntil` has been
+   * scheduled (or, when no `waitUntil` is wired, after the inline
+   * dispatch settles). Either way the call site never observes a
+   * rejection — the rejection branch logs + swallows.
+   *
    * `note` is intentionally NOT redacted — these notes are between two
    * commercial parties, both of whom can see them via the negotiation
    * UI anyway. They DO get HTML-escaped by the renderer.
    */
-  private dispatchLifecycleEmail(params: {
+  private async dispatchLifecycleEmail(params: {
     recipientUserId: string;
     organizationId: string;
     templateName: AgreementTemplateName;
@@ -1474,7 +1528,7 @@ export class AgreementService extends BaseService {
     termMonths: number | null;
     note?: string | null;
   }): Promise<void> {
-    return this.dispatchLifecycleEmailImpl(params).catch((err) => {
+    const work = this.dispatchLifecycleEmailImpl(params).catch((err) => {
       // We deliberately log + swallow. Mailer transport failures should
       // not prevent the agreement from existing — the agreement row is
       // the source of truth.
@@ -1485,6 +1539,17 @@ export class AgreementService extends BaseService {
         error: err instanceof Error ? err.message : String(err),
       });
     });
+
+    if (this.waitUntil) {
+      // Production hot path: schedule on the worker's ExecutionContext
+      // so the API response unblocks immediately. The lookup phase
+      // (three DB selects) no longer blocks the response.
+      this.waitUntil(work);
+      return;
+    }
+    // Fallback: await inline so test harnesses without a waitUntil hook
+    // can still observe the dispatch sequence via mailer.mock.calls.
+    await work;
   }
 
   private async dispatchLifecycleEmailImpl(params: {
