@@ -226,7 +226,9 @@ describe('ObservabilityClient', () => {
       const loggedData = JSON.parse(
         consoleSpy.info.mock.calls[0]?.[0] as string
       );
-      expect(loggedData.metadata.password).toBe('[REDACTED]');
+      // Production uses hash mode (FNV-1a, 8 hex chars) for correlation —
+      // not the literal '[REDACTED]' which is the 'mask' mode output.
+      expect(loggedData.metadata.password).toMatch(/^hash:[0-9a-f]{8}$/);
       expect(loggedData.metadata.username).toBe('john');
     });
   });
@@ -255,8 +257,10 @@ describe('ObservabilityClient', () => {
       const loggedData = JSON.parse(
         consoleSpy.info.mock.calls[0]?.[0] as string
       );
-      // Production uses hash mode - completely redacted
-      expect(loggedData.metadata.apiKey).toBe('[REDACTED]');
+      // Production uses hash mode — value replaced with `hash:XXXXXXXX`
+      // (FNV-1a 32-bit, 8 hex chars) so the same redacted secret can be
+      // correlated across log lines without leaking its plaintext.
+      expect(loggedData.metadata.apiKey).toMatch(/^hash:[0-9a-f]{8}$/);
     });
   });
 
