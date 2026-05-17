@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "uq_refund_reviews_open_per_payout" ON "refund_reviews" USING btree ("payout_id") WHERE "refund_reviews"."resolved_at" IS NULL;

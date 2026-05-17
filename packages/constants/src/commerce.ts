@@ -87,7 +87,10 @@ export const CONNECT_ACCOUNT_STATUS = {
 
 export const FEES = {
   PLATFORM_PERCENT: 1000, // 10.00% of gross
-  ORG_PERCENT: 0, // 0% for one-time purchases
+  // 10% of post-platform-fee on one-off purchases. Codex-h69cg shipped the
+  // ledger row + secondary `transfers.create` that delivers this slice to the
+  // org's Connect account. Override per-org via the `fee_config_org` table.
+  ORG_PERCENT: 1000,
   SUBSCRIPTION_ORG_PERCENT: 1500, // 15.00% of post-platform-fee for subscriptions
 } as const;
 

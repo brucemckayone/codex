@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "uq_payouts_platform_fee_per_charge" ON "payouts" USING btree ("stripe_charge_id") WHERE "payouts"."payout_type" = 'platform_fee';

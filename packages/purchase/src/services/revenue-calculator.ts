@@ -158,8 +158,12 @@ export function calculateRevenueSplit(
 }
 
 /**
- * Default revenue split configuration
- * Phase 1 defaults: 10% platform, 0% org, 90% creator
+ * Default revenue split configuration.
+ *
+ * Defaults: 10% platform of gross, 10% org of post-platform, 81% creator of
+ * gross (= 90% of post-platform). The org slice flips on the tri-party ledger
+ * row + secondary org-fee transfer added by Codex-h69cg. Override per-org via
+ * the `fee_config_org` table or per-creator via `fee_config_org_creator`.
  */
 export const DEFAULT_PLATFORM_FEE_PERCENTAGE = FEES.PLATFORM_PERCENT;
 export const DEFAULT_ORG_FEE_PERCENTAGE = FEES.ORG_PERCENT;

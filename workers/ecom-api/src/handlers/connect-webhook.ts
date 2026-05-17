@@ -14,10 +14,19 @@ import {
   ConnectAccountService,
   SubscriptionService,
 } from '@codex/subscription';
+import { uuidSchema, z } from '@codex/validation';
 import { createWebhookDbClient } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
+
+// Codex-ohjvn: malformed metadata is an operations error, not a silent
+// skip. A missing or non-UUID `codex_organization_id` on an active
+// transition leaves pending payouts stuck without any signal — WARN
+// distinguishes "legit no-org Connect" from "schema/setup drift".
+const connectMetadataSchema = z.object({
+  codex_organization_id: uuidSchema,
+});
 
 export async function handleConnectWebhook(
   event: Stripe.Event,
@@ -82,8 +91,18 @@ export async function handleConnectWebhook(
         // BUG-014: When an account transitions to fully active, resolve any
         // accumulated pending payouts via fire-and-forget (waitUntil).
         if (isNowActive && !wasActive) {
-          const orgId = account.metadata?.codex_organization_id;
-          if (orgId) {
+          const parsed = connectMetadataSchema.safeParse(account.metadata);
+          if (!parsed.success) {
+            obs?.warn(
+              'connect-webhook: invalid metadata on active transition; skipping payout resolution',
+              {
+                accountId: account.id,
+                eventId: event.id,
+                reason: parsed.error.issues[0]?.message ?? 'unknown',
+              }
+            );
+          } else {
+            const orgId = parsed.data.codex_organization_id;
             const { db: subDb, cleanup: subCleanup } = createWebhookDbClient(
               c.env
             );

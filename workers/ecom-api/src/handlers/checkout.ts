@@ -112,14 +112,23 @@ export async function handleCheckoutCompleted(
     return;
   }
 
-  // Extract the application fee Stripe was told to collect (for reconciliation).
-  // The PaymentIntent carries the application_fee_amount we set at checkout creation.
+  // Extract the application fee Stripe was told to collect (for reconciliation),
+  // plus the charge id (PaymentIntent.latest_charge) which the payouts pipeline
+  // uses as `source_transaction` for the secondary org-fee transfer and as the
+  // Stripe correlation for every payouts ledger row.
   let stripeApplicationFeeCents: number | null = null;
+  let stripeChargeId: string | null = null;
   try {
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
     stripeApplicationFeeCents = paymentIntent.application_fee_amount ?? null;
+    stripeChargeId =
+      typeof paymentIntent.latest_charge === 'string'
+        ? paymentIntent.latest_charge
+        : (paymentIntent.latest_charge?.id ?? null);
   } catch (piError) {
-    // Non-fatal — reconciliation is best-effort
+    // Non-fatal — reconciliation is best-effort. Missing chargeId here means
+    // the payouts pipeline degrades to a no-op for this purchase; the purchase
+    // + access grant still complete via the transaction below.
     obs?.warn('Could not retrieve PaymentIntent for fee reconciliation', {
       paymentIntentId,
       error: piError instanceof Error ? piError.message : String(piError),
@@ -149,6 +158,7 @@ export async function handleCheckoutCompleted(
       amountPaidCents: amountTotal,
       currency: CURRENCY.GBP,
       stripeApplicationFeeCents,
+      stripeChargeId,
     });
 
     obs?.info('Purchase completed successfully', {

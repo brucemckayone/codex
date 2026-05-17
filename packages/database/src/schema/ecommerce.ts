@@ -242,8 +242,9 @@ export const purchases = pgTable(
     currency: varchar('currency', { length: 3 }).notNull().default('gbp'),
 
     // Revenue split snapshot (immutable - calculated at purchase time)
-    // Phase 1: platformFeeCents = 10%, organizationFeeCents = 0%, creatorPayoutCents = 90%
-    // DEFAULT 0 ensures safe migration for existing records (will be backfilled)
+    // Defaults: platformFeeCents = 10% of gross, organizationFeeCents = 10% of
+    // post-platform, creatorPayoutCents = 90% of post-platform (Codex-h69cg).
+    // DEFAULT 0 ensures safe migration for existing records (will be backfilled).
     platformFeeCents: integer('platform_fee_cents').notNull().default(0),
     organizationFeeCents: integer('organization_fee_cents')
       .notNull()

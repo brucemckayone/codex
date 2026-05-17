@@ -1,0 +1,1 @@
+ALTER TABLE "payouts" ALTER COLUMN "status" SET DATA TYPE varchar(32);

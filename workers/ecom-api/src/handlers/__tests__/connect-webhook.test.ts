@@ -68,6 +68,10 @@ function createContext(): {
   };
 }
 
+// Default org UUID for fixtures (Codex-ohjvn: connect-webhook now
+// validates metadata.codex_organization_id as a real UUID).
+const DEFAULT_TEST_ORG_UUID = '00000000-0000-4000-8000-000000000001';
+
 function createAccountUpdatedEvent(opts: {
   accountId?: string;
   orgId?: string | null;
@@ -83,7 +87,9 @@ function createAccountUpdatedEvent(opts: {
     metadata:
       opts.orgId === null
         ? {}
-        : { codex_organization_id: opts.orgId ?? 'org_1' },
+        : {
+            codex_organization_id: opts.orgId ?? DEFAULT_TEST_ORG_UUID,
+          },
   };
   return {
     id: `evt_${Date.now()}_${Math.random()}`,
@@ -166,7 +172,7 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
     expect(mockHandleAccountUpdated).toHaveBeenCalledOnce();
     expect(mockResolvePendingPayouts).toHaveBeenCalledOnce();
     expect(mockResolvePendingPayouts).toHaveBeenCalledWith(
-      'org_1',
+      DEFAULT_TEST_ORG_UUID,
       'acct_test_123'
     );
   });
@@ -284,6 +290,42 @@ describe('handleConnectWebhook (Codex-qigid: re-check active from data.object)',
     await handleConnectWebhook(event, mockStripe, context);
 
     expect(mockHandleAccountUpdated).toHaveBeenCalledOnce();
+    expect(mockResolvePendingPayouts).not.toHaveBeenCalled();
+  });
+
+  // Codex-ohjvn (F-57 + F-63): on an active transition with missing or
+  // malformed org metadata, the handler WARNs (rather than silently
+  // skipping) so operators see the drift.
+  it('F-57: WARNS (not just skips) when active transition has missing org metadata', async () => {
+    dbState = { chargesEnabled: false, payoutsEnabled: false };
+    const event = createAccountUpdatedEvent({
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      orgId: null,
+    });
+    const { context, mock } = createContext();
+
+    await handleConnectWebhook(event, mockStripe, context);
+
+    expect(mock._obs.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/missing|invalid/i),
+      expect.objectContaining({ accountId: 'acct_test_123' })
+    );
+    expect(mockResolvePendingPayouts).not.toHaveBeenCalled();
+  });
+
+  it('F-63: rejects non-UUID metadata.codex_organization_id without querying', async () => {
+    dbState = { chargesEnabled: false, payoutsEnabled: false };
+    const event = createAccountUpdatedEvent({
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      orgId: 'not-a-valid-uuid',
+    });
+    const { context, mock } = createContext();
+
+    await handleConnectWebhook(event, mockStripe, context);
+
+    expect(mock._obs.warn).toHaveBeenCalled();
     expect(mockResolvePendingPayouts).not.toHaveBeenCalled();
   });
 

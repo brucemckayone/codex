@@ -9,6 +9,10 @@
  * - Connect account management
  */
 
+import {
+  payoutSourceFilterEnum,
+  payoutStatusFilterEnum,
+} from '@codex/validation';
 import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { ApiError } from '$lib/api/errors';
@@ -440,20 +444,8 @@ export const listSubscribers = query(
 
 const listPayoutsQueryArgsSchema = z.object({
   organizationId: z.string().uuid(),
-  // Status taxonomy widened in PR3 (Codex-05vp8):
-  //  - 'paid' replaces 'resolved' as the canonical name; 'resolved' is kept
-  //    as a URL alias for one release and dropped in PR4.
-  //  - 'needs_attention' combines pending + failed for the banner CTA.
-  status: z
-    .enum([
-      'all',
-      'pending',
-      'paid',
-      'resolved',
-      'failed',
-      'needs_attention',
-    ])
-    .default('all'),
+  status: payoutStatusFilterEnum.default('all'),
+  source: payoutSourceFilterEnum.default('all'),
   fromDate: z.string().datetime().optional(),
   toDate: z.string().datetime().optional(),
   page: z.coerce.number().int().min(1).default(1),
@@ -480,11 +472,12 @@ const getPayoutSummaryArgsSchema = z.object({
  */
 export const listPayouts = query(
   listPayoutsQueryArgsSchema,
-  async ({ organizationId, status, fromDate, toDate, page, limit }) => {
+  async ({ organizationId, status, source, fromDate, toDate, page, limit }) => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
     const params = new URLSearchParams();
     if (status) params.set('status', status);
+    if (source) params.set('source', source);
     if (fromDate) params.set('fromDate', fromDate);
     if (toDate) params.set('toDate', toDate);
     params.set('page', String(page));
@@ -509,6 +502,42 @@ export const getPayoutSummary = query(
     if (fromDate) params.set('fromDate', fromDate);
     if (toDate) params.set('toDate', toDate);
     return api.subscription.getPayoutSummary(organizationId, params);
+  }
+);
+
+/**
+ * Per-creator payout breakdown for the studio payouts right rail
+ * (Codex-6nt4l). Returns one entry per user who received a
+ * `creator_payout` or `organization_fee` row under the current filters;
+ * `platform_fee` rows are excluded. Owner-only.
+ *
+ * Args mirror `listPayouts` minus pagination — the rail intentionally
+ * aggregates the whole row set, not a page slice. Filter chips on the
+ * page reshape both the table AND the rail by passing the same args to
+ * both queries.
+ */
+const getPayoutsByCreatorBreakdownArgsSchema = z.object({
+  organizationId: z.string().uuid(),
+  status: payoutStatusFilterEnum.default('all'),
+  source: payoutSourceFilterEnum.default('all'),
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
+});
+
+export const getPayoutsByCreatorBreakdown = query(
+  getPayoutsByCreatorBreakdownArgsSchema,
+  async ({ organizationId, status, source, fromDate, toDate }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (source) params.set('source', source);
+    if (fromDate) params.set('fromDate', fromDate);
+    if (toDate) params.set('toDate', toDate);
+    return api.subscription.getPayoutsByCreatorBreakdown(
+      organizationId,
+      params
+    );
   }
 );
 

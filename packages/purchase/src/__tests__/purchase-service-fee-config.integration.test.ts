@@ -233,7 +233,11 @@ describe('PurchaseService × FeeConfigService integration', () => {
 
   it('without feeConfig injected, falls back to legacy DEFAULT_* constants (regression guard)', async () => {
     const svc = new PurchaseService({ db, environment: 'test' }, mockStripe);
-    // Default 10% platform / 0% org / 90% creator → on 1000, expect 100/0/900.
+    // Default 10% platform / 10% org of post-platform / 81% creator of gross
+    // (post-h69cg). On gross=1000:
+    //   platform = ceil(1000 * 10%)    = 100
+    //   org      = ceil(900 * 10%)     = 90
+    //   creator  = 1000 - 100 - 90     = 810
     const content = await makePaidContent(1000, 'fee-fallback');
     const piId = `pi_fee_fallback_${Date.now()}`;
     const purchase = await svc.completePurchase(piId, {
@@ -244,7 +248,7 @@ describe('PurchaseService × FeeConfigService integration', () => {
       currency: 'gbp',
     });
     expect(purchase.platformFeeCents).toBe(100);
-    expect(purchase.organizationFeeCents).toBe(0);
-    expect(purchase.creatorPayoutCents).toBe(900);
+    expect(purchase.organizationFeeCents).toBe(90);
+    expect(purchase.creatorPayoutCents).toBe(810);
   });
 });

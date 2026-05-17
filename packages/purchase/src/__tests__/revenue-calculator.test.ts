@@ -14,8 +14,8 @@ import {
 
 describe('Revenue Calculator', () => {
   describe('calculateRevenueSplit', () => {
-    describe('default split (10% platform / 0% org / 90% creator)', () => {
-      it('calculates correctly for $29.99 (2999 cents)', () => {
+    describe('default split (10% platform / 10% org of post-platform / 81% creator of gross)', () => {
+      it('calculates correctly for £29.99 (2999 cents)', () => {
         const split = calculateRevenueSplit(
           2999,
           DEFAULT_PLATFORM_FEE_PERCENTAGE,
@@ -23,9 +23,11 @@ describe('Revenue Calculator', () => {
         );
 
         // Platform: ceil(2999 * 1000 / 10000) = ceil(299.9) = 300
+        // Post-platform: 2699 → Org: ceil(2699 * 1000 / 10000) = ceil(269.9) = 270
+        // Creator: 2999 - 300 - 270 = 2429
         expect(split.platformFeeCents).toBe(300);
-        expect(split.organizationFeeCents).toBe(0);
-        expect(split.creatorPayoutCents).toBe(2699);
+        expect(split.organizationFeeCents).toBe(270);
+        expect(split.creatorPayoutCents).toBe(2429);
 
         // Verify sum equals total
         const total =
@@ -35,17 +37,17 @@ describe('Revenue Calculator', () => {
         expect(total).toBe(2999);
       });
 
-      it('calculates correctly for $100.00 (10000 cents)', () => {
+      it('calculates correctly for £100.00 (10000 cents)', () => {
         const split = calculateRevenueSplit(
           10000,
           DEFAULT_PLATFORM_FEE_PERCENTAGE,
           DEFAULT_ORG_FEE_PERCENTAGE
         );
 
-        // Platform: ceil(10000 * 1000 / 10000) = 1000
+        // Platform: 1000 → Post: 9000 → Org: 900 → Creator: 8100
         expect(split.platformFeeCents).toBe(1000);
-        expect(split.organizationFeeCents).toBe(0);
-        expect(split.creatorPayoutCents).toBe(9000);
+        expect(split.organizationFeeCents).toBe(900);
+        expect(split.creatorPayoutCents).toBe(8100);
 
         // Verify sum equals total
         expect(
@@ -55,17 +57,19 @@ describe('Revenue Calculator', () => {
         ).toBe(10000);
       });
 
-      it('calculates correctly for $9.99 (999 cents)', () => {
+      it('calculates correctly for £9.99 (999 cents)', () => {
         const split = calculateRevenueSplit(
           999,
           DEFAULT_PLATFORM_FEE_PERCENTAGE,
           DEFAULT_ORG_FEE_PERCENTAGE
         );
 
-        // Platform: ceil(999 * 1000 / 10000) = ceil(99.9) = 100
+        // Platform: ceil(999 * 1000 / 10000) = 100
+        // Post-platform: 899 → Org: ceil(899 * 1000 / 10000) = ceil(89.9) = 90
+        // Creator: 999 - 100 - 90 = 809
         expect(split.platformFeeCents).toBe(100);
-        expect(split.organizationFeeCents).toBe(0);
-        expect(split.creatorPayoutCents).toBe(899);
+        expect(split.organizationFeeCents).toBe(90);
+        expect(split.creatorPayoutCents).toBe(809);
 
         expect(
           split.platformFeeCents +
@@ -285,8 +289,12 @@ describe('Revenue Calculator', () => {
       expect(DEFAULT_PLATFORM_FEE_PERCENTAGE).toBe(1000);
     });
 
-    it('DEFAULT_ORG_FEE_PERCENTAGE is 0% (0 basis points)', () => {
-      expect(DEFAULT_ORG_FEE_PERCENTAGE).toBe(0);
+    it('DEFAULT_ORG_FEE_PERCENTAGE is 10% (1000 basis points) of post-platform', () => {
+      // Bumped from 0 to 1000 in Codex-h69cg follow-up: the tri-party ledger
+      // landed (PR #203) and the platform-wide expectation flipped to allocate
+      // a 10% slice to the org on one-off purchases by default. Override via
+      // fee_config_org.one_off_org_fee_percent for per-org tuning.
+      expect(DEFAULT_ORG_FEE_PERCENTAGE).toBe(1000);
     });
   });
 });

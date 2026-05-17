@@ -13,6 +13,7 @@ export * from './notifications';
 export * from './organizations';
 export * from './payouts';
 export * from './playback';
+export * from './refund-reviews';
 export * from './settings';
 export * from './storage';
 export * from './subscriptions';

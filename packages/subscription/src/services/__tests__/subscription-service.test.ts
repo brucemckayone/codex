@@ -2829,7 +2829,9 @@ describe('SubscriptionService', () => {
       // Override the default empty-payments mock so retrieve returns the
       // fully expanded shape Stripe yields when `expand: ['payments']`.
       (
-        stripe as unknown as { invoices: { retrieve: ReturnType<typeof vi.fn> } }
+        stripe as unknown as {
+          invoices: { retrieve: ReturnType<typeof vi.fn> };
+        }
       ).invoices.retrieve.mockResolvedValueOnce({
         id: mockInvoice.id,
         payments: {
@@ -2847,9 +2849,7 @@ describe('SubscriptionService', () => {
       const calls = (stripe.transfers.create as ReturnType<typeof vi.fn>).mock
         .calls;
       for (const [, opts] of calls) {
-        expect(opts?.idempotencyKey).toMatch(
-          new RegExp(`^${realChargeId}_`)
-        );
+        expect(opts?.idempotencyKey).toMatch(new RegExp(`^${realChargeId}_`));
       }
     });
 
@@ -2875,7 +2875,9 @@ describe('SubscriptionService', () => {
       }) as unknown as Stripe.Invoice;
 
       (
-        stripe as unknown as { invoices: { retrieve: ReturnType<typeof vi.fn> } }
+        stripe as unknown as {
+          invoices: { retrieve: ReturnType<typeof vi.fn> };
+        }
       ).invoices.retrieve.mockResolvedValueOnce({
         id: mockInvoice.id,
         payments: {
@@ -2899,14 +2901,14 @@ describe('SubscriptionService', () => {
       const calls = (stripe.transfers.create as ReturnType<typeof vi.fn>).mock
         .calls;
       for (const [, opts] of calls) {
-        expect(opts?.idempotencyKey).toMatch(
-          new RegExp(`^${chargeViaPi}_`)
-        );
+        expect(opts?.idempotencyKey).toMatch(new RegExp(`^${chargeViaPi}_`));
       }
     });
 
     it('falls back to charges.list when paymentIntent has no latest_charge (race after PI confirmation)', async () => {
-      const { org, tier1 } = await createFullOrg('invoice-charges-list-fallback');
+      const { org, tier1 } = await createFullOrg(
+        'invoice-charges-list-fallback'
+      );
       const [sub] = await db
         .insert(subscriptions)
         .values(
@@ -2928,7 +2930,9 @@ describe('SubscriptionService', () => {
 
       // Expanded invoice has only PI, no charge.
       (
-        stripe as unknown as { invoices: { retrieve: ReturnType<typeof vi.fn> } }
+        stripe as unknown as {
+          invoices: { retrieve: ReturnType<typeof vi.fn> };
+        }
       ).invoices.retrieve.mockResolvedValueOnce({
         id: mockInvoice.id,
         payments: {
@@ -2984,7 +2988,9 @@ describe('SubscriptionService', () => {
 
       // Expanded retrieve returns empty too.
       (
-        stripe as unknown as { invoices: { retrieve: ReturnType<typeof vi.fn> } }
+        stripe as unknown as {
+          invoices: { retrieve: ReturnType<typeof vi.fn> };
+        }
       ).invoices.retrieve.mockResolvedValueOnce({
         id: mockInvoice.id,
         payments: { data: [] },
@@ -3796,6 +3802,404 @@ describe('SubscriptionService', () => {
       expect(result).toBeDefined();
       expect(result?.userId).toBeUndefined();
       expect(result?.orgId).toBeUndefined();
+    });
+  });
+
+  // ─── Webhook ordering self-heal (Codex-t7psp) ─────────────────────
+  //
+  // Stripe does NOT guarantee webhook delivery order. On a fresh
+  // subscription, `invoice.payment_succeeded` and `invoice.payment_failed`
+  // can arrive BEFORE `customer.subscription.created`. Before this fix,
+  // those handlers logged "Invoice for unknown subscription" and silently
+  // dropped the first payout (race #1) or the past_due flip (race #2).
+  //
+  // Fix: `ensureSubscriptionDataPresent` retrieves the sub from Stripe
+  // when the DB row is missing and inserts subscription + follower +
+  // membership in one transaction. Side effects (welcome email, cache
+  // invalidation) stay on the create-event handler so they don't get
+  // dropped by the unique-violation swallow when the real
+  // `customer.subscription.created` lands later.
+  describe('Webhook ordering self-heal (Codex-t7psp)', () => {
+    /** Unique stripe-sub id per call — avoids cross-run collisions in the shared test DB. */
+    function uniqueStripeSubId(prefix: string) {
+      return `sub_${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    /** Build a Stripe subscription mock with the metadata our helper expects. */
+    function buildStripeSubMock(args: {
+      stripeSubId: string;
+      stripeCustomerId: string;
+      userId: string;
+      orgId: string;
+      tierId: string;
+    }) {
+      return createMockStripeSubscription({
+        id: args.stripeSubId,
+        customer: args.stripeCustomerId,
+        metadata: {
+          codex_user_id: args.userId,
+          codex_organization_id: args.orgId,
+          codex_tier_id: args.tierId,
+        },
+      }) as unknown as Stripe.Subscription;
+    }
+
+    it('race #1: invoice.payment_succeeded self-heals missing subscription row and runs transfers', async () => {
+      const { org, tier1 } = await createFullOrg('selfheal-race1');
+      const stripeSubId = uniqueStripeSubId('race1');
+      const stripeCustomerId = `cus_${stripeSubId}`;
+      const chargeId = `ch_${stripeSubId}`;
+
+      // Pre-condition: NO subscriptions row exists for this Stripe sub.
+      // Stripe sub retrieve returns a fully-formed sub with our metadata.
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(
+        buildStripeSubMock({
+          stripeSubId,
+          stripeCustomerId,
+          userId: otherCreatorId,
+          orgId: org.id,
+          tierId: tier1.id,
+        })
+      );
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        parent: {
+          subscription_details: { subscription: stripeSubId },
+        },
+        payments: {
+          data: [{ payment: { charge: chargeId, payment_intent: null } }],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const result = await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      // Helper inserted the subscription + follower + membership rows.
+      const { eq, and } = await import('drizzle-orm');
+      const { organizationFollowers, organizationMemberships } = await import(
+        '@codex/database/schema'
+      );
+      const [inserted] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
+        .limit(1);
+      expect(inserted).toBeDefined();
+      expect(inserted.userId).toBe(otherCreatorId);
+      expect(inserted.organizationId).toBe(org.id);
+
+      const [follower] = await db
+        .select()
+        .from(organizationFollowers)
+        .where(
+          and(
+            eq(organizationFollowers.organizationId, org.id),
+            eq(organizationFollowers.userId, otherCreatorId)
+          )
+        )
+        .limit(1);
+      expect(follower).toBeDefined();
+
+      const [membership] = await db
+        .select()
+        .from(organizationMemberships)
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, org.id),
+            eq(organizationMemberships.userId, otherCreatorId)
+          )
+        )
+        .limit(1);
+      expect(membership).toBeDefined();
+      expect(membership.role).toBe('subscriber');
+
+      // Money path resumed: transfers fired with chargeId-derived keys.
+      expect(stripe.transfers.create).toHaveBeenCalled();
+      const transferCalls = (
+        stripe.transfers.create as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      for (const [, opts] of transferCalls) {
+        expect(opts?.idempotencyKey).toMatch(new RegExp(`^${chargeId}_`));
+      }
+
+      // Handler returns invalidation tuple so the route bumps caches.
+      expect(result?.userId).toBe(otherCreatorId);
+      expect(result?.orgId).toBe(org.id);
+    });
+
+    it('race #2: invoice.payment_failed self-heals missing row then flips status to past_due', async () => {
+      const { org, tier1 } = await createFullOrg('selfheal-race2');
+      const stripeSubId = uniqueStripeSubId('race2');
+      const stripeCustomerId = `cus_${stripeSubId}`;
+
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(
+        buildStripeSubMock({
+          stripeSubId,
+          stripeCustomerId,
+          userId: otherCreatorId,
+          orgId: org.id,
+          tierId: tier1.id,
+        })
+      );
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_due: 499,
+        customer_email: 'failed@example.com',
+        parent: {
+          subscription_details: { subscription: stripeSubId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const result = await service.handleInvoicePaymentFailed(mockInvoice);
+
+      const { eq } = await import('drizzle-orm');
+      const [row] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
+        .limit(1);
+      expect(row).toBeDefined();
+      expect(row.status).toBe('past_due');
+      expect(result?.userId).toBe(otherCreatorId);
+      expect(result?.orgId).toBe(org.id);
+    });
+
+    it('Stripe 404 on retrieve: handler returns cleanly, no transfer, no row inserted', async () => {
+      const stripeSubId = uniqueStripeSubId('stripe404');
+
+      // Simulate Stripe returning 404 — type marker matches the
+      // detection branch in ensureSubscriptionDataPresent.
+      const stripe404 = new Error('No such subscription') as Error & {
+        type?: string;
+      };
+      stripe404.type = 'StripeInvalidRequestError';
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockRejectedValueOnce(stripe404);
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        parent: {
+          subscription_details: { subscription: stripeSubId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const callsBefore = (stripe.transfers.create as ReturnType<typeof vi.fn>)
+        .mock.calls.length;
+      const result = await service.handleInvoicePaymentSucceeded(mockInvoice);
+      const callsAfter = (stripe.transfers.create as ReturnType<typeof vi.fn>)
+        .mock.calls.length;
+
+      expect(result).toBeUndefined();
+      expect(callsAfter).toBe(callsBefore);
+
+      const { eq } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
+      expect(rows).toHaveLength(0);
+    });
+
+    it('metadata missing on retrieved sub: helper returns null, no row inserted', async () => {
+      const stripeSubId = uniqueStripeSubId('nometa');
+
+      // Default mock returns a sub with empty metadata — exactly the
+      // shape that should trip the "missing metadata" guard.
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(
+        createMockStripeSubscription({
+          id: stripeSubId,
+          metadata: {},
+        }) as unknown as Stripe.Subscription
+      );
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        parent: {
+          subscription_details: { subscription: stripeSubId },
+        },
+      }) as unknown as Stripe.Invoice;
+
+      const result = await service.handleInvoicePaymentSucceeded(mockInvoice);
+      expect(result).toBeUndefined();
+
+      const { eq } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
+      expect(rows).toHaveLength(0);
+    });
+
+    it('concurrent self-heal: two parallel invoice handlers insert exactly one row, both run transfers', async () => {
+      const { org, tier1 } = await createFullOrg('selfheal-concurrent');
+      const stripeSubId = uniqueStripeSubId('concurrent');
+      const stripeCustomerId = `cus_${stripeSubId}`;
+      const chargeId = `ch_${stripeSubId}`;
+
+      // Both parallel invocations will call retrieve — return the same
+      // metadata on every call so the second insert sees a unique-violation.
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockImplementation(() =>
+        buildStripeSubMock({
+          stripeSubId,
+          stripeCustomerId,
+          userId: otherCreatorId,
+          orgId: org.id,
+          tierId: tier1.id,
+        })
+      );
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        parent: {
+          subscription_details: { subscription: stripeSubId },
+        },
+        payments: {
+          data: [{ payment: { charge: chargeId, payment_intent: null } }],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      // Fire both handlers in parallel — exactly the racing-webhooks shape.
+      await Promise.all([
+        service.handleInvoicePaymentSucceeded(mockInvoice),
+        service.handleInvoicePaymentSucceeded(mockInvoice),
+      ]);
+
+      const { eq } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
+      expect(rows).toHaveLength(1);
+
+      // Both invocations ran transfers, every call carries a chargeId-derived
+      // idempotency key — Stripe will dedupe the duplicate transfer at its end.
+      const transferCalls = (
+        stripe.transfers.create as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      expect(transferCalls.length).toBeGreaterThanOrEqual(2);
+      for (const [, opts] of transferCalls) {
+        expect(opts?.idempotencyKey).toMatch(new RegExp(`^${chargeId}_`));
+      }
+    });
+
+    it('regression: customer.subscription.created lands AFTER self-heal pre-insert → side effects still fire', async () => {
+      // Sequence:
+      //   1. invoice.payment_succeeded arrives FIRST → self-heal inserts row
+      //   2. customer.subscription.created arrives SECOND → must NOT swallow
+      //      the welcome email + cache invalidation just because the row
+      //      pre-existed. This is the regression-prevention guarantee.
+      const { org, tier1 } = await createFullOrg('selfheal-create-after');
+      const stripeSubId = uniqueStripeSubId('createafter');
+      const stripeCustomerId = `cus_${stripeSubId}`;
+
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(
+        buildStripeSubMock({
+          stripeSubId,
+          stripeCustomerId,
+          userId: otherCreatorId,
+          orgId: org.id,
+          tierId: tier1.id,
+        })
+      );
+
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        parent: {
+          subscription_details: { subscription: stripeSubId },
+        },
+        payments: {
+          data: [
+            { payment: { charge: `ch_${stripeSubId}`, payment_intent: null } },
+          ],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      // Step 1: invoice arrives first, self-heals row.
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      // Step 2: real create event arrives — the Stripe sub object the
+      // ecom-api webhook would dispatch to handleSubscriptionCreated.
+      const mockCreateEventSub = buildStripeSubMock({
+        stripeSubId,
+        stripeCustomerId,
+        userId: otherCreatorId,
+        orgId: org.id,
+        tierId: tier1.id,
+      });
+
+      const result =
+        await service.handleSubscriptionCreated(mockCreateEventSub);
+
+      // The previous unique-violation swallow returned `void` here, dropping
+      // the welcome email + cache invalidation. After the fix, the handler
+      // MUST return `{ userId, orgId }` so the route bumps both caches and
+      // dispatches the welcome email.
+      expect(result).toBeDefined();
+      expect(result?.userId).toBe(otherCreatorId);
+      expect(result?.orgId).toBe(org.id);
+    });
+
+    it('regression: Stripe redelivers create event after 5xx-after-insert → side effects fire on redelivery', async () => {
+      // Pre-insert via self-heal to simulate "first delivery 5xx'd
+      // after we inserted the row" — the second attempt finds the row
+      // already present. With the old swallow, the email was lost
+      // forever; the new behavior fires it on redelivery.
+      const { org, tier1 } = await createFullOrg('selfheal-redeliver');
+      const stripeSubId = uniqueStripeSubId('redeliver');
+      const stripeCustomerId = `cus_${stripeSubId}`;
+
+      (
+        stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce(
+        buildStripeSubMock({
+          stripeSubId,
+          stripeCustomerId,
+          userId: otherCreatorId,
+          orgId: org.id,
+          tierId: tier1.id,
+        })
+      );
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 499,
+        parent: {
+          subscription_details: { subscription: stripeSubId },
+        },
+        payments: {
+          data: [
+            { payment: { charge: `ch_${stripeSubId}`, payment_intent: null } },
+          ],
+        },
+      }) as unknown as Stripe.Invoice;
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      // Now fire the create event TWICE — simulating Stripe redelivery.
+      const createSub = buildStripeSubMock({
+        stripeSubId,
+        stripeCustomerId,
+        userId: otherCreatorId,
+        orgId: org.id,
+        tierId: tier1.id,
+      });
+      const first = await service.handleSubscriptionCreated(createSub);
+      const second = await service.handleSubscriptionCreated(createSub);
+
+      // Both invocations return invalidation tuples — neither swallows
+      // the side effects despite the row already being present.
+      expect(first?.userId).toBe(otherCreatorId);
+      expect(first?.orgId).toBe(org.id);
+      expect(second?.userId).toBe(otherCreatorId);
+      expect(second?.orgId).toBe(org.id);
     });
   });
 
@@ -4961,9 +5365,7 @@ describe('SubscriptionService', () => {
       // UI-derived display status is still 'resolved' until PR4 drops the alias.
       expect(result.items[0]!.status).toBe('resolved');
       expect(result.items[0]!.amountCents).toBe(250);
-      expect(result.items[0]!.stripeTransferId).toBe(
-        'tr_05vp8_canonical_paid'
-      );
+      expect(result.items[0]!.stripeTransferId).toBe('tr_05vp8_canonical_paid');
     });
 
     it('projects payoutType from the payouts row', async () => {
@@ -5074,6 +5476,112 @@ describe('SubscriptionService', () => {
       expect(result.items).toHaveLength(1);
       expect(result.items[0]!.subscriberName).toBeNull();
       expect(result.items[0]!.subscriberEmail).toBeNull();
+    });
+
+    // Codex-e2773: rows that share a transferGroup must NEVER split
+    // across pagination pages. Group-aware pagination treats each
+    // distinct transferGroup as one page slot; rows with NULL
+    // transferGroup become their own pseudo-groups.
+    it('keeps all rows of a transferGroup on the same page (Codex-e2773)', async () => {
+      const { org, tier1 } = await createFullOrg('e2773-grouped');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'grouped'
+      );
+
+      // 3 groups × 7 rows each = 21 rows. Even with limit=20 the old
+      // by-row pagination would split group #2 across pages 1 and 2.
+      const groupKeyA = `tg_${createUniqueSlug('a')}`;
+      const groupKeyB = `tg_${createUniqueSlug('b')}`;
+      const groupKeyC = `tg_${createUniqueSlug('c')}`;
+      const baseRow = {
+        userId: otherCreatorId,
+        organizationId: org.id,
+        subscriptionId: sub.id,
+        amountCents: 100,
+        currency: 'gbp',
+        reason: 'connect_not_ready',
+        status: 'pending' as const,
+        payoutType: 'creator_payout' as const,
+      };
+      const sevenRows = (transferGroup: string, baseMs: number) =>
+        Array.from({ length: 7 }, (_, i) => ({
+          ...baseRow,
+          transferGroup,
+          createdAt: new Date(baseMs + i),
+        }));
+
+      await db.insert(payoutsTable).values([
+        // Group C is oldest, B middle, A newest. Default sort = desc(createdAt).
+        ...sevenRows(groupKeyC, 1_000_000),
+        ...sevenRows(groupKeyB, 2_000_000),
+        ...sevenRows(groupKeyA, 3_000_000),
+      ]);
+
+      // Page 1 with limit=2 should return groups A + B (the 2 most
+      // recent groups) — 14 rows total, NO split.
+      const page1 = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 2,
+      });
+
+      const groupsOnPage1 = new Set(
+        page1.items.map((r) => r.transferGroup).filter((g): g is string => !!g)
+      );
+      expect(groupsOnPage1.has(groupKeyA)).toBe(true);
+      expect(groupsOnPage1.has(groupKeyB)).toBe(true);
+      expect(groupsOnPage1.has(groupKeyC)).toBe(false);
+      expect(page1.items).toHaveLength(14);
+
+      // Pagination reports group count, not row count.
+      expect(page1.pagination.total).toBe(3);
+      expect(page1.pagination.totalPages).toBe(2);
+
+      // Page 2 returns the remaining group (C) with its 7 sibling rows.
+      const page2 = await service.listPayoutsByOrg(org.id, {
+        page: 2,
+        limit: 2,
+      });
+      expect(page2.items).toHaveLength(7);
+      expect(page2.items.every((r) => r.transferGroup === groupKeyC)).toBe(
+        true
+      );
+    });
+
+    // Codex-e2773: rows with NULL transferGroup each get their own page
+    // slot so the legacy (pre-grouping) data shape doesn't regress.
+    it('treats null-transferGroup rows as singletons in pagination (Codex-e2773)', async () => {
+      const { org, tier1 } = await createFullOrg('e2773-null-tg');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'null-tg'
+      );
+
+      await db.insert(payoutsTable).values(
+        Array.from({ length: 3 }, (_, i) => ({
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100 + i,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending' as const,
+          payoutType: 'creator_payout' as const,
+          createdAt: new Date(1_000_000 + i),
+        }))
+      );
+
+      const result = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 10,
+      });
+
+      expect(result.items).toHaveLength(3);
+      expect(result.pagination.total).toBe(3);
     });
   });
 
@@ -5284,7 +5792,7 @@ describe('SubscriptionService', () => {
       expect(result.inTransitCents).toBe(400); // 150 + 250 only
     });
 
-    it("needsAttentionCount counts pending + failed rows (excludes paid)", async () => {
+    it('needsAttentionCount counts pending + failed rows (excludes paid)', async () => {
       const { org, tier1 } = await createFullOrg('05vp8-sum-needs-attn');
       const sub = await seedSubscriptionForOrg(
         org.id,
@@ -5404,6 +5912,745 @@ describe('SubscriptionService', () => {
       expect(b.totalEarnedCents).toBe(9999);
       expect(b.inTransitCents).toBe(0);
       expect(b.needsAttentionCount).toBe(1);
+    });
+  });
+
+  // ─── getPayoutsByCreatorBreakdown (Codex-6nt4l) ────────────────────────────
+  //
+  // Per-creator aggregate powering the studio /payouts right rail. Shares
+  // the WHERE-clause helper with listPayoutsByOrg so the table and the rail
+  // reshape together under filter chips.
+
+  describe('getPayoutsByCreatorBreakdown', () => {
+    async function seedSubscriptionForOrg(
+      orgId: string,
+      tierId: string,
+      userId: string,
+      slug: string
+    ) {
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(userId, orgId, tierId, {
+            status: 'active',
+            stripeSubscriptionId: `sub_6nt4l_${createUniqueSlug(slug)}`,
+          })
+        )
+        .returning();
+      return sub;
+    }
+
+    it('aggregates one row per creator, sorted by totalPaidCents desc', async () => {
+      const { org, tier1 } = await createFullOrg('6nt4l-agg');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'agg'
+      );
+      // otherCreatorId: £15 paid (10 + 5). thirdUserId: £25 paid.
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 1000,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_agg_a',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_agg_1',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_agg_b',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_agg_2',
+        },
+        {
+          userId: thirdUserId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 2500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_agg_c',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_agg_3',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+
+      expect(result).toHaveLength(2);
+      // Sort: desc by totalPaidCents — thirdUserId (£25) > otherCreatorId (£15).
+      expect(result[0].userId).toBe(thirdUserId);
+      expect(result[0].totalPaidCents).toBe(2500);
+      expect(result[1].userId).toBe(otherCreatorId);
+      expect(result[1].totalPaidCents).toBe(1500);
+    });
+
+    it('excludes platform_fee rows from the breakdown', async () => {
+      const { org, tier1 } = await createFullOrg('6nt4l-plat');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'plat'
+      );
+      await db.insert(payoutsTable).values([
+        // platform_fee — MUST be excluded (userId IS NULL per schema CHECK).
+        {
+          userId: null,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 999,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_plat_fee',
+          status: 'paid',
+          payoutType: 'platform_fee',
+          transferGroup: 'tg_6nt4l_plat_shared',
+        },
+        // creator_payout in the SAME transaction — MUST appear.
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 800,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_plat_creator',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_plat_shared',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      expect(result).toHaveLength(1);
+      expect(result[0].userId).toBe(otherCreatorId);
+      expect(result[0].totalPaidCents).toBe(800);
+    });
+
+    it("totalPaidCents and source splits sum only status='paid' rows", async () => {
+      const { org, tier1 } = await createFullOrg('6nt4l-paid-only');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'paid'
+      );
+      await db.insert(payoutsTable).values([
+        // Paid subscription row
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 700,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_paid_sub',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          sourceType: 'subscription',
+          transferGroup: 'tg_6nt4l_paid_1',
+        },
+        // Paid purchase row
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 300,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_paid_purchase',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          sourceType: 'purchase',
+          transferGroup: 'tg_6nt4l_paid_2',
+        },
+        // Pending — MUST NOT count toward totalPaidCents
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 5000,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+          sourceType: 'subscription',
+          transferGroup: 'tg_6nt4l_paid_3',
+        },
+        // Failed — MUST NOT count toward totalPaidCents
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 4000,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'creator_payout',
+          sourceType: 'purchase',
+          transferGroup: 'tg_6nt4l_paid_4',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      expect(result).toHaveLength(1);
+      const c = result[0];
+      expect(c.totalPaidCents).toBe(1000); // 700 + 300 only
+      expect(c.subscriptionPaidCents).toBe(700);
+      expect(c.purchasePaidCents).toBe(300);
+      // Pending + failed are NOT in totalPaidCents but DO show in needsAttentionCount.
+      expect(c.needsAttentionCount).toBe(2);
+    });
+
+    it('transactionCount dedupes by transferGroup (4 rows in 2 groups → 2)', async () => {
+      const { org, tier1 } = await createFullOrg('6nt4l-tx-count');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'tx'
+      );
+      // Two transactions, each contributing 2 rows for the same creator
+      // (e.g. one org_fee row + one creator_payout row). Per-creator
+      // transferGroup dedup must report 2 transactions, not 4.
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_tx_a1',
+          status: 'paid',
+          payoutType: 'organization_fee',
+          transferGroup: 'tg_6nt4l_tx_GROUP_A',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 200,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_tx_a2',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_tx_GROUP_A',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 150,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_tx_b1',
+          status: 'paid',
+          payoutType: 'organization_fee',
+          transferGroup: 'tg_6nt4l_tx_GROUP_B',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 250,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_tx_b2',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_tx_GROUP_B',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      expect(result).toHaveLength(1);
+      expect(result[0].transactionCount).toBe(2);
+      expect(result[0].totalPaidCents).toBe(700); // 100 + 200 + 150 + 250
+    });
+
+    it('isOrgOwner is true for the user whose membership.role = "owner"', async () => {
+      const { org, tier1 } = await createFullOrg('6nt4l-owner');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'owner'
+      );
+      const { organizationMemberships } = await import(
+        '@codex/database/schema'
+      );
+      // otherCreatorId is the org owner; thirdUserId is a non-owner creator.
+      await db.insert(organizationMemberships).values([
+        {
+          organizationId: org.id,
+          userId: otherCreatorId,
+          role: 'owner',
+          status: 'active',
+        },
+        {
+          organizationId: org.id,
+          userId: thirdUserId,
+          role: 'creator',
+          status: 'active',
+        },
+      ]);
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_owner_owner',
+          status: 'paid',
+          payoutType: 'organization_fee',
+          transferGroup: 'tg_6nt4l_owner',
+        },
+        {
+          userId: thirdUserId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 200,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_owner_creator',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_owner',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      const byUser = new Map(result.map((r) => [r.userId, r]));
+      expect(byUser.get(otherCreatorId)?.isOrgOwner).toBe(true);
+      expect(byUser.get(thirdUserId)?.isOrgOwner).toBe(false);
+    });
+
+    it('honours status / sourceType filters consistently with listPayoutsByOrg', async () => {
+      const { org, tier1 } = await createFullOrg('6nt4l-filters');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'flt'
+      );
+      await db.insert(payoutsTable).values([
+        // Paid subscription
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_flt_sub',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          sourceType: 'subscription',
+          transferGroup: 'tg_6nt4l_flt_1',
+        },
+        // Paid purchase
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_flt_purch',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          sourceType: 'purchase',
+          transferGroup: 'tg_6nt4l_flt_2',
+        },
+        // Failed (excluded by status='paid' filter)
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 999,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'creator_payout',
+          sourceType: 'subscription',
+          transferGroup: 'tg_6nt4l_flt_3',
+        },
+      ]);
+
+      // Source='subscription' should give only the £1 subscription row.
+      const subscriptionOnly = await service.getPayoutsByCreatorBreakdown(
+        org.id,
+        {
+          sourceType: 'subscription',
+        }
+      );
+      expect(subscriptionOnly[0].totalPaidCents).toBe(100);
+      expect(subscriptionOnly[0].subscriptionPaidCents).toBe(100);
+      expect(subscriptionOnly[0].purchasePaidCents).toBe(0);
+
+      // Status='paid' should exclude the failed row → still £6 total.
+      const paidOnly = await service.getPayoutsByCreatorBreakdown(org.id, {
+        status: 'paid',
+      });
+      expect(paidOnly[0].totalPaidCents).toBe(600);
+      expect(paidOnly[0].needsAttentionCount).toBe(0);
+
+      // Cross-check: listPayoutsByOrg under the same filters returns the
+      // same row count — the helpers MUST share their WHERE clause.
+      const listSubs = await service.listPayoutsByOrg(org.id, {
+        page: 1,
+        limit: 20,
+        sourceType: 'subscription',
+      });
+      expect(
+        listSubs.items.filter((r) => r.payoutType !== 'platform_fee')
+      ).toHaveLength(2);
+    });
+
+    // ── Multi-creator org scenarios (Codex-6nt4l) ──────────────────────
+    // The h69cg tri-party model + multi-creator revshare creates edge
+    // cases the per-user accumulator must handle correctly. These tests
+    // pin the contract.
+
+    it('multi-creator: needsAttentionCount dedupes sibling rows sharing a transferGroup', async () => {
+      // One failed charge produces TWO owner-attributed rows under
+      // multi-creator revshare: an `organization_fee` AND a
+      // `creator_payout_to_owner`. Both share one transferGroup. Pre-fix
+      // the owner card showed "1 transaction · 2 needs attention" for a
+      // single stuck payout — counting per-row instead of per-group.
+      const { org, tier1 } = await createFullOrg('6nt4l-multi-dedup');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'mcd'
+      );
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'organization_fee',
+          transferGroup: 'tg_6nt4l_mcd_FAIL',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 200,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'creator_payout_to_owner',
+          transferGroup: 'tg_6nt4l_mcd_FAIL',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      expect(result).toHaveLength(1);
+      // 2 rows, 1 transferGroup → 1 transaction, 1 needsAttention.
+      expect(result[0].transactionCount).toBe(1);
+      expect(result[0].needsAttentionCount).toBe(1);
+    });
+
+    it('multi-creator: orgFeePaidCents tracks organization_fee subset for the owner card', async () => {
+      // Owner gets BOTH `organization_fee` AND `creator_payout_to_owner`
+      // rows. Headline totalPaidCents sums both — orgFeePaidCents
+      // discloses the org-fee slice so the owner's card is visually
+      // comparable to non-owner creators.
+      const { org, tier1 } = await createFullOrg('6nt4l-orgfee');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'orgfee'
+      );
+      const { organizationMemberships } = await import(
+        '@codex/database/schema'
+      );
+      await db.insert(organizationMemberships).values({
+        organizationId: org.id,
+        userId: otherCreatorId,
+        role: 'owner',
+        status: 'active',
+      });
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 150,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_orgfee_a',
+          status: 'paid',
+          payoutType: 'organization_fee',
+          transferGroup: 'tg_6nt4l_orgfee_1',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 850,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_orgfee_b',
+          status: 'paid',
+          payoutType: 'creator_payout_to_owner',
+          transferGroup: 'tg_6nt4l_orgfee_1',
+        },
+        // Add a non-owner creator with NO org_fee rows — must show
+        // orgFeePaidCents=0 (it's an owner-only concept).
+        {
+          userId: thirdUserId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 400,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_6nt4l_orgfee_c',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_orgfee_2',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      const owner = result.find((r) => r.userId === otherCreatorId);
+      const creator = result.find((r) => r.userId === thirdUserId);
+      expect(owner?.isOrgOwner).toBe(true);
+      expect(owner?.totalPaidCents).toBe(1000); // 150 + 850
+      expect(owner?.orgFeePaidCents).toBe(150); // organization_fee only
+      expect(creator?.isOrgOwner).toBe(false);
+      expect(creator?.totalPaidCents).toBe(400);
+      expect(creator?.orgFeePaidCents).toBe(0);
+    });
+
+    it('multi-creator: min_transfer_floor rows are excluded from needsAttentionCount', async () => {
+      // Tiny per-creator revshares get held below Stripe's minimum
+      // transfer floor — pending until a sweep aggregates them. They
+      // are NOT operator exceptions and must not bloat the
+      // needsAttention badge across the rail.
+      const { org, tier1 } = await createFullOrg('6nt4l-floor');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'floor'
+      );
+      await db.insert(payoutsTable).values([
+        // Floor-held row — MUST be excluded.
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 50,
+          currency: 'gbp',
+          reason: 'min_transfer_floor',
+          status: 'pending',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_floor_1',
+        },
+        // Genuine transfer_failed — MUST be counted.
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 200,
+          currency: 'gbp',
+          reason: 'transfer_failed',
+          status: 'failed',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_floor_2',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      expect(result).toHaveLength(1);
+      // Floor row excluded, only the transfer_failed counts.
+      expect(result[0].needsAttentionCount).toBe(1);
+      // transactionCount still sees both groups — floor row IS a
+      // transaction, just not an exception.
+      expect(result[0].transactionCount).toBe(2);
+    });
+
+    it('multi-creator: tie-broken by lastPaidAt desc when totalPaidCents matches', async () => {
+      // Two creators on identical revshare percentages will hit
+      // identical totals across reloads. Without a tie-breaker the
+      // rail order is non-deterministic. Secondary sort: lastPaidAt
+      // desc — most-recently-paid first reads as "freshest" data.
+      const { org, tier1 } = await createFullOrg('6nt4l-tie');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'tie'
+      );
+      const oldDate = new Date('2026-04-01T00:00:00Z');
+      const newDate = new Date('2026-05-01T00:00:00Z');
+      await db.insert(payoutsTable).values([
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: oldDate,
+          stripeTransferId: 'tr_6nt4l_tie_old',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_tie_old',
+        },
+        {
+          userId: thirdUserId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: newDate,
+          stripeTransferId: 'tr_6nt4l_tie_new',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          transferGroup: 'tg_6nt4l_tie_new',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      expect(result).toHaveLength(2);
+      // Identical totalPaidCents — most-recently-paid first.
+      expect(result[0].userId).toBe(thirdUserId);
+      expect(result[1].userId).toBe(otherCreatorId);
+    });
+
+    // REGRESSION (PR #204 deep-review F-3, DQ-8) — multi-creator orgs.
+    // ea08ca29 ships the orgFeePaidCents TRANSPARENCY field on the owner
+    // card, but leaves organization_fee inside totalPaidCents. DQ-8
+    // resolution (option a) requires excluding org_fee from totalPaidCents
+    // entirely — surface the org slice as a separate panel, not as
+    // personal earnings. See docs/pr-203-review/design-questions.md.
+    //
+    // Currently fails because production reports totalPaidCents=270 for the
+    // owner (the org slice). When the fix lands:
+    //   1. this assertion (owner totalPaidCents === 0) passes, vitest
+    //      flips this it.fails red, fixer removes .fails.
+    //   2. The 'orgFeePaidCents tracks ...' test above also needs its
+    //      `owner.totalPaidCents` assertion updated from 1000 → 850
+    //      (excluding org_fee from the total).
+    it.fails('F-3/DQ-8: excludes organization_fee from per-creator totalPaidCents (multi-creator regression)', async () => {
+      const { org, tier1 } = await createFullOrg('h3864-exclude-orgfee');
+      const sub = await seedSubscriptionForOrg(
+        org.id,
+        tier1.id,
+        otherCreatorId,
+        'exclude'
+      );
+      const { organizationMemberships } = await import(
+        '@codex/database/schema'
+      );
+      // Owner = otherCreatorId (also holds the org Connect account).
+      // Co-creator who actually authored the content = thirdUserId.
+      await db.insert(organizationMemberships).values([
+        {
+          organizationId: org.id,
+          userId: otherCreatorId,
+          role: 'owner',
+          status: 'active',
+        },
+        {
+          organizationId: org.id,
+          userId: thirdUserId,
+          role: 'creator',
+          status: 'active',
+        },
+      ]);
+      // One £20 purchase of thirdUserId's content. Splits 10/15/76.5:
+      //   creator_payout £15.30 → thirdUserId
+      //   organization_fee £2.70 → owner's Connect (userId=otherCreatorId)
+      //   platform_fee £2.00 → userId=NULL (already excluded from breakdown)
+      await db.insert(payoutsTable).values([
+        {
+          userId: thirdUserId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 1530,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_h3864_exclude_creator',
+          status: 'paid',
+          payoutType: 'creator_payout',
+          sourceType: 'purchase',
+          transferGroup: 'tg_h3864_exclude',
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 270,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          resolvedAt: new Date(),
+          stripeTransferId: 'tr_h3864_exclude_org',
+          status: 'paid',
+          payoutType: 'organization_fee',
+          sourceType: 'purchase',
+          transferGroup: 'tg_h3864_exclude',
+        },
+      ]);
+
+      const result = await service.getPayoutsByCreatorBreakdown(org.id);
+      const byUser = new Map(result.map((r) => [r.userId, r]));
+
+      // Co-creator (thirdUserId): £15.30 personal earnings — correct.
+      expect(byUser.get(thirdUserId)?.totalPaidCents).toBe(1530);
+
+      // Owner (otherCreatorId): £0 personal earnings — they received
+      // only the org-admin slice, not a creator_payout. The rail's
+      // "per-creator earnings" semantic must not surface org slice as
+      // personal earnings. Currently fails: production reports 270 here.
+      expect(byUser.get(otherCreatorId)?.totalPaidCents).toBe(0);
     });
   });
 
@@ -6058,6 +7305,95 @@ describe('SubscriptionService', () => {
       );
 
       warnSpy.mockRestore();
+    });
+
+    // Codex-dbzkg: retry must pass source_transaction so the transfer
+    // pulls from the original charge's source-linked balance, not
+    // general platform balance — otherwise the platform double-pays
+    // (the charge sits source-linked, the retry uses unrelated funds).
+    // Also forwards source_type metadata for Stripe-side reconciliation
+    // across both subscription- and purchase-sourced retries.
+    it('forwards source_transaction + source_type metadata on tracked retries; omits source_transaction on legacy rows', async () => {
+      const { org, sub, stripeAccountId } =
+        await seedConnectAndSubscription('w4jjk-source-tx');
+      const subChargeId = `ch_${createUniqueSlug('sub')}`;
+      const purchaseChargeId = `ch_${createUniqueSlug('pch')}`;
+
+      await db.insert(payoutsTable).values([
+        {
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          stripeChargeId: subChargeId,
+          sourceType: 'subscription',
+          amountCents: 1500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: creatorId,
+          organizationId: org.id,
+          stripeChargeId: purchaseChargeId,
+          sourceType: 'purchase',
+          amountCents: 800,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        },
+        {
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          sourceType: 'subscription',
+          amountCents: 400,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        },
+      ]);
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      await service.resolvePendingPayouts(org.id, stripeAccountId);
+
+      const findCall = (chargeId: string | undefined) =>
+        transferSpy.mock.calls.find(
+          ([params]) =>
+            (params as { source_transaction?: string }).source_transaction ===
+            chargeId
+        );
+
+      const subCall = findCall(subChargeId);
+      expect(
+        subCall,
+        'sub-sourced retry must carry source_transaction'
+      ).toBeDefined();
+      expect(subCall![0]).toMatchObject({
+        source_transaction: subChargeId,
+        metadata: { source_type: 'subscription', subscription_id: sub.id },
+      });
+
+      const purchaseCall = findCall(purchaseChargeId);
+      expect(
+        purchaseCall,
+        'purchase-sourced retry must carry source_transaction'
+      ).toBeDefined();
+      expect(purchaseCall![0]).toMatchObject({
+        source_transaction: purchaseChargeId,
+        metadata: { source_type: 'purchase' },
+      });
+
+      const legacyCall = findCall(undefined);
+      expect(
+        legacyCall,
+        'row without stripeChargeId must omit source_transaction'
+      ).toBeDefined();
+      expect(legacyCall![0]).not.toHaveProperty('source_transaction');
     });
   });
 
@@ -6858,7 +8194,9 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
           subscription_details: { subscription: sub.stripeSubscriptionId },
         },
         payments: {
-          data: [{ payment: { charge: chargeId, payment_intent: 'pi_orgfee' } }],
+          data: [
+            { payment: { charge: chargeId, payment_intent: 'pi_orgfee' } },
+          ],
         },
       }) as unknown as Stripe.Invoice;
 
@@ -7004,22 +8342,24 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       // the partial-unique-index path.
       const transferSpy = vi.mocked(stripe.transfers.create);
       const byKey = new Map<string, string>();
-      transferSpy.mockImplementation((params: Record<string, unknown>, opts) => {
-        const o = opts as { idempotencyKey?: string } | undefined;
-        const key = o?.idempotencyKey ?? '';
-        let id = byKey.get(key);
-        if (!id) {
-          id = `tr_idem_${createUniqueSlug('t')}`;
-          byKey.set(key, id);
+      transferSpy.mockImplementation(
+        (params: Record<string, unknown>, opts) => {
+          const o = opts as { idempotencyKey?: string } | undefined;
+          const key = o?.idempotencyKey ?? '';
+          let id = byKey.get(key);
+          if (!id) {
+            id = `tr_idem_${createUniqueSlug('t')}`;
+            byKey.set(key, id);
+          }
+          return Promise.resolve({
+            id,
+            amount: params.amount,
+            currency: params.currency,
+            destination: params.destination,
+            metadata: params.metadata ?? {},
+          }) as unknown as ReturnType<typeof transferSpy>;
         }
-        return Promise.resolve({
-          id,
-          amount: params.amount,
-          currency: params.currency,
-          destination: params.destination,
-          metadata: params.metadata ?? {},
-        }) as unknown as ReturnType<typeof transferSpy>;
-      });
+      );
 
       const chargeId = 'ch_e9v3b_idem_fixed';
       const mockInvoice = createMockStripeInvoice({
@@ -7128,6 +8468,31 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
       ).toBe(true);
     }
 
+    // Codex-g9owu: parallel helper for unique-index violations. Walks the
+    // same code/cause/message chain as expectCheckViolation so the driver's
+    // wrapping shape isn't a single point of brittleness across tests.
+    function expectUniqueViolation(err: unknown, constraint: string) {
+      expect(err).toBeDefined();
+      const e = err as {
+        code?: string;
+        constraint?: string;
+        cause?: { code?: string; constraint?: string; message?: string };
+        message?: string;
+      };
+      const code = e.code ?? e.cause?.code;
+      const cname = e.constraint ?? e.cause?.constraint;
+      const msg = `${e.message ?? ''} ${e.cause?.message ?? ''}`;
+      const matched =
+        code === '23505' ||
+        cname === constraint ||
+        msg.includes('23505') ||
+        msg.includes(constraint);
+      expect(
+        matched,
+        `expected unique violation (${constraint}); got code=${code} constraint=${cname} message=${msg}`
+      ).toBe(true);
+    }
+
     it('check_payouts_paid_invariant: status=paid with stripeTransferId=null is rejected', async () => {
       const base = await baseValues('e9v3b-check-paid-invariant');
       const err = await db
@@ -7150,11 +8515,90 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
         .values({
           ...base,
           // 'resolved' is the URL alias, NOT a valid DB status — the
-          // CHECK only accepts paid/pending/failed.
+          // CHECK only accepts paid/pending/failed/reversed/cancelled_by_refund.
           status: 'resolved' as unknown as 'pending',
         })
         .catch((e) => e);
       expectCheckViolation(err, 'check_payouts_status');
+    });
+
+    // Codex-92ej7 / DQ-9: cancelled_by_refund must satisfy the CHECK so
+    // production reversePayoutsForPurchase can write it on connect_not_ready
+    // rows after a refund.
+    it("check_payouts_status: status='cancelled_by_refund' is accepted (DQ-9)", async () => {
+      const base = await baseValues('e9v3b-cancelled-refund');
+      const [row] = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          status: 'cancelled_by_refund' as unknown as 'pending',
+          resolvedAt: new Date(),
+        })
+        .returning();
+      expect(row.status).toBe('cancelled_by_refund');
+    });
+
+    // Codex-g9owu: a second platform_fee row for the same charge must be
+    // rejected by the partial unique index uq_payouts_platform_fee_per_charge.
+    // Without this, concurrent webhook redeliveries race past the SELECT
+    // pre-check and silently double-insert platform revenue.
+    it('uq_payouts_platform_fee_per_charge: second platform_fee row for same charge is rejected (Codex-g9owu)', async () => {
+      const base = await baseValues('e9v3b-platform-fee-unique');
+      const chargeId = `ch_unique_pf_${createUniqueSlug('x')}`;
+
+      const [first] = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          userId: null,
+          payoutType: 'platform_fee',
+          status: 'paid',
+          stripeChargeId: chargeId,
+          resolvedAt: new Date(),
+        })
+        .returning();
+      expect(first.payoutType).toBe('platform_fee');
+
+      const err = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          userId: null,
+          payoutType: 'platform_fee',
+          status: 'paid',
+          stripeChargeId: chargeId,
+          resolvedAt: new Date(),
+        })
+        .catch((e) => e);
+      expectUniqueViolation(err, 'uq_payouts_platform_fee_per_charge');
+    });
+
+    // Codex-g9owu: the partial index is scoped to payoutType='platform_fee',
+    // so non-platform_fee rows with a shared stripeChargeId are unaffected
+    // (a charge funds platform_fee + org_fee + creator_payout siblings).
+    it('uq_payouts_platform_fee_per_charge: does NOT reject non-platform_fee rows with shared chargeId (Codex-g9owu)', async () => {
+      const base = await baseValues('e9v3b-platform-fee-shared');
+      const chargeId = `ch_shared_${createUniqueSlug('x')}`;
+
+      await db.insert(payoutsTable).values({
+        ...base,
+        userId: null,
+        payoutType: 'platform_fee',
+        status: 'paid',
+        stripeChargeId: chargeId,
+        resolvedAt: new Date(),
+      });
+
+      // creator_payout row for the same chargeId must succeed.
+      const [creatorRow] = await db
+        .insert(payoutsTable)
+        .values({
+          ...base,
+          payoutType: 'creator_payout',
+          stripeChargeId: chargeId,
+        })
+        .returning();
+      expect(creatorRow.payoutType).toBe('creator_payout');
     });
 
     it("check_payouts_reason: reason='made_up' (not in allowed set) is rejected", async () => {

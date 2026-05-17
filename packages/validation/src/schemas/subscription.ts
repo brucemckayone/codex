@@ -192,18 +192,52 @@ export const payoutStatusFilterEnum = z.enum([
   'paid',
   'resolved', // legacy URL alias for 'paid' (PR3); dropped in PR4
   'failed',
+  'reversed', // Codex-h69cg: refund-reversed rows
+  'cancelled_by_refund', // Codex-92ej7 / DQ-9: refund hit before Connect activated
   'needs_attention',
+]);
+
+/**
+ * Codex-h69cg: tri-party ledger source filter for /studio/payouts.
+ *   'all'          → purchases + subscriptions (default, backwards-compatible)
+ *   'purchase'     → one-time-purchase rows only
+ *   'subscription' → recurring-subscription rows only
+ */
+export const payoutSourceFilterEnum = z.enum([
+  'all',
+  'purchase',
+  'subscription',
 ]);
 
 export const listPayoutsQuerySchema = paginationSchema.extend({
   organizationId: uuidSchema,
   status: payoutStatusFilterEnum.default('all'),
+  source: payoutSourceFilterEnum.default('all'),
   fromDate: z.string().datetime().optional(),
   toDate: z.string().datetime().optional(),
 });
 
 export const getPayoutSummaryQuerySchema = z.object({
   organizationId: uuidSchema,
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
+});
+
+/**
+ * Codex-6nt4l: per-creator payout breakdown for the studio payouts right
+ * rail. Mirrors `listPayoutsQuerySchema` minus pagination — the rail
+ * intentionally surfaces every paid creator regardless of page (page is a
+ * UX construct for the table; the rail aggregates the whole row set).
+ *
+ * Status/source default to 'all' so a bare GET works for the unfiltered
+ * "By creator" panel. They MUST stay in sync with the table's filter chips
+ * — both endpoints feed `SubscriptionService.buildPayoutConditions` to
+ * guarantee the table and the rail reshape together.
+ */
+export const getPayoutsByCreatorBreakdownQuerySchema = z.object({
+  organizationId: uuidSchema,
+  status: payoutStatusFilterEnum.default('all'),
+  source: payoutSourceFilterEnum.default('all'),
   fromDate: z.string().datetime().optional(),
   toDate: z.string().datetime().optional(),
 });
@@ -256,9 +290,13 @@ export type ReactivateSubscriptionInput = z.infer<
 >;
 export type ResumeSubscriptionInput = z.infer<typeof resumeSubscriptionSchema>;
 export type PayoutStatusFilter = z.infer<typeof payoutStatusFilterEnum>;
+export type PayoutSourceFilter = z.infer<typeof payoutSourceFilterEnum>;
 export type ListPayoutsQueryInput = z.infer<typeof listPayoutsQuerySchema>;
 export type GetPayoutSummaryQueryInput = z.infer<
   typeof getPayoutSummaryQuerySchema
+>;
+export type GetPayoutsByCreatorBreakdownQueryInput = z.infer<
+  typeof getPayoutsByCreatorBreakdownQuerySchema
 >;
 
 export type ListSubscribersQueryInput = z.infer<

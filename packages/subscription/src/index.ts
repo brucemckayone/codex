@@ -34,7 +34,9 @@ export {
   type ListSubscribersQueryInput,
   listPayoutsQuerySchema,
   listSubscribersQuerySchema,
+  type PayoutSourceFilter,
   type PayoutStatusFilter,
+  payoutSourceFilterEnum,
   payoutStatusFilterEnum,
   type ReorderTiersInput,
   reorderTiersSchema,
@@ -74,6 +76,7 @@ export {
   type WaitUntilFn,
 } from './services/subscription-invalidation';
 export type {
+  CreatorPayoutBreakdown,
   PayoutDisplayStatus,
   PayoutSummary,
   PayoutWithCreator,
