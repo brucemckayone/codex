@@ -1,5 +1,6 @@
 import { relations, sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   check,
   index,
   integer,
@@ -7,6 +8,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
@@ -158,13 +160,137 @@ export const organizationPlatformAgreements = pgTable(
 );
 
 /**
+ * Agreement proposals — immutable audit of revenue-share negotiation rounds.
+ *
+ * Codex-ppxtd (WP-1 of Codex-nk4km).
+ *
+ * Every owner-offer / creator-counter / counter-of-counter is a row here.
+ * Lineage walks via `parent_proposal_id` (NULL = the round-1 initial offer
+ * from the owner). When a proposal is accepted, `creator_organization_agreements`
+ * is written/updated and points back via `current_proposal_id`. Proposals are
+ * NEVER updated except for terminal status transitions (open → accepted /
+ * declined / withdrawn / countered / superseded) — the row body is the
+ * historical record.
+ *
+ * Revenue type is per-row: a creator can hold one active `subscription`
+ * agreement AND one active `content_purchase` agreement with the same org.
+ */
+export const agreementProposals = pgTable(
+  'agreement_proposals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    creatorId: text('creator_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // 'subscription' | 'content_purchase' — see CHECK below
+    revenueType: varchar('revenue_type', { length: 32 }).notNull(),
+
+    // Self-FK lineage. NULL = round-1 initial offer.
+    parentProposalId: uuid('parent_proposal_id').references(
+      (): AnyPgColumn => agreementProposals.id,
+      { onDelete: 'set null' }
+    ),
+    // 1 for the owner's initial offer; +1 per counter.
+    roundNumber: integer('round_number').notNull(),
+
+    proposedByUserId: text('proposed_by_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // 'owner' | 'creator' — see CHECK below
+    proposedByRole: varchar('proposed_by_role', { length: 16 }).notNull(),
+
+    // Creator's slice of the post-platform-fee pool (basis points 0–10000).
+    proposedCreatorSharePercent: integer(
+      'proposed_creator_share_percent'
+    ).notNull(),
+    // Proposed soft-lock review window in months. NULL = indefinite.
+    proposedTermMonths: integer('proposed_term_months'),
+    proposedEffectiveFrom: timestamp('proposed_effective_from', {
+      withTimezone: true,
+    }).notNull(),
+
+    note: text('note'),
+
+    // 'open' | 'accepted' | 'declined' | 'countered' | 'withdrawn' | 'superseded'
+    status: varchar('status', { length: 16 }).notNull(),
+
+    respondedAt: timestamp('responded_at', { withTimezone: true }),
+    respondedByUserId: text('responded_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    declineReason: text('decline_reason'),
+
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    // Thread lookup: list all proposals in the (org, creator, revenue_type) negotiation.
+    index('idx_agreement_proposals_thread').on(
+      table.organizationId,
+      table.creatorId,
+      table.revenueType
+    ),
+    // Creator portfolio queries — "what's waiting on me?" / "what have I countered?"
+    index('idx_agreement_proposals_creator_status').on(
+      table.creatorId,
+      table.status
+    ),
+    // Owner pending queries — "what counters are waiting on me?"
+    index('idx_agreement_proposals_org_status').on(
+      table.organizationId,
+      table.status
+    ),
+
+    check(
+      'check_agreement_proposals_revenue_type',
+      sql`${table.revenueType} IN ('subscription', 'content_purchase')`
+    ),
+    check(
+      'check_agreement_proposals_proposed_by_role',
+      sql`${table.proposedByRole} IN ('owner', 'creator')`
+    ),
+    check(
+      'check_agreement_proposals_status',
+      sql`${table.status} IN ('open', 'accepted', 'declined', 'countered', 'withdrawn', 'superseded')`
+    ),
+    check(
+      'check_agreement_proposals_share_bps',
+      sql`${table.proposedCreatorSharePercent} >= 0 AND ${table.proposedCreatorSharePercent} <= 10000`
+    ),
+    check(
+      'check_agreement_proposals_round_positive',
+      sql`${table.roundNumber} >= 1`
+    ),
+    check(
+      'check_agreement_proposals_term_positive',
+      sql`${table.proposedTermMonths} IS NULL OR ${table.proposedTermMonths} > 0`
+    ),
+  ]
+);
+
+/**
  * Creator-Organization revenue split agreements
  *
- * Defines how much of the remaining revenue (after platform fee) goes to the organization.
- * Phase 1: 0% to org, 100% of (post-platform-fee) revenue to creator
- * Phase 2+: Orgs can negotiate revenue share with creators (e.g., 20% to org, 80% to creator)
+ * Defines how much of the remaining revenue (after platform fee) goes to the
+ * creator. Owner residual = (post-platform-fee pool) − Σ(active creator shares).
  *
- * If no record exists, defaults to 0% org fee (all remaining revenue to creator)
+ * One row per (organization, creator, revenue_type) where status='active'
+ * (enforced by partial unique index). Terminated/expired rows persist for
+ * audit and may multiply on the same (org, creator, revenue_type) key.
+ *
+ * `current_proposal_id` points at the accepted proposal that produced this
+ * row's economics.
+ *
+ * Codex-ppxtd (WP-1 of Codex-nk4km) extended this from the Phase-1 single
+ * "org fee" model into a per-revenue-type lifecycle-aware contract.
  */
 export const creatorOrganizationAgreements = pgTable(
   'creator_organization_agreements',
@@ -176,8 +302,30 @@ export const creatorOrganizationAgreements = pgTable(
     organizationId: uuid('organization_id')
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
-    // Organization's cut of post-platform-fee revenue (basis points)
+    // Organization's cut of post-platform-fee revenue (basis points).
+    // (Legacy column — Phase 2+ math uses proposed_creator_share_percent on the
+    //  accepted proposal as the source of truth. Retained for backwards-compat
+    //  during the WP-2/WP-4 service rollout.)
     organizationFeePercentage: integer('organization_fee_percentage').notNull(),
+
+    // WP-1 additions:
+    // 'subscription' | 'content_purchase'
+    revenueType: varchar('revenue_type', { length: 32 })
+      .notNull()
+      .default('subscription'),
+    // 'active' | 'terminated' | 'expired'
+    status: varchar('status', { length: 16 }).notNull().default('active'),
+    terminatedAt: timestamp('terminated_at', { withTimezone: true }),
+    terminatedByUserId: text('terminated_by_user_id').references(
+      () => users.id,
+      { onDelete: 'set null' }
+    ),
+    terminationReason: text('termination_reason'),
+    currentProposalId: uuid('current_proposal_id').references(
+      () => agreementProposals.id,
+      { onDelete: 'set null' }
+    ),
+
     effectiveFrom: timestamp('effective_from', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -197,16 +345,45 @@ export const creatorOrganizationAgreements = pgTable(
       table.effectiveFrom,
       table.effectiveUntil
     ),
+    // Composite for "active per (org, creator, type)" lookups in the payout pipeline.
+    index('idx_creator_org_agreement_active_lookup').on(
+      table.organizationId,
+      table.creatorId,
+      table.revenueType,
+      table.status
+    ),
     check(
       'check_org_fee_percentage',
       sql`${table.organizationFeePercentage} >= 0 AND ${table.organizationFeePercentage} <= 10000`
     ),
-    // Unique constraint: one active agreement per creator-org pair at any time
+    check(
+      'check_creator_org_agreement_revenue_type',
+      sql`${table.revenueType} IN ('subscription', 'content_purchase')`
+    ),
+    check(
+      'check_creator_org_agreement_status',
+      sql`${table.status} IN ('active', 'terminated', 'expired')`
+    ),
+    check(
+      'check_creator_org_agreement_terminated_shape',
+      sql`(${table.status} = 'terminated') = (${table.terminatedAt} IS NOT NULL)`
+    ),
+    // Legacy tuple-unique. Extended in WP-1 with revenue_type so two
+    // different-revenue-type agreements can co-exist at the same
+    // effective_from. The PARTIAL unique below is the authoritative
+    // "one active per (org, creator, type)" invariant; this tuple-unique
+    // is retained to keep prior upsert-by-effectiveFrom semantics working.
     unique('creator_org_agreement_unique').on(
       table.creatorId,
       table.organizationId,
-      table.effectiveFrom
+      table.effectiveFrom,
+      table.revenueType
     ),
+    // WP-1 partial unique: at most one ACTIVE agreement per (org, creator, type).
+    // Allows multiple terminated/expired rows for the same triple (audit history).
+    uniqueIndex('uq_creator_org_agreement_active_per_type')
+      .on(table.organizationId, table.creatorId, table.revenueType)
+      .where(sql`${table.status} = 'active'`),
   ]
 );
 
@@ -421,10 +598,50 @@ export const creatorOrganizationAgreementsRelations = relations(
     creator: one(users, {
       fields: [creatorOrganizationAgreements.creatorId],
       references: [users.id],
+      relationName: 'creatorOrganizationAgreementCreator',
     }),
     organization: one(organizations, {
       fields: [creatorOrganizationAgreements.organizationId],
       references: [organizations.id],
+    }),
+    currentProposal: one(agreementProposals, {
+      fields: [creatorOrganizationAgreements.currentProposalId],
+      references: [agreementProposals.id],
+    }),
+    terminatedBy: one(users, {
+      fields: [creatorOrganizationAgreements.terminatedByUserId],
+      references: [users.id],
+      relationName: 'creatorOrganizationAgreementTerminatedBy',
+    }),
+  })
+);
+
+export const agreementProposalsRelations = relations(
+  agreementProposals,
+  ({ one }) => ({
+    organization: one(organizations, {
+      fields: [agreementProposals.organizationId],
+      references: [organizations.id],
+    }),
+    creator: one(users, {
+      fields: [agreementProposals.creatorId],
+      references: [users.id],
+      relationName: 'agreementProposalCreator',
+    }),
+    proposedBy: one(users, {
+      fields: [agreementProposals.proposedByUserId],
+      references: [users.id],
+      relationName: 'agreementProposalProposedBy',
+    }),
+    respondedBy: one(users, {
+      fields: [agreementProposals.respondedByUserId],
+      references: [users.id],
+      relationName: 'agreementProposalRespondedBy',
+    }),
+    parentProposal: one(agreementProposals, {
+      fields: [agreementProposals.parentProposalId],
+      references: [agreementProposals.id],
+      relationName: 'agreementProposalParent',
     }),
   })
 );
@@ -448,3 +665,6 @@ export type CreatorOrganizationAgreement =
   typeof creatorOrganizationAgreements.$inferSelect;
 export type NewCreatorOrganizationAgreement =
   typeof creatorOrganizationAgreements.$inferInsert;
+
+export type AgreementProposal = typeof agreementProposals.$inferSelect;
+export type NewAgreementProposal = typeof agreementProposals.$inferInsert;
