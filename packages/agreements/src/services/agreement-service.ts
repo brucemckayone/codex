@@ -1157,6 +1157,55 @@ export class AgreementService extends BaseService {
     }
   }
 
+  /**
+   * All proposals where the given user is the named creator, regardless of
+   * org or revenue type. Optional `status` filter narrows the result set.
+   *
+   * Used by the creator-side portfolio (WP-8 — Codex-bw2wf) to surface
+   * pending proposals on orgs where the creator does NOT yet have an
+   * `creatorOrganizationAgreement` row — i.e. owner-initiated round-1
+   * proposals that the creator hasn't accepted yet. `getActiveAgreementsForCreator`
+   * alone misses these because no active agreement row exists until accept.
+   *
+   * Returns chronological proposals (oldest first). Empty array when the
+   * caller has no proposals.
+   */
+  async getProposalsForCreator(input: {
+    creatorId: string;
+    status?: AgreementProposal['status'] | AgreementProposal['status'][];
+  }): Promise<AgreementProposal[]> {
+    try {
+      const statusFilter = (() => {
+        if (!input.status) return undefined;
+        const arr = Array.isArray(input.status) ? input.status : [input.status];
+        if (arr.length === 0) return undefined;
+        return inArray(agreementProposals.status, arr);
+      })();
+      return await this.db.query.agreementProposals.findMany({
+        where: and(
+          eq(agreementProposals.creatorId, input.creatorId),
+          statusFilter
+        ),
+        orderBy: [asc(agreementProposals.createdAt)],
+      });
+    } catch (error) {
+      this.handleError(error, 'getProposalsForCreator');
+    }
+  }
+
+  /**
+   * Resolve a human-readable org name for one organization id. Returns
+   * `null` for unknown / hard-deleted orgs (rare). Used by the
+   * creator-side portfolio route to surface friendly org names — the
+   * agreement rows themselves only carry the id.
+   *
+   * Soft-deleted orgs are deliberately included; a recently-archived
+   * org with an outstanding negotiation is still useful audit context.
+   */
+  async getOrgName(organizationId: string): Promise<string | null> {
+    return this.lookupOrgName(organizationId);
+  }
+
   // ── Lifecycle notification dispatch (WP-5 — Codex-90de9) ────────────────
 
   /**

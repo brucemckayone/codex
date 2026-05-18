@@ -1118,6 +1118,219 @@ describe('AgreementService', () => {
     });
   });
 
+  // ── getProposalsForCreator / getOrgName (WP-8 — Codex-bw2wf) ───────────
+  //
+  // Both methods are load-bearing for the creator-side portfolio:
+  //   - getProposalsForCreator powers /agreements/me/portfolio AND
+  //     /agreements/me/threads/:proposalId enumeration. The latter cannot
+  //     fall back to getActiveAgreementsForCreator because pending round-1
+  //     proposals never have a creatorOrganizationAgreements row.
+  //   - getOrgName surfaces the friendly org name in the portfolio rows.
+  //
+  // Per [[feedback-security-deep-test]]: positive + cross-tenant-pin
+  // (negative) for any creator-scoped read. The cross-tenant pin is the
+  // load-bearing invariant — without it, a creator could enumerate someone
+  // else's proposals.
+
+  describe('getProposalsForCreator', () => {
+    it('returns proposals where creatorId matches', async () => {
+      const fxA = await seedOrgFixture(db);
+      const fxB = await seedOrgFixture(db);
+      // Owner of org A proposes to creator A. Owner of org B proposes to
+      // creator B (a different user fixture). Each has exactly one open
+      // proposal in their own org.
+      await service.proposeAgreement({
+        organizationId: fxA.orgId,
+        creatorId: fxA.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fxA.ownerId,
+      });
+      await service.proposeAgreement({
+        organizationId: fxB.orgId,
+        creatorId: fxB.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 4000,
+        termMonths: 6,
+        proposedByUserId: fxB.ownerId,
+      });
+      const forA = await service.getProposalsForCreator({
+        creatorId: fxA.creatorAId,
+      });
+      expect(forA).toHaveLength(1);
+      expect(forA[0]?.creatorId).toBe(fxA.creatorAId);
+      expect(forA[0]?.organizationId).toBe(fxA.orgId);
+    });
+
+    it('honours status filter when passed (array form, WP-8 hardening for I1)', async () => {
+      // Seed: 2 open + 1 declined + 1 withdrawn for creator A across two
+      // orgs (the propose guard refuses 2 open threads on the same triple).
+      const fxA = await seedOrgFixture(db);
+      const fxB = await seedOrgFixture(db);
+      // Two open proposals (different orgs).
+      await service.proposeAgreement({
+        organizationId: fxA.orgId,
+        creatorId: fxA.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fxA.ownerId,
+      });
+      await service.proposeAgreement({
+        organizationId: fxB.orgId,
+        creatorId: fxB.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 2500,
+        termMonths: 6,
+        proposedByUserId: fxB.ownerId,
+      });
+      // A declined proposal (same triple as fxA's open, but fxA's open
+      // must be declined first so the triple is terminal).
+      const fxC = await seedOrgFixture(db);
+      const toDecline = await service.proposeAgreement({
+        organizationId: fxC.orgId,
+        creatorId: fxC.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 2000,
+        termMonths: 6,
+        proposedByUserId: fxC.ownerId,
+      });
+      await service.declineProposal({
+        proposalId: toDecline.id,
+        declinedByUserId: fxC.creatorAId,
+      });
+      // A withdrawn proposal in yet another org.
+      const fxD = await seedOrgFixture(db);
+      const toWithdraw = await service.proposeAgreement({
+        organizationId: fxD.orgId,
+        creatorId: fxD.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 1500,
+        termMonths: 6,
+        proposedByUserId: fxD.ownerId,
+      });
+      await service.withdrawProposal({
+        proposalId: toWithdraw.id,
+        withdrawnByUserId: fxD.ownerId,
+      });
+
+      // Each fixture's creatorA is a distinct user; query each. The
+      // status-filter assertion uses fxA (the open thread).
+      const openOnly = await service.getProposalsForCreator({
+        creatorId: fxA.creatorAId,
+        status: ['open'],
+      });
+      expect(openOnly).toHaveLength(1);
+      expect(openOnly[0]?.status).toBe('open');
+
+      const allForA = await service.getProposalsForCreator({
+        creatorId: fxA.creatorAId,
+      });
+      expect(allForA).toHaveLength(1);
+
+      // Status filter as a single string also accepted.
+      const declinedOnly = await service.getProposalsForCreator({
+        creatorId: fxC.creatorAId,
+        status: 'declined',
+      });
+      expect(declinedOnly).toHaveLength(1);
+      expect(declinedOnly[0]?.status).toBe('declined');
+
+      // Multi-status filter narrows correctly.
+      const openOrDeclinedForA = await service.getProposalsForCreator({
+        creatorId: fxA.creatorAId,
+        status: ['open', 'declined', 'withdrawn'],
+      });
+      expect(openOrDeclinedForA).toHaveLength(1);
+      expect(openOrDeclinedForA[0]?.status).toBe('open');
+    });
+
+    it('returns empty array when creator has no proposals', async () => {
+      const result = await service.getProposalsForCreator({
+        creatorId: randomUUID(),
+      });
+      expect(result).toEqual([]);
+    });
+
+    it('cross-tenant pin: returns nothing for a different creator', async () => {
+      // Two orgs, two creator users. A proposal is seeded for creator A
+      // ONLY. Querying for creator B's id must return zero rows even
+      // though they exist as users in the database.
+      const fx = await seedOrgFixture(db);
+      await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      const forB = await service.getProposalsForCreator({
+        creatorId: fx.creatorBId,
+      });
+      expect(forB).toEqual([]);
+    });
+
+    it('returns proposals chronologically (oldest first)', async () => {
+      // Three proposals in three different orgs, seeded in known order.
+      // Drizzle's createdAt timestamps are server-set, so we lean on
+      // insertion order rather than predetermined timestamps; that's
+      // sufficient for asserting ASC ordering.
+      const fxA = await seedOrgFixture(db);
+      const p1 = await service.proposeAgreement({
+        organizationId: fxA.orgId,
+        creatorId: fxA.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fxA.ownerId,
+      });
+      // Counter (creates a child proposal in the same thread).
+      const p2 = await service.counterPropose({
+        proposalId: p1.id,
+        sharePercent: 4000,
+        termMonths: 6,
+        counteredByUserId: fxA.creatorAId,
+      });
+      const all = await service.getProposalsForCreator({
+        creatorId: fxA.creatorAId,
+      });
+      expect(all.length).toBeGreaterThanOrEqual(2);
+      const indexOfP1 = all.findIndex((p) => p.id === p1.id);
+      const indexOfP2 = all.findIndex((p) => p.id === p2.id);
+      // p1 was created first → must appear before p2 in the ASC list.
+      expect(indexOfP1).toBeLessThan(indexOfP2);
+    });
+  });
+
+  describe('getOrgName', () => {
+    it('returns the human-readable name for an existing org', async () => {
+      // seedOrgFixture inserts orgs with name "Test Org" — assert.
+      const fx = await seedOrgFixture(db);
+      const name = await service.getOrgName(fx.orgId);
+      expect(name).toBe('Test Org');
+    });
+
+    it('returns the name for a soft-deleted org (lookup is intentionally inclusive)', async () => {
+      // Per the docstring on lookupOrgName: soft-deleted orgs still
+      // return their name — a recently-archived org with an outstanding
+      // negotiation is still useful audit context for the portfolio UI.
+      const fx = await seedOrgFixture(db);
+      await db
+        .update(schema.organizations)
+        .set({ deletedAt: new Date() })
+        .where(eq(schema.organizations.id, fx.orgId));
+      const name = await service.getOrgName(fx.orgId);
+      expect(name).toBe('Test Org');
+    });
+
+    it('returns null for an unknown org id', async () => {
+      const name = await service.getOrgName(randomUUID());
+      expect(name).toBeNull();
+    });
+  });
+
   // ── WP-4 payout-pipeline read filters (Codex-rzfjw) ────────────────────
   //
   // The payout pipeline at invoice time needs three new query shapes:

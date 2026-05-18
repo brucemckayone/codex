@@ -317,6 +317,8 @@ interface AgreementServiceMock {
   getActiveAgreements: ReturnType<typeof vi.fn>;
   getActiveAgreementsForCreator: ReturnType<typeof vi.fn>;
   getNegotiationThread: ReturnType<typeof vi.fn>;
+  getProposalsForCreator: ReturnType<typeof vi.fn>;
+  getOrgName: ReturnType<typeof vi.fn>;
 }
 
 function createAgreementServiceMock(): AgreementServiceMock {
@@ -432,6 +434,33 @@ function createAgreementServiceMock(): AgreementServiceMock {
         organizationId: MANAGED_ORG_ID,
       },
     ]),
+    // WP-8 additions (Codex-bw2wf). `getProposalsForCreator` powers the
+    // `/me/threads/:proposalId` enumeration AND the `/me/portfolio`
+    // aggregator; default to a single proposal owned by CALLER_CREATOR_ID
+    // so the positive-path tests succeed without per-test setup.
+    getProposalsForCreator: vi.fn().mockResolvedValue([
+      {
+        id: PROPOSAL_ID,
+        organizationId: MANAGED_ORG_ID,
+        creatorId: CALLER_CREATOR_ID,
+        revenueType: 'subscription',
+        status: 'open',
+        proposedByRole: 'owner',
+        proposedByUserId: OWNER_USER_ID,
+        proposedCreatorSharePercent: 3000,
+        proposedTermMonths: 12,
+        parentProposalId: null,
+        roundNumber: 1,
+        note: null,
+        declineReason: null,
+        respondedAt: null,
+        respondedByUserId: null,
+        proposedEffectiveFrom: new Date('2026-01-01'),
+        createdAt: new Date('2026-01-01'),
+        updatedAt: new Date('2026-01-01'),
+      },
+    ]),
+    getOrgName: vi.fn().mockResolvedValue('Test Org'),
   };
 }
 
@@ -1396,7 +1425,11 @@ describe('GET /agreements/me/threads/:proposalId — creator-view thread', () =>
 
   it('negative: caller has no agreements at all → 404', async () => {
     const services = { agreements: createAgreementServiceMock() };
+    // WP-8: thread enumeration now flows through getProposalsForCreator,
+    // not getActiveAgreementsForCreator. Clear both — the caller has no
+    // threads at all, so neither query should surface PROPOSAL_ID.
     services.agreements.getActiveAgreementsForCreator.mockResolvedValue([]);
+    services.agreements.getProposalsForCreator.mockResolvedValue([]);
     const bundle = buildApp({
       services,
       user: { id: CALLER_CREATOR_ID },
@@ -1426,5 +1459,413 @@ describe('GET /agreements/me/threads/:proposalId — creator-view thread', () =>
     expect(
       services.agreements.getActiveAgreementsForCreator
     ).not.toHaveBeenCalled();
+  });
+});
+
+// ─── GET /agreements/me/portfolio (WP-8 — Codex-bw2wf) ───────────────────────
+
+describe('GET /agreements/me/portfolio (ANONYMISATION CONTRACT)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // Helper: build a proposals array with shared defaults so each test only
+  // overrides the fields that matter to its scenario.
+  function makeProposal(overrides: Record<string, unknown>) {
+    return {
+      id: PROPOSAL_ID,
+      organizationId: MANAGED_ORG_ID,
+      creatorId: CALLER_CREATOR_ID,
+      revenueType: 'subscription',
+      status: 'open',
+      proposedByRole: 'owner',
+      proposedByUserId: OWNER_USER_ID,
+      proposedCreatorSharePercent: 3000,
+      proposedTermMonths: 12,
+      parentProposalId: null,
+      roundNumber: 1,
+      note: null,
+      declineReason: null,
+      respondedAt: null,
+      respondedByUserId: null,
+      proposedEffectiveFrom: new Date('2026-01-01'),
+      createdAt: new Date('2026-01-01'),
+      updatedAt: new Date('2026-01-01'),
+      ...overrides,
+    };
+  }
+
+  it('positive: returns active + pendingActionRequired + pendingWaitingOnOrg + past sections', async () => {
+    const services = { agreements: createAgreementServiceMock() };
+    // Active row: the caller has one active subscription agreement.
+    services.agreements.getActiveAgreementsForCreator.mockResolvedValue([
+      {
+        id: 'agr_active',
+        organizationId: MANAGED_ORG_ID,
+        creatorId: CALLER_CREATOR_ID,
+        revenueType: 'subscription',
+        status: 'active',
+        organizationFeePercentage: 7000, // share = 3000
+        currentProposalId: PROPOSAL_ID,
+        terminatedAt: null,
+        effectiveFrom: new Date('2026-01-01'),
+        effectiveUntil: null,
+      },
+    ]);
+    // No peers on this org (caller alone holds the active row).
+    services.agreements.getActiveAgreements.mockResolvedValue([
+      {
+        id: 'agr_active',
+        organizationId: MANAGED_ORG_ID,
+        creatorId: CALLER_CREATOR_ID,
+        revenueType: 'subscription',
+        status: 'active',
+        organizationFeePercentage: 7000,
+        currentProposalId: PROPOSAL_ID,
+        terminatedAt: null,
+        effectiveFrom: new Date('2026-01-01'),
+        effectiveUntil: null,
+      },
+    ]);
+    services.agreements.getOrgName.mockResolvedValue('Test Org');
+    // Proposals: 1 owner-proposed open (pendingActionRequired), 1 creator
+    // open counter (pendingWaitingOnOrg), 1 declined (past).
+    services.agreements.getProposalsForCreator.mockResolvedValue([
+      makeProposal({
+        id: 'prop_active_anchor',
+        status: 'accepted',
+        respondedAt: new Date('2026-01-01'),
+        respondedByUserId: CALLER_CREATOR_ID,
+      }),
+      makeProposal({
+        id: 'prop_pending_from_owner',
+        organizationId: '500e4567-e89b-12d3-a456-426614174500',
+        status: 'open',
+        proposedByRole: 'owner',
+        roundNumber: 1,
+        createdAt: new Date('2026-02-01'),
+        updatedAt: new Date('2026-02-01'),
+      }),
+      makeProposal({
+        id: 'prop_creator_counter',
+        organizationId: '600e4567-e89b-12d3-a456-426614174600',
+        status: 'open',
+        proposedByRole: 'creator',
+        roundNumber: 2,
+        createdAt: new Date('2026-02-05'),
+        updatedAt: new Date('2026-02-05'),
+      }),
+      makeProposal({
+        id: 'prop_declined',
+        organizationId: '700e4567-e89b-12d3-a456-426614174700',
+        status: 'declined',
+        // Within the 90-day past cutoff — use a relative date so the
+        // test stays valid as time passes.
+        respondedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+        respondedByUserId: CALLER_CREATOR_ID,
+        declineReason: 'Not enough',
+        updatedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+      }),
+    ]);
+    const bundle = buildApp({
+      services,
+      user: { id: CALLER_CREATOR_ID },
+    });
+    const res = await bundle.app.request(getReq('/agreements/me/portfolio'));
+    expect(res.status).toBe(200);
+    const payload = (await res.json()) as {
+      data: {
+        active: Array<{ creatorId: string; revenueType: string }>;
+        pendingActionRequired: Array<{ proposalId: string }>;
+        pendingWaitingOnOrg: Array<{ proposalId: string }>;
+        past: Array<{ proposalId: string; status: string }>;
+      };
+    };
+    expect(payload.data.active).toHaveLength(1);
+    expect(payload.data.active[0]?.creatorId).toBe(CALLER_CREATOR_ID);
+    expect(payload.data.pendingActionRequired).toHaveLength(1);
+    expect(payload.data.pendingActionRequired[0]?.proposalId).toBe(
+      'prop_pending_from_owner'
+    );
+    expect(payload.data.pendingWaitingOnOrg).toHaveLength(1);
+    expect(payload.data.pendingWaitingOnOrg[0]?.proposalId).toBe(
+      'prop_creator_counter'
+    );
+    expect(payload.data.past).toHaveLength(1);
+    expect(payload.data.past[0]?.status).toBe('declined');
+  });
+
+  it('anonymisation: peer identifiers never appear in any section (load-bearing invariant)', async () => {
+    const services = { agreements: createAgreementServiceMock() };
+    // Caller has an active subscription. Peer creator Y also has an
+    // active subscription on the same org. Peer's userId / creatorId MUST
+    // be absent from the serialised payload.
+    services.agreements.getActiveAgreementsForCreator.mockResolvedValue([
+      {
+        id: 'agr_caller_sub',
+        organizationId: MANAGED_ORG_ID,
+        creatorId: CALLER_CREATOR_ID,
+        revenueType: 'subscription',
+        status: 'active',
+        organizationFeePercentage: 7000,
+        currentProposalId: PROPOSAL_ID,
+        terminatedAt: null,
+        effectiveFrom: new Date('2026-01-01'),
+        effectiveUntil: null,
+      },
+    ]);
+    services.agreements.getActiveAgreements.mockResolvedValue([
+      {
+        id: 'agr_caller_sub',
+        organizationId: MANAGED_ORG_ID,
+        creatorId: CALLER_CREATOR_ID,
+        revenueType: 'subscription',
+        status: 'active',
+        organizationFeePercentage: 7000,
+        currentProposalId: PROPOSAL_ID,
+        terminatedAt: null,
+        effectiveFrom: new Date('2026-01-01'),
+        effectiveUntil: null,
+      },
+      {
+        id: 'agr_peer_sub',
+        organizationId: MANAGED_ORG_ID,
+        creatorId: PEER_CREATOR_ID_1,
+        revenueType: 'subscription',
+        status: 'active',
+        organizationFeePercentage: 8000, // peer share = 2000
+        currentProposalId: 'prop_peer',
+        terminatedAt: null,
+        effectiveFrom: new Date('2026-01-02'),
+        effectiveUntil: null,
+      },
+    ]);
+    services.agreements.getOrgName.mockResolvedValue('Test Org');
+    services.agreements.getProposalsForCreator.mockResolvedValue([
+      makeProposal({
+        id: 'prop_for_caller',
+        status: 'accepted',
+      }),
+    ]);
+    const bundle = buildApp({
+      services,
+      user: { id: CALLER_CREATOR_ID },
+    });
+    const res = await bundle.app.request(getReq('/agreements/me/portfolio'));
+    expect(res.status).toBe(200);
+    const payload = (await res.json()) as unknown;
+    const bodyText = JSON.stringify(payload);
+    // The load-bearing invariant: NEVER let a peer's identifier into
+    // any section's wire payload. Anonymisation contract.
+    expect(bodyText).not.toContain(PEER_CREATOR_ID_1);
+    expect(bodyText).not.toContain(PEER_CREATOR_ID_2);
+  });
+
+  it('cross-pool isolation: subscription peers do not pollute content_purchase peer aggregates', async () => {
+    const services = { agreements: createAgreementServiceMock() };
+    // Caller has ONLY a subscription on the org. There's a peer with a
+    // subscription (in the same pool as the caller) and another peer with
+    // a content_purchase agreement (a different pool). The aggregate must
+    // count ONLY the subscription peer.
+    services.agreements.getActiveAgreementsForCreator.mockResolvedValue([
+      {
+        id: 'agr_caller_sub',
+        organizationId: MANAGED_ORG_ID,
+        creatorId: CALLER_CREATOR_ID,
+        revenueType: 'subscription',
+        status: 'active',
+        organizationFeePercentage: 7000, // share = 3000
+        currentProposalId: PROPOSAL_ID,
+        terminatedAt: null,
+        effectiveFrom: new Date('2026-01-01'),
+        effectiveUntil: null,
+      },
+    ]);
+    services.agreements.getActiveAgreements.mockResolvedValue([
+      // Caller's own active sub row
+      {
+        id: 'agr_caller_sub',
+        organizationId: MANAGED_ORG_ID,
+        creatorId: CALLER_CREATOR_ID,
+        revenueType: 'subscription',
+        status: 'active',
+        organizationFeePercentage: 7000,
+        currentProposalId: PROPOSAL_ID,
+        terminatedAt: null,
+        effectiveFrom: new Date('2026-01-01'),
+        effectiveUntil: null,
+      },
+      // Peer Y: subscription@20% — IN the caller's pool
+      {
+        id: 'agr_peer_sub',
+        organizationId: MANAGED_ORG_ID,
+        creatorId: PEER_CREATOR_ID_1,
+        revenueType: 'subscription',
+        status: 'active',
+        organizationFeePercentage: 8000, // share = 2000
+        currentProposalId: 'prop_peer_sub',
+        terminatedAt: null,
+        effectiveFrom: new Date('2026-01-02'),
+        effectiveUntil: null,
+      },
+      // Peer Z: content_purchase@10% — DIFFERENT pool, must not pollute
+      {
+        id: 'agr_peer_cp',
+        organizationId: MANAGED_ORG_ID,
+        creatorId: PEER_CREATOR_ID_2,
+        revenueType: 'content_purchase',
+        status: 'active',
+        organizationFeePercentage: 9000, // share = 1000
+        currentProposalId: 'prop_peer_cp',
+        terminatedAt: null,
+        effectiveFrom: new Date('2026-01-03'),
+        effectiveUntil: null,
+      },
+    ]);
+    services.agreements.getOrgName.mockResolvedValue('Test Org');
+    services.agreements.getProposalsForCreator.mockResolvedValue([
+      makeProposal({ id: 'prop_for_caller', status: 'accepted' }),
+    ]);
+    const bundle = buildApp({
+      services,
+      user: { id: CALLER_CREATOR_ID },
+    });
+    const res = await bundle.app.request(getReq('/agreements/me/portfolio'));
+    expect(res.status).toBe(200);
+    const payload = (await res.json()) as {
+      data: {
+        active: Array<{
+          revenueType: string;
+          peers: { count: number; aggregateSharePercent: number };
+        }>;
+      };
+    };
+    // Caller only holds the subscription row → exactly one active row.
+    expect(payload.data.active).toHaveLength(1);
+    const subRow = payload.data.active[0]!;
+    expect(subRow.revenueType).toBe('subscription');
+    // peers.count must reflect ONLY the subscription peer (Y), not the
+    // content-purchase peer (Z). Aggregate must be Y's share = 2000.
+    expect(subRow.peers.count).toBe(1);
+    expect(subRow.peers.aggregateSharePercent).toBe(2000);
+  });
+
+  it('pending split: owner-proposed → pendingActionRequired, creator-proposed → pendingWaitingOnOrg', async () => {
+    const services = { agreements: createAgreementServiceMock() };
+    services.agreements.getActiveAgreementsForCreator.mockResolvedValue([]);
+    services.agreements.getActiveAgreements.mockResolvedValue([]);
+    services.agreements.getOrgName.mockResolvedValue('Test Org');
+    services.agreements.getProposalsForCreator.mockResolvedValue([
+      // Owner proposed last → action required on the creator side.
+      makeProposal({
+        id: 'prop_owner_open',
+        status: 'open',
+        proposedByRole: 'owner',
+        roundNumber: 1,
+      }),
+      // Creator countered last → waiting on org (next-actor is owner).
+      makeProposal({
+        id: 'prop_creator_counter',
+        status: 'open',
+        proposedByRole: 'creator',
+        roundNumber: 2,
+        organizationId: '500e4567-e89b-12d3-a456-426614174500',
+      }),
+    ]);
+    const bundle = buildApp({
+      services,
+      user: { id: CALLER_CREATOR_ID },
+    });
+    const res = await bundle.app.request(getReq('/agreements/me/portfolio'));
+    expect(res.status).toBe(200);
+    const payload = (await res.json()) as {
+      data: {
+        pendingActionRequired: Array<{ proposalId: string }>;
+        pendingWaitingOnOrg: Array<{ proposalId: string }>;
+      };
+    };
+    expect(payload.data.pendingActionRequired).toHaveLength(1);
+    expect(payload.data.pendingActionRequired[0]?.proposalId).toBe(
+      'prop_owner_open'
+    );
+    expect(payload.data.pendingWaitingOnOrg).toHaveLength(1);
+    expect(payload.data.pendingWaitingOnOrg[0]?.proposalId).toBe(
+      'prop_creator_counter'
+    );
+  });
+
+  it('past 90-day cutoff: terminal proposals older than 90 days excluded', async () => {
+    const services = { agreements: createAgreementServiceMock() };
+    services.agreements.getActiveAgreementsForCreator.mockResolvedValue([]);
+    services.agreements.getActiveAgreements.mockResolvedValue([]);
+    services.agreements.getOrgName.mockResolvedValue('Test Org');
+    const now = Date.now();
+    services.agreements.getProposalsForCreator.mockResolvedValue([
+      // Recent (yesterday) — must surface
+      makeProposal({
+        id: 'prop_recent',
+        status: 'declined',
+        updatedAt: new Date(now - 1 * 24 * 60 * 60 * 1000),
+        respondedAt: new Date(now - 1 * 24 * 60 * 60 * 1000),
+        organizationId: '500e4567-e89b-12d3-a456-426614174500',
+      }),
+      // 100 days old — must be excluded by the 90-day cutoff
+      makeProposal({
+        id: 'prop_old',
+        status: 'declined',
+        updatedAt: new Date(now - 100 * 24 * 60 * 60 * 1000),
+        respondedAt: new Date(now - 100 * 24 * 60 * 60 * 1000),
+        organizationId: '600e4567-e89b-12d3-a456-426614174600',
+      }),
+    ]);
+    const bundle = buildApp({
+      services,
+      user: { id: CALLER_CREATOR_ID },
+    });
+    const res = await bundle.app.request(getReq('/agreements/me/portfolio'));
+    expect(res.status).toBe(200);
+    const payload = (await res.json()) as {
+      data: { past: Array<{ proposalId: string }> };
+    };
+    expect(payload.data.past).toHaveLength(1);
+    expect(payload.data.past[0]?.proposalId).toBe('prop_recent');
+  });
+
+  it('401 when no session', async () => {
+    const services = { agreements: createAgreementServiceMock() };
+    const bundle = buildApp({ user: null, services });
+    const res = await bundle.app.request(getReq('/agreements/me/portfolio'));
+    expect(res.status).toBe(401);
+    expect(
+      services.agreements.getActiveAgreementsForCreator
+    ).not.toHaveBeenCalled();
+    expect(services.agreements.getProposalsForCreator).not.toHaveBeenCalled();
+  });
+
+  it('callable by users with no org membership (pure auth gate, not requireOrgMembership)', async () => {
+    const services = { agreements: createAgreementServiceMock() };
+    services.agreements.getActiveAgreementsForCreator.mockResolvedValue([]);
+    services.agreements.getActiveAgreements.mockResolvedValue([]);
+    services.agreements.getOrgName.mockResolvedValue(null);
+    services.agreements.getProposalsForCreator.mockResolvedValue([]);
+    // No __testOrganizationId — orgRole=null also (no membership at all).
+    const bundle = buildApp({
+      services,
+      user: { id: CALLER_CREATOR_ID },
+      orgRole: null,
+      organizationId: undefined,
+    });
+    const res = await bundle.app.request(getReq('/agreements/me/portfolio'));
+    expect(res.status).toBe(200);
+    const payload = (await res.json()) as {
+      data: {
+        active: unknown[];
+        pendingActionRequired: unknown[];
+        pendingWaitingOnOrg: unknown[];
+        past: unknown[];
+      };
+    };
+    expect(payload.data.active).toEqual([]);
+    expect(payload.data.pendingActionRequired).toEqual([]);
+    expect(payload.data.pendingWaitingOnOrg).toEqual([]);
+    expect(payload.data.past).toEqual([]);
   });
 });
