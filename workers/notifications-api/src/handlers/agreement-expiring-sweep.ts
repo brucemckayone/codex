@@ -44,8 +44,13 @@ export interface RunAgreementExpiringSweepDeps {
   obs: ObservabilityClient;
   /** Environment label for service config */
   environment: string;
-  /** Web app URL for deep link in email body */
-  webAppUrl?: string;
+  /**
+   * Web app URL for deep link in email body. Required because
+   * `AgreementService` (Codex-0omga / PR #222) throws at construction
+   * when this is unset — the scheduled handler skips the sweep gracefully
+   * when `env.WEB_APP_URL` is missing instead of crashing the cron.
+   */
+  webAppUrl: string;
   /** HMAC secret for worker-to-worker /internal/send call */
   workerSecret: string;
   /** Notifications-api base URL (resolved via getServiceUrl) */
@@ -356,10 +361,13 @@ export async function runScheduledAgreementExpiringSweep(
       env.ENVIRONMENT ?? 'development'
     );
 
-  if (!env.DATABASE_URL || !env.WORKER_SHARED_SECRET) {
+  const webAppUrl = deps?.webAppUrl ?? env.WEB_APP_URL;
+
+  if (!env.DATABASE_URL || !env.WORKER_SHARED_SECRET || !webAppUrl) {
     obs.error('agreement-expiring sweep: missing required env vars, skipping', {
       hasDatabaseUrl: Boolean(env.DATABASE_URL),
       hasWorkerSecret: Boolean(env.WORKER_SHARED_SECRET),
+      hasWebAppUrl: Boolean(webAppUrl),
     });
     return null;
   }
@@ -372,7 +380,7 @@ export async function runScheduledAgreementExpiringSweep(
     db,
     obs,
     environment: env.ENVIRONMENT ?? 'development',
-    webAppUrl: deps?.webAppUrl ?? env.WEB_APP_URL,
+    webAppUrl,
     workerSecret: deps?.workerSecret ?? env.WORKER_SHARED_SECRET,
     notificationsUrl,
     daysAhead: deps?.daysAhead,

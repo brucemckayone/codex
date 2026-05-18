@@ -25,9 +25,9 @@ export { default as CopyIcon } from './CopyIcon.svelte';
 export { default as CreditCardIcon } from './CreditCardIcon.svelte';
 export { default as DownloadIcon } from './DownloadIcon.svelte';
 export { default as EditIcon } from './EditIcon.svelte';
+export { default as ExternalLinkIcon } from './ExternalLinkIcon.svelte';
 export { default as EyeIcon } from './EyeIcon.svelte';
 export { default as EyeOffIcon } from './EyeOffIcon.svelte';
-export { default as ExternalLinkIcon } from './ExternalLinkIcon.svelte';
 // File
 export { default as FileIcon } from './FileIcon.svelte';
 export { default as FileTextIcon } from './FileTextIcon.svelte';
