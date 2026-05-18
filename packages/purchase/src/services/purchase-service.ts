@@ -558,6 +558,15 @@ export class PurchaseService extends BaseService {
         // .proposedCreatorSharePercent` via `current_proposal_id` so
         // this read works for both pre-WP-1 backfilled rows (migration
         // 0072 synthesised a proposal) and new agreements.
+        //
+        // Codex-xz61z (I5): pin `purchasedAt` once and reuse in all
+        // three Q3 predicates. Previously three `new Date()` calls
+        // could produce slightly different millisecond values when
+        // executed back-to-back, which is harmless in practice but
+        // makes the predicate non-deterministic — webhook replays
+        // can land on the wrong side of an agreement boundary that
+        // occurred mid-millisecond.
+        const purchasedAt = new Date();
         const [agreementRow] = await tx
           .select({
             sharePercent: agreementProposals.proposedCreatorSharePercent,
@@ -585,13 +594,13 @@ export class PurchaseService extends BaseService {
                 eq(creatorOrganizationAgreements.status, 'active'),
                 and(
                   eq(creatorOrganizationAgreements.status, 'terminated'),
-                  gt(creatorOrganizationAgreements.terminatedAt, new Date())
+                  gt(creatorOrganizationAgreements.terminatedAt, purchasedAt)
                 )
               ),
-              lte(creatorOrganizationAgreements.effectiveFrom, new Date()),
+              lte(creatorOrganizationAgreements.effectiveFrom, purchasedAt),
               or(
                 isNull(creatorOrganizationAgreements.effectiveUntil),
-                gt(creatorOrganizationAgreements.effectiveUntil, new Date())
+                gt(creatorOrganizationAgreements.effectiveUntil, purchasedAt)
               )
             )
           )

@@ -1,6 +1,6 @@
 # Codex Packages
 
-22 packages across 3 layers: Foundation, Service, Utility.
+23 packages across 3 layers: Foundation, Service, Utility.
 
 ## Package Registry
 
@@ -21,6 +21,7 @@
 | **@codex/organization** | Org CRUD, membership | `OrganizationService` | [organization/CLAUDE.md](organization/CLAUDE.md) |
 | **@codex/identity** | User profiles, identity | `IdentityService` | [identity/CLAUDE.md](identity/CLAUDE.md) |
 | **@codex/access** | Access control, signed URLs, playback | `ContentAccessService` | [access/CLAUDE.md](access/CLAUDE.md) |
+| **@codex/agreements** | Revenue-share agreement state machine (Codex-nk4km) | `AgreementService`, `validateProposedShare` | [agreements/CLAUDE.md](agreements/CLAUDE.md) |
 | **@codex/purchase** | Stripe one-time checkout, purchase history | `PurchaseService`, `createStripeClient` | [purchase/CLAUDE.md](purchase/CLAUDE.md) |
 | **@codex/subscription** | Subscription tiers, Stripe Connect, revenue splits | `TierService`, `SubscriptionService`, `ConnectAccountService`, `calculateRevenueSplit` | [subscription/CLAUDE.md](subscription/CLAUDE.md) |
 | **@codex/notifications** | Email templates, sending | `NotificationsService`, `TemplateService`, `NotificationPreferencesService` | [notifications/CLAUDE.md](notifications/CLAUDE.md) |
@@ -51,8 +52,9 @@ Services (depend on Foundation):
   organization → database, service-errors, validation
   identity     → database, service-errors, validation, cloudflare-clients, cache
   access       → database, service-errors, cloudflare-clients, purchase
-  purchase     → database, service-errors, validation (+ Stripe SDK)
-  subscription → database, service-errors, validation, constants (+ Stripe SDK)
+  agreements   → database, service-errors, validation, shared-types, observability, constants
+  purchase     → database, service-errors, validation, agreements (+ Stripe SDK)
+  subscription → database, service-errors, validation, constants, agreements (+ Stripe SDK)
   notifications→ database, service-errors, validation, platform-settings
   admin        → database, service-errors
   transcoding  → database, service-errors, cloudflare-clients
@@ -79,6 +81,7 @@ Utilities (used by Workers and Services):
 | Org settings (branding, features, contact) | `@codex/platform-settings` |
 | One-time purchases, purchase history | `@codex/purchase` |
 | Subscription tiers, billing, Stripe Connect | `@codex/subscription` |
+| Revenue-share agreements, proposal state machine | `@codex/agreements` |
 | Send emails, manage templates | `@codex/notifications` |
 | Transcode media, R2 key builders | `@codex/transcoding` |
 | Admin analytics, content moderation | `@codex/admin` |

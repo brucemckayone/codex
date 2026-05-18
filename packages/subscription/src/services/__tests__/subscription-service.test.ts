@@ -15,6 +15,7 @@
  * - Stripe v19 shapes for period dates and invoice payments
  */
 
+import { CURRENCY } from '@codex/constants';
 import * as schema from '@codex/database/schema';
 import {
   creatorOrganizationAgreements,
@@ -4240,6 +4241,13 @@ describe('SubscriptionService', () => {
         return opts?.idempotencyKey === `${chargeId}_creator_pool_owner`;
       });
       expect(ownerFallbackCalls).toHaveLength(1);
+      // Codex-xz61z (N3): pin GBP on the zero-share fallback transfer.
+      // The pipeline is GBP-only (Codex-yv18n) — assert at the call
+      // boundary so any drift to USD/EUR fails the test fast.
+      const transferParams = ownerFallbackCalls[0]?.[0] as
+        | { currency?: string }
+        | undefined;
+      expect(transferParams?.currency).toBe(CURRENCY.GBP);
     });
 
     // Codex-ez3tl (I3): ghost-agreement guard

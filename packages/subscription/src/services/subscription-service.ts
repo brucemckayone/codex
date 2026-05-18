@@ -3904,6 +3904,121 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
+   * Codex-xz61z (I2): shared owner-fallback for the two zero-creator-payout
+   * branches in `executeTransfers`:
+   *
+   *   1. The "empty agreements" branch (no rows matched the Q3 filter).
+   *   2. The "all zero-share" branch (rows matched but `totalShareBps == 0`).
+   *
+   * Both routes the entire creator pool to the org owner via a single
+   * `creator_payout_to_owner` transfer + ledger row. They share an
+   * idempotency key (`${chargeId}_creator_pool_owner`) so a webhook
+   * replay collapses to one Stripe transfer regardless of which branch
+   * fires on the replay.
+   *
+   * `logContext` is appended to ledger-error log messages so the
+   * branch is identifiable in observability without duplicating the
+   * code path.
+   *
+   * If `orgConnect` is missing or `chargesEnabled === false`, the
+   * helper exits silently — the upstream org-fee transfer block above
+   * already accumulated a pending payout for the same Connect account,
+   * which is the correct end state.
+   */
+  private async transferCreatorPoolToOwner(
+    subscriptionId: string,
+    orgId: string,
+    chargeId: string,
+    transferGroup: string,
+    creatorPayoutCents: number,
+    orgConnect:
+      | { userId: string; stripeAccountId: string; chargesEnabled: boolean }
+      | null
+      | undefined,
+    logContext: string
+  ): Promise<void> {
+    if (!orgConnect?.chargesEnabled || creatorPayoutCents <= 0) {
+      return;
+    }
+    try {
+      const transfer = await this.stripe.transfers.create(
+        {
+          amount: creatorPayoutCents,
+          currency: CURRENCY.GBP,
+          destination: orgConnect.stripeAccountId,
+          source_transaction: chargeId,
+          transfer_group: transferGroup,
+          metadata: {
+            subscription_id: subscriptionId,
+            type: 'creator_payout_to_owner',
+          },
+        },
+        { idempotencyKey: `${chargeId}_creator_pool_owner` }
+      );
+      try {
+        await this.db.insert(payouts).values({
+          userId: orgConnect.userId,
+          organizationId: orgId,
+          subscriptionId,
+          amountCents: creatorPayoutCents,
+          payoutType: 'creator_payout_to_owner',
+          status: 'paid',
+          stripeTransferId: transfer.id,
+          stripeChargeId: chargeId,
+          transferGroup,
+          resolvedAt: new Date(),
+        });
+      } catch (insertError) {
+        if (!isUniqueViolation(insertError)) {
+          this.obs.error(
+            `Creator-pool transfer to owner succeeded but payouts ledger insert failed (${logContext})`,
+            {
+              subscriptionId,
+              organizationId: orgId,
+              stripeTransferId: transfer.id,
+              amountCents: creatorPayoutCents,
+              error: (insertError as Error).message,
+            }
+          );
+        }
+      }
+    } catch (transferError) {
+      this.obs.error(
+        `Creator pool transfer to owner failed (${logContext}), accumulating`,
+        {
+          subscriptionId,
+          organizationId: orgId,
+          amountCents: creatorPayoutCents,
+          error: (transferError as Error).message,
+        }
+      );
+      // BUG-036: Wrap pending payout insert in try/catch so a DB failure
+      // doesn't crash the entire transfer flow.
+      try {
+        await this.db.insert(payouts).values({
+          userId: orgConnect.userId,
+          organizationId: orgId,
+          subscriptionId,
+          amountCents: creatorPayoutCents,
+          payoutType: 'creator_payout_to_owner',
+          status: 'failed',
+          reason: 'transfer_failed',
+        });
+      } catch (insertError) {
+        this.obs.error(
+          `Failed to record pending payout for creator pool to owner (${logContext})`,
+          {
+            subscriptionId,
+            organizationId: orgId,
+            amountCents: creatorPayoutCents,
+            error: (insertError as Error).message,
+          }
+        );
+      }
+    }
+  }
+
+  /**
    * Execute revenue transfers to org and creator(s) after invoice payment.
    * Uses source_transaction to link transfers to the charge.
    * Creators without active Connect accounts have their share accumulated.
@@ -4212,86 +4327,17 @@ export class SubscriptionService extends BaseService {
 
     if (creatorAgreements.length === 0) {
       // No creator agreements — org owner gets the full creator pool
-      // (Already handled by org transfer above or accumulated)
-      // Transfer remaining to the org Connect account as creator payout
-      if (orgConnect?.chargesEnabled && creatorPayoutCents > 0) {
-        try {
-          const transfer = await this.stripe.transfers.create(
-            {
-              amount: creatorPayoutCents,
-              currency: CURRENCY.GBP,
-              destination: orgConnect.stripeAccountId,
-              source_transaction: chargeId,
-              transfer_group: transferGroup,
-              metadata: {
-                subscription_id: subscriptionId,
-                type: 'creator_payout_to_owner',
-              },
-            },
-            { idempotencyKey: `${chargeId}_creator_pool_owner` }
-          );
-          try {
-            await this.db.insert(payouts).values({
-              userId: orgConnect.userId,
-              organizationId: orgId,
-              subscriptionId,
-              amountCents: creatorPayoutCents,
-              payoutType: 'creator_payout_to_owner',
-              status: 'paid',
-              stripeTransferId: transfer.id,
-              stripeChargeId: chargeId,
-              transferGroup,
-              resolvedAt: new Date(),
-            });
-          } catch (insertError) {
-            if (!isUniqueViolation(insertError)) {
-              this.obs.error(
-                'Creator-pool transfer to owner succeeded but payouts ledger insert failed',
-                {
-                  subscriptionId,
-                  organizationId: orgId,
-                  stripeTransferId: transfer.id,
-                  amountCents: creatorPayoutCents,
-                  error: (insertError as Error).message,
-                }
-              );
-            }
-          }
-        } catch (transferError) {
-          this.obs.error(
-            'Creator pool transfer to owner failed, accumulating',
-            {
-              subscriptionId,
-              organizationId: orgId,
-              amountCents: creatorPayoutCents,
-              error: (transferError as Error).message,
-            }
-          );
-          // BUG-036: Wrap pending payout insert in try/catch so a DB failure
-          // doesn't crash the entire transfer flow.
-          try {
-            await this.db.insert(payouts).values({
-              userId: orgConnect.userId,
-              organizationId: orgId,
-              subscriptionId,
-              amountCents: creatorPayoutCents,
-              payoutType: 'creator_payout_to_owner',
-              status: 'failed',
-              reason: 'transfer_failed',
-            });
-          } catch (insertError) {
-            this.obs.error(
-              'Failed to record pending payout for creator pool to owner',
-              {
-                subscriptionId,
-                organizationId: orgId,
-                amountCents: creatorPayoutCents,
-                error: (insertError as Error).message,
-              }
-            );
-          }
-        }
-      }
+      // (Already handled by org transfer above or accumulated).
+      // Codex-xz61z (I2): delegate to the shared helper.
+      await this.transferCreatorPoolToOwner(
+        subscriptionId,
+        orgId,
+        chargeId,
+        transferGroup,
+        creatorPayoutCents,
+        orgConnect,
+        'empty_agreements'
+      );
       return;
     }
 
@@ -4314,89 +4360,21 @@ export class SubscriptionService extends BaseService {
           agreementCount: creatorAgreements.length,
         }
       );
-      // Effectively the same as the empty-agreements branch above.
-      // Recurse-via-fallthrough is messy here; re-enter the empty
-      // branch path by zeroing creatorAgreements and breaking out.
-      creatorAgreements.length = 0;
-      // Re-route to the org owner using the same idempotency key as
-      // the empty branch. Inline (not a function call) to keep the
-      // method's shape recognisable.
-      if (orgConnect?.chargesEnabled && creatorPayoutCents > 0) {
-        try {
-          const transfer = await this.stripe.transfers.create(
-            {
-              amount: creatorPayoutCents,
-              currency: CURRENCY.GBP,
-              destination: orgConnect.stripeAccountId,
-              source_transaction: chargeId,
-              transfer_group: transferGroup,
-              metadata: {
-                subscription_id: subscriptionId,
-                type: 'creator_payout_to_owner',
-              },
-            },
-            { idempotencyKey: `${chargeId}_creator_pool_owner` }
-          );
-          try {
-            await this.db.insert(payouts).values({
-              userId: orgConnect.userId,
-              organizationId: orgId,
-              subscriptionId,
-              amountCents: creatorPayoutCents,
-              payoutType: 'creator_payout_to_owner',
-              status: 'paid',
-              stripeTransferId: transfer.id,
-              stripeChargeId: chargeId,
-              transferGroup,
-              resolvedAt: new Date(),
-            });
-          } catch (insertError) {
-            if (!isUniqueViolation(insertError)) {
-              this.obs.error(
-                'Creator-pool transfer to owner succeeded but payouts ledger insert failed (zero-share branch)',
-                {
-                  subscriptionId,
-                  organizationId: orgId,
-                  stripeTransferId: transfer.id,
-                  amountCents: creatorPayoutCents,
-                  error: (insertError as Error).message,
-                }
-              );
-            }
-          }
-        } catch (transferError) {
-          this.obs.error(
-            'Creator pool transfer to owner failed (zero-share branch), accumulating',
-            {
-              subscriptionId,
-              organizationId: orgId,
-              amountCents: creatorPayoutCents,
-              error: (transferError as Error).message,
-            }
-          );
-          try {
-            await this.db.insert(payouts).values({
-              userId: orgConnect.userId,
-              organizationId: orgId,
-              subscriptionId,
-              amountCents: creatorPayoutCents,
-              payoutType: 'creator_payout_to_owner',
-              status: 'failed',
-              reason: 'transfer_failed',
-            });
-          } catch (insertError) {
-            this.obs.error(
-              'Failed to record pending payout for zero-share fallback',
-              {
-                subscriptionId,
-                organizationId: orgId,
-                amountCents: creatorPayoutCents,
-                error: (insertError as Error).message,
-              }
-            );
-          }
-        }
-      }
+      // Codex-xz61z (I2): delegate to the shared helper. Same
+      // idempotency key as the empty-agreements branch so a webhook
+      // replay still collapses to one Stripe transfer regardless of
+      // which branch fires on the replay.
+      // Codex-xz61z (N1): dropped dead `creatorAgreements.length = 0;`
+      // mutation — the function returns immediately below, no reader.
+      await this.transferCreatorPoolToOwner(
+        subscriptionId,
+        orgId,
+        chargeId,
+        transferGroup,
+        creatorPayoutCents,
+        orgConnect,
+        'zero_share'
+      );
       return;
     }
 
@@ -4430,22 +4408,25 @@ export class SubscriptionService extends BaseService {
         (postPlatformCents * agreement.sharePercent) / shareDivisor
       );
 
-      // Codex-rzfjw: per-creator split observability. Emit one
-      // structured event per agreement so the payout pipeline is
-      // auditable end-to-end (creator → amount → agreement share).
-      this.obs.info('payout_split_computed', {
-        subscriptionId,
-        organizationId: orgId,
-        creatorId: agreement.creatorId,
-        amountCents: creatorAmount,
-        sharePercent: agreement.sharePercent,
-        totalShareBps,
-        postPlatformCents,
-        effectiveOrgFeeCents,
-        effectiveCreatorPoolCents,
-      });
-
-      if (creatorAmount <= 0) continue;
+      // Codex-xz61z (I4): emit `payout_split_skipped` for iterations
+      // that never reach the transfer call. The previous code emitted
+      // `payout_split_computed` BEFORE the zero-amount + min-transfer
+      // gates, which made the log misleading — it claimed an amount
+      // was paid out when it was actually skipped or accumulated as
+      // pending. Each iteration now emits exactly one log line whose
+      // shape matches the iteration's terminal state.
+      if (creatorAmount <= 0) {
+        this.obs.info('payout_split_skipped', {
+          subscriptionId,
+          organizationId: orgId,
+          creatorId: agreement.creatorId,
+          amountCents: creatorAmount,
+          sharePercent: agreement.sharePercent,
+          totalShareBps,
+          pendingReason: 'zero_amount',
+        });
+        continue;
+      }
 
       // Codex-m644n: per-creator min-transfer floor. Walk the override chain
       // for this specific (org, creator) pair — Creator A and Creator B can
@@ -4464,6 +4445,18 @@ export class SubscriptionService extends BaseService {
           creatorId: agreement.creatorId,
           amountCents: creatorAmount,
           minTransferCents: creatorFees.minTransferCents,
+        });
+        // Codex-xz61z (I4): tagged-skip log so split-vs-transfer
+        // accounting can be reconstructed from observability alone.
+        this.obs.info('payout_split_skipped', {
+          subscriptionId,
+          organizationId: orgId,
+          creatorId: agreement.creatorId,
+          amountCents: creatorAmount,
+          sharePercent: agreement.sharePercent,
+          totalShareBps,
+          minTransferCents: creatorFees.minTransferCents,
+          pendingReason: 'min_transfer_floor',
         });
         try {
           await this.db.insert(payouts).values({
@@ -4492,6 +4485,8 @@ export class SubscriptionService extends BaseService {
       const creatorConnect = connectByCreator.get(agreement.creatorId);
 
       if (creatorConnect?.chargesEnabled) {
+        let transferred = false;
+        let pendingReason: string | undefined;
         try {
           const transfer = await this.stripe.transfers.create(
             {
@@ -4508,6 +4503,7 @@ export class SubscriptionService extends BaseService {
             },
             { idempotencyKey: `${chargeId}_creator_${agreement.creatorId}` }
           );
+          transferred = true;
           try {
             await this.db.insert(payouts).values({
               userId: agreement.creatorId,
@@ -4536,6 +4532,7 @@ export class SubscriptionService extends BaseService {
             }
           }
         } catch (transferError) {
+          pendingReason = 'transfer_failed';
           this.obs.error('Creator transfer failed, accumulating as pending', {
             subscriptionId,
             creatorId: agreement.creatorId,
@@ -4566,10 +4563,30 @@ export class SubscriptionService extends BaseService {
             );
           }
         }
+        // Codex-xz61z (I4): emit `payout_split_computed` AFTER the
+        // transfer attempt so `actuallyTransferred` reflects the
+        // terminal state of the iteration. `pendingReason` is set
+        // when the transfer failed and the row was accumulated.
+        this.obs.info('payout_split_computed', {
+          subscriptionId,
+          organizationId: orgId,
+          creatorId: agreement.creatorId,
+          amountCents: creatorAmount,
+          sharePercent: agreement.sharePercent,
+          totalShareBps,
+          postPlatformCents,
+          effectiveOrgFeeCents,
+          effectiveCreatorPoolCents,
+          actuallyTransferred: transferred,
+          pendingReason,
+        });
       } else {
         // Accumulate pending payout
         // BUG-036: Wrap pending payout insert in try/catch so a DB failure
         // doesn't crash the entire transfer flow.
+        const pendingReason = creatorConnect
+          ? 'connect_restricted'
+          : 'connect_not_ready';
         try {
           await this.db.insert(payouts).values({
             userId: agreement.creatorId,
@@ -4578,7 +4595,7 @@ export class SubscriptionService extends BaseService {
             amountCents: creatorAmount,
             payoutType: 'creator_payout',
             status: 'pending',
-            reason: creatorConnect ? 'connect_restricted' : 'connect_not_ready',
+            reason: pendingReason,
           });
         } catch (insertError) {
           this.obs.error(
@@ -4596,6 +4613,22 @@ export class SubscriptionService extends BaseService {
           creatorId: agreement.creatorId,
           amountCents: creatorAmount,
           subscriptionId,
+        });
+        // Codex-xz61z (I4): emit `payout_split_computed` for the
+        // Connect-not-ready path so the per-creator audit log
+        // captures every iteration, with `actuallyTransferred=false`.
+        this.obs.info('payout_split_computed', {
+          subscriptionId,
+          organizationId: orgId,
+          creatorId: agreement.creatorId,
+          amountCents: creatorAmount,
+          sharePercent: agreement.sharePercent,
+          totalShareBps,
+          postPlatformCents,
+          effectiveOrgFeeCents,
+          effectiveCreatorPoolCents,
+          actuallyTransferred: false,
+          pendingReason,
         });
       }
     }
