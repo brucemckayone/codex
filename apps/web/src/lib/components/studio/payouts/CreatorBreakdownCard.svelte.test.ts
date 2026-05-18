@@ -59,6 +59,7 @@ describe('CreatorBreakdownCard', () => {
 
   test('renders identifiable card for a healthy creator (smoke)', () => {
     const result = mount(CreatorBreakdownCard, {
+      target: document.body,
       props: { breakdown: baseBreakdown() },
     });
     cleanup = () => unmount(result);
@@ -85,6 +86,7 @@ describe('CreatorBreakdownCard', () => {
   // and the fixer removes `.fails`.
   test.fails('F-19: shows identifying fragment for soft-deleted creator (currently shows only "Unknown creator")', () => {
     const result = mount(CreatorBreakdownCard, {
+      target: document.body,
       props: {
         breakdown: baseBreakdown({
           userId: 'usr_deleted_abc123def456',

@@ -1,0 +1,37 @@
+name: Main Branch Static-Analysis Gate
+
+# Closes Codex-1v6wt.
+#
+# Dedicated, fast (~2 min) static-analysis gate on push to main. Runs the
+# same biome + turbo typecheck + frozen-lockfile install as the broader
+# `testing.yml` workflow, but in isolation — so when main breaks, the
+# failure surfaces as a single red check on the main commit rather than
+# being buried inside the 10+ minute test pipeline.
+#
+# Motivation: the Revenue-Share Agreements epic (Codex-nk4km) landed three
+# infra leaks that slipped through because:
+#   1. `--admin` squash-merges bypass required-status-check waits, so
+#      `testing.yml` ran AFTER the merge had already landed.
+#   2. The static-analysis step is one of many jobs in testing.yml, so a
+#      failure isn't immediately obvious in the commit-status checklist.
+#
+# This workflow is intentionally narrow: only push-to-main, only the
+# static-analysis triplet. If it fails, main is broken; fix is urgent.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: main-gate-${{ github.sha }}
+  cancel-in-progress: false  # Each commit on main gets its own gate result
+
+jobs:
+  static-analysis:
+    name: Static Analysis (biome + typecheck + lockfile)
+    uses: ./.github/workflows/static_analysis.yml
+    secrets: inherit
