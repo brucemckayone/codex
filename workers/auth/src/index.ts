@@ -191,22 +191,58 @@ app.post('/api/test/fast-register', async (c) => {
       return c.json({ error: 'Sign-up failed', details: body }, 500);
     }
 
-    // Mark email as verified directly in the database
+    // Mark email as verified directly in the database.
+    // BetterAuth's sign-up response carries NO session cookie when
+    // `requireEmailVerification: true` is set in auth-config — the user
+    // must verify first, then sign in. We skip the verification email
+    // flow for tests, but we still need a real session cookie.
     await db
       .update(schema.users)
       .set({ emailVerified: true })
       .where(eq(schema.users.email, email));
 
-    // Build a new Response that preserves Set-Cookie headers.
-    // BetterAuth's handler returns a standard Response, but returning it
-    // directly through Hono can lose multi-valued Set-Cookie headers.
-    const body = await signUpResponse.text();
+    // Trigger a programmatic sign-in to mint a real session cookie.
+    // This call goes directly into BetterAuth's handler in-process —
+    // it does NOT traverse the Hono middleware chain, so the auth
+    // rate-limiter never fires. That's why e2e tests can use this
+    // path at the scale they need (~94 user creations across the suite)
+    // without hitting the 5-req/15-min budget on /api/auth/sign-in/email.
+    const signInRequest = new Request(
+      `${env.WEB_APP_URL || 'http://localhost:42069'}/api/auth/sign-in/email`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin:
+            env.WEB_APP_URL ||
+            c.req.header('Origin') ||
+            'http://localhost:42069',
+        },
+        body: JSON.stringify({ email, password }),
+      }
+    );
+
+    const signInResponse = await auth.handler(signInRequest);
+
+    if (!signInResponse || signInResponse.status >= 400) {
+      const body = signInResponse ? await signInResponse.text() : 'null';
+      return c.json(
+        { error: 'Internal sign-in after fast-register failed', details: body },
+        500
+      );
+    }
+
+    // Build a new Response that preserves Set-Cookie headers from the
+    // sign-in response. BetterAuth's handler returns a standard Response,
+    // but returning it directly through Hono can lose multi-valued
+    // Set-Cookie headers — copy them explicitly.
+    const body = await signInResponse.text();
     const headers = new Headers();
-    signUpResponse.headers.forEach((value, key) => {
+    signInResponse.headers.forEach((value, key) => {
       headers.append(key, value);
     });
     return new Response(body, {
-      status: signUpResponse.status,
+      status: signInResponse.status,
       headers,
     });
   } catch (error) {
