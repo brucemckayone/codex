@@ -186,21 +186,36 @@ export function setupTestDatabase(): Database {
  *
  * Deletion order (respects foreign keys):
  * 1. video_playback (references content, users)
- * 2. purchases (references content, users, organizations)
- * 3. content_access (references content, users, organizations)
- * 4. creator_organization_agreements (references users, organizations)
- * 5. organization_platform_agreements (references organizations)
- * 6. content (references media_items, organizations, users)
- * 7. media_items (references users)
- * 8. organizations (no foreign keys from other content tables)
+ * 2. refund_reviews (references purchases AND payouts with onDelete: 'restrict')
+ * 3. payouts (referenced by refund_reviews)
+ * 4. purchases (references content, users, organizations; referenced by refund_reviews)
+ * 5. content_access (references content, users, organizations)
+ * 6. agreement_proposals (references organizations, users; self-FK)
+ * 7. creator_organization_agreements (references users, organizations, proposals)
+ * 8. organization_platform_agreements (references organizations)
+ * 9. content (references media_items, organizations, users)
+ * 10. media_items (references users)
+ * 11. organizations (no foreign keys from other content tables)
  *
  * @param db - Database client
  */
 export async function cleanupDatabase(db: Database): Promise<void> {
   // Delete in order that respects foreign key constraints
   await db.delete(schema.videoPlayback);
+  // refund_reviews references purchases AND payouts with onDelete: 'restrict' —
+  // must go before either. Was previously missed in cleanup and caused FK
+  // failures whenever a prior subscription test left rows behind.
+  await db.delete(schema.refundReviews);
+  await db.delete(schema.payouts);
   await db.delete(schema.purchases);
   await db.delete(schema.contentAccess);
+  // Codex-tnft0 (WP-2 of Codex-nk4km): agreement_proposals is referenced by
+  // creator_organization_agreements.current_proposal_id (onDelete: 'set null')
+  // and references organizations/users (onDelete: 'cascade'). Deleting
+  // proposals first is not strictly required (the SET NULL would resolve
+  // cleanly), but it keeps the cleanup explicit and FK-ordering audit-safe
+  // per the test-cleanup-fk-ordering feedback memory.
+  await db.delete(schema.agreementProposals);
   await db.delete(schema.creatorOrganizationAgreements);
   await db.delete(schema.organizationPlatformAgreements);
   await db.delete(schema.content);
@@ -220,8 +235,17 @@ export async function cleanupDatabase(db: Database): Promise<void> {
 export async function cleanupDatabaseComplete(db: Database): Promise<void> {
   // Delete in order that respects foreign key constraints
   await db.delete(schema.videoPlayback);
+  await db.delete(schema.refundReviews);
+  await db.delete(schema.payouts);
   await db.delete(schema.purchases);
   await db.delete(schema.contentAccess);
+  // Codex-tnft0 (WP-2 of Codex-nk4km): agreement_proposals is referenced by
+  // creator_organization_agreements.current_proposal_id (onDelete: 'set null')
+  // and references organizations/users (onDelete: 'cascade'). Deleting
+  // proposals first is not strictly required (the SET NULL would resolve
+  // cleanly), but it keeps the cleanup explicit and FK-ordering audit-safe
+  // per the test-cleanup-fk-ordering feedback memory.
+  await db.delete(schema.agreementProposals);
   await db.delete(schema.creatorOrganizationAgreements);
   await db.delete(schema.organizationPlatformAgreements);
   await db.delete(schema.content);
