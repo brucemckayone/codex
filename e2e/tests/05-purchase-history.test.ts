@@ -571,7 +571,7 @@ describe('Purchase History API', () => {
       expect(purchase.contentId).toBe(contentId);
       expect(purchase.organizationId).toBe(organizationId);
       expect(purchase.amountPaidCents).toBe(2999);
-      expect(purchase.currency).toBe('usd');
+      expect(purchase.currency).toBe('gbp');
       expect(purchase.status).toBe('completed');
 
       // Verify revenue split fields
@@ -597,8 +597,9 @@ describe('Purchase History API', () => {
       expect(response.status).toBe(401);
     });
 
-    test('should return 403 when purchase belongs to another user', async () => {
-      // otherBuyer tries to access buyer's purchase
+    test('should return 404 when purchase belongs to another user (privacy posture)', async () => {
+      // otherBuyer tries to access buyer's purchase — service returns 404
+      // rather than 403 so non-owners cannot enumerate purchase IDs.
       const response = await httpClient.get(
         `${WORKER_URLS.ecom}/purchases/${purchaseId}`,
         {
@@ -609,7 +610,7 @@ describe('Purchase History API', () => {
         }
       );
 
-      expect(response.status).toBe(403);
+      expect(response.status).toBe(404);
     });
 
     test('should return 404 when purchase does not exist', async () => {
@@ -689,7 +690,9 @@ describe('Purchase History API', () => {
     });
 
     test('creator cannot access buyer purchase records', async () => {
-      // Creator tries to access buyer's purchase by ID
+      // Creator tries to access buyer's purchase by ID — service scopes by
+      // customerId so the row is invisible from outside, returning 404
+      // rather than 403 (consistent privacy posture with other-buyer case).
       const response = await httpClient.get(
         `${WORKER_URLS.ecom}/purchases/${purchaseId}`,
         {
@@ -700,8 +703,7 @@ describe('Purchase History API', () => {
         }
       );
 
-      // Creator is not the customer, should be forbidden
-      expect(response.status).toBe(403);
+      expect(response.status).toBe(404);
     });
   });
 

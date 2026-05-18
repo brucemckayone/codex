@@ -73,7 +73,7 @@ describe('Media Workflow (Content-API <-> Media-API)', () => {
           mediaType: 'video',
           mimeType: 'video/mp4',
           fileSizeBytes: 1024 * 1024 * 10,
-          r2Key: `uploads/${creator.user.id}/test-video.mp4`,
+          r2Key: `${creator.user.id}/originals/test-${Date.now()}/test-video.mp4`,
         },
       });
 
@@ -166,7 +166,7 @@ describe('Media Workflow (Content-API <-> Media-API)', () => {
             mediaType: 'video',
             mimeType: 'video/mp4',
             fileSizeBytes: 100,
-            r2Key: `uploads/${creator.user.id}/fail.mp4`,
+            r2Key: `${creator.user.id}/originals/fail-${Date.now()}/fail.mp4`,
           },
         }
       );
@@ -207,7 +207,12 @@ describe('Media Workflow (Content-API <-> Media-API)', () => {
       expect(media?.transcodingError).toBe('Corrupted input file');
     });
 
-    it('should allow retrying failed transcoding', async () => {
+    // Retry triggers a real RunPod /runsync POST via RUNPOD_DIRECT_URL.
+    // Requires the local RunPod Python mock on :8000 (see docs/transcoding).
+    // Set RUNPOD_MOCK_AVAILABLE=1 in CI/local env once the mock is running.
+    const retryWithInfra =
+      process.env.RUNPOD_MOCK_AVAILABLE === '1' ? it : it.skip;
+    retryWithInfra('should allow retrying failed transcoding', async () => {
       const res = await httpClient.post(
         `${WORKER_URLS.media}/api/transcoding/retry/${mediaId}`,
         {

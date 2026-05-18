@@ -127,10 +127,13 @@ describe('Organization Lifecycle', () => {
           },
         });
 
-        // Try to create second org with same slug
+        // Try to create second org with same slug. POST /api/organizations
+        // is gated to roles ['creator','admin','platform_owner'], so we use
+        // creator.cookie here — outsider (default 'customer' role) would
+        // be rejected with 403 before the slug uniqueness check fires.
         const response = await httpClient.post(orgBaseUrl, {
           headers: {
-            Cookie: outsider.cookie,
+            Cookie: creator.cookie,
             Origin: WORKER_URLS.organization,
           },
           data: {
@@ -242,10 +245,10 @@ describe('Organization Lifecycle', () => {
 
         await expectSuccessResponse(response);
         const body = await response.json();
-        const data = body.data;
-        expect(data.items.length).toBeGreaterThanOrEqual(1);
+        // List envelope: { items, pagination } at top level (procedure())
+        expect(body.items.length).toBeGreaterThanOrEqual(1);
         expect(
-          data.items.some((org: { name: string }) => org.name === uniqueName)
+          body.items.some((org: { name: string }) => org.name === uniqueName)
         ).toBe(true);
       }
     );
@@ -409,7 +412,7 @@ describe('Organization Lifecycle', () => {
         const body = await createRes.json();
         const created = body.data;
 
-        // Delete
+        // Delete — soft delete returns 204 with empty body (no envelope)
         const deleteRes = await httpClient.delete(
           `${orgBaseUrl}/${created.id}`,
           {
@@ -419,7 +422,7 @@ describe('Organization Lifecycle', () => {
             },
           }
         );
-        await expectSuccessResponse(deleteRes);
+        expect(deleteRes.status).toBe(204);
 
         // Verify hidden from retrieval by ID
         const getByIdRes = await httpClient.get(`${orgBaseUrl}/${created.id}`, {

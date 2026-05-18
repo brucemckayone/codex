@@ -39,7 +39,7 @@ describe('Content Creation Flow', () => {
           mediaType: 'video',
           mimeType: 'video/mp4',
           fileSizeBytes: 1024000,
-          r2Key: `media/${user.id}/test-video-${Date.now()}.mp4`,
+          r2Key: `${user.id}/originals/test-${Date.now()}/test-video.mp4`,
         },
       }
     );
@@ -160,7 +160,7 @@ describe('Content Creation Flow', () => {
           mediaType: 'video',
           mimeType: 'video/mp4',
           fileSizeBytes: 1024000,
-          r2Key: `media/${user.id}/test-video-${Date.now()}.mp4`,
+          r2Key: `${user.id}/originals/test-${Date.now()}/test-video.mp4`,
         },
       }
     );
@@ -226,7 +226,7 @@ describe('Content Creation Flow', () => {
           mediaType: 'video',
           mimeType: 'video/mp4',
           fileSizeBytes: 1024000,
-          r2Key: `media/user1/video1-${Date.now()}.mp4`,
+          r2Key: `user1/originals/video1-${Date.now()}/video1.mp4`,
         },
       }
     );
