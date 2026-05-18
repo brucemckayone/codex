@@ -330,6 +330,14 @@ export const creatorOrganizationAgreements = pgTable(
       .notNull()
       .defaultNow(),
     effectiveUntil: timestamp('effective_until', { withTimezone: true }), // NULL = indefinite
+    // WP-? (Codex-tugez): set when the agreement-expiring-soon cron has
+    // already fired for this row. Used to make the cron idempotent —
+    // re-running the sweep after a partial failure does NOT re-send.
+    // NULL = no expiring-soon email has been sent yet. Cleared on
+    // renewal (future scope; today renewal means a new row).
+    expiringSoonEmailSentAt: timestamp('expiring_soon_email_sent_at', {
+      withTimezone: true,
+    }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),

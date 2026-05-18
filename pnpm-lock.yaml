@@ -1682,6 +1682,9 @@ importers:
 
   workers/notifications-api:
     dependencies:
+      '@codex/agreements':
+        specifier: workspace:*
+        version: link:../../packages/agreements
       '@codex/constants':
         specifier: workspace:*
         version: link:../../packages/constants
@@ -1691,6 +1694,9 @@ importers:
       '@codex/notifications':
         specifier: workspace:*
         version: link:../../packages/notifications
+      '@codex/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@codex/platform-settings':
         specifier: workspace:*
         version: link:../../packages/platform-settings

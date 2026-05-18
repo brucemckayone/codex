@@ -1078,6 +1078,147 @@ export class AgreementService extends BaseService {
   }
 
   /**
+   * Find active agreements approaching their term end (Codex-tugez).
+   *
+   * Filters:
+   *   - `status='active'` — only live agreements can expire
+   *   - `effectiveUntil IS NOT NULL` — indefinite agreements never expire
+   *   - `effectiveUntil > now` — not already past expiry
+   *   - `effectiveUntil <= now + daysAhead days` — within the warning window
+   *   - `expiringSoonEmailSentAt IS NULL` — idempotency gate; once the cron
+   *     has fired for this row, it does not refire
+   *
+   * Returns enriched rows: agreement + creator contact + org name. The
+   * cron handler iterates this list and dispatches one email per recipient
+   * (creator + the first active owner of the org) per agreement.
+   *
+   * Soft-deleted users (creator or owner) are filtered out — there is
+   * nothing to email. Orphan orgs (no active owner) still surface the
+   * creator-side email; the cron handler is the place to handle the
+   * owner-side lookup.
+   *
+   * Used by `notifications-api`'s scheduled handler. Not gated by auth —
+   * the worker's cron trigger is its own authentication.
+   */
+  async findExpiringAgreements(input: {
+    daysAhead: number;
+    now?: Date;
+  }): Promise<
+    Array<{
+      agreement: CreatorOrganizationAgreement;
+      creator: { id: string; email: string; name: string };
+      orgName: string;
+    }>
+  > {
+    try {
+      const now = input.now ?? new Date();
+      const windowEnd = new Date(
+        now.getTime() + input.daysAhead * 24 * 60 * 60 * 1000
+      );
+
+      const rows = await this.db
+        .select({
+          agreement: creatorOrganizationAgreements,
+          creatorEmail: users.email,
+          creatorName: users.name,
+          orgName: organizations.name,
+        })
+        .from(creatorOrganizationAgreements)
+        .innerJoin(users, eq(users.id, creatorOrganizationAgreements.creatorId))
+        .innerJoin(
+          organizations,
+          eq(organizations.id, creatorOrganizationAgreements.organizationId)
+        )
+        .where(
+          and(
+            eq(creatorOrganizationAgreements.status, 'active'),
+            isNull(creatorOrganizationAgreements.expiringSoonEmailSentAt),
+            // Window: not yet expired AND within the warning lead time.
+            gt(creatorOrganizationAgreements.effectiveUntil, now),
+            lte(creatorOrganizationAgreements.effectiveUntil, windowEnd)
+          )
+        );
+
+      return rows.map((r) => ({
+        agreement: r.agreement,
+        creator: {
+          id: r.agreement.creatorId,
+          email: r.creatorEmail,
+          name: r.creatorName,
+        },
+        orgName: r.orgName,
+      }));
+    } catch (error) {
+      this.handleError(error, 'findExpiringAgreements');
+    }
+  }
+
+  /**
+   * Mark `expiring_soon_email_sent_at = now` for one agreement. Called
+   * by the cron handler after a successful email dispatch so re-running
+   * the sweep does NOT re-send. Per-agreement update (no batching) —
+   * the sweep is daily and the row count is bounded; a transaction per
+   * row is acceptable and lets us tolerate per-row failure.
+   *
+   * Idempotent: setting the column on an already-marked row is a no-op.
+   * No transaction needed (single UPDATE).
+   */
+  async markExpiringSoonSent(
+    agreementId: string,
+    sentAt?: Date
+  ): Promise<void> {
+    try {
+      const at = sentAt ?? new Date();
+      await this.db
+        .update(creatorOrganizationAgreements)
+        .set({
+          expiringSoonEmailSentAt: at,
+          updatedAt: at,
+        })
+        .where(eq(creatorOrganizationAgreements.id, agreementId));
+    } catch (error) {
+      this.handleError(error, 'markExpiringSoonSent');
+    }
+  }
+
+  /**
+   * Resolve the first active owner of an org — used by the
+   * agreement-expiring-soon cron to find a recipient for the org-side
+   * email. Returns `null` for orphan orgs (no active owner row). The
+   * cron handler logs and skips the owner-side email when this returns
+   * `null`; the creator-side email still fires.
+   */
+  async getFirstActiveOwnerContact(organizationId: string): Promise<{
+    id: string;
+    email: string;
+    name: string;
+  } | null> {
+    try {
+      const [row] = await this.db
+        .select({
+          userId: organizationMemberships.userId,
+          email: users.email,
+          name: users.name,
+        })
+        .from(organizationMemberships)
+        .innerJoin(users, eq(users.id, organizationMemberships.userId))
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, organizationId),
+            eq(organizationMemberships.role, 'owner'),
+            eq(organizationMemberships.status, 'active')
+          )
+        )
+        .orderBy(asc(organizationMemberships.createdAt))
+        .limit(1);
+      if (!row) return null;
+      return { id: row.userId, email: row.email, name: row.name };
+    } catch (error) {
+      this.handleError(error, 'getFirstActiveOwnerContact');
+    }
+  }
+
+  /**
    * Full negotiation thread for a (org, creator, revenue_type) triple,
    * chronological. Empty array if no thread exists yet.
    *

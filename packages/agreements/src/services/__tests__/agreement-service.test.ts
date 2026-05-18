@@ -1920,4 +1920,260 @@ describe('AgreementService', () => {
       expect(data.sharePercentDisplay).toBe('50%');
     });
   });
+
+  // ─── findExpiringAgreements / markExpiringSoonSent (WP-? — Codex-tugez) ─
+  //
+  // The agreement-expiring-soon cron handler in notifications-api drives
+  // this method daily. Tests cover the window-filter, idempotency gate,
+  // and status filter — see project_revenue_share_decisions.md (Q3) for
+  // why we don't pro-rate on mid-cycle termination.
+  describe('findExpiringAgreements / markExpiringSoonSent', () => {
+    /**
+     * Helper: accept a proposal so we end up with an active agreement row
+     * to test against. Returns the agreement id + the proposal so the
+     * test can drive markExpiringSoonSent / direct UPDATE on the row.
+     */
+    async function seedActiveAgreement(
+      fx: OrgFixture,
+      options: {
+        termMonths: number | null;
+        effectiveFromOffsetDays?: number;
+      } = { termMonths: 6 }
+    ): Promise<string> {
+      const proposal = await service.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: options.termMonths,
+        proposedByUserId: fx.ownerId,
+        effectiveFrom: options.effectiveFromOffsetDays
+          ? new Date(Date.now() + options.effectiveFromOffsetDays * 86_400_000)
+          : undefined,
+      });
+      const agreement = await service.acceptProposal({
+        proposalId: proposal.id,
+        acceptedByUserId: fx.creatorAId,
+      });
+      return agreement.id;
+    }
+
+    it('agreement expiring in 25 days IS returned (within 30-day window)', async () => {
+      const fx = await seedOrgFixture(db);
+      // 6-month term placed 5 months and 5 days ago -> ~25 days remaining.
+      // Easier: compute backwards — set effectiveFrom such that
+      // (effectiveFrom + termMonths*30 days) is 25 days from now.
+      const desiredDaysUntilExpiry = 25;
+      const termMonths = 6;
+      const termMs = termMonths * 30 * 86_400_000;
+      const effectiveFrom = new Date(
+        Date.now() + desiredDaysUntilExpiry * 86_400_000 - termMs
+      );
+
+      // Custom path: insert directly because the proposal flow uses
+      // computeEffectiveUntil with setUTCMonth (calendar months, not
+      // 30-day chunks). We want the row, not the proposal flow under
+      // test here.
+      const effectiveUntil = new Date(effectiveFrom.getTime() + termMs);
+      const [row] = await db
+        .insert(schema.creatorOrganizationAgreements)
+        .values({
+          creatorId: fx.creatorAId,
+          organizationId: fx.orgId,
+          organizationFeePercentage: 7000, // 30% share
+          revenueType: 'subscription',
+          status: 'active',
+          effectiveFrom,
+          effectiveUntil,
+        })
+        .returning();
+      if (!row) throw new Error('Failed to seed test agreement');
+
+      const expiring = await service.findExpiringAgreements({ daysAhead: 30 });
+      expect(expiring).toHaveLength(1);
+      expect(expiring[0]?.agreement.id).toBe(row.id);
+      expect(expiring[0]?.creator.id).toBe(fx.creatorAId);
+      expect(expiring[0]?.orgName).toBe('Test Org');
+    });
+
+    it('agreement expiring in 35 days is NOT returned (outside window)', async () => {
+      const fx = await seedOrgFixture(db);
+      const desiredDaysUntilExpiry = 35;
+      const termMs = 6 * 30 * 86_400_000;
+      const effectiveFrom = new Date(
+        Date.now() + desiredDaysUntilExpiry * 86_400_000 - termMs
+      );
+      const effectiveUntil = new Date(effectiveFrom.getTime() + termMs);
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        creatorId: fx.creatorAId,
+        organizationId: fx.orgId,
+        organizationFeePercentage: 7000,
+        revenueType: 'subscription',
+        status: 'active',
+        effectiveFrom,
+        effectiveUntil,
+      });
+
+      const expiring = await service.findExpiringAgreements({ daysAhead: 30 });
+      expect(expiring).toHaveLength(0);
+    });
+
+    it('agreement with expiringSoonEmailSentAt already set is NOT returned', async () => {
+      const fx = await seedOrgFixture(db);
+      const effectiveFrom = new Date(Date.now() - 155 * 86_400_000); // -155 days
+      const effectiveUntil = new Date(Date.now() + 25 * 86_400_000); // +25 days
+      const [row] = await db
+        .insert(schema.creatorOrganizationAgreements)
+        .values({
+          creatorId: fx.creatorAId,
+          organizationId: fx.orgId,
+          organizationFeePercentage: 7000,
+          revenueType: 'subscription',
+          status: 'active',
+          effectiveFrom,
+          effectiveUntil,
+          expiringSoonEmailSentAt: new Date(),
+        })
+        .returning();
+      if (!row) throw new Error('Failed to seed agreement');
+
+      const expiring = await service.findExpiringAgreements({ daysAhead: 30 });
+      expect(expiring).toHaveLength(0);
+    });
+
+    it('terminated agreement is NOT returned (status filter)', async () => {
+      const fx = await seedOrgFixture(db);
+      const effectiveFrom = new Date(Date.now() - 155 * 86_400_000);
+      const effectiveUntil = new Date(Date.now() + 25 * 86_400_000);
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        creatorId: fx.creatorAId,
+        organizationId: fx.orgId,
+        organizationFeePercentage: 7000,
+        revenueType: 'subscription',
+        status: 'terminated',
+        terminatedAt: new Date(),
+        effectiveFrom,
+        effectiveUntil,
+      });
+
+      const expiring = await service.findExpiringAgreements({ daysAhead: 30 });
+      expect(expiring).toHaveLength(0);
+    });
+
+    it('indefinite agreement (effectiveUntil IS NULL) is NOT returned', async () => {
+      const fx = await seedOrgFixture(db);
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        creatorId: fx.creatorAId,
+        organizationId: fx.orgId,
+        organizationFeePercentage: 7000,
+        revenueType: 'subscription',
+        status: 'active',
+        effectiveFrom: new Date(Date.now() - 30 * 86_400_000),
+        effectiveUntil: null, // indefinite
+      });
+
+      const expiring = await service.findExpiringAgreements({ daysAhead: 30 });
+      expect(expiring).toHaveLength(0);
+    });
+
+    it('agreement already past expiry (effectiveUntil <= now) is NOT returned', async () => {
+      const fx = await seedOrgFixture(db);
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        creatorId: fx.creatorAId,
+        organizationId: fx.orgId,
+        organizationFeePercentage: 7000,
+        revenueType: 'subscription',
+        status: 'active',
+        effectiveFrom: new Date(Date.now() - 200 * 86_400_000),
+        effectiveUntil: new Date(Date.now() - 10 * 86_400_000), // expired 10 days ago
+      });
+
+      const expiring = await service.findExpiringAgreements({ daysAhead: 30 });
+      expect(expiring).toHaveLength(0);
+    });
+
+    it('markExpiringSoonSent sets the timestamp and dedupes future scans', async () => {
+      const fx = await seedOrgFixture(db);
+      // Seed via the public propose+accept path so the agreement row is
+      // produced by the same path the cron consumes.
+      const agreementId = await seedActiveAgreement(fx, { termMonths: 1 });
+
+      // Force the agreement into the window by direct UPDATE — the
+      // calendar-month math from acceptProposal may not land within 30
+      // days from now (depends on test clock).
+      const effectiveUntil = new Date(Date.now() + 20 * 86_400_000);
+      await db
+        .update(schema.creatorOrganizationAgreements)
+        .set({ effectiveUntil })
+        .where(eq(schema.creatorOrganizationAgreements.id, agreementId));
+
+      const before = await service.findExpiringAgreements({ daysAhead: 30 });
+      expect(before.find((r) => r.agreement.id === agreementId)).toBeDefined();
+
+      await service.markExpiringSoonSent(agreementId);
+
+      const after = await service.findExpiringAgreements({ daysAhead: 30 });
+      expect(after.find((r) => r.agreement.id === agreementId)).toBeUndefined();
+
+      // Row is actually marked in DB
+      const [row] = await db
+        .select({
+          sentAt: schema.creatorOrganizationAgreements.expiringSoonEmailSentAt,
+        })
+        .from(schema.creatorOrganizationAgreements)
+        .where(eq(schema.creatorOrganizationAgreements.id, agreementId));
+      expect(row?.sentAt).toBeInstanceOf(Date);
+    });
+
+    it('getFirstActiveOwnerContact returns the owner row when one exists', async () => {
+      const fx = await seedOrgFixture(db);
+      const contact = await service.getFirstActiveOwnerContact(fx.orgId);
+      expect(contact).not.toBeNull();
+      expect(contact?.id).toBe(fx.ownerId);
+      expect(contact?.email).toContain('@');
+    });
+
+    it('getFirstActiveOwnerContact returns null for an org with no active owner', async () => {
+      // Seed an org with NO owner membership at all.
+      const [org] = await db
+        .insert(schema.organizations)
+        .values({ name: 'Orphan Org', slug: createUniqueSlug('orphan') })
+        .returning();
+      if (!org) throw new Error('Failed to seed orphan org');
+
+      const contact = await service.getFirstActiveOwnerContact(org.id);
+      expect(contact).toBeNull();
+    });
+
+    it('respects custom `now` for window calculation', async () => {
+      const fx = await seedOrgFixture(db);
+      // Expiry ~30 years in the future — would never appear with real now,
+      // but appears when we pass a `now` that's only 25 days behind it.
+      const futureExpiry = new Date('2056-06-01T00:00:00Z');
+      const futureEffectiveFrom = new Date('2055-12-01T00:00:00Z');
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        creatorId: fx.creatorAId,
+        organizationId: fx.orgId,
+        organizationFeePercentage: 7000,
+        revenueType: 'subscription',
+        status: 'active',
+        effectiveFrom: futureEffectiveFrom,
+        effectiveUntil: futureExpiry,
+      });
+
+      const withDefaultNow = await service.findExpiringAgreements({
+        daysAhead: 30,
+      });
+      expect(withDefaultNow).toHaveLength(0);
+
+      // Pass a `now` 25 days before futureExpiry → falls in the 30-day
+      // window.
+      const nearExpiry = new Date(futureExpiry.getTime() - 25 * 86_400_000);
+      const withCustomNow = await service.findExpiringAgreements({
+        daysAhead: 30,
+        now: nearExpiry,
+      });
+      expect(withCustomNow).toHaveLength(1);
+    });
+  });
 });
