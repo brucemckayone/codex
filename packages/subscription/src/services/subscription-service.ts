@@ -3974,114 +3974,14 @@ export class SubscriptionService extends BaseService {
     // transfers route to the same account checkout validated against.
     const orgConnect = await resolvePrimaryConnect(this.db, orgId);
 
-    // Transfer org fee
-    if (orgConnect?.chargesEnabled && orgFeeCents > 0) {
-      try {
-        const transfer = await this.stripe.transfers.create(
-          {
-            amount: orgFeeCents,
-            currency: CURRENCY.GBP,
-            destination: orgConnect.stripeAccountId,
-            source_transaction: chargeId,
-            transfer_group: transferGroup,
-            metadata: {
-              subscription_id: subscriptionId,
-              type: 'organization_fee',
-            },
-          },
-          { idempotencyKey: `${chargeId}_org_fee` }
-        );
-        // Record success in the ledger. The unique partial index on
-        // stripe_transfer_id collapses webhook double-fires to a single row;
-        // any other DB error gets logged loud — money moved but the ledger
-        // missed the entry, which is a data-integrity event worth paging on.
-        try {
-          await this.db.insert(payouts).values({
-            userId: orgConnect.userId,
-            organizationId: orgId,
-            subscriptionId,
-            amountCents: orgFeeCents,
-            payoutType: 'organization_fee',
-            status: 'paid',
-            stripeTransferId: transfer.id,
-            stripeChargeId: chargeId,
-            transferGroup,
-            resolvedAt: new Date(),
-          });
-        } catch (insertError) {
-          if (!isUniqueViolation(insertError)) {
-            this.obs.error(
-              'Org transfer succeeded but payouts ledger insert failed',
-              {
-                subscriptionId,
-                organizationId: orgId,
-                stripeTransferId: transfer.id,
-                amountCents: orgFeeCents,
-                error: (insertError as Error).message,
-              }
-            );
-          }
-        }
-      } catch (transferError) {
-        this.obs.error('Org transfer failed, accumulating as pending payout', {
-          subscriptionId,
-          organizationId: orgId,
-          amountCents: orgFeeCents,
-          error: (transferError as Error).message,
-        });
-        try {
-          await this.db.insert(payouts).values({
-            userId: orgConnect.userId,
-            organizationId: orgId,
-            subscriptionId,
-            amountCents: orgFeeCents,
-            payoutType: 'organization_fee',
-            status: 'failed',
-            reason: 'transfer_failed',
-          });
-        } catch (insertError) {
-          this.obs.error('Failed to record pending payout for org transfer', {
-            subscriptionId,
-            organizationId: orgId,
-            amountCents: orgFeeCents,
-            error: (insertError as Error).message,
-          });
-        }
-      }
-    } else if (orgFeeCents > 0) {
-      // Accumulate if Connect not ready — resolve the org owner's userId
-      const ownerId =
-        orgConnect?.userId ?? (await this.resolveOrgOwnerId(orgId));
-      if (!ownerId) {
-        this.obs.error(
-          'Cannot record pending payout: no Connect account and no org owner found',
-          { subscriptionId, organizationId: orgId, amountCents: orgFeeCents }
-        );
-      } else {
-        try {
-          await this.db.insert(payouts).values({
-            userId: ownerId,
-            organizationId: orgId,
-            subscriptionId,
-            amountCents: orgFeeCents,
-            payoutType: 'organization_fee',
-            status: 'pending',
-            reason: 'connect_not_ready',
-          });
-        } catch (insertError) {
-          this.obs.error(
-            'Failed to record pending payout (Connect not ready)',
-            {
-              subscriptionId,
-              organizationId: orgId,
-              amountCents: orgFeeCents,
-              error: (insertError as Error).message,
-            }
-          );
-        }
-      }
-    }
-
+    // Codex-ez3tl (C1): query agreements BEFORE the org transfer so the
+    // org's transfer amount reflects the post-platform residual when
+    // creator agreements exist. Per the agreement-math.ts ADR header,
+    // `proposed_creator_share_percent` is the creator's absolute fraction
+    // of the POST-PLATFORM pool — NOT a relative weight. When agreements
+    // exist the fee-config's static `orgFeePercent` is overridden by
+    // `effectiveOrgFeePercent = max(0, 10000 - totalShareBps)`.
+    //
     // Codex-rzfjw (WP-4): query the agreements model with all four
     // WP-1 filters pinned at invoice fire time, and JOIN to the
     // accepted proposal to read `proposed_creator_share_percent` as
@@ -4101,13 +4001,20 @@ export class SubscriptionService extends BaseService {
     // pointing at a synthesised round-1 'accepted' proposal whose
     // `proposed_creator_share_percent = 10000 - organization_fee_percentage`,
     // so this JOIN handles both pre-WP-1 and post-WP-1 rows uniformly.
-    const creatorAgreements = await this.db
+    //
+    // Codex-ez3tl (I3): leftJoin + NULL skip. `current_proposal_id` is
+    // FK `onDelete: 'set null'`, so a proposal delete nulls the link.
+    // The pre-fix `innerJoin` silently dropped such rows. The leftJoin
+    // surfaces them; rows with NULL share are skipped with a warn log
+    // so misconfigurations don't go undetected.
+    const creatorAgreementsRaw = await this.db
       .select({
+        agreementId: creatorOrganizationAgreements.id,
         creatorId: creatorOrganizationAgreements.creatorId,
         sharePercent: agreementProposals.proposedCreatorSharePercent,
       })
       .from(creatorOrganizationAgreements)
-      .innerJoin(
+      .leftJoin(
         agreementProposals,
         eq(
           agreementProposals.id,
@@ -4138,6 +4045,170 @@ export class SubscriptionService extends BaseService {
           )
         )
       );
+
+    const creatorAgreements: Array<{
+      creatorId: string;
+      sharePercent: number;
+    }> = [];
+    for (const row of creatorAgreementsRaw) {
+      if (row.sharePercent === null) {
+        this.obs.warn(
+          'payout: agreement has no current_proposal_id; skipping',
+          {
+            agreementId: row.agreementId,
+            organizationId: orgId,
+            creatorId: row.creatorId,
+            subscriptionId,
+          }
+        );
+        continue;
+      }
+      creatorAgreements.push({
+        creatorId: row.creatorId,
+        sharePercent: row.sharePercent,
+      });
+    }
+
+    // Codex-ez3tl (C1): compute the effective splits. When agreements
+    // exist with a positive totalShareBps, the org's fee is the
+    // post-platform residual (not the fee-config's static slice). When
+    // no agreements exist (or all are zero-share), the inputs from
+    // `computeSubscriptionSplit` are honoured unchanged — the org gets
+    // its fee-config slice and the org owner receives the creator pool
+    // via the fallback transfer below.
+    //
+    // `postPlatformCents` is the gross minus platform fee; reconstructed
+    // from the inputs since `calculateRevenueSplit` produced
+    // (platform + org + creator_pool == gross) and we have all three.
+    const postPlatformCents = orgFeeCents + creatorPayoutCents;
+    const totalShareBps = creatorAgreements.reduce(
+      (sum, a) => sum + a.sharePercent,
+      0
+    );
+
+    // When totalShareBps > 0, override the fee-config org slice with the
+    // post-platform residual. When totalShareBps == 0 (no agreements or
+    // all zero-share), keep the original orgFeeCents — the empty-agreements
+    // branch below will route the creator pool to the org owner.
+    const effectiveOrgFeeCents =
+      totalShareBps > 0
+        ? Math.floor(
+            (postPlatformCents * Math.max(0, 10_000 - totalShareBps)) / 10_000
+          )
+        : orgFeeCents;
+    const effectiveCreatorPoolCents = postPlatformCents - effectiveOrgFeeCents;
+
+    // Transfer org fee (now using the effective amount).
+    if (orgConnect?.chargesEnabled && effectiveOrgFeeCents > 0) {
+      try {
+        const transfer = await this.stripe.transfers.create(
+          {
+            amount: effectiveOrgFeeCents,
+            currency: CURRENCY.GBP,
+            destination: orgConnect.stripeAccountId,
+            source_transaction: chargeId,
+            transfer_group: transferGroup,
+            metadata: {
+              subscription_id: subscriptionId,
+              type: 'organization_fee',
+            },
+          },
+          { idempotencyKey: `${chargeId}_org_fee` }
+        );
+        // Record success in the ledger. The unique partial index on
+        // stripe_transfer_id collapses webhook double-fires to a single row;
+        // any other DB error gets logged loud — money moved but the ledger
+        // missed the entry, which is a data-integrity event worth paging on.
+        try {
+          await this.db.insert(payouts).values({
+            userId: orgConnect.userId,
+            organizationId: orgId,
+            subscriptionId,
+            amountCents: effectiveOrgFeeCents,
+            payoutType: 'organization_fee',
+            status: 'paid',
+            stripeTransferId: transfer.id,
+            stripeChargeId: chargeId,
+            transferGroup,
+            resolvedAt: new Date(),
+          });
+        } catch (insertError) {
+          if (!isUniqueViolation(insertError)) {
+            this.obs.error(
+              'Org transfer succeeded but payouts ledger insert failed',
+              {
+                subscriptionId,
+                organizationId: orgId,
+                stripeTransferId: transfer.id,
+                amountCents: effectiveOrgFeeCents,
+                error: (insertError as Error).message,
+              }
+            );
+          }
+        }
+      } catch (transferError) {
+        this.obs.error('Org transfer failed, accumulating as pending payout', {
+          subscriptionId,
+          organizationId: orgId,
+          amountCents: effectiveOrgFeeCents,
+          error: (transferError as Error).message,
+        });
+        try {
+          await this.db.insert(payouts).values({
+            userId: orgConnect.userId,
+            organizationId: orgId,
+            subscriptionId,
+            amountCents: effectiveOrgFeeCents,
+            payoutType: 'organization_fee',
+            status: 'failed',
+            reason: 'transfer_failed',
+          });
+        } catch (insertError) {
+          this.obs.error('Failed to record pending payout for org transfer', {
+            subscriptionId,
+            organizationId: orgId,
+            amountCents: effectiveOrgFeeCents,
+            error: (insertError as Error).message,
+          });
+        }
+      }
+    } else if (effectiveOrgFeeCents > 0) {
+      // Accumulate if Connect not ready — resolve the org owner's userId
+      const ownerId =
+        orgConnect?.userId ?? (await this.resolveOrgOwnerId(orgId));
+      if (!ownerId) {
+        this.obs.error(
+          'Cannot record pending payout: no Connect account and no org owner found',
+          {
+            subscriptionId,
+            organizationId: orgId,
+            amountCents: effectiveOrgFeeCents,
+          }
+        );
+      } else {
+        try {
+          await this.db.insert(payouts).values({
+            userId: ownerId,
+            organizationId: orgId,
+            subscriptionId,
+            amountCents: effectiveOrgFeeCents,
+            payoutType: 'organization_fee',
+            status: 'pending',
+            reason: 'connect_not_ready',
+          });
+        } catch (insertError) {
+          this.obs.error(
+            'Failed to record pending payout (Connect not ready)',
+            {
+              subscriptionId,
+              organizationId: orgId,
+              amountCents: effectiveOrgFeeCents,
+              error: (insertError as Error).message,
+            }
+          );
+        }
+      }
+    }
 
     if (creatorAgreements.length === 0) {
       // No creator agreements — org owner gets the full creator pool
@@ -4226,23 +4297,14 @@ export class SubscriptionService extends BaseService {
 
     // Distribute creator pool by per-creator share basis points
     // (Codex-rzfjw, WP-4 of Codex-nk4km): `creatorAgreements[i].sharePercent`
-    // is the creator's slice of the post-platform pool, derived from the
-    // legacy `organization_fee_percentage` column via
-    // `creatorShareFromLegacyOrgFee()` above. The sum may be < 10000
-    // (org owner retains the residual via the existing org_fee branch),
-    // = 10000 (org residual is zero — legal outcome), or > 10000 by
-    // design (multiple creators each accept their slice and the org
-    // ate the gap on negotiation). We normalise by the actual sum so
-    // total transferred never exceeds the creator pool.
-    const totalShareBps = creatorAgreements.reduce(
-      (sum, a) => sum + a.sharePercent,
-      0
-    );
-
+    // is the creator's slice of the POST-PLATFORM pool, per the
+    // agreement-math.ts ADR header. `totalShareBps` was computed above
+    // (before the org transfer) so the org's effective fee equals the
+    // post-platform residual `max(0, 10000 - totalShareBps)`.
+    //
     // Edge: every agreement carries `sharePercent=0` (e.g. legacy rows
-    // backfilled with org_fee=10000). totalShareBps would be 0 → divide
-    // by zero. Bail to the no-agreements branch — full creator pool
-    // routes to the org owner. Preserves the "org keeps all" fallback.
+    // backfilled with org_fee=10000). totalShareBps == 0 means there is
+    // no creator pool to distribute — route to the org owner instead.
     if (totalShareBps <= 0) {
       this.obs.info(
         'All active subscription agreements have zero creator share; routing pool to org owner',
@@ -4351,9 +4413,21 @@ export class SubscriptionService extends BaseService {
       );
     const connectByCreator = new Map(creatorConnects.map((c) => [c.userId, c]));
 
+    // Codex-ez3tl (C1): per-creator amount uses the POST-PLATFORM pool
+    // as the base and the creator's absolute share fraction — matching
+    // the ADR (agreement-math.ts header) and the content-purchase
+    // pipeline (purchase-service.ts via calculateRevenueSplit). The
+    // divisor is `max(totalShareBps, 10000)`:
+    //   - For well-formed configs where `validateProposedShare` bounds
+    //     sum ≤ 10000, the divisor is 10000 and each creator gets their
+    //     absolute share of post-platform.
+    //   - For oversum (totalShareBps > 10000) defensive clamp: divide
+    //     by the actual sum so total transferred never exceeds the pool
+    //     (creators jointly take 100% of post-platform, org gets 0).
+    const shareDivisor = Math.max(totalShareBps, 10_000);
     for (const agreement of creatorAgreements) {
       const creatorAmount = Math.floor(
-        (creatorPayoutCents * agreement.sharePercent) / totalShareBps
+        (postPlatformCents * agreement.sharePercent) / shareDivisor
       );
 
       // Codex-rzfjw: per-creator split observability. Emit one
@@ -4366,6 +4440,9 @@ export class SubscriptionService extends BaseService {
         amountCents: creatorAmount,
         sharePercent: agreement.sharePercent,
         totalShareBps,
+        postPlatformCents,
+        effectiveOrgFeeCents,
+        effectiveCreatorPoolCents,
       });
 
       if (creatorAmount <= 0) continue;

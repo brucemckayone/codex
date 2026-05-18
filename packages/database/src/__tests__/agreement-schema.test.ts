@@ -663,7 +663,9 @@ describe.skipIf(!HAS_DB)('Agreement Schema (Codex-ppxtd)', () => {
       expect(sqlText).toMatch(
         /NOT EXISTS\s*\(\s*SELECT 1\s+FROM "agreement_proposals" p/i
       );
-      expect(sqlText).toMatch(/p\."organization_id"\s*=\s*a\."organization_id"/);
+      expect(sqlText).toMatch(
+        /p\."organization_id"\s*=\s*a\."organization_id"/
+      );
       expect(sqlText).toMatch(/p\."creator_id"\s*=\s*a\."creator_id"/);
       expect(sqlText).toMatch(/p\."revenue_type"\s*=\s*a\."revenue_type"/);
     });
