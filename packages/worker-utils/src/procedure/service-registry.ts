@@ -460,16 +460,37 @@ export function createServiceRegistry(
           : undefined;
 
         // Web-app base URL powers the deep link embedded inside every
-        // agreement-lifecycle email. Mirrors the
-        // `subscription-tier-price-change` wiring on `subscription` —
-        // same `WEB_APP_URL` binding, same fallback semantics.
+        // agreement-lifecycle email. Codex-0omga (WP-5 polish): the
+        // value is now MANDATORY at AgreementService construction; the
+        // service itself throws if unset. We surface a more specific
+        // error here so a misconfigured worker fails at boot rather
+        // than at the first agreement mutation.
         const webAppUrl = env.WEB_APP_URL;
+        if (!webAppUrl) {
+          throw new Error(
+            'AgreementService requires `env.WEB_APP_URL` to be set ' +
+              'for notification deep-links. Check wrangler.jsonc.'
+          );
+        }
+
+        // Codex-0omga (WP-5 polish): thread `executionCtx.waitUntil`
+        // through so the lifecycle notification dispatch (3 DB lookups
+        // + mailer fire) is offloaded from the API request critical
+        // path. Mirrors the `subscription` waitUntil wiring above.
+        // When `executionCtx` is absent (shouldn't happen inside
+        // `procedure()` but defensive) the service falls back to
+        // inline dispatch — mutation still succeeds, response is just
+        // slightly slower.
+        const waitUntil = executionCtx
+          ? executionCtx.waitUntil.bind(executionCtx)
+          : undefined;
 
         _agreements = new AgreementService({
           db: getSharedDb(),
           environment: getEnvironment(),
           mailer,
           webAppUrl,
+          waitUntil,
         });
       }
       return _agreements;

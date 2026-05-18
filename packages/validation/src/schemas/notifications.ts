@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { createSanitizedStringSchema, uuidSchema } from '../primitives';
+import {
+  createSanitizedStringSchema,
+  urlSchema,
+  uuidSchema,
+} from '../primitives';
 
 // ============================================
 // Enums (must match database CHECK constraints)
@@ -373,7 +377,13 @@ const agreementBaseFields = {
   revenueTypeLabel: z.string(),
   sharePercentDisplay: z.string(),
   termMonthsDisplay: z.string(),
-  deepLinkUrl: z.string().url(),
+  // Codex-0omga (WP-5 polish) — use the project's centralized `urlSchema`
+  // primitive so the deep link is forced to HTTP/HTTPS. Blocks the
+  // `javascript:` / `data:` XSS vectors a naive `z.string().url()` would
+  // accept. The dispatcher in @codex/agreements now demands `webAppUrl`
+  // at construction (no relative fallback), so the value always passes
+  // this refinement in production.
+  deepLinkUrl: urlSchema,
   note: z.string().optional(),
 };
 

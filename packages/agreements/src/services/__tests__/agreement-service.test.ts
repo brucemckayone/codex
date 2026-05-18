@@ -136,9 +136,14 @@ describe('AgreementService', () => {
     // FeeConfigService — share-validation reasons purely about the
     // post-platform pool. WP-4's payout pipeline reads the platform
     // fee fresh at invoice time elsewhere.
+    //
+    // Codex-0omga (WP-5 polish): `webAppUrl` is now mandatory at
+    // construction. Tests use a fixed sentinel so deep-link assertions
+    // are stable.
     service = new AgreementService({
       db,
       environment: 'test',
+      webAppUrl: 'https://app.example.test',
     });
   });
 
@@ -1918,6 +1923,105 @@ describe('AgreementService', () => {
       const data = params.data as Record<string, string>;
       expect(data.revenueTypeLabel).toBe('content-purchase');
       expect(data.sharePercentDisplay).toBe('50%');
+    });
+
+    // ─── Construction-time guards (Codex-0omga WP-5 polish) ──────────────
+
+    it('throws at construction if webAppUrl is missing (mandatory)', () => {
+      // Codex-0omga: `webAppUrl` is mandatory at construction. Failing
+      // fast surfaces misconfigured workers at boot rather than at the
+      // first lifecycle notification.
+      expect(() => {
+        new AgreementService({
+          db,
+          environment: 'test',
+          // @ts-expect-error — deliberately omitting required field
+          webAppUrl: undefined,
+        });
+      }).toThrow(/webAppUrl/i);
+    });
+
+    it('throws at construction if webAppUrl is the empty string', () => {
+      expect(() => {
+        new AgreementService({
+          db,
+          environment: 'test',
+          webAppUrl: '',
+        });
+      }).toThrow(/webAppUrl/i);
+    });
+
+    // ─── Dispatcher latency offload (Codex-0omga WP-5 polish) ────────────
+    //
+    // When `waitUntil` is wired, the entire dispatch (3 DB lookups +
+    // mailer fire) MUST be scheduled on it instead of awaited inline.
+    // Asserted via a mock waitUntil that captures the promise; the
+    // mailer is only invoked AFTER the captured promise resolves.
+
+    it('offloads lifecycle dispatch onto waitUntil when wired (latency fix)', async () => {
+      const fx = await seedOrgFixture(db);
+      const mailer = vi.fn();
+      const capturedPromises: Promise<unknown>[] = [];
+      const waitUntil = vi.fn((promise: Promise<unknown>) => {
+        capturedPromises.push(promise);
+      });
+      const serviceWithWaitUntil = new AgreementService({
+        db,
+        environment: 'test',
+        mailer,
+        webAppUrl: 'https://app.example.test',
+        waitUntil,
+      });
+
+      // Proposing returns BEFORE the dispatch has completed — the
+      // dispatch promise is captured by waitUntil instead of awaited.
+      await serviceWithWaitUntil.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+
+      // waitUntil was called exactly once for this single mutation
+      expect(waitUntil).toHaveBeenCalledTimes(1);
+      // ...but the mailer hasn't fired yet — it's queued behind the
+      // lookup phase which is now off the request critical path.
+      // (May or may not have fired depending on microtask scheduling;
+      // either way we need to drain the captured promise to be sure.)
+      await Promise.all(capturedPromises);
+      // After drainage the mailer fired exactly once with the right
+      // template + recipient.
+      expect(mailer).toHaveBeenCalledTimes(1);
+      const params = mailer.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(params.templateName).toBe('agreement-proposed-by-owner');
+      expect(params.userId).toBe(fx.creatorAId);
+    });
+
+    it('falls back to inline dispatch when waitUntil is omitted (test/legacy harness)', async () => {
+      // Without waitUntil, the existing inline-await behaviour holds —
+      // by the time proposeAgreement returns, the mailer has already
+      // fired. This is what the original mailer-assertion tests rely
+      // on, so the behaviour must be preserved when waitUntil is
+      // unwired.
+      const fx = await seedOrgFixture(db);
+      const mailer = vi.fn();
+      const serviceWithoutWaitUntil = new AgreementService({
+        db,
+        environment: 'test',
+        mailer,
+        webAppUrl: 'https://app.example.test',
+      });
+      await serviceWithoutWaitUntil.proposeAgreement({
+        organizationId: fx.orgId,
+        creatorId: fx.creatorAId,
+        revenueType: 'subscription',
+        sharePercent: 3000,
+        termMonths: 6,
+        proposedByUserId: fx.ownerId,
+      });
+      expect(mailer).toHaveBeenCalledTimes(1);
     });
   });
 

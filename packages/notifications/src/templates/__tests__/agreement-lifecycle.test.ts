@@ -79,6 +79,8 @@ const FIXTURES: TemplateFixture[] = [
       '6 months',
       'Alex',
     ],
+    // GBP-only platform — block accidental USD currency symbol.
+    bodyExcludes: ['$'],
   },
   {
     name: 'agreement-countered-by-creator',
@@ -91,6 +93,7 @@ const FIXTURES: TemplateFixture[] = [
       '30%',
       'post-platform subscription revenue',
     ],
+    bodyExcludes: ['$'],
   },
   {
     name: 'agreement-countered-by-owner',
@@ -103,6 +106,7 @@ const FIXTURES: TemplateFixture[] = [
       '30%',
       'post-platform subscription revenue',
     ],
+    bodyExcludes: ['$'],
   },
   {
     name: 'agreement-accepted',
@@ -116,6 +120,7 @@ const FIXTURES: TemplateFixture[] = [
       'post-platform subscription revenue',
       '2026-06-01',
     ],
+    bodyExcludes: ['$'],
   },
   {
     name: 'agreement-declined',
@@ -130,6 +135,7 @@ const FIXTURES: TemplateFixture[] = [
       'commercially viable',
       'post-platform subscription revenue',
     ],
+    bodyExcludes: ['$'],
   },
   {
     name: 'agreement-terminated',
@@ -148,6 +154,7 @@ const FIXTURES: TemplateFixture[] = [
       'no further shares accrue',
       '2026-05-17',
     ],
+    bodyExcludes: ['$'],
   },
   {
     name: 'agreement-expiring-soon',
@@ -161,6 +168,7 @@ const FIXTURES: TemplateFixture[] = [
       'post-platform subscription revenue',
       '2026-06-30',
     ],
+    bodyExcludes: ['$'],
   },
 ];
 
@@ -237,6 +245,18 @@ describe('agreement-lifecycle templates (WP-5 — Codex-90de9)', () => {
         for (const needle of fixture.bodyContains) {
           expect(html.content).toContain(needle);
           expect(text.content).toContain(needle);
+        }
+
+        // Codex-0omga (WP-5 polish): negative contract — every
+        // template MUST exclude the listed substrings. Per
+        // [[feedback-currency-gbp]] the platform is GBP-only, so we
+        // forbid the literal `$` across every agreement template body
+        // as defense against an accidental USD copy edit slipping in.
+        if (fixture.bodyExcludes) {
+          for (const excluded of fixture.bodyExcludes) {
+            expect(html.content).not.toContain(excluded);
+            expect(text.content).not.toContain(excluded);
+          }
         }
       });
 
@@ -337,6 +357,14 @@ describe('agreement-lifecycle templates (WP-5 — Codex-90de9)', () => {
     // The subjects in the seed file are short — this guard ensures a
     // future copy edit doesn't accidentally bloat them past the inbox
     // truncation limit (~70 chars for most webmail clients).
+    //
+    // NOTE: keep these subjects in sync with the seeded values in
+    // `packages/database/scripts/seed-email-templates.ts` — if a copy
+    // edit lands on one side without the other, this guard will start
+    // testing stale text. A shared-import refactor was considered for
+    // Codex-0omga (WP-5 polish) but deferred: the seed script is a
+    // build-time CLI, while this test is a unit-test runtime; folding
+    // them into one module pulls Node-CLI deps into the renderer tests.
     const subjects: Record<string, string> = {
       'agreement-proposed-by-owner':
         '{{orgName}} proposed a revenue-share agreement',
