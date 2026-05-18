@@ -343,6 +343,85 @@ export const weeklyDigestDataSchema = z.object({
 });
 
 // ============================================
+// Revenue-Share Agreement Templates (WP-5 — Codex-90de9)
+// ============================================
+
+/**
+ * Shared base for agreement lifecycle notifications.
+ *
+ * Copy guidance: every share figure MUST be rendered as
+ * "% of post-platform [revenue type] revenue". Per the agreement-math
+ * ADR + C1 fix (PR #213), the snapshotted creator share is a fraction
+ * of the POOL THAT REMAINS AFTER the platform fee is removed — never
+ * a fraction of the gross. Plain-text-style copy like "30% of every
+ * sale" would mislead.
+ *
+ * `revenueTypeLabel` is the human-readable variant rendered in subject +
+ * body — callers MUST pass "subscription" or "content-purchase" (or the
+ * future translated variant). The schema does NOT enforce the enum so
+ * future revenue types can pass through without a validation rev.
+ *
+ * `sharePercentDisplay` is the share formatted for display ("30%"). The
+ * raw basis-points integer is NOT passed to the template — callers do
+ * the formatting before sending so the renderer-side string substitution
+ * is locale-safe (e.g. "30 %" in fr-FR).
+ */
+const agreementBaseFields = {
+  recipientName: z.string(),
+  orgName: z.string(),
+  otherPartyName: z.string(),
+  revenueTypeLabel: z.string(),
+  sharePercentDisplay: z.string(),
+  termMonthsDisplay: z.string(),
+  deepLinkUrl: z.string().url(),
+  note: z.string().optional(),
+};
+
+export const agreementProposedByOwnerDataSchema = z.object({
+  ...agreementBaseFields,
+});
+
+export const agreementCounteredByCreatorDataSchema = z.object({
+  ...agreementBaseFields,
+});
+
+export const agreementCounteredByOwnerDataSchema = z.object({
+  ...agreementBaseFields,
+});
+
+export const agreementAcceptedDataSchema = z.object({
+  ...agreementBaseFields,
+  effectiveFromDate: z.string(),
+});
+
+export const agreementDeclinedDataSchema = z.object({
+  ...agreementBaseFields,
+  declineReason: z.string().optional(),
+});
+
+/**
+ * Termination notice — Decision Q3 (no pro-rating): the recipient holds
+ * the full share for any invoice fired before `effectiveTerminationDate`,
+ * but no share accrues afterwards.
+ */
+export const agreementTerminatedDataSchema = z.object({
+  ...agreementBaseFields,
+  terminationReason: z.string().optional(),
+  effectiveTerminationDate: z.string(),
+});
+
+/**
+ * Expiring-soon notice — fired ~30 days before
+ * `creator_organization_agreements.effective_until`. Cron trigger is
+ * deferred to a follow-up bead; template lands now so the registry has
+ * one source of truth.
+ */
+export const agreementExpiringSoonDataSchema = z.object({
+  ...agreementBaseFields,
+  expiryDate: z.string(),
+});
+
+// ============================================
 // Template Data Schema Map (all 18 templates)
 // ============================================
 
@@ -373,6 +452,14 @@ export const templateDataSchemas = {
   // Engagement
   'new-content-published': newContentPublishedDataSchema,
   'weekly-digest': weeklyDigestDataSchema,
+  // Revenue-share agreements (WP-5 — Codex-90de9)
+  'agreement-proposed-by-owner': agreementProposedByOwnerDataSchema,
+  'agreement-countered-by-creator': agreementCounteredByCreatorDataSchema,
+  'agreement-countered-by-owner': agreementCounteredByOwnerDataSchema,
+  'agreement-accepted': agreementAcceptedDataSchema,
+  'agreement-declined': agreementDeclinedDataSchema,
+  'agreement-terminated': agreementTerminatedDataSchema,
+  'agreement-expiring-soon': agreementExpiringSoonDataSchema,
 } as const;
 
 // Type for template data keys (enables compile-time checking)

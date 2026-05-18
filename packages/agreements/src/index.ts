@@ -28,8 +28,10 @@
 export {
   type AcceptProposalInput,
   type ActiveAgreementShareView,
+  type AgreementLifecycleMailer,
   AgreementService,
   type AgreementServiceConfig,
+  type AgreementTemplateName,
   type CounterProposeInput,
   creatorShareFromLegacyOrgFee,
   type DeclineProposalInput,
