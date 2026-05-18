@@ -517,6 +517,38 @@ describe('enforcePolicyInline · requireOrgMembership', () => {
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
+  // ----- Prevention test for the WP-3 `/agreements/propose` regression -----
+  // Routes that put `organizationId` in the REQUEST BODY are broken by
+  // construction: `resolveOrganizationId()` reads URL params, subdomain, or
+  // the QUERY STRING — never body — and policy enforcement (Step 1) runs
+  // BEFORE input validation (Step 3), so the body has not been parsed by
+  // the time the resolver fires. This test pins that contract: even if a
+  // future refactor adds body reading capability to the Hono request mock,
+  // the resolver must not depend on it. If you change `resolveOrganizationId`
+  // to read body, this test must be updated AND the doc-comment on
+  // `proposeAgreementInputSchema` should be revised.
+  it('does NOT read request body to resolve organizationId (body content is ignored)', async () => {
+    const { extractOrganizationFromSubdomain } = await import('../org-helpers');
+    vi.mocked(extractOrganizationFromSubdomain).mockResolvedValue(null);
+
+    // makeCtx does NOT expose `req.json` — this is the structural proof
+    // that `resolveOrganizationId` cannot read body. We additionally
+    // assert the function rejects with ValidationError when no other
+    // resolution path succeeds, confirming the resolver never falls
+    // back to "look in the body".
+    const { ctx } = makeCtx({
+      vars: { user: { id: 'u1', role: 'user' } },
+      // No params, no query, no subdomain — only a "body" exists in a
+      // real request but the resolver must not see it.
+    });
+    await expect(
+      enforcePolicyInline(ctx, {
+        auth: 'required',
+        requireOrgMembership: true,
+      })
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
   it('throws ForbiddenError when user is not a member', async () => {
     const { checkOrganizationMembership } = await import('../org-helpers');
     vi.mocked(checkOrganizationMembership).mockResolvedValue(null);

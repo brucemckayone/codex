@@ -28,6 +28,7 @@ import { handlePaymentWebhook } from './handlers/payment-webhook';
 import { dispatchScheduled } from './handlers/payouts-sweep';
 import { handleSubscriptionWebhook } from './handlers/subscription-webhook';
 import { verifyStripeSignature } from './middleware/verify-signature';
+import agreements from './routes/agreements';
 import checkout from './routes/checkout';
 import connect from './routes/connect';
 import purchases from './routes/purchases';
@@ -138,6 +139,14 @@ app.route('/subscriptions', subscriptions);
  * Handles Stripe Connect onboarding and account management
  */
 app.route('/connect', connect);
+
+/**
+ * Agreements routes (Codex-hqke2 — WP-3 of Codex-nk4km)
+ * Revenue-share negotiation state machine over @codex/agreements
+ * AgreementService. Propose / accept / decline / counter / withdraw /
+ * terminate / list / threads.
+ */
+app.route('/agreements', agreements);
 
 // ============================================================================
 // Webhook Endpoints
