@@ -243,12 +243,18 @@ jobs:
           R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
+          STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}
+          STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: ${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}
+          STRIPE_WEBHOOK_SECRET_CONNECT: ${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
         run: |
           echo "::add-mask::$DATABASE_URL"
           echo "::add-mask::$R2_SECRET_ACCESS_KEY"
           echo "::add-mask::$STRIPE_SECRET_KEY"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_BOOKING"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_PAYMENT"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_SUBSCRIPTION"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_CONNECT"
           echo "::add-mask::$BETTER_AUTH_SECRET"
           chmod +x .github/scripts/generate-dev-vars.sh
           .github/scripts/generate-dev-vars.sh
@@ -640,6 +646,9 @@ jobs:
           R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
+          STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}
+          STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: ${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}
+          STRIPE_WEBHOOK_SECRET_CONNECT: ${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           # Media API specific
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -655,6 +664,9 @@ jobs:
           echo "::add-mask::$R2_SECRET_ACCESS_KEY"
           echo "::add-mask::$STRIPE_SECRET_KEY"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_BOOKING"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_PAYMENT"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_SUBSCRIPTION"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_CONNECT"
           echo "::add-mask::$BETTER_AUTH_SECRET"
           echo "::add-mask::$RUNPOD_API_KEY"
           echo "::add-mask::$RUNPOD_WEBHOOK_SECRET"
@@ -803,6 +815,9 @@ jobs:
           DB_METHOD: ${{ vars.DB_METHOD }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
+          STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}
+          STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: ${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}
+          STRIPE_WEBHOOK_SECRET_CONNECT: ${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -821,6 +836,9 @@ jobs:
           echo "::add-mask::$DATABASE_URL"
           echo "::add-mask::$STRIPE_SECRET_KEY"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_BOOKING"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_PAYMENT"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_SUBSCRIPTION"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_CONNECT"
           echo "::add-mask::$R2_SECRET_ACCESS_KEY"
           echo "::add-mask::$BETTER_AUTH_SECRET"
           echo "::add-mask::$RUNPOD_API_KEY"
