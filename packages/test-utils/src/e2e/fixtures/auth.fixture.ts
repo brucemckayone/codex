@@ -150,14 +150,18 @@ export const authFixture = {
 
       const setCookie = response.headers.get('set-cookie');
 
-      // If fast-register succeeded but returned no cookies,
-      // the user was created — login directly instead of the slow legacy path.
+      // fast-register signs the user in programmatically after creating + verifying
+      // (workers/auth/src/index.ts), so the response MUST carry a session cookie.
+      // If it doesn't, something has regressed in the worker — fail loud rather
+      // than silently falling back to a rate-limited /sign-in/email retry.
       if (
         !setCookie ||
         (!setCookie.includes('better-auth.session_token') &&
           !setCookie.includes('codex-session'))
       ) {
-        return this._loginFallback(data);
+        throw new Error(
+          `Fast-register returned 2xx without a session cookie — auth worker regression suspected. Check workers/auth/src/index.ts fast-register handler.`
+        );
       }
 
       const cookie = extractSessionCookie(setCookie);
@@ -232,13 +236,14 @@ export const authFixture = {
     if (!registerResponse.ok) {
       const errorText = await registerResponse.text();
 
-      // If user already exists (fast-register created them, or stale from
-      // a prior test run), fall back to login instead of failing.
+      // If user already exists (stale from a prior run, or email collision
+      // across parallel test files), sign in directly. loginUser is the
+      // canonical public login helper — same code path as fresh sign-ins.
       if (
         registerResponse.status === 422 &&
         errorText.includes('USER_ALREADY_EXISTS')
       ) {
-        return this._loginFallback(data);
+        return this.loginUser(data);
       }
 
       let errorMsg = errorText;
@@ -400,56 +405,6 @@ export const authFixture = {
       user: sessionData.user,
       session: sessionData.session,
       cookie: extractSessionCookie(verifyCookie),
-    };
-  },
-
-  /**
-   * Internal fallback: login when registration fails because the user
-   * already exists (e.g. created by fast-register without cookies, or
-   * left over from a previous test run).
-   */
-  async _loginFallback(data: {
-    email: string;
-    password: string;
-  }): Promise<RegisteredUser> {
-    const loginResponse = await httpClient.post(
-      `${AUTH_URL}/api/auth/sign-in/email`,
-      {
-        data: { email: data.email, password: data.password },
-        headers: { Origin: AUTH_URL },
-      }
-    );
-
-    if (!loginResponse.ok) {
-      const errorText = await loginResponse.text();
-      throw new Error(
-        `Login fallback failed (${loginResponse.status}): ${errorText.slice(0, 200)}`
-      );
-    }
-
-    const setCookie = loginResponse.headers.get('set-cookie');
-    const cookie = extractSessionCookie(setCookie);
-
-    const sessionResponse = await httpClient.get(
-      `${AUTH_URL}/api/auth/get-session`,
-      { headers: { Cookie: cookie } }
-    );
-
-    if (!sessionResponse.ok) {
-      throw new Error(
-        `Failed to get session after login fallback: ${sessionResponse.status}`
-      );
-    }
-
-    const sessionData = (await sessionResponse.json()) as {
-      user: RegisteredUser['user'];
-      session: RegisteredUser['session'];
-    };
-
-    return {
-      user: sessionData.user,
-      session: sessionData.session,
-      cookie,
     };
   },
 
