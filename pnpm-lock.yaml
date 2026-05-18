@@ -105,6 +105,9 @@ importers:
       '@codex/admin':
         specifier: workspace:*
         version: link:../../packages/admin
+      '@codex/agreements':
+        specifier: workspace:*
+        version: link:../../packages/agreements
       '@codex/cache':
         specifier: workspace:*
         version: link:../../packages/cache
