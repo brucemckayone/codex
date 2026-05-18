@@ -296,10 +296,13 @@ export type AdminContentListQueryInput = z.infer<
 
 /**
  * Content ID path parameter schema
- * Used for publish, unpublish, and delete operations
+ * Used for publish, unpublish, and delete operations.
+ * Uses `contentId` (not `id`) so the procedure's org resolver doesn't
+ * mistake the content UUID for an organization UUID. Org must be
+ * supplied via `?organizationId=` query param.
  */
 export const adminContentIdParamsSchema = z.object({
-  id: uuidSchema,
+  contentId: uuidSchema,
 });
 
 export type AdminContentIdParams = z.infer<typeof adminContentIdParamsSchema>;

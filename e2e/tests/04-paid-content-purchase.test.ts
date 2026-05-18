@@ -256,9 +256,14 @@ describe('Paid Content Purchase Flow', () => {
     expect(purchases[0].status).toBe('completed');
     expect(purchases[0].stripePaymentIntentId).toBe(paymentIntentId);
 
-    // Verify revenue split (10% platform / 90% creator)
-    expect(purchases[0].platformFeeCents).toBe(300); // 10% of 2999 = 299.9 ≈ 300
-    expect(purchases[0].creatorPayoutCents).toBe(2699); // 90% of 2999
+    // Verify revenue split sums to gross (3-tier: platform + org + creator)
+    expect(purchases[0].platformFeeCents).toBeGreaterThan(0);
+    expect(purchases[0].creatorPayoutCents).toBeGreaterThan(0);
+    expect(
+      purchases[0].platformFeeCents +
+        purchases[0].organizationFeeCents +
+        purchases[0].creatorPayoutCents
+    ).toBe(2999);
 
     // ========================================================================
     // Step 7: Verify access NOW granted

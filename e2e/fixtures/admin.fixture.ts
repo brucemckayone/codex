@@ -258,21 +258,26 @@ export const adminFixture = {
   },
 
   /**
-   * POST /api/admin/content/:id/publish
+   * POST /api/admin/content/:contentId/publish
+   *
+   * Route param is `:contentId` (not `:id`), so the procedure's org resolver
+   * does not pick it up — orgId must be supplied via `?organizationId=` query.
    */
   async publishContent(
     cookie: string,
+    organizationId: string,
     contentId: string
   ): Promise<AdminContentItem> {
-    const response = await httpClient.post(
-      `${WORKER_URLS.admin}/api/admin/content/${contentId}/publish`,
-      {
-        headers: {
-          Cookie: cookie,
-          Origin: WORKER_URLS.admin,
-        },
-      }
+    const url = new URL(
+      `${WORKER_URLS.admin}/api/admin/content/${contentId}/publish`
     );
+    url.searchParams.set('organizationId', organizationId);
+    const response = await httpClient.post(url.toString(), {
+      headers: {
+        Cookie: cookie,
+        Origin: WORKER_URLS.admin,
+      },
+    });
 
     if (!response.ok) {
       const error = await response.text();
@@ -284,21 +289,23 @@ export const adminFixture = {
   },
 
   /**
-   * POST /api/admin/content/:id/unpublish
+   * POST /api/admin/content/:contentId/unpublish
    */
   async unpublishContent(
     cookie: string,
+    organizationId: string,
     contentId: string
   ): Promise<AdminContentItem> {
-    const response = await httpClient.post(
-      `${WORKER_URLS.admin}/api/admin/content/${contentId}/unpublish`,
-      {
-        headers: {
-          Cookie: cookie,
-          Origin: WORKER_URLS.admin,
-        },
-      }
+    const url = new URL(
+      `${WORKER_URLS.admin}/api/admin/content/${contentId}/unpublish`
     );
+    url.searchParams.set('organizationId', organizationId);
+    const response = await httpClient.post(url.toString(), {
+      headers: {
+        Cookie: cookie,
+        Origin: WORKER_URLS.admin,
+      },
+    });
 
     if (!response.ok) {
       const error = await response.text();
@@ -310,18 +317,21 @@ export const adminFixture = {
   },
 
   /**
-   * DELETE /api/admin/content/:id
+   * DELETE /api/admin/content/:contentId
    */
-  async deleteContent(cookie: string, contentId: string): Promise<boolean> {
-    const response = await httpClient.delete(
-      `${WORKER_URLS.admin}/api/admin/content/${contentId}`,
-      {
-        headers: {
-          Cookie: cookie,
-          Origin: WORKER_URLS.admin,
-        },
-      }
-    );
+  async deleteContent(
+    cookie: string,
+    organizationId: string,
+    contentId: string
+  ): Promise<boolean> {
+    const url = new URL(`${WORKER_URLS.admin}/api/admin/content/${contentId}`);
+    url.searchParams.set('organizationId', organizationId);
+    const response = await httpClient.delete(url.toString(), {
+      headers: {
+        Cookie: cookie,
+        Origin: WORKER_URLS.admin,
+      },
+    });
 
     if (!response.ok && response.status !== 204) {
       const error = await response.text();

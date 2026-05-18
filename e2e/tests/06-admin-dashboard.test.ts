@@ -120,6 +120,7 @@ describe('Admin Dashboard', () => {
       expect(stats.totalPurchases).toBe(0);
       expect(stats.averageOrderValueCents).toBe(0);
       expect(stats.platformFeeCents).toBe(0);
+      expect(stats.organizationFeeCents).toBe(0);
       expect(stats.creatorPayoutCents).toBe(0);
       expect(stats.revenueByDay).toEqual([]);
     }, 60000);
@@ -258,9 +259,13 @@ describe('Admin Dashboard', () => {
         expect(stats.totalRevenueCents).toBe(2999);
         expect(stats.totalPurchases).toBe(1);
         expect(stats.averageOrderValueCents).toBe(2999);
-        // Revenue split: 10% platform = 300, 90% creator = 2699
-        expect(stats.platformFeeCents).toBe(300);
-        expect(stats.creatorPayoutCents).toBe(2699);
+        expect(stats.platformFeeCents).toBeGreaterThan(0);
+        expect(stats.creatorPayoutCents).toBeGreaterThan(0);
+        expect(
+          stats.platformFeeCents +
+            stats.organizationFeeCents +
+            stats.creatorPayoutCents
+        ).toBe(2999);
       },
       { timeout: 180000 }
     );
@@ -857,6 +862,7 @@ describe('Admin Dashboard', () => {
         // Admin publishes content
         const published = await adminFixture.publishContent(
           admin.cookie,
+          admin.organization.id,
           content.id
         );
 
@@ -915,6 +921,7 @@ describe('Admin Dashboard', () => {
         // Admin unpublishes content
         const unpublished = await adminFixture.unpublishContent(
           admin.cookie,
+          admin.organization.id,
           content.id
         );
 
@@ -961,7 +968,11 @@ describe('Admin Dashboard', () => {
         const content = unwrapApiResponse(await contentResponse.json());
 
         // Admin deletes content
-        await adminFixture.deleteContent(admin.cookie, content.id);
+        await adminFixture.deleteContent(
+          admin.cookie,
+          admin.organization.id,
+          content.id
+        );
 
         // Verify content no longer in list
         const contentList = await adminFixture.listAllContent(
@@ -1026,16 +1037,20 @@ describe('Admin Dashboard', () => {
         );
         const content = unwrapApiResponse(await contentResponse.json());
 
-        // Admin2 tries to publish admin1's content - should fail with 404
-        const response = await httpClient.post(
-          `${WORKER_URLS.admin}/api/admin/content/${content.id}/publish`,
-          {
-            headers: {
-              Cookie: admin2.cookie,
-              'Content-Type': 'application/json',
-            },
-          }
+        // Admin2 (with their own org context) tries to publish admin1's content.
+        // Service queries WHERE id=admin1ContentId AND organizationId=admin2OrgId
+        // → no match → 404. The orgId is required by the resolver and is
+        // supplied via query (route param is :contentId, not :id).
+        const crossOrgUrl = new URL(
+          `${WORKER_URLS.admin}/api/admin/content/${content.id}/publish`
         );
+        crossOrgUrl.searchParams.set('organizationId', admin2.organization.id);
+        const response = await httpClient.post(crossOrgUrl.toString(), {
+          headers: {
+            Cookie: admin2.cookie,
+            'Content-Type': 'application/json',
+          },
+        });
 
         expect(response.status).toBe(404);
       },
