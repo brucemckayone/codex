@@ -3787,11 +3787,16 @@ describe('SubscriptionService', () => {
     //     agreement receives their cut (was failing in production)
     //   - payouts ledger inserts one row per active agreement + one residual
 
-    it('WP-4: original bug repro — co-creator with active subscription agreement gets their cut', async () => {
-      // This was the bug that triggered the epic: subscription payouts
-      // checked an empty `creator_organization_agreements` table and
-      // routed 100% to the org owner. Now a co-creator with a 30%
-      // agreement receives 30% of the post-platform pool.
+    it('WP-4 / WP-10 REGRESSION GUARD: original co-creator-loses-revenue bug — co-creator with active 30% subscription agreement receives 30% of post-platform on invoice payment', async () => {
+      // CANONICAL ORIGINAL-BUG REGRESSION GUARD for the
+      // Revenue-Share Agreements epic (Codex-nk4km). This was the bug
+      // that triggered the epic: subscription payouts checked an empty
+      // `creator_organization_agreements` table and routed 100% to the
+      // org owner. Now a co-creator with a 30% agreement receives 30%
+      // of the post-platform pool.
+      //
+      // If this test fails, the co-creator-loses-revenue bug has
+      // regressed and the epic's payout-fix is broken in production.
       //
       // Codex-ez3tl (I1): exact-amount assertion. Pre-fix, the
       // co-creator received 85% of post-platform (765 cents) because
