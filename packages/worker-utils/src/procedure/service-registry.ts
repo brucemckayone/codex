@@ -424,12 +424,73 @@ export function createServiceRegistry(
      * purely about the post-platform pool — see `agreement-math.ts`),
      * so no `feeConfig` dep is threaded through here. WP-4 reads the
      * platform fee fresh in the payout pipeline.
+     *
+     * WP-5 (Codex-90de9): wire a mailer thunk so every lifecycle
+     * mutation can fire a notification fire-and-forget AFTER the
+     * transaction commits. Same pattern as the SubscriptionService
+     * `mailer` slot — the service stays unaware of `Bindings` /
+     * `ExecutionContext`; `sendEmailToWorker` under the hood schedules
+     * the worker-to-worker fetch on `executionCtx.waitUntil`. When
+     * `executionCtx` is absent (shouldn't happen inside `procedure()`
+     * but be defensive), the mailer slot stays undefined and the
+     * service silently skips emails — agreement mutations still
+     * succeed.
      */
     get agreements() {
       if (!_agreements) {
+        const mailer = executionCtx
+          ? (params: {
+              to: string;
+              toName?: string;
+              templateName:
+                | 'agreement-proposed-by-owner'
+                | 'agreement-countered-by-creator'
+                | 'agreement-countered-by-owner'
+                | 'agreement-accepted'
+                | 'agreement-declined'
+                | 'agreement-terminated'
+                | 'agreement-expiring-soon';
+              category: 'transactional';
+              userId?: string;
+              organizationId?: string | null;
+              data: Record<string, string | number | boolean>;
+            }) => {
+              sendEmailToWorker(env, executionCtx, params);
+            }
+          : undefined;
+
+        // Web-app base URL powers the deep link embedded inside every
+        // agreement-lifecycle email. Codex-0omga (WP-5 polish): the
+        // value is now MANDATORY at AgreementService construction; the
+        // service itself throws if unset. We surface a more specific
+        // error here so a misconfigured worker fails at boot rather
+        // than at the first agreement mutation.
+        const webAppUrl = env.WEB_APP_URL;
+        if (!webAppUrl) {
+          throw new Error(
+            'AgreementService requires `env.WEB_APP_URL` to be set ' +
+              'for notification deep-links. Check wrangler.jsonc.'
+          );
+        }
+
+        // Codex-0omga (WP-5 polish): thread `executionCtx.waitUntil`
+        // through so the lifecycle notification dispatch (3 DB lookups
+        // + mailer fire) is offloaded from the API request critical
+        // path. Mirrors the `subscription` waitUntil wiring above.
+        // When `executionCtx` is absent (shouldn't happen inside
+        // `procedure()` but defensive) the service falls back to
+        // inline dispatch — mutation still succeeds, response is just
+        // slightly slower.
+        const waitUntil = executionCtx
+          ? executionCtx.waitUntil.bind(executionCtx)
+          : undefined;
+
         _agreements = new AgreementService({
           db: getSharedDb(),
           environment: getEnvironment(),
+          mailer,
+          webAppUrl,
+          waitUntil,
         });
       }
       return _agreements;

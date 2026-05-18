@@ -26,14 +26,21 @@
   import FocusRail from '$lib/components/studio/dashboard/FocusRail.svelte';
   import ActivityStream from '$lib/components/studio/dashboard/ActivityStream.svelte';
   import type { FocusItem } from '$lib/components/studio/dashboard/FocusRail.svelte';
+  import { buildOwnerAgreementFocusItems } from '$lib/components/studio/dashboard/agreement-focus-items';
   import {
     PlusIcon,
     EditIcon,
     UsersIcon,
     FileTextIcon,
   } from '$lib/components/ui/Icon';
+  import { dismiss, isDismissed } from '$lib/collections/dismissals';
   import { formatPrice } from '$lib/utils/format';
   import { getDashboardStats, getActivityFeed } from '$lib/remote/admin.remote';
+  import {
+    listActiveAgreements,
+    listPendingProposals,
+  } from '$lib/remote/agreements.remote';
+  import { getOrgMembers } from '$lib/remote/org.remote';
   import * as m from '$paraglide/messages';
 
   let { data } = $props();
@@ -51,6 +58,43 @@
       ? getActivityFeed({ organizationId: data.org.id, limit: 12 })
       : null
   );
+
+  // ── Revenue-share signal data (WP-9 — Codex-k9no0) ──────────────────────
+  // Only admin/owner see agreement focus items — the worker route gates
+  // both endpoints with requireOrgManagement. Skipping the query for
+  // creator/non-admin roles avoids a guaranteed 403.
+  const agreementsQuery = $derived(
+    isAdmin && data.org?.id
+      ? listActiveAgreements({ organizationId: data.org.id })
+      : null
+  );
+  const pendingCountersQuery = $derived(
+    isAdmin && data.org?.id
+      ? listPendingProposals({
+          organizationId: data.org.id,
+          proposedByRole: 'creator',
+        })
+      : null
+  );
+  // Team members feed the propose-nudge — every non-subscriber creator
+  // without a subscription agreement gets a card.
+  const teamMembersQuery = $derived(
+    isAdmin && data.org?.id
+      ? getOrgMembers({ orgId: data.org.id, limit: 100 })
+      : null
+  );
+
+  // ── Dismissal reactivity ────────────────────────────────────────────────
+  // dismiss() / isDismissed() read from the localStorage collection; the
+  // collection mutates synchronously, but Svelte 5 derived values need an
+  // explicit trigger to re-evaluate. We bump `dismissTick` on every
+  // dismissal, then read it inside the focusItems $derived so the rebuild
+  // fires.
+  let dismissTick = $state(0);
+  function handleFocusDismiss(itemId: string) {
+    dismiss(itemId);
+    dismissTick += 1;
+  }
 
   const stats = $derived(statsQuery?.current ?? null);
   const statsLoading = $derived(statsQuery?.loading ?? false);
@@ -98,7 +142,14 @@
   });
 
   // ── Focus items (contextual — real work, not generic links) ──────────────
+  // Order: drafts > revenue-share signals > customers > branding nudges.
+  // Dismissable items are filtered against the localStorage dismissal
+  // collection (WP-9). The `dismissTick` read forces re-derivation when
+  // the user dismisses a card.
   const focusItems = $derived.by<FocusItem[]>(() => {
+    // Touch the tick so dismissals re-fire derivation.
+    void dismissTick;
+
     const items: FocusItem[] = [];
     const drafts = data.badgeCounts?.draftContent ?? 0;
 
@@ -130,6 +181,45 @@
     }
 
     if (isAdmin) {
+      // WP-9 revenue-share signals — only when all three data sources
+      // have resolved. We deliberately don't render partial sets while
+      // queries are still loading; the rest of the rail covers the
+      // skeleton state.
+      const activeAgreements = agreementsQuery?.current?.items ?? [];
+      const pendingCounters = pendingCountersQuery?.current?.items ?? [];
+      const teamMembers = teamMembersQuery?.current?.items ?? [];
+      const dataReady =
+        agreementsQuery?.current != null &&
+        pendingCountersQuery?.current != null &&
+        teamMembersQuery?.current != null;
+      if (dataReady) {
+        const agreementItems = buildOwnerAgreementFocusItems({
+          teamMembers: teamMembers
+            .filter((m) => m.role !== 'subscriber')
+            .map((m) => ({
+              userId: m.userId,
+              name: m.name,
+              email: m.email,
+              role: m.role,
+            })),
+          activeAgreements: activeAgreements.map((a) => ({
+            id: a.id,
+            creatorId: a.creatorId,
+            revenueType: a.revenueType,
+            organizationFeePercentage: a.organizationFeePercentage,
+            effectiveUntil: a.effectiveUntil,
+          })),
+          pendingCreatorCounters: pendingCounters.map((p) => ({
+            id: p.id,
+            creatorId: p.creatorId,
+            proposedByRole: p.proposedByRole,
+            revenueType: p.revenueType,
+            proposedCreatorSharePercent: p.proposedCreatorSharePercent,
+          })),
+        }).filter((item) => !item.dismissable || !isDismissed(item.id));
+        items.push(...agreementItems);
+      }
+
       // Customers tile — visible only to admin/owner, prompts CRM review
       const customerCount = stats?.customers?.value ?? 0;
       if (customerCount > 0) {
@@ -275,7 +365,7 @@
 
   <!-- ── 03  Split: Focus rail + Activity stream ── -->
   <section class="below-fold">
-    <FocusRail items={focusItems} />
+    <FocusRail items={focusItems} onDismiss={handleFocusDismiss} />
     <ActivityStream
       activities={activities}
       loading={activitiesLoading}

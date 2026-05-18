@@ -1447,6 +1447,307 @@ describe('PurchaseService Integration', () => {
     });
   });
 
+  // ─── WP-4 content-purchase agreement integration (Codex-rzfjw) ─────────
+  //
+  // Decision Q1: content-purchase revenue is attributed to the uploader
+  // (`content.creatorId`) — that creator's `revenueType='content_purchase'`
+  // agreement determines the split. If no agreement exists, the org keeps
+  // 100% of post-platform revenue (pre-agreements behaviour, fallback to
+  // FeeConfigService).
+  //
+  // These tests pin the WP-4 behaviour:
+  //   - agreement present  → split shifts toward creator per agreement share
+  //   - no agreement       → fallback to org fee resolved from feeConfig
+  //   - terminated         → not active, fallback fires
+  //   - wrong revenueType  → not used, fallback fires
+  //   - other creator's agreement on the same org → does NOT apply (Q1)
+  describe('completePurchase — WP-4 content-purchase agreements (Codex-rzfjw)', () => {
+    // Each test seeds an agreement on the same (org, creator) tuple and
+    // the schema's partial unique index `uq_creator_org_agreement_active_per_type`
+    // would reject the second test's insert. Clear any active rows for
+    // the shared org between tests.
+    beforeEach(async () => {
+      await db
+        .delete(schema.creatorOrganizationAgreements)
+        .where(
+          eq(
+            schema.creatorOrganizationAgreements.organizationId,
+            organizationId
+          )
+        );
+      await db
+        .delete(schema.agreementProposals)
+        .where(eq(schema.agreementProposals.organizationId, organizationId));
+    });
+
+    async function seedContentPurchaseAgreement(
+      orgId: string,
+      creatorId: string,
+      sharePercent: number,
+      options: {
+        status?: 'active' | 'terminated';
+        terminatedAt?: Date | null;
+        revenueType?: 'subscription' | 'content_purchase';
+      } = {}
+    ) {
+      const [proposal] = await db
+        .insert(schema.agreementProposals)
+        .values({
+          organizationId: orgId,
+          creatorId,
+          revenueType: options.revenueType ?? 'content_purchase',
+          roundNumber: 1,
+          proposedByUserId: creatorId,
+          proposedByRole: 'owner',
+          proposedCreatorSharePercent: sharePercent,
+          proposedTermMonths: null,
+          proposedEffectiveFrom: new Date(),
+          status: 'accepted',
+          respondedAt: new Date(),
+          respondedByUserId: creatorId,
+        })
+        .returning();
+      if (!proposal) throw new Error('seed proposal failed');
+      await db.insert(schema.creatorOrganizationAgreements).values({
+        organizationId: orgId,
+        creatorId,
+        organizationFeePercentage: 10_000 - sharePercent,
+        revenueType: options.revenueType ?? 'content_purchase',
+        status: options.status ?? 'active',
+        terminatedAt: options.terminatedAt ?? null,
+        currentProposalId: proposal.id,
+      });
+      return { proposalId: proposal.id };
+    }
+
+    async function seedPaidContent(opts: {
+      title: string;
+      priceCents: number;
+    }) {
+      const media = await mediaService.create(
+        {
+          title: opts.title,
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: `hls/${opts.title}/master.m3u8`,
+          thumbnailKey: `thumbnails/${opts.title}.jpg`,
+          durationSeconds: 60,
+        },
+        userId
+      );
+      const content = await contentService.create(
+        {
+          organizationId,
+          title: opts.title,
+          slug: createUniqueSlug(opts.title.toLowerCase().replace(/\s+/g, '-')),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: opts.priceCents,
+        },
+        userId
+      );
+      await contentService.publish(content.id, userId);
+      return { content };
+    }
+
+    it('WP-4: content_purchase agreement overrides default org fee — creator receives agreement share of post-platform', async () => {
+      // Default platform fee = 10%. With a 70% creator share agreement,
+      // the org's effective cut becomes 30% of post-platform. On a £100
+      // purchase:
+      //   platform = ceil(10000 * 10%) = 1000
+      //   org      = ceil(9000  * 30%) = 2700
+      //   creator  = 10000 - 1000 - 2700 = 6300
+      const { content } = await seedPaidContent({
+        title: 'WP-4 agreement override',
+        priceCents: 10000,
+      });
+      await seedContentPurchaseAgreement(organizationId, userId, 7000);
+
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      (mockStripe as any).transfers = {
+        create: vi.fn().mockResolvedValue({ id: 'tr_test' }),
+      };
+      const purchase = await purchaseService.completePurchase(
+        `pi_wp4_override_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: content.id,
+          organizationId,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+        }
+      );
+
+      expect(purchase.platformFeeCents).toBe(1000);
+      expect(purchase.organizationFeeCents).toBe(2700);
+      expect(purchase.creatorPayoutCents).toBe(6300);
+    });
+
+    it('WP-4: no agreement → falls back to FeeConfigService defaults (org keeps post-platform)', async () => {
+      // No agreement seeded. With default fees (10% platform / 10% org),
+      // org gets 900, creator gets 8100.
+      const { content } = await seedPaidContent({
+        title: 'WP-4 no agreement fallback',
+        priceCents: 10000,
+      });
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      (mockStripe as any).transfers = {
+        create: vi.fn().mockResolvedValue({ id: 'tr_test' }),
+      };
+
+      const purchase = await purchaseService.completePurchase(
+        `pi_wp4_fallback_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: content.id,
+          organizationId,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+        }
+      );
+
+      // Default split: platform 1000, org 900, creator 8100.
+      expect(purchase.platformFeeCents).toBe(1000);
+      expect(purchase.organizationFeeCents).toBe(900);
+      expect(purchase.creatorPayoutCents).toBe(8100);
+    });
+
+    it('WP-4: terminated agreement → fallback to defaults (no longer applies)', async () => {
+      const { content } = await seedPaidContent({
+        title: 'WP-4 terminated agreement',
+        priceCents: 10000,
+      });
+      // Terminated yesterday — must not influence the split.
+      await seedContentPurchaseAgreement(organizationId, userId, 7000, {
+        status: 'terminated',
+        terminatedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      });
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      (mockStripe as any).transfers = {
+        create: vi.fn().mockResolvedValue({ id: 'tr_test' }),
+      };
+
+      const purchase = await purchaseService.completePurchase(
+        `pi_wp4_term_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: content.id,
+          organizationId,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+        }
+      );
+
+      // Default fallback split — agreement is terminated so it doesn't apply.
+      expect(purchase.platformFeeCents).toBe(1000);
+      expect(purchase.organizationFeeCents).toBe(900);
+      expect(purchase.creatorPayoutCents).toBe(8100);
+    });
+
+    it('WP-4: subscription-type agreement does NOT apply to content_purchase split', async () => {
+      // A subscription agreement exists for the uploader — but the
+      // content-purchase path must only look at content_purchase
+      // agreements. Fallback fires.
+      const { content } = await seedPaidContent({
+        title: 'WP-4 wrong revenue type',
+        priceCents: 10000,
+      });
+      await seedContentPurchaseAgreement(organizationId, userId, 7000, {
+        revenueType: 'subscription',
+      });
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      (mockStripe as any).transfers = {
+        create: vi.fn().mockResolvedValue({ id: 'tr_test' }),
+      };
+
+      const purchase = await purchaseService.completePurchase(
+        `pi_wp4_revtype_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: content.id,
+          organizationId,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+        }
+      );
+
+      // Default fallback — subscription agreement is irrelevant here.
+      expect(purchase.platformFeeCents).toBe(1000);
+      expect(purchase.organizationFeeCents).toBe(900);
+      expect(purchase.creatorPayoutCents).toBe(8100);
+    });
+
+    it("WP-4: a DIFFERENT creator's content_purchase agreement does NOT apply to this content (Q1 own-content scope)", async () => {
+      // Decision Q1: the agreement looked up at split time is keyed on
+      // `content.creatorId` (the uploader). An agreement held by
+      // `otherUserId` (the buyer in this test setup, who is also a
+      // user but not the uploader) MUST NOT influence the split.
+      const { content } = await seedPaidContent({
+        title: 'WP-4 other creator agreement',
+        priceCents: 10000,
+      });
+      // Seed an agreement for OTHER user (not the uploader).
+      await seedContentPurchaseAgreement(organizationId, otherUserId, 7000);
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      (mockStripe as any).transfers = {
+        create: vi.fn().mockResolvedValue({ id: 'tr_test' }),
+      };
+
+      const purchase = await purchaseService.completePurchase(
+        `pi_wp4_other_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: content.id,
+          organizationId,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+        }
+      );
+
+      // The split is the default — only the uploader's agreement counts.
+      expect(purchase.platformFeeCents).toBe(1000);
+      expect(purchase.organizationFeeCents).toBe(900);
+      expect(purchase.creatorPayoutCents).toBe(8100);
+    });
+
+    it('WP-4: 100% creator share agreement → creator gets the full post-platform pool', async () => {
+      const { content } = await seedPaidContent({
+        title: 'WP-4 full share',
+        priceCents: 10000,
+      });
+      await seedContentPurchaseAgreement(organizationId, userId, 10000);
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      (mockStripe as any).transfers = {
+        create: vi.fn().mockResolvedValue({ id: 'tr_test' }),
+      };
+
+      const purchase = await purchaseService.completePurchase(
+        `pi_wp4_full_${Date.now()}`,
+        {
+          customerId: otherUserId,
+          contentId: content.id,
+          organizationId,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+        }
+      );
+
+      // platform = 1000, org = 0, creator = 9000.
+      expect(purchase.platformFeeCents).toBe(1000);
+      expect(purchase.organizationFeeCents).toBe(0);
+      expect(purchase.creatorPayoutCents).toBe(9000);
+    });
+  });
+
   describe('processRefund — payouts reversal (Codex-h69cg)', () => {
     it('reverses Stripe transfers + marks all rows reversed when refund processes', async () => {
       // Set up a feeConfig with org_fee > 0 so an org_fee row + transfer exist

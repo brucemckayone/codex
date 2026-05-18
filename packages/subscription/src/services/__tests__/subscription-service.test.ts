@@ -15,6 +15,8 @@
  * - Stripe v19 shapes for period dates and invoice payments
  */
 
+import { CURRENCY } from '@codex/constants';
+import * as schema from '@codex/database/schema';
 import {
   creatorOrganizationAgreements,
   organizations,
@@ -3262,6 +3264,66 @@ describe('SubscriptionService', () => {
     }
 
     /**
+     * Codex-rzfjw (WP-4): seed a (proposal, agreement) pair so the WP-4
+     * payout pipeline's JOIN against `agreementProposals` resolves the
+     * creator share. Mirrors the synthesised-proposal shape that
+     * migration 0072 writes for legacy rows.
+     *
+     * @param sharePercent Creator's share of the post-platform pool in bps.
+     *   The legacy `organization_fee_percentage` column is dual-written
+     *   as `10000 - sharePercent` per the WP-1 invariant so any code
+     *   still reading the legacy column sees the same economics.
+     */
+    async function seedAgreement(
+      orgId: string,
+      creatorId: string,
+      sharePercent: number,
+      options: {
+        effectiveFrom?: Date;
+        effectiveUntil?: Date | null;
+        status?: 'active' | 'terminated' | 'expired';
+        terminatedAt?: Date | null;
+        revenueType?: 'subscription' | 'content_purchase';
+      } = {}
+    ): Promise<{ proposalId: string; agreementId: string }> {
+      const [proposal] = await db
+        .insert(schema.agreementProposals)
+        .values({
+          organizationId: orgId,
+          creatorId,
+          revenueType: options.revenueType ?? 'subscription',
+          roundNumber: 1,
+          proposedByUserId: creatorId,
+          proposedByRole: 'owner',
+          proposedCreatorSharePercent: sharePercent,
+          proposedTermMonths: null,
+          proposedEffectiveFrom: options.effectiveFrom ?? new Date(),
+          status: 'accepted',
+          respondedAt: new Date(),
+          respondedByUserId: creatorId,
+        })
+        .returning();
+      if (!proposal) throw new Error('seed proposal failed');
+
+      const [agreement] = await db
+        .insert(creatorOrganizationAgreements)
+        .values({
+          creatorId,
+          organizationId: orgId,
+          organizationFeePercentage: 10_000 - sharePercent,
+          revenueType: options.revenueType ?? 'subscription',
+          status: options.status ?? 'active',
+          terminatedAt: options.terminatedAt ?? null,
+          currentProposalId: proposal.id,
+          effectiveFrom: options.effectiveFrom ?? new Date(),
+          effectiveUntil: options.effectiveUntil ?? null,
+        })
+        .returning();
+      if (!agreement) throw new Error('seed agreement failed');
+      return { proposalId: proposal.id, agreementId: agreement.id };
+    }
+
+    /**
      * Filter Stripe transfer mock calls to just the per-creator transfers
      * (excludes the `_org_fee` and `_creator_pool_owner` keys). The
      * production code stamps each per-creator call with
@@ -3298,18 +3360,8 @@ describe('SubscriptionService', () => {
       const c1 = await seedCreatorWithConnect(org.id);
       const c2 = await seedCreatorWithConnect(org.id);
 
-      await db.insert(creatorOrganizationAgreements).values([
-        {
-          creatorId: c1,
-          organizationId: org.id,
-          organizationFeePercentage: 5000,
-        },
-        {
-          creatorId: c2,
-          organizationId: org.id,
-          organizationFeePercentage: 5000,
-        },
-      ]);
+      await seedAgreement(org.id, c1, 5000);
+      await seedAgreement(org.id, c2, 5000);
 
       const [sub] = await db
         .insert(subscriptions)
@@ -3363,23 +3415,9 @@ describe('SubscriptionService', () => {
       const c2 = await seedCreatorWithConnect(org.id);
       const c3 = await seedCreatorWithConnect(org.id);
 
-      await db.insert(creatorOrganizationAgreements).values([
-        {
-          creatorId: c1,
-          organizationId: org.id,
-          organizationFeePercentage: 3334,
-        },
-        {
-          creatorId: c2,
-          organizationId: org.id,
-          organizationFeePercentage: 3333,
-        },
-        {
-          creatorId: c3,
-          organizationId: org.id,
-          organizationFeePercentage: 3333,
-        },
-      ]);
+      await seedAgreement(org.id, c1, 3334);
+      await seedAgreement(org.id, c2, 3333);
+      await seedAgreement(org.id, c3, 3333);
 
       const [sub] = await db
         .insert(subscriptions)
@@ -3423,28 +3461,22 @@ describe('SubscriptionService', () => {
       expect(a1 + a2 + a3).toBeGreaterThan(0);
     });
 
-    it('share-sum UNDER 10000 bps (4000+4000=8000): production normalises by totalShareBps, so creators split the full pool', async () => {
-      // Production code at subscription-service.ts:2972-2974 divides by
-      // totalShareBps (the SUM of share rows), not by 10000. Locking in
-      // that contract: undersum does NOT route a remainder to the org
-      // owner. The creators receive the full creator pool, split by
-      // their relative weights.
+    it('share-sum UNDER 10000 bps (4000+4000=8000): creators get absolute shares of post-platform, org gets residual', async () => {
+      // Codex-ez3tl (C1): `proposed_creator_share_percent` is the
+      // ABSOLUTE fraction of the post-platform pool. With shares
+      // 4000+4000, totalShareBps=8000 → effectiveOrgFeePercent=2000.
+      // For gross=1000, platform=10%=100, post=900:
+      //   org gets floor(900*2000/10000) = 180
+      //   each creator gets floor(900*4000/10000) = 360
+      //   sum: 100 + 180 + 360 + 360 = 1000 ✓
+      // The org receives its residual via the existing `${chargeId}_org_fee`
+      // transfer, NOT the `${chargeId}_creator_pool_owner` fallback.
       const { org, tier1 } = await createFullOrg('split-undersum');
       const c1 = await seedCreatorWithConnect(org.id);
       const c2 = await seedCreatorWithConnect(org.id);
 
-      await db.insert(creatorOrganizationAgreements).values([
-        {
-          creatorId: c1,
-          organizationId: org.id,
-          organizationFeePercentage: 4000,
-        },
-        {
-          creatorId: c2,
-          organizationId: org.id,
-          organizationFeePercentage: 4000,
-        },
-      ]);
+      await seedAgreement(org.id, c1, 4000);
+      await seedAgreement(org.id, c2, 4000);
 
       const [sub] = await db
         .insert(subscriptions)
@@ -3476,9 +3508,8 @@ describe('SubscriptionService', () => {
       // Both creators receive a transfer.
       expect(creatorCalls).toHaveLength(2);
 
-      // With shares 4000+4000, totalShareBps = 8000. Each creator gets
-      // floor(payout * 4000/8000) = floor(payout/2). The agreements
-      // present branch is taken (no `creator_payout_to_owner` transfer):
+      // The agreements branch is taken (no `creator_payout_to_owner`
+      // fallback). The org's residual rides the existing org_fee key.
       const allCalls = (stripe.transfers.create as ReturnType<typeof vi.fn>)
         .mock.calls;
       const ownerFallbackCalls = allCalls.filter((call) => {
@@ -3487,32 +3518,40 @@ describe('SubscriptionService', () => {
       });
       expect(ownerFallbackCalls).toHaveLength(0);
 
-      // Equal split because shares are equal.
-      const [first, second] = creatorCalls;
-      expect(first.amount).toBe(second.amount);
+      // Exact-amount assertions (Codex-ez3tl I1): each creator gets 360,
+      // sum < creator pool of 900 (org keeps residual 180).
+      const byKey = new Map(
+        creatorCalls.map((c) => [c.idempotencyKey, c.amount])
+      );
+      expect(byKey.get(`${chargeId}_creator_${c1}`)).toBe(360);
+      expect(byKey.get(`${chargeId}_creator_${c2}`)).toBe(360);
+
+      // Org residual lands on the `${chargeId}_org_fee` key.
+      const orgFeeCalls = allCalls.filter((call) => {
+        const opts = call[1] as { idempotencyKey?: string } | undefined;
+        return opts?.idempotencyKey === `${chargeId}_org_fee`;
+      });
+      expect(orgFeeCalls).toHaveLength(1);
+      const orgFeeParams = orgFeeCalls[0][0] as { amount: number };
+      expect(orgFeeParams.amount).toBe(180);
     });
 
-    it('share-sum OVER 10000 bps (6000+5000=11000): production silently clamps via normalisation, no throw', async () => {
-      // Production normalises by totalShareBps = 11000, so each creator
-      // receives floor(payout * share / 11000) — the sum is ≤ payout. No
-      // error is thrown; the service does not currently enforce a
-      // 10000-bps ceiling. This test pins that behaviour.
+    it('share-sum OVER 10000 bps (6000+5000=11000): clamp by max(totalShareBps,10000), no over-pay, no throw', async () => {
+      // Codex-ez3tl (C1): `validateProposedShare` enforces sum ≤ 10000,
+      // but the payout pipeline defends against an oversum config by
+      // dividing per-creator by `max(totalShareBps, 10000)`. Creators
+      // jointly take ≤ 100% of post-platform; org gets 0 residual.
+      // For gross=1000, platform=10%=100, post=900, divisor=11000:
+      //   c1 = floor(900*6000/11000) = 490
+      //   c2 = floor(900*5000/11000) = 409
+      //   org_fee = 0 (effectiveOrgFeePercent = max(0, 10000-11000) = 0)
+      //   sum: 100 + 0 + 490 + 409 = 999 ≤ 1000 ✓ (1¢ float-rounding loss)
       const { org, tier1 } = await createFullOrg('split-oversum');
       const c1 = await seedCreatorWithConnect(org.id);
       const c2 = await seedCreatorWithConnect(org.id);
 
-      await db.insert(creatorOrganizationAgreements).values([
-        {
-          creatorId: c1,
-          organizationId: org.id,
-          organizationFeePercentage: 6000,
-        },
-        {
-          creatorId: c2,
-          organizationId: org.id,
-          organizationFeePercentage: 5000,
-        },
-      ]);
+      await seedAgreement(org.id, c1, 6000);
+      await seedAgreement(org.id, c2, 5000);
 
       const [sub] = await db
         .insert(subscriptions)
@@ -3555,11 +3594,12 @@ describe('SubscriptionService', () => {
       // c1 (6000) > c2 (5000), so a1 > a2 (strict — different shares).
       expect(a1).toBeGreaterThan(a2);
 
-      // Clamp invariant: a1 = floor(payout * 6000/11000), a2 = floor(payout * 5000/11000).
-      // The ratio a1/a2 ≈ 6000/5000 = 1.2 (within rounding tolerance).
-      // The key contract is: total ≤ creator pool — which we can verify
-      // by checking no transfer exceeds the input amount_paid (=1000).
-      expect(a1 + a2).toBeLessThanOrEqual(1000);
+      // Exact-amount assertions (Codex-ez3tl I1): clamp via max-divisor.
+      expect(a1).toBe(490);
+      expect(a2).toBe(409);
+
+      // Critical invariant: total per-creator transfer ≤ post-platform pool.
+      expect(a1 + a2).toBeLessThanOrEqual(900);
     });
 
     it('zero-share agreement: creator with 0 bps receives no transfer, share holder gets full pool', async () => {
@@ -3567,14 +3607,8 @@ describe('SubscriptionService', () => {
       const c1 = await seedCreatorWithConnect(org.id);
       const c2 = await seedCreatorWithConnect(org.id);
 
-      await db.insert(creatorOrganizationAgreements).values([
-        {
-          creatorId: c1,
-          organizationId: org.id,
-          organizationFeePercentage: 5000,
-        },
-        { creatorId: c2, organizationId: org.id, organizationFeePercentage: 0 },
-      ]);
+      await seedAgreement(org.id, c1, 5000);
+      await seedAgreement(org.id, c2, 0);
 
       const [sub] = await db
         .insert(subscriptions)
@@ -3662,14 +3696,13 @@ describe('SubscriptionService', () => {
       const { org, tier1 } = await createFullOrg('split-mid-removal');
       const c1 = await seedCreatorWithConnect(org.id);
 
-      const [agreementRow] = await db
-        .insert(creatorOrganizationAgreements)
-        .values({
-          creatorId: c1,
-          organizationId: org.id,
-          organizationFeePercentage: 10000,
-        })
-        .returning();
+      // Codex-rzfjw (WP-4): seed via seedAgreement so the payout
+      // pipeline's JOIN against agreement_proposals resolves the share.
+      // 100% share to c1 — org owner takes zero residual on the first
+      // invoice. effective_until is updated below to simulate mid-period
+      // termination.
+      const { agreementId } = await seedAgreement(org.id, c1, 10000);
+      const agreementRow = { id: agreementId };
 
       const [sub] = await db
         .insert(subscriptions)
@@ -3741,6 +3774,559 @@ describe('SubscriptionService', () => {
         }
       );
       expect(ownerFallbackSecondCycle).toHaveLength(1);
+    });
+
+    // ── WP-4 deep coverage (Codex-rzfjw) ──────────────────────────────
+    //
+    // These tests exercise the new agreement-model semantics that WP-4
+    // wires into the payout pipeline:
+    //   - status='terminated' BEFORE invoice → no payout
+    //   - status='terminated' AFTER  invoice → still receives payout (Q3)
+    //   - effective_from > invoiceAt → not-yet-active, no payout
+    //   - revenueType='content_purchase' rows do NOT pollute subscription pool
+    //   - reproduce the original bug: a co-creator with an active subscription
+    //     agreement receives their cut (was failing in production)
+    //   - payouts ledger inserts one row per active agreement + one residual
+
+    it('WP-4 / WP-10 REGRESSION GUARD: original co-creator-loses-revenue bug — co-creator with active 30% subscription agreement receives 30% of post-platform on invoice payment', async () => {
+      // CANONICAL ORIGINAL-BUG REGRESSION GUARD for the
+      // Revenue-Share Agreements epic (Codex-nk4km). This was the bug
+      // that triggered the epic: subscription payouts checked an empty
+      // `creator_organization_agreements` table and routed 100% to the
+      // org owner. Now a co-creator with a 30% agreement receives 30%
+      // of the post-platform pool.
+      //
+      // If this test fails, the co-creator-loses-revenue bug has
+      // regressed and the epic's payout-fix is broken in production.
+      //
+      // Codex-ez3tl (I1): exact-amount assertion. Pre-fix, the
+      // co-creator received 85% of post-platform (765 cents) because
+      // the divisor was the sum-of-shares (3000) not 10000. Post-fix,
+      // they receive their ABSOLUTE share of post-platform per the
+      // ADR (agreement-math.ts header). For gross=1000, platform=10%
+      // (100 cents), post-platform=900, the 30%-share co-creator gets
+      // floor(900 * 3000 / 10000) = 270 cents. The org keeps the 70%
+      // residual = 630 cents via the existing `${chargeId}_org_fee`
+      // transfer — NO `creator_pool_owner` fallback fires.
+      const { org, tier1 } = await createFullOrg('wp4-original-bug');
+      const coCreator = await seedCreatorWithConnect(org.id);
+      await seedAgreement(org.id, coCreator, 3000);
+
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const chargeId = 'ch_wp4_repro';
+      const invoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [{ payment: { charge: chargeId, payment_intent: 'pi_wp4' } }],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentSucceeded(invoice);
+
+      const creatorCalls = perCreatorTransferCalls(
+        stripe.transfers.create as ReturnType<typeof vi.fn>
+      );
+      const coCreatorCall = creatorCalls.find(
+        (c) => c.idempotencyKey === `${chargeId}_creator_${coCreator}`
+      );
+      expect(coCreatorCall).toBeDefined();
+      // Exact-amount assertion locks in the C1 fix:
+      expect(coCreatorCall?.amount).toBe(270);
+
+      // The org receives its 70% residual via the existing org_fee key,
+      // NOT via the no-agreements `creator_pool_owner` fallback.
+      const allCalls = (stripe.transfers.create as ReturnType<typeof vi.fn>)
+        .mock.calls;
+      const ownerFallbackCalls = allCalls.filter((call) => {
+        const opts = call[1] as { idempotencyKey?: string } | undefined;
+        return opts?.idempotencyKey === `${chargeId}_creator_pool_owner`;
+      });
+      expect(ownerFallbackCalls).toHaveLength(0);
+
+      // Org residual via the `${chargeId}_org_fee` key:
+      //   effectiveOrgFeePercent = 10000 - 3000 = 7000
+      //   orgFee = floor(900 * 7000 / 10000) = 630
+      const orgFeeCalls = allCalls.filter((call) => {
+        const opts = call[1] as { idempotencyKey?: string } | undefined;
+        return opts?.idempotencyKey === `${chargeId}_org_fee`;
+      });
+      expect(orgFeeCalls).toHaveLength(1);
+      const orgFeeParams = orgFeeCalls[0][0] as { amount: number };
+      expect(orgFeeParams.amount).toBe(630);
+    });
+
+    it('WP-4 / Codex-ez3tl I1: multi-creator exact split (30/20/10%) sums to gross', async () => {
+      // Three creators at 30/20/10% share. Sums via the new math:
+      //   gross = 1000, platform = 10% = 100, post = 900
+      //   totalShareBps = 6000, effectiveOrgFeePercent = 4000
+      //   org_fee = floor(900 * 4000 / 10000) = 360
+      //   c1 (30%) = floor(900 * 3000 / 10000) = 270
+      //   c2 (20%) = floor(900 * 2000 / 10000) = 180
+      //   c3 (10%) = floor(900 * 1000 / 10000) =  90
+      //   sum: 100 + 360 + 270 + 180 + 90 = 1000 ✓ exact
+      const { org, tier1 } = await createFullOrg('wp4-multi-exact');
+      const c1 = await seedCreatorWithConnect(org.id);
+      const c2 = await seedCreatorWithConnect(org.id);
+      const c3 = await seedCreatorWithConnect(org.id);
+
+      await seedAgreement(org.id, c1, 3000);
+      await seedAgreement(org.id, c2, 2000);
+      await seedAgreement(org.id, c3, 1000);
+
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const chargeId = 'ch_wp4_multi_exact';
+      const invoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [
+            {
+              payment: {
+                charge: chargeId,
+                payment_intent: 'pi_wp4_multi_exact',
+              },
+            },
+          ],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentSucceeded(invoice);
+
+      const allCalls = (stripe.transfers.create as ReturnType<typeof vi.fn>)
+        .mock.calls;
+      const byKey = new Map<string, number>();
+      for (const call of allCalls) {
+        const params = call[0] as { amount: number };
+        const opts = call[1] as { idempotencyKey?: string } | undefined;
+        if (opts?.idempotencyKey) {
+          byKey.set(opts.idempotencyKey, params.amount);
+        }
+      }
+
+      expect(byKey.get(`${chargeId}_creator_${c1}`)).toBe(270);
+      expect(byKey.get(`${chargeId}_creator_${c2}`)).toBe(180);
+      expect(byKey.get(`${chargeId}_creator_${c3}`)).toBe(90);
+      expect(byKey.get(`${chargeId}_org_fee`)).toBe(360);
+
+      // No creator_pool_owner fallback (agreements exist).
+      const ownerFallbackCalls = allCalls.filter((call) => {
+        const opts = call[1] as { idempotencyKey?: string } | undefined;
+        return opts?.idempotencyKey === `${chargeId}_creator_pool_owner`;
+      });
+      expect(ownerFallbackCalls).toHaveLength(0);
+
+      // Sum invariant: platform (100, retained, not transferred) +
+      // org_fee (360) + creator payouts (270+180+90=540) = gross (1000).
+      const sum =
+        100 +
+        (byKey.get(`${chargeId}_org_fee`) ?? 0) +
+        (byKey.get(`${chargeId}_creator_${c1}`) ?? 0) +
+        (byKey.get(`${chargeId}_creator_${c2}`) ?? 0) +
+        (byKey.get(`${chargeId}_creator_${c3}`) ?? 0);
+      expect(sum).toBe(1000);
+    });
+
+    it('WP-4: agreement terminated BEFORE invoice fires → no payout (Q3 strict cutoff)', async () => {
+      const { org, tier1 } = await createFullOrg('wp4-terminated-before');
+      const coCreator = await seedCreatorWithConnect(org.id);
+      const longAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      // Agreement terminated yesterday — must NOT receive payout today.
+      await seedAgreement(org.id, coCreator, 3000, {
+        effectiveFrom: longAgo,
+        status: 'terminated',
+        terminatedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      });
+
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const chargeId = 'ch_wp4_term_before';
+      const invoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [
+            { payment: { charge: chargeId, payment_intent: 'pi_wp4_tb' } },
+          ],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentSucceeded(invoice);
+
+      const creatorCalls = perCreatorTransferCalls(
+        stripe.transfers.create as ReturnType<typeof vi.fn>
+      );
+      const coCreatorCall = creatorCalls.find(
+        (c) => c.idempotencyKey === `${chargeId}_creator_${coCreator}`
+      );
+      expect(coCreatorCall).toBeUndefined();
+    });
+
+    it('WP-4: agreement terminated AFTER invoice fires → still receives payout (Q3 no pro-rating)', async () => {
+      // Per Decision Q3 in project_revenue_share_decisions: whoever holds
+      // an active agreement at invoice fire time receives the full cut
+      // for that period. Termination on day 15 of a 30-day period → no
+      // share for the NEXT invoice, but the current one is locked in.
+      const { org, tier1 } = await createFullOrg('wp4-terminated-after');
+      const coCreator = await seedCreatorWithConnect(org.id);
+      // Agreement created 7 days ago, terminated 1h from "now" (which is
+      // ahead of the invoice's `created` field — invoice fires in the
+      // mock with `created` defaulting to now()).
+      const longAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const oneHourLater = new Date(Date.now() + 60 * 60 * 1000);
+      await seedAgreement(org.id, coCreator, 4000, {
+        effectiveFrom: longAgo,
+        status: 'terminated',
+        terminatedAt: oneHourLater,
+      });
+
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const invoiceCreated = Math.floor(Date.now() / 1000); // "now" in seconds
+      const chargeId = 'ch_wp4_term_after';
+      const invoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        created: invoiceCreated,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [
+            { payment: { charge: chargeId, payment_intent: 'pi_wp4_ta' } },
+          ],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentSucceeded(invoice);
+
+      const creatorCalls = perCreatorTransferCalls(
+        stripe.transfers.create as ReturnType<typeof vi.fn>
+      );
+      const coCreatorCall = creatorCalls.find(
+        (c) => c.idempotencyKey === `${chargeId}_creator_${coCreator}`
+      );
+      expect(coCreatorCall).toBeDefined();
+      expect(coCreatorCall?.amount).toBeGreaterThan(0);
+    });
+
+    it('WP-4: effective_from > invoiceAt → agreement not yet active, no payout', async () => {
+      const { org, tier1 } = await createFullOrg('wp4-future-from');
+      const coCreator = await seedCreatorWithConnect(org.id);
+      // Agreement effective from 7 days in the future — not yet live.
+      const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      await seedAgreement(org.id, coCreator, 3000, { effectiveFrom: future });
+
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const chargeId = 'ch_wp4_future';
+      const invoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [
+            { payment: { charge: chargeId, payment_intent: 'pi_wp4_fut' } },
+          ],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentSucceeded(invoice);
+
+      const creatorCalls = perCreatorTransferCalls(
+        stripe.transfers.create as ReturnType<typeof vi.fn>
+      );
+      expect(
+        creatorCalls.find(
+          (c) => c.idempotencyKey === `${chargeId}_creator_${coCreator}`
+        )
+      ).toBeUndefined();
+    });
+
+    it('WP-4: revenueType=content_purchase agreements do NOT pollute the subscription pool', async () => {
+      const { org, tier1 } = await createFullOrg('wp4-rev-type-filter');
+      const subCreator = await seedCreatorWithConnect(org.id);
+      const cpCreator = await seedCreatorWithConnect(org.id);
+      // One subscription agreement + one content_purchase agreement.
+      // The content_purchase row must not flow through the subscription
+      // payout path.
+      await seedAgreement(org.id, subCreator, 3000, {
+        revenueType: 'subscription',
+      });
+      await seedAgreement(org.id, cpCreator, 5000, {
+        revenueType: 'content_purchase',
+      });
+
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const chargeId = 'ch_wp4_revtype';
+      const invoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [
+            { payment: { charge: chargeId, payment_intent: 'pi_wp4_rt' } },
+          ],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentSucceeded(invoice);
+
+      const creatorCalls = perCreatorTransferCalls(
+        stripe.transfers.create as ReturnType<typeof vi.fn>
+      );
+      // Subscription creator should get a payout.
+      expect(
+        creatorCalls.find(
+          (c) => c.idempotencyKey === `${chargeId}_creator_${subCreator}`
+        )
+      ).toBeDefined();
+      // Content-purchase creator MUST NOT get a subscription payout.
+      expect(
+        creatorCalls.find(
+          (c) => c.idempotencyKey === `${chargeId}_creator_${cpCreator}`
+        )
+      ).toBeUndefined();
+    });
+
+    it('WP-4: payouts ledger has one row per active creator agreement', async () => {
+      const { org, tier1 } = await createFullOrg('wp4-ledger-rows');
+      const c1 = await seedCreatorWithConnect(org.id);
+      const c2 = await seedCreatorWithConnect(org.id);
+      const c3 = await seedCreatorWithConnect(org.id);
+      await seedAgreement(org.id, c1, 3000);
+      await seedAgreement(org.id, c2, 2000);
+      await seedAgreement(org.id, c3, 1000);
+
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const chargeId = 'ch_wp4_ledger';
+      const invoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [{ payment: { charge: chargeId, payment_intent: 'pi_wp4_l' } }],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentSucceeded(invoice);
+
+      const { eq, and } = await import('drizzle-orm');
+      const creatorPayouts = await db
+        .select()
+        .from(payoutsTable)
+        .where(
+          and(
+            eq(payoutsTable.organizationId, org.id),
+            eq(payoutsTable.subscriptionId, sub.id),
+            eq(payoutsTable.payoutType, 'creator_payout')
+          )
+        );
+      // 3 creator agreements → 3 creator_payout rows on the ledger.
+      expect(creatorPayouts).toHaveLength(3);
+      // All three creators are represented.
+      const userIds = creatorPayouts.map((r) => r.userId).sort();
+      expect(userIds).toEqual([c1, c2, c3].sort());
+    });
+
+    it('WP-4: all-zero-share agreements fall through to "org keeps all" branch', async () => {
+      // Every creator has a 0% agreement (degenerate / legacy backfill
+      // with org_fee=10000). The total shareBps is 0 — the new pipeline
+      // must not divide by zero. It routes the full creator pool to the
+      // org owner via the zero-share fallback.
+      const { org, tier1 } = await createFullOrg('wp4-all-zero');
+      const c1 = await seedCreatorWithConnect(org.id);
+      const c2 = await seedCreatorWithConnect(org.id);
+      await seedAgreement(org.id, c1, 0);
+      await seedAgreement(org.id, c2, 0);
+
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const chargeId = 'ch_wp4_allzero';
+      const invoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [
+            { payment: { charge: chargeId, payment_intent: 'pi_wp4_az' } },
+          ],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await expect(
+        service.handleInvoicePaymentSucceeded(invoice)
+      ).resolves.toBeDefined();
+
+      // Per-creator transfers must be zero.
+      const creatorCalls = perCreatorTransferCalls(
+        stripe.transfers.create as ReturnType<typeof vi.fn>
+      );
+      expect(creatorCalls).toHaveLength(0);
+
+      // Owner-fallback transfer must have fired.
+      const allCalls = (stripe.transfers.create as ReturnType<typeof vi.fn>)
+        .mock.calls;
+      const ownerFallbackCalls = allCalls.filter((call) => {
+        const opts = call[1] as { idempotencyKey?: string } | undefined;
+        return opts?.idempotencyKey === `${chargeId}_creator_pool_owner`;
+      });
+      expect(ownerFallbackCalls).toHaveLength(1);
+      // Codex-xz61z (N3): pin GBP on the zero-share fallback transfer.
+      // The pipeline is GBP-only (Codex-yv18n) — assert at the call
+      // boundary so any drift to USD/EUR fails the test fast.
+      const transferParams = ownerFallbackCalls[0]?.[0] as
+        | { currency?: string }
+        | undefined;
+      expect(transferParams?.currency).toBe(CURRENCY.GBP);
+    });
+
+    // Codex-ez3tl (I3): ghost-agreement guard
+    //
+    // `current_proposal_id` is a FK with `onDelete: 'set null'`, so an
+    // admin tool that deletes a proposal will null the link on its
+    // agreement row. The pre-fix `innerJoin` silently dropped such rows;
+    // the post-fix `leftJoin` surfaces them — the pipeline skips with a
+    // warn log and the org gets the full pool via the no-agreements path
+    // (a single orphan agreement → 0 effective creators).
+    it('WP-4 / Codex-ez3tl I3: agreement with NULL current_proposal_id is skipped (no silent drop)', async () => {
+      const { org, tier1 } = await createFullOrg('ez3tl-null-proposal');
+      const orphanCreator = await seedCreatorWithConnect(org.id);
+
+      // Insert an agreement WITHOUT a current_proposal_id — mirrors what
+      // happens when a future admin tool deletes the linked proposal
+      // (FK onDelete: 'set null'). The pre-fix pipeline's innerJoin
+      // silently dropped this row; the post-fix leftJoin must surface
+      // it for the skip-with-warn handler.
+      const [orphanAgreement] = await db
+        .insert(creatorOrganizationAgreements)
+        .values({
+          creatorId: orphanCreator,
+          organizationId: org.id,
+          organizationFeePercentage: 5000,
+          revenueType: 'subscription',
+          status: 'active',
+          currentProposalId: null,
+          effectiveFrom: new Date(Date.now() - 24 * 60 * 60 * 1000),
+        })
+        .returning();
+      expect(orphanAgreement).toBeDefined();
+
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      const chargeId = 'ch_ez3tl_orphan';
+      const invoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [
+            { payment: { charge: chargeId, payment_intent: 'pi_ez3tl_op' } },
+          ],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await expect(
+        service.handleInvoicePaymentSucceeded(invoice)
+      ).resolves.toBeDefined();
+
+      // The orphan creator MUST NOT receive a per-creator transfer.
+      const creatorCalls = perCreatorTransferCalls(
+        stripe.transfers.create as ReturnType<typeof vi.fn>
+      );
+      expect(
+        creatorCalls.find(
+          (c) => c.idempotencyKey === `${chargeId}_creator_${orphanCreator}`
+        )
+      ).toBeUndefined();
+
+      // With zero effective agreements (the orphan was skipped), the
+      // empty-agreements branch fires the creator_pool_owner transfer to
+      // route the entire pool to the org.
+      const allCalls = (stripe.transfers.create as ReturnType<typeof vi.fn>)
+        .mock.calls;
+      const ownerFallbackCalls = allCalls.filter((call) => {
+        const opts = call[1] as { idempotencyKey?: string } | undefined;
+        return opts?.idempotencyKey === `${chargeId}_creator_pool_owner`;
+      });
+      expect(ownerFallbackCalls).toHaveLength(1);
     });
   });
 
@@ -8160,6 +8746,12 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
   /**
    * Add an extra creator (with their own Connect account) to an org and
    * seed an active agreement for them. Returns the creator's userId.
+   *
+   * Codex-rzfjw (WP-4): the WP-4 payout pipeline reads
+   * `proposed_creator_share_percent` from `agreement_proposals` via
+   * `current_proposal_id`. We seed both the proposal AND the agreement
+   * (with dual-write `organization_fee_percentage = 10000 - share` per
+   * WP-1 invariant) so the JOIN resolves cleanly.
    */
   async function addCreatorWithAgreement(
     orgId: string,
@@ -8173,10 +8765,31 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
         status: 'active',
       })
     );
+    const [proposal] = await db
+      .insert(schema.agreementProposals)
+      .values({
+        organizationId: orgId,
+        creatorId: userId,
+        revenueType: 'subscription',
+        roundNumber: 1,
+        proposedByUserId: userId,
+        proposedByRole: 'owner',
+        proposedCreatorSharePercent: sharePercent,
+        proposedTermMonths: null,
+        proposedEffectiveFrom: new Date(),
+        status: 'accepted',
+        respondedAt: new Date(),
+        respondedByUserId: userId,
+      })
+      .returning();
+    if (!proposal) throw new Error('seed proposal failed');
     await db.insert(creatorOrganizationAgreements).values({
       creatorId: userId,
       organizationId: orgId,
-      organizationFeePercentage: sharePercent,
+      organizationFeePercentage: 10_000 - sharePercent,
+      revenueType: 'subscription',
+      status: 'active',
+      currentProposalId: proposal.id,
     });
     return userId;
   }

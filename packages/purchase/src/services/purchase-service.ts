@@ -29,8 +29,10 @@ import {
 } from '@codex/constants';
 import { isUniqueViolation, toIso } from '@codex/database';
 import {
+  agreementProposals,
   content,
   contentAccess,
+  creatorOrganizationAgreements,
   payouts,
   purchases,
   refundReviews,
@@ -58,6 +60,7 @@ import {
   count,
   desc,
   eq,
+  gt,
   gte,
   isNotNull,
   isNull,
@@ -539,6 +542,80 @@ export class PurchaseService extends BaseService {
               minTransferCents: 0,
             };
 
+        // Step 3a (Codex-rzfjw / WP-4): override `orgFeePercent` with the
+        // uploader's content_purchase agreement when one exists.
+        //
+        // Decision Q1: content-purchase revenue is attributed to the
+        // uploader (`content.creatorId`), and THAT creator's
+        // revenue_type='content_purchase' agreement determines the split.
+        // Per-content overrides are out of scope (future epic).
+        //
+        // Decision Q2: creator share is snapshotted on the proposal;
+        // platform fee is read fresh (we keep `fees.platformFeePercent`
+        // from FeeConfigService above).
+        //
+        // The agreement's share is read from `agreementProposals
+        // .proposedCreatorSharePercent` via `current_proposal_id` so
+        // this read works for both pre-WP-1 backfilled rows (migration
+        // 0072 synthesised a proposal) and new agreements.
+        //
+        // Codex-xz61z (I5): pin `purchasedAt` once and reuse in all
+        // three Q3 predicates. Previously three `new Date()` calls
+        // could produce slightly different millisecond values when
+        // executed back-to-back, which is harmless in practice but
+        // makes the predicate non-deterministic — webhook replays
+        // can land on the wrong side of an agreement boundary that
+        // occurred mid-millisecond.
+        const purchasedAt = new Date();
+        const [agreementRow] = await tx
+          .select({
+            sharePercent: agreementProposals.proposedCreatorSharePercent,
+          })
+          .from(creatorOrganizationAgreements)
+          .innerJoin(
+            agreementProposals,
+            eq(
+              agreementProposals.id,
+              creatorOrganizationAgreements.currentProposalId
+            )
+          )
+          .where(
+            and(
+              eq(creatorOrganizationAgreements.organizationId, organizationId),
+              eq(
+                creatorOrganizationAgreements.creatorId,
+                contentRecord.creatorId
+              ),
+              eq(creatorOrganizationAgreements.revenueType, 'content_purchase'),
+              // Per Decision Q3: active-as-of-purchase-date. The schema
+              // check enforces (status='terminated') = (terminatedAt IS
+              // NOT NULL) — status='active' implies terminatedAt is NULL.
+              or(
+                eq(creatorOrganizationAgreements.status, 'active'),
+                and(
+                  eq(creatorOrganizationAgreements.status, 'terminated'),
+                  gt(creatorOrganizationAgreements.terminatedAt, purchasedAt)
+                )
+              ),
+              lte(creatorOrganizationAgreements.effectiveFrom, purchasedAt),
+              or(
+                isNull(creatorOrganizationAgreements.effectiveUntil),
+                gt(creatorOrganizationAgreements.effectiveUntil, purchasedAt)
+              )
+            )
+          )
+          .limit(1);
+
+        // If an agreement is present, derive the org's cut from
+        // 10000 - creator_share. If not, fall through to the
+        // FeeConfigService-resolved value — that is the Q1 fallback
+        // ("org keeps 100% of post-platform" when nothing else
+        // applies; the org-fee resolution defaults to 100% post-platform
+        // unless an admin has overridden it).
+        const effectiveOrgFeePercent = agreementRow
+          ? 10_000 - agreementRow.sharePercent
+          : fees.orgFeePercent;
+
         // Step 4: Calculate revenue split, then apply min-platform-fee floor.
         // The floor is enforced in the caller (not in calculateRevenueSplit)
         // to keep the math pure. When (amount * pct / 10000) < minFee, we
@@ -549,13 +626,28 @@ export class PurchaseService extends BaseService {
         const rawSplit = calculateRevenueSplit(
           metadata.amountPaidCents,
           fees.platformFeePercent,
-          fees.orgFeePercent
+          effectiveOrgFeePercent
         );
         const revenueSplit = applyMinPlatformFeeFloor(
           metadata.amountPaidCents,
           rawSplit,
           fees.minPlatformFeeCents
         );
+
+        // Codex-rzfjw: emit one observability event per purchase split
+        // for end-to-end auditability of the agreements payout pipeline.
+        this.obs.info('payout_split_computed', {
+          purchaseId: undefined,
+          contentId: metadata.contentId,
+          organizationId,
+          creatorId: contentRecord.creatorId,
+          amountPaidCents: metadata.amountPaidCents,
+          platformFeeCents: revenueSplit.platformFeeCents,
+          organizationFeeCents: revenueSplit.organizationFeeCents,
+          creatorPayoutCents: revenueSplit.creatorPayoutCents,
+          agreementApplied: Boolean(agreementRow),
+          source: 'content_purchase',
+        });
 
         // Step 4a: Reconcile Stripe-collected fee against calculated split.
         // If the application fee Stripe actually charged differs from what

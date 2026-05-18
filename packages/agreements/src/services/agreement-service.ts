@@ -35,6 +35,7 @@ import {
   creatorOrganizationAgreements,
   organizationMemberships,
   organizations,
+  users,
 } from '@codex/database/schema';
 import {
   BaseService,
@@ -43,7 +44,18 @@ import {
   NotFoundError,
   type ServiceConfig,
 } from '@codex/service-errors';
-import { and, asc, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lte,
+  ne,
+  or,
+} from 'drizzle-orm';
 import { AgreementNotFoundError, InvalidProposalStateError } from '../errors';
 import type {
   AgreementProposal,
@@ -52,6 +64,7 @@ import type {
 } from '../types';
 import {
   creatorShareFromLegacyOrgFee,
+  formatRevenueTypeLabel,
   legacyOrgFeeFromCreatorShare,
   validateProposedShare,
 } from './agreement-math';
@@ -112,14 +125,93 @@ export interface TerminateAgreementInput {
 // ─── Service config ───────────────────────────────────────────────────────
 
 /**
+ * Template names fired by AgreementService lifecycle methods (WP-5 —
+ * Codex-90de9). String literals so the service stays decoupled from
+ * `@codex/notifications` — the registry wires a `mailer` thunk that
+ * understands the worker-to-worker transport, and the service just
+ * names the template.
+ */
+export type AgreementTemplateName =
+  | 'agreement-proposed-by-owner'
+  | 'agreement-countered-by-creator'
+  | 'agreement-countered-by-owner'
+  | 'agreement-accepted'
+  | 'agreement-declined'
+  | 'agreement-terminated'
+  | 'agreement-expiring-soon';
+
+/**
+ * Fire-and-forget mailer thunk used by the lifecycle hooks. Matches the
+ * shape of `SendEmailToWorkerParams` from `@codex/worker-utils` so the
+ * registry can wire `sendEmailToWorker(env, ctx, params)` directly.
+ *
+ * Returns `void` — failures are the mailer's concern. The service has
+ * a try/catch around every call site so a thrown error never bubbles
+ * up and rolls back the agreement transaction (which has already
+ * committed by the time the mailer fires — agreement is source of
+ * truth, notification is observation).
+ */
+export type AgreementLifecycleMailer = (params: {
+  to: string;
+  toName?: string;
+  templateName: AgreementTemplateName;
+  category: 'transactional';
+  userId?: string;
+  organizationId?: string | null;
+  data: Record<string, string | number | boolean>;
+}) => void;
+
+/**
+ * `ExecutionContext.waitUntil`-shaped hook. Inlined here (instead of
+ * importing from `@codex/cache`) to keep the service's dep surface
+ * minimal — same shape used across the registry's other services.
+ */
+export type AgreementWaitUntilFn = (promise: Promise<unknown>) => void;
+
+/**
  * Constructor config. As of the PR #210 review, the service no longer
  * threads `FeeConfigService` through share validation — `agreement-math`
  * reasons purely about the post-platform pool. Platform fee is still
  * read fresh in the WP-4 payout pipeline; if a future feature needs it
  * inside this service (e.g. a /preview endpoint that breaks down org
  * residual after platform fee), re-add the dep at that point.
+ *
+ * WP-5 (Codex-90de9) adds an optional `mailer` thunk used by the
+ * lifecycle hooks to fire notifications after a successful mutation.
+ * When absent (narrow unit tests, legacy harnesses), all mutations
+ * still succeed — only the email side-effect is skipped.
+ *
+ * `webAppUrl` is MANDATORY (per WP-5 polish — Codex-0omga). It is the
+ * absolute base used to construct deep links into the negotiation /
+ * agreement pages embedded in the email body. The previous "relative
+ * fallback" never worked in practice — `z.string().url()` in the
+ * validation schema rejects relative paths, so a mailer call dispatched
+ * without `webAppUrl` would have failed downstream anyway. Failing fast
+ * at construction surfaces misconfiguration during wiring rather than at
+ * the first lifecycle notification.
+ *
+ * `waitUntil` (per Codex-0omga) is the optional `ExecutionContext.waitUntil`
+ * hook used to push the entire lifecycle dispatch (user / org lookups +
+ * mailer fire) off the request critical path. When omitted (narrow unit
+ * tests, legacy harnesses) the dispatch runs inline AFTER the agreement
+ * transaction commits, which is still correct — just slightly slower
+ * for the request response.
  */
-export type AgreementServiceConfig = ServiceConfig;
+export interface AgreementServiceConfig extends ServiceConfig {
+  mailer?: AgreementLifecycleMailer;
+  /**
+   * Absolute base URL used to build email deep-links. Mandatory; the
+   * service throws at construction if unset.
+   */
+  webAppUrl: string;
+  /**
+   * Optional `ExecutionContext.waitUntil` (or equivalent). Production
+   * code threads the worker `ExecutionContext.waitUntil` through here so
+   * the lookup-and-dispatch phase of lifecycle notifications doesn't
+   * block the API response.
+   */
+  waitUntil?: AgreementWaitUntilFn;
+}
 
 // ─── Service ──────────────────────────────────────────────────────────────
 
@@ -131,8 +223,26 @@ export type AgreementServiceConfig = ServiceConfig;
 type Tx = Parameters<Parameters<AgreementService['db']['transaction']>[0]>[0];
 
 export class AgreementService extends BaseService {
+  private readonly mailer: AgreementLifecycleMailer | undefined;
+  private readonly webAppUrl: string;
+  private readonly waitUntil: AgreementWaitUntilFn | undefined;
+
   constructor(config: AgreementServiceConfig) {
     super(config);
+    if (!config.webAppUrl) {
+      // Fail-fast on misconfiguration. The deep-link is validated
+      // downstream via `urlSchema` (HTTP/HTTPS only), so an empty /
+      // relative base would have surfaced as a 500 in the first
+      // lifecycle notification anyway — better to crash the worker at
+      // boot than silently lose a real notification.
+      throw new Error(
+        'AgreementService requires `webAppUrl` to be set for notification deep-links. ' +
+          'Check `env.WEB_APP_URL` in wrangler.jsonc and the service registry wiring.'
+      );
+    }
+    this.mailer = config.mailer;
+    this.webAppUrl = config.webAppUrl;
+    this.waitUntil = config.waitUntil;
   }
 
   // ── Public: propose ─────────────────────────────────────────────────────
@@ -159,7 +269,7 @@ export class AgreementService extends BaseService {
     input: ProposeAgreementInput
   ): Promise<AgreementProposal> {
     try {
-      return await this.db.transaction(async (tx) => {
+      const proposal = await this.db.transaction(async (tx) => {
         await this.assertActiveOwner(
           tx,
           input.organizationId,
@@ -217,6 +327,25 @@ export class AgreementService extends BaseService {
         }
         return row;
       });
+
+      // WP-5: notify the recipient AFTER the transaction commits. The
+      // owner is the initiator, so the creator is the recipient.
+      // Failures are caught + logged inside the dispatcher — never roll
+      // back the (already committed) agreement state.
+      await this.dispatchLifecycleEmail({
+        recipientUserId: proposal.creatorId,
+        organizationId: proposal.organizationId,
+        templateName: 'agreement-proposed-by-owner',
+        extraContext: {},
+        threadId: proposal.id,
+        counterpartyUserId: proposal.proposedByUserId,
+        revenueType: proposal.revenueType as RevenueType,
+        sharePercent: proposal.proposedCreatorSharePercent,
+        termMonths: proposal.proposedTermMonths,
+        note: proposal.note,
+      });
+
+      return proposal;
     } catch (error) {
       this.handleError(error, 'proposeAgreement');
     }
@@ -236,7 +365,7 @@ export class AgreementService extends BaseService {
    */
   async counterPropose(input: CounterProposeInput): Promise<AgreementProposal> {
     try {
-      return await this.db.transaction(async (tx) => {
+      const result = await this.db.transaction(async (tx) => {
         const parent = await this.findProposalForUpdateOrThrow(
           tx,
           input.proposalId
@@ -323,8 +452,43 @@ export class AgreementService extends BaseService {
         if (!child) {
           throw new InternalServiceError('Failed to insert counter proposal');
         }
-        return child;
+        // Surface both the new child row AND the parent's
+        // `proposedByUserId` so the post-commit dispatcher can address
+        // the email correctly. For a creator-counter the parent's
+        // proposer was the owner (recipient of this counter); for an
+        // owner-counter the parent's proposer was the creator (now the
+        // OG creator who must learn the owner re-countered).
+        return { child, counteringRole, parent };
       });
+
+      // WP-5: notify the counterparty AFTER the transaction commits.
+      // Recipient mapping:
+      //   - creator counters → owner receives 'agreement-countered-by-creator'
+      //     (the owner who originally proposed; we use the parent's
+      //     proposedByUserId because that's the deterministic OG-owner
+      //     identity on this thread, even if the org has multiple owners)
+      //   - owner counters   → creator receives 'agreement-countered-by-owner'
+      //     (always parent.creatorId — the named creator on the thread)
+      const isCreatorCounter = result.counteringRole === 'creator';
+      const recipientUserId = isCreatorCounter
+        ? result.parent.proposedByUserId
+        : result.child.creatorId;
+      await this.dispatchLifecycleEmail({
+        recipientUserId,
+        organizationId: result.child.organizationId,
+        templateName: isCreatorCounter
+          ? 'agreement-countered-by-creator'
+          : 'agreement-countered-by-owner',
+        extraContext: {},
+        threadId: result.child.id,
+        counterpartyUserId: input.counteredByUserId,
+        revenueType: result.child.revenueType as RevenueType,
+        sharePercent: result.child.proposedCreatorSharePercent,
+        termMonths: result.child.proposedTermMonths,
+        note: result.child.note,
+      });
+
+      return result.child;
     } catch (error) {
       this.handleError(error, 'counterPropose');
     }
@@ -355,7 +519,7 @@ export class AgreementService extends BaseService {
     input: AcceptProposalInput
   ): Promise<CreatorOrganizationAgreement> {
     try {
-      return await this.db.transaction(async (tx) => {
+      const result = await this.db.transaction(async (tx) => {
         const proposal = await this.findProposalForUpdateOrThrow(
           tx,
           input.proposalId
@@ -489,8 +653,64 @@ export class AgreementService extends BaseService {
             'Failed to insert creator organization agreement'
           );
         }
-        return agreement;
+        // Surface both the new active agreement row AND the original
+        // proposal so the post-commit dispatcher can read the snapshotted
+        // share + the proposer identity. The proposal's
+        // `proposedByUserId` is the deterministic owner identity for
+        // owner-initiated threads (creator-initiated proposals are not
+        // currently supported but the dispatcher honours
+        // `proposedByRole` to address the email correctly if/when they
+        // are).
+        return { agreement, proposal };
       });
+
+      // WP-5: both parties receive 'agreement-accepted'. The recipient
+      // pair depends on who initiated the thread:
+      //   - owner-initiated thread → owner = proposal.proposedByUserId,
+      //     creator = proposal.creatorId
+      //   - creator-initiated thread → owner = whoever accepted (input.acceptedByUserId,
+      //     since only an active org owner could have accepted a
+      //     creator-proposed counter), creator = proposal.proposedByUserId
+      const ownerSideUserId =
+        result.proposal.proposedByRole === 'owner'
+          ? result.proposal.proposedByUserId
+          : input.acceptedByUserId;
+      const creatorSideUserId = result.proposal.creatorId;
+      const effectiveFromDate = this.formatDate(result.agreement.effectiveFrom);
+      const sharePercent = result.proposal.proposedCreatorSharePercent;
+      const termMonths = result.proposal.proposedTermMonths;
+      const note = result.proposal.note;
+      // Notify both parties in parallel — failures inside the
+      // dispatcher are caught individually so one slow lookup or one
+      // missing user row doesn't poison the other branch.
+      await Promise.all([
+        this.dispatchLifecycleEmail({
+          recipientUserId: creatorSideUserId,
+          organizationId: result.agreement.organizationId,
+          templateName: 'agreement-accepted',
+          extraContext: { effectiveFromDate },
+          threadId: result.proposal.id,
+          counterpartyUserId: ownerSideUserId,
+          revenueType: result.agreement.revenueType as RevenueType,
+          sharePercent,
+          termMonths,
+          note,
+        }),
+        this.dispatchLifecycleEmail({
+          recipientUserId: ownerSideUserId,
+          organizationId: result.agreement.organizationId,
+          templateName: 'agreement-accepted',
+          extraContext: { effectiveFromDate },
+          threadId: result.proposal.id,
+          counterpartyUserId: creatorSideUserId,
+          revenueType: result.agreement.revenueType as RevenueType,
+          sharePercent,
+          termMonths,
+          note,
+        }),
+      ]);
+
+      return result.agreement;
     } catch (error) {
       this.handleError(error, 'acceptProposal');
     }
@@ -502,7 +722,7 @@ export class AgreementService extends BaseService {
     input: DeclineProposalInput
   ): Promise<AgreementProposal> {
     try {
-      return await this.db.transaction(async (tx) => {
+      const declined = await this.db.transaction(async (tx) => {
         const proposal = await this.findProposalForUpdateOrThrow(
           tx,
           input.proposalId
@@ -553,6 +773,47 @@ export class AgreementService extends BaseService {
         }
         return updated;
       });
+
+      // WP-5: both parties receive 'agreement-declined'. Owner/creator
+      // mapping mirrors acceptProposal — for owner-initiated threads
+      // the owner is `proposedByUserId`; for creator-initiated threads
+      // the owner is the actor who declined (input.declinedByUserId).
+      const ownerSideUserId =
+        declined.proposedByRole === 'owner'
+          ? declined.proposedByUserId
+          : input.declinedByUserId;
+      const creatorSideUserId = declined.creatorId;
+      const declineReason = input.reason ?? '';
+      const sharePercent = declined.proposedCreatorSharePercent;
+      const termMonths = declined.proposedTermMonths;
+      await Promise.all([
+        this.dispatchLifecycleEmail({
+          recipientUserId: creatorSideUserId,
+          organizationId: declined.organizationId,
+          templateName: 'agreement-declined',
+          extraContext: { declineReason },
+          threadId: declined.id,
+          counterpartyUserId: ownerSideUserId,
+          revenueType: declined.revenueType as RevenueType,
+          sharePercent,
+          termMonths,
+          note: declined.note,
+        }),
+        this.dispatchLifecycleEmail({
+          recipientUserId: ownerSideUserId,
+          organizationId: declined.organizationId,
+          templateName: 'agreement-declined',
+          extraContext: { declineReason },
+          threadId: declined.id,
+          counterpartyUserId: creatorSideUserId,
+          revenueType: declined.revenueType as RevenueType,
+          sharePercent,
+          termMonths,
+          note: declined.note,
+        }),
+      ]);
+
+      return declined;
     } catch (error) {
       this.handleError(error, 'declineProposal');
     }
@@ -630,7 +891,7 @@ export class AgreementService extends BaseService {
     input: TerminateAgreementInput
   ): Promise<CreatorOrganizationAgreement> {
     try {
-      return await this.db.transaction(async (tx) => {
+      const terminated = await this.db.transaction(async (tx) => {
         const agreement = await this.findAgreementForUpdateOrThrow(
           tx,
           input.agreementId
@@ -678,6 +939,78 @@ export class AgreementService extends BaseService {
         }
         return updated;
       });
+
+      // WP-5: notify the OTHER party (not the terminator). When the
+      // creator terminated, the recipient is the first active org owner;
+      // when an owner terminated, the recipient is the named creator.
+      const terminatorIsCreator =
+        terminated.creatorId === input.terminatedByUserId;
+      let recipientUserId: string;
+      if (terminatorIsCreator) {
+        // Pick any active owner of the org to receive the notice.
+        // Multi-owner orgs only need one notification — the org's
+        // shared studio inbox surfaces it for all owners. Choosing the
+        // first by membership creation order keeps this deterministic
+        // for tests; the schema doesn't guarantee uniqueness of owner
+        // rows but in practice there's a small bounded set.
+        const [ownerRow] = await this.db
+          .select({ userId: organizationMemberships.userId })
+          .from(organizationMemberships)
+          .where(
+            and(
+              eq(
+                organizationMemberships.organizationId,
+                terminated.organizationId
+              ),
+              eq(organizationMemberships.role, 'owner'),
+              eq(organizationMemberships.status, 'active')
+            )
+          )
+          .limit(1);
+        if (!ownerRow) {
+          // Orphaned org — no active owner to notify. Log + skip; the
+          // agreement is still validly terminated.
+          this.obs.warn(
+            'agreement termination notice skipped: no active owner for org',
+            { organizationId: terminated.organizationId }
+          );
+          return terminated;
+        }
+        recipientUserId = ownerRow.userId;
+      } else {
+        recipientUserId = terminated.creatorId;
+      }
+
+      await this.dispatchLifecycleEmail({
+        recipientUserId,
+        organizationId: terminated.organizationId,
+        templateName: 'agreement-terminated',
+        extraContext: {
+          terminationReason: input.reason ?? '',
+          effectiveTerminationDate: this.formatDate(
+            terminated.terminatedAt ?? new Date()
+          ),
+        },
+        threadId: terminated.id,
+        counterpartyUserId: input.terminatedByUserId,
+        revenueType: terminated.revenueType as RevenueType,
+        // Reconstruct share from the legacy org-fee column on the
+        // agreement (same arithmetic the validation path uses). The
+        // proposal-row JOIN would be more authoritative but the
+        // agreement row already has all the info we need for display.
+        sharePercent: 10000 - terminated.organizationFeePercentage,
+        // Termination notice doesn't include the original `term_months`
+        // — we lost that detail after acceptance. Render as
+        // 'effectiveUntil - effectiveFrom' if available, otherwise
+        // 'Indefinite' is the honest answer at this point.
+        termMonths: this.estimateTermMonths(
+          terminated.effectiveFrom,
+          terminated.effectiveUntil
+        ),
+        note: null,
+      });
+
+      return terminated;
     } catch (error) {
       this.handleError(error, 'terminateAgreement');
     }
@@ -686,28 +1019,58 @@ export class AgreementService extends BaseService {
   // ── Public: reads ───────────────────────────────────────────────────────
 
   /**
-   * Active agreements for an org — every `status='active'` row, both
-   * revenue types. Sorted by `effectiveFrom DESC` so the most recent
-   * agreements bubble up.
+   * Active agreements for an org. Sorted by `effectiveFrom DESC` so the
+   * most recent agreements bubble up.
+   *
+   * Filters (WP-4 / Codex-rzfjw):
+   * - `status='active'`
+   * - `terminatedAt IS NULL OR terminatedAt > activeAt` (Decision Q3:
+   *   no pro-rating — whoever holds an active agreement at invoice fire
+   *   time receives the full cut for that period)
+   * - `effectiveFrom <= activeAt` (an agreement scheduled to start in
+   *   the future never receives a payout for the current invoice)
+   * - `effectiveUntil IS NULL OR effectiveUntil > activeAt` (defence in
+   *   depth for the legacy time-sliced model)
+   * - optional `revenueType` filter (subscription | content_purchase)
+   *
+   * When `activeAt` is omitted, defaults to `new Date()`. The payout
+   * pipeline always passes the invoice's `created` timestamp so a
+   * webhook replay against the same invoice surfaces the same set of
+   * agreements regardless of clock drift.
    */
   async getActiveAgreements(input: {
     organizationId: string;
+    revenueType?: RevenueType;
+    activeAt?: Date;
   }): Promise<CreatorOrganizationAgreement[]> {
     try {
+      const at = input.activeAt ?? new Date();
       return await this.db.query.creatorOrganizationAgreements.findMany({
         where: and(
           eq(
             creatorOrganizationAgreements.organizationId,
             input.organizationId
           ),
-          eq(creatorOrganizationAgreements.status, 'active'),
-          // The agreements table doesn't carry a `deletedAt` column —
-          // termination is the soft-delete vector. The `terminatedAt`
-          // filter is defence-in-depth: a row in `active` should never
-          // also carry a `terminated_at` (enforced by
-          // `check_creator_org_agreement_terminated_shape`), but if a
-          // future bug skews them we still refuse to surface it.
-          isNull(creatorOrganizationAgreements.terminatedAt)
+          // Per Decision Q3: an agreement is "active at activeAt" if
+          // EITHER it is currently status='active' (never terminated,
+          // and the schema check enforces terminatedAt IS NULL), OR it
+          // was terminated AFTER activeAt (so it was still live at
+          // invoice fire time and earns the cut for that period).
+          or(
+            eq(creatorOrganizationAgreements.status, 'active'),
+            and(
+              eq(creatorOrganizationAgreements.status, 'terminated'),
+              gt(creatorOrganizationAgreements.terminatedAt, at)
+            )
+          ),
+          lte(creatorOrganizationAgreements.effectiveFrom, at),
+          or(
+            isNull(creatorOrganizationAgreements.effectiveUntil),
+            gt(creatorOrganizationAgreements.effectiveUntil, at)
+          ),
+          input.revenueType
+            ? eq(creatorOrganizationAgreements.revenueType, input.revenueType)
+            : undefined
         ),
         orderBy: [desc(creatorOrganizationAgreements.effectiveFrom)],
       });
@@ -718,22 +1081,181 @@ export class AgreementService extends BaseService {
 
   /**
    * Creator's portfolio across all orgs — used by the creator-studio
-   * /negotiations page. Filters to `status='active'` only.
+   * /negotiations page. Filters to `status='active'` only with the same
+   * temporal predicates as {@link getActiveAgreements}.
    */
   async getActiveAgreementsForCreator(input: {
     creatorId: string;
+    revenueType?: RevenueType;
+    activeAt?: Date;
   }): Promise<CreatorOrganizationAgreement[]> {
     try {
+      const at = input.activeAt ?? new Date();
       return await this.db.query.creatorOrganizationAgreements.findMany({
         where: and(
           eq(creatorOrganizationAgreements.creatorId, input.creatorId),
-          eq(creatorOrganizationAgreements.status, 'active'),
-          isNull(creatorOrganizationAgreements.terminatedAt)
+          // Q3 semantics (see getActiveAgreements above):
+          or(
+            eq(creatorOrganizationAgreements.status, 'active'),
+            and(
+              eq(creatorOrganizationAgreements.status, 'terminated'),
+              gt(creatorOrganizationAgreements.terminatedAt, at)
+            )
+          ),
+          lte(creatorOrganizationAgreements.effectiveFrom, at),
+          or(
+            isNull(creatorOrganizationAgreements.effectiveUntil),
+            gt(creatorOrganizationAgreements.effectiveUntil, at)
+          ),
+          input.revenueType
+            ? eq(creatorOrganizationAgreements.revenueType, input.revenueType)
+            : undefined
         ),
         orderBy: [desc(creatorOrganizationAgreements.effectiveFrom)],
       });
     } catch (error) {
       this.handleError(error, 'getActiveAgreementsForCreator');
+    }
+  }
+
+  /**
+   * Find active agreements approaching their term end (Codex-tugez).
+   *
+   * Filters:
+   *   - `status='active'` — only live agreements can expire
+   *   - `effectiveUntil IS NOT NULL` — indefinite agreements never expire
+   *   - `effectiveUntil > now` — not already past expiry
+   *   - `effectiveUntil <= now + daysAhead days` — within the warning window
+   *   - `expiringSoonEmailSentAt IS NULL` — idempotency gate; once the cron
+   *     has fired for this row, it does not refire
+   *
+   * Returns enriched rows: agreement + creator contact + org name. The
+   * cron handler iterates this list and dispatches one email per recipient
+   * (creator + the first active owner of the org) per agreement.
+   *
+   * Soft-deleted users (creator or owner) are filtered out — there is
+   * nothing to email. Orphan orgs (no active owner) still surface the
+   * creator-side email; the cron handler is the place to handle the
+   * owner-side lookup.
+   *
+   * Used by `notifications-api`'s scheduled handler. Not gated by auth —
+   * the worker's cron trigger is its own authentication.
+   */
+  async findExpiringAgreements(input: {
+    daysAhead: number;
+    now?: Date;
+  }): Promise<
+    Array<{
+      agreement: CreatorOrganizationAgreement;
+      creator: { id: string; email: string; name: string };
+      orgName: string;
+    }>
+  > {
+    try {
+      const now = input.now ?? new Date();
+      const windowEnd = new Date(
+        now.getTime() + input.daysAhead * 24 * 60 * 60 * 1000
+      );
+
+      const rows = await this.db
+        .select({
+          agreement: creatorOrganizationAgreements,
+          creatorEmail: users.email,
+          creatorName: users.name,
+          orgName: organizations.name,
+        })
+        .from(creatorOrganizationAgreements)
+        .innerJoin(users, eq(users.id, creatorOrganizationAgreements.creatorId))
+        .innerJoin(
+          organizations,
+          eq(organizations.id, creatorOrganizationAgreements.organizationId)
+        )
+        .where(
+          and(
+            eq(creatorOrganizationAgreements.status, 'active'),
+            isNull(creatorOrganizationAgreements.expiringSoonEmailSentAt),
+            // Window: not yet expired AND within the warning lead time.
+            gt(creatorOrganizationAgreements.effectiveUntil, now),
+            lte(creatorOrganizationAgreements.effectiveUntil, windowEnd)
+          )
+        );
+
+      return rows.map((r) => ({
+        agreement: r.agreement,
+        creator: {
+          id: r.agreement.creatorId,
+          email: r.creatorEmail,
+          name: r.creatorName,
+        },
+        orgName: r.orgName,
+      }));
+    } catch (error) {
+      this.handleError(error, 'findExpiringAgreements');
+    }
+  }
+
+  /**
+   * Mark `expiring_soon_email_sent_at = now` for one agreement. Called
+   * by the cron handler after a successful email dispatch so re-running
+   * the sweep does NOT re-send. Per-agreement update (no batching) —
+   * the sweep is daily and the row count is bounded; a transaction per
+   * row is acceptable and lets us tolerate per-row failure.
+   *
+   * Idempotent: setting the column on an already-marked row is a no-op.
+   * No transaction needed (single UPDATE).
+   */
+  async markExpiringSoonSent(
+    agreementId: string,
+    sentAt?: Date
+  ): Promise<void> {
+    try {
+      const at = sentAt ?? new Date();
+      await this.db
+        .update(creatorOrganizationAgreements)
+        .set({
+          expiringSoonEmailSentAt: at,
+          updatedAt: at,
+        })
+        .where(eq(creatorOrganizationAgreements.id, agreementId));
+    } catch (error) {
+      this.handleError(error, 'markExpiringSoonSent');
+    }
+  }
+
+  /**
+   * Resolve the first active owner of an org — used by the
+   * agreement-expiring-soon cron to find a recipient for the org-side
+   * email. Returns `null` for orphan orgs (no active owner row). The
+   * cron handler logs and skips the owner-side email when this returns
+   * `null`; the creator-side email still fires.
+   */
+  async getFirstActiveOwnerContact(organizationId: string): Promise<{
+    id: string;
+    email: string;
+    name: string;
+  } | null> {
+    try {
+      const [row] = await this.db
+        .select({
+          userId: organizationMemberships.userId,
+          email: users.email,
+          name: users.name,
+        })
+        .from(organizationMemberships)
+        .innerJoin(users, eq(users.id, organizationMemberships.userId))
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, organizationId),
+            eq(organizationMemberships.role, 'owner'),
+            eq(organizationMemberships.status, 'active')
+          )
+        )
+        .orderBy(asc(organizationMemberships.createdAt))
+        .limit(1);
+      if (!row) return null;
+      return { id: row.userId, email: row.email, name: row.name };
+    } catch (error) {
+      this.handleError(error, 'getFirstActiveOwnerContact');
     }
   }
 
@@ -765,6 +1287,336 @@ export class AgreementService extends BaseService {
     } catch (error) {
       this.handleError(error, 'getNegotiationThread');
     }
+  }
+
+  /**
+   * All proposals where the given user is the named creator, regardless of
+   * org or revenue type. Optional `status` filter narrows the result set.
+   *
+   * Used by the creator-side portfolio (WP-8 — Codex-bw2wf) to surface
+   * pending proposals on orgs where the creator does NOT yet have an
+   * `creatorOrganizationAgreement` row — i.e. owner-initiated round-1
+   * proposals that the creator hasn't accepted yet. `getActiveAgreementsForCreator`
+   * alone misses these because no active agreement row exists until accept.
+   *
+   * Returns chronological proposals (oldest first). Empty array when the
+   * caller has no proposals.
+   */
+  async getProposalsForCreator(input: {
+    creatorId: string;
+    status?: AgreementProposal['status'] | AgreementProposal['status'][];
+  }): Promise<AgreementProposal[]> {
+    try {
+      const statusFilter = (() => {
+        if (!input.status) return undefined;
+        const arr = Array.isArray(input.status) ? input.status : [input.status];
+        if (arr.length === 0) return undefined;
+        return inArray(agreementProposals.status, arr);
+      })();
+      return await this.db.query.agreementProposals.findMany({
+        where: and(
+          eq(agreementProposals.creatorId, input.creatorId),
+          statusFilter
+        ),
+        orderBy: [asc(agreementProposals.createdAt)],
+      });
+    } catch (error) {
+      this.handleError(error, 'getProposalsForCreator');
+    }
+  }
+
+  /**
+   * All proposals on an organization, regardless of which creator they
+   * target. Mirrors {@link getProposalsForCreator} but org-scoped — used
+   * by WP-9 (Codex-k9no0) to surface "counter-proposal received" signals
+   * on the owner studio dashboard. The org-status composite index
+   * (`idx_agreement_proposals_org_status`) already exists on the schema,
+   * so the typical "open proposals on this org" query is index-served.
+   *
+   * Optional `proposedByRole` filter lets the FocusRail aggregator pull
+   * "open proposals from creators waiting on owner action" in a single
+   * round-trip instead of pulling all open proposals and filtering
+   * client-side.
+   *
+   * Returns chronological proposals (oldest first) — same ordering as
+   * {@link getProposalsForCreator} so consumers can reuse the same
+   * iteration code on both sides.
+   *
+   * Authorisation note: the SERVICE applies no auth gate; callers are
+   * expected to scope the request by an org the actor is already
+   * authorised to read (see the `requireOrgManagement` route gate in
+   * `workers/ecom-api/src/routes/agreements.ts`).
+   */
+  async getProposalsForOrg(input: {
+    organizationId: string;
+    status?: AgreementProposal['status'] | AgreementProposal['status'][];
+    proposedByRole?: 'owner' | 'creator';
+  }): Promise<AgreementProposal[]> {
+    try {
+      const statusFilter = (() => {
+        if (!input.status) return undefined;
+        const arr = Array.isArray(input.status) ? input.status : [input.status];
+        if (arr.length === 0) return undefined;
+        return inArray(agreementProposals.status, arr);
+      })();
+      const roleFilter = input.proposedByRole
+        ? eq(agreementProposals.proposedByRole, input.proposedByRole)
+        : undefined;
+      return await this.db.query.agreementProposals.findMany({
+        where: and(
+          eq(agreementProposals.organizationId, input.organizationId),
+          statusFilter,
+          roleFilter
+        ),
+        orderBy: [asc(agreementProposals.createdAt)],
+      });
+    } catch (error) {
+      this.handleError(error, 'getProposalsForOrg');
+    }
+  }
+
+  /**
+   * Resolve a human-readable org name for one organization id. Returns
+   * `null` for unknown / hard-deleted orgs (rare). Used by the
+   * creator-side portfolio route to surface friendly org names — the
+   * agreement rows themselves only carry the id.
+   *
+   * Soft-deleted orgs are deliberately included; a recently-archived
+   * org with an outstanding negotiation is still useful audit context.
+   */
+  async getOrgName(organizationId: string): Promise<string | null> {
+    return this.lookupOrgName(organizationId);
+  }
+
+  // ── Lifecycle notification dispatch (WP-5 — Codex-90de9) ────────────────
+
+  /**
+   * Format a basis-points share (0–10000) as a display string ("30%").
+   * Centralised so all six lifecycle templates render the share with
+   * identical formatting. Per the post-platform semantic, callers MUST
+   * pass the value FROM the proposal / agreement row — the template
+   * itself does not re-derive it from the legacy org-fee column.
+   */
+  private formatSharePercent(sharePercentBasisPoints: number): string {
+    // Integer math first: 3000 bp → 30. Fractional shares (rare —
+    // proposals are integer bp) fall through to `toFixed(2)` to avoid
+    // float surprises like "29.999999%".
+    const asPercent = sharePercentBasisPoints / 100;
+    return Number.isInteger(asPercent)
+      ? `${asPercent}%`
+      : `${asPercent.toFixed(2)}%`;
+  }
+
+  /**
+   * Format a `term_months` value into the display string used across
+   * every agreement-lifecycle template. `null` = indefinite agreement
+   * per the schema; the UI surface and the email copy reflect that.
+   */
+  private formatTermMonths(termMonths: number | null): string {
+    if (termMonths == null) return 'Indefinite';
+    return termMonths === 1 ? '1 month' : `${termMonths} months`;
+  }
+
+  /**
+   * Format a Date for display inside email body. ISO date (YYYY-MM-DD)
+   * stays locale-neutral and machine-readable. The web UI can render
+   * the absolute date in the recipient's timezone via the embedded
+   * deep link.
+   */
+  private formatDate(date: Date): string {
+    return date.toISOString().slice(0, 10);
+  }
+
+  /**
+   * Reconstruct the original `term_months` from the (effectiveFrom,
+   * effectiveUntil) pair on the agreement row. Used by the termination
+   * notice when we no longer have direct access to the proposal's
+   * `proposed_term_months` field. `null` `effectiveUntil` = indefinite.
+   *
+   * Returns `null` when both are unset or when the window is sub-monthly
+   * (rare; the termination notice degrades to 'Indefinite' display in
+   * that case which is honest enough for terminal-state copy).
+   */
+  private estimateTermMonths(
+    effectiveFrom: Date | null,
+    effectiveUntil: Date | null
+  ): number | null {
+    if (!effectiveFrom || !effectiveUntil) return null;
+    const ms = effectiveUntil.getTime() - effectiveFrom.getTime();
+    if (ms <= 0) return null;
+    // ~30.44 days/month average — close enough for display copy.
+    const months = Math.round(ms / (1000 * 60 * 60 * 24 * 30.44));
+    return months > 0 ? months : null;
+  }
+
+  /**
+   * Build the absolute deep link to the negotiation thread + agreement.
+   * `webAppUrl` is mandatory at construction (Codex-0omga polish) so the
+   * resulting URL always validates against the project's `urlSchema`
+   * (HTTP/HTTPS only).
+   */
+  private buildNegotiationDeepLink(orgId: string, threadId: string): string {
+    const path = `/studio/negotiations/${threadId}?orgId=${orgId}`;
+    return `${this.webAppUrl}${path}`;
+  }
+
+  /**
+   * Locate the email + display name for a given user. Returns `null`
+   * when the user has been hard-deleted (e.g. GDPR erasure happened
+   * between transaction commit and mailer fire — rare but possible).
+   * The lifecycle dispatcher silently skips the email in that case.
+   */
+  private async lookupUserContact(userId: string): Promise<{
+    email: string;
+    name: string;
+  } | null> {
+    const [row] = await this.db
+      .select({ email: users.email, name: users.name })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!row) return null;
+    return { email: row.email, name: row.name };
+  }
+
+  /**
+   * Locate the human-readable org name for a given org id. Soft-deleted
+   * orgs are deliberately included — an agreement notification for a
+   * recently-archived org is still useful audit information.
+   */
+  private async lookupOrgName(organizationId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ name: organizations.name })
+      .from(organizations)
+      .where(eq(organizations.id, organizationId))
+      .limit(1);
+    return row?.name ?? null;
+  }
+
+  /**
+   * Dispatch one lifecycle notification fire-and-forget. Wraps the
+   * `mailer` thunk in a try/catch so a thrown error never bubbles out
+   * — the agreement transaction has already committed, and the
+   * notification is observation, not source-of-truth.
+   *
+   * Latency hardening (Codex-0omga polish): when a `waitUntil` hook was
+   * threaded through the constructor, the ENTIRE dispatch (DB lookups +
+   * mailer fire) is pushed off the request critical path. Inside
+   * `procedure()` handlers this means the API response no longer pays
+   * the ~one-DB-roundtrip lookup tax for every agreement mutation. When
+   * `waitUntil` is absent (narrow tests, legacy harnesses) the dispatch
+   * still runs awaited inline — slower, but correct.
+   *
+   * The returned promise resolves only AFTER `waitUntil` has been
+   * scheduled (or, when no `waitUntil` is wired, after the inline
+   * dispatch settles). Either way the call site never observes a
+   * rejection — the rejection branch logs + swallows.
+   *
+   * `note` is intentionally NOT redacted — these notes are between two
+   * commercial parties, both of whom can see them via the negotiation
+   * UI anyway. They DO get HTML-escaped by the renderer.
+   */
+  private async dispatchLifecycleEmail(params: {
+    recipientUserId: string;
+    organizationId: string;
+    templateName: AgreementTemplateName;
+    extraContext: Record<string, string>;
+    threadId: string;
+    counterpartyUserId: string;
+    revenueType: RevenueType;
+    sharePercent: number;
+    termMonths: number | null;
+    note?: string | null;
+  }): Promise<void> {
+    const work = this.dispatchLifecycleEmailImpl(params).catch((err) => {
+      // We deliberately log + swallow. Mailer transport failures should
+      // not prevent the agreement from existing — the agreement row is
+      // the source of truth.
+      this.obs.warn('agreement notification dispatch failed', {
+        templateName: params.templateName,
+        recipientUserId: params.recipientUserId,
+        threadId: params.threadId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+    if (this.waitUntil) {
+      // Production hot path: schedule on the worker's ExecutionContext
+      // so the API response unblocks immediately. The lookup phase
+      // (three DB selects) no longer blocks the response.
+      this.waitUntil(work);
+      return;
+    }
+    // Fallback: await inline so test harnesses without a waitUntil hook
+    // can still observe the dispatch sequence via mailer.mock.calls.
+    await work;
+  }
+
+  private async dispatchLifecycleEmailImpl(params: {
+    recipientUserId: string;
+    organizationId: string;
+    templateName: AgreementTemplateName;
+    extraContext: Record<string, string>;
+    threadId: string;
+    counterpartyUserId: string;
+    revenueType: RevenueType;
+    sharePercent: number;
+    termMonths: number | null;
+    note?: string | null;
+  }): Promise<void> {
+    if (!this.mailer) {
+      // Narrow unit tests / legacy harnesses without a mailer wired —
+      // silently no-op. The agreement mutation has already succeeded;
+      // notification is best-effort.
+      return;
+    }
+
+    const [recipient, counterparty, orgName] = await Promise.all([
+      this.lookupUserContact(params.recipientUserId),
+      this.lookupUserContact(params.counterpartyUserId),
+      this.lookupOrgName(params.organizationId),
+    ]);
+
+    if (!recipient) {
+      // User row vanished between commit and mailer fire. Nothing to
+      // do — log and exit.
+      this.obs.warn(
+        'agreement notification skipped: recipient user not found',
+        {
+          recipientUserId: params.recipientUserId,
+          templateName: params.templateName,
+        }
+      );
+      return;
+    }
+
+    const data: Record<string, string | number | boolean> = {
+      recipientName: recipient.name,
+      orgName: orgName ?? 'Your organization',
+      otherPartyName: counterparty?.name ?? 'The other party',
+      revenueTypeLabel: formatRevenueTypeLabel(params.revenueType),
+      sharePercentDisplay: this.formatSharePercent(params.sharePercent),
+      termMonthsDisplay: this.formatTermMonths(params.termMonths),
+      deepLinkUrl: this.buildNegotiationDeepLink(
+        params.organizationId,
+        params.threadId
+      ),
+      // Empty string keeps the renderer's missing-token list clean —
+      // the template still includes the `<em>Note:</em>` block but it
+      // renders as empty when no note was supplied.
+      note: params.note ?? '',
+      ...params.extraContext,
+    };
+
+    this.mailer({
+      to: recipient.email,
+      toName: recipient.name,
+      templateName: params.templateName,
+      category: 'transactional',
+      userId: params.recipientUserId,
+      organizationId: params.organizationId,
+      data,
+    });
   }
 
   // ── Internal helpers ────────────────────────────────────────────────────

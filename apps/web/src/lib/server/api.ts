@@ -26,6 +26,10 @@ import type {
   SubscriberStats,
   TopContentItem,
 } from '@codex/admin';
+import type {
+  AgreementProposal,
+  CreatorOrganizationAgreement,
+} from '@codex/agreements';
 import {
   COOKIES,
   getServiceUrl,
@@ -1790,6 +1794,253 @@ export function createServerApi(
           {
             method: 'POST',
             body: JSON.stringify({ organizationId }),
+          }
+        ),
+    },
+
+    /**
+     * Revenue-share agreements (ecom-api worker)
+     *
+     * Owner-facing: settings → revenue-share tab proposes/counters/accepts
+     * agreements with team creators. Creator-facing: /studio/negotiations
+     * (WP-8, separate WP) consumes `listForCreator`.
+     */
+    agreements: {
+      /**
+       * Owner-view list of active agreements for an org. Worker re-derives
+       * scope from authenticated membership — `organizationId` in the
+       * query is used only to resolve the `procedure()` membership gate.
+       */
+      list: (
+        organizationId: string,
+        params?: { revenueType?: 'subscription' | 'content_purchase' }
+      ) => {
+        const search = new URLSearchParams();
+        if (params?.revenueType) search.set('revenueType', params.revenueType);
+        return request<PaginatedListResponse<CreatorOrganizationAgreement>>(
+          'ecom',
+          withOrg('/agreements', organizationId, search)
+        );
+      },
+
+      /**
+       * Owner-view open proposals on this org (WP-9 — Codex-k9no0).
+       * Optional `proposedByRole` filter narrows to "counter-proposals
+       * from creators waiting on owner action" in a single round-trip.
+       * Same `requireOrgManagement` gate as `list`.
+       */
+      listPending: (
+        organizationId: string,
+        params?: { proposedByRole?: 'owner' | 'creator' }
+      ) => {
+        const search = new URLSearchParams();
+        if (params?.proposedByRole) {
+          search.set('proposedByRole', params.proposedByRole);
+        }
+        return request<PaginatedListResponse<AgreementProposal>>(
+          'ecom',
+          withOrg('/agreements/pending', organizationId, search)
+        );
+      },
+
+      /**
+       * Owner-view negotiation thread for one (creator, revenueType) on
+       * this org. Empty array if no thread exists.
+       */
+      getThread: (
+        organizationId: string,
+        creatorId: string,
+        revenueType: 'subscription' | 'content_purchase'
+      ) => {
+        const search = new URLSearchParams({ revenueType });
+        return request<AgreementProposal[]>(
+          'ecom',
+          withOrg(
+            `/agreements/threads/${encodeURIComponent(creatorId)}`,
+            organizationId,
+            search
+          )
+        );
+      },
+
+      /**
+       * Creator-view: my agreements across every org, with anonymised peer
+       * aggregates. Worker scopes on `ctx.user.id`.
+       */
+      listForCreator: () =>
+        request<
+          PaginatedListResponse<{
+            id: string;
+            organizationId: string;
+            creatorId: string;
+            revenueType: string;
+            status: string;
+            effectiveFrom: string | Date;
+            effectiveUntil: string | Date | null;
+            organizationFeePercentage: number;
+            currentProposalId: string | null;
+            terminatedAt: string | Date | null;
+            peers: { count: number; aggregateSharePercent: number };
+          }>
+        >('ecom', '/agreements/me'),
+
+      /**
+       * Creator-view portfolio aggregator (WP-8). Returns active +
+       * pending-action-required + waiting-on-org + past in one round-trip.
+       * Anonymisation contract preserved: peer aggregates only, never peer
+       * identifiers.
+       */
+      getCreatorPortfolio: () =>
+        request<{
+          active: Array<{
+            id: string;
+            organizationId: string;
+            organizationName: string | null;
+            creatorId: string;
+            revenueType: string;
+            status: string;
+            effectiveFrom: string | Date;
+            effectiveUntil: string | Date | null;
+            organizationFeePercentage: number;
+            currentProposalId: string | null;
+            terminatedAt: string | Date | null;
+            peers: { count: number; aggregateSharePercent: number };
+          }>;
+          pendingActionRequired: Array<{
+            proposalId: string;
+            organizationId: string;
+            organizationName: string | null;
+            revenueType: string;
+            proposedSharePercent: number;
+            proposedTermMonths: number | null;
+            proposedByRole: string;
+            roundNumber: number;
+            createdAt: string | Date;
+            note: string | null;
+            threadProposalId: string;
+          }>;
+          pendingWaitingOnOrg: Array<{
+            proposalId: string;
+            organizationId: string;
+            organizationName: string | null;
+            revenueType: string;
+            proposedSharePercent: number;
+            proposedTermMonths: number | null;
+            proposedByRole: string;
+            roundNumber: number;
+            createdAt: string | Date;
+            note: string | null;
+            threadProposalId: string;
+          }>;
+          past: Array<{
+            proposalId: string;
+            organizationId: string;
+            organizationName: string | null;
+            revenueType: string;
+            status: string;
+            proposedSharePercent: number;
+            proposedByRole: string;
+            roundNumber: number;
+            endedAt: string | Date | null;
+            declineReason: string | null;
+          }>;
+        }>('ecom', '/agreements/me/portfolio'),
+
+      /**
+       * Creator-view negotiation thread by ANY proposal id within the
+       * thread. Worker enumerates threads where the caller is the named
+       * creator (including pending-only threads without an active row).
+       */
+      getMyThread: (proposalId: string) =>
+        request<AgreementProposal[]>(
+          'ecom',
+          `/agreements/me/threads/${encodeURIComponent(proposalId)}`
+        ),
+
+      /**
+       * Round 1 owner-initiated proposal. `organizationId` lives in the
+       * query string (procedure() resolveOrganizationId only reads query
+       * fallback; body org would 400 with ORG_CONTEXT_REQUIRED).
+       */
+      propose: (
+        organizationId: string,
+        input: {
+          creatorId: string;
+          revenueType: 'subscription' | 'content_purchase';
+          sharePercent: number;
+          termMonths: number;
+          note?: string;
+          effectiveFrom?: string | Date;
+        }
+      ) =>
+        request<AgreementProposal>(
+          'ecom',
+          `/agreements/propose?organizationId=${encodeURIComponent(organizationId)}`,
+          {
+            method: 'POST',
+            body: JSON.stringify(input),
+          }
+        ),
+
+      /** Counter an open proposal — service flips role from parent. */
+      counter: (
+        proposalId: string,
+        input: {
+          sharePercent: number;
+          termMonths: number;
+          note?: string;
+        }
+      ) =>
+        request<AgreementProposal>(
+          'ecom',
+          `/agreements/${encodeURIComponent(proposalId)}/counter`,
+          {
+            method: 'POST',
+            body: JSON.stringify(input),
+          }
+        ),
+
+      /** Accept an open proposal — service performs atomic 6-step write. */
+      accept: (proposalId: string) =>
+        request<CreatorOrganizationAgreement>(
+          'ecom',
+          `/agreements/${encodeURIComponent(proposalId)}/accept`,
+          {
+            method: 'POST',
+            body: JSON.stringify({}),
+          }
+        ),
+
+      /** Decline an open proposal — optional reason captured for audit. */
+      decline: (proposalId: string, input?: { reason?: string }) =>
+        request<AgreementProposal>(
+          'ecom',
+          `/agreements/${encodeURIComponent(proposalId)}/decline`,
+          {
+            method: 'POST',
+            body: JSON.stringify(input ?? {}),
+          }
+        ),
+
+      /** Withdraw a proposal — only the proposing side may withdraw. */
+      withdraw: (proposalId: string) =>
+        request<AgreementProposal>(
+          'ecom',
+          `/agreements/${encodeURIComponent(proposalId)}/withdraw`,
+          {
+            method: 'POST',
+            body: JSON.stringify({}),
+          }
+        ),
+
+      /** Terminate an active agreement — either party may terminate. */
+      terminate: (agreementId: string, input?: { reason?: string }) =>
+        request<CreatorOrganizationAgreement>(
+          'ecom',
+          `/agreements/${encodeURIComponent(agreementId)}/terminate`,
+          {
+            method: 'POST',
+            body: JSON.stringify(input ?? {}),
           }
         ),
     },

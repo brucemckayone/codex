@@ -24,7 +24,9 @@
       ? 'branding'
       : page.url.pathname.endsWith('/pricing-faq')
         ? 'pricing-faq'
-        : 'general'
+        : page.url.pathname.endsWith('/revenue-share')
+          ? 'revenue-share'
+          : 'general'
   );
 
   // Derive loading tab from pending navigation
@@ -33,9 +35,11 @@
       ? 'branding'
       : navigating?.to?.url.pathname?.endsWith('/pricing-faq')
         ? 'pricing-faq'
-        : navigating?.to?.url.pathname?.endsWith('/settings')
-          ? 'general'
-          : null
+        : navigating?.to?.url.pathname?.endsWith('/revenue-share')
+          ? 'revenue-share'
+          : navigating?.to?.url.pathname?.endsWith('/settings')
+            ? 'general'
+            : null
   );
 
   // Map nav items to tab config with i18n labels
@@ -54,6 +58,11 @@
       value: 'pricing-faq',
       href: '/studio/settings/pricing-faq',
       label: 'Pricing FAQ',
+    },
+    {
+      value: 'revenue-share',
+      href: '/studio/settings/revenue-share',
+      label: 'Revenue share',
     },
   ]);
 </script>

@@ -105,6 +105,9 @@ importers:
       '@codex/admin':
         specifier: workspace:*
         version: link:../../packages/admin
+      '@codex/agreements':
+        specifier: workspace:*
+        version: link:../../packages/agreements
       '@codex/cache':
         specifier: workspace:*
         version: link:../../packages/cache
@@ -448,9 +451,6 @@ importers:
       '@codex/observability':
         specifier: workspace:*
         version: link:../observability
-      '@codex/purchase':
-        specifier: workspace:*
-        version: link:../purchase
       '@codex/service-errors':
         specifier: workspace:*
         version: link:../service-errors
@@ -900,6 +900,9 @@ importers:
 
   packages/purchase:
     dependencies:
+      '@codex/agreements':
+        specifier: workspace:*
+        version: link:../agreements
       '@codex/cache':
         specifier: workspace:*
         version: link:../cache
@@ -1017,6 +1020,9 @@ importers:
 
   packages/subscription:
     dependencies:
+      '@codex/agreements':
+        specifier: workspace:*
+        version: link:../agreements
       '@codex/cache':
         specifier: workspace:*
         version: link:../cache
@@ -1676,6 +1682,9 @@ importers:
 
   workers/notifications-api:
     dependencies:
+      '@codex/agreements':
+        specifier: workspace:*
+        version: link:../../packages/agreements
       '@codex/constants':
         specifier: workspace:*
         version: link:../../packages/constants
@@ -1685,6 +1694,9 @@ importers:
       '@codex/notifications':
         specifier: workspace:*
         version: link:../../packages/notifications
+      '@codex/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@codex/platform-settings':
         specifier: workspace:*
         version: link:../../packages/platform-settings

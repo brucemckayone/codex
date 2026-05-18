@@ -25,6 +25,7 @@
   import {
     LayoutDashboardIcon,
     FileIcon,
+    FileTextIcon,
     VideoIcon,
     TrendingUpIcon,
     UsersIcon,
@@ -67,6 +68,7 @@
     monetisation: CoinsIcon,
     payouts: BanknoteIcon,
     billing: CreditCardIcon,
+    agreements: FileTextIcon,
   };
 
   interface StudioUser {

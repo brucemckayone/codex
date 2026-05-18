@@ -118,6 +118,22 @@ function makeDb(overrides: Record<string, unknown> = {}): DbSpy {
       return {
         from: vi.fn(() => ({
           where: vi.fn(() => makeWhereReturn()),
+          // Codex-rzfjw: the WP-4 payout pipeline JOINs
+          // creator_organization_agreements → agreement_proposals via
+          // current_proposal_id to read `proposed_creator_share_percent`.
+          // Mock the joined shape so the executeTransfers query resolves
+          // to "no active agreements" in this orchestrator test (which
+          // is only asserting the cache/invalidation hook, not transfer
+          // economics).
+          //
+          // Codex-ez3tl (I3): the pipeline switched innerJoin → leftJoin
+          // so a NULL current_proposal_id surfaces (with a warn) instead
+          // of silently dropping the row. The orchestrator-test mocks the
+          // empty-agreements case, so leftJoin and innerJoin behave the
+          // same here — both yield the empty `makeWhereReturn` result.
+          leftJoin: vi.fn(() => ({
+            where: vi.fn(() => makeWhereReturn()),
+          })),
         })),
       };
     }),

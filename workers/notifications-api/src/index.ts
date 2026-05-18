@@ -20,12 +20,14 @@
  */
 
 import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
+import type { Bindings } from '@codex/shared-types';
 import {
   createEnvValidationMiddleware,
   createKvCheck,
   createWorker,
   standardDatabaseCheck,
 } from '@codex/worker-utils';
+import { dispatchScheduled } from './handlers/agreement-expiring-sweep';
 // Import route modules
 import internalRoutes from './routes/internal';
 import previewRoutes from './routes/preview';
@@ -115,19 +117,21 @@ app.route('/api/templates', previewRoutes);
 app.route('/internal', internalRoutes);
 app.route('/unsubscribe', unsubscribeRoutes);
 // ============================================================================
-// Export (with Cron Trigger support for weekly digest)
+// Export (with Cron Trigger support)
 // ============================================================================
 
 export default {
   fetch: app.fetch,
-  async scheduled(
-    _event: ScheduledEvent,
-    env: Record<string, unknown>,
+  scheduled(
+    controller: ScheduledController,
+    env: Bindings,
     ctx: ExecutionContext
-  ) {
-    // Weekly digest cron handler
-    // Configured in wrangler.toml: crons = ["0 9 * * 1"] (Monday 09:00 UTC)
-    // TODO: Implement handleWeeklyDigest — query opted-in users,
-    // fetch new content from last 7 days, batch-send digest emails.
+  ): void {
+    // Cron expressions live in wrangler.jsonc → triggers.crons.
+    // Currently configured: `0 8 * * *` (daily 08:00 UTC) — fires the
+    // agreement-expiring-soon sweep (Codex-tugez). Future schedules
+    // (weekly digest, etc.) get added to the array and discriminated
+    // by `controller.cron` inside dispatchScheduled.
+    dispatchScheduled(controller, env, ctx);
   },
 };

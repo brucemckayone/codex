@@ -269,11 +269,96 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'contentDescription',
   ],
   'weekly-digest': ['userName', 'newContentCount', 'topContent', 'platformUrl'],
+
+  // Revenue-share agreements (WP-5 — Codex-90de9). All copy MUST refer
+  // to share as "% of post-platform revenue" — see
+  // packages/validation/src/schemas/notifications.ts agreementBaseFields
+  // for the rationale.
+  'agreement-proposed-by-owner': [
+    'recipientName',
+    'orgName',
+    'otherPartyName',
+    'revenueTypeLabel',
+    'sharePercentDisplay',
+    'termMonthsDisplay',
+    'deepLinkUrl',
+    'note',
+  ],
+  'agreement-countered-by-creator': [
+    'recipientName',
+    'orgName',
+    'otherPartyName',
+    'revenueTypeLabel',
+    'sharePercentDisplay',
+    'termMonthsDisplay',
+    'deepLinkUrl',
+    'note',
+  ],
+  'agreement-countered-by-owner': [
+    'recipientName',
+    'orgName',
+    'otherPartyName',
+    'revenueTypeLabel',
+    'sharePercentDisplay',
+    'termMonthsDisplay',
+    'deepLinkUrl',
+    'note',
+  ],
+  'agreement-accepted': [
+    'recipientName',
+    'orgName',
+    'otherPartyName',
+    'revenueTypeLabel',
+    'sharePercentDisplay',
+    'termMonthsDisplay',
+    'effectiveFromDate',
+    'deepLinkUrl',
+    'note',
+  ],
+  'agreement-declined': [
+    'recipientName',
+    'orgName',
+    'otherPartyName',
+    'revenueTypeLabel',
+    'sharePercentDisplay',
+    'termMonthsDisplay',
+    'declineReason',
+    'deepLinkUrl',
+    'note',
+  ],
+  'agreement-terminated': [
+    'recipientName',
+    'orgName',
+    'otherPartyName',
+    'revenueTypeLabel',
+    'sharePercentDisplay',
+    'termMonthsDisplay',
+    'terminationReason',
+    'effectiveTerminationDate',
+    'deepLinkUrl',
+    'note',
+  ],
+  'agreement-expiring-soon': [
+    'recipientName',
+    'orgName',
+    'otherPartyName',
+    'revenueTypeLabel',
+    'sharePercentDisplay',
+    'termMonthsDisplay',
+    'expiryDate',
+    'deepLinkUrl',
+    'note',
+  ],
 };
 
 /**
  * Transactional templates never include unsubscribe links.
  * Receipts, security notices, and account alerts must always be delivered.
+ *
+ * Agreement lifecycle templates (WP-5 — Codex-90de9) are transactional:
+ * they govern a two-party commercial contract that cannot be silently
+ * dropped via a marketing opt-out. Mirrors the rationale for
+ * `subscription-tier-price-change` — both touch billing-adjacent state.
  */
 const TRANSACTIONAL_TEMPLATES = new Set([
   'email-verification',
@@ -292,6 +377,15 @@ const TRANSACTIONAL_TEMPLATES = new Set([
   'transcoding-complete',
   'transcoding-failed',
   'connect-account-status',
+  // Revenue-share agreements (WP-5 — Codex-90de9): commercial contract,
+  // not marketable.
+  'agreement-proposed-by-owner',
+  'agreement-countered-by-creator',
+  'agreement-countered-by-owner',
+  'agreement-accepted',
+  'agreement-declined',
+  'agreement-terminated',
+  'agreement-expiring-soon',
 ]);
 
 /**
