@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import { ShareExceedsAvailableError } from '../../errors';
 import {
   creatorShareFromLegacyOrgFee,
+  formatRevenueTypeLabel,
   legacyOrgFeeFromCreatorShare,
   sumActiveCreatorShares,
   validateProposedShare,
@@ -240,5 +241,19 @@ describe('agreement-math.creatorShareFromLegacyOrgFee', () => {
         creatorShareFromLegacyOrgFee(legacyOrgFeeFromCreatorShare(share))
       ).toBe(share);
     }
+  });
+});
+
+describe('agreement-math.formatRevenueTypeLabel', () => {
+  it('returns "subscription" for the subscription revenue type', () => {
+    expect(formatRevenueTypeLabel('subscription')).toBe('subscription');
+  });
+
+  it('returns the hyphenated "content-purchase" for content_purchase', () => {
+    // Hyphen, not space — matches the revenue_type enum value the schema
+    // stores, the email template subject lines, and the studio/creator UI
+    // copy. Catches any future drift where this collapses to the value
+    // with a space.
+    expect(formatRevenueTypeLabel('content_purchase')).toBe('content-purchase');
   });
 });

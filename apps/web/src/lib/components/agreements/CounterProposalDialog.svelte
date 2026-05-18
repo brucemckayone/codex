@@ -19,6 +19,7 @@
   math decision; see project_revenue_share_decisions Q2). Currency GBP.
 -->
 <script lang="ts">
+  import { formatRevenueTypeLabel } from '@codex/agreements';
   import BrandSliderField from '$lib/components/brand-editor/BrandSliderField.svelte';
   import { DialogForm } from '$lib/components/ui/DialogForm';
 
@@ -76,9 +77,7 @@
     }
   });
 
-  const revenueLabel = $derived(
-    revenueType === 'subscription' ? 'subscription' : 'content-purchase'
-  );
+  const revenueLabel = $derived(formatRevenueTypeLabel(revenueType));
   const sharePercent = $derived(shareBp / 100);
   const ownerSharePercent = $derived(currentSharePercent / 100);
   const formattedShare = $derived(

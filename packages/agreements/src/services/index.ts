@@ -5,6 +5,7 @@
 export {
   type ActiveAgreementShareView,
   creatorShareFromLegacyOrgFee,
+  formatRevenueTypeLabel,
   legacyOrgFeeFromCreatorShare,
   sumActiveCreatorShares,
   type ValidateProposedShareInput,

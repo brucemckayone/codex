@@ -23,7 +23,11 @@
   Props mirror the WP-7 spec in Codex-s80r6.
 -->
 <script lang="ts">
-  import type { AgreementProposal, CreatorOrganizationAgreement } from '@codex/agreements';
+  import {
+    type AgreementProposal,
+    type CreatorOrganizationAgreement,
+    formatRevenueTypeLabel,
+  } from '@codex/agreements';
 
   interface Creator {
     id: string;
@@ -185,8 +189,22 @@
 
   <div class="agreement-card__rows">
     {#each [
-      { revType: 'subscription' as const, label: 'Subscription', state: subscriptionState },
-      { revType: 'content_purchase' as const, label: 'Content purchase', state: contentPurchaseState },
+      {
+        revType: 'subscription' as const,
+        label: 'Subscription',
+        // copyLabel is what gets interpolated into prose ("of post-platform
+        // {copyLabel} revenue"). Sourced from `formatRevenueTypeLabel` so it
+        // matches the hyphenated `revenue_type` enum value used in
+        // NegotiationThread, ProposeAgreementDialog, +page.svelte etc.
+        copyLabel: formatRevenueTypeLabel('subscription'),
+        state: subscriptionState,
+      },
+      {
+        revType: 'content_purchase' as const,
+        label: 'Content purchase',
+        copyLabel: formatRevenueTypeLabel('content_purchase'),
+        state: contentPurchaseState,
+      },
     ] as row (row.revType)}
       <section
         class="agreement-card__row"
@@ -223,7 +241,7 @@
                 <dd>
                   <strong>{formatPercent(row.state.sharePercent)}</strong>
                   <span class="agreement-card__row-detail-hint">
-                    of post-platform {row.label.toLowerCase()} revenue
+                    of post-platform {row.copyLabel} revenue
                   </span>
                 </dd>
               </div>
@@ -245,7 +263,7 @@
                   <dd>
                     <strong>{formatPercent(row.state.pendingShare)}</strong>
                     <span class="agreement-card__row-detail-hint">
-                      of post-platform {row.label.toLowerCase()} revenue
+                      of post-platform {row.copyLabel} revenue
                     </span>
                   </dd>
                 </div>
@@ -258,14 +276,14 @@
                 <dd>
                   <strong>{formatPercent(row.state.sharePercent)}</strong>
                   <span class="agreement-card__row-detail-hint">
-                    of post-platform {row.label.toLowerCase()} revenue
+                    of post-platform {row.copyLabel} revenue
                   </span>
                 </dd>
               </div>
             </dl>
           {:else}
             <p class="agreement-card__row-empty">
-              No revenue share configured. Default: org keeps 100% of post-platform {row.label.toLowerCase()} revenue.
+              No revenue share configured. Default: org keeps 100% of post-platform {row.copyLabel} revenue.
             </p>
           {/if}
         </div>

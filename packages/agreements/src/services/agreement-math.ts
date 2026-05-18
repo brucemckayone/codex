@@ -177,3 +177,17 @@ export function legacyOrgFeeFromCreatorShare(
 export function creatorShareFromLegacyOrgFee(orgFeePercent: number): number {
   return BPS_MAX - orgFeePercent;
 }
+
+/**
+ * Canonical human-readable label for a {@link RevenueType}. Centralised so
+ * email templates (AgreementService), the studio UI (AgreementCard,
+ * NegotiationThread, ProposeAgreementDialog) and any future surface use
+ * the same string — "content-purchase" (hyphen) matches the enum value
+ * exactly and reads consistently across the product. English-only for
+ * now; i18n is a future scope (WP-5 brief).
+ */
+export function formatRevenueTypeLabel(
+  revenueType: 'subscription' | 'content_purchase'
+): string {
+  return revenueType === 'subscription' ? 'subscription' : 'content-purchase';
+}
