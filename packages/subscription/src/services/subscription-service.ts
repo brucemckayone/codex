@@ -37,6 +37,7 @@ import {
 } from '@codex/constants';
 import { dateWindow, isUniqueViolation, toIso } from '@codex/database';
 import {
+  agreementProposals,
   creatorOrganizationAgreements,
   organizationFollowers,
   organizationMemberships,
@@ -69,10 +70,13 @@ import {
   and,
   desc,
   eq,
+  gt,
   inArray,
   isNotNull,
   isNull,
   lt,
+  lte,
+  or,
   sql,
 } from 'drizzle-orm';
 import type Stripe from 'stripe';
@@ -1431,14 +1435,25 @@ export class SubscriptionService extends BaseService {
       stripeSubscriptionId: stripeSubId,
     });
 
-    // Execute revenue transfers
+    // Execute revenue transfers.
+    //
+    // Codex-rzfjw (WP-4): pin agreement-lookup at invoice fire time
+    // (Decision Q3 — no pro-rating, active-as-of-invoice-date). Webhook
+    // replays of the same invoice get the same active-set even if the
+    // agreement state has since changed (e.g. a creator terminated after
+    // the invoice fired but before the webhook landed).
+    const invoiceCreatedAt =
+      typeof stripeInvoice.created === 'number'
+        ? new Date(stripeInvoice.created * 1000)
+        : new Date();
     await this.executeTransfers(
       sub.id,
       sub.organizationId,
       sourceTransaction,
       split.platformFeeCents,
       split.organizationFeeCents,
-      split.creatorPayoutCents
+      split.creatorPayoutCents,
+      invoiceCreatedAt
     );
 
     this.obs.info('Invoice payment processed', {
@@ -3908,7 +3923,8 @@ export class SubscriptionService extends BaseService {
     chargeId: string,
     platformFeeCents: number,
     orgFeeCents: number,
-    creatorPayoutCents: number
+    creatorPayoutCents: number,
+    invoiceCreatedAt: Date = new Date()
   ): Promise<void> {
     const transferGroup = `sub_${subscriptionId}`;
 
@@ -4066,17 +4082,60 @@ export class SubscriptionService extends BaseService {
       }
     }
 
-    // Get all creators in the org with their revenue share agreements
+    // Codex-rzfjw (WP-4): query the agreements model with all four
+    // WP-1 filters pinned at invoice fire time, and JOIN to the
+    // accepted proposal to read `proposed_creator_share_percent` as
+    // the authoritative share — NOT the legacy `organization_fee_percentage`
+    // column. The legacy column is dual-written by WP-2 (Discovery 2
+    // of project_revenue_share_wp1_discoveries) and will be dropped in a
+    // follow-up migration once this read path lands.
+    //
+    // Filters:
+    //   status='active'                         — only live agreements
+    //   revenueType='subscription'              — subscription pool
+    //   terminatedAt IS NULL OR > invoiceAt     — Q3 no pro-rating
+    //   effectiveFrom <= invoiceAt              — not-yet-active excluded
+    //   effectiveUntil IS NULL OR > invoiceAt   — legacy time-slice safety
+    //
+    // Backfilled legacy rows (migration 0072) have `current_proposal_id`
+    // pointing at a synthesised round-1 'accepted' proposal whose
+    // `proposed_creator_share_percent = 10000 - organization_fee_percentage`,
+    // so this JOIN handles both pre-WP-1 and post-WP-1 rows uniformly.
     const creatorAgreements = await this.db
       .select({
         creatorId: creatorOrganizationAgreements.creatorId,
-        sharePercent: creatorOrganizationAgreements.organizationFeePercentage,
+        sharePercent: agreementProposals.proposedCreatorSharePercent,
       })
       .from(creatorOrganizationAgreements)
+      .innerJoin(
+        agreementProposals,
+        eq(
+          agreementProposals.id,
+          creatorOrganizationAgreements.currentProposalId
+        )
+      )
       .where(
         and(
           eq(creatorOrganizationAgreements.organizationId, orgId),
-          sql`${creatorOrganizationAgreements.effectiveUntil} IS NULL OR ${creatorOrganizationAgreements.effectiveUntil} > now()`
+          eq(creatorOrganizationAgreements.revenueType, 'subscription'),
+          // Per Decision Q3: an agreement is active at invoice time if
+          // EITHER it is currently status='active' (never terminated), OR
+          // it was terminated AFTER the invoice fired. The schema's
+          // check_creator_org_agreement_terminated_shape enforces
+          // `(status='terminated') = (terminated_at IS NOT NULL)`, so
+          // status='active' guarantees terminatedAt IS NULL.
+          or(
+            eq(creatorOrganizationAgreements.status, 'active'),
+            and(
+              eq(creatorOrganizationAgreements.status, 'terminated'),
+              gt(creatorOrganizationAgreements.terminatedAt, invoiceCreatedAt)
+            )
+          ),
+          lte(creatorOrganizationAgreements.effectiveFrom, invoiceCreatedAt),
+          or(
+            isNull(creatorOrganizationAgreements.effectiveUntil),
+            gt(creatorOrganizationAgreements.effectiveUntil, invoiceCreatedAt)
+          )
         )
       );
 
@@ -4165,13 +4224,119 @@ export class SubscriptionService extends BaseService {
       return;
     }
 
-    // Distribute creator pool by fixed percentages
-    // Note: creatorOrganizationAgreements.organizationFeePercentage is repurposed
-    // as the creator's share percentage in basis points for subscription context
+    // Distribute creator pool by per-creator share basis points
+    // (Codex-rzfjw, WP-4 of Codex-nk4km): `creatorAgreements[i].sharePercent`
+    // is the creator's slice of the post-platform pool, derived from the
+    // legacy `organization_fee_percentage` column via
+    // `creatorShareFromLegacyOrgFee()` above. The sum may be < 10000
+    // (org owner retains the residual via the existing org_fee branch),
+    // = 10000 (org residual is zero — legal outcome), or > 10000 by
+    // design (multiple creators each accept their slice and the org
+    // ate the gap on negotiation). We normalise by the actual sum so
+    // total transferred never exceeds the creator pool.
     const totalShareBps = creatorAgreements.reduce(
       (sum, a) => sum + a.sharePercent,
       0
     );
+
+    // Edge: every agreement carries `sharePercent=0` (e.g. legacy rows
+    // backfilled with org_fee=10000). totalShareBps would be 0 → divide
+    // by zero. Bail to the no-agreements branch — full creator pool
+    // routes to the org owner. Preserves the "org keeps all" fallback.
+    if (totalShareBps <= 0) {
+      this.obs.info(
+        'All active subscription agreements have zero creator share; routing pool to org owner',
+        {
+          organizationId: orgId,
+          subscriptionId,
+          agreementCount: creatorAgreements.length,
+        }
+      );
+      // Effectively the same as the empty-agreements branch above.
+      // Recurse-via-fallthrough is messy here; re-enter the empty
+      // branch path by zeroing creatorAgreements and breaking out.
+      creatorAgreements.length = 0;
+      // Re-route to the org owner using the same idempotency key as
+      // the empty branch. Inline (not a function call) to keep the
+      // method's shape recognisable.
+      if (orgConnect?.chargesEnabled && creatorPayoutCents > 0) {
+        try {
+          const transfer = await this.stripe.transfers.create(
+            {
+              amount: creatorPayoutCents,
+              currency: CURRENCY.GBP,
+              destination: orgConnect.stripeAccountId,
+              source_transaction: chargeId,
+              transfer_group: transferGroup,
+              metadata: {
+                subscription_id: subscriptionId,
+                type: 'creator_payout_to_owner',
+              },
+            },
+            { idempotencyKey: `${chargeId}_creator_pool_owner` }
+          );
+          try {
+            await this.db.insert(payouts).values({
+              userId: orgConnect.userId,
+              organizationId: orgId,
+              subscriptionId,
+              amountCents: creatorPayoutCents,
+              payoutType: 'creator_payout_to_owner',
+              status: 'paid',
+              stripeTransferId: transfer.id,
+              stripeChargeId: chargeId,
+              transferGroup,
+              resolvedAt: new Date(),
+            });
+          } catch (insertError) {
+            if (!isUniqueViolation(insertError)) {
+              this.obs.error(
+                'Creator-pool transfer to owner succeeded but payouts ledger insert failed (zero-share branch)',
+                {
+                  subscriptionId,
+                  organizationId: orgId,
+                  stripeTransferId: transfer.id,
+                  amountCents: creatorPayoutCents,
+                  error: (insertError as Error).message,
+                }
+              );
+            }
+          }
+        } catch (transferError) {
+          this.obs.error(
+            'Creator pool transfer to owner failed (zero-share branch), accumulating',
+            {
+              subscriptionId,
+              organizationId: orgId,
+              amountCents: creatorPayoutCents,
+              error: (transferError as Error).message,
+            }
+          );
+          try {
+            await this.db.insert(payouts).values({
+              userId: orgConnect.userId,
+              organizationId: orgId,
+              subscriptionId,
+              amountCents: creatorPayoutCents,
+              payoutType: 'creator_payout_to_owner',
+              status: 'failed',
+              reason: 'transfer_failed',
+            });
+          } catch (insertError) {
+            this.obs.error(
+              'Failed to record pending payout for zero-share fallback',
+              {
+                subscriptionId,
+                organizationId: orgId,
+                amountCents: creatorPayoutCents,
+                error: (insertError as Error).message,
+              }
+            );
+          }
+        }
+      }
+      return;
+    }
 
     // Batch-fetch all creator Connect accounts to avoid N+1 queries
     const creatorIds = creatorAgreements.map((a) => a.creatorId);
@@ -4190,6 +4355,18 @@ export class SubscriptionService extends BaseService {
       const creatorAmount = Math.floor(
         (creatorPayoutCents * agreement.sharePercent) / totalShareBps
       );
+
+      // Codex-rzfjw: per-creator split observability. Emit one
+      // structured event per agreement so the payout pipeline is
+      // auditable end-to-end (creator → amount → agreement share).
+      this.obs.info('payout_split_computed', {
+        subscriptionId,
+        organizationId: orgId,
+        creatorId: agreement.creatorId,
+        amountCents: creatorAmount,
+        sharePercent: agreement.sharePercent,
+        totalShareBps,
+      });
 
       if (creatorAmount <= 0) continue;
 

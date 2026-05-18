@@ -448,9 +448,6 @@ importers:
       '@codex/observability':
         specifier: workspace:*
         version: link:../observability
-      '@codex/purchase':
-        specifier: workspace:*
-        version: link:../purchase
       '@codex/service-errors':
         specifier: workspace:*
         version: link:../service-errors
@@ -900,6 +897,9 @@ importers:
 
   packages/purchase:
     dependencies:
+      '@codex/agreements':
+        specifier: workspace:*
+        version: link:../agreements
       '@codex/cache':
         specifier: workspace:*
         version: link:../cache
@@ -1017,6 +1017,9 @@ importers:
 
   packages/subscription:
     dependencies:
+      '@codex/agreements':
+        specifier: workspace:*
+        version: link:../agreements
       '@codex/cache':
         specifier: workspace:*
         version: link:../cache
