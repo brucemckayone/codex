@@ -36,6 +36,24 @@ async function checkAuthWorkerHealthy(): Promise<boolean> {
   }
 }
 
+/**
+ * Derive the cookie `domain` attribute from the configured Playwright base URL.
+ *
+ * CI sets `PLAYWRIGHT_BASE_URL=http://localhost:8787` (Wrangler) → hostname
+ * `localhost`. Local default is `http://lvh.me:5173` (Vite dev) → hostname
+ * `lvh.me`. Without this, cookies registered with one hardcoded domain do
+ * not apply on the other base URL and authenticated `goto('/...')` calls
+ * silently redirect to /login.
+ */
+function getCookieDomain(): string {
+  const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://lvh.me:5173';
+  try {
+    return new URL(baseURL).hostname;
+  } catch {
+    return 'lvh.me';
+  }
+}
+
 type AuthenticateAsUserFixture = {
   authenticateAsUser: () => Promise<void>;
 };
@@ -75,6 +93,7 @@ export const test = base.extend<AuthFixtures>({
 
       // Parse cookies from the header string using shared helper
       const parsedCookies = parseCookieString(user.cookie);
+      const cookieDomain = getCookieDomain();
       const browserCookies: {
         name: string;
         value: string;
@@ -91,7 +110,7 @@ export const test = base.extend<AuthFixtures>({
         browserCookies.push({
           name,
           value,
-          domain: 'lvh.me',
+          domain: cookieDomain,
           path: '/',
           httpOnly: true,
           secure: false,
@@ -104,7 +123,7 @@ export const test = base.extend<AuthFixtures>({
           browserCookies.push({
             name: COOKIES.SESSION_NAME,
             value,
-            domain: 'lvh.me',
+            domain: cookieDomain,
             path: '/',
             httpOnly: true,
             secure: false,
@@ -190,13 +209,14 @@ export async function registerSharedUser(): Promise<SharedAuthCookies> {
   });
 
   const parsedCookies = parseCookieString(user.cookie);
+  const cookieDomain = getCookieDomain();
   const browserCookies: SharedAuthCookies['cookies'] = [];
 
   for (const { name, value } of parsedCookies) {
     browserCookies.push({
       name,
       value,
-      domain: 'localhost',
+      domain: cookieDomain,
       path: '/',
       httpOnly: true,
       secure: false,
@@ -208,7 +228,7 @@ export async function registerSharedUser(): Promise<SharedAuthCookies> {
       browserCookies.push({
         name: COOKIES.SESSION_NAME,
         value,
-        domain: 'localhost',
+        domain: cookieDomain,
         path: '/',
         httpOnly: true,
         secure: false,

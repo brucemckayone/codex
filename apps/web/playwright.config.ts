@@ -87,8 +87,8 @@ export default defineConfig({
         },
         {
           command:
-            'cd ../../workers/identity-api && npx wrangler dev --env test --port 42071',
-          url: 'http://localhost:42071/health', // Use health endpoint for ready detection
+            'cd ../../workers/identity-api && npx wrangler dev --env test --port 42074',
+          url: 'http://localhost:42074/health', // Use health endpoint for ready detection
           timeout: 90000, // 90 seconds - Workers start faster
           reuseExistingServer: true,
         },
@@ -108,15 +108,15 @@ export default defineConfig({
         },
         {
           command:
-            'cd ../../workers/organization-api && npx wrangler dev --env test --port 42075',
-          url: 'http://localhost:42075/health',
+            'cd ../../workers/organization-api && npx wrangler dev --env test --port 42071',
+          url: 'http://localhost:42071/health',
           timeout: 90000,
           reuseExistingServer: true,
         },
         {
           command:
-            'cd ../../workers/media-api && npx wrangler dev --env test --port 42076',
-          url: 'http://localhost:42076/health',
+            'cd ../../workers/media-api && npx wrangler dev --env test --port 4002',
+          url: 'http://localhost:4002/health',
           timeout: 90000,
           reuseExistingServer: true,
         },
