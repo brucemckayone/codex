@@ -43,6 +43,13 @@ test.describe('Studio Settings - General', () => {
       '/settings'
     );
 
+    // contactQuery loading shows skeletons; wait for the real form before
+    // sweeping fields.
+    await page.waitForSelector('form.settings-form', {
+      state: 'visible',
+      timeout: 15000,
+    });
+
     await expect(
       page.getByRole('textbox', { name: 'Platform Name' })
     ).toBeVisible();
@@ -86,8 +93,19 @@ test.describe('Studio Settings - General', () => {
       '/settings'
     );
 
+    await page.waitForSelector('form.settings-form', {
+      state: 'visible',
+      timeout: 15000,
+    });
+
+    // Timezone migrated from a native <select> to a custom Melt UI <Select>
+    // combobox — options live in a popover that only mounts when the
+    // trigger is clicked. Open it first, then count the listbox items.
     const timezone = page.getByRole('combobox', { name: 'Timezone' });
-    const options = timezone.locator('option');
+    await timezone.click();
+
+    const options = page.getByRole('option');
+    await expect(options.first()).toBeVisible({ timeout: 5000 });
     const count = await options.count();
 
     // Should have UTC plus several timezones
@@ -193,7 +211,7 @@ test.describe('Studio Settings - Branding', () => {
     await injectSharedStudioAuth(page, sharedAuth);
   });
 
-  test('branding page loads with color picker and logo upload', async ({
+  test('branding page loads with logo upload + edit-live action', async ({
     page,
   }) => {
     await navigateToStudioPage(
@@ -202,34 +220,18 @@ test.describe('Studio Settings - Branding', () => {
       '/settings/branding'
     );
 
-    // Color picker: native color input + hex text input
-    await expect(
-      page.getByRole('textbox', { name: 'Hex color code' })
-    ).toBeVisible();
-
-    // Logo upload button
+    // The settings/branding page was reshaped to a logo-upload card plus a
+    // read-only "Current Brand" summary that delegates colour/typography
+    // edits to the floating brand editor (hence the "Edit Brand Live"
+    // CTA). The legacy hex picker + save button live in the brand editor
+    // now — covered by brand-editor-hero-effects.spec.ts.
     await expect(
       page.getByRole('button', { name: 'Upload Logo' })
     ).toBeVisible();
 
-    // Save button for color form
     await expect(
-      page.getByRole('button', { name: 'Save Changes' })
+      page.getByRole('button', { name: /Edit Brand Live/i })
     ).toBeVisible();
-  });
-
-  test('hex color input shows default blue', async ({ page }) => {
-    await navigateToStudioPage(
-      page,
-      sharedAuth.member.organization.slug,
-      '/settings/branding'
-    );
-
-    const hexInput = page.getByRole('textbox', { name: 'Hex color code' });
-    const value = await hexInput.inputValue();
-
-    // Default brand color is #3B82F6
-    expect(value.toUpperCase()).toContain('3B82F6');
   });
 
   test('Branding tab is selected on branding page', async ({ page }) => {
@@ -245,7 +247,15 @@ test.describe('Studio Settings - Branding', () => {
 });
 
 test.describe('Studio Settings - Branding Mutations', () => {
-  test('can save branding color', async ({ page }) => {
+  // Hex-color mutation moved out of /settings/branding when the
+  // floating brand editor took over colour/typography. Coverage now
+  // lives in brand-editor-hero-effects.spec.ts (full editor flow) and
+  // the brand-editor unit tests. The page-level "Edit Brand Live" CTA
+  // hand-off is exercised in `branding page loads with logo upload +
+  // edit-live action` above.
+  test('Edit Brand Live CTA is clickable on the branding page', async ({
+    page,
+  }) => {
     const member = await setupStudioUser(page, { orgRole: 'owner' });
 
     await navigateToStudioPage(
@@ -254,15 +264,8 @@ test.describe('Studio Settings - Branding Mutations', () => {
       '/settings/branding'
     );
 
-    // Change color via hex input
-    const hexInput = page.getByRole('textbox', { name: 'Hex color code' });
-    await hexInput.clear();
-    await hexInput.fill('#FF5733');
-
-    await page.getByRole('button', { name: 'Save Changes' }).click();
-
-    // Wait for success feedback
-    const success = page.locator('[role="status"]');
-    await expect(success).toBeVisible({ timeout: 15000 });
+    const editLive = page.getByRole('button', { name: /Edit Brand Live/i });
+    await expect(editLive).toBeVisible({ timeout: 15000 });
+    await expect(editLive).toBeEnabled();
   });
 });

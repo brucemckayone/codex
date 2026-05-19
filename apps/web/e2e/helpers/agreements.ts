@@ -79,6 +79,12 @@ async function reLoginUser(
 /**
  * Inject cookies onto `.lvh.me` so they work on every subdomain (the
  * org subdomain, `creators`, and the platform host).
+ *
+ * Playwright's `addCookies` honors the RFC 6265 leading-dot rule
+ * strictly — `domain: 'lvh.me'` matches only the exact host, not
+ * subdomains. Use the leading-dot form so a single cookie applies to
+ * `${org}.lvh.me`, `creators.lvh.me`, and the platform root all at
+ * once.
  */
 export async function injectAgreementCookies(
   ctx: BrowserContext | Page,
@@ -100,7 +106,7 @@ export async function injectAgreementCookies(
     browserCookies.push({
       name,
       value,
-      domain: 'lvh.me',
+      domain: '.lvh.me',
       path: '/',
       httpOnly: true,
       secure: false,
@@ -112,7 +118,7 @@ export async function injectAgreementCookies(
       browserCookies.push({
         name: COOKIES.SESSION_NAME,
         value,
-        domain: 'lvh.me',
+        domain: '.lvh.me',
         path: '/',
         httpOnly: true,
         secure: false,

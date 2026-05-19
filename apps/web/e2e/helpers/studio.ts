@@ -87,6 +87,12 @@ export async function navigateToStudio(page: Page, orgSlug: string) {
 
 /**
  * Navigate to a specific studio page on an org subdomain.
+ *
+ * Studio is SPA-rendered (`+layout.ts` exports `ssr = false`), so the
+ * initial HTML is an empty shell. Waiting for `.studio-layout` ensures
+ * the client-side bundle hydrated and the studio shell is mounted
+ * before assertions run — without this, fast-running tests can race
+ * the very first paint of the page.
  */
 export async function navigateToStudioPage(
   page: Page,
@@ -96,6 +102,10 @@ export async function navigateToStudioPage(
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   await page.goto(`http://${orgSlug}.lvh.me:${BASE_PORT}/studio${cleanPath}`, {
     waitUntil: 'load',
+  });
+  await page.waitForSelector('.studio-layout', {
+    state: 'visible',
+    timeout: 30000,
   });
   // Wait for Svelte 5 hydration
   await page.evaluate(() => new Promise(requestAnimationFrame));

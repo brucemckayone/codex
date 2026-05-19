@@ -38,14 +38,18 @@ test.describe('Studio Content - List Page', () => {
     await injectSharedStudioAuth(page, sharedAuth);
   });
 
-  test('content list page loads with heading', async ({ page }) => {
+  test('content list page loads with command bar', async ({ page }) => {
     await navigateToStudioPage(
       page,
       sharedAuth.member.organization.slug,
       '/content'
     );
 
-    await expect(page.locator('h1')).toBeVisible();
+    // Editorial refactor removed the page-level <h1>; the page identity
+    // now lives in the ContentListCommandBar (role="toolbar").
+    await expect(
+      page.getByRole('toolbar', { name: 'Content library actions' })
+    ).toBeVisible();
   });
 
   test('create button links to new content', async ({ page }) => {
@@ -66,10 +70,17 @@ test.describe('Studio Content - List Page', () => {
       '/content'
     );
 
-    // New org: empty state with create CTA. Populated org: table.
+    // New org: EmptyState renders (with `.empty-state` div). Populated
+    // org: a real table. The listContent query streams so we have to
+    // wait for whichever branch ends up rendering — until then both
+    // selectors race the skeleton.
+    await page.waitForSelector('.empty-state, table', {
+      state: 'visible',
+      timeout: 15000,
+    });
+
     const emptyState = page.locator('.empty-state');
     const table = page.locator('table');
-
     const hasEmpty = await emptyState.isVisible().catch(() => false);
     const hasTable = await table.isVisible().catch(() => false);
     expect(hasEmpty || hasTable).toBeTruthy();
@@ -111,12 +122,18 @@ test.describe('Studio Content - Create Form', () => {
       '/content/new'
     );
 
+    // /content/new shows a skeleton while listMedia + listTiers resolve;
+    // wait for the real form to mount before sweeping fields.
+    await page.waitForSelector('form', { state: 'visible', timeout: 20000 });
+
     // Text fields
     await expect(page.getByRole('textbox', { name: 'Title' })).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Slug' })).toBeVisible();
-    await expect(
-      page.getByRole('textbox', { name: 'Description' })
-    ).toBeVisible();
+    // Description is a Tiptap RichTextEditor (contenteditable inside a
+    // wrapper div). It's not a plain `<textarea>` so `getByRole('textbox',
+    // { name: 'Description' })` doesn't match — assert the editor wrapper
+    // instead.
+    await expect(page.locator('.rich-text-editor')).toBeVisible();
 
     // Custom combobox selects
     await expect(
@@ -201,13 +218,22 @@ test.describe('Studio Content - Create Submission', () => {
 
     await navigateToStudioPage(page, member.organization.slug, '/content/new');
 
+    // Wait for the form to replace the skeleton (listMedia + listTiers
+    // queries gate the render).
+    await page.waitForSelector('form', { state: 'visible', timeout: 20000 });
+
     // Fill title and slug manually (Playwright fill doesn't trigger oninput for auto-slug)
     const uniqueSlug = `e2e-article-${Date.now()}`;
     await page.getByRole('textbox', { name: 'Title' }).fill('E2E Test Article');
     await page.getByRole('textbox', { name: 'Slug' }).fill(uniqueSlug);
-    await page
-      .getByRole('textbox', { name: 'Description' })
-      .fill('Test article description');
+
+    // Description is a Tiptap RichTextEditor — type into the contenteditable
+    // ProseMirror instance rather than calling `.fill()` (which only targets
+    // <input>/<textarea>). The hidden mirror textarea keeps the form payload
+    // in sync.
+    const editorBody = page.locator('.rich-text-editor .ProseMirror');
+    await editorBody.click();
+    await editorBody.type('Test article description');
 
     // Switch to Article type (doesn't require mediaItemId)
     await page.getByRole('combobox', { name: 'Content Type' }).click();

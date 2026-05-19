@@ -120,5 +120,16 @@ export default defineConfig({
           timeout: 90000,
           reuseExistingServer: true,
         },
+        {
+          // Analytics + studio admin pages call admin-api for revenue,
+          // subscribers, followers, top-content, and content-performance
+          // queries. Without it `isZeroState` never resolves and the
+          // analytics zero-state heading never renders.
+          command:
+            'cd ../../workers/admin-api && npx wrangler dev --env test --port 42073',
+          url: 'http://localhost:42073/health',
+          timeout: 90000,
+          reuseExistingServer: true,
+        },
       ],
 });

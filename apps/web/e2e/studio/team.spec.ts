@@ -61,9 +61,16 @@ test.describe('Studio Team Page', () => {
       '/team'
     );
 
+    // MemberTable renders one of three branches: loading-state skeleton,
+    // empty-state, or table-wrapper containing the real <table>. Wait
+    // for whichever non-skeleton branch lands.
+    await page.waitForSelector('table, .empty-state', {
+      state: 'visible',
+      timeout: 15000,
+    });
+
     const table = page.locator('table');
     const emptyState = page.locator('.empty-state');
-
     const hasTable = await table.isVisible().catch(() => false);
     const hasEmpty = await emptyState.isVisible().catch(() => false);
     expect(hasTable || hasEmpty).toBeTruthy();
@@ -146,10 +153,15 @@ test.describe('Studio Customers Page', () => {
       '/customers'
     );
 
-    // New org: empty state. Populated org: table.
+    // Wait for the customers query to land — either the EmptyState
+    // appears (no customers) or a real <table> (existing customers).
+    await page.waitForSelector('.empty-state, table', {
+      state: 'visible',
+      timeout: 15000,
+    });
+
     const emptyState = page.locator('.empty-state');
     const table = page.locator('table');
-
     const hasEmpty = await emptyState.isVisible().catch(() => false);
     const hasTable = await table.isVisible().catch(() => false);
     expect(hasEmpty || hasTable).toBeTruthy();
