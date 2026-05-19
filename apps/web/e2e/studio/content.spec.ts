@@ -14,8 +14,15 @@ import {
  *
  * Tests content listing, creation form, and form fields.
  *
- * NOTE: The Select component renders as a custom combobox (role="combobox"),
- * not a native <select>. Use getByRole('combobox', { name }) to interact.
+ * NOTE: The content form has migrated key fields off the old combobox/
+ * native-select pattern. Today's structure:
+ *   - Content Type: <fieldset role="radiogroup"> in ContentTypeSelector
+ *   - Access (formerly Visibility): <div role="radiogroup"> in
+ *     AccessSection with `free`/`paid`/`followers`/`subscribers`/`team`
+ *   - Description / Content Body: Tiptap RichTextEditor
+ *     (contenteditable; type with `.click()` + `.type()`, not `.fill()`)
+ *   - Tier picker (when Access is `subscribers`/`paid` with org tiers):
+ *     Melt UI <Select> combobox — opens a popover with role="option".
  *
  * NOTE: Svelte 5 bind:value + Playwright fill() does not trigger oninput,
  * so auto-slug from title does not work. Tests fill the slug field manually.
@@ -140,17 +147,18 @@ test.describe('Studio Content - Create Form', () => {
         .locator('.rich-text-editor')
     ).toBeVisible();
 
-    // Custom combobox selects
+    // Content Type is a `<fieldset role="radiogroup">` with `<legend>`
+    // ("Content Type") — visible label comes from the legend in
+    // ContentTypeSelector.svelte.
     await expect(
-      page.getByRole('combobox', { name: 'Content Type' })
-    ).toBeVisible();
-    await expect(
-      page.getByRole('combobox', { name: 'Visibility' })
+      page.getByRole('radiogroup', { name: 'Content Type' })
     ).toBeVisible();
 
-    // Price field (spinbutton)
+    // Visibility/Access was reshaped into an "Access" radiogroup with
+    // semantic options (free / paid / followers / subscribers / team)
+    // in AccessSection.svelte.
     await expect(
-      page.getByRole('spinbutton', { name: /Price/i })
+      page.getByRole('radiogroup', { name: 'Access' })
     ).toBeVisible();
 
     // Submit button
@@ -171,7 +179,7 @@ test.describe('Studio Content - Create Form', () => {
     ).toBeVisible();
   });
 
-  test('content type combobox has Video, Audio, Article options', async ({
+  test('content type radiogroup has Video, Audio, Article options', async ({
     page,
   }) => {
     await navigateToStudioPage(
@@ -180,40 +188,49 @@ test.describe('Studio Content - Create Form', () => {
       '/content/new'
     );
 
-    // Open combobox
-    await page.getByRole('combobox', { name: 'Content Type' }).click();
+    await page.waitForSelector('form', { state: 'visible', timeout: 20000 });
 
-    // Check all options exist
-    await expect(page.getByRole('option', { name: 'Video' })).toBeVisible();
-    await expect(page.getByRole('option', { name: 'Audio' })).toBeVisible();
-    await expect(page.getByRole('option', { name: 'Article' })).toBeVisible();
+    // Content Type is a fieldset/radiogroup (not a combobox) — every type
+    // is a visible labelled radio that's selectable directly.
+    await expect(page.getByRole('radio', { name: 'Video' })).toBeVisible();
+    await expect(page.getByRole('radio', { name: 'Audio' })).toBeVisible();
+    await expect(page.getByRole('radio', { name: 'Article' })).toBeVisible();
   });
 
-  test('visibility combobox has expected options', async ({ page }) => {
+  test('access radiogroup has free/paid options visible', async ({ page }) => {
     await navigateToStudioPage(
       page,
       sharedAuth.member.organization.slug,
       '/content/new'
     );
 
-    await page.getByRole('combobox', { name: 'Visibility' }).click();
+    await page.waitForSelector('form', { state: 'visible', timeout: 20000 });
 
-    await expect(page.getByRole('option', { name: 'Public' })).toBeVisible();
-    await expect(page.getByRole('option', { name: 'Private' })).toBeVisible();
+    // The legacy Visibility dropdown was reshaped into the Access
+    // radiogroup with the AccessSection (`free`, `paid`, plus org-
+    // dependent `followers`/`subscribers`/`team`). For a fresh org with
+    // no tiers, only `free` and `paid` show by default.
+    await expect(page.getByRole('radio', { name: /Free/i })).toBeVisible();
+    await expect(page.getByRole('radio', { name: /Paid/i })).toBeVisible();
   });
 
-  test('price field defaults to 0 with help text', async ({ page }) => {
+  test('price field appears when Paid access is selected', async ({ page }) => {
     await navigateToStudioPage(
       page,
       sharedAuth.member.organization.slug,
       '/content/new'
     );
 
-    const priceField = page.getByRole('spinbutton', { name: /Price/i });
-    await expect(priceField).toHaveValue('0');
+    await page.waitForSelector('form', { state: 'visible', timeout: 20000 });
 
-    // Help text below price
-    await expect(page.locator('.form-help')).toContainText('free content');
+    // AccessSection only renders the price input when the `paid` or
+    // `subscribers` access type is selected — `free` (the default for
+    // tier-less orgs) keeps the price hidden. Switching to `Paid`
+    // reveals the price field.
+    await page.getByRole('radio', { name: /Paid/i }).click();
+    const priceField = page.locator('#price');
+    await expect(priceField).toBeVisible({ timeout: 5000 });
+    await expect(priceField).toHaveAttribute('min', '0');
   });
 });
 
@@ -242,9 +259,9 @@ test.describe('Studio Content - Create Submission', () => {
     await descriptionEditor.click();
     await descriptionEditor.type('Test article description');
 
-    // Switch to Article type (doesn't require mediaItemId)
-    await page.getByRole('combobox', { name: 'Content Type' }).click();
-    await page.getByRole('option', { name: 'Article' }).click();
+    // Switch to Article type (doesn't require mediaItemId). Content Type
+    // is a radiogroup now — click the labelled radio rather than a select.
+    await page.getByRole('radio', { name: 'Article' }).click();
 
     // Submit
     await page.getByRole('button', { name: 'Create Content' }).click();
