@@ -129,11 +129,16 @@ test.describe('Studio Content - Create Form', () => {
     // Text fields
     await expect(page.getByRole('textbox', { name: 'Title' })).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Slug' })).toBeVisible();
-    // Description is a Tiptap RichTextEditor (contenteditable inside a
-    // wrapper div). It's not a plain `<textarea>` so `getByRole('textbox',
-    // { name: 'Description' })` doesn't match — assert the editor wrapper
-    // instead.
-    await expect(page.locator('.rich-text-editor')).toBeVisible();
+    // Description is a Tiptap RichTextEditor. The content form actually
+    // mounts two `.rich-text-editor` instances (description + content
+    // body), so anchor on the form-field wrapper to pick the description
+    // one specifically.
+    await expect(
+      page
+        .locator('.form-field')
+        .filter({ has: page.locator('label[for="description"]') })
+        .locator('.rich-text-editor')
+    ).toBeVisible();
 
     // Custom combobox selects
     await expect(
@@ -227,13 +232,15 @@ test.describe('Studio Content - Create Submission', () => {
     await page.getByRole('textbox', { name: 'Title' }).fill('E2E Test Article');
     await page.getByRole('textbox', { name: 'Slug' }).fill(uniqueSlug);
 
-    // Description is a Tiptap RichTextEditor — type into the contenteditable
-    // ProseMirror instance rather than calling `.fill()` (which only targets
-    // <input>/<textarea>). The hidden mirror textarea keeps the form payload
-    // in sync.
-    const editorBody = page.locator('.rich-text-editor .ProseMirror');
-    await editorBody.click();
-    await editorBody.type('Test article description');
+    // Description is a Tiptap RichTextEditor — type into the description
+    // ProseMirror contenteditable (there are two `.rich-text-editor`
+    // instances on this page, so scope to the description form field).
+    const descriptionEditor = page
+      .locator('.form-field')
+      .filter({ has: page.locator('label[for="description"]') })
+      .locator('.rich-text-editor .ProseMirror');
+    await descriptionEditor.click();
+    await descriptionEditor.type('Test article description');
 
     // Switch to Article type (doesn't require mediaItemId)
     await page.getByRole('combobox', { name: 'Content Type' }).click();

@@ -85,17 +85,20 @@ test.describe('Studio Media Page', () => {
       '/media'
     );
 
-    // New org should have no media — look for empty state or upload prompt
+    // Wait for the StudioMediaPage to land inside `.library-body` before
+    // asserting on the empty branch — `mediaQuery.loading` shows a
+    // skeleton that mounts neither empty-state nor a drop zone yet.
+    await page.waitForSelector('.library-body', {
+      state: 'visible',
+      timeout: 15000,
+    });
+
+    // New org should have no media — look for empty state or the
+    // viewport-wide drop overlay (drop-zone class lives on the LogoUpload
+    // pattern but the media page uses MediaLibrary's empty-state slot).
     const emptyState = page.locator('.empty-state');
-    const uploadPrompt = page.locator('.drop-zone, .upload-zone');
-
     const hasEmpty = await emptyState.isVisible().catch(() => false);
-    const hasUploadPrompt = await uploadPrompt
-      .first()
-      .isVisible()
-      .catch(() => false);
 
-    // One of these should show for a new org
-    expect(hasEmpty || hasUploadPrompt).toBeTruthy();
+    expect(hasEmpty).toBeTruthy();
   });
 });

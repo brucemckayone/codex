@@ -99,8 +99,11 @@ test.describe('Studio Team Page', () => {
     await page.getByRole('button', { name: /Invite Member/i }).click();
     await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 });
 
+    // Email is a native <input id="invite-email">. Role migrated from a
+    // native <select> to the custom Melt UI <Select> component which
+    // renders a combobox trigger, so locate by role + accessible name.
     await expect(page.locator('#invite-email')).toBeVisible();
-    await expect(page.locator('#invite-role')).toBeVisible();
+    await expect(page.getByRole('combobox', { name: /role/i })).toBeVisible();
   });
 
   test('invite dialog closes on cancel', async ({ page }) => {
