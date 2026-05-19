@@ -55,6 +55,15 @@ R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
 R2_BUCKET_MEDIA=${R2_BUCKET_MEDIA}
 EOF
       ;;
+    "organization-api")
+      # Tier endpoints look up Stripe price metadata when a tier has a
+      # Stripe-priced plan (introduced by the revenue-share work). Without
+      # this key, the org layout's loadOrgTiers() call cascades into 500s
+      # on every org page — including the bug-hunt page-bug cluster.
+      cat >> "${VARS_FILE}" << EOF
+STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+EOF
+      ;;
     "media-api")
       cat >> "${VARS_FILE}" << EOF
 RUNPOD_API_KEY=${RUNPOD_API_KEY}
