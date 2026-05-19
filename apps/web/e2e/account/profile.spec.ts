@@ -82,18 +82,18 @@ test.describe('Account Profile Page - Read-Only', () => {
     // Check page title
     await expect(page).toHaveTitle(/Profile.*Codex/i);
 
-    // Check main heading
-    await expect(page.locator('.profile h1')).toContainText('Profile');
+    // Check main heading (account page renders inside `.account-page`)
+    await expect(page.locator('.account-page h1')).toContainText('Profile');
 
-    // Check avatar section
-    await expect(page.locator('.settings-card h2').first()).toContainText(
-      'Avatar'
-    );
+    // Check avatar section — Card.Title renders `div[role=heading]`, not <h2>
+    await expect(
+      page.getByRole('heading', { level: 2, name: /Avatar/i })
+    ).toBeVisible();
     await expect(page.locator('button:has-text("Upload New")')).toBeVisible();
 
-    // Check personal information section
+    // Check personal information section — same Card.Title pattern
     await expect(
-      page.locator('h2:has-text("Personal Information")')
+      page.getByRole('heading', { level: 2, name: /Personal Information/i })
     ).toBeVisible();
 
     // Check form fields exist

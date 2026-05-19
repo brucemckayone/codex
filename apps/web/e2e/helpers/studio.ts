@@ -118,7 +118,13 @@ export async function navigateToOrgPage(
 
 /**
  * Inject cookies for an org member into the page context.
- * Sets cookies on `.lvh.me` domain so they work on all subdomains.
+ *
+ * Studio + org tests navigate to ABSOLUTE org-subdomain URLs
+ * (`http://{slug}.lvh.me:${BASE_PORT}/...`), so cookies need to apply
+ * across all `*.lvh.me` hosts. Playwright's `addCookies` honors the
+ * RFC 6265 leading-dot rule strictly — `domain: 'lvh.me'` matches only
+ * the exact host, so we use the leading-dot form to scope the cookie
+ * to every subdomain (the per-test org slug is generated at runtime).
  */
 export async function injectOrgCookies(
   page: Page,
@@ -140,7 +146,7 @@ export async function injectOrgCookies(
     browserCookies.push({
       name,
       value,
-      domain: 'lvh.me',
+      domain: '.lvh.me',
       path: '/',
       httpOnly: true,
       secure: false,
@@ -153,7 +159,7 @@ export async function injectOrgCookies(
       browserCookies.push({
         name: COOKIES.SESSION_NAME,
         value,
-        domain: 'lvh.me',
+        domain: '.lvh.me',
         path: '/',
         httpOnly: true,
         secure: false,

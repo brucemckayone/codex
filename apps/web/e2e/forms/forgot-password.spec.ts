@@ -24,45 +24,13 @@ test.describe('Forgot Password Form', () => {
     await expect(page.getByText('Back to Sign In')).toBeVisible();
   });
 
-  test('shows validation error for empty email', async ({ page }) => {
-    // Submit without entering email
-    await page.click('button[type="submit"]');
-
-    // Wait for validation error
-    await expect(page.locator('.error-text')).toBeVisible({ timeout: 5000 });
-
-    // Email input should have error state
-    const emailInput = page.locator('input[name="email"]');
-    await expect(emailInput).toHaveAttribute('data-error', 'true');
-  });
-
-  test('shows validation error for invalid email format', async ({ page }) => {
-    await page.fill('input[name="email"]', 'invalid-email-format');
-    await page.click('button[type="submit"]');
-
-    // Wait for validation error
-    await expect(page.locator('.error-text')).toBeVisible({ timeout: 5000 });
-
-    // Check email input has error state
-    const emailInput = page.locator('input[name="email"]');
-    await expect(emailInput).toHaveAttribute('data-error', 'true');
-
-    // Error message should mention valid email
-    await expect(page.locator('.error-text')).toContainText(/email/i);
-  });
-
-  test('preserves email value after validation error', async ({ page }) => {
-    const testEmail = 'preserved-value';
-
-    await page.fill('input[name="email"]', testEmail);
-    await page.click('button[type="submit"]');
-
-    // Wait for error
-    await expect(page.locator('.error-text')).toBeVisible({ timeout: 5000 });
-
-    // Email should still have the value
-    await expect(page.locator('input[name="email"]')).toHaveValue(testEmail);
-  });
+  // Field-level validation error tests were removed when /forgot-password
+  // migrated from page actions to BetterAuth remote forms (auth.remote.ts).
+  // The remote form returns a top-level `.success`/`.error` shape only —
+  // there is no per-field error to surface, so the page renders no
+  // `.error-text` / `data-error` markup. HTML5 `required` covers empty
+  // submissions natively; invalid email formatting is rejected server-side
+  // by the remote handler. The success-state test below covers the wire.
 
   test('navigates back to login page', async ({ page }) => {
     await page.click('text=Back to Sign In');

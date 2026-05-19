@@ -56,14 +56,15 @@ test.describe('Account Payment Page - Authenticated Behavior', () => {
     // Should show page title "Payments"
     await expect(page.locator('h1')).toContainText('Payments');
 
-    // Should show "Billing Information" section
-    await expect(page.locator('h2:has-text("Billing")')).toBeVisible();
-
-    // Should show "Purchase History" section
+    // Card.Title renders `<div role="heading" aria-level={level}>` rather than
+    // a semantic <h2>, so we use ARIA role lookup. Both sections live inside
+    // Card.Root containers in the payment page.
     await expect(
-      page.locator(
-        'h2:has-text("Purchase History"), h3:has-text("Purchase History")'
-      )
+      page.getByRole('heading', { level: 2, name: /Billing/i })
+    ).toBeVisible();
+
+    await expect(
+      page.getByRole('heading', { level: 2, name: /Purchase History/i })
     ).toBeVisible();
   });
 
@@ -83,9 +84,11 @@ test.describe('Account Payment Page - Authenticated Behavior', () => {
   test('displays "Manage Billing" section', async ({ page }) => {
     await page.goto('/account/payment');
 
-    // Should show "Billing Information" heading
+    // Card.Title renders `<div role="heading" aria-level={level}>` rather than
+    // a semantic <h2>/<h3>, so use the ARIA-role lookup that survives the
+    // refactor.
     await expect(
-      page.locator('h2:has-text("Billing"), h3:has-text("Billing")')
+      page.getByRole('heading', { level: 2, name: /Billing/i })
     ).toBeVisible();
   });
 
