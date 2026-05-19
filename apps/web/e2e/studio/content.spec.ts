@@ -147,16 +147,16 @@ test.describe('Studio Content - Create Form', () => {
         .locator('.rich-text-editor')
     ).toBeVisible();
 
-    // Content Type is a `<fieldset role="radiogroup">` with `<legend>`
-    // ("Content Type") — visible label comes from the legend in
-    // ContentTypeSelector.svelte.
+    // Content Type renders as a `<fieldset><legend>Content Type</legend>`
+    // (plain fieldset — implicit role is "group", not "radiogroup",
+    // because there's no explicit role attribute on the element).
     await expect(
-      page.getByRole('radiogroup', { name: 'Content Type' })
+      page.getByRole('group', { name: 'Content Type' })
     ).toBeVisible();
 
-    // Visibility/Access was reshaped into an "Access" radiogroup with
-    // semantic options (free / paid / followers / subscribers / team)
-    // in AccessSection.svelte.
+    // Access (formerly Visibility) IS an explicit `<div role="radiogroup"
+    // aria-label="Access">` per AccessSection.svelte, so radiogroup +
+    // name='Access' is the right lookup here.
     await expect(
       page.getByRole('radiogroup', { name: 'Access' })
     ).toBeVisible();
@@ -225,9 +225,12 @@ test.describe('Studio Content - Create Form', () => {
 
     // AccessSection only renders the price input when the `paid` or
     // `subscribers` access type is selected — `free` (the default for
-    // tier-less orgs) keeps the price hidden. Switching to `Paid`
-    // reveals the price field.
-    await page.getByRole('radio', { name: /Paid/i }).click();
+    // tier-less orgs) keeps the price hidden. The radios are sr-only;
+    // click the `.access-card` label that wraps each one.
+    await page
+      .locator('.access-card')
+      .filter({ has: page.locator('text=/Paid/i') })
+      .click();
     const priceField = page.locator('#price');
     await expect(priceField).toBeVisible({ timeout: 5000 });
     await expect(priceField).toHaveAttribute('min', '0');
@@ -259,9 +262,15 @@ test.describe('Studio Content - Create Submission', () => {
     await descriptionEditor.click();
     await descriptionEditor.type('Test article description');
 
-    // Switch to Article type (doesn't require mediaItemId). Content Type
-    // is a radiogroup now — click the labelled radio rather than a select.
-    await page.getByRole('radio', { name: 'Article' }).click();
+    // Switch to Article type (doesn't require mediaItemId). The radio
+    // input is sr-only; the visible `<label class="type-card">` wraps it
+    // with an Icon that intercepts pointer events. Click the labelled
+    // card instead so the click lands on the label and toggles the
+    // inner radio.
+    await page
+      .locator('.type-card')
+      .filter({ has: page.locator('text=Article') })
+      .click();
 
     // Submit
     await page.getByRole('button', { name: 'Create Content' }).click();
