@@ -882,6 +882,34 @@ jobs:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
 
+      # Content + Organization workers are required for `bug-hunt.spec.ts`
+      # and any /discover / /:org-slug / studio-content navigation. Without
+      # them the SvelteKit SSR app on :8787 hits ECONNREFUSED on org-info
+      # and discover-content lookups and surfaces 500s/404s for the public
+      # pages.
+      - name: Start Content API Worker in background
+        run: |
+          cd workers/content-api
+          pnpm wrangler dev --env test --port 4001 --local &
+          echo $! > content-api-worker.pid
+          timeout 60 bash -c 'until curl -f http://localhost:4001/health > /dev/null 2>&1; do sleep 1; done'
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+
+      - name: Start Organization API Worker in background
+        run: |
+          cd workers/organization-api
+          pnpm wrangler dev --env test --port 42071 --local &
+          echo $! > organization-api-worker.pid
+          timeout 60 bash -c 'until curl -f http://localhost:42071/health > /dev/null 2>&1; do sleep 1; done'
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+
       - name: Start Wrangler dev server in background
         run: |
           echo "::add-mask::$DATABASE_URL"
@@ -1008,6 +1036,22 @@ jobs:
           if [ -f workers/ecom-api/ecom-api-worker.pid ]; then
             kill $(cat workers/ecom-api/ecom-api-worker.pid) || true
             rm workers/ecom-api/ecom-api-worker.pid
+          fi
+
+      - name: Stop Content API Worker
+        if: always()
+        run: |
+          if [ -f workers/content-api/content-api-worker.pid ]; then
+            kill $(cat workers/content-api/content-api-worker.pid) || true
+            rm workers/content-api/content-api-worker.pid
+          fi
+
+      - name: Stop Organization API Worker
+        if: always()
+        run: |
+          if [ -f workers/organization-api/organization-api-worker.pid ]; then
+            kill $(cat workers/organization-api/organization-api-worker.pid) || true
+            rm workers/organization-api/organization-api-worker.pid
           fi
 
       # Upload generated snapshots for committing to repo
