@@ -343,11 +343,14 @@ app.get(
 );
 
 /**
- * POST /api/admin/content/:id/publish
- * Publish content (admin override)
+ * POST /api/admin/content/:contentId/publish
+ * Publish content (admin override).
+ * URL slot is :contentId (not :id) so the procedure org-resolver doesn't
+ * mistake the content UUID for an org id (Codex-mrvid). Org context flows
+ * via ?organizationId= query param.
  */
 app.post(
-  '/api/admin/content/:id/publish',
+  '/api/admin/content/:contentId/publish',
   procedure({
     policy: {
       auth: 'required',
@@ -358,18 +361,18 @@ app.post(
     handler: async (ctx) => {
       return await ctx.services.adminContent.publishContent(
         ctx.organizationId,
-        ctx.input.params.id
+        ctx.input.params.contentId
       );
     },
   })
 );
 
 /**
- * POST /api/admin/content/:id/unpublish
- * Unpublish content (admin override)
+ * POST /api/admin/content/:contentId/unpublish
+ * Unpublish content (admin override). See publish handler for URL slot rationale.
  */
 app.post(
-  '/api/admin/content/:id/unpublish',
+  '/api/admin/content/:contentId/unpublish',
   procedure({
     policy: {
       auth: 'required',
@@ -380,18 +383,18 @@ app.post(
     handler: async (ctx) => {
       return await ctx.services.adminContent.unpublishContent(
         ctx.organizationId,
-        ctx.input.params.id
+        ctx.input.params.contentId
       );
     },
   })
 );
 
 /**
- * DELETE /api/admin/content/:id
- * Soft delete content (admin override)
+ * DELETE /api/admin/content/:contentId
+ * Soft delete content (admin override). See publish handler for URL slot rationale.
  */
 app.delete(
-  '/api/admin/content/:id',
+  '/api/admin/content/:contentId',
   procedure({
     policy: {
       auth: 'required',
@@ -403,7 +406,7 @@ app.delete(
     handler: async (ctx) => {
       await ctx.services.adminContent.deleteContent(
         ctx.organizationId,
-        ctx.input.params.id
+        ctx.input.params.contentId
       );
       return null;
     },
