@@ -6,6 +6,10 @@ export default defineWorkersConfig({
     // Use Workers pool to run tests in workerd runtime (not Node.js)
     poolOptions: {
       workers: {
+        // Run all test files in a single workerd instance to keep localhost
+        // ephemeral-port pressure low on local runs (the pool otherwise spawns
+        // one workerd per file).
+        singleWorker: true,
         wrangler: { configPath: './wrangler.jsonc', environment: 'test' },
       },
     },

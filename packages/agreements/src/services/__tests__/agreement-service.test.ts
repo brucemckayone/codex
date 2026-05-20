@@ -1563,6 +1563,15 @@ describe('AgreementService', () => {
 
     it('getActiveAgreementsForCreator: revenueType filter scopes the portfolio', async () => {
       const fx = await seedOrgFixture(db);
+      // Set effectiveFrom explicitly in the past so the active-window
+      // predicate (`effectiveFrom <= now()`) doesn't race against the row's
+      // defaultNow(): Postgres timestamps are microsecond-precision while
+      // JavaScript Date is millisecond, and the truncation can put the row's
+      // timestamp microseconds AHEAD of `new Date()` in the same millisecond,
+      // flickering this assertion when the test happens to run sub-millisecond
+      // after the insert. The other temporal tests in this suite use the same
+      // explicit-past pattern.
+      const effectiveFrom = new Date(Date.now() - 60_000);
       await db.insert(schema.creatorOrganizationAgreements).values([
         {
           organizationId: fx.orgId,
@@ -1570,6 +1579,7 @@ describe('AgreementService', () => {
           organizationFeePercentage: 7000,
           revenueType: 'subscription',
           status: 'active',
+          effectiveFrom,
         },
         {
           organizationId: fx.orgId,
@@ -1577,6 +1587,7 @@ describe('AgreementService', () => {
           organizationFeePercentage: 5000,
           revenueType: 'content_purchase',
           status: 'active',
+          effectiveFrom,
         },
       ]);
       const subOnly = await service.getActiveAgreementsForCreator({

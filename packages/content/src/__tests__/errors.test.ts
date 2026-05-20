@@ -12,7 +12,6 @@ import {
 } from '@codex/service-errors';
 import { describe, expect, it } from 'vitest';
 import {
-  ContentAlreadyPublishedError,
   ContentNotFoundError,
   ContentTypeMismatchError,
   MediaNotFoundError,
@@ -263,46 +262,6 @@ describe('Content Service Errors', () => {
     });
   });
 
-  describe('ContentAlreadyPublishedError', () => {
-    it('should extend BusinessLogicError', () => {
-      const error = new ContentAlreadyPublishedError('content-123');
-      expect(error).toBeInstanceOf(BusinessLogicError);
-    });
-
-    it('should have correct error code', () => {
-      const error = new ContentAlreadyPublishedError('content-123');
-      expect(error.code).toBe('BUSINESS_LOGIC_ERROR');
-    });
-
-    it('should have correct HTTP status code', () => {
-      const error = new ContentAlreadyPublishedError('content-123');
-      expect(error.statusCode).toBe(422);
-    });
-
-    it('should have descriptive message', () => {
-      const error = new ContentAlreadyPublishedError('content-123');
-      expect(error.message).toBe('Content is already published');
-    });
-
-    it('should include contentId in context', () => {
-      const error = new ContentAlreadyPublishedError('content-123');
-      expect(error.context).toEqual({ contentId: 'content-123' });
-    });
-
-    it('should serialize custom properties correctly', () => {
-      const error = new ContentAlreadyPublishedError('content-123');
-      const serialized = JSON.parse(JSON.stringify(error));
-
-      expect(serialized).toMatchObject({
-        code: 'BUSINESS_LOGIC_ERROR',
-        statusCode: 422,
-        context: { contentId: 'content-123' },
-      });
-
-      expect(error.message).toBe('Content is already published');
-    });
-  });
-
   describe('MediaOwnershipError', () => {
     it('should extend ForbiddenError', () => {
       const error = new MediaOwnershipError('media-123', 'user-456');
@@ -377,9 +336,6 @@ describe('Content Service Errors', () => {
         'ContentTypeMismatchError'
       );
       expect(new SlugConflictError('1').name).toBe('SlugConflictError');
-      expect(new ContentAlreadyPublishedError('1').name).toBe(
-        'ContentAlreadyPublishedError'
-      );
       expect(new MediaOwnershipError('1', '2').name).toBe(
         'MediaOwnershipError'
       );
@@ -394,7 +350,6 @@ describe('Content Service Errors', () => {
         new MediaNotReadyError('1'),
         new ContentTypeMismatchError('a', 'b'),
         new SlugConflictError('1'),
-        new ContentAlreadyPublishedError('1'),
         new MediaOwnershipError('1', '2'),
       ];
 

@@ -6,11 +6,12 @@ import { NotificationsService } from '../notifications-service';
 // Shared mock for hasOptedOut — individual tests override the resolved value
 const mockHasOptedOut = vi.fn().mockResolvedValue(false);
 
-// Mock the NotificationPreferencesService module
+// Vitest 4 rejects arrow-function `mockImplementation` for `new`-able mocks.
+// A class is the cleanest constructor-compatible mock here.
 vi.mock('../notification-preferences-service', () => ({
-  NotificationPreferencesService: vi
-    .fn()
-    .mockImplementation(() => ({ hasOptedOut: mockHasOptedOut })),
+  NotificationPreferencesService: class {
+    hasOptedOut = mockHasOptedOut;
+  },
 }));
 
 // Mock dependencies

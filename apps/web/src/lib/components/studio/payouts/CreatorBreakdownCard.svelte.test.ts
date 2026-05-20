@@ -66,7 +66,13 @@ describe('CreatorBreakdownCard', () => {
 
     expect(screen.getByText('Alice Creator')).toBeTruthy();
     expect(screen.getByText('£15.30')).toBeTruthy();
-    expect(screen.getByText(/1 transaction/)).toBeTruthy();
+    // The transaction count + label render as adjacent text nodes
+    // ({transactionCount}{whitespace}{transactionLabel}); the custom
+    // screen.getByText helper walks individual TEXT nodes and can't match
+    // a regex spanning siblings. Assert against the concatenated body
+    // textContent like F-19 does below.
+    const cardText = document.body.textContent ?? '';
+    expect(cardText).toMatch(/1\s+transaction\b/);
   });
 
   // REGRESSION (PR #204 deep-review F-19, DQ-11) — when a user is soft-deleted

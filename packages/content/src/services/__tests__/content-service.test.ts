@@ -101,7 +101,7 @@ describe('ContentService', () => {
         expect(result.contentType).toBe('video');
         expect(result.mediaItemId).toBe(media.id);
         expect(result.status).toBe('draft'); // Always starts as draft
-        expect(result.visibility).toBe('public');
+        expect(result.accessType).toBe('free');
         expect(result.priceCents).toBe(0);
         expect(result.publishedAt).toBeNull();
         expect(result.viewCount).toBe(0);
@@ -256,7 +256,7 @@ describe('ContentService', () => {
         expect(result.tags).toEqual(['vitest', 'testing', 'typescript']);
       });
 
-      it('should create paid content with purchased_only visibility', async () => {
+      it('should create paid content with paid access type', async () => {
         // Arrange
         const [media] = await db
           .insert(mediaItems)
@@ -273,8 +273,8 @@ describe('ContentService', () => {
           slug: createUniqueSlug('paid'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'purchased_only',
-          priceCents: 999, // $9.99
+          accessType: 'paid',
+          priceCents: 999, // £9.99
           tags: [],
         };
 
@@ -282,7 +282,7 @@ describe('ContentService', () => {
         const result = await service.create(input, creatorId);
 
         // Assert
-        expect(result.visibility).toBe('purchased_only');
+        expect(result.accessType).toBe('paid');
         expect(result.priceCents).toBe(999);
       });
     });
@@ -810,7 +810,7 @@ describe('ContentService', () => {
       expect(updated.description).toBe('New description');
     });
 
-    it('should update content visibility and price', async () => {
+    it('should update content access type and price', async () => {
       // Arrange
       const [media] = await db
         .insert(mediaItems)
@@ -828,7 +828,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('price'),
           contentType: 'video',
           mediaItemId: media.id,
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0,
           tags: [],
         },
@@ -839,14 +839,14 @@ describe('ContentService', () => {
       const updated = await service.update(
         created.id,
         {
-          visibility: 'purchased_only',
-          priceCents: 1999, // $19.99
+          accessType: 'paid',
+          priceCents: 1999, // £19.99
         },
         creatorId
       );
 
       // Assert
-      expect(updated.visibility).toBe('purchased_only');
+      expect(updated.accessType).toBe('paid');
       expect(updated.priceCents).toBe(1999);
     });
 
@@ -1269,21 +1269,21 @@ describe('ContentService', () => {
       });
     });
 
-    it('should filter by visibility', async () => {
+    it('should filter by accessType', async () => {
       // Act
-      const publicContent = await service.list(creatorId, {
-        visibility: 'public',
+      const freeContent = await service.list(creatorId, {
+        accessType: 'free',
       });
 
-      // Assert: All our created content is public
-      expect(publicContent.items.length).toBeGreaterThanOrEqual(5);
+      // Assert: All our created content is free (default)
+      expect(freeContent.items.length).toBeGreaterThanOrEqual(5);
       for (const contentId of createdContentIds) {
-        expect(publicContent.items.some((item) => item.id === contentId)).toBe(
+        expect(freeContent.items.some((item) => item.id === contentId)).toBe(
           true
         );
       }
-      publicContent.items.forEach((item) => {
-        expect(item.visibility).toBe('public');
+      freeContent.items.forEach((item) => {
+        expect(item.accessType).toBe('free');
       });
     });
 

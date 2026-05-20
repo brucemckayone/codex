@@ -572,11 +572,14 @@ describe('Transcoding E2E Tests', () => {
       expect(retryResponse.status).toBe(403);
     });
 
-    it('should handle webhook for non-existent media (404)', async () => {
+    it('should ack webhook for non-existent media with 200 (permanent-error policy)', async () => {
       /**
        * Test Flow:
        * 1. Send webhook for unknown jobId
-       * 2. Expect graceful handling (404 or logged warning)
+       * 2. Webhook handler classifies NotFoundError as permanent and ACKs with
+       *    200 so RunPod does not retry a payload that will never succeed
+       *    (mirrors the Stripe webhook idempotency policy — see
+       *    workers/media-api/src/routes/webhook.ts:119-141).
        */
 
       const unknownPayload = {
@@ -626,8 +629,15 @@ describe('Transcoding E2E Tests', () => {
         }
       );
 
-      // Should return 404 or 500 (graceful handling)
-      expect([404, 500]).toContain(webhookResponse.status);
+      // Permanent error → 200 (no retry). RunPod will not be told to retry
+      // a payload referencing a media row that never existed.
+      expect(webhookResponse.status).toBe(200);
+      const ackBody = (await webhookResponse.json()) as {
+        received: boolean;
+        error?: string;
+      };
+      expect(ackBody.received).toBe(true);
+      expect(ackBody.error).toBeTruthy();
     });
 
     it('should handle race condition in webhook (concurrent status update)', async () => {

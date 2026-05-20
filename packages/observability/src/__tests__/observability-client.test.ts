@@ -226,7 +226,9 @@ describe('ObservabilityClient', () => {
       const loggedData = JSON.parse(
         consoleSpy.info.mock.calls[0]?.[0] as string
       );
-      expect(loggedData.metadata.password).toBe('[REDACTED]');
+      // Production uses hash mode: 'hash:<8 hex chars>' for correlation without exposure
+      expect(loggedData.metadata.password).toMatch(/^hash:[0-9a-f]+$/);
+      expect(loggedData.metadata.password).not.toContain('secret123');
       expect(loggedData.metadata.username).toBe('john');
     });
   });
@@ -255,8 +257,9 @@ describe('ObservabilityClient', () => {
       const loggedData = JSON.parse(
         consoleSpy.info.mock.calls[0]?.[0] as string
       );
-      // Production uses hash mode - completely redacted
-      expect(loggedData.metadata.apiKey).toBe('[REDACTED]');
+      // Production uses hash mode: deterministic hash prefix, no plaintext
+      expect(loggedData.metadata.apiKey).toMatch(/^hash:[0-9a-f]+$/);
+      expect(loggedData.metadata.apiKey).not.toContain('sk_live');
     });
   });
 

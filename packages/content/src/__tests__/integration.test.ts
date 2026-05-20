@@ -55,11 +55,14 @@ describe('Integration Tests', () => {
   describe('full content creation workflow', () => {
     it('should create organization, media, and content in sequence', async () => {
       // Step 1: Create organization
-      const org = await orgService.create({
-        name: 'Test Company',
-        slug: createUniqueSlug('company'),
-        description: 'A test company',
-      });
+      const org = await orgService.create(
+        {
+          name: 'Test Company',
+          slug: createUniqueSlug('company'),
+          description: 'A test company',
+        },
+        creatorId
+      );
 
       expect(org.id).toBeDefined();
 
@@ -390,15 +393,21 @@ describe('Integration Tests', () => {
       const slug = createUniqueSlug('shared');
 
       // Create two organizations
-      const org1 = await orgService.create({
-        name: 'Organization 1',
-        slug: createUniqueSlug('org1'),
-      });
+      const org1 = await orgService.create(
+        {
+          name: 'Organization 1',
+          slug: createUniqueSlug('org1'),
+        },
+        creatorId
+      );
 
-      const org2 = await orgService.create({
-        name: 'Organization 2',
-        slug: createUniqueSlug('org2'),
-      });
+      const org2 = await orgService.create(
+        {
+          name: 'Organization 2',
+          slug: createUniqueSlug('org2'),
+        },
+        creatorId
+      );
 
       // Create media
       const media = await mediaService.create(
@@ -457,10 +466,13 @@ describe('Integration Tests', () => {
     });
 
     it('should enforce slug uniqueness within organization', async () => {
-      const org = await orgService.create({
-        name: 'Test Org',
-        slug: createUniqueSlug('test-org'),
-      });
+      const org = await orgService.create(
+        {
+          name: 'Test Org',
+          slug: createUniqueSlug('test-org'),
+        },
+        creatorId
+      );
 
       const media = await mediaService.create(
         {
@@ -585,10 +597,13 @@ describe('Integration Tests', () => {
 
   describe('organization management with content', () => {
     it('should list all content in an organization', async () => {
-      const org = await orgService.create({
-        name: 'Test Company',
-        slug: createUniqueSlug('company'),
-      });
+      const org = await orgService.create(
+        {
+          name: 'Test Company',
+          slug: createUniqueSlug('company'),
+        },
+        creatorId
+      );
 
       const media = await mediaService.create(
         {
@@ -640,10 +655,13 @@ describe('Integration Tests', () => {
     });
 
     it('should list personal content separately from org content', async () => {
-      const org = await orgService.create({
-        name: 'Test Org',
-        slug: createUniqueSlug('test-org'),
-      });
+      const org = await orgService.create(
+        {
+          name: 'Test Org',
+          slug: createUniqueSlug('test-org'),
+        },
+        creatorId
+      );
 
       const media = await mediaService.create(
         {
@@ -726,10 +744,13 @@ describe('Integration Tests', () => {
     });
 
     it('should handle organization deletion with existing content', async () => {
-      const org = await orgService.create({
-        name: 'To Delete',
-        slug: createUniqueSlug('delete-org'),
-      });
+      const org = await orgService.create(
+        {
+          name: 'To Delete',
+          slug: createUniqueSlug('delete-org'),
+        },
+        creatorId
+      );
 
       const media = await mediaService.create(
         {
@@ -782,10 +803,13 @@ describe('Integration Tests', () => {
 
   describe('multi-creator collaboration scenarios', () => {
     it('should allow different creators to have content in same organization', async () => {
-      const org = await orgService.create({
-        name: 'Shared Org',
-        slug: createUniqueSlug('shared'),
-      });
+      const org = await orgService.create(
+        {
+          name: 'Shared Org',
+          slug: createUniqueSlug('shared'),
+        },
+        creatorId
+      );
 
       // Creator 1 media and content
       const media1 = await mediaService.create(

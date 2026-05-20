@@ -38,7 +38,7 @@ import { BaseService, ValidationError } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
 import { createContentSchema, updateContentSchema } from '@codex/validation';
-import { and, asc, desc, eq, ilike, isNull, ne, or } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, isNull, ne, or, sql } from 'drizzle-orm';
 import {
   BusinessLogicError,
   ContentNotFoundError,
@@ -828,13 +828,15 @@ export class ContentService extends BaseService {
         }
       }
 
-      // Determine sort order — use publishedAt for public listings (not createdAt)
+      // Determine sort order — use publishedAt for public listings (not createdAt).
+      // Force NULLS LAST so any published rows with a missing publishedAt (legacy
+      // or malformed data) don't dominate the head of the public catalogue.
       const orderByClause =
         params.sort === 'oldest'
-          ? asc(content.publishedAt)
+          ? sql`${content.publishedAt} ASC NULLS LAST`
           : params.sort === 'title'
             ? asc(content.title)
-            : desc(content.publishedAt);
+            : sql`${content.publishedAt} DESC NULLS LAST`;
 
       const where = and(...whereConditions);
       return await paginatedQuery({
