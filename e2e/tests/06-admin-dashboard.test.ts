@@ -1017,16 +1017,24 @@ describe('Admin Dashboard', () => {
         );
         const content = unwrapApiResponse(await contentResponse.json());
 
-        // Admin2 tries to publish admin1's content - should fail with 404
-        const response = await httpClient.post(
-          `${WORKER_URLS.admin}/api/admin/content/${content.id}/publish`,
-          {
-            headers: {
-              Cookie: admin2.cookie,
-              'Content-Type': 'application/json',
-            },
-          }
+        // Admin2 tries to publish admin1's content - should fail with 404.
+        // Pass admin2's own organizationId as a query param so the procedure
+        // resolver picks admin2's org (membership check passes), then the
+        // service looks for content scoped to admin2's org and finds none →
+        // NotFoundError → 404. Without the query param the resolver would
+        // return 400 ORG_CONTEXT_REQUIRED before any access check fires
+        // (path slot is :contentId per Codex-mrvid; the resolver no longer
+        // auto-promotes a content UUID to an org id).
+        const url = new URL(
+          `${WORKER_URLS.admin}/api/admin/content/${content.id}/publish`
         );
+        url.searchParams.set('organizationId', admin2.organization.id);
+        const response = await httpClient.post(url.toString(), {
+          headers: {
+            Cookie: admin2.cookie,
+            'Content-Type': 'application/json',
+          },
+        });
 
         expect(response.status).toBe(404);
       },
