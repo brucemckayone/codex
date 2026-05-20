@@ -50,7 +50,14 @@ test.describe('Agreements — Propose → Accept happy path', () => {
       waitUntil: 'load',
     });
 
-    // Studio root awaits client-side hydration — wait for the page heading.
+    // Studio is SSR=false; wait for the shell to hydrate before checking
+    // for page-specific elements. Without this, the page-level heading
+    // can race the initial empty shell.
+    await ownerPage.waitForSelector('.studio-layout', {
+      state: 'visible',
+      timeout: 30_000,
+    });
+
     await expect(
       ownerPage.getByRole('heading', { name: 'Team revenue share' })
     ).toBeVisible({ timeout: 30_000 });

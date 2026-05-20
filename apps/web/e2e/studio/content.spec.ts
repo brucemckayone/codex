@@ -212,12 +212,17 @@ test.describe('Studio Content - Create Form', () => {
 
     await page.waitForSelector('form', { state: 'visible', timeout: 20000 });
 
-    // The legacy Visibility dropdown was reshaped into the Access
-    // radiogroup with the AccessSection (`free`, `paid`, plus org-
-    // dependent `followers`/`subscribers`/`team`). For a fresh org with
-    // no tiers, only `free` and `paid` show by default.
-    await expect(page.getByRole('radio', { name: /Free/i })).toBeVisible();
-    await expect(page.getByRole('radio', { name: /Paid/i })).toBeVisible();
+    // Each Access option's accessible name pulls in BOTH the title and
+    // description spans, so a regex like /Free/i matches the Followers
+    // description ("Must follow your organisation (free)") and trips
+    // strict-mode. Anchor on the `.access-label` titles directly, which
+    // are unique. The paid card is labelled "One-time purchase".
+    await expect(
+      page.locator('.access-label').filter({ hasText: /^Free$/ })
+    ).toBeVisible();
+    await expect(
+      page.locator('.access-label').filter({ hasText: /^One-time purchase$/ })
+    ).toBeVisible();
   });
 
   test('price field appears when Paid access is selected', async ({ page }) => {
@@ -232,10 +237,13 @@ test.describe('Studio Content - Create Form', () => {
     // AccessSection only renders the price input when the `paid` or
     // `subscribers` access type is selected — `free` (the default for
     // tier-less orgs) keeps the price hidden. The radios are sr-only;
-    // click the `.access-card` label that wraps each one.
+    // click the `.access-card` whose visible label is "One-time
+    // purchase" (the paid option).
     await page
       .locator('.access-card')
-      .filter({ has: page.locator('text=/Paid/i') })
+      .filter({
+        has: page.locator('.access-label', { hasText: 'One-time purchase' }),
+      })
       .click();
     const priceField = page.locator('#price');
     await expect(priceField).toBeVisible({ timeout: 5000 });
