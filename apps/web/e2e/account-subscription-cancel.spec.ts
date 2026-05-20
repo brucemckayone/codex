@@ -46,6 +46,11 @@ const SEEDED_ORG_NAME = 'Studio Alpha';
  */
 async function loginAsSeedViewer(page: import('@playwright/test').Page) {
   await page.goto('/login');
+  // If the session cookie is already in this context (set by beforeEach or
+  // a prior test), /login's server load redirects straight to /library. In
+  // that case there's no email input to fill — skip the form flow.
+  if (/\/library/.test(page.url())) return;
+
   await page.fill('input[name="email"]', SEED_USER.email);
   await page.fill('input[name="password"]', SEED_USER.password);
   await page.click('button[type="submit"]', { noWaitAfter: true });

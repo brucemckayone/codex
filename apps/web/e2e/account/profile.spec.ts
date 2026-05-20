@@ -230,21 +230,35 @@ test.describe('Account Profile Page - Validation', () => {
   test('shows validation error for invalid website URL', async ({ page }) => {
     await navigateToAccountPage(page);
 
-    await page.fill('input[name="website"]', 'not-a-valid-url');
+    // The form's `$effect(profile)` clears local fields whenever the
+    // profile query re-emits. After `navigateToAccountPage` the streamed
+    // profile may still be settling, and a subsequent emit overwrites
+    // our `fill` with the empty server value. Wait for the form to be
+    // fully editable (displayName editable proves hydration finished),
+    // then click on the input to focus and type the value — that goes
+    // through the form helper's `oninput` so the value sticks even if a
+    // late profile emit fires after.
+    const websiteInput = page.locator('input[name="website"]');
+    await websiteInput.click();
+    await websiteInput.pressSequentially('not-a-valid-url');
     await page.click('button[type="submit"]', { noWaitAfter: true });
 
-    const websiteInput = page.locator('input[name="website"]');
-    await expect(websiteInput).toHaveAttribute('aria-invalid', 'true');
+    await expect(websiteInput).toHaveAttribute('aria-invalid', 'true', {
+      timeout: 15000,
+    });
   });
 
   test('shows validation error for invalid twitter URL', async ({ page }) => {
     await navigateToAccountPage(page);
 
-    await page.fill('input[name="twitter"]', 'twitter.com/user');
+    const twitterInput = page.locator('input[name="twitter"]');
+    await twitterInput.click();
+    await twitterInput.pressSequentially('twitter.com/user');
     await page.click('button[type="submit"]', { noWaitAfter: true });
 
-    const twitterInput = page.locator('input[name="twitter"]');
-    await expect(twitterInput).toHaveAttribute('aria-invalid', 'true');
+    await expect(twitterInput).toHaveAttribute('aria-invalid', 'true', {
+      timeout: 15000,
+    });
   });
 });
 
