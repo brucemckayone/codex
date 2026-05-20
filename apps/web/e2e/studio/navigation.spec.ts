@@ -107,7 +107,12 @@ test.describe('Studio Navigation - Sidebar', () => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
     const rail = page.locator('aside[data-mode="desktop"]');
 
-    await rail.locator('a[href="/studio/analytics"]').click();
+    // Native el.click() — Playwright synthetic clicks don't reliably
+    // trigger SvelteKit's delegated link handler under parallel-worker
+    // load (proven by Content above). Same fix applied to Team/Settings.
+    await rail.locator('a[href="/studio/analytics"]').evaluate((el) => {
+      (el as HTMLAnchorElement).click();
+    });
     await page.waitForURL(/\/studio\/analytics/, { waitUntil: 'commit' });
   });
 
@@ -115,7 +120,9 @@ test.describe('Studio Navigation - Sidebar', () => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
     const rail = page.locator('aside[data-mode="desktop"]');
 
-    await rail.locator('a[href="/studio/team"]').click();
+    await rail.locator('a[href="/studio/team"]').evaluate((el) => {
+      (el as HTMLAnchorElement).click();
+    });
     await page.waitForURL(/\/studio\/team/, { waitUntil: 'commit' });
   });
 
@@ -123,7 +130,9 @@ test.describe('Studio Navigation - Sidebar', () => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
     const rail = page.locator('aside[data-mode="desktop"]');
 
-    await rail.locator('a[href="/studio/settings"]').click();
+    await rail.locator('a[href="/studio/settings"]').evaluate((el) => {
+      (el as HTMLAnchorElement).click();
+    });
     await page.waitForURL(/\/studio\/settings/, { waitUntil: 'commit' });
   });
 
@@ -131,8 +140,10 @@ test.describe('Studio Navigation - Sidebar', () => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
     const rail = page.locator('aside[data-mode="desktop"]');
 
-    await rail.locator('a[href="/studio/billing"]').click();
-    await page.waitForURL(/\/studio\/billing/);
+    await rail.locator('a[href="/studio/billing"]').evaluate((el) => {
+      (el as HTMLAnchorElement).click();
+    });
+    await page.waitForURL(/\/studio\/billing/, { waitUntil: 'commit' });
   });
 });
 

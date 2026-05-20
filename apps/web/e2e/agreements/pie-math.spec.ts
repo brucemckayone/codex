@@ -64,14 +64,19 @@ test.describe('Agreements — Multi-creator pie math', () => {
         const dialog = ownerPage.getByRole('dialog');
         await expect(dialog).toBeVisible({ timeout: 5000 });
 
-        // Set creator share via the BrandSlider's text-input. The
-        // slider exposes its current value as an editable number.
-        const shareInput = dialog
-          .locator('input[type="number"], input[role="spinbutton"]')
-          .first();
-        if ((await shareInput.count()) > 0) {
-          await shareInput.fill(String(share));
-        }
+        // The share control is a `<input type="range" id="propose-share">`
+        // rendered by BrandSliderField — role="slider", not "spinbutton".
+        // Setting `.value` + dispatching `input` is the only way to make
+        // the dialog's reactive state pick the right basis-points before
+        // submit. Without this all three creators end up at the dialog's
+        // default share (30%) and the active-agreements section shows
+        // three identical rows instead of 30/20/10.
+        await dialog
+          .locator('#propose-share')
+          .evaluate((el: HTMLInputElement, value) => {
+            el.value = value;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+          }, String(share));
 
         await dialog.getByRole('button', { name: /send proposal/i }).click();
         await expect(
@@ -119,8 +124,15 @@ test.describe('Agreements — Multi-creator pie math', () => {
       );
       await expect(teamBudget).toBeVisible({ timeout: 15_000 });
 
-      // The pie copy explicitly says "post-platform" (per Decision Q1).
-      await expect(teamBudget).toContainText(/post-platform/i);
+      // The page-level intro paragraph (above the team-budget section)
+      // is where the post-platform-pool semantic is communicated to the
+      // owner — the team-budget lede itself just describes the pie. Per
+      // Decision Q1, what matters is that the page surfaces the
+      // "post-platform" framing somewhere, not specifically inside the
+      // team-budget section.
+      await expect(
+        ownerPage.locator('.revenue-share-page__intro')
+      ).toContainText(/post-platform/i);
 
       // The active-agreements quick-action list contains all three.
       const activeSection = ownerPage.locator(

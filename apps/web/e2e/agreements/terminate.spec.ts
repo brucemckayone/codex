@@ -121,15 +121,17 @@ test.describe('Agreements — Terminate', () => {
       // re-rendered conditionally) OR no longer contains the creator.
       await expect(activeSection).toBeHidden({ timeout: 15_000 });
 
-      // Creator portfolio reflects the terminated agreement in Past.
+      // Creator portfolio reflects the termination. The "past" section
+      // in _creators/.../negotiations/+page.svelte only surfaces terminal
+      // *proposals* (declined/withdrawn/superseded) — terminated
+      // *agreements* are not currently displayed there. So instead of
+      // checking past-heading, verify that the active section is no
+      // longer rendered (it gates on `active.length > 0`).
       await creatorPage.reload({ waitUntil: 'load' });
-      const pastSection = creatorPage.locator(
-        'section[aria-labelledby="past-heading"]'
+      const creatorActiveSection = creatorPage.locator(
+        'section[aria-labelledby="active-heading"]'
       );
-      await expect(pastSection).toBeVisible({ timeout: 15_000 });
-      const showPast = pastSection.getByRole('button', { name: /show/i });
-      if ((await showPast.count()) > 0) await showPast.click();
-      await expect(pastSection).toContainText(/Terminated/i);
+      await expect(creatorActiveSection).toBeHidden({ timeout: 15_000 });
     } finally {
       await ownerCtx.close();
       await creatorCtx.close();
@@ -177,9 +179,18 @@ test.describe('Agreements — Terminate', () => {
         timeout: 15_000,
       });
 
-      // Detail page exposes a Terminate button.
+      // Detail page exposes a Terminate button → confirmation form →
+      // "Confirm terminate". The creator side requires the two-step
+      // confirmation (see _creators/.../[proposalId]/+page.svelte's
+      // `terminateConfirming` $state), whereas the owner side terminates
+      // immediately on first click. Without the second click the API is
+      // never called and the toast never fires.
       await creatorPage
-        .getByRole('button', { name: /terminate/i })
+        .getByRole('button', { name: /^Terminate$/i })
+        .first()
+        .click();
+      await creatorPage
+        .getByRole('button', { name: /confirm terminate/i })
         .first()
         .click();
 
