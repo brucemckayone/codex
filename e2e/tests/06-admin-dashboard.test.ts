@@ -14,6 +14,11 @@
 
 import { closeDbPool, dbHttp, dbWs, schema } from '@codex/database';
 import {
+  calculateRevenueSplit,
+  DEFAULT_ORG_FEE_PERCENTAGE,
+  DEFAULT_PLATFORM_FEE_PERCENTAGE,
+} from '@codex/purchase';
+import {
   authFixture,
   expectErrorResponse,
   expectForbidden,
@@ -266,9 +271,14 @@ describe('Admin Dashboard', () => {
         expect(stats.totalRevenueCents).toBe(2999);
         expect(stats.totalPurchases).toBe(1);
         expect(stats.averageOrderValueCents).toBe(2999);
-        // Revenue split: 10% platform = 300, 90% creator = 2699
-        expect(stats.platformFeeCents).toBe(300);
-        expect(stats.creatorPayoutCents).toBe(2699);
+        // Three-bucket revenue split: platform → org → creator (Codex-h69cg)
+        const expectedSplit = calculateRevenueSplit(
+          2999,
+          DEFAULT_PLATFORM_FEE_PERCENTAGE,
+          DEFAULT_ORG_FEE_PERCENTAGE
+        );
+        expect(stats.platformFeeCents).toBe(expectedSplit.platformFeeCents);
+        expect(stats.creatorPayoutCents).toBe(expectedSplit.creatorPayoutCents);
       },
       { timeout: 180000 }
     );

@@ -127,10 +127,15 @@ describe('Organization Lifecycle', () => {
           },
         });
 
-        // Try to create second org with same slug
+        // Try to create second org with same slug.
+        // Use creator.cookie (not outsider.cookie) because outsider has the
+        // default 'customer' role which fails the route's role gate
+        // (roles: ['creator', 'admin', 'platform_owner']) with 403 BEFORE the
+        // slug-uniqueness check runs. The test's intent is to verify slug
+        // uniqueness — that requires a caller who is allowed to create orgs.
         const response = await httpClient.post(orgBaseUrl, {
           headers: {
-            Cookie: outsider.cookie,
+            Cookie: creator.cookie,
             Origin: WORKER_URLS.organization,
           },
           data: {

@@ -196,10 +196,12 @@ jobs:
 
       # Database Setup: Apply committed migrations to ephemeral branch
       # Note: Migrations are generated locally and committed; CI only applies them
-      # Note: db_url_with_pooler from create-branch step is available in this job
+      # Note: db_url (direct) is used for migrations — db_url_with_pooler routes
+      # through pgbouncer which drops connections mid-DDL on Neon ephemeral
+      # branches. Runtime queries can still use the pooled URL.
       - name: Apply migrations to ephemeral branch
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           DB_METHOD: NEON_BRANCH
         run: |
           echo "::add-mask::$DATABASE_URL"
@@ -477,7 +479,8 @@ jobs:
       - name: Apply migrations
         if: steps.should-run.outputs.should_run == 'true'
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          # Direct (non-pooled) URL — pgbouncer drops connections mid-DDL.
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           DB_METHOD: NEON_BRANCH
         run: |
           echo "::add-mask::$DATABASE_URL"
@@ -613,7 +616,8 @@ jobs:
 
       - name: Apply migrations
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          # Direct (non-pooled) URL — pgbouncer drops connections mid-DDL.
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           DB_METHOD: NEON_BRANCH
         run: |
           echo "::add-mask::$DATABASE_URL"
@@ -784,9 +788,10 @@ jobs:
         run: pnpm --filter @codex/constants build
 
       # Database Setup: Apply committed migrations to ephemeral branch
+      # Direct (non-pooled) URL — pgbouncer drops connections mid-DDL.
       - name: Apply migrations to ephemeral branch
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           DB_METHOD: NEON_BRANCH
         run: |
           echo "::add-mask::$DATABASE_URL"
