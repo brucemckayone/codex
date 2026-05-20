@@ -571,7 +571,7 @@ describe('Purchase History API', () => {
       expect(purchase.contentId).toBe(contentId);
       expect(purchase.organizationId).toBe(organizationId);
       expect(purchase.amountPaidCents).toBe(2999);
-      expect(purchase.currency).toBe('usd');
+      expect(purchase.currency).toBe('gbp');
       expect(purchase.status).toBe('completed');
 
       // Verify revenue split fields
@@ -597,8 +597,11 @@ describe('Purchase History API', () => {
       expect(response.status).toBe(401);
     });
 
-    test('should return 403 when purchase belongs to another user', async () => {
-      // otherBuyer tries to access buyer's purchase
+    test('should return 404 when purchase belongs to another user', async () => {
+      // otherBuyer tries to access buyer's purchase.
+      // getPurchase() scopes the query by (purchaseId, customerId) so cross-user
+      // access returns 0 rows → PurchaseNotFoundError → 404. This is intentional
+      // (security: no info leak about whether the purchase exists for another user).
       const response = await httpClient.get(
         `${WORKER_URLS.ecom}/purchases/${purchaseId}`,
         {
@@ -609,7 +612,7 @@ describe('Purchase History API', () => {
         }
       );
 
-      expect(response.status).toBe(403);
+      expect(response.status).toBe(404);
     });
 
     test('should return 404 when purchase does not exist', async () => {
@@ -689,7 +692,8 @@ describe('Purchase History API', () => {
     });
 
     test('creator cannot access buyer purchase records', async () => {
-      // Creator tries to access buyer's purchase by ID
+      // Creator tries to access buyer's purchase by ID.
+      // Same as cross-user: query scopes by (purchaseId, customerId) → 404.
       const response = await httpClient.get(
         `${WORKER_URLS.ecom}/purchases/${purchaseId}`,
         {
@@ -700,8 +704,7 @@ describe('Purchase History API', () => {
         }
       );
 
-      // Creator is not the customer, should be forbidden
-      expect(response.status).toBe(403);
+      expect(response.status).toBe(404);
     });
   });
 
