@@ -174,8 +174,11 @@ test.describe('Studio Content - Create Form', () => {
       '/content/new'
     );
 
+    // The "Back to Content" pattern was replaced by a Breadcrumb pointing
+    // at /studio/content with label "Content". The breadcrumb is the
+    // documented navigation pattern; assert on that link instead.
     await expect(
-      page.getByRole('link', { name: 'Back to Content' })
+      page.getByRole('link', { name: 'Content', exact: true })
     ).toBeVisible();
   });
 
