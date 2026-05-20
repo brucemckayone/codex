@@ -12,7 +12,7 @@
  * All tests validate organization scoping to ensure data isolation.
  */
 
-import { closeDbPool, dbHttp, schema } from '@codex/database';
+import { closeDbPool, dbHttp, dbWs, schema } from '@codex/database';
 import {
   authFixture,
   expectErrorResponse,
@@ -45,17 +45,37 @@ describe('Admin Dashboard', () => {
       await expectErrorResponse(response, 'UNAUTHORIZED', 401);
     });
 
-    test('should reject non-platform-owner users', async () => {
-      // Create a regular creator user (NOT platform owner)
-      const creatorEmail = `creator-reject-${Date.now()}@example.com`;
-      const { cookie: creatorCookie } = await authFixture.registerUser({
-        email: creatorEmail,
-        password: 'SecurePassword123!',
-        name: 'Regular Creator',
-        role: 'creator',
+    test('should reject org members without management role', async () => {
+      // Admin routes require BOTH requireOrgMembership AND requireOrgManagement.
+      // To verify role-based rejection (403) we must satisfy membership first,
+      // otherwise the membership resolver fires first and returns 400.
+      const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const creatorEmail = `creator-reject-${suffix}@example.com`;
+      const { user: creator, cookie: creatorCookie } =
+        await authFixture.registerUser({
+          email: creatorEmail,
+          password: 'SecurePassword123!',
+          name: 'Regular Creator',
+          role: 'creator',
+        });
+
+      // Seed an org and enrol the creator as a non-management member.
+      const [org] = await dbWs
+        .insert(schema.organizations)
+        .values({
+          name: `Reject Org ${suffix}`,
+          slug: `reject-org-${suffix}`,
+        })
+        .returning();
+
+      await dbWs.insert(schema.organizationMemberships).values({
+        organizationId: org.id,
+        userId: creator.id,
+        role: 'member',
       });
 
-      // Try to access admin analytics - should fail with 403
+      // Try to access admin analytics - should fail with 403 (org-management
+      // role required; 'member' role is insufficient).
       const response = await httpClient.get(
         `${WORKER_URLS.admin}/api/admin/analytics/revenue`,
         {
