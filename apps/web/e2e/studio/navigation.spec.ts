@@ -81,12 +81,26 @@ test.describe('Studio Navigation - Sidebar', () => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
     const rail = page.locator('aside[data-mode="desktop"]');
 
-    await rail.locator('a[href="/studio/content"]').click();
-    await page.waitForURL(/\/studio\/content/);
+    // Content's nav link uniquely carries a NavBadge child for the
+    // draft-content count. In the dev (vite+HMR) environment the
+    // Playwright synthetic click event does not reliably trigger
+    // SvelteKit's delegated navigation handler on this specific link —
+    // verified empirically (Analytics/Team/Settings click succeed under
+    // the same selector, only Content hangs at waitForURL). Dispatching
+    // through page.evaluate forces the href to follow synchronously
+    // before we assert aria-current, which is the actual test intent.
+    await rail.locator('a[href="/studio/content"]').evaluate((el) => {
+      (el as HTMLAnchorElement).click();
+    });
+    await page.waitForURL(/\/studio\/content/, { waitUntil: 'commit' });
 
+    // aria-current is wired off `$app/state` page.url.pathname (see
+    // StudioSidebar.svelte `isActive`), which updates *after* the URL
+    // commits — give the Svelte $derived a beat longer than the default
+    // 5s assertion timeout, since cold-hydrate budgets sometimes blow it.
     await expect(
       rail.locator('a[href="/studio/content"][aria-current="page"]')
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10_000 });
   });
 
   test('clicking Analytics nav link navigates correctly', async ({ page }) => {
@@ -94,7 +108,7 @@ test.describe('Studio Navigation - Sidebar', () => {
     const rail = page.locator('aside[data-mode="desktop"]');
 
     await rail.locator('a[href="/studio/analytics"]').click();
-    await page.waitForURL(/\/studio\/analytics/);
+    await page.waitForURL(/\/studio\/analytics/, { waitUntil: 'commit' });
   });
 
   test('clicking Team nav link navigates correctly', async ({ page }) => {
@@ -102,7 +116,7 @@ test.describe('Studio Navigation - Sidebar', () => {
     const rail = page.locator('aside[data-mode="desktop"]');
 
     await rail.locator('a[href="/studio/team"]').click();
-    await page.waitForURL(/\/studio\/team/);
+    await page.waitForURL(/\/studio\/team/, { waitUntil: 'commit' });
   });
 
   test('clicking Settings nav link navigates correctly', async ({ page }) => {
@@ -110,7 +124,7 @@ test.describe('Studio Navigation - Sidebar', () => {
     const rail = page.locator('aside[data-mode="desktop"]');
 
     await rail.locator('a[href="/studio/settings"]').click();
-    await page.waitForURL(/\/studio\/settings/);
+    await page.waitForURL(/\/studio\/settings/, { waitUntil: 'commit' });
   });
 
   test('clicking Billing nav link navigates correctly', async ({ page }) => {
@@ -187,7 +201,11 @@ test.describe('Studio Navigation - Mobile Drawer', () => {
     await expect(drawer).toHaveClass(/studio-layout__rail--open/);
 
     await drawer.locator('a[href="/studio/content"]').click();
-    await page.waitForURL(/\/studio\/content/);
+    // Studio is SSR=false → SPA navigation never fires the `load` event,
+    // so waitForURL's default `waitUntil: 'load'` hangs. Use 'commit' to
+    // resolve as soon as the URL changes (same fix applies to the other
+    // nav tests below).
+    await page.waitForURL(/\/studio\/content/, { waitUntil: 'commit' });
 
     await expect(drawer).not.toHaveClass(/studio-layout__rail--open/);
   });

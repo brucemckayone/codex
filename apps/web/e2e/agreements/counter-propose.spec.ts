@@ -91,25 +91,43 @@ test.describe('Agreements — Counter-propose round-trip', () => {
       timeout: 15_000,
     });
 
-    // The detail page exposes a counter-propose form. Find the share input
-    // (typically a slider/number) and the submit button.
-    const counterShare = creatorPage
-      .getByRole('spinbutton', { name: /share|creator share/i })
-      .or(creatorPage.locator('input[type="number"]'))
-      .first();
-    if ((await counterShare.count()) > 0) {
-      // Try slider-text-input first, fall back to a raw number input.
-      await counterShare.fill('40');
-    }
+    // The detail page renders a "Counter" trigger button + a (closed)
+    // CounterProposalDialog. Earlier this test conflated the trigger and
+    // the dialog's submit button under a single `.first()` regex, which
+    // matched the trigger only — the dialog opened but the proposal was
+    // never submitted. Walk through trigger → fill → submit explicitly.
+    await creatorPage
+      .getByRole('button', { name: /^Counter$/i, exact: false })
+      .first()
+      .click();
 
-    const submitCounter = creatorPage
-      .getByRole('button', { name: /send counter|submit counter|counter/i })
-      .first();
-    await submitCounter.click();
+    const counterDialog = creatorPage.getByRole('dialog');
+    await expect(counterDialog).toBeVisible({ timeout: 5000 });
 
-    // Toast confirming counter sent.
+    // The share control is a `<input type="range" id="counter-share">`
+    // rendered by BrandSliderField — role="slider", not "spinbutton".
+    // Set the value via JS and dispatch the input event so the
+    // dialog's `onShareInput` handler updates `shareBp` to the
+    // basis-points equivalent. Without this the dialog's `isChanged`
+    // guard refuses to submit ("Counters must change either the share
+    // or term"). We pick 40 (= 40% creator share) for the
+    // round-2 assertion downstream.
+    await counterDialog
+      .locator('#counter-share')
+      .evaluate((el: HTMLInputElement) => {
+        el.value = '40';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+
+    await counterDialog
+      .getByRole('button', { name: /send counter|submit counter/i })
+      .first()
+      .click();
+
+    // Toast confirming counter sent ("Counter sent" — see
+    // routes/_creators/.../[proposalId]/+page.svelte:224).
     await expect(
-      creatorPage.locator('[role="alert"]').filter({ hasText: /counter|sent/i })
+      creatorPage.locator('[role="alert"]').filter({ hasText: /Counter sent/i })
     ).toBeVisible({ timeout: 10_000 });
 
     // ─── Owner reviews + accepts counter ─────────────────────────────
