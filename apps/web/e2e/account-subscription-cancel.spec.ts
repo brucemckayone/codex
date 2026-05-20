@@ -105,6 +105,19 @@ test.describe
       }
     });
 
+    // beforeEach ensures the seeded viewer starts each test in ACTIVE state.
+    // The seed/Stripe pair (`createOrFindStripeSubscription`) reuses an
+    // existing Stripe subscription if one matches the seed id — so if a
+    // previous run cancelled it (and the afterEach reactivation failed),
+    // `pnpm db:seed` will NOT reset Stripe's state, and the next run starts
+    // in CANCELLING. Reactivate up front so the first sanity assertion is
+    // reliable across reruns.
+    test.beforeEach(async ({ page }) => {
+      await loginAsSeedViewer(page);
+      await page.goto('/account/subscriptions').catch(() => {});
+      await reactivateIfCancelling(page);
+    });
+
     test.afterEach(async ({ page }) => {
       // Best-effort teardown — idempotency per task constraint.
       await page.goto('/account/subscriptions').catch(() => {});
@@ -114,8 +127,10 @@ test.describe
     test('cancel flips to CANCELLING without hard refresh and keeps currentPeriodEnd visible', async ({
       page,
     }) => {
-      await loginAsSeedViewer(page);
-      await page.goto('/account/subscriptions');
+      // beforeEach already logged in + navigated to /account/subscriptions
+      // + reactivated if the previous run left it in CANCELLING. Re-navigating
+      // here would be redundant — the page is already on /account/subscriptions
+      // with the seeded viewer's ACTIVE subscription.
 
       // Page title present → server load returned. Matches messages/en.json subscription_manage.
       await expect(page.locator('h1.page-title')).toBeVisible({
@@ -182,8 +197,12 @@ test.describe
       expect(navigationCount).toBe(navBaseline);
 
       // ASSERT: currentPeriodEnd still visible (revocation is at period end).
+      // In CANCELLING state the card surfaces BOTH the active-state and the
+      // cancelling-state period-end labels — strict-mode `.toBeVisible()` on
+      // a regex matching either fails with "resolved to N elements". Scope
+      // to first match (we just need one of them to be present).
       await expect(
-        card.locator('text=/Current period ends|will end on/i')
+        card.locator('text=/Current period ends|will end on/i').first()
       ).toBeVisible();
 
       page.off('framenavigated', onFrameNav);
