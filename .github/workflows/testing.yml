@@ -792,6 +792,24 @@ jobs:
           echo "::add-mask::$DATABASE_URL"
           pnpm --filter @codex/database db:migrate
 
+      # Seed deterministic fixture data — required by E2E web specs that
+      # assume viewer@test.com / creator@test.com exist with active
+      # subscriptions on Studio Alpha (account-subscription-cancel,
+      # pricing-reactivate, progress-save-access-gate, subscription-cross-device,
+      # subscription-paused-resumed, streaming-revocation).
+      # STRIPE_SECRET_KEY is optional — without it the seed falls back to
+      # synthetic Stripe IDs (commerce.ts:602-688). The --force flag skips
+      # the interactive "DELETE ALL DATA?" confirmation.
+      - name: Seed deterministic fixture data
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DB_METHOD: NEON_BRANCH
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          echo "::add-mask::$STRIPE_SECRET_KEY"
+          pnpm --filter @codex/database exec tsx scripts/seed-data.ts --force
+
       # Build all packages and workers (including Auth Worker and dependencies)
       - name: Build all packages and workers with Turborepo
         run: |
