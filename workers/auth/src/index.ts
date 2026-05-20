@@ -197,16 +197,44 @@ app.post('/api/test/fast-register', async (c) => {
       .set({ emailVerified: true })
       .where(eq(schema.users.email, email));
 
-    // Build a new Response that preserves Set-Cookie headers.
-    // BetterAuth's handler returns a standard Response, but returning it
-    // directly through Hono can lose multi-valued Set-Cookie headers.
-    const body = await signUpResponse.text();
+    // The sign-up response has NO Set-Cookie when requireEmailVerification:true,
+    // so do an explicit sign-in now that the user is verified. Calling auth.handler
+    // directly bypasses the worker's Hono rate-limit middleware (which only gates
+    // the public /api/auth/sign-in/email route), so this never contends with the
+    // 5/15min auth rate limit that has historically broken E2E suites.
+    const signInRequest = new Request(
+      `${env.WEB_APP_URL || 'http://localhost:42069'}/api/auth/sign-in/email`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin:
+            env.WEB_APP_URL ||
+            c.req.header('Origin') ||
+            'http://localhost:42069',
+        },
+        body: JSON.stringify({ email, password }),
+      }
+    );
+
+    const signInResponse = await auth.handler(signInRequest);
+
+    if (!signInResponse || signInResponse.status >= 400) {
+      const body = signInResponse ? await signInResponse.text() : 'null';
+      return c.json(
+        { error: 'Sign-in after fast-register failed', details: body },
+        500
+      );
+    }
+
+    // Preserve multi-valued Set-Cookie headers by manually copying through Headers.
+    const body = await signInResponse.text();
     const headers = new Headers();
-    signUpResponse.headers.forEach((value, key) => {
+    signInResponse.headers.forEach((value, key) => {
       headers.append(key, value);
     });
     return new Response(body, {
-      status: signUpResponse.status,
+      status: signInResponse.status,
       headers,
     });
   } catch (error) {
