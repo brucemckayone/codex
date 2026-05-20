@@ -23,6 +23,13 @@ import { createServerApi } from '$lib/server/api';
 
 const revenueTypeSchema = z.enum(['subscription', 'content_purchase']);
 
+// BetterAuth issues 32-char text IDs (not UUIDs) for users — see
+// `packages/database/src/schema/users.ts`. Schemas that constrain user-id
+// fields (creatorId, proposedByUserId, etc.) must accept that format, not
+// `z.string().uuid()`, or every real call 400-rejects client-side before
+// the remote command even fires.
+const userIdSchema = z.string().min(1).max(64);
+
 const listAgreementsArgsSchema = z.object({
   organizationId: z.string().uuid(),
   revenueType: revenueTypeSchema.optional(),
@@ -35,13 +42,13 @@ const listPendingProposalsArgsSchema = z.object({
 
 const getThreadArgsSchema = z.object({
   organizationId: z.string().uuid(),
-  creatorId: z.string().uuid(),
+  creatorId: userIdSchema,
   revenueType: revenueTypeSchema,
 });
 
 const proposeAgreementArgsSchema = z.object({
   organizationId: z.string().uuid(),
-  creatorId: z.string().uuid(),
+  creatorId: userIdSchema,
   revenueType: revenueTypeSchema,
   sharePercent: z.number().int().min(0).max(10000),
   termMonths: z.number().int().min(1).max(120),

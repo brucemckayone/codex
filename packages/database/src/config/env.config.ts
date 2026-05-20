@@ -145,11 +145,19 @@ function applyNeonConfig(
   );
 }
 
-// Main exported value for config/env logic
+// Main exported value for config/env logic.
+//
+// `method` is a getter (not a top-level expression) so this module can be
+// imported in non-Node environments without crashing on `process is not
+// defined`. The browser bundle for `@codex/agreements` re-exports symbols
+// from `@codex/database`, and a direct `process.env.X` here propagates as
+// a module-init ReferenceError through the entire downstream import graph.
 export const DbEnvConfig = {
   rootEnvPath: ROOT_ENV_PATH,
   getDbUrl,
-  method: process.env.DB_METHOD ?? '',
+  get method() {
+    return typeof process !== 'undefined' ? (process.env.DB_METHOD ?? '') : '';
+  },
   out: DRIZZLE_CONFIG.OUT,
   schema: DRIZZLE_CONFIG.SCHEMA,
   dialect: DATABASE_DIALECT as

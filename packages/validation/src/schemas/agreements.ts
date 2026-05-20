@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { uuidSchema } from '../primitives';
+import { userIdSchema, uuidSchema } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
 
 /**
@@ -116,7 +116,11 @@ export type AgreementIdParamInput = z.infer<typeof agreementIdParamSchema>;
  * route layer doesn't re-check ownership.
  */
 export const proposeAgreementInputSchema = z.object({
-  creatorId: uuidSchema,
+  // BetterAuth issues text IDs (not UUIDs) for users — see
+  // `packages/database/src/schema/users.ts` (`id: text('id')`). `userIdSchema`
+  // accepts that 1-64-char format; using `uuidSchema` here 400-rejects every
+  // real propose call. Same applies to the other user-id fields below.
+  creatorId: userIdSchema,
   revenueType: agreementRevenueTypeEnum,
   sharePercent: sharePercentSchema,
   termMonths: termMonthsSchema,
@@ -208,7 +212,7 @@ export type TerminateAgreementInput = z.infer<
  */
 export const listAgreementsQuerySchema = paginationSchema.extend({
   organizationId: uuidSchema.optional(),
-  creatorId: uuidSchema.optional(),
+  creatorId: userIdSchema.optional(),
   revenueType: agreementRevenueTypeEnum.optional(),
 });
 export type ListAgreementsQueryInput = z.infer<
@@ -233,7 +237,7 @@ export type GetNegotiationThreadQueryInput = z.infer<
  * GET /agreements/threads/:creatorId — owner-view thread params.
  */
 export const ownerThreadParamSchema = z.object({
-  creatorId: uuidSchema,
+  creatorId: userIdSchema,
 });
 export type OwnerThreadParamInput = z.infer<typeof ownerThreadParamSchema>;
 

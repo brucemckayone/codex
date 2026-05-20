@@ -11,7 +11,7 @@
  * for the bug that motivated this single-source-of-truth pattern.
  */
 
-import { BETTERAUTH_RATE_LIMITED_PATHS_SET } from '@codex/constants';
+import { BETTERAUTH_RATE_LIMITED_PATHS_SET, ENV_NAMES } from '@codex/constants';
 import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import type { Context, Next } from 'hono';
 import type { AuthEnv } from '../types';
@@ -41,6 +41,25 @@ export function createAuthRateLimiter() {
     if (
       c.req.method !== 'POST' ||
       !BETTERAUTH_RATE_LIMITED_PATHS_SET.has(c.req.path)
+    ) {
+      await next();
+      return undefined;
+    }
+
+    // Test + development bypass: E2E suites exercise login dozens of
+    // times per run (auth-flow registers + verifies + logs in,
+    // agreement fixtures re-login after platform-role promotion,
+    // loginAsSeedViewer hits /api/auth/sign-in/email per spec).
+    // Because the per-IP key collapses to `unknown:/api/auth/sign-in`
+    // in local dev (no `cf-connecting-ip` header), every login across
+    // every test user shares one 5/15min budget and produces spurious
+    // 429s. Grouping `development + test` matches the existing pattern
+    // in `auth-config.ts:60-61, 135-136, 149-150` for trusted origins.
+    // Production env is never `development`/`test` so the attack
+    // surface is unchanged.
+    if (
+      c.env.ENVIRONMENT === ENV_NAMES.TEST ||
+      c.env.ENVIRONMENT === ENV_NAMES.DEVELOPMENT
     ) {
       await next();
       return undefined;
