@@ -98,7 +98,11 @@ jobs:
 
       - name: Apply migrations
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          # Use direct (non-pooled) connection for migrations. pgbouncer in
+          # transaction mode silently drops connections during multi-statement
+          # DDL. The pooled URL is fine for runtime queries; only migrations
+          # need direct.
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           DB_METHOD: NEON_BRANCH
         run: |
           echo "::add-mask::$DATABASE_URL"
