@@ -59,11 +59,11 @@ test.describe('Agreements — Counter-propose round-trip', () => {
     const proposeDialog = ownerPage.getByRole('dialog');
     await expect(proposeDialog).toBeVisible({ timeout: 5000 });
     await proposeDialog
-      .getByRole('radio', { name: /6 months/i })
+      .getByRole('radio', { name: '6 months', exact: true })
       .check({ force: true });
     await proposeDialog.getByRole('button', { name: /send proposal/i }).click();
     await expect(
-      ownerPage.locator('[role="status"]').filter({ hasText: /Proposal sent/i })
+      ownerPage.locator('[role="alert"]').filter({ hasText: /Proposal sent/i })
     ).toBeVisible({ timeout: 10_000 });
 
     // ─── Creator counters @ 40% ───────────────────────────────────────
@@ -109,9 +109,7 @@ test.describe('Agreements — Counter-propose round-trip', () => {
 
     // Toast confirming counter sent.
     await expect(
-      creatorPage
-        .locator('[role="status"]')
-        .filter({ hasText: /counter|sent/i })
+      creatorPage.locator('[role="alert"]').filter({ hasText: /counter|sent/i })
     ).toBeVisible({ timeout: 10_000 });
 
     // ─── Owner reviews + accepts counter ─────────────────────────────
@@ -140,7 +138,7 @@ test.describe('Agreements — Counter-propose round-trip', () => {
 
     await expect(
       ownerPage
-        .locator('[role="status"]')
+        .locator('[role="alert"]')
         .filter({ hasText: /Agreement accepted/i })
     ).toBeVisible({ timeout: 10_000 });
 

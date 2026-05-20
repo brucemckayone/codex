@@ -79,7 +79,7 @@ test.describe('Agreements — Propose → Accept happy path', () => {
     await expect(dialog).toBeVisible({ timeout: 5000 });
     // Term radio: pick 6 months.
     await dialog
-      .getByRole('radio', { name: /6 months/i })
+      .getByRole('radio', { name: '6 months', exact: true })
       .check({ force: true });
 
     // Optional note for thread provenance.
@@ -89,7 +89,7 @@ test.describe('Agreements — Propose → Accept happy path', () => {
 
     // Success toast confirmation.
     await expect(
-      ownerPage.locator('[role="status"]').filter({ hasText: /Proposal sent/i })
+      ownerPage.locator('[role="alert"]').filter({ hasText: /Proposal sent/i })
     ).toBeVisible({ timeout: 10_000 });
 
     // ─── Creator context ───────────────────────────────────────────────
@@ -119,7 +119,7 @@ test.describe('Agreements — Propose → Accept happy path', () => {
     // Success toast.
     await expect(
       creatorPage
-        .locator('[role="status"]')
+        .locator('[role="alert"]')
         .filter({ hasText: /Agreement accepted/i })
     ).toBeVisible({ timeout: 10_000 });
 
