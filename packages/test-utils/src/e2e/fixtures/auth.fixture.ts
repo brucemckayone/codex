@@ -127,23 +127,10 @@ export const authFixture = {
           },
         });
 
-        // Retry on 503 (worker restart mid-request).
+        // Retry on 503 (worker restart mid-request)
         if (response.status === 503 && attempt < maxRetries) {
           await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
           continue;
-        }
-
-        // Retry on transient 500 from BetterAuth FAILED_TO_CREATE_USER.
-        // This surfaces intermittently in CI when several test forks register
-        // users in parallel — likely pgbouncer transaction-mode state churn
-        // or a Neon connection blip. The user creation itself is idempotent
-        // (unique emails) so a retry is safe.
-        if (response.status === 500 && attempt < maxRetries) {
-          const peek = await response.clone().text();
-          if (peek.includes('FAILED_TO_CREATE_USER')) {
-            await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
-            continue;
-          }
         }
 
         break;
