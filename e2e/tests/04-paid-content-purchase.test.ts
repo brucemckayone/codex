@@ -18,6 +18,11 @@
 
 import { closeDbPool, dbHttp, schema } from '@codex/database';
 import {
+  calculateRevenueSplit,
+  DEFAULT_ORG_FEE_PERCENTAGE,
+  DEFAULT_PLATFORM_FEE_PERCENTAGE,
+} from '@codex/purchase';
+import {
   authFixture,
   expectSuccessResponse,
   httpClient,
@@ -256,9 +261,19 @@ describe('Paid Content Purchase Flow', () => {
     expect(purchases[0].status).toBe('completed');
     expect(purchases[0].stripePaymentIntentId).toBe(paymentIntentId);
 
-    // Verify revenue split (10% platform / 90% creator)
-    expect(purchases[0].platformFeeCents).toBe(300); // 10% of 2999 = 299.9 ≈ 300
-    expect(purchases[0].creatorPayoutCents).toBe(2699); // 90% of 2999
+    // Verify revenue split (three-bucket: platform / org / creator)
+    const expectedSplit = calculateRevenueSplit(
+      2999,
+      DEFAULT_PLATFORM_FEE_PERCENTAGE,
+      DEFAULT_ORG_FEE_PERCENTAGE
+    );
+    expect(purchases[0].platformFeeCents).toBe(expectedSplit.platformFeeCents);
+    expect(purchases[0].organizationFeeCents).toBe(
+      expectedSplit.organizationFeeCents
+    );
+    expect(purchases[0].creatorPayoutCents).toBe(
+      expectedSplit.creatorPayoutCents
+    );
 
     // ========================================================================
     // Step 7: Verify access NOW granted
