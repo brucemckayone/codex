@@ -128,7 +128,7 @@ describe('Paid Content Purchase Flow', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: organization.id, // Required for paid content
-          visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 2999, // $29.99 - PAID CONTENT
           category: 'Education',
           tags: ['paid', 'premium', 'course'],
@@ -358,7 +358,7 @@ describe('Paid Content Purchase Flow', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: organization.id, // Required for paid content
-          visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 1999,
         },
       }
@@ -547,7 +547,7 @@ describe('Paid Content Purchase Flow', () => {
           contentType: 'video',
           mediaItemId: media.id,
           organizationId: organization.id, // Required for paid content
-          visibility: 'purchased_only',
+          accessType: 'paid',
           priceCents: 999,
         },
       }
@@ -644,7 +644,7 @@ describe('Paid Content Purchase Flow', () => {
           slug: `free-no-checkout-${Date.now()}`,
           contentType: 'written',
           contentBody: 'This is free content',
-          visibility: 'public',
+          accessType: 'free',
           priceCents: 0, // FREE
         },
       }
