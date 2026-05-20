@@ -16,8 +16,19 @@ export const load: PageServerLoad = async ({
   platform,
   cookies,
   setHeaders,
+  depends,
 }) => {
   const { org } = await parent();
+
+  // Subscribe to the org-version invalidation key the platform layout
+  // uses for cross-device sync — when Tab A cancels (or reactivates) a
+  // subscription and Tab B fires the visibilitychange handler in
+  // `_org/[slug]/+layout.svelte:287`, that
+  // `invalidate('cache:org-versions')` needs to re-run THIS load too so
+  // the streamed `currentSubscription` reflects the new state. Without
+  // it the tier card CTA stays stuck on "Current plan" until a hard
+  // reload. Covered by subscription-cross-device.spec.ts.
+  depends('cache:org-versions');
 
   // REVALIDATE variant forces browsers to revalidate on every request so a
   // user who signs in (or subscribes) doesn't see the anonymous tier list
