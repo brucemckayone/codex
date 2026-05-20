@@ -39,6 +39,7 @@
     declineAgreement,
     getAgreementThread,
     listActiveAgreements,
+    listPendingProposals,
     proposeAgreement,
     terminateAgreement,
     withdrawAgreement,
@@ -67,6 +68,14 @@
   // Active agreements for the whole org (both revenue types).
   const agreementsQuery = $derived(
     isAuthorized ? listActiveAgreements({ organizationId: orgId }) : null
+  );
+
+  // Open + countered proposals on the org (both directions). Drives the
+  // per-creator "Review counter" / "Pending — waiting on creator" surfaces
+  // on each AgreementCard. Without this the card only knows about active
+  // agreements and cannot reflect a pending negotiation round.
+  const pendingProposalsQuery = $derived(
+    isAuthorized ? listPendingProposals({ organizationId: orgId }) : null
   );
 
   // Org members — needed to render one card per team creator. We filter
@@ -118,6 +127,48 @@
     }
     return map;
   });
+
+  /**
+   * Pending proposal lookup, same key shape. Built from the
+   * `listPendingProposals` query — only open + countered rows.
+   *
+   * Shape conversion (AgreementProposal → PendingProposalSummary that
+   * AgreementCard accepts): basis-points share is divided by 100 so the
+   * card renders display-percent without re-doing the math; waitingOnRole
+   * is the inverse of proposedByRole. The most recent round wins if
+   * multiple pendings exist for a (creator, type) pair — the listPending
+   * endpoint returns chronological asc, so iterating in order leaves the
+   * last (highest round_number) in the map.
+   */
+  const pendingProposals = $derived(
+    pendingProposalsQuery?.current?.items ?? []
+  );
+  const pendingByCreatorAndType = $derived.by(() => {
+    type PendingSummary = {
+      proposalId: string;
+      sharePercent: number;
+      termMonths: number | null;
+      proposedByRole: 'owner' | 'creator';
+      waitingOnRole: 'owner' | 'creator';
+      roundNumber: number;
+    };
+    const map = new Map<string, PendingSummary>();
+    for (const p of pendingProposals) {
+      map.set(`${p.creatorId}:${p.revenueType}`, {
+        proposalId: p.id,
+        sharePercent: p.proposedCreatorSharePercent / 100,
+        termMonths: p.proposedTermMonths ?? null,
+        proposedByRole: p.proposedByRole as 'owner' | 'creator',
+        waitingOnRole: p.proposedByRole === 'owner' ? 'creator' : 'owner',
+        roundNumber: p.roundNumber,
+      });
+    }
+    return map;
+  });
+
+  function getPendingFor(creatorId: string, revenueType: RevenueType) {
+    return pendingByCreatorAndType.get(`${creatorId}:${revenueType}`) ?? null;
+  }
 
   // ─── Pie data ────────────────────────────────────────────────────────────
 
@@ -230,7 +281,7 @@
       `${proposeCreatorName} will be notified.`
     );
     proposeDialogOpen = false;
-    await agreementsQuery?.refresh();
+    await Promise.all([agreementsQuery?.refresh(), pendingProposalsQuery?.refresh()]);
   }
 
   // ─── Thread dialog state ─────────────────────────────────────────────────
@@ -271,7 +322,7 @@
       await acceptAgreement({ proposalId });
       toast.success('Agreement accepted', 'The new agreement is now active.');
       threadDialogOpen = false;
-      await agreementsQuery?.refresh();
+      await Promise.all([agreementsQuery?.refresh(), pendingProposalsQuery?.refresh()]);
     } catch (err) {
       toast.error(
         'Could not accept proposal',
@@ -285,7 +336,7 @@
       await declineAgreement({ proposalId });
       toast.info('Proposal declined', `The creator will be notified.`);
       threadDialogOpen = false;
-      await agreementsQuery?.refresh();
+      await Promise.all([agreementsQuery?.refresh(), pendingProposalsQuery?.refresh()]);
     } catch (err) {
       toast.error(
         'Could not decline proposal',
@@ -299,7 +350,7 @@
       await withdrawAgreement({ proposalId });
       toast.info('Proposal withdrawn');
       threadDialogOpen = false;
-      await agreementsQuery?.refresh();
+      await Promise.all([agreementsQuery?.refresh(), pendingProposalsQuery?.refresh()]);
     } catch (err) {
       toast.error(
         'Could not withdraw proposal',
@@ -350,7 +401,7 @@
     });
     toast.success('Counter sent', `${counterCreatorName} will be notified.`);
     counterDialogOpen = false;
-    await agreementsQuery?.refresh();
+    await Promise.all([agreementsQuery?.refresh(), pendingProposalsQuery?.refresh()]);
   }
 
   // ─── Terminate handler ────────────────────────────────────────────────────
@@ -359,7 +410,7 @@
     try {
       await terminateAgreement({ agreementId });
       toast.success('Agreement terminated');
-      await agreementsQuery?.refresh();
+      await Promise.all([agreementsQuery?.refresh(), pendingProposalsQuery?.refresh()]);
     } catch (err) {
       toast.error(
         'Could not terminate agreement',
@@ -452,6 +503,11 @@
               {creator}
               subscriptionAgreement={getAgreementFor(creator.id, 'subscription')}
               contentPurchaseAgreement={getAgreementFor(creator.id, 'content_purchase')}
+              pendingSubscriptionProposal={getPendingFor(creator.id, 'subscription')}
+              pendingContentPurchaseProposal={getPendingFor(
+                creator.id,
+                'content_purchase'
+              )}
               onPropose={(revType) =>
                 openProposeDialog(creator.id, creator.name, revType, 'propose')}
               onAmend={(revType, currentShare) =>
