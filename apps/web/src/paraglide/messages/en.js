@@ -7751,6 +7751,22 @@ export const discover_empty_search = (params) => `No content found for "${params
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const discover_result_count_one = () => `1 result`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const discover_result_count_other = (params) => `${params.count} results`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const landing_hero_title = () => `Transform Your Content Journey`
 
 
