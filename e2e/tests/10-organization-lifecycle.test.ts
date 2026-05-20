@@ -247,10 +247,11 @@ describe('Organization Lifecycle', () => {
 
         await expectSuccessResponse(response);
         const body = await response.json();
-        const data = body.data;
-        expect(data.items.length).toBeGreaterThanOrEqual(1);
+        // List endpoint returns the standard list envelope:
+        // { items: [...], pagination: {...} } at the top level (no `data` wrapper).
+        expect(body.items.length).toBeGreaterThanOrEqual(1);
         expect(
-          data.items.some((org: { name: string }) => org.name === uniqueName)
+          body.items.some((org: { name: string }) => org.name === uniqueName)
         ).toBe(true);
       }
     );
@@ -414,7 +415,7 @@ describe('Organization Lifecycle', () => {
         const body = await createRes.json();
         const created = body.data;
 
-        // Delete
+        // Delete (returns 204 No Content per REST convention for soft delete)
         const deleteRes = await httpClient.delete(
           `${orgBaseUrl}/${created.id}`,
           {
@@ -424,7 +425,7 @@ describe('Organization Lifecycle', () => {
             },
           }
         );
-        await expectSuccessResponse(deleteRes);
+        await expectSuccessResponse(deleteRes, 204);
 
         // Verify hidden from retrieval by ID
         const getByIdRes = await httpClient.get(`${orgBaseUrl}/${created.id}`, {

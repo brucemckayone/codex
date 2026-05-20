@@ -149,8 +149,9 @@ describe('Notifications API', () => {
       );
       expect(res.status).toBe(200);
       const body = await res.json();
+      // List endpoint envelope: { items, pagination } at top level, no `data` wrapper.
       expect(
-        body.data.items.some((t: { name: string }) => t.name === templateName)
+        body.items.some((t: { name: string }) => t.name === templateName)
       ).toBe(true);
     });
   });
@@ -192,9 +193,10 @@ describe('Notifications API', () => {
       );
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(
-        body.data.items.some((t: { id: string }) => t.id === templateId)
-      ).toBe(true);
+      // List endpoint envelope: { items, pagination } at top level, no `data` wrapper.
+      expect(body.items.some((t: { id: string }) => t.id === templateId)).toBe(
+        true
+      );
     });
 
     it('should forbid outsider from listing org templates', async () => {
