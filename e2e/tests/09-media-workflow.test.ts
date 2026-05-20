@@ -73,7 +73,7 @@ describe('Media Workflow (Content-API <-> Media-API)', () => {
           mediaType: 'video',
           mimeType: 'video/mp4',
           fileSizeBytes: 1024 * 1024 * 10,
-          r2Key: `uploads/${creator.user.id}/test-video.mp4`,
+          // r2Key omitted — service auto-generates via SSOT path helper.
         },
       });
 
@@ -166,7 +166,7 @@ describe('Media Workflow (Content-API <-> Media-API)', () => {
             mediaType: 'video',
             mimeType: 'video/mp4',
             fileSizeBytes: 100,
-            r2Key: `uploads/${creator.user.id}/fail.mp4`,
+            // r2Key omitted — service auto-generates via SSOT path helper.
           },
         }
       );
