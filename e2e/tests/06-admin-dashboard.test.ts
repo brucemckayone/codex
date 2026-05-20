@@ -76,8 +76,15 @@ describe('Admin Dashboard', () => {
 
       // Try to access admin analytics - should fail with 403 (org-management
       // role required; 'member' role is insufficient).
+      //
+      // ?organizationId is required because resolveOrganizationId() falls
+      // through URL param → subdomain → query param. For a non-platform_owner
+      // user, the platform_owner membership-shortcut doesn't fire, so without
+      // a query param the resolver returns null → 400 ORG_CONTEXT_REQUIRED.
+      // The Zod query schema does not declare organizationId, but the policy
+      // resolver runs before input validation so it sees the raw query.
       const response = await httpClient.get(
-        `${WORKER_URLS.admin}/api/admin/analytics/revenue`,
+        `${WORKER_URLS.admin}/api/admin/analytics/revenue?organizationId=${org.id}`,
         {
           headers: { Cookie: creatorCookie },
         }
