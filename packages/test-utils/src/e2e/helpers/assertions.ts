@@ -42,7 +42,11 @@ export async function expectSuccessResponse(
   }
   const expect = await getExpect();
   expect(response.status).toBe(expectedStatus);
-  expect(response.headers.get('content-type')).toContain('application/json');
+  // 204 No Content responses have no body and intentionally no content-type
+  // header. Asserting content-type on them throws because get() returns null.
+  if (expectedStatus !== 204) {
+    expect(response.headers.get('content-type')).toContain('application/json');
+  }
 }
 
 /**
