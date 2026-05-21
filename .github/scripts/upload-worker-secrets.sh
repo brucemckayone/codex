@@ -103,9 +103,12 @@ EOF
     ;;
 
   identity-api)
+    # WORKER_SHARED_SECRET required: identity-api exposes a worker-HMAC
+    # membership lookup endpoint that auth uses to resolve org context.
     SECRETS_JSON=$(cat <<EOF
 {
-  "DATABASE_URL":"${DATABASE_URL}"
+  "DATABASE_URL":"${DATABASE_URL}",
+  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:-}"
 }
 EOF
 )
@@ -136,9 +139,13 @@ EOF
     ;;
 
   notifications-api)
+    # WORKER_SHARED_SECRET required: notifications-api accepts worker-HMAC
+    # signed /internal/send calls from other workers (auth → welcome email,
+    # org-api → invite email, etc).
     SECRETS_JSON=$(cat <<EOF
 {
-  "DATABASE_URL":"${DATABASE_URL}"
+  "DATABASE_URL":"${DATABASE_URL}",
+  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:-}"
 }
 EOF
 )
