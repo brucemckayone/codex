@@ -87,12 +87,29 @@ jobs:
           DEV_BRANCH_ID=$(echo "$BRANCHES" | jq -r '.branches[] | select(.name == "dev") | .id' | head -n 1)
 
           if [ -z "$DEV_BRANCH_ID" ]; then
-            echo "🌱 No dev branch found — creating from main parent..."
-            PARENT_ID=$(echo "$BRANCHES" | jq -r '.branches[] | select(.name == "main") | .id' | head -n 1)
+            echo "🌱 No dev branch found — locating primary branch to fork from..."
+            # Neon labels the project's primary data branch with `primary: true`
+            # (older API versions use `default: true`). The branch name varies
+            # per project (could be "main", "production", "br-xxx", etc.), so
+            # we filter by the boolean flag instead of by name.
+            PARENT_ID=$(echo "$BRANCHES" | jq -r '.branches[] | select(.primary == true or .default == true) | .id' | head -n 1)
+
+            # Fallback: try common branch names if the project doesn't expose
+            # a primary/default flag (very old Neon API responses).
             if [ -z "$PARENT_ID" ]; then
-              echo "❌ Could not find main branch in Neon project — aborting"
+              for CANDIDATE in main production master prod; do
+                PARENT_ID=$(echo "$BRANCHES" | jq -r ".branches[] | select(.name == \"$CANDIDATE\") | .id" | head -n 1)
+                [ -n "$PARENT_ID" ] && echo "   Using fallback branch name '$CANDIDATE'" && break
+              done
+            fi
+
+            if [ -z "$PARENT_ID" ]; then
+              echo "❌ Could not find primary branch in Neon project — aborting"
+              echo "Available branches:"
+              echo "$BRANCHES" | jq -r '.branches[] | "  \(.name) (primary=\(.primary // false))"'
               exit 1
             fi
+            echo "   Parent branch ID: $PARENT_ID"
             CREATE_RESPONSE=$(curl -fsS -X POST -H "$AUTH" -H "Content-Type: application/json" \
               "${API_BASE}/projects/${NEON_PROJECT_ID}/branches" \
               -d "{\"endpoints\":[{\"type\":\"read_write\"}],\"branch\":{\"name\":\"dev\",\"parent_id\":\"${PARENT_ID}\"}}")
