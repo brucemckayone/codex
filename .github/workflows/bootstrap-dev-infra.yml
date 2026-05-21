@@ -60,11 +60,15 @@ jobs:
               echo "✅ $B already exists"
             elif [ "$CREATE" = "true" ]; then
               echo "🌱 Creating $B..."
-              if curl -fsS -X POST -H "$AUTH" -H "Content-Type: application/json" \
-                "$API" -d "{\"name\":\"$B\"}" > /dev/null; then
+              # Drop -f so we capture the body even on 4xx
+              RESPONSE=$(curl -sS -X POST -H "$AUTH" -H "Content-Type: application/json" \
+                "$API" -d "{\"name\":\"$B\"}")
+              if echo "$RESPONSE" | jq -e '.success' > /dev/null 2>&1; then
                 echo "| $B | 🌱 created |" >> "$GITHUB_STEP_SUMMARY"
               else
-                echo "| $B | ❌ failed to create |" >> "$GITHUB_STEP_SUMMARY"
+                echo "| $B | ❌ failed |" >> "$GITHUB_STEP_SUMMARY"
+                echo "❌ Failed to create R2 bucket $B. Full API response:"
+                echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
                 exit 1
               fi
             else
@@ -82,15 +86,19 @@ jobs:
           API="https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records"
           AUTH="Authorization: Bearer ${CF_DNS_TOKEN}"
 
-          # Records we need. Wildcards + apex CNAMEs proxied through Cloudflare
-          # so the orange-cloud terminator routes requests to the worker.
-          # Cloudflare workers don't accept A records — CNAMEs to the
-          # placeholder `100::` are the documented pattern for routes that
-          # are entirely served by Workers (the worker route bindings
-          # determine which worker handles the request).
+          # Records we need. For Cloudflare Workers zone_name routes (used
+          # by apps/web for the dev apex + wildcard), the documented
+          # placeholder pattern is an AAAA record pointing at `100::` —
+          # an IPv6 sink that ensures DNS resolution succeeds while the
+          # actual request routing happens via the Worker route binding.
+          #
+          # CNAME does NOT work here because CNAME content must be a
+          # hostname, not an IPv6 literal (Cloudflare API returns 400).
+          # A records also work with `192.0.2.1` (TEST-NET-1) but AAAA
+          # is the more common convention in Cloudflare docs.
           declare -A RECORDS=(
-            [dev.revelations.studio]=CNAME
-            [*.dev.revelations.studio]=CNAME
+            [dev.revelations.studio]=AAAA
+            [*.dev.revelations.studio]=AAAA
           )
           CONTENT="100::"
 
@@ -112,13 +120,16 @@ jobs:
               echo "✅ $NAME ($TYPE) already exists"
             elif [ "$CREATE" = "true" ]; then
               echo "🌱 Creating $NAME ($TYPE)..."
-              RESPONSE=$(curl -fsS -X POST -H "$AUTH" -H "Content-Type: application/json" \
+              # Drop -f so we capture the body even on 4xx; check .success
+              # afterwards. Without this, curl exits silently on error.
+              RESPONSE=$(curl -sS -X POST -H "$AUTH" -H "Content-Type: application/json" \
                 "$API" -d "{\"type\":\"$TYPE\",\"name\":\"$NAME\",\"content\":\"$CONTENT\",\"proxied\":true,\"ttl\":1}")
-              if echo "$RESPONSE" | jq -e '.success' > /dev/null; then
+              if echo "$RESPONSE" | jq -e '.success' > /dev/null 2>&1; then
                 echo "| $NAME | $TYPE | 🌱 created |" >> "$GITHUB_STEP_SUMMARY"
               else
                 echo "| $NAME | $TYPE | ❌ failed |" >> "$GITHUB_STEP_SUMMARY"
-                echo "Response: $RESPONSE"
+                echo "❌ Failed to create $NAME ($TYPE). Full API response:"
+                echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
                 exit 1
               fi
             else
