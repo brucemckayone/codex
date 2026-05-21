@@ -217,8 +217,8 @@
       ],
       "routes": [
         {
-          "pattern": "content-api.dev.revelations.studio",
-          "custom_domain": true
+          "pattern": "content-api.dev.revelations.studio/*",
+          "zone_name": "revelations.studio"
         }
       ]
     }
