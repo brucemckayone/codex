@@ -1,0 +1,138 @@
+name: Bootstrap Dev Infrastructure
+
+# One-time (idempotent) workflow to provision Cloudflare DNS records and
+# R2 buckets for the dev environment. Re-running is safe — every step
+# checks for the resource and skips if it already exists.
+#
+# Custom domain bindings for each worker are handled automatically by
+# `wrangler deploy --env dev` (via `custom_domain: true` in each
+# workers/*/wrangler.jsonc), so they're not in this workflow.
+#
+# Trigger: manual via `gh workflow run "Bootstrap Dev Infrastructure"`
+#          or the GitHub Actions UI → "Run workflow" button.
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_missing:
+        description: "Create resources that don't exist (false = audit only)"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    name: Bootstrap dev DNS + R2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure R2 buckets exist
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_R2_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CREATE: ${{ inputs.create_missing }}
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets"
+          AUTH="Authorization: Bearer ${CF_API_TOKEN}"
+
+          # The bucket names the dev workers expect (see GH `dev` env vars).
+          # Each line: BUCKET_NAME
+          BUCKETS=(
+            codex-media-dev
+            codex-assets-dev
+            codex-platform-dev
+            codex-resources-dev
+          )
+
+          echo "## R2 Bucket Bootstrap" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Bucket | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+
+          EXISTING=$(curl -fsS -H "$AUTH" "$API" | jq -r '.result.buckets[].name')
+
+          for B in "${BUCKETS[@]}"; do
+            if echo "$EXISTING" | grep -qx "$B"; then
+              echo "| $B | ✅ exists |" >> "$GITHUB_STEP_SUMMARY"
+              echo "✅ $B already exists"
+            elif [ "$CREATE" = "true" ]; then
+              echo "🌱 Creating $B..."
+              if curl -fsS -X POST -H "$AUTH" -H "Content-Type: application/json" \
+                "$API" -d "{\"name\":\"$B\"}" > /dev/null; then
+                echo "| $B | 🌱 created |" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "| $B | ❌ failed to create |" >> "$GITHUB_STEP_SUMMARY"
+                exit 1
+              fi
+            else
+              echo "| $B | ⚠️ missing (audit-only mode) |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      - name: Ensure DNS records exist
+        env:
+          CF_DNS_TOKEN: ${{ secrets.CLOUDFLARE_DNS_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CREATE: ${{ inputs.create_missing }}
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records"
+          AUTH="Authorization: Bearer ${CF_DNS_TOKEN}"
+
+          # Records we need. Wildcards + apex CNAMEs proxied through Cloudflare
+          # so the orange-cloud terminator routes requests to the worker.
+          # Cloudflare workers don't accept A records — CNAMEs to the
+          # placeholder `100::` are the documented pattern for routes that
+          # are entirely served by Workers (the worker route bindings
+          # determine which worker handles the request).
+          declare -A RECORDS=(
+            [dev.revelations.studio]=CNAME
+            [*.dev.revelations.studio]=CNAME
+          )
+          CONTENT="100::"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "## DNS Bootstrap" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Record | Type | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+
+          for NAME in "${!RECORDS[@]}"; do
+            TYPE="${RECORDS[$NAME]}"
+            # Encode `*` for URL-safe lookup
+            URL_NAME=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))" "$NAME")
+            EXISTS=$(curl -fsS -H "$AUTH" "${API}?name=${URL_NAME}&type=${TYPE}" \
+              | jq -r '.result | length')
+
+            if [ "$EXISTS" -gt 0 ]; then
+              echo "| $NAME | $TYPE | ✅ exists |" >> "$GITHUB_STEP_SUMMARY"
+              echo "✅ $NAME ($TYPE) already exists"
+            elif [ "$CREATE" = "true" ]; then
+              echo "🌱 Creating $NAME ($TYPE)..."
+              RESPONSE=$(curl -fsS -X POST -H "$AUTH" -H "Content-Type: application/json" \
+                "$API" -d "{\"type\":\"$TYPE\",\"name\":\"$NAME\",\"content\":\"$CONTENT\",\"proxied\":true,\"ttl\":1}")
+              if echo "$RESPONSE" | jq -e '.success' > /dev/null; then
+                echo "| $NAME | $TYPE | 🌱 created |" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "| $NAME | $TYPE | ❌ failed |" >> "$GITHUB_STEP_SUMMARY"
+                echo "Response: $RESPONSE"
+                exit 1
+              fi
+            else
+              echo "| $NAME | $TYPE | ⚠️ missing (audit-only) |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      - name: Next steps
+        run: |
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Next Steps" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "1. Run \`./.github/scripts/bootstrap-dev-env.sh\` locally to create the GH \`dev\` environment + populate secrets" >> "$GITHUB_STEP_SUMMARY"
+          echo "2. Create the \`dev\` git branch: \`git checkout -b dev && git push -u origin dev\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "3. First push triggers testing.yml → deploy-dev.yml (auto-creates Neon dev branch + deploys 9 services)" >> "$GITHUB_STEP_SUMMARY"
+          echo "4. After first deploy, run \`./.github/scripts/setup-stripe-dev-webhooks.sh --upload\` to create test-mode Stripe endpoints" >> "$GITHUB_STEP_SUMMARY"
+          echo "5. Re-trigger deploy to pick up the Stripe secrets" >> "$GITHUB_STEP_SUMMARY"
