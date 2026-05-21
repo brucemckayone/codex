@@ -170,7 +170,7 @@
       ],
       "routes": [
         {
-          "pattern": "ecom-api.dev.revelations.studio/*",
+          "pattern": "ecom-api.dev.revelations.studio",
           "custom_domain": true
         }
       ]

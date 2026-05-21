@@ -145,7 +145,7 @@
       ],
       "routes": [
         {
-          "pattern": "auth.dev.revelations.studio/*",
+          "pattern": "auth.dev.revelations.studio",
           "custom_domain": true
         }
       ]

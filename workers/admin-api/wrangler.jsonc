@@ -201,7 +201,7 @@
       ],
       "routes": [
         {
-          "pattern": "admin-api.dev.revelations.studio/*",
+          "pattern": "admin-api.dev.revelations.studio",
           "custom_domain": true
         }
       ]

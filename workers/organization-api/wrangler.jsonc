@@ -210,7 +210,7 @@
       ],
       "routes": [
         {
-          "pattern": "organization-api.dev.revelations.studio/*",
+          "pattern": "organization-api.dev.revelations.studio",
           "custom_domain": true
         }
       ]
