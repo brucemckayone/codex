@@ -25,7 +25,10 @@ import type {
   TemplateService,
 } from '@codex/notifications';
 import type { ObservabilityClient } from '@codex/observability';
-import type { OrganizationService } from '@codex/organization';
+import type {
+  DevDomainService,
+  OrganizationService,
+} from '@codex/organization';
 import type { PlatformSettingsFacade } from '@codex/platform-settings';
 import type { FeeConfigService, PurchaseService } from '@codex/purchase';
 import type {
@@ -125,6 +128,12 @@ export interface ServiceRegistry {
   // Organization domain
   organization: OrganizationService;
   settings: PlatformSettingsFacade;
+  /**
+   * Dev-only Cloudflare Custom Domain provisioner (Codex Phase 7).
+   * No-op outside `ENVIRONMENT === 'dev'`. Creates per-org HTTPS bindings
+   * for hostnames at two levels deep where Universal SSL doesn't reach.
+   */
+  devDomain: DevDomainService;
 
   // Commerce domain
   purchase: PurchaseService;

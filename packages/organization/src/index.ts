@@ -56,7 +56,11 @@
 // Services
 // ============================================================================
 
-export { OrganizationService } from './services';
+export {
+  DevDomainService,
+  type DevDomainServiceConfig,
+  OrganizationService,
+} from './services';
 
 // ============================================================================
 // Types

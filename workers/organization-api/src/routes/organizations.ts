@@ -73,6 +73,15 @@ app.post(
         ctx.user.id
       );
 
+      // Dev-only: provision a Cloudflare Custom Domain so the new org's
+      // `{slug}.dev.revelations.studio` hostname gets a per-hostname TLS
+      // cert + routing binding. Fire-and-forget — org creation must
+      // not block on or fail because of Cloudflare API hiccups. No-op
+      // outside the deployed `dev` environment.
+      ctx.executionCtx.waitUntil(
+        ctx.services.devDomain.ensureDevDomain(org.slug)
+      );
+
       return org;
     },
   })
@@ -557,6 +566,14 @@ app.patch(
         ctx.executionCtx.waitUntil(Promise.all(invalidations).catch(() => {}));
       }
 
+      // Dev-only: if the slug changed, swap the Cloudflare Custom Domain
+      // (delete old hostname binding + create new). No-op outside dev.
+      if (oldSlug && updated.slug !== oldSlug) {
+        ctx.executionCtx.waitUntil(
+          ctx.services.devDomain.renameDevDomain(oldSlug, updated.slug)
+        );
+      }
+
       return updated;
     },
   })
@@ -623,6 +640,13 @@ app.delete(
             Promise.all(invalidations).catch(() => {})
           );
         }
+
+        // Dev-only: tear down the Cloudflare Custom Domain that was
+        // provisioned at org-create time so the hostname is freed up.
+        // No-op outside dev.
+        ctx.executionCtx.waitUntil(
+          ctx.services.devDomain.removeDevDomain(org.slug)
+        );
       }
 
       return null;

@@ -27,7 +27,7 @@ import {
   TemplateService,
 } from '@codex/notifications';
 import type { ObservabilityClient } from '@codex/observability';
-import { OrganizationService } from '@codex/organization';
+import { DevDomainService, OrganizationService } from '@codex/organization';
 import {
   BrandingSettingsService,
   ContactSettingsService,
@@ -94,6 +94,7 @@ export function createServiceRegistry(
   let _access: ContentAccessService | undefined;
   let _imageProcessing: ImageProcessingService | undefined;
   let _organization: OrganizationService | undefined;
+  let _devDomain: DevDomainService | undefined;
   let _settings: PlatformSettingsFacade | undefined;
   let _purchase: PurchaseService | undefined;
   let _feeConfig: FeeConfigService | undefined;
@@ -344,6 +345,32 @@ export function createServiceRegistry(
         });
       }
       return _organization;
+    },
+
+    /**
+     * Dev-only Cloudflare Custom Domain provisioner. No-op outside
+     * `ENVIRONMENT === 'dev'`. Reads CLOUDFLARE_API_TOKEN and
+     * CLOUDFLARE_ACCOUNT_ID from worker env bindings; missing creds
+     * turn the service off silently rather than failing org-create.
+     */
+    get devDomain() {
+      if (!_devDomain) {
+        _devDomain = new DevDomainService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          cloudflareApiToken:
+            typeof env.CLOUDFLARE_API_TOKEN === 'string'
+              ? env.CLOUDFLARE_API_TOKEN
+              : undefined,
+          cloudflareAccountId:
+            typeof env.CLOUDFLARE_ACCOUNT_ID === 'string'
+              ? env.CLOUDFLARE_ACCOUNT_ID
+              : undefined,
+          zoneName: 'revelations.studio',
+          webWorkerName: 'codex-web-dev',
+        });
+      }
+      return _devDomain;
     },
 
     get settings() {
