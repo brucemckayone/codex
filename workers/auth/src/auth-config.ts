@@ -190,7 +190,13 @@ export function createAuthInstance(options: AuthConfigOptions) {
     trustedOrigins: [
       env.WEB_APP_URL,
       env.API_URL,
-      // Dev-only origins
+      // Deployed dev (long-lived dev.revelations.studio branch). Browser
+      // requests come from the platform apex AND from per-org subdomains
+      // (studio-alpha.dev.revelations.studio etc), so a wildcard is needed.
+      ...(env.ENVIRONMENT === ENV_NAMES.DEV
+        ? [`https://${DOMAINS.DEV_REMOTE}`, `https://*.${DOMAINS.DEV_REMOTE}`]
+        : []),
+      // Local dev origins
       ...(env.ENVIRONMENT === ENV_NAMES.DEVELOPMENT
         ? [
             'http://localhost:42069', // Auth worker's own URL for E2E tests
@@ -203,7 +209,8 @@ export function createAuthInstance(options: AuthConfigOptions) {
 
     // Cross-subdomain cookie support
     // Allows sessions from lvh.me:3000 to work on {slug}.lvh.me:3000
-    // In production: sessions from revelations.studio work on {slug}.revelations.studio
+    // Deployed dev:  sessions from dev.revelations.studio work on {slug}.dev.revelations.studio
+    // Production:    sessions from revelations.studio work on {slug}.revelations.studio
     advanced: {
       crossSubDomainCookies: {
         enabled: true,
@@ -212,7 +219,9 @@ export function createAuthInstance(options: AuthConfigOptions) {
             ? getDevCookieDomain(env) // .lvh.me or .{ip}.nip.io based on WEB_APP_URL
             : env.ENVIRONMENT === ENV_NAMES.TEST
               ? undefined // Tests use exact origin
-              : `.${DOMAINS.PROD}`,
+              : env.ENVIRONMENT === ENV_NAMES.DEV
+                ? `.${DOMAINS.DEV_REMOTE}` // .dev.revelations.studio
+                : `.${DOMAINS.PROD}`,
       },
     },
   });

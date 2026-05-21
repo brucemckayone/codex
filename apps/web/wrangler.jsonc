@@ -126,6 +126,39 @@
           "zone_name": "revelations.studio"
         }
       ]
+    },
+
+    // Deployed dev environment (long-lived dev.revelations.studio branch)
+    // The platform and org wildcards live UNDER the dev.revelations.studio
+    // apex, which Cloudflare treats as a separate single-level wildcard
+    // from the prod *.revelations.studio one — no conflict.
+    "dev": {
+      "name": "codex-web-dev",
+      "vars": {
+        "ENVIRONMENT": "dev",
+        "AUTH_WORKER_URL": "https://auth.dev.revelations.studio",
+        "API_URL": "https://content-api.dev.revelations.studio",
+        "CONTENT_API_URL": "https://content-api.dev.revelations.studio",
+        "ORG_API_URL": "https://organization-api.dev.revelations.studio",
+        "ECOM_API_URL": "https://ecom-api.dev.revelations.studio",
+        "MEDIA_API_URL": "https://media-api.dev.revelations.studio",
+        "IDENTITY_API_URL": "https://identity-api.dev.revelations.studio",
+        "ADMIN_API_URL": "https://admin-api.dev.revelations.studio",
+        "NOTIFICATIONS_API_URL": "https://notifications-api.dev.revelations.studio"
+      },
+      "routes": [
+        // Dev platform apex
+        {
+          "pattern": "dev.revelations.studio/*",
+          "zone_name": "revelations.studio"
+        },
+        // Wildcard for dev org subdomains (LAST). API workers under
+        // dev.revelations.studio register separately with custom_domain: true.
+        {
+          "pattern": "*.dev.revelations.studio/*",
+          "zone_name": "revelations.studio"
+        }
+      ]
     }
     // Note: Preview configs are generated dynamically
   }

@@ -164,6 +164,47 @@
           "custom_domain": true
         }
       ]
+    },
+
+    // Deployed dev environment (long-lived dev.revelations.studio)
+    "dev": {
+      "name": "admin-api-dev",
+      "vars": {
+        "ENVIRONMENT": "dev",
+        "DB_METHOD": "PRODUCTION",
+        "WEB_APP_URL": "https://dev.revelations.studio",
+        "AUTH_WORKER_URL": "https://auth.dev.revelations.studio"
+      },
+      "kv_namespaces": [
+        {
+          "binding": "RATE_LIMIT_KV",
+          "id": "cea7153364974737b16870df08f31083"
+        },
+        {
+          "binding": "AUTH_SESSION_KV",
+          "id": "82d04a4236df4aac8e9d87793344f0ed"
+        },
+        {
+          "binding": "CACHE_KV",
+          "id": "c5e85d4c8ecb46f9a3e5d4d96a14e9f1"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-dev"
+        },
+        {
+          "binding": "ASSETS_BUCKET",
+          "bucket_name": "codex-assets-dev"
+        }
+      ],
+      "routes": [
+        {
+          "pattern": "admin-api.dev.revelations.studio/*",
+          "custom_domain": true
+        }
+      ]
     }
   }
 

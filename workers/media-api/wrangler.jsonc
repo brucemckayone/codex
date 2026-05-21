@@ -200,6 +200,52 @@
           "custom_domain": true
         }
       ]
+    },
+
+    // Deployed dev environment (long-lived dev.revelations.studio)
+    // B2 credentials, RunPod keys, WORKER_SHARED_SECRET must be set via
+    // `wrangler secret put * --env dev` before first deploy.
+    "dev": {
+      "name": "media-api-dev",
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "ORPHAN_CLEANUP_DO",
+            "class_name": "OrphanedFileCleanupDO"
+          }
+        ]
+      },
+      "triggers": {
+        "crons": ["0 * * * *"]
+      },
+      "vars": {
+        "ENVIRONMENT": "dev",
+        "DB_METHOD": "PRODUCTION",
+        "WEB_APP_URL": "https://dev.revelations.studio",
+        "API_URL": "https://media-api.dev.revelations.studio"
+      },
+      "kv_namespaces": [
+        {
+          "binding": "RATE_LIMIT_KV",
+          "id": "cea7153364974737b16870df08f31083"
+        },
+        {
+          "binding": "AUTH_SESSION_KV",
+          "id": "82d04a4236df4aac8e9d87793344f0ed"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "MEDIA_BUCKET",
+          "bucket_name": "codex-media-dev"
+        }
+      ],
+      "routes": [
+        {
+          "pattern": "media-api.dev.revelations.studio/*",
+          "custom_domain": true
+        }
+      ]
     }
   }
 

@@ -53,8 +53,17 @@ export function getCookieConfig(
     ...options,
   };
 
-  // Set domain in production (configurable via env)
-  if (!devMode && !config.domain) {
+  // Set domain based on host. The dev-remote check is host-based (not
+  // env-based) so a misconfigured deployment can't fall through to the
+  // prod default and leak the `.revelations.studio` cookie scope onto
+  // dev requests.
+  const hostIsDevRemote =
+    host === DOMAINS.DEV_REMOTE ||
+    (host?.endsWith(`.${DOMAINS.DEV_REMOTE}`) ?? false);
+
+  if (hostIsDevRemote && !config.domain) {
+    config.domain = `.${DOMAINS.DEV_REMOTE}`;
+  } else if (!devMode && !config.domain) {
     const envBindings = typeof env === 'object' ? env : undefined;
     config.domain =
       (envBindings?.COOKIE_DOMAIN as string) ?? `.${DOMAINS.PROD}`;
