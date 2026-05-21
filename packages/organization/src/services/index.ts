@@ -5,4 +5,10 @@
  * Provides both service classes and factory functions.
  */
 // Organization Service
+
+// Dev-only Cloudflare Custom Domain provisioner
+export {
+  DevDomainService,
+  type DevDomainServiceConfig,
+} from './dev-domain-service';
 export { OrganizationService } from './organization-service';

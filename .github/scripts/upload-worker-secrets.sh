@@ -121,9 +121,15 @@ EOF
     ;;
 
   organization-api)
+    # CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID are used by
+    # DevDomainService to provision Cloudflare Workers Custom Domains
+    # for new orgs in the dev environment. They're harmless to inject
+    # in non-dev environments (the service no-ops outside ENVIRONMENT=dev).
     SECRETS_JSON=$(cat <<EOF
 {
-  "DATABASE_URL":"${DATABASE_URL}"
+  "DATABASE_URL":"${DATABASE_URL}",
+  "CLOUDFLARE_API_TOKEN":"${CLOUDFLARE_API_TOKEN:-}",
+  "CLOUDFLARE_ACCOUNT_ID":"${CLOUDFLARE_ACCOUNT_ID:-}"
 }
 EOF
 )
