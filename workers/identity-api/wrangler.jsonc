@@ -209,7 +209,7 @@
       ],
       "routes": [
         {
-          "pattern": "identity-api.dev.revelations.studio/*",
+          "pattern": "identity-api.dev.revelations.studio",
           "custom_domain": true
         }
       ]
