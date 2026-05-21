@@ -39,7 +39,9 @@ describe('Content Creation Flow', () => {
           mediaType: 'video',
           mimeType: 'video/mp4',
           fileSizeBytes: 1024000,
-          r2Key: `media/${user.id}/test-video-${Date.now()}.mp4`,
+          // r2Key omitted — service auto-generates via getOriginalKey() to
+          // {creatorId}/originals/{mediaId}/{filename}. Tests cannot synthesize
+          // a valid key because mediaId is server-allocated.
         },
       }
     );
@@ -160,7 +162,9 @@ describe('Content Creation Flow', () => {
           mediaType: 'video',
           mimeType: 'video/mp4',
           fileSizeBytes: 1024000,
-          r2Key: `media/${user.id}/test-video-${Date.now()}.mp4`,
+          // r2Key omitted — service auto-generates via getOriginalKey() to
+          // {creatorId}/originals/{mediaId}/{filename}. Tests cannot synthesize
+          // a valid key because mediaId is server-allocated.
         },
       }
     );
@@ -226,7 +230,7 @@ describe('Content Creation Flow', () => {
           mediaType: 'video',
           mimeType: 'video/mp4',
           fileSizeBytes: 1024000,
-          r2Key: `media/user1/video1-${Date.now()}.mp4`,
+          // r2Key omitted — service auto-generates via SSOT path helper.
         },
       }
     );

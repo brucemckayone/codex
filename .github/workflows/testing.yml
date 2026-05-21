@@ -196,10 +196,12 @@ jobs:
 
       # Database Setup: Apply committed migrations to ephemeral branch
       # Note: Migrations are generated locally and committed; CI only applies them
-      # Note: db_url_with_pooler from create-branch step is available in this job
+      # Note: db_url (direct) is used for migrations — db_url_with_pooler routes
+      # through pgbouncer which drops connections mid-DDL on Neon ephemeral
+      # branches. Runtime queries can still use the pooled URL.
       - name: Apply migrations to ephemeral branch
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           DB_METHOD: NEON_BRANCH
         run: |
           echo "::add-mask::$DATABASE_URL"
@@ -477,7 +479,8 @@ jobs:
       - name: Apply migrations
         if: steps.should-run.outputs.should_run == 'true'
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          # Direct (non-pooled) URL — pgbouncer drops connections mid-DDL.
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           DB_METHOD: NEON_BRANCH
         run: |
           echo "::add-mask::$DATABASE_URL"
@@ -613,7 +616,8 @@ jobs:
 
       - name: Apply migrations
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          # Direct (non-pooled) URL — pgbouncer drops connections mid-DDL.
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           DB_METHOD: NEON_BRANCH
         run: |
           echo "::add-mask::$DATABASE_URL"
@@ -635,13 +639,27 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          # All Stripe webhook secrets — passthrough ensures generate-dev-vars.sh
+          # writes the real values to .dev.vars.test instead of falling back to
+          # whsec_ci_*_placeholder defaults. Without this, ecom-api worker boots
+          # with stub HMAC secrets and fails signature verification when e2e
+          # tests forge webhook events (test/04 paid-purchase + downstream).
           STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
+          STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}
+          STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: ${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}
+          STRIPE_WEBHOOK_SECRET_CONNECT: ${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}
+          STRIPE_WEBHOOK_SECRET_CUSTOMER: ${{ secrets.STRIPE_WEBHOOK_SECRET_CUSTOMER }}
+          STRIPE_WEBHOOK_SECRET_DISPUTE: ${{ secrets.STRIPE_WEBHOOK_SECRET_DISPUTE }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
           # Media API specific
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
           RUNPOD_WEBHOOK_SECRET: ${{ secrets.RUNPOD_WEBHOOK_SECRET }}
-          RUNPOD_API_URL: http://localhost:4002/internal/mock-runpod
+          # RUNPOD_DIRECT_URL is used verbatim by TranscodingService (no path
+          # construction). RUNPOD_API_URL would be appended with
+          # /<endpointId>/run which doesn't exist on the mock.
+          RUNPOD_DIRECT_URL: http://localhost:4002/internal/mock-runpod
           B2_ENDPOINT: ${{ secrets.B2_ENDPOINT }}
           B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
           B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
@@ -651,7 +669,13 @@ jobs:
           echo "::add-mask::$R2_SECRET_ACCESS_KEY"
           echo "::add-mask::$STRIPE_SECRET_KEY"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_BOOKING"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_PAYMENT"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_SUBSCRIPTION"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_CONNECT"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_CUSTOMER"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_DISPUTE"
           echo "::add-mask::$BETTER_AUTH_SECRET"
+          echo "::add-mask::$WORKER_SHARED_SECRET"
           echo "::add-mask::$RUNPOD_API_KEY"
           echo "::add-mask::$RUNPOD_WEBHOOK_SECRET"
           echo "::add-mask::$B2_APP_KEY"
@@ -767,9 +791,10 @@ jobs:
         run: pnpm --filter @codex/constants build
 
       # Database Setup: Apply committed migrations to ephemeral branch
+      # Direct (non-pooled) URL — pgbouncer drops connections mid-DDL.
       - name: Apply migrations to ephemeral branch
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           DB_METHOD: NEON_BRANCH
         run: |
           echo "::add-mask::$DATABASE_URL"
@@ -797,17 +822,29 @@ jobs:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           DB_METHOD: ${{ vars.DB_METHOD }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          # All Stripe webhook secrets — passthrough ensures generate-dev-vars.sh
+          # writes the real values to .dev.vars.test instead of falling back to
+          # whsec_ci_*_placeholder defaults. Mirrors e2e-api-tests env block.
           STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
+          STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}
+          STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: ${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}
+          STRIPE_WEBHOOK_SECRET_CONNECT: ${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}
+          STRIPE_WEBHOOK_SECRET_CUSTOMER: ${{ secrets.STRIPE_WEBHOOK_SECRET_CUSTOMER }}
+          STRIPE_WEBHOOK_SECRET_DISPUTE: ${{ secrets.STRIPE_WEBHOOK_SECRET_DISPUTE }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
           # Media API specific
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
           RUNPOD_WEBHOOK_SECRET: ${{ secrets.RUNPOD_WEBHOOK_SECRET }}
-          RUNPOD_API_URL: http://localhost:4002/internal/mock-runpod
+          # RUNPOD_DIRECT_URL is used verbatim by TranscodingService (no path
+          # construction). RUNPOD_API_URL would be appended with
+          # /<endpointId>/run which doesn't exist on the mock.
+          RUNPOD_DIRECT_URL: http://localhost:4002/internal/mock-runpod
           B2_ENDPOINT: ${{ secrets.B2_ENDPOINT }}
           B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
           B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
@@ -816,8 +853,14 @@ jobs:
           echo "::add-mask::$DATABASE_URL"
           echo "::add-mask::$STRIPE_SECRET_KEY"
           echo "::add-mask::$STRIPE_WEBHOOK_SECRET_BOOKING"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_PAYMENT"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_SUBSCRIPTION"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_CONNECT"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_CUSTOMER"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_DISPUTE"
           echo "::add-mask::$R2_SECRET_ACCESS_KEY"
           echo "::add-mask::$BETTER_AUTH_SECRET"
+          echo "::add-mask::$WORKER_SHARED_SECRET"
           echo "::add-mask::$RUNPOD_API_KEY"
           echo "::add-mask::$RUNPOD_WEBHOOK_SECRET"
           echo "::add-mask::$B2_APP_KEY"

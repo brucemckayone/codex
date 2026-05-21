@@ -105,6 +105,40 @@ app.route('/', transcodingRoutes);
 app.route('/', webhookRoutes);
 
 // ============================================================================
+// Mock RunPod /run endpoint (test/dev only)
+// ============================================================================
+
+/**
+ * POST /internal/mock-runpod
+ *
+ * Stands in for RunPod's `/v2/<endpoint>/run` API during e2e tests. The
+ * workflow points `RUNPOD_API_URL` at this endpoint so the transcoding
+ * service's `triggerJob()` can dispatch jobs without a real RunPod account.
+ *
+ * Returns a fake job id + IN_QUEUE status, mimicking the real RunPod
+ * response shape. The transcoding service stores the job id and waits for
+ * a webhook callback — in e2e tests the webhook is forged separately, so
+ * this mock does NOT need to schedule its own callback.
+ *
+ * Guarded by ENVIRONMENT — returns 404 in production.
+ */
+app.post('/internal/mock-runpod', async (c) => {
+  const env = c.env as unknown as Bindings & { ENVIRONMENT?: string };
+  const environment = env.ENVIRONMENT || 'development';
+  if (environment !== 'development' && environment !== 'test') {
+    return c.notFound();
+  }
+
+  return c.json(
+    {
+      id: `mock-job-${crypto.randomUUID()}`,
+      status: 'IN_QUEUE',
+    },
+    200
+  );
+});
+
+// ============================================================================
 // Orphan Cleanup DO Routes (Internal)
 // ============================================================================
 

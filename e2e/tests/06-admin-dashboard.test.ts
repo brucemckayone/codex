@@ -14,6 +14,11 @@
 
 import { closeDbPool, dbHttp, dbWs, schema } from '@codex/database';
 import {
+  calculateRevenueSplit,
+  DEFAULT_ORG_FEE_PERCENTAGE,
+  DEFAULT_PLATFORM_FEE_PERCENTAGE,
+} from '@codex/purchase';
+import {
   authFixture,
   expectErrorResponse,
   expectForbidden,
@@ -104,7 +109,7 @@ describe('Admin Dashboard', () => {
       });
 
       // Access admin analytics - should succeed
-      const stats = await adminFixture.getRevenueStats(admin.cookie);
+      const stats = await adminFixture.getRevenueStats(admin);
 
       expect(stats).toBeDefined();
       expect(stats.totalRevenueCents).toBe(0);
@@ -125,7 +130,7 @@ describe('Admin Dashboard', () => {
         orgSlug: `zero-org-${Date.now()}`,
       });
 
-      const stats = await adminFixture.getRevenueStats(admin.cookie);
+      const stats = await adminFixture.getRevenueStats(admin);
 
       expect(stats.totalRevenueCents).toBe(0);
       expect(stats.totalPurchases).toBe(0);
@@ -261,14 +266,19 @@ describe('Admin Dashboard', () => {
         );
 
         // 4. Verify revenue stats
-        const stats = await adminFixture.getRevenueStats(admin.cookie);
+        const stats = await adminFixture.getRevenueStats(admin);
 
         expect(stats.totalRevenueCents).toBe(2999);
         expect(stats.totalPurchases).toBe(1);
         expect(stats.averageOrderValueCents).toBe(2999);
-        // Revenue split: 10% platform = 300, 90% creator = 2699
-        expect(stats.platformFeeCents).toBe(300);
-        expect(stats.creatorPayoutCents).toBe(2699);
+        // Three-bucket revenue split: platform → org → creator (Codex-h69cg)
+        const expectedSplit = calculateRevenueSplit(
+          2999,
+          DEFAULT_PLATFORM_FEE_PERCENTAGE,
+          DEFAULT_ORG_FEE_PERCENTAGE
+        );
+        expect(stats.platformFeeCents).toBe(expectedSplit.platformFeeCents);
+        expect(stats.creatorPayoutCents).toBe(expectedSplit.creatorPayoutCents);
       },
       { timeout: 180000 }
     );
@@ -399,12 +409,12 @@ describe('Admin Dashboard', () => {
         );
 
         // Admin1 should see the purchase
-        const admin1Stats = await adminFixture.getRevenueStats(admin1.cookie);
+        const admin1Stats = await adminFixture.getRevenueStats(admin1);
         expect(admin1Stats.totalPurchases).toBe(1);
         expect(admin1Stats.totalRevenueCents).toBe(1999);
 
         // Admin2 should NOT see admin1's purchase
-        const admin2Stats = await adminFixture.getRevenueStats(admin2.cookie);
+        const admin2Stats = await adminFixture.getRevenueStats(admin2);
         expect(admin2Stats.totalPurchases).toBe(0);
         expect(admin2Stats.totalRevenueCents).toBe(0);
       },
@@ -628,7 +638,7 @@ describe('Admin Dashboard', () => {
         );
 
         // Customer stats should show 1 distinct customer
-        const customerStats = await adminFixture.getCustomerStats(admin.cookie);
+        const customerStats = await adminFixture.getCustomerStats(admin);
         expect(customerStats.totalCustomers).toBe(1); // Same buyer = 1 distinct customer
       },
       { timeout: 180000 }
@@ -651,7 +661,7 @@ describe('Admin Dashboard', () => {
         });
 
         // Top content with limit=3 on empty org
-        const topContent = await adminFixture.getTopContent(admin.cookie, 3);
+        const topContent = await adminFixture.getTopContent(admin, 3);
 
         expect(Array.isArray(topContent)).toBe(true);
         expect(topContent.length).toBeLessThanOrEqual(3);
@@ -702,7 +712,7 @@ describe('Admin Dashboard', () => {
         }
 
         // List with pagination
-        const result = await adminFixture.listAllContent(admin.cookie, {
+        const result = await adminFixture.listAllContent(admin, {
           page: 1,
           limit: 2,
         });
@@ -785,17 +795,16 @@ describe('Admin Dashboard', () => {
         );
 
         // Filter by published only
-        const publishedResult = await adminFixture.listAllContent(
-          admin.cookie,
-          { status: 'published' }
-        );
+        const publishedResult = await adminFixture.listAllContent(admin, {
+          status: 'published',
+        });
 
         expect(
           publishedResult.items.every((c) => c.status === 'published')
         ).toBe(true);
 
         // Filter by draft only
-        const draftResult = await adminFixture.listAllContent(admin.cookie, {
+        const draftResult = await adminFixture.listAllContent(admin, {
           status: 'draft',
         });
 
@@ -843,10 +852,7 @@ describe('Admin Dashboard', () => {
         expect(content.status).toBe('draft');
 
         // Admin publishes content
-        const published = await adminFixture.publishContent(
-          admin.cookie,
-          content.id
-        );
+        const published = await adminFixture.publishContent(admin, content.id);
 
         expect(published.status).toBe('published');
       },
@@ -902,7 +908,7 @@ describe('Admin Dashboard', () => {
 
         // Admin unpublishes content
         const unpublished = await adminFixture.unpublishContent(
-          admin.cookie,
+          admin,
           content.id
         );
 
@@ -949,10 +955,10 @@ describe('Admin Dashboard', () => {
         const content = unwrapApiResponse(await contentResponse.json());
 
         // Admin deletes content
-        await adminFixture.deleteContent(admin.cookie, content.id);
+        await adminFixture.deleteContent(admin, content.id);
 
         // Verify content no longer in list
-        const contentList = await adminFixture.listAllContent(admin.cookie);
+        const contentList = await adminFixture.listAllContent(admin);
         expect(
           contentList.items.find((c) => c.id === content.id)
         ).toBeUndefined();
@@ -1011,16 +1017,24 @@ describe('Admin Dashboard', () => {
         );
         const content = unwrapApiResponse(await contentResponse.json());
 
-        // Admin2 tries to publish admin1's content - should fail with 404
-        const response = await httpClient.post(
-          `${WORKER_URLS.admin}/api/admin/content/${content.id}/publish`,
-          {
-            headers: {
-              Cookie: admin2.cookie,
-              'Content-Type': 'application/json',
-            },
-          }
+        // Admin2 tries to publish admin1's content - should fail with 404.
+        // Pass admin2's own organizationId as a query param so the procedure
+        // resolver picks admin2's org (membership check passes), then the
+        // service looks for content scoped to admin2's org and finds none →
+        // NotFoundError → 404. Without the query param the resolver would
+        // return 400 ORG_CONTEXT_REQUIRED before any access check fires
+        // (path slot is :contentId per Codex-mrvid; the resolver no longer
+        // auto-promotes a content UUID to an org id).
+        const url = new URL(
+          `${WORKER_URLS.admin}/api/admin/content/${content.id}/publish`
         );
+        url.searchParams.set('organizationId', admin2.organization.id);
+        const response = await httpClient.post(url.toString(), {
+          headers: {
+            Cookie: admin2.cookie,
+            'Content-Type': 'application/json',
+          },
+        });
 
         expect(response.status).toBe(404);
       },
@@ -1148,7 +1162,7 @@ describe('Admin Dashboard', () => {
         );
 
         // List customers
-        const customers = await adminFixture.listCustomers(admin.cookie);
+        const customers = await adminFixture.listCustomers(admin);
 
         expect(customers.items).toHaveLength(1);
         expect(customers.items[0].userId).toBe(buyer.id);
@@ -1272,10 +1286,7 @@ describe('Admin Dashboard', () => {
         );
 
         // Get customer details
-        const details = await adminFixture.getCustomerDetails(
-          admin.cookie,
-          buyer.id
-        );
+        const details = await adminFixture.getCustomerDetails(admin, buyer.id);
 
         expect(details.userId).toBe(buyer.id);
         expect(details.totalPurchases).toBe(1);
@@ -1464,7 +1475,7 @@ describe('Admin Dashboard', () => {
 
       // Admin grants complimentary access to second content
       const granted = await adminFixture.grantContentAccess(
-        admin.cookie,
+        admin,
         buyer.id,
         content2.id
       );
@@ -1598,14 +1609,14 @@ describe('Admin Dashboard', () => {
 
       // Customer already has access via purchase. Grant access twice.
       const first = await adminFixture.grantContentAccess(
-        admin.cookie,
+        admin,
         buyer.id,
         content.id
       );
       expect(first).toBe(true);
 
       const second = await adminFixture.grantContentAccess(
-        admin.cookie,
+        admin,
         buyer.id,
         content.id
       );

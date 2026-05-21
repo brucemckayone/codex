@@ -296,10 +296,18 @@ export type AdminContentListQueryInput = z.infer<
 
 /**
  * Content ID path parameter schema
- * Used for publish, unpublish, and delete operations
+ * Used for publish, unpublish, and delete operations.
+ *
+ * Uses `contentId` (not `id`) deliberately. The procedure org-resolver checks
+ * `params.id || params.orgId || params.organizationId` as a fallback for org
+ * context — a UUID at `params.id` is treated as an org id. On
+ * /api/admin/content/:id/{publish,unpublish,delete} that's wrong because
+ * :id is a content id, not an org id, and the org context must come from
+ * the ?organizationId= query param. Renaming the URL slot to :contentId
+ * keeps the resolver out of the way (Codex-mrvid).
  */
 export const adminContentIdParamsSchema = z.object({
-  id: uuidSchema,
+  contentId: uuidSchema,
 });
 
 export type AdminContentIdParams = z.infer<typeof adminContentIdParamsSchema>;

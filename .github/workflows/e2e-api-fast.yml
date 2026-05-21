@@ -1,0 +1,210 @@
+name: E2E API Fast Feedback
+
+# Isolated fast-feedback workflow for the e2e:api suite.
+#
+# Motivation: the full `testing.yml` pipeline runs cleanup → static-analysis →
+# changes → test(20) (~26m) → worker-tests → e2e-api. The e2e-api job itself
+# is only ~2 minutes, but the dependency chain means failures don't surface
+# for ~30 minutes. This workflow runs e2e:api in parallel with the omnibus
+# (no `needs:` upstream) so failures surface in ~4 minutes.
+#
+# Identical Neon branch + dev-vars setup as the omnibus to avoid drift.
+# Runs on the same `test` environment so the same secrets resolve.
+#
+# Path filters: only triggers when something that could affect e2e:api
+# actually changes (workers/, packages/, e2e/, the dev-vars script, or this
+# workflow itself).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'e2e/**'
+      - 'workers/**'
+      - 'packages/**'
+      - '.github/scripts/generate-dev-vars.sh'
+      - '.github/workflows/e2e-api-fast.yml'
+  push:
+    branches-ignore:
+      - main
+    paths:
+      - 'e2e/**'
+      - 'workers/**'
+      - 'packages/**'
+      - '.github/scripts/generate-dev-vars.sh'
+      - '.github/workflows/e2e-api-fast.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: e2e-api-fast-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-api:
+    name: E2E API Fast
+    runs-on: ubuntu-latest
+    environment: test
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Neon branch name
+        id: branch-name
+        # Unique per run to avoid races with the omnibus workflow which also
+        # creates ephemeral branches. cleanup-stale-branches in the omnibus
+        # only deletes non-default branches once at start of its own run, so
+        # our branch is safe as long as our cleanup step fires reliably.
+        run: echo "name=ci-e2e-api-fast-${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_OUTPUT
+
+      - name: Create Neon branch
+        id: create-branch
+        uses: neondatabase/create-branch-action@v5
+        with:
+          project_id: ${{ vars.NEON_PROJECT_ID }}
+          branch_name: ${{ steps.branch-name.outputs.name }}
+          parent: production
+          username: neondb_owner
+          api_key: ${{ secrets.NEON_API_KEY }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache Turborepo
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-e2e-api-fast-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-e2e-api-fast-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
+            ${{ runner.os }}-turbo-e2e-api-fast-
+            ${{ runner.os }}-turbo-e2e-api-
+            ${{ runner.os }}-turbo-
+
+      - name: Build constants package
+        run: pnpm --filter @codex/constants build
+
+      - name: Apply migrations
+        env:
+          # Use direct (non-pooled) connection for migrations. pgbouncer in
+          # transaction mode silently drops connections during multi-statement
+          # DDL. The pooled URL is fine for runtime queries; only migrations
+          # need direct.
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
+          DB_METHOD: NEON_BRANCH
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          pnpm --filter @codex/database db:migrate
+
+      - name: Build dependencies
+        run: pnpm build
+        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_LOG_VERBOSITY: info
+
+      - name: Generate worker dev vars for all workers
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DB_METHOD: ${{ vars.DB_METHOD }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          # All Stripe webhook secrets — passthrough ensures generate-dev-vars.sh
+          # writes the real values to .dev.vars.test instead of falling back to
+          # whsec_ci_*_placeholder defaults. Without this, ecom-api worker boots
+          # with stub HMAC secrets and fails signature verification when e2e
+          # tests forge webhook events (test/04 paid-purchase + downstream).
+          STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
+          STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}
+          STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: ${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}
+          STRIPE_WEBHOOK_SECRET_CONNECT: ${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}
+          STRIPE_WEBHOOK_SECRET_CUSTOMER: ${{ secrets.STRIPE_WEBHOOK_SECRET_CUSTOMER }}
+          STRIPE_WEBHOOK_SECRET_DISPUTE: ${{ secrets.STRIPE_WEBHOOK_SECRET_DISPUTE }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
+          # Media API specific
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+          RUNPOD_WEBHOOK_SECRET: ${{ secrets.RUNPOD_WEBHOOK_SECRET }}
+          # RUNPOD_DIRECT_URL is used verbatim by TranscodingService (no path
+          # construction). RUNPOD_API_URL would be treated as a base URL and
+          # appended with /<endpointId>/run, which doesn't exist on the mock.
+          RUNPOD_DIRECT_URL: http://localhost:4002/internal/mock-runpod
+          B2_ENDPOINT: ${{ secrets.B2_ENDPOINT }}
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          echo "::add-mask::$R2_SECRET_ACCESS_KEY"
+          echo "::add-mask::$STRIPE_SECRET_KEY"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_BOOKING"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_PAYMENT"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_SUBSCRIPTION"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_CONNECT"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_CUSTOMER"
+          echo "::add-mask::$STRIPE_WEBHOOK_SECRET_DISPUTE"
+          echo "::add-mask::$BETTER_AUTH_SECRET"
+          echo "::add-mask::$WORKER_SHARED_SECRET"
+          echo "::add-mask::$RUNPOD_API_KEY"
+          echo "::add-mask::$RUNPOD_WEBHOOK_SECRET"
+          echo "::add-mask::$B2_APP_KEY"
+          chmod +x .github/scripts/generate-dev-vars.sh
+          .github/scripts/generate-dev-vars.sh
+
+      - name: Run E2E API tests
+        id: run-tests
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DB_METHOD: ${{ vars.DB_METHOD }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          echo "::add-mask::$STRIPE_SECRET_KEY"
+          pnpm test:e2e:api
+        continue-on-error: true
+
+      - name: Upload E2E API test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-api-fast-results-${{ github.run_id }}
+          path: |
+            e2e/test-results.json
+            e2e/test-results/**
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Fail if E2E API tests failed
+        if: steps.run-tests.outcome == 'failure'
+        run: exit 1
+
+      - name: Cleanup Neon branch
+        if: always() && steps.create-branch.outputs.branch_id
+        run: |
+          npm i -g neonctl@2
+          neonctl branches delete ${{ steps.create-branch.outputs.branch_id }} --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}

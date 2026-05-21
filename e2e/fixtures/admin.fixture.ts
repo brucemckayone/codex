@@ -1,6 +1,14 @@
 /**
  * Admin fixture for e2e tests
  * Handles platform owner setup and admin API helpers via REAL admin-api worker
+ *
+ * Admin API endpoints use `auth: 'required' + requireOrgMembership + requireOrgManagement`
+ * (admin-api/CLAUDE.md). Org context is resolved from URL param, subdomain, or
+ * `?organizationId=` query param. The e2e test client hits localhost directly
+ * (no subdomain) and most admin routes have no orgId path param, so the fixture
+ * accepts a `PlatformOwnerContext`-shaped first arg and appends the org id as a
+ * query parameter on every request. Without this, the procedure resolver throws
+ * `VALIDATION_ERROR { code: 'ORG_CONTEXT_REQUIRED' }` before any role check fires.
  */
 
 import { dbHttp, schema } from '@codex/database';
@@ -17,6 +25,25 @@ import type {
 } from '@codex/test-utils/e2e/helpers/types';
 import { eq } from 'drizzle-orm';
 import { WORKER_URLS } from '../helpers/worker-urls';
+
+/**
+ * Shape required by every admin fixture method: cookie + organization with id.
+ * Compatible with the full PlatformOwnerContext returned by createPlatformOwner.
+ */
+type AdminContext = Pick<PlatformOwnerContext, 'cookie' | 'organization'>;
+
+function adminHeaders(admin: AdminContext) {
+  return {
+    Cookie: admin.cookie,
+    Origin: WORKER_URLS.admin,
+  };
+}
+
+function adminUrl(path: string, admin: AdminContext): URL {
+  const url = new URL(`${WORKER_URLS.admin}${path}`);
+  url.searchParams.set('organizationId', admin.organization.id);
+  return url;
+}
 
 export const adminFixture = {
   /**
@@ -137,18 +164,15 @@ export const adminFixture = {
    * GET /api/admin/analytics/revenue
    */
   async getRevenueStats(
-    cookie: string,
+    admin: AdminContext,
     params?: { startDate?: string; endDate?: string }
   ): Promise<RevenueStats> {
-    const url = new URL(`${WORKER_URLS.admin}/api/admin/analytics/revenue`);
+    const url = adminUrl('/api/admin/analytics/revenue', admin);
     if (params?.startDate) url.searchParams.set('startDate', params.startDate);
     if (params?.endDate) url.searchParams.set('endDate', params.endDate);
 
     const response = await httpClient.get(url.toString(), {
-      headers: {
-        Cookie: cookie,
-        Origin: WORKER_URLS.admin,
-      },
+      headers: adminHeaders(admin),
     });
 
     if (!response.ok) {
@@ -163,16 +187,11 @@ export const adminFixture = {
   /**
    * GET /api/admin/analytics/customers
    */
-  async getCustomerStats(cookie: string): Promise<CustomerStats> {
-    const response = await httpClient.get(
-      `${WORKER_URLS.admin}/api/admin/analytics/customers`,
-      {
-        headers: {
-          Cookie: cookie,
-          Origin: WORKER_URLS.admin,
-        },
-      }
-    );
+  async getCustomerStats(admin: AdminContext): Promise<CustomerStats> {
+    const url = adminUrl('/api/admin/analytics/customers', admin);
+    const response = await httpClient.get(url.toString(), {
+      headers: adminHeaders(admin),
+    });
 
     if (!response.ok) {
       const error = await response.text();
@@ -188,17 +207,14 @@ export const adminFixture = {
    * Returns paginated response, extracts items array for backward compatibility
    */
   async getTopContent(
-    cookie: string,
+    admin: AdminContext,
     limit?: number
   ): Promise<TopContentItem[]> {
-    const url = new URL(`${WORKER_URLS.admin}/api/admin/analytics/top-content`);
+    const url = adminUrl('/api/admin/analytics/top-content', admin);
     if (limit) url.searchParams.set('limit', limit.toString());
 
     const response = await httpClient.get(url.toString(), {
-      headers: {
-        Cookie: cookie,
-        Origin: WORKER_URLS.admin,
-      },
+      headers: adminHeaders(admin),
     });
 
     if (!response.ok) {
@@ -207,7 +223,6 @@ export const adminFixture = {
     }
 
     const body = await response.json();
-    // List envelope: { items, pagination } at top level
     return body.items ?? [];
   },
 
@@ -219,19 +234,16 @@ export const adminFixture = {
    * GET /api/admin/content
    */
   async listAllContent(
-    cookie: string,
+    admin: AdminContext,
     params?: { page?: number; limit?: number; status?: string }
   ): Promise<AdminPaginatedResponse<AdminContentItem>> {
-    const url = new URL(`${WORKER_URLS.admin}/api/admin/content`);
+    const url = adminUrl('/api/admin/content', admin);
     if (params?.page) url.searchParams.set('page', params.page.toString());
     if (params?.limit) url.searchParams.set('limit', params.limit.toString());
     if (params?.status) url.searchParams.set('status', params.status);
 
     const response = await httpClient.get(url.toString(), {
-      headers: {
-        Cookie: cookie,
-        Origin: WORKER_URLS.admin,
-      },
+      headers: adminHeaders(admin),
     });
 
     if (!response.ok) {
@@ -240,25 +252,20 @@ export const adminFixture = {
     }
 
     const body = await response.json();
-    return body; // List envelope: { items, pagination } at top level
+    return body;
   },
 
   /**
    * POST /api/admin/content/:id/publish
    */
   async publishContent(
-    cookie: string,
+    admin: AdminContext,
     contentId: string
   ): Promise<AdminContentItem> {
-    const response = await httpClient.post(
-      `${WORKER_URLS.admin}/api/admin/content/${contentId}/publish`,
-      {
-        headers: {
-          Cookie: cookie,
-          Origin: WORKER_URLS.admin,
-        },
-      }
-    );
+    const url = adminUrl(`/api/admin/content/${contentId}/publish`, admin);
+    const response = await httpClient.post(url.toString(), {
+      headers: adminHeaders(admin),
+    });
 
     if (!response.ok) {
       const error = await response.text();
@@ -273,18 +280,13 @@ export const adminFixture = {
    * POST /api/admin/content/:id/unpublish
    */
   async unpublishContent(
-    cookie: string,
+    admin: AdminContext,
     contentId: string
   ): Promise<AdminContentItem> {
-    const response = await httpClient.post(
-      `${WORKER_URLS.admin}/api/admin/content/${contentId}/unpublish`,
-      {
-        headers: {
-          Cookie: cookie,
-          Origin: WORKER_URLS.admin,
-        },
-      }
-    );
+    const url = adminUrl(`/api/admin/content/${contentId}/unpublish`, admin);
+    const response = await httpClient.post(url.toString(), {
+      headers: adminHeaders(admin),
+    });
 
     if (!response.ok) {
       const error = await response.text();
@@ -298,16 +300,14 @@ export const adminFixture = {
   /**
    * DELETE /api/admin/content/:id
    */
-  async deleteContent(cookie: string, contentId: string): Promise<boolean> {
-    const response = await httpClient.delete(
-      `${WORKER_URLS.admin}/api/admin/content/${contentId}`,
-      {
-        headers: {
-          Cookie: cookie,
-          Origin: WORKER_URLS.admin,
-        },
-      }
-    );
+  async deleteContent(
+    admin: AdminContext,
+    contentId: string
+  ): Promise<boolean> {
+    const url = adminUrl(`/api/admin/content/${contentId}`, admin);
+    const response = await httpClient.delete(url.toString(), {
+      headers: adminHeaders(admin),
+    });
 
     if (!response.ok && response.status !== 204) {
       const error = await response.text();
@@ -325,18 +325,15 @@ export const adminFixture = {
    * GET /api/admin/customers
    */
   async listCustomers(
-    cookie: string,
+    admin: AdminContext,
     params?: { page?: number; limit?: number }
   ): Promise<AdminPaginatedResponse<CustomerWithStats>> {
-    const url = new URL(`${WORKER_URLS.admin}/api/admin/customers`);
+    const url = adminUrl('/api/admin/customers', admin);
     if (params?.page) url.searchParams.set('page', params.page.toString());
     if (params?.limit) url.searchParams.set('limit', params.limit.toString());
 
     const response = await httpClient.get(url.toString(), {
-      headers: {
-        Cookie: cookie,
-        Origin: WORKER_URLS.admin,
-      },
+      headers: adminHeaders(admin),
     });
 
     if (!response.ok) {
@@ -345,25 +342,20 @@ export const adminFixture = {
     }
 
     const body = await response.json();
-    return body; // List envelope: { items, pagination } at top level
+    return body;
   },
 
   /**
    * GET /api/admin/customers/:id
    */
   async getCustomerDetails(
-    cookie: string,
+    admin: AdminContext,
     customerId: string
   ): Promise<CustomerDetails> {
-    const response = await httpClient.get(
-      `${WORKER_URLS.admin}/api/admin/customers/${customerId}`,
-      {
-        headers: {
-          Cookie: cookie,
-          Origin: WORKER_URLS.admin,
-        },
-      }
-    );
+    const url = adminUrl(`/api/admin/customers/${customerId}`, admin);
+    const response = await httpClient.get(url.toString(), {
+      headers: adminHeaders(admin),
+    });
 
     if (!response.ok) {
       const error = await response.text();
@@ -380,19 +372,17 @@ export const adminFixture = {
    * POST /api/admin/customers/:customerId/grant-access/:contentId
    */
   async grantContentAccess(
-    cookie: string,
+    admin: AdminContext,
     customerId: string,
     contentId: string
   ): Promise<boolean> {
-    const response = await httpClient.post(
-      `${WORKER_URLS.admin}/api/admin/customers/${customerId}/grant-access/${contentId}`,
-      {
-        headers: {
-          Cookie: cookie,
-          Origin: WORKER_URLS.admin,
-        },
-      }
+    const url = adminUrl(
+      `/api/admin/customers/${customerId}/grant-access/${contentId}`,
+      admin
     );
+    const response = await httpClient.post(url.toString(), {
+      headers: adminHeaders(admin),
+    });
 
     if (!response.ok) {
       const error = await response.text();

@@ -5,10 +5,14 @@ import { defineConfig } from 'vitest/config';
  * Tests backend worker flows across auth, content, identity, and ecom APIs
  *
  * Parallel Execution Notes:
- * - Tests run in parallel using forked processes (maxForks: 4 in CI)
+ * - Tests run in parallel using forked processes (maxForks: 2)
  * - Each test file gets isolated services but shares the connection pool
  * - Test data isolation via randomUUID prefixes (see helpers/test-isolation.ts)
  * - All test files must have afterAll cleanup that calls closeDbPool()
+ * - CI uses 2 forks (was 4) — too many parallel forks contend on the auth
+ *   worker's DB pool against a single Neon ephemeral branch and produce
+ *   transient BetterAuth FAILED_TO_CREATE_USER 500s during parallel user
+ *   registration. 2 forks still parallelise meaningfully without the race.
  */
 export default defineConfig({
   test: {
@@ -19,11 +23,10 @@ export default defineConfig({
     pool: 'forks',
     poolOptions: {
       forks: {
-        // Enable parallel execution (was singleFork: true)
         singleFork: false,
-        // Limit concurrent forks to avoid connection pool exhaustion
-        // CI gets more forks for faster execution
-        maxForks: process.env.CI ? 4 : 2,
+        // Cap at 2 forks in both CI and local. See module comment above
+        // for the auth-worker contention rationale.
+        maxForks: 2,
       },
     },
 

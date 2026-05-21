@@ -30,9 +30,12 @@ describe('Notifications API', () => {
       .where(eq(schema.users.id, platformOwner.user.id));
 
     // 2. Create Org Admin and Organization
+    // POST /api/organizations requires roles: ['creator', 'admin', 'platform_owner'];
+    // the default role from registerUser is 'customer' which 403s.
     orgAdmin = await authFixture.registerUser({
       email: `admin-${createUniqueSlug()}@example.com`,
       password: 'Password123!',
+      role: 'creator',
     });
     const orgRes = await httpClient.post(
       `${WORKER_URLS.organization}/api/organizations`,
@@ -146,8 +149,9 @@ describe('Notifications API', () => {
       );
       expect(res.status).toBe(200);
       const body = await res.json();
+      // List endpoint envelope: { items, pagination } at top level, no `data` wrapper.
       expect(
-        body.data.items.some((t: { name: string }) => t.name === templateName)
+        body.items.some((t: { name: string }) => t.name === templateName)
       ).toBe(true);
     });
   });
@@ -189,9 +193,10 @@ describe('Notifications API', () => {
       );
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(
-        body.data.items.some((t: { id: string }) => t.id === templateId)
-      ).toBe(true);
+      // List endpoint envelope: { items, pagination } at top level, no `data` wrapper.
+      expect(body.items.some((t: { id: string }) => t.id === templateId)).toBe(
+        true
+      );
     });
 
     it('should forbid outsider from listing org templates', async () => {
