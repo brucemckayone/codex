@@ -41,6 +41,9 @@ else
     production)
       WORKER_SUFFIX="-production"
       ;;
+    dev)
+      WORKER_SUFFIX="-dev"
+      ;;
     preview)
       WORKER_SUFFIX="-preview"
       ;;
