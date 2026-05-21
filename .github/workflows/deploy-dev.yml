@@ -121,28 +121,32 @@ jobs:
             echo "✅ Existing dev branch found: $DEV_BRANCH_ID"
           fi
 
-          # Get the read-write endpoint host
-          ENDPOINTS=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
-            "${API_BASE}/projects/${NEON_PROJECT_ID}/branches/${DEV_BRANCH_ID}/endpoints")
-          ENDPOINT_HOST=$(echo "$ENDPOINTS" | jq -r '.endpoints[] | select(.type == "read_write") | .host' | head -n 1)
-
-          # Get role credentials (password is needed for the connection URI)
-          ROLES=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
-            "${API_BASE}/projects/${NEON_PROJECT_ID}/branches/${DEV_BRANCH_ID}/roles")
-          ROLE_NAME=$(echo "$ROLES" | jq -r '.roles[0].name')
-          ROLE_PASSWORD=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
-            "${API_BASE}/projects/${NEON_PROJECT_ID}/branches/${DEV_BRANCH_ID}/roles/${ROLE_NAME}/reveal_password" \
-            | jq -r '.password')
-
-          # Get the default database name (usually "neondb" or "main")
+          # Resolve database + role names from the branch metadata.
           DBS=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
             "${API_BASE}/projects/${NEON_PROJECT_ID}/branches/${DEV_BRANCH_ID}/databases")
           DB_NAME=$(echo "$DBS" | jq -r '.databases[0].name')
 
-          # Construct the direct (non-pgbouncer) connection URI per Neon docs.
-          # Use direct host explicitly because pgbouncer pooler drops connections
-          # mid-DDL — per project memory [[neon-pgbouncer-ddl-breaks]].
-          CONNECTION_URI="postgresql://${ROLE_NAME}:${ROLE_PASSWORD}@${ENDPOINT_HOST}/${DB_NAME}?sslmode=require"
+          ROLES=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
+            "${API_BASE}/projects/${NEON_PROJECT_ID}/branches/${DEV_BRANCH_ID}/roles")
+          ROLE_NAME=$(echo "$ROLES" | jq -r '.roles[0].name')
+
+          # Use Neon's connection_uri endpoint to get a pre-formatted, URL-
+          # safe URI rather than manually assembling one. Manual assembly
+          # broke previously when the role password contained special
+          # characters that needed URL-encoding (e.g. /, +, =). The
+          # connection_uri endpoint handles encoding correctly.
+          # Pass pooled=false to get the direct host (not pgbouncer) since
+          # pgbouncer drops connections mid-DDL — per project memory
+          # [[neon-pgbouncer-ddl-breaks]].
+          CONNECTION_RESPONSE=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
+            "${API_BASE}/projects/${NEON_PROJECT_ID}/connection_uri?branch_id=${DEV_BRANCH_ID}&database_name=${DB_NAME}&role_name=${ROLE_NAME}&pooled=false")
+          CONNECTION_URI=$(echo "$CONNECTION_RESPONSE" | jq -r '.uri')
+
+          if [ -z "$CONNECTION_URI" ] || [ "$CONNECTION_URI" = "null" ]; then
+            echo "❌ Failed to resolve connection URI. Response was:"
+            echo "$CONNECTION_RESPONSE" | jq . 2>/dev/null || echo "$CONNECTION_RESPONSE"
+            exit 1
+          fi
 
           # Mask + export — never print the URI itself
           echo "::add-mask::$CONNECTION_URI"
