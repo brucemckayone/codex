@@ -6,13 +6,17 @@
 
 import { RESERVED_SUBDOMAINS } from '$lib/constants';
 
+const DEV_REMOTE_SUFFIX = '.dev.revelations.studio';
+const DEV_REMOTE_APEX = 'dev.revelations.studio';
+
 /**
  * Extract subdomain from hostname
  *
  * Handles:
- * - lvh.me variants (e.g., bruce-studio.lvh.me)
- * - nip.io variants (e.g., bruce-studio.192.168.1.10.nip.io)
+ * - lvh.me variants (e.g., bruce-studio.lvh.me) — local dev
+ * - nip.io variants (e.g., bruce-studio.192.168.1.10.nip.io) — LAN testing
  * - localhost variants (e.g., test-org.localhost:3000)
+ * - Deployed dev: {subdomain}.dev.revelations.studio — long-lived integration env
  * - Production domains (e.g., yoga-studio.revelations.studio)
  *
  * @param hostname - The hostname from URL
@@ -49,6 +53,22 @@ export function extractSubdomain(hostname: string): string | null {
     const parts = host.split('.');
     if (parts.length > 1 && parts[0] !== 'localhost') {
       return parts[0];
+    }
+    return null;
+  }
+
+  // Deployed dev: {subdomain}.dev.revelations.studio
+  // MUST come before the prod check — both the bare apex `dev.revelations.studio`
+  // and the org subdomain `studio-alpha.dev.revelations.studio` need to be handled
+  // here so they don't accidentally fall into the prod regex below.
+  if (host === DEV_REMOTE_APEX) {
+    return null;
+  }
+  if (host.endsWith(DEV_REMOTE_SUFFIX)) {
+    const prefix = host.slice(0, -DEV_REMOTE_SUFFIX.length);
+    // Reject nested subdomains (e.g. foo.bar.dev.revelations.studio)
+    if (prefix && !prefix.includes('.')) {
+      return prefix;
     }
     return null;
   }
@@ -91,26 +111,39 @@ export function buildOrgUrl(currentUrl: URL, slug: string, path = '/'): string {
   const port = currentUrl.port;
   const protocol = currentUrl.protocol;
 
-  let baseDomain: string;
-
-  if (host.endsWith('lvh.me')) {
-    baseDomain = 'lvh.me';
-  } else if (host.endsWith('nip.io')) {
-    // Extract {ip}.nip.io as the base domain
-    const nipMatch = host.match(/(\d+\.\d+\.\d+\.\d+\.nip\.io)$/);
-    baseDomain = nipMatch ? nipMatch[1] : 'nip.io';
-  } else if (host.includes('localhost')) {
-    baseDomain = 'localhost';
-  } else if (host.endsWith('revelations.studio')) {
-    baseDomain = 'revelations.studio';
-  } else {
-    // Fallback: strip first segment as subdomain
-    const parts = host.split('.');
-    baseDomain = parts.length > 1 ? parts.slice(1).join('.') : host;
-  }
+  const baseDomain = deriveBaseDomain(host);
 
   const portSuffix = port ? `:${port}` : '';
   return `${protocol}//${slug}.${baseDomain}${portSuffix}${path}`;
+}
+
+/**
+ * Derive the base apex domain from a hostname for URL construction.
+ * The base domain is what goes AFTER an org slug — e.g. `lvh.me`,
+ * `dev.revelations.studio`, or `revelations.studio`. Order matters:
+ * dev must be checked before prod since dev.revelations.studio also
+ * ends with `revelations.studio`.
+ */
+function deriveBaseDomain(host: string): string {
+  if (host.endsWith('lvh.me')) {
+    return 'lvh.me';
+  }
+  if (host.endsWith('nip.io')) {
+    const nipMatch = host.match(/(\d+\.\d+\.\d+\.\d+\.nip\.io)$/);
+    return nipMatch ? nipMatch[1] : 'nip.io';
+  }
+  if (host.includes('localhost')) {
+    return 'localhost';
+  }
+  if (host === DEV_REMOTE_APEX || host.endsWith(DEV_REMOTE_SUFFIX)) {
+    return DEV_REMOTE_APEX;
+  }
+  if (host.endsWith('revelations.studio')) {
+    return 'revelations.studio';
+  }
+  // Fallback: strip first segment as subdomain
+  const parts = host.split('.');
+  return parts.length > 1 ? parts.slice(1).join('.') : host;
 }
 
 /**
@@ -130,22 +163,7 @@ export function buildPlatformUrl(currentUrl: URL, path = '/'): string {
   const port = currentUrl.port;
   const protocol = currentUrl.protocol;
 
-  let baseDomain: string;
-
-  if (host.endsWith('lvh.me')) {
-    baseDomain = 'lvh.me';
-  } else if (host.endsWith('nip.io')) {
-    const nipMatch = host.match(/(\d+\.\d+\.\d+\.\d+\.nip\.io)$/);
-    baseDomain = nipMatch ? nipMatch[1] : 'nip.io';
-  } else if (host.includes('localhost')) {
-    baseDomain = 'localhost';
-  } else if (host.endsWith('revelations.studio')) {
-    baseDomain = 'revelations.studio';
-  } else {
-    const parts = host.split('.');
-    baseDomain = parts.length > 1 ? parts.slice(1).join('.') : host;
-  }
-
+  const baseDomain = deriveBaseDomain(host);
   const portSuffix = port ? `:${port}` : '';
   return `${protocol}//${baseDomain}${portSuffix}${path}`;
 }

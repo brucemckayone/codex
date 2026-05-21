@@ -1,0 +1,387 @@
+name: Deploy to Dev
+
+# Long-lived dev branch deploy: push to `dev` → deploys all workers + web
+# to *.dev.revelations.studio. Mirrors deploy-production.yml structure but
+# scoped to the GitHub `dev` environment.
+#
+# Before first deploy, ensure the user has:
+#   - Created a GitHub `dev` environment with secrets populated
+#     (mirroring `production` but with test-mode Stripe + fresh
+#     SESSION_SECRET / BETTER_AUTH_SECRET; DATABASE_URL is auto-set below)
+#   - Configured *.dev.revelations.studio wildcard DNS in Cloudflare +
+#     custom domain bindings on each *-dev worker (one-time, after first deploy)
+#   - Created R2 buckets codex-{media,assets,platform,resources}-dev
+
+on:
+  workflow_run:
+    workflows: ["PR and Push CI (Neon ephemeral DB)"]
+    types:
+      - completed
+    branches:
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+  issues: write
+
+concurrency:
+  group: dev-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy-dev:
+    name: Deploy to Dev
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'dev')
+    environment:
+      name: dev
+      url: https://dev.revelations.studio
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache Turborepo
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-dev-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-dev-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
+            ${{ runner.os }}-turbo-dev-
+            ${{ runner.os }}-turbo-
+
+      # Ensure the Neon dev branch exists and grab its connection string.
+      # Idempotent: re-uses the existing dev branch if found, otherwise
+      # forks it from the parent (main) branch.
+      - name: Ensure Neon dev branch + fetch connection string
+        id: neon
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          API_BASE="https://console.neon.tech/api/v2"
+          AUTH="Authorization: Bearer ${NEON_API_KEY}"
+
+          echo "🔍 Looking up existing branches in project ${NEON_PROJECT_ID}..."
+          BRANCHES=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
+            "${API_BASE}/projects/${NEON_PROJECT_ID}/branches")
+
+          DEV_BRANCH_ID=$(echo "$BRANCHES" | jq -r '.branches[] | select(.name == "dev") | .id' | head -n 1)
+
+          if [ -z "$DEV_BRANCH_ID" ]; then
+            echo "🌱 No dev branch found — creating from main parent..."
+            PARENT_ID=$(echo "$BRANCHES" | jq -r '.branches[] | select(.name == "main") | .id' | head -n 1)
+            if [ -z "$PARENT_ID" ]; then
+              echo "❌ Could not find main branch in Neon project — aborting"
+              exit 1
+            fi
+            CREATE_RESPONSE=$(curl -fsS -X POST -H "$AUTH" -H "Content-Type: application/json" \
+              "${API_BASE}/projects/${NEON_PROJECT_ID}/branches" \
+              -d "{\"endpoints\":[{\"type\":\"read_write\"}],\"branch\":{\"name\":\"dev\",\"parent_id\":\"${PARENT_ID}\"}}")
+            DEV_BRANCH_ID=$(echo "$CREATE_RESPONSE" | jq -r '.branch.id')
+            echo "✅ Created dev branch: $DEV_BRANCH_ID"
+            # Settle: Neon endpoint takes a few seconds to provision
+            sleep 10
+          else
+            echo "✅ Existing dev branch found: $DEV_BRANCH_ID"
+          fi
+
+          # Get the read-write endpoint host
+          ENDPOINTS=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
+            "${API_BASE}/projects/${NEON_PROJECT_ID}/branches/${DEV_BRANCH_ID}/endpoints")
+          ENDPOINT_HOST=$(echo "$ENDPOINTS" | jq -r '.endpoints[] | select(.type == "read_write") | .host' | head -n 1)
+
+          # Get role credentials (password is needed for the connection URI)
+          ROLES=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
+            "${API_BASE}/projects/${NEON_PROJECT_ID}/branches/${DEV_BRANCH_ID}/roles")
+          ROLE_NAME=$(echo "$ROLES" | jq -r '.roles[0].name')
+          ROLE_PASSWORD=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
+            "${API_BASE}/projects/${NEON_PROJECT_ID}/branches/${DEV_BRANCH_ID}/roles/${ROLE_NAME}/reveal_password" \
+            | jq -r '.password')
+
+          # Get the default database name (usually "neondb" or "main")
+          DBS=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
+            "${API_BASE}/projects/${NEON_PROJECT_ID}/branches/${DEV_BRANCH_ID}/databases")
+          DB_NAME=$(echo "$DBS" | jq -r '.databases[0].name')
+
+          # Construct the direct (non-pgbouncer) connection URI per Neon docs.
+          # Use direct host explicitly because pgbouncer pooler drops connections
+          # mid-DDL — per project memory [[neon-pgbouncer-ddl-breaks]].
+          CONNECTION_URI="postgresql://${ROLE_NAME}:${ROLE_PASSWORD}@${ENDPOINT_HOST}/${DB_NAME}?sslmode=require"
+
+          # Mask + export — never print the URI itself
+          echo "::add-mask::$CONNECTION_URI"
+          echo "DATABASE_URL=$CONNECTION_URI" >> "$GITHUB_OUTPUT"
+          echo "✅ Neon dev branch connection string resolved"
+
+      - name: Build all workers
+        run: pnpm build
+        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_LOG_VERBOSITY: info
+
+      - name: Build constants package
+        run: pnpm --filter @codex/constants build
+
+      - name: Run dev database migrations
+        run: pnpm --filter @codex/database db:migrate
+        env:
+          DATABASE_URL: ${{ steps.neon.outputs.DATABASE_URL }}
+          DB_METHOD: ${{ vars.DB_METHOD }}
+
+      # --- WORKER DEPLOYMENTS ---
+
+      - name: Deploy media-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/media-api
+          command: >
+            deploy --env dev
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
+
+      - name: Upload media-api secrets
+        run: .github/scripts/upload-worker-secrets.sh dev media-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ steps.neon.outputs.DATABASE_URL }}
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+          RUNPOD_WEBHOOK_SECRET: ${{ secrets.RUNPOD_WEBHOOK_SECRET }}
+          WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
+          B2_ENDPOINT: ${{ secrets.B2_ENDPOINT }}
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+
+      - name: Deploy ecom-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/ecom-api
+          command: deploy --env dev
+
+      - name: Upload ecom-api secrets
+        run: .github/scripts/upload-worker-secrets.sh dev ecom-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ steps.neon.outputs.DATABASE_URL }}
+          # Test-mode keys come from the `dev` GitHub environment
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET_PAYMENT: ${{ secrets.STRIPE_WEBHOOK_SECRET_PAYMENT }}
+          STRIPE_WEBHOOK_SECRET_SUBSCRIPTION: ${{ secrets.STRIPE_WEBHOOK_SECRET_SUBSCRIPTION }}
+          STRIPE_WEBHOOK_SECRET_CONNECT: ${{ secrets.STRIPE_WEBHOOK_SECRET_CONNECT }}
+          STRIPE_WEBHOOK_SECRET_CUSTOMER: ${{ secrets.STRIPE_WEBHOOK_SECRET_CUSTOMER }}
+          STRIPE_WEBHOOK_SECRET_BOOKING: ${{ secrets.STRIPE_WEBHOOK_SECRET_BOOKING }}
+          STRIPE_WEBHOOK_SECRET_DISPUTE: ${{ secrets.STRIPE_WEBHOOK_SECRET_DISPUTE }}
+
+      - name: Deploy content-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/content-api
+          command: >
+            deploy --env dev
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+
+      - name: Upload content-api secrets
+        run: .github/scripts/upload-worker-secrets.sh dev content-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ steps.neon.outputs.DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
+
+      - name: Deploy identity-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/identity-api
+          command: >
+            deploy --env dev
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+
+      - name: Upload identity-api secrets
+        run: .github/scripts/upload-worker-secrets.sh dev identity-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ steps.neon.outputs.DATABASE_URL }}
+          WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
+
+      - name: Deploy admin-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/admin-api
+          command: deploy --env dev
+
+      - name: Upload admin-api secrets
+        run: .github/scripts/upload-worker-secrets.sh dev admin-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ steps.neon.outputs.DATABASE_URL }}
+
+      - name: Deploy organization-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/organization-api
+          command: >
+            deploy --env dev
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+
+      - name: Upload organization-api secrets
+        run: .github/scripts/upload-worker-secrets.sh dev organization-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ steps.neon.outputs.DATABASE_URL }}
+          WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
+
+      - name: Deploy notifications-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/notifications-api
+          command: deploy --env dev
+
+      - name: Upload notifications-api secrets
+        run: .github/scripts/upload-worker-secrets.sh dev notifications-api
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ steps.neon.outputs.DATABASE_URL }}
+          WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
+
+      - name: Deploy auth-worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/auth
+          command: deploy --env dev
+
+      - name: Upload auth-worker secrets
+        run: .github/scripts/upload-worker-secrets.sh dev auth
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ steps.neon.outputs.DATABASE_URL }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
+
+      - name: Build SvelteKit app
+        run: pnpm build:web
+        env:
+          DATABASE_URL: ${{ steps.neon.outputs.DATABASE_URL }}
+          PUBLIC_APP_URL: https://dev.revelations.studio
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_LOG_VERBOSITY: info
+
+      - name: Deploy SvelteKit
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/web
+          command: deploy --env dev
+
+      - name: Upload web secrets
+        run: |
+          echo "{\"DATABASE_URL\":\"${DATABASE_URL}\"}" | npx wrangler secret bulk --name codex-web-dev
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_URL: ${{ steps.neon.outputs.DATABASE_URL }}
+
+      # --- POST-DEPLOYMENT VERIFICATION ---
+
+      - name: Smoke tests
+        timeout-minutes: 5
+        run: |
+          echo "## 🚧 Dev Smoke Tests" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          FAILED=0
+          check_health() {
+            local service_name=$1
+            local url=$2
+            if curl -L -f -s "$url" > /dev/null 2>&1; then
+              echo "✅ $service_name" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ $service_name ($url)" >> $GITHUB_STEP_SUMMARY
+              return 1
+            fi
+          }
+          echo "⏳ Waiting 30s for propagation..."
+          sleep 30
+          check_health "Media API" "https://media-api.dev.revelations.studio/health" || FAILED=1
+          check_health "Ecom API" "https://ecom-api.dev.revelations.studio/health" || FAILED=1
+          check_health "Content API" "https://content-api.dev.revelations.studio/health" || FAILED=1
+          check_health "Identity API" "https://identity-api.dev.revelations.studio/health" || FAILED=1
+          check_health "Organization API" "https://organization-api.dev.revelations.studio/health" || FAILED=1
+          check_health "Notifications API" "https://notifications-api.dev.revelations.studio/health" || FAILED=1
+          check_health "Admin API" "https://admin-api.dev.revelations.studio/health" || FAILED=1
+          check_health "Auth Worker" "https://auth.dev.revelations.studio/health" || FAILED=1
+          check_health "Web App" "https://dev.revelations.studio/" || FAILED=1
+          if [ $FAILED -eq 0 ]; then
+            echo "✅ **All dev services passed smoke tests**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Some dev services failed smoke tests**" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## 🚧 Dev Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | URL |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| Web App | [dev.revelations.studio](https://dev.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Media API | [media-api.dev.revelations.studio](https://media-api.dev.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Ecom API | [ecom-api.dev.revelations.studio](https://ecom-api.dev.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Content API | [content-api.dev.revelations.studio](https://content-api.dev.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Identity API | [identity-api.dev.revelations.studio](https://identity-api.dev.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Organization API | [organization-api.dev.revelations.studio](https://organization-api.dev.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Notifications API | [notifications-api.dev.revelations.studio](https://notifications-api.dev.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Admin API | [admin-api.dev.revelations.studio](https://admin-api.dev.revelations.studio) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Auth | [auth.dev.revelations.studio](https://auth.dev.revelations.studio) |" >> $GITHUB_STEP_SUMMARY

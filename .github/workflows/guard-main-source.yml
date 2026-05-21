@@ -1,0 +1,43 @@
+name: Guard main source branch
+
+# Blocks PRs to main whose source branch is anything other than `dev`.
+# This enforces the protected branch model: feature branches → dev → main.
+# Pair this with a required-status-check rule on main in repo settings so
+# the merge button is disabled until this passes.
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  check-source-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject PRs to main from non-dev branches
+        run: |
+          SRC="${{ github.head_ref }}"
+          if [ "$SRC" != "dev" ]; then
+            echo "❌ PRs to \`main\` must originate from \`dev\` only."
+            echo ""
+            echo "   This PR's source branch is: $SRC"
+            echo ""
+            echo "   The workflow is:"
+            echo "     1. Open feature branch from \`dev\`"
+            echo "     2. PR feature → dev (gets smoke-tested on dev.revelations.studio)"
+            echo "     3. When dev is stable, open dev → main PR for the prod release"
+            echo ""
+            echo "   If you genuinely need a hotfix path that bypasses dev,"
+            echo "   discuss with the team first and document it in CLAUDE.md."
+            exit 1
+          fi
+          echo "✅ Source branch is \`dev\` — proceeding."

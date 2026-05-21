@@ -41,6 +41,33 @@ describe('Subdomain Utilities', () => {
       // Logic might return 'www' and let context handler deal with it
       expect(extractSubdomain('www.revelations.studio')).toBe('www');
     });
+
+    it('returns null for bare dev.revelations.studio (deployed dev apex)', () => {
+      expect(extractSubdomain('dev.revelations.studio')).toBeNull();
+    });
+
+    it('returns org slug from {slug}.dev.revelations.studio', () => {
+      expect(extractSubdomain('studio-alpha.dev.revelations.studio')).toBe(
+        'studio-alpha'
+      );
+      expect(
+        extractSubdomain('of-blood-and-bones.dev.revelations.studio')
+      ).toBe('of-blood-and-bones');
+    });
+
+    it('returns reserved subdomain from dev.revelations.studio', () => {
+      expect(extractSubdomain('auth.dev.revelations.studio')).toBe('auth');
+      expect(extractSubdomain('creators.dev.revelations.studio')).toBe(
+        'creators'
+      );
+    });
+
+    it('rejects nested subdomains under dev.revelations.studio', () => {
+      // We do not support two-level org subdomains in deployed dev
+      expect(
+        extractSubdomain('foo.studio-alpha.dev.revelations.studio')
+      ).toBeNull();
+    });
   });
 
   describe('getSubdomainContext', () => {
@@ -94,6 +121,28 @@ describe('Subdomain Utilities', () => {
         subdomain: 'api',
       });
     });
+
+    it('identifies platform context on deployed dev apex', () => {
+      expect(getSubdomainContext('dev.revelations.studio')).toEqual({
+        type: 'platform',
+      });
+      expect(getSubdomainContext('www.dev.revelations.studio')).toEqual({
+        type: 'platform',
+      });
+    });
+
+    it('identifies organization context on deployed dev subdomain', () => {
+      expect(
+        getSubdomainContext('studio-alpha.dev.revelations.studio')
+      ).toEqual({ type: 'organization', slug: 'studio-alpha' });
+    });
+
+    it('identifies reserved subdomains on deployed dev', () => {
+      expect(getSubdomainContext('auth.dev.revelations.studio')).toEqual({
+        type: 'reserved',
+        subdomain: 'auth',
+      });
+    });
   });
 
   // ============================================================================
@@ -143,6 +192,24 @@ describe('Subdomain Utilities', () => {
         'https://bruce-studio.lvh.me:3000/library'
       );
     });
+
+    it('stays on dev.revelations.studio when navigating from a dev org subdomain', () => {
+      // Regression: must NOT leak to prod (studio-beta.revelations.studio)
+      // when crossing orgs from a dev page.
+      const currentUrl = new URL(
+        'https://studio-alpha.dev.revelations.studio/library'
+      );
+      expect(buildOrgUrl(currentUrl, 'studio-beta', '/explore')).toBe(
+        'https://studio-beta.dev.revelations.studio/explore'
+      );
+    });
+
+    it('stays on dev.revelations.studio when navigating from the dev apex', () => {
+      const currentUrl = new URL('https://dev.revelations.studio/discover');
+      expect(buildOrgUrl(currentUrl, 'studio-alpha', '/')).toBe(
+        'https://studio-alpha.dev.revelations.studio/'
+      );
+    });
   });
 
   describe('buildCreatorsUrl', () => {
@@ -170,6 +237,15 @@ describe('Subdomain Utilities', () => {
     it('defaults to "/" when path is omitted', () => {
       const currentUrl = new URL('http://lvh.me:3000/');
       expect(buildCreatorsUrl(currentUrl)).toBe('http://creators.lvh.me:3000/');
+    });
+
+    it('builds creators URL on deployed dev', () => {
+      const currentUrl = new URL(
+        'https://studio-alpha.dev.revelations.studio/explore'
+      );
+      expect(buildCreatorsUrl(currentUrl, '/profile/alex')).toBe(
+        'https://creators.dev.revelations.studio/profile/alex'
+      );
     });
   });
 });

@@ -15,6 +15,7 @@ export type ServiceName =
 export const ENV_NAMES = {
   PRODUCTION: 'production',
   STAGING: 'staging',
+  DEV: 'dev', // deployed long-lived dev branch (dev.revelations.studio)
   DEVELOPMENT: 'development',
   TEST: 'test',
 } as const;
@@ -77,6 +78,17 @@ export function isDev(env?: Env | boolean): boolean {
   )
     return true;
   return false;
+}
+
+/**
+ * True when running on the deployed long-lived `dev` environment
+ * (dev.revelations.studio). Distinct from `isDev()` which is true for
+ * local development — the deployed dev env runs over HTTPS with secure
+ * cookies, just at a different apex than prod.
+ */
+export function isDevRemote(env?: Env | boolean): boolean {
+  if (typeof env !== 'object' || env === null) return false;
+  return env.ENVIRONMENT === ENV_NAMES.DEV;
 }
 
 /**
@@ -177,41 +189,57 @@ export function validateServiceUrl(
 const DEFAULT_URLS = {
   auth: {
     prod: 'https://auth.revelations.studio',
+    devRemote: 'https://auth.dev.revelations.studio',
     dev: `http://localhost:${SERVICE_PORTS.AUTH}`,
   },
   content: {
     prod: 'https://content-api.revelations.studio',
+    devRemote: 'https://content-api.dev.revelations.studio',
     dev: `http://localhost:${SERVICE_PORTS.CONTENT}`,
   },
   access: {
     prod: 'https://content-api.revelations.studio',
+    devRemote: 'https://content-api.dev.revelations.studio',
     dev: `http://localhost:${SERVICE_PORTS.ACCESS}`,
   },
   org: {
     prod: 'https://organization-api.revelations.studio',
+    devRemote: 'https://organization-api.dev.revelations.studio',
     dev: `http://localhost:${SERVICE_PORTS.ORGANIZATION}`,
   },
   ecom: {
     prod: 'https://ecom-api.revelations.studio',
+    devRemote: 'https://ecom-api.dev.revelations.studio',
     dev: `http://localhost:${SERVICE_PORTS.ECOMMERCE}`,
   },
   admin: {
     prod: 'https://admin-api.revelations.studio',
+    devRemote: 'https://admin-api.dev.revelations.studio',
     dev: `http://localhost:${SERVICE_PORTS.ADMIN}`,
   },
   identity: {
     prod: 'https://identity-api.revelations.studio',
+    devRemote: 'https://identity-api.dev.revelations.studio',
     dev: `http://localhost:${SERVICE_PORTS.IDENTITY}`,
   },
   notifications: {
     prod: 'https://notifications-api.revelations.studio',
+    devRemote: 'https://notifications-api.dev.revelations.studio',
     dev: `http://localhost:${SERVICE_PORTS.NOTIFICATIONS}`,
   },
   media: {
     prod: 'https://media-api.revelations.studio',
+    devRemote: 'https://media-api.dev.revelations.studio',
     dev: `http://localhost:${SERVICE_PORTS.MEDIA}`,
   },
 } as const;
+
+type ServiceUrls = (typeof DEFAULT_URLS)[keyof typeof DEFAULT_URLS];
+
+function pickDefaultUrl(urls: ServiceUrls, env?: Env | boolean): string {
+  if (isDevRemote(env)) return urls.devRemote;
+  return isDev(env) ? urls.dev : urls.prod;
+}
 
 export function getServiceUrl(
   service: ServiceName,
@@ -250,55 +278,53 @@ export function getServiceUrl(
     case 'auth':
       return getValidatedUrl(
         getEnvVar('AUTH_WORKER_URL'),
-        devMode ? DEFAULT_URLS.auth.dev : DEFAULT_URLS.auth.prod
+        pickDefaultUrl(DEFAULT_URLS.auth, env)
       );
     case 'content':
       return getValidatedUrl(
         getEnvVar('API_URL'),
-        devMode ? DEFAULT_URLS.content.dev : DEFAULT_URLS.content.prod
+        pickDefaultUrl(DEFAULT_URLS.content, env)
       );
     case 'access':
       return getValidatedUrl(
         getEnvVar('API_URL'),
-        devMode ? DEFAULT_URLS.access.dev : DEFAULT_URLS.access.prod
+        pickDefaultUrl(DEFAULT_URLS.access, env)
       );
     case 'org':
       return getValidatedUrl(
         getEnvVar('ORG_API_URL'),
-        devMode ? DEFAULT_URLS.org.dev : DEFAULT_URLS.org.prod
+        pickDefaultUrl(DEFAULT_URLS.org, env)
       );
     case 'ecom':
       return getValidatedUrl(
         getEnvVar('ECOM_API_URL'),
-        devMode ? DEFAULT_URLS.ecom.dev : DEFAULT_URLS.ecom.prod
+        pickDefaultUrl(DEFAULT_URLS.ecom, env)
       );
     case 'admin':
       return getValidatedUrl(
         getEnvVar('ADMIN_API_URL'),
-        devMode ? DEFAULT_URLS.admin.dev : DEFAULT_URLS.admin.prod
+        pickDefaultUrl(DEFAULT_URLS.admin, env)
       );
     case 'identity':
       return getValidatedUrl(
         getEnvVar('IDENTITY_API_URL'),
-        devMode ? DEFAULT_URLS.identity.dev : DEFAULT_URLS.identity.prod
+        pickDefaultUrl(DEFAULT_URLS.identity, env)
       );
     case 'notifications':
       return getValidatedUrl(
         getEnvVar('NOTIFICATIONS_API_URL'),
-        devMode
-          ? DEFAULT_URLS.notifications.dev
-          : DEFAULT_URLS.notifications.prod
+        pickDefaultUrl(DEFAULT_URLS.notifications, env)
       );
     case 'media':
       return getValidatedUrl(
         getEnvVar('MEDIA_API_URL'),
-        devMode ? DEFAULT_URLS.media.dev : DEFAULT_URLS.media.prod
+        pickDefaultUrl(DEFAULT_URLS.media, env)
       );
     default: {
       // Runtime fallback for unknown services
       const defaults = DEFAULT_URLS[service as keyof typeof DEFAULT_URLS];
       if (defaults) {
-        return devMode ? defaults.dev : defaults.prod;
+        return pickDefaultUrl(defaults, env);
       }
       throw new Error(`Unknown service: ${service}`);
     }

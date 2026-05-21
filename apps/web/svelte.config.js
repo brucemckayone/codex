@@ -195,6 +195,17 @@ const config = {
           // org subdomain → platform login).
           'https://revelations.studio',
           'https://*.revelations.studio',
+          // Deployed dev branch — same pattern as prod but at the
+          // dev.revelations.studio apex. Required so logout on
+          // studio-alpha.dev.revelations.studio can redirect to
+          // dev.revelations.studio/login.
+          //
+          // Note: `https://*.revelations.studio` above does NOT match
+          // `https://studio-alpha.dev.revelations.studio` — CSP wildcards
+          // only match one subdomain level, so deeper apexes need their
+          // own explicit entries.
+          'https://dev.revelations.studio',
+          'https://*.dev.revelations.studio',
           // Dev-only — `lvh.me` (cross-subdomain cookies) and `*.nip.io`
           // (LAN mobile testing). Inert in production.
           'http://lvh.me:3000',
