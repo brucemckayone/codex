@@ -79,8 +79,18 @@ jobs:
       - name: Build required packages
         run: pnpm --filter @codex/database --filter @codex/constants build
 
-      - name: Run dev migrations (ensure schema is current)
-        run: pnpm --filter @codex/database db:migrate
+      - name: Run dev migrations (ensure schema is current, with retry)
+        run: |
+          for attempt in 1 2 3; do
+            echo "Migration attempt $attempt/3..."
+            if pnpm --filter @codex/database db:migrate; then
+              echo "✅ Migrations applied"
+              exit 0
+            fi
+            echo "❌ Attempt $attempt failed; waiting 10s before retry..."
+            sleep 10
+          done
+          exit 1
         env:
           DATABASE_URL: ${{ steps.neon.outputs.DATABASE_URL }}
           DB_METHOD: PRODUCTION
