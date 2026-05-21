@@ -56,19 +56,20 @@ fi
 echo ""
 
 # Step 3: Set environment variables (per-environment overrides)
+# Bash 3.2 (macOS default) doesn't support associative arrays, so we use
+# inline calls instead of a loop. Each line is one gh variable set.
 echo "🔧 Step 3: Setting environment variables..."
-declare -A VARS=(
-  [DB_METHOD]="PRODUCTION"
-  [R2_BUCKET_MEDIA]="codex-media-dev"
-  [R2_BUCKET_ASSETS]="codex-assets-dev"
-  [R2_BUCKET_PLATFORM]="codex-platform-dev"
-  [R2_BUCKET_RESOURCES]="codex-resources-dev"
-)
-for KEY in "${!VARS[@]}"; do
-  VALUE="${VARS[$KEY]}"
+set_var() {
+  local KEY="$1"
+  local VALUE="$2"
   gh variable set "$KEY" --env "$ENV" --body "$VALUE" > /dev/null
   echo "   ✅ ${KEY} = ${VALUE}"
-done
+}
+set_var DB_METHOD "PRODUCTION"
+set_var R2_BUCKET_MEDIA "codex-media-dev"
+set_var R2_BUCKET_ASSETS "codex-assets-dev"
+set_var R2_BUCKET_PLATFORM "codex-platform-dev"
+set_var R2_BUCKET_RESOURCES "codex-resources-dev"
 echo ""
 
 # Step 4: Generate + set the three random secrets
