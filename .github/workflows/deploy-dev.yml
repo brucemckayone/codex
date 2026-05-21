@@ -13,10 +13,17 @@ name: Deploy to Dev
 #   - Created R2 buckets codex-{media,assets,platform,resources}-dev
 
 on:
-  workflow_run:
-    workflows: ["PR and Push CI (Neon ephemeral DB)"]
-    types:
-      - completed
+  # Trigger directly on push to dev. We don't use workflow_run because:
+  #   1. workflow_run executes from the default branch (main), so the
+  #      `environment: dev` branch policy correctly rejected main as a
+  #      non-`dev` source — making workflow_run incompatible with strict
+  #      env branch policies.
+  #   2. workflow_run's actions/checkout defaults to main's HEAD, so we'd
+  #      be deploying main's code, not dev's.
+  # Direct push trigger means the workflow runs on dev with dev's code
+  # checked out, and github.ref matches refs/heads/dev so the env policy
+  # is satisfied.
+  push:
     branches:
       - dev
   workflow_dispatch:
@@ -34,11 +41,6 @@ jobs:
   deploy-dev:
     name: Deploy to Dev
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_branch == 'dev')
     environment:
       name: dev
       url: https://dev.revelations.studio
