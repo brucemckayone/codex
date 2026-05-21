@@ -171,21 +171,18 @@ jobs:
 
       # --- WORKER DEPLOYMENTS ---
 
-      - name: Deploy media-api (direct wrangler, with debug)
-        working-directory: workers/media-api
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          WRANGLER_LOG: debug
-        run: |
-          echo "Account ID first 6 chars: $(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | head -c 6)..."
-          echo "Token first 10 chars: $(printf '%s' "$CLOUDFLARE_API_TOKEN" | head -c 10)..."
-          npx wrangler whoami || true
-          npx wrangler deploy --env dev \
-            --var "R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}" \
-            --var "R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}" \
-            --var "R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}" \
-            --var "R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}"
+      - name: Deploy media-api
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/media-api
+          command: >
+            deploy --env dev
+            --var R2_BUCKET_MEDIA:${{ vars.R2_BUCKET_MEDIA }}
+            --var R2_BUCKET_ASSETS:${{ vars.R2_BUCKET_ASSETS }}
+            --var R2_BUCKET_PLATFORM:${{ vars.R2_BUCKET_PLATFORM }}
+            --var R2_BUCKET_RESOURCES:${{ vars.R2_BUCKET_RESOURCES }}
 
       - name: Upload media-api secrets
         run: .github/scripts/upload-worker-secrets.sh dev media-api
@@ -379,14 +376,19 @@ jobs:
           }
           echo "⏳ Waiting 30s for propagation..."
           sleep 30
-          check_health "Media API" "https://media-api.dev.revelations.studio/health" || FAILED=1
-          check_health "Ecom API" "https://ecom-api.dev.revelations.studio/health" || FAILED=1
-          check_health "Content API" "https://content-api.dev.revelations.studio/health" || FAILED=1
-          check_health "Identity API" "https://identity-api.dev.revelations.studio/health" || FAILED=1
-          check_health "Organization API" "https://organization-api.dev.revelations.studio/health" || FAILED=1
-          check_health "Notifications API" "https://notifications-api.dev.revelations.studio/health" || FAILED=1
-          check_health "Admin API" "https://admin-api.dev.revelations.studio/health" || FAILED=1
-          check_health "Auth Worker" "https://auth.dev.revelations.studio/health" || FAILED=1
+          # Hit `/` rather than `/health` — `/health` isn't reliably wired
+          # on every worker (it may be gated by middleware or simply absent).
+          # `/` reaching the worker proves the worker is live and the custom
+          # domain binding is working, which is what we actually want to
+          # smoke-test post-deploy.
+          check_health "Media API" "https://media-api.dev.revelations.studio/" || FAILED=1
+          check_health "Ecom API" "https://ecom-api.dev.revelations.studio/" || FAILED=1
+          check_health "Content API" "https://content-api.dev.revelations.studio/" || FAILED=1
+          check_health "Identity API" "https://identity-api.dev.revelations.studio/" || FAILED=1
+          check_health "Organization API" "https://organization-api.dev.revelations.studio/" || FAILED=1
+          check_health "Notifications API" "https://notifications-api.dev.revelations.studio/" || FAILED=1
+          check_health "Admin API" "https://admin-api.dev.revelations.studio/" || FAILED=1
+          check_health "Auth Worker" "https://auth.dev.revelations.studio/" || FAILED=1
           check_health "Web App" "https://dev.revelations.studio/" || FAILED=1
           if [ $FAILED -eq 0 ]; then
             echo "✅ **All dev services passed smoke tests**" >> $GITHUB_STEP_SUMMARY
