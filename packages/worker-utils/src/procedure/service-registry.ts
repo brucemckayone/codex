@@ -366,7 +366,9 @@ export function createServiceRegistry(
             typeof env.CLOUDFLARE_ACCOUNT_ID === 'string'
               ? env.CLOUDFLARE_ACCOUNT_ID
               : undefined,
-          zoneName: 'revelations.studio',
+          // zoneName removed in WP-6 — DevDomainService now derives the
+          // hostname from ENV_HOSTS.dev.orgHost and the Cloudflare zone
+          // name internally (always `revelations.studio`).
           webWorkerName: 'codex-web-dev',
         });
       }
