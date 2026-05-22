@@ -1,6 +1,7 @@
 import { type Env, validateServiceUrl } from '@codex/constants';
 import { ENV_HOSTS } from './env-hosts';
-import type { EnvName, HostInfo, ServiceName } from './types';
+import { parseHost } from './parse-host';
+import type { EnvName, ServiceName } from './types';
 
 /**
  * Per-service env-var override key. Workers + apps/web have always supported
@@ -133,63 +134,106 @@ function readEnvVar(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STUBS — filled in WP-4 (URL builders for org / platform / content).
-// Signatures are stable so WP-4/5a can develop in parallel.
+// URL builders — derive scheme/baseDomain/port from the request URL.
+//
+// Signatures take `URL` (not `HostInfo`) so existing apps/web callers using
+// `page.url` migrate with zero call-site change. The handler internally calls
+// `parseHost` to extract the baseDomain that goes after the org slug.
+//
+// `buildOrgUrlFromEnv` is the worker-side variant — for callers like
+// `DevDomainService` that don't have a request URL. It derives scheme + port
+// + baseDomain entirely from `ENV_HOSTS[env]`.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Build a full URL on a specific org subdomain, derived from a parsed host.
- * Preserves the current page's protocol and port (when present).
+ * Build a full URL on a different org subdomain, preserving the current
+ * page's protocol and port. Used when the user navigates from one org's
+ * subdomain to another (different origin → needs a full URL, not a path).
+ *
+ * @example
+ * buildOrgUrl(new URL('http://lvh.me:3000/'), 'bruce-studio', '/studio')
+ * // → 'http://bruce-studio.lvh.me:3000/studio'
+ *
+ * @example
+ * buildOrgUrl(new URL('https://yoga-studio.revelations.studio/'), 'cooking-school')
+ * // → 'https://cooking-school.revelations.studio/'
  */
-export function buildOrgUrl(
-  _host: HostInfo,
-  _slug: string,
-  _path = '/'
-): string {
-  throw new Error('buildOrgUrl: not implemented (WP-4)');
+export function buildOrgUrl(currentUrl: URL, slug: string, path = '/'): string {
+  const { baseDomain } = parseHost(currentUrl.hostname);
+  const portSuffix = currentUrl.port ? `:${currentUrl.port}` : '';
+  return `${currentUrl.protocol}//${slug}.${baseDomain}${portSuffix}${path}`;
 }
 
 /**
- * Build an org subdomain URL from an env name (no request context required).
- * Used by `DevDomainService` and any worker that needs an org URL without
- * a `currentUrl` to derive from.
+ * Build an org subdomain URL from an `EnvName` (no request context required).
+ * Used by `DevDomainService` (Codex-0hxw4, WP-6) and any worker that needs
+ * an org URL without a `currentUrl` to derive from.
+ *
+ * @example
+ * buildOrgUrlFromEnv('dev', 'studio-alpha')
+ * // → 'https://studio-alpha.dev.revelations.studio/'
+ *
+ * @example
+ * buildOrgUrlFromEnv('development', 'bruce-studio', '/studio')
+ * // → 'http://bruce-studio.lvh.me:3000/studio'
  */
 export function buildOrgUrlFromEnv(
-  _env: EnvName,
-  _slug: string,
-  _path = '/'
+  env: EnvName,
+  slug: string,
+  path = '/'
 ): string {
-  throw new Error('buildOrgUrlFromEnv: not implemented (WP-4)');
+  const cfg = ENV_HOSTS[env];
+  const portSuffix = cfg.port ? `:${cfg.port}` : '';
+  return `${cfg.scheme}://${cfg.orgHost(slug)}${portSuffix}${path}`;
 }
 
 /**
- * Build a platform URL (no subdomain, root of the apex).
+ * Build a platform URL — strips the subdomain, keeps the rest of the origin.
+ * E.g. `https://yoga-studio.revelations.studio/foo` → `https://revelations.studio/path`.
  */
-export function buildPlatformUrl(_host: HostInfo, _path = '/'): string {
-  throw new Error('buildPlatformUrl: not implemented (WP-4)');
+export function buildPlatformUrl(currentUrl: URL, path = '/'): string {
+  const { baseDomain } = parseHost(currentUrl.hostname);
+  const portSuffix = currentUrl.port ? `:${currentUrl.port}` : '';
+  return `${currentUrl.protocol}//${baseDomain}${portSuffix}${path}`;
 }
 
 /**
- * Build a URL on the `creators` subdomain.
+ * Build a URL on the `creators` subdomain. Thin wrapper over `buildOrgUrl`
+ * with `slug='creators'` — kept as a named export for ergonomics and
+ * grep-ability at call sites.
  */
-export function buildCreatorsUrl(_host: HostInfo, _path = '/'): string {
-  throw new Error('buildCreatorsUrl: not implemented (WP-4)');
+export function buildCreatorsUrl(currentUrl: URL, path = '/'): string {
+  return buildOrgUrl(currentUrl, 'creators', path);
 }
 
 /**
  * Build a URL to a content detail page, handling cross-org subdomain routing.
  *
  * - On the content's own org subdomain → root-relative `/content/{slug}`
- * - On a different origin (platform, other org) → full URL via buildOrgUrl
- * - Falls back to content ID if slug is unavailable
+ * - On a different origin (platform, other org) → full URL via `buildOrgUrl`
+ * - Falls back to content ID when `slug` is missing
+ *
+ * Codex-ga4d (closed Apr 2026) introduced this helper; 10+ Svelte components
+ * adopted it. WP-4 moves the implementation to `@codex/urls` while preserving
+ * the existing call-site contract via the `apps/web/src/lib/utils/subdomain.ts`
+ * re-export wrapper.
  */
 export function buildContentUrl(
-  _host: HostInfo,
-  _content: {
+  currentUrl: URL,
+  content: {
     slug?: string | null;
     id: string;
     organizationSlug?: string | null;
   }
 ): string {
-  throw new Error('buildContentUrl: not implemented (WP-4)');
+  const contentPath = `/content/${content.slug ?? content.id}`;
+
+  if (content.organizationSlug) {
+    const { subdomain } = parseHost(currentUrl.hostname);
+    if (subdomain !== content.organizationSlug) {
+      return buildOrgUrl(currentUrl, content.organizationSlug, contentPath);
+    }
+  }
+
+  return contentPath;
 }
