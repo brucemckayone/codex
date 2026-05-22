@@ -190,12 +190,14 @@ describe('Internal Send Route', () => {
       });
 
       // Auth passes and input validates — handler executes.
-      // Without a real database, the service layer will error (500),
-      // or it may succeed if mock/console provider is configured.
-      // The key assertion: it is NOT 401 (auth passed) and NOT 400 (validation passed).
+      // Acceptable post-handler statuses (the test is flow-through, not behaviour):
+      //   200 — template seeded, mock provider rendered + sent
+      //   404 — fresh CI DB has migrations but no template seed; service throws NotFoundError
+      //   500 — DB unreachable or other handler-layer error
+      // The key assertion: NOT 401 (auth passed) and NOT 400 (validation passed).
       expect(response.status).not.toBe(401);
       expect(response.status).not.toBe(400);
-      expect([200, 500]).toContain(response.status);
+      expect([200, 404, 500]).toContain(response.status);
     });
   });
 });
