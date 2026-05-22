@@ -43,9 +43,14 @@ jobs:
           DEFAULT_BRANCH=$(echo "$BRANCHES" | jq -r '.[] | select(.default == true) | .name' | head -1)
           echo "Default branch: $DEFAULT_BRANCH"
 
-          # Delete ALL branches except the default production branch
-          # This includes: ci-test-branch, ci-e2e-branch, pr-*, push-*, and neon-testing ephemeral branches
-          echo "$BRANCHES" | jq -r ".[] | select(.default != true) | .id" | while read branch_id; do
+          # Delete ephemeral CI branches only — preserve the long-lived "dev"
+          # branch alongside the default (production) branch. The dev branch
+          # carries seeded org data and configured webhook secrets; deleting
+          # it forces a full re-bootstrap + re-seed for every CI cycle, which
+          # broke the dev environment after PR #243 merged (Phase 7 verify).
+          # Includes: ci-test-branch, ci-e2e-branch, pr-*, push-*, neon-testing.
+          # Excludes: default branch + "dev".
+          echo "$BRANCHES" | jq -r '.[] | select(.default != true and .name != "dev") | .id' | while read branch_id; do
             if [ -n "$branch_id" ] && [ "$branch_id" != "null" ]; then
               BRANCH_NAME=$(echo "$BRANCHES" | jq -r ".[] | select(.id == \"$branch_id\") | .name")
               echo "Deleting branch: $BRANCH_NAME ($branch_id)"
