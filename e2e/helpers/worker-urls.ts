@@ -1,17 +1,17 @@
 /**
  * Worker URLs for E2E tests.
  *
- * Re-exports from @codex/constants to maintain single source of truth for worker ports.
- * All workers use localhost URLs for local E2E testing.
+ * Re-exports from @codex/urls to maintain single source of truth for worker
+ * URLs. All workers use localhost URLs for local E2E testing.
  *
  * @module e2e/helpers/worker-urls
  */
 
-import { getServiceUrl } from '@codex/constants';
+import { buildServiceUrl as getServiceUrl } from '@codex/urls';
 
 /**
  * Worker URLs for E2E testing.
- * All URLs derived from @codex/constants SERVICE_PORTS.
+ * All URLs derived from @codex/urls ENV_HOSTS (development env).
  */
 export const WORKER_URLS = {
   auth: getServiceUrl('auth', true), // http://localhost:42069

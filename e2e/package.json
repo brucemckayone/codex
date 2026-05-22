@@ -25,6 +25,7 @@
     "@codex/observability": "workspace:*",
     "@codex/organization": "workspace:*",
     "@codex/purchase": "workspace:*",
-    "@codex/shared-types": "workspace:*"
+    "@codex/shared-types": "workspace:*",
+    "@codex/urls": "workspace:*"
   }
 }

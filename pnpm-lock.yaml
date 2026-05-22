@@ -325,6 +325,9 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../packages/shared-types
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../packages/urls
     devDependencies:
       '@aws-sdk/client-s3':
         specifier: ^3.937.0
