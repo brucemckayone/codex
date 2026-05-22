@@ -82,6 +82,10 @@ done
 echo ""
 
 # Step 5: Prompt for Stripe test-mode key
+# Defensive: bracketed-paste mode in some terminals can eat the first
+# character of pasted input under `read`. We show a masked preview of
+# what was actually captured and require explicit confirmation before
+# uploading, so paste artefacts don't ship silently.
 echo "💳 Step 5: Stripe test-mode secret key"
 echo "   Get it from: https://dashboard.stripe.com/test/apikeys"
 echo "   Should start with sk_test_..."
@@ -90,6 +94,14 @@ echo ""
 if [[ ! "$STRIPE_KEY" =~ ^sk_test_ ]]; then
   echo "   ❌ That doesn't look like a test-mode key (should start with sk_test_)."
   echo "   Aborting to prevent accidentally uploading a live key."
+  exit 1
+fi
+# Show first 11 chars + last 4 so the user can verify what was captured
+PREVIEW="${STRIPE_KEY:0:11}…${STRIPE_KEY: -4}"
+echo "   Captured: ${PREVIEW}  (length ${#STRIPE_KEY})"
+read -r -p "   Does that look right? (y/n) " CONFIRM
+if [ "$CONFIRM" != "y" ]; then
+  echo "   ❌ Aborted. Re-run the script when ready."
   exit 1
 fi
 echo "$STRIPE_KEY" | gh secret set STRIPE_SECRET_KEY --env "$ENV" --body -
@@ -103,6 +115,16 @@ echo "   or use a dev-specific bucket name (e.g. codex-media-dev)."
 read -r -p "   B2_BUCKET name: " B2_BUCKET
 if [ -z "$B2_BUCKET" ]; then
   echo "   ❌ Empty value rejected."
+  exit 1
+fi
+# Show what was captured so paste artefacts (e.g. bracketed-paste eating
+# the first character) don't ship silently. Real-world bite that
+# prompted this safeguard: typed `codex-media-dev`, captured
+# `odex-media-dev`, uploaded as B2_BUCKET before anyone noticed.
+echo "   Captured: [${B2_BUCKET}]"
+read -r -p "   Does that look right? (y/n) " CONFIRM
+if [ "$CONFIRM" != "y" ]; then
+  echo "   ❌ Aborted. Re-run the script when ready."
   exit 1
 fi
 echo "$B2_BUCKET" | gh secret set B2_BUCKET --env "$ENV" --body -

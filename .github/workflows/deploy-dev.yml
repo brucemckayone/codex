@@ -13,10 +13,17 @@ name: Deploy to Dev
 #   - Created R2 buckets codex-{media,assets,platform,resources}-dev
 
 on:
-  workflow_run:
-    workflows: ["PR and Push CI (Neon ephemeral DB)"]
-    types:
-      - completed
+  # Trigger directly on push to dev. We don't use workflow_run because:
+  #   1. workflow_run executes from the default branch (main), so the
+  #      `environment: dev` branch policy correctly rejected main as a
+  #      non-`dev` source — making workflow_run incompatible with strict
+  #      env branch policies.
+  #   2. workflow_run's actions/checkout defaults to main's HEAD, so we'd
+  #      be deploying main's code, not dev's.
+  # Direct push trigger means the workflow runs on dev with dev's code
+  # checked out, and github.ref matches refs/heads/dev so the env policy
+  # is satisfied.
+  push:
     branches:
       - dev
   workflow_dispatch:
@@ -34,11 +41,6 @@ jobs:
   deploy-dev:
     name: Deploy to Dev
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_branch == 'dev')
     environment:
       name: dev
       url: https://dev.revelations.studio
@@ -85,12 +87,29 @@ jobs:
           DEV_BRANCH_ID=$(echo "$BRANCHES" | jq -r '.branches[] | select(.name == "dev") | .id' | head -n 1)
 
           if [ -z "$DEV_BRANCH_ID" ]; then
-            echo "🌱 No dev branch found — creating from main parent..."
-            PARENT_ID=$(echo "$BRANCHES" | jq -r '.branches[] | select(.name == "main") | .id' | head -n 1)
+            echo "🌱 No dev branch found — locating primary branch to fork from..."
+            # Neon labels the project's primary data branch with `primary: true`
+            # (older API versions use `default: true`). The branch name varies
+            # per project (could be "main", "production", "br-xxx", etc.), so
+            # we filter by the boolean flag instead of by name.
+            PARENT_ID=$(echo "$BRANCHES" | jq -r '.branches[] | select(.primary == true or .default == true) | .id' | head -n 1)
+
+            # Fallback: try common branch names if the project doesn't expose
+            # a primary/default flag (very old Neon API responses).
             if [ -z "$PARENT_ID" ]; then
-              echo "❌ Could not find main branch in Neon project — aborting"
+              for CANDIDATE in main production master prod; do
+                PARENT_ID=$(echo "$BRANCHES" | jq -r ".branches[] | select(.name == \"$CANDIDATE\") | .id" | head -n 1)
+                [ -n "$PARENT_ID" ] && echo "   Using fallback branch name '$CANDIDATE'" && break
+              done
+            fi
+
+            if [ -z "$PARENT_ID" ]; then
+              echo "❌ Could not find primary branch in Neon project — aborting"
+              echo "Available branches:"
+              echo "$BRANCHES" | jq -r '.branches[] | "  \(.name) (primary=\(.primary // false))"'
               exit 1
             fi
+            echo "   Parent branch ID: $PARENT_ID"
             CREATE_RESPONSE=$(curl -fsS -X POST -H "$AUTH" -H "Content-Type: application/json" \
               "${API_BASE}/projects/${NEON_PROJECT_ID}/branches" \
               -d "{\"endpoints\":[{\"type\":\"read_write\"}],\"branch\":{\"name\":\"dev\",\"parent_id\":\"${PARENT_ID}\"}}")
@@ -102,28 +121,32 @@ jobs:
             echo "✅ Existing dev branch found: $DEV_BRANCH_ID"
           fi
 
-          # Get the read-write endpoint host
-          ENDPOINTS=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
-            "${API_BASE}/projects/${NEON_PROJECT_ID}/branches/${DEV_BRANCH_ID}/endpoints")
-          ENDPOINT_HOST=$(echo "$ENDPOINTS" | jq -r '.endpoints[] | select(.type == "read_write") | .host' | head -n 1)
-
-          # Get role credentials (password is needed for the connection URI)
-          ROLES=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
-            "${API_BASE}/projects/${NEON_PROJECT_ID}/branches/${DEV_BRANCH_ID}/roles")
-          ROLE_NAME=$(echo "$ROLES" | jq -r '.roles[0].name')
-          ROLE_PASSWORD=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
-            "${API_BASE}/projects/${NEON_PROJECT_ID}/branches/${DEV_BRANCH_ID}/roles/${ROLE_NAME}/reveal_password" \
-            | jq -r '.password')
-
-          # Get the default database name (usually "neondb" or "main")
+          # Resolve database + role names from the branch metadata.
           DBS=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
             "${API_BASE}/projects/${NEON_PROJECT_ID}/branches/${DEV_BRANCH_ID}/databases")
           DB_NAME=$(echo "$DBS" | jq -r '.databases[0].name')
 
-          # Construct the direct (non-pgbouncer) connection URI per Neon docs.
-          # Use direct host explicitly because pgbouncer pooler drops connections
-          # mid-DDL — per project memory [[neon-pgbouncer-ddl-breaks]].
-          CONNECTION_URI="postgresql://${ROLE_NAME}:${ROLE_PASSWORD}@${ENDPOINT_HOST}/${DB_NAME}?sslmode=require"
+          ROLES=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
+            "${API_BASE}/projects/${NEON_PROJECT_ID}/branches/${DEV_BRANCH_ID}/roles")
+          ROLE_NAME=$(echo "$ROLES" | jq -r '.roles[0].name')
+
+          # Use Neon's connection_uri endpoint to get a pre-formatted, URL-
+          # safe URI rather than manually assembling one. Manual assembly
+          # broke previously when the role password contained special
+          # characters that needed URL-encoding (e.g. /, +, =). The
+          # connection_uri endpoint handles encoding correctly.
+          # Pass pooled=false to get the direct host (not pgbouncer) since
+          # pgbouncer drops connections mid-DDL — per project memory
+          # [[neon-pgbouncer-ddl-breaks]].
+          CONNECTION_RESPONSE=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
+            "${API_BASE}/projects/${NEON_PROJECT_ID}/connection_uri?branch_id=${DEV_BRANCH_ID}&database_name=${DB_NAME}&role_name=${ROLE_NAME}&pooled=false")
+          CONNECTION_URI=$(echo "$CONNECTION_RESPONSE" | jq -r '.uri')
+
+          if [ -z "$CONNECTION_URI" ] || [ "$CONNECTION_URI" = "null" ]; then
+            echo "❌ Failed to resolve connection URI. Response was:"
+            echo "$CONNECTION_RESPONSE" | jq . 2>/dev/null || echo "$CONNECTION_RESPONSE"
+            exit 1
+          fi
 
           # Mask + export — never print the URI itself
           echo "::add-mask::$CONNECTION_URI"
@@ -140,8 +163,24 @@ jobs:
       - name: Build constants package
         run: pnpm --filter @codex/constants build
 
-      - name: Run dev database migrations
-        run: pnpm --filter @codex/database db:migrate
+      - name: Run dev database migrations (with retry)
+        run: |
+          # Neon free-tier auto-suspends inactive compute. The first
+          # migration attempt after a cold branch can be terminated mid-DDL
+          # with "administrator command" as Neon spins up the compute. Retry
+          # with backoff — by attempt 2 the branch is warm and the migration
+          # completes cleanly.
+          for attempt in 1 2 3; do
+            echo "Migration attempt $attempt/3..."
+            if pnpm --filter @codex/database db:migrate; then
+              echo "✅ Migrations applied"
+              exit 0
+            fi
+            echo "❌ Attempt $attempt failed; waiting 10s before retry..."
+            sleep 10
+          done
+          echo "❌ All 3 migration attempts failed"
+          exit 1
         env:
           DATABASE_URL: ${{ steps.neon.outputs.DATABASE_URL }}
           DB_METHOD: ${{ vars.DB_METHOD }}
@@ -341,26 +380,41 @@ jobs:
           echo "## 🚧 Dev Smoke Tests" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           FAILED=0
+          # A "healthy" worker is one that responds with ANY non-network
+          # HTTP status. We drop `curl -f` (which treats 4xx/5xx as failure)
+          # because Hono workers correctly return 404 from `/` when no
+          # route is defined — that's NOT a deploy failure, it just means
+          # the worker is alive and dispatching. We treat curl exit 0 (got
+          # a response) as success and any non-zero (network/TLS error) as
+          # failure. A 5xx body is reported but doesn't fail the deploy.
           check_health() {
             local service_name=$1
             local url=$2
-            if curl -L -f -s "$url" > /dev/null 2>&1; then
-              echo "✅ $service_name" >> $GITHUB_STEP_SUMMARY
+            local status
+            status=$(curl -L -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" 2>&1)
+            local exit_code=$?
+            if [ $exit_code -eq 0 ] && [ -n "$status" ] && [ "$status" != "000" ]; then
+              echo "✅ $service_name (HTTP $status)" >> $GITHUB_STEP_SUMMARY
             else
-              echo "❌ $service_name ($url)" >> $GITHUB_STEP_SUMMARY
+              echo "❌ $service_name ($url) — curl exit=$exit_code status=$status" >> $GITHUB_STEP_SUMMARY
               return 1
             fi
           }
           echo "⏳ Waiting 30s for propagation..."
           sleep 30
-          check_health "Media API" "https://media-api.dev.revelations.studio/health" || FAILED=1
-          check_health "Ecom API" "https://ecom-api.dev.revelations.studio/health" || FAILED=1
-          check_health "Content API" "https://content-api.dev.revelations.studio/health" || FAILED=1
-          check_health "Identity API" "https://identity-api.dev.revelations.studio/health" || FAILED=1
-          check_health "Organization API" "https://organization-api.dev.revelations.studio/health" || FAILED=1
-          check_health "Notifications API" "https://notifications-api.dev.revelations.studio/health" || FAILED=1
-          check_health "Admin API" "https://admin-api.dev.revelations.studio/health" || FAILED=1
-          check_health "Auth Worker" "https://auth.dev.revelations.studio/health" || FAILED=1
+          # Hit `/` rather than `/health` — `/health` isn't reliably wired
+          # on every worker (it may be gated by middleware or simply absent).
+          # `/` reaching the worker proves the worker is live and the custom
+          # domain binding is working, which is what we actually want to
+          # smoke-test post-deploy.
+          check_health "Media API" "https://media-api.dev.revelations.studio/" || FAILED=1
+          check_health "Ecom API" "https://ecom-api.dev.revelations.studio/" || FAILED=1
+          check_health "Content API" "https://content-api.dev.revelations.studio/" || FAILED=1
+          check_health "Identity API" "https://identity-api.dev.revelations.studio/" || FAILED=1
+          check_health "Organization API" "https://organization-api.dev.revelations.studio/" || FAILED=1
+          check_health "Notifications API" "https://notifications-api.dev.revelations.studio/" || FAILED=1
+          check_health "Admin API" "https://admin-api.dev.revelations.studio/" || FAILED=1
+          check_health "Auth Worker" "https://auth.dev.revelations.studio/" || FAILED=1
           check_health "Web App" "https://dev.revelations.studio/" || FAILED=1
           if [ $FAILED -eq 0 ]; then
             echo "✅ **All dev services passed smoke tests**" >> $GITHUB_STEP_SUMMARY

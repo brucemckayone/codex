@@ -186,7 +186,7 @@
         },
         {
           "binding": "CACHE_KV",
-          "id": "c5e85d4c8ecb46f9a3e5d4d96a14e9f1"
+          "id": "8bde7d718cff4bfa99e29cd8e0aa7353"
         }
       ],
       "r2_buckets": [
@@ -201,7 +201,7 @@
       ],
       "routes": [
         {
-          "pattern": "admin-api.dev.revelations.studio/*",
+          "pattern": "admin-api.dev.revelations.studio",
           "custom_domain": true
         }
       ]

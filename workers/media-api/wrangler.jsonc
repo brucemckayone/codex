@@ -242,7 +242,7 @@
       ],
       "routes": [
         {
-          "pattern": "media-api.dev.revelations.studio/*",
+          "pattern": "media-api.dev.revelations.studio",
           "custom_domain": true
         }
       ]

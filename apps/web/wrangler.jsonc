@@ -45,7 +45,7 @@
       "kv_namespaces": [
         {
           "binding": "CACHE_KV",
-          "id": "c5e85d4c8ecb46f9a3e5d4d96a14e9f1"
+          "id": "8bde7d718cff4bfa99e29cd8e0aa7353"
         }
       ]
     },
@@ -146,16 +146,22 @@
         "ADMIN_API_URL": "https://admin-api.dev.revelations.studio",
         "NOTIFICATIONS_API_URL": "https://notifications-api.dev.revelations.studio"
       },
+      "kv_namespaces": [
+        {
+          "binding": "CACHE_KV",
+          "id": "8bde7d718cff4bfa99e29cd8e0aa7353"
+        }
+      ],
       "routes": [
-        // Dev platform apex
+        // Dev platform apex only. Per-org subdomains are NOT routed via
+        // a wildcard zone route — instead each org gets its own
+        // Cloudflare Custom Domain bound to this worker (see
+        // organization-api's dev-domain-service hook + bootstrap-dev-infra
+        // workflow). A wildcard zone route would shadow the API workers'
+        // custom domains (Phase 7 root-cause), so we intentionally don't
+        // ship one.
         {
           "pattern": "dev.revelations.studio/*",
-          "zone_name": "revelations.studio"
-        },
-        // Wildcard for dev org subdomains (LAST). API workers under
-        // dev.revelations.studio register separately with custom_domain: true.
-        {
-          "pattern": "*.dev.revelations.studio/*",
           "zone_name": "revelations.studio"
         }
       ]

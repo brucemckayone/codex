@@ -94,6 +94,20 @@ export type Bindings = {
   R2_ACCOUNT_ID?: string;
 
   /**
+   * Cloudflare API token used by dev-only DevDomainService for
+   * Workers Custom Domain provisioning. Optional — when absent the
+   * service no-ops. Only the organization-api worker needs this binding;
+   * it's included on all workers' Bindings type for simplicity.
+   */
+  CLOUDFLARE_API_TOKEN?: string;
+
+  /**
+   * Cloudflare Account ID used by dev-only DevDomainService alongside
+   * CLOUDFLARE_API_TOKEN. Optional.
+   */
+  CLOUDFLARE_ACCOUNT_ID?: string;
+
+  /**
    * R2 API token Access Key ID
    */
   R2_ACCESS_KEY_ID?: string;

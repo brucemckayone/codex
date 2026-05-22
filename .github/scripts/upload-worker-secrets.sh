@@ -103,9 +103,12 @@ EOF
     ;;
 
   identity-api)
+    # WORKER_SHARED_SECRET required: identity-api exposes a worker-HMAC
+    # membership lookup endpoint that auth uses to resolve org context.
     SECRETS_JSON=$(cat <<EOF
 {
-  "DATABASE_URL":"${DATABASE_URL}"
+  "DATABASE_URL":"${DATABASE_URL}",
+  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:-}"
 }
 EOF
 )
@@ -121,18 +124,28 @@ EOF
     ;;
 
   organization-api)
+    # CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID are used by
+    # DevDomainService to provision Cloudflare Workers Custom Domains
+    # for new orgs in the dev environment. They're harmless to inject
+    # in non-dev environments (the service no-ops outside ENVIRONMENT=dev).
     SECRETS_JSON=$(cat <<EOF
 {
-  "DATABASE_URL":"${DATABASE_URL}"
+  "DATABASE_URL":"${DATABASE_URL}",
+  "CLOUDFLARE_API_TOKEN":"${CLOUDFLARE_API_TOKEN:-}",
+  "CLOUDFLARE_ACCOUNT_ID":"${CLOUDFLARE_ACCOUNT_ID:-}"
 }
 EOF
 )
     ;;
 
   notifications-api)
+    # WORKER_SHARED_SECRET required: notifications-api accepts worker-HMAC
+    # signed /internal/send calls from other workers (auth → welcome email,
+    # org-api → invite email, etc).
     SECRETS_JSON=$(cat <<EOF
 {
-  "DATABASE_URL":"${DATABASE_URL}"
+  "DATABASE_URL":"${DATABASE_URL}",
+  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:-}"
 }
 EOF
 )

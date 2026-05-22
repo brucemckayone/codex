@@ -1,0 +1,122 @@
+name: Seed Dev Database
+
+# DESTRUCTIVE: truncates all dev DB tables and re-seeds with the canonical
+# test fixtures (studio-alpha, studio-beta, of-blood-and-bones + their
+# content, users, tiers). Use this when:
+#   - The dev branch was just created and is empty
+#   - Test data drifted to a broken state and a fresh start is wanted
+#   - Schema changes invalidated the existing seed
+#
+# Workflow_dispatch only — never auto-triggers. Requires an explicit
+# `confirm: true` input to prevent accidental data loss.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Confirm: I understand this WIPES all dev DB data"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    name: Seed dev database
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+      url: https://dev.revelations.studio
+    if: inputs.confirm == true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Resolve the Neon dev branch URI fresh — same logic as deploy-dev.yml
+      # so a seed run can stand on its own without depending on a prior deploy.
+      - name: Ensure Neon dev branch + fetch connection string
+        id: neon
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          API_BASE="https://console.neon.tech/api/v2"
+          AUTH="Authorization: Bearer ${NEON_API_KEY}"
+
+          BRANCHES=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
+            "${API_BASE}/projects/${NEON_PROJECT_ID}/branches")
+          DEV_BRANCH_ID=$(echo "$BRANCHES" | jq -r '.branches[] | select(.name == "dev") | .id' | head -n 1)
+          if [ -z "$DEV_BRANCH_ID" ]; then
+            echo "❌ Dev Neon branch doesn't exist. Run deploy-dev.yml first to create it."
+            exit 1
+          fi
+
+          DBS=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
+            "${API_BASE}/projects/${NEON_PROJECT_ID}/branches/${DEV_BRANCH_ID}/databases")
+          DB_NAME=$(echo "$DBS" | jq -r '.databases[0].name')
+
+          ROLES=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
+            "${API_BASE}/projects/${NEON_PROJECT_ID}/branches/${DEV_BRANCH_ID}/roles")
+          ROLE_NAME=$(echo "$ROLES" | jq -r '.roles[0].name')
+
+          CONNECTION_RESPONSE=$(curl -fsS -H "$AUTH" -H "Accept: application/json" \
+            "${API_BASE}/projects/${NEON_PROJECT_ID}/connection_uri?branch_id=${DEV_BRANCH_ID}&database_name=${DB_NAME}&role_name=${ROLE_NAME}&pooled=false")
+          CONNECTION_URI=$(echo "$CONNECTION_RESPONSE" | jq -r '.uri')
+          echo "::add-mask::$CONNECTION_URI"
+          echo "DATABASE_URL=$CONNECTION_URI" >> "$GITHUB_OUTPUT"
+
+      - name: Build required packages
+        run: pnpm --filter @codex/database --filter @codex/constants build
+
+      - name: Run dev migrations (ensure schema is current, with retry)
+        run: |
+          for attempt in 1 2 3; do
+            echo "Migration attempt $attempt/3..."
+            if pnpm --filter @codex/database db:migrate; then
+              echo "✅ Migrations applied"
+              exit 0
+            fi
+            echo "❌ Attempt $attempt failed; waiting 10s before retry..."
+            sleep 10
+          done
+          exit 1
+        env:
+          DATABASE_URL: ${{ steps.neon.outputs.DATABASE_URL }}
+          DB_METHOD: PRODUCTION
+
+      - name: Seed dev data
+        run: pnpm --filter @codex/database db:seed
+        env:
+          DATABASE_URL: ${{ steps.neon.outputs.DATABASE_URL }}
+          DB_METHOD: PRODUCTION
+          # The seed script also touches dev CDN / KV for cache-flushing.
+          # In CI we don't have those bindings, so those operations
+          # will be no-ops or warn — the DB seeding still completes.
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## 🌱 Dev DB Seed Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Seeded orgs: \`studio-alpha\`, \`studio-beta\`, \`of-blood-and-bones\`" >> $GITHUB_STEP_SUMMARY
+          echo "Seed users (password: see SEED_PASSWORD in seed/constants.ts):" >> $GITHUB_STEP_SUMMARY
+          echo "- creator@test.com (owns studio-alpha + studio-beta)" >> $GITHUB_STEP_SUMMARY
+          echo "- admin@test.com" >> $GITHUB_STEP_SUMMARY
+          echo "- luzura@test.com (owns of-blood-and-bones)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Visit:" >> $GITHUB_STEP_SUMMARY
+          echo "- https://dev.revelations.studio/" >> $GITHUB_STEP_SUMMARY
+          echo "- https://studio-alpha.dev.revelations.studio/" >> $GITHUB_STEP_SUMMARY
+          echo "- https://studio-beta.dev.revelations.studio/" >> $GITHUB_STEP_SUMMARY
+          echo "- https://of-blood-and-bones.dev.revelations.studio/" >> $GITHUB_STEP_SUMMARY

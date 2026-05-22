@@ -60,11 +60,15 @@ jobs:
               echo "✅ $B already exists"
             elif [ "$CREATE" = "true" ]; then
               echo "🌱 Creating $B..."
-              if curl -fsS -X POST -H "$AUTH" -H "Content-Type: application/json" \
-                "$API" -d "{\"name\":\"$B\"}" > /dev/null; then
+              # Drop -f so we capture the body even on 4xx
+              RESPONSE=$(curl -sS -X POST -H "$AUTH" -H "Content-Type: application/json" \
+                "$API" -d "{\"name\":\"$B\"}")
+              if echo "$RESPONSE" | jq -e '.success' > /dev/null 2>&1; then
                 echo "| $B | 🌱 created |" >> "$GITHUB_STEP_SUMMARY"
               else
-                echo "| $B | ❌ failed to create |" >> "$GITHUB_STEP_SUMMARY"
+                echo "| $B | ❌ failed |" >> "$GITHUB_STEP_SUMMARY"
+                echo "❌ Failed to create R2 bucket $B. Full API response:"
+                echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
                 exit 1
               fi
             else
@@ -82,15 +86,19 @@ jobs:
           API="https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records"
           AUTH="Authorization: Bearer ${CF_DNS_TOKEN}"
 
-          # Records we need. Wildcards + apex CNAMEs proxied through Cloudflare
-          # so the orange-cloud terminator routes requests to the worker.
-          # Cloudflare workers don't accept A records — CNAMEs to the
-          # placeholder `100::` are the documented pattern for routes that
-          # are entirely served by Workers (the worker route bindings
-          # determine which worker handles the request).
+          # Records we need. For Cloudflare Workers zone_name routes (used
+          # by apps/web for the dev apex + wildcard), the documented
+          # placeholder pattern is an AAAA record pointing at `100::` —
+          # an IPv6 sink that ensures DNS resolution succeeds while the
+          # actual request routing happens via the Worker route binding.
+          #
+          # CNAME does NOT work here because CNAME content must be a
+          # hostname, not an IPv6 literal (Cloudflare API returns 400).
+          # A records also work with `192.0.2.1` (TEST-NET-1) but AAAA
+          # is the more common convention in Cloudflare docs.
           declare -A RECORDS=(
-            [dev.revelations.studio]=CNAME
-            [*.dev.revelations.studio]=CNAME
+            [dev.revelations.studio]=AAAA
+            [*.dev.revelations.studio]=AAAA
           )
           CONTENT="100::"
 
@@ -112,17 +120,89 @@ jobs:
               echo "✅ $NAME ($TYPE) already exists"
             elif [ "$CREATE" = "true" ]; then
               echo "🌱 Creating $NAME ($TYPE)..."
-              RESPONSE=$(curl -fsS -X POST -H "$AUTH" -H "Content-Type: application/json" \
+              # Drop -f so we capture the body even on 4xx; check .success
+              # afterwards. Without this, curl exits silently on error.
+              RESPONSE=$(curl -sS -X POST -H "$AUTH" -H "Content-Type: application/json" \
                 "$API" -d "{\"type\":\"$TYPE\",\"name\":\"$NAME\",\"content\":\"$CONTENT\",\"proxied\":true,\"ttl\":1}")
-              if echo "$RESPONSE" | jq -e '.success' > /dev/null; then
+              if echo "$RESPONSE" | jq -e '.success' > /dev/null 2>&1; then
                 echo "| $NAME | $TYPE | 🌱 created |" >> "$GITHUB_STEP_SUMMARY"
               else
                 echo "| $NAME | $TYPE | ❌ failed |" >> "$GITHUB_STEP_SUMMARY"
-                echo "Response: $RESPONSE"
+                echo "❌ Failed to create $NAME ($TYPE). Full API response:"
+                echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
                 exit 1
               fi
             else
               echo "| $NAME | $TYPE | ⚠️ missing (audit-only) |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      - name: Ensure seed Cloudflare Custom Domains exist
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CREATE: ${{ inputs.create_missing }}
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/workers/domains"
+          AUTH="Authorization: Bearer ${CF_API_TOKEN}"
+
+          # Each line: HOSTNAME|WORKER_NAME
+          # 8 API workers (each → its `-dev` worker) + 3 seed orgs (→ codex-web-dev).
+          # Other org subdomains are created dynamically at org-create time
+          # by DevDomainService (see organization-api routes).
+          DOMAINS=(
+            "auth.dev.revelations.studio|auth-worker-dev"
+            "content-api.dev.revelations.studio|content-api-dev"
+            "ecom-api.dev.revelations.studio|ecom-api-dev"
+            "identity-api.dev.revelations.studio|identity-api-dev"
+            "admin-api.dev.revelations.studio|admin-api-dev"
+            "organization-api.dev.revelations.studio|organization-api-dev"
+            "notifications-api.dev.revelations.studio|notifications-api-dev"
+            "media-api.dev.revelations.studio|media-api-dev"
+            "studio-alpha.dev.revelations.studio|codex-web-dev"
+            "studio-beta.dev.revelations.studio|codex-web-dev"
+            "of-blood-and-bones.dev.revelations.studio|codex-web-dev"
+          )
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Workers Custom Domains" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Hostname | Worker | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+
+          # Fetch the existing custom-domain list once (cheaper than checking
+          # per-host) and search it in-memory for each desired binding.
+          EXISTING=$(curl -fsS -H "$AUTH" "$API" | jq -c '.result // []')
+
+          for ENTRY in "${DOMAINS[@]}"; do
+            HOSTNAME="${ENTRY%%|*}"
+            WORKER="${ENTRY##*|}"
+
+            FOUND=$(echo "$EXISTING" | jq -r --arg h "$HOSTNAME" --arg s "$WORKER" \
+              '.[] | select(.hostname == $h and .service == $s) | .id' | head -n 1)
+
+            if [ -n "$FOUND" ]; then
+              echo "| $HOSTNAME | $WORKER | ✅ exists |" >> "$GITHUB_STEP_SUMMARY"
+              echo "✅ $HOSTNAME → $WORKER already bound"
+            elif [ "$CREATE" = "true" ]; then
+              echo "🌱 Creating $HOSTNAME → $WORKER..."
+              RESPONSE=$(curl -sS -X PUT -H "$AUTH" -H "Content-Type: application/json" \
+                "$API" \
+                -d "{\"hostname\":\"$HOSTNAME\",\"service\":\"$WORKER\",\"environment\":\"production\",\"zone_id\":\"$CF_ZONE_ID\"}")
+              if echo "$RESPONSE" | jq -e '.success' > /dev/null 2>&1; then
+                echo "| $HOSTNAME | $WORKER | 🌱 created |" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "| $HOSTNAME | $WORKER | ❌ failed |" >> "$GITHUB_STEP_SUMMARY"
+                echo "❌ Failed to bind $HOSTNAME → $WORKER. Full API response:"
+                echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
+                # Don't `exit 1` here: a single binding failure (e.g. worker
+                # doesn't yet exist on first run) shouldn't block the others.
+                # The workflow as a whole still surfaces failures in the summary.
+              fi
+            else
+              echo "| $HOSTNAME | $WORKER | ⚠️ missing (audit-only) |" >> "$GITHUB_STEP_SUMMARY"
             fi
           done
 
@@ -136,3 +216,4 @@ jobs:
           echo "3. First push triggers testing.yml → deploy-dev.yml (auto-creates Neon dev branch + deploys 9 services)" >> "$GITHUB_STEP_SUMMARY"
           echo "4. After first deploy, run \`./.github/scripts/setup-stripe-dev-webhooks.sh --upload\` to create test-mode Stripe endpoints" >> "$GITHUB_STEP_SUMMARY"
           echo "5. Re-trigger deploy to pick up the Stripe secrets" >> "$GITHUB_STEP_SUMMARY"
+          echo "6. New orgs created in dev via POST /api/organizations get their Custom Domain auto-provisioned by DevDomainService" >> "$GITHUB_STEP_SUMMARY"
