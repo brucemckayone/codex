@@ -501,6 +501,9 @@ jobs:
           DB_METHOD: ${{ vars.DB_METHOD }}
           # Always needed
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          # Required by every worker — HMAC for inter-worker calls and
+          # notifications-api unsubscribe-token signing. Missing → 500s.
+          WORKER_SHARED_SECRET: ${{ secrets.WORKER_SHARED_SECRET }}
           # Conditionally used based on matrix.needs_r2
           R2_ACCOUNT_ID: ${{ matrix.needs_r2 && secrets.R2_ACCOUNT_ID || '' }}
           R2_ACCESS_KEY_ID: ${{ matrix.needs_r2 && secrets.R2_ACCESS_KEY_ID || '' }}
@@ -512,6 +515,7 @@ jobs:
         run: |
           echo "::add-mask::$DATABASE_URL"
           echo "::add-mask::$BETTER_AUTH_SECRET"
+          [ -n "$WORKER_SHARED_SECRET" ] && echo "::add-mask::$WORKER_SHARED_SECRET"
           [ -n "$R2_SECRET_ACCESS_KEY" ] && echo "::add-mask::$R2_SECRET_ACCESS_KEY"
           [ -n "$STRIPE_SECRET_KEY" ] && echo "::add-mask::$STRIPE_SECRET_KEY"
           [ -n "$STRIPE_WEBHOOK_SECRET_BOOKING" ] && echo "::add-mask::$STRIPE_WEBHOOK_SECRET_BOOKING"
