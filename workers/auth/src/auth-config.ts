@@ -9,7 +9,7 @@
 import { AUTH_ROLES, COOKIES, DOMAINS, ENV_NAMES } from '@codex/constants';
 import { createDbClient, schema } from '@codex/database';
 import { createKVSecondaryStorage } from '@codex/security';
-import { cookieDomainFor, type EnvName } from '@codex/urls';
+import { cookieDomainFor, corsOriginsFor, type EnvName } from '@codex/urls';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { createAuthMiddleware } from 'better-auth/api';
@@ -210,21 +210,14 @@ export function createAuthInstance(options: AuthConfigOptions) {
     trustedOrigins: [
       env.WEB_APP_URL,
       env.API_URL,
-      // Deployed dev (long-lived dev.revelations.studio branch). Browser
-      // requests come from the platform apex AND from per-org subdomains
-      // (studio-alpha.dev.revelations.studio etc), so a wildcard is needed.
-      ...(env.ENVIRONMENT === ENV_NAMES.DEV_REMOTE
-        ? [`https://${DOMAINS.DEV_REMOTE}`, `https://*.${DOMAINS.DEV_REMOTE}`]
-        : []),
-      // Local dev origins
-      ...(env.ENVIRONMENT === ENV_NAMES.DEVELOPMENT
-        ? [
-            'http://localhost:42069', // Auth worker's own URL for E2E tests
-            'http://lvh.me:3000', // Dev app (cross-subdomain cookies)
-            'http://lvh.me:5173', // Vite dev server
-            'http://*.nip.io', // Phone/LAN testing (any {ip}.nip.io subdomain)
-          ]
-        : []),
+      // Per-env static origins from `@codex/urls`. Includes wildcards for
+      // dev (`*.dev.revelations.studio`), staging (`*-staging.revelations.studio`),
+      // production (`*.revelations.studio` — closes the dormant cross-subdomain
+      // 403 risk surfaced in the 2026-05-22 post-epic audit), and the
+      // lvh.me/nip.io/localhost set for local dev. `WEB_APP_URL` and `API_URL`
+      // above carry the per-binding apex + API host that aren't in the
+      // static list.
+      ...corsOriginsFor(env.ENVIRONMENT as EnvName),
     ].filter((url): url is string => Boolean(url)),
 
     // Cross-subdomain cookie support

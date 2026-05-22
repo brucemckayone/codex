@@ -22,8 +22,10 @@ describe('corsOriginsFor', () => {
     expect(origins).toContain('https://*-staging.revelations.studio');
   });
 
-  it('production returns empty (relies on env.WEB_APP_URL + env.API_URL)', () => {
-    expect(corsOriginsFor('production')).toEqual([]);
+  it('production returns wildcard subdomain for cross-subdomain auth POSTs', () => {
+    expect(corsOriginsFor('production')).toEqual([
+      'https://*.revelations.studio',
+    ]);
   });
 
   it('test returns empty (tests use exact origin)', () => {
