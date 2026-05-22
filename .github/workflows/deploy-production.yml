@@ -351,6 +351,13 @@ jobs:
 
       # --- POST-DEPLOYMENT VERIFICATION ---
 
+      # After-deploy smoke gate (WP-9, Codex-ikum9). Catches silent 500s from
+      # broken bindings, missing env vars, or routing misconfig that
+      # wrangler-deploy alone cannot detect. Every worker exposes /health via
+      # createWorker() in @codex/worker-utils — a non-2xx response means the
+      # worker is alive but its DB/KV/R2 wiring is broken, which is exactly
+      # the silent-failure mode this gate exists to catch. Any non-2xx fails
+      # the workflow with a GitHub annotation pointing at the failing URL.
       - name: Comprehensive smoke tests
         timeout-minutes: 5
         run: |
@@ -361,20 +368,22 @@ jobs:
 
           FAILED=0
 
-          # Function to check health
+          # Strict gate: only 2xx passes. `--max-time 15` prevents indefinite
+          # hangs on DNS/TLS issues. GitHub annotations (::error::) surface the
+          # failure URL directly in the PR/checks UI so on-call can act fast.
           check_health() {
             local service_name=$1
             local url=$2
-            echo "Testing $service_name ($url)..."
-
-            # Use curl to get status code, follow redirects, match 200
-            if curl -L -f -s "$url" > /dev/null 2>&1; then
-              echo "✅ $service_name" >> $GITHUB_STEP_SUMMARY
+            local status
+            status=$(curl -L -s -o /tmp/body.txt -w '%{http_code}' --max-time 15 "$url" 2>&1)
+            local exit_code=$?
+            if [ $exit_code -eq 0 ] && [ "$status" -ge 200 ] && [ "$status" -lt 300 ]; then
+              echo "✅ $service_name (HTTP $status)" >> $GITHUB_STEP_SUMMARY
               return 0
-            else
-              echo "❌ $service_name ($url)" >> $GITHUB_STEP_SUMMARY
-              return 1
             fi
+            echo "::error title=Production smoke failed::$service_name at $url returned HTTP $status (curl exit=$exit_code)"
+            echo "❌ $service_name ($url) — HTTP $status, curl exit=$exit_code" >> $GITHUB_STEP_SUMMARY
+            return 1
           }
 
           # Wait for propagation (initial delay)
@@ -399,7 +408,7 @@ jobs:
             exit 0
           else
             echo "❌ **Some services failed smoke tests**" >> $GITHUB_STEP_SUMMARY
-            # Don't fail the build immediately, allow notification to run
+            # Fail the deploy so on-call sees the alert immediately
             exit 1
           fi
 
