@@ -8,7 +8,7 @@ export {
   buildPlatformUrl,
   buildServiceUrl,
 } from './build-url';
-// Stub for WP-5a (cookieDomainFor). Throws "not implemented (WP-5a)" on call.
+export { getCookieConfig } from './cookie-config';
 export { cookieDomainFor } from './cookie-domain';
 export { corsOriginsFor } from './cors-origins';
 export {
