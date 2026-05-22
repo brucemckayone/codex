@@ -1,0 +1,71 @@
+name: Storybook Build Gate
+
+# Fast-feedback gate that catches Storybook build regressions before they
+# hide in the slower E2E Web Tests suite (which takes 6+ min). Runs on
+# PRs that touch the Storybook config, story files, the components those
+# stories consume, or the Vite/Paraglide config that historically pulled
+# in PostHog and crashed the build (see apps/web/.storybook/main.ts
+# PostHog rejection-filter comment for context).
+
+on:
+  pull_request:
+    paths:
+      - 'apps/web/.storybook/**'
+      - 'apps/web/src/lib/components/**/*.stories.svelte'
+      - 'apps/web/src/lib/components/**/*.svelte'
+      - 'apps/web/vite.config.ts'
+      - 'apps/web/svelte.config.js'
+      - 'apps/web/package.json'
+      - 'packages/**/src/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/storybook-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: storybook-build-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-storybook:
+    name: Build Storybook
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache Turborepo
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-storybook-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-storybook-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
+            ${{ runner.os }}-turbo-storybook-
+
+      - name: Build workspace packages
+        run: pnpm build:packages
+        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+
+      - name: Generate Paraglide i18n files
+        run: pnpm --filter web exec paraglide-js compile --project ./project.inlang --outdir ./src/paraglide
+
+      - name: Build Storybook
+        run: pnpm --filter web build-storybook
+        env:
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
