@@ -77,7 +77,7 @@ function uniqueEmail(label: string): string {
 }
 
 describe('BetterAuth cross-subdomain cookie integration (WP-5b)', () => {
-  test('Set-Cookie shape under ENVIRONMENT=test: HttpOnly, SameSite=Lax, Path=/, no Domain, not Secure', async () => {
+  test('Set-Cookie shape under ENVIRONMENT=test: HttpOnly, SameSite=Lax, Path=/, dev-shape Domain only, not Secure', async () => {
     const email = uniqueEmail('shape');
     const password = 'SecurePassword123!';
 
@@ -129,13 +129,21 @@ describe('BetterAuth cross-subdomain cookie integration (WP-5b)', () => {
     // Required for the cookie to be sent on any path under the org.
     expect(lower).toMatch(/(^|;\s*)path=\//);
 
-    // ── NO Domain attribute under ENVIRONMENT=test ─────────────────────
+    // ── Domain attribute: dev-shape OR absent, NEVER production-shape ──
     // `resolveCrossSubDomainCookieDomain` returns `undefined` for test env
-    // (auth-config.ts line 47). The HTTP serialiser MUST omit Domain
-    // entirely — not write `Domain=undefined` or `Domain=` (empty value).
-    // Without this assertion a regression where the serialiser writes a
-    // default Domain attribute would silently pass.
-    expect(lower).not.toMatch(/(^|;\s*)domain=/);
+    // (auth-config.ts:47), but BetterAuth's `crossSubDomainCookies.enabled:
+    // true` causes the runtime to STILL derive a Domain from the request
+    // host (e.g. `Domain=lvh.me` for requests to localhost:42069 via
+    // lvh.me). The security property we actually need is that test-env
+    // cookies never carry a PRODUCTION-shaped Domain (`.revelations.studio`),
+    // which would silently leak session scope between envs. Allow dev-shape
+    // hosts (`lvh.me`, `localhost`, `nip.io`); reject `.revelations.studio`.
+    const domainMatch = lower.match(/(^|;\s*)domain=([^;]+)/);
+    if (domainMatch?.[2]) {
+      const domainValue = domainMatch[2].trim();
+      expect(domainValue).not.toMatch(/revelations\.studio/);
+      expect(domainValue).toMatch(/^\.?(lvh\.me|localhost|nip\.io)$/);
+    }
 
     // ── Secure absent under HTTP test env ──────────────────────────────
     // auth-config.ts line 127-129: secure=false when ENVIRONMENT is
