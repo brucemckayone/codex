@@ -1,9 +1,5 @@
-import {
-  COOKIES,
-  getCookieConfig,
-  HEADERS,
-  MIME_TYPES,
-} from '@codex/constants';
+import { COOKIES, HEADERS, MIME_TYPES } from '@codex/constants';
+import { getCookieConfig } from '@codex/urls';
 import { authRegisterSchema } from '@codex/validation';
 import { fail, isRedirect, redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
