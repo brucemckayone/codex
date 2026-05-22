@@ -96,7 +96,7 @@ jobs:
       - name: Build constants package
         run: pnpm --filter @codex/constants build
 
-      - name: Apply migrations
+      - name: Apply migrations (with retry)
         env:
           # Use direct (non-pooled) connection for migrations. pgbouncer in
           # transaction mode silently drops connections during multi-statement
@@ -106,7 +106,23 @@ jobs:
           DB_METHOD: NEON_BRANCH
         run: |
           echo "::add-mask::$DATABASE_URL"
-          pnpm --filter @codex/database db:migrate
+          # Freshly-created Neon ephemeral branches occasionally race their
+          # role-credential provisioning. The first migration attempt fails
+          # with "password authentication failed for user 'neondb_owner'";
+          # the credentials become valid within a few seconds. Mirrors the
+          # retry strategy from PR #242 for the "administrator command"
+          # cold-branch termination on the long-lived dev branch.
+          for attempt in 1 2 3; do
+            echo "Migration attempt $attempt/3..."
+            if pnpm --filter @codex/database db:migrate; then
+              echo "Migrations applied"
+              exit 0
+            fi
+            echo "Attempt $attempt failed; waiting 10s before retry..."
+            sleep 10
+          done
+          echo "All 3 migration attempts failed"
+          exit 1
 
       - name: Build dependencies
         run: pnpm build
