@@ -38,6 +38,7 @@
     "@codex/shared-types": "workspace:*",
     "@codex/subscription": "workspace:*",
     "@codex/test-utils": "workspace:*",
+    "@codex/urls": "workspace:*",
     "@codex/validation": "workspace:*",
     "@inlang/paraglide-sveltekit": "^0.15.0",
     "@melt-ui/svelte": "^0.86.6",

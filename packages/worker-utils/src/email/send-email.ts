@@ -13,9 +13,9 @@
  *   });
  */
 
-import { getServiceUrl } from '@codex/constants';
 import { workerFetch } from '@codex/security';
 import type { Bindings } from '@codex/shared-types';
+import { buildServiceUrl as getServiceUrl } from '@codex/urls';
 import type { InternalSendEmailInput } from '@codex/validation';
 
 export type SendEmailToWorkerParams = Omit<InternalSendEmailInput, 'data'> & {

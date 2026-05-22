@@ -138,6 +138,9 @@ importers:
       '@codex/test-utils':
         specifier: workspace:*
         version: link:../../packages/test-utils
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../../packages/urls
       '@codex/validation':
         specifier: workspace:*
         version: link:../../packages/validation
@@ -1078,6 +1081,9 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../shared-types
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../urls
       '@neondatabase/serverless':
         specifier: ^0.10.4
         version: 0.10.4
@@ -1250,6 +1256,9 @@ importers:
       '@codex/transcoding':
         specifier: workspace:*
         version: link:../transcoding
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../urls
       '@codex/validation':
         specifier: workspace:*
         version: link:../validation
@@ -1354,6 +1363,9 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../../packages/urls
       '@codex/validation':
         specifier: workspace:*
         version: link:../../packages/validation
@@ -1719,6 +1731,9 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../../packages/urls
       '@codex/validation':
         specifier: workspace:*
         version: link:../../packages/validation

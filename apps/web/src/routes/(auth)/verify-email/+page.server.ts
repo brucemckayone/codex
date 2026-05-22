@@ -1,4 +1,5 @@
-import { COOKIES, getCookieConfig, getServiceUrl } from '@codex/constants';
+import { COOKIES, getCookieConfig } from '@codex/constants';
+import { buildServiceUrl as getServiceUrl } from '@codex/urls';
 import { logger } from '$lib/observability';
 import {
   extractSessionToken,

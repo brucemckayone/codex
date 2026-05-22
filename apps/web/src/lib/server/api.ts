@@ -30,13 +30,7 @@ import type {
   AgreementProposal,
   CreatorOrganizationAgreement,
 } from '@codex/agreements';
-import {
-  COOKIES,
-  getServiceUrl,
-  HEADERS,
-  MIME_TYPES,
-  type ServiceName,
-} from '@codex/constants';
+import { COOKIES, HEADERS, MIME_TYPES } from '@codex/constants';
 import type { MediaItem } from '@codex/database/schema';
 import type { AvatarUploadResponse } from '@codex/identity';
 import type { NotificationPreferencesResponse } from '@codex/notifications';
@@ -65,6 +59,10 @@ import type {
   PayoutWithCreator,
   SubscriberListItem,
 } from '@codex/subscription';
+import {
+  buildServiceUrl as getServiceUrl,
+  type ServiceName,
+} from '@codex/urls';
 import type {
   CancelSubscriptionInput,
   ChangeTierInput,
