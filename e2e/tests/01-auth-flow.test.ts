@@ -3,13 +3,13 @@
  * Tests user registration, login, session validation, and logout
  */
 
-import { getServiceUrl } from '@codex/constants';
 import { closeDbPool } from '@codex/database';
 import {
   authFixture,
   expectSuccessResponse,
   httpClient,
 } from '@codex/test-utils/e2e';
+import { buildServiceUrl as getServiceUrl } from '@codex/urls';
 import { afterAll, describe, expect, test } from 'vitest';
 
 /**
