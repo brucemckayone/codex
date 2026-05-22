@@ -1,93 +1,39 @@
 /**
- * Subdomain parsing utilities
+ * Subdomain parsing utilities (apps/web wrapper layer)
  *
- * Used by the reroute hook to map subdomains to route groups
+ * Used by the reroute hook (`apps/web/src/hooks.ts`), auth-layer guards
+ * (`apps/web/src/routes/(auth)/+layout.server.ts`), and 30+ Svelte
+ * components that import from `$lib/utils/subdomain`.
+ *
+ * The actual parsing lives in `@codex/urls.parseHost` — this file is a
+ * thin re-export / adapter layer so the existing callers don't need to
+ * change their imports. URL builders (buildOrgUrl, buildPlatformUrl,
+ * buildCreatorsUrl, buildContentUrl) still live here pending WP-4
+ * (Codex-fiveo) which will move them to @codex/urls.
  */
 
+import { parseHost } from '@codex/urls';
 import { RESERVED_SUBDOMAINS } from '$lib/constants';
 
-const DEV_REMOTE_SUFFIX = '.dev.revelations.studio';
-const DEV_REMOTE_APEX = 'dev.revelations.studio';
-
 /**
- * Extract subdomain from hostname
+ * Extract subdomain from hostname. Returns `null` on the bare apex,
+ * nested subdomains, or unknown hosts.
  *
- * Handles:
- * - lvh.me variants (e.g., bruce-studio.lvh.me) — local dev
- * - nip.io variants (e.g., bruce-studio.192.168.1.10.nip.io) — LAN testing
- * - localhost variants (e.g., test-org.localhost:3000)
- * - Deployed dev: {subdomain}.dev.revelations.studio — long-lived integration env
- * - Production domains (e.g., yoga-studio.revelations.studio)
- *
- * @param hostname - The hostname from URL
- * @returns The subdomain or null if none
+ * Backward-compatible wrapper over `@codex/urls.parseHost`.
  */
 export function extractSubdomain(hostname: string): string | null {
-  // Remove port if present
-  const host = hostname.split(':')[0];
-
-  // lvh.me handling: {subdomain}.lvh.me (dev cross-subdomain cookies)
-  if (host.endsWith('lvh.me')) {
-    const parts = host.split('.');
-    // bruce-studio.lvh.me → ['bruce-studio', 'lvh', 'me']
-    if (parts.length > 2) {
-      return parts[0];
-    }
-    return null;
-  }
-
-  // nip.io handling: {subdomain}.{ip}.nip.io (phone testing over LAN)
-  // e.g. bruce-studio.192.168.1.10.nip.io → subdomain is 'bruce-studio'
-  // e.g. 192.168.1.10.nip.io → no subdomain
-  if (host.endsWith('nip.io')) {
-    // Match: optional-subdomain.ip-octets.nip.io
-    const nipMatch = host.match(/^(.+?)\.(\d+\.\d+\.\d+\.\d+)\.nip\.io$/);
-    if (nipMatch) {
-      return nipMatch[1]; // subdomain before the IP
-    }
-    return null; // bare {ip}.nip.io = no subdomain
-  }
-
-  // localhost handling: {subdomain}.localhost
-  if (host.includes('localhost')) {
-    const parts = host.split('.');
-    if (parts.length > 1 && parts[0] !== 'localhost') {
-      return parts[0];
-    }
-    return null;
-  }
-
-  // Deployed dev: {subdomain}.dev.revelations.studio
-  // MUST come before the prod check — both the bare apex `dev.revelations.studio`
-  // and the org subdomain `studio-alpha.dev.revelations.studio` need to be handled
-  // here so they don't accidentally fall into the prod regex below.
-  if (host === DEV_REMOTE_APEX) {
-    return null;
-  }
-  if (host.endsWith(DEV_REMOTE_SUFFIX)) {
-    const prefix = host.slice(0, -DEV_REMOTE_SUFFIX.length);
-    // Reject nested subdomains (e.g. foo.bar.dev.revelations.studio)
-    if (prefix && !prefix.includes('.')) {
-      return prefix;
-    }
-    return null;
-  }
-
-  // Production: {subdomain}.revelations.studio
-  const match = host.match(/^([^.]+)\.revelations\.studio$/);
-  return match ? match[1] : null;
+  return parseHost(hostname).subdomain;
 }
 
 /**
- * Check if a subdomain is reserved (cannot be an org slug)
+ * Check if a subdomain is reserved (cannot be an org slug). Unchanged
+ * from historical behaviour — reads from `@codex/constants.RESERVED_SUBDOMAINS_SET`
+ * via the apps/web re-export at `$lib/constants`.
  */
 export function isReservedSubdomain(subdomain: string): boolean {
   return RESERVED_SUBDOMAINS.has(subdomain.toLowerCase());
 }
 
-/**
- * Determine the context type from a subdomain
- */
 type SubdomainContext =
   | { type: 'platform' }
   | { type: 'creators' }
@@ -107,43 +53,20 @@ type SubdomainContext =
  *          or "http://bruce-studio.192.168.1.10.nip.io:3000/studio"
  */
 export function buildOrgUrl(currentUrl: URL, slug: string, path = '/'): string {
-  const host = currentUrl.hostname;
+  const baseDomain = deriveBaseDomain(currentUrl.hostname);
   const port = currentUrl.port;
-  const protocol = currentUrl.protocol;
-
-  const baseDomain = deriveBaseDomain(host);
-
   const portSuffix = port ? `:${port}` : '';
-  return `${protocol}//${slug}.${baseDomain}${portSuffix}${path}`;
+  return `${currentUrl.protocol}//${slug}.${baseDomain}${portSuffix}${path}`;
 }
 
 /**
- * Derive the base apex domain from a hostname for URL construction.
- * The base domain is what goes AFTER an org slug — e.g. `lvh.me`,
- * `dev.revelations.studio`, or `revelations.studio`. Order matters:
- * dev must be checked before prod since dev.revelations.studio also
- * ends with `revelations.studio`.
+ * Derive the base apex domain (everything AFTER an org slug). Thin
+ * wrapper over `@codex/urls.parseHost` — the builder family below uses
+ * this internally. WP-4 will inline `parseHost` directly into each
+ * builder and remove this helper.
  */
 function deriveBaseDomain(host: string): string {
-  if (host.endsWith('lvh.me')) {
-    return 'lvh.me';
-  }
-  if (host.endsWith('nip.io')) {
-    const nipMatch = host.match(/(\d+\.\d+\.\d+\.\d+\.nip\.io)$/);
-    return nipMatch ? nipMatch[1] : 'nip.io';
-  }
-  if (host.includes('localhost')) {
-    return 'localhost';
-  }
-  if (host === DEV_REMOTE_APEX || host.endsWith(DEV_REMOTE_SUFFIX)) {
-    return DEV_REMOTE_APEX;
-  }
-  if (host.endsWith('revelations.studio')) {
-    return 'revelations.studio';
-  }
-  // Fallback: strip first segment as subdomain
-  const parts = host.split('.');
-  return parts.length > 1 ? parts.slice(1).join('.') : host;
+  return parseHost(host).baseDomain;
 }
 
 /**
@@ -159,13 +82,10 @@ export function buildCreatorsUrl(currentUrl: URL, path = '/'): string {
  * E.g., buildPlatformUrl(currentUrl, '/library') → 'http://lvh.me:3000/library'
  */
 export function buildPlatformUrl(currentUrl: URL, path = '/'): string {
-  const host = currentUrl.hostname;
+  const baseDomain = deriveBaseDomain(currentUrl.hostname);
   const port = currentUrl.port;
-  const protocol = currentUrl.protocol;
-
-  const baseDomain = deriveBaseDomain(host);
   const portSuffix = port ? `:${port}` : '';
-  return `${protocol}//${baseDomain}${portSuffix}${path}`;
+  return `${currentUrl.protocol}//${baseDomain}${portSuffix}${path}`;
 }
 
 /**
@@ -195,8 +115,18 @@ export function buildContentUrl(
   return contentPath;
 }
 
+/**
+ * Determine the context type from a hostname.
+ *
+ * Returns:
+ * - `{ type: 'platform' }` on apex, www, or unrecognised host (parseHost env=null)
+ * - `{ type: 'creators' }` on the creators subdomain
+ * - `{ type: 'reserved', subdomain }` on infrastructure subdomains
+ *   (api, auth, content-api, etc — see RESERVED_SUBDOMAINS)
+ * - `{ type: 'organization', slug }` otherwise
+ */
 export function getSubdomainContext(hostname: string): SubdomainContext {
-  const subdomain = extractSubdomain(hostname);
+  const subdomain = parseHost(hostname).subdomain;
 
   // No subdomain or www → platform
   if (!subdomain || subdomain === 'www') {
