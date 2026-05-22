@@ -15,7 +15,11 @@ export type ServiceName =
 export const ENV_NAMES = {
   PRODUCTION: 'production',
   STAGING: 'staging',
-  DEV: 'dev', // deployed long-lived dev branch (dev.revelations.studio)
+  // DEV_REMOTE is the deployed long-lived dev branch (dev.revelations.studio).
+  // Renamed from DEV to disambiguate from DEVELOPMENT (= local). The string
+  // value 'dev' is unchanged — this rename is identifier-only and does NOT
+  // require updating ENVIRONMENT bindings in any wrangler.jsonc.
+  DEV_REMOTE: 'dev',
   DEVELOPMENT: 'development',
   TEST: 'test',
 } as const;
@@ -88,7 +92,7 @@ export function isDev(env?: Env | boolean): boolean {
  */
 export function isDevRemote(env?: Env | boolean): boolean {
   if (typeof env !== 'object' || env === null) return false;
-  return env.ENVIRONMENT === ENV_NAMES.DEV;
+  return env.ENVIRONMENT === ENV_NAMES.DEV_REMOTE;
 }
 
 /**

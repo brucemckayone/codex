@@ -193,7 +193,7 @@ export function createAuthInstance(options: AuthConfigOptions) {
       // Deployed dev (long-lived dev.revelations.studio branch). Browser
       // requests come from the platform apex AND from per-org subdomains
       // (studio-alpha.dev.revelations.studio etc), so a wildcard is needed.
-      ...(env.ENVIRONMENT === ENV_NAMES.DEV
+      ...(env.ENVIRONMENT === ENV_NAMES.DEV_REMOTE
         ? [`https://${DOMAINS.DEV_REMOTE}`, `https://*.${DOMAINS.DEV_REMOTE}`]
         : []),
       // Local dev origins
@@ -219,7 +219,7 @@ export function createAuthInstance(options: AuthConfigOptions) {
             ? getDevCookieDomain(env) // .lvh.me or .{ip}.nip.io based on WEB_APP_URL
             : env.ENVIRONMENT === ENV_NAMES.TEST
               ? undefined // Tests use exact origin
-              : env.ENVIRONMENT === ENV_NAMES.DEV
+              : env.ENVIRONMENT === ENV_NAMES.DEV_REMOTE
                 ? `.${DOMAINS.DEV_REMOTE}` // .dev.revelations.studio
                 : `.${DOMAINS.PROD}`,
       },
