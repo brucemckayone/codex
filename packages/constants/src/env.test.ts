@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type Env, getServiceUrl, isDev, validateServiceUrl } from './env';
+import { isDev, validateServiceUrl } from './env';
 
 describe('isDev', () => {
   it('returns true for boolean true', () => {
@@ -34,87 +34,9 @@ describe('isDev', () => {
   });
 });
 
-describe('getServiceUrl', () => {
-  it('returns dev URL in dev mode', () => {
-    const url = getServiceUrl('auth', true);
-    expect(url).toContain('localhost');
-  });
-
-  it('returns prod URL in prod mode', () => {
-    const url = getServiceUrl('auth', false);
-    expect(url).toContain('revelations.studio');
-  });
-
-  it('uses environment binding if provided', () => {
-    const env: Env = {
-      AUTH_WORKER_URL: 'https://custom.example.com',
-      MODE: 'production',
-    };
-    const url = getServiceUrl('auth', env);
-    expect(url).toBe('https://custom.example.com');
-  });
-
-  it('validates environment URLs in production', () => {
-    const env: Env = {
-      AUTH_WORKER_URL: 'http://insecure.example.com',
-      MODE: 'production',
-    };
-    expect(() => getServiceUrl('auth', env)).toThrow('HTTPS is required');
-  });
-
-  it('allows HTTP in dev mode', () => {
-    const env: Env = {
-      AUTH_WORKER_URL: 'http://localhost:3000',
-      dev: true,
-    };
-    const url = getServiceUrl('auth', env);
-    expect(url).toBe('http://localhost:3000');
-  });
-
-  it('returns all service URLs in dev mode', () => {
-    const services = [
-      'auth',
-      'content',
-      'access',
-      'org',
-      'ecom',
-      'admin',
-      'identity',
-      'notifications',
-      'media',
-    ] as const;
-
-    for (const service of services) {
-      const url = getServiceUrl(service, true);
-      expect(url).toContain('localhost');
-    }
-  });
-
-  it('returns all service URLs in prod mode', () => {
-    const services = [
-      'auth',
-      'content',
-      'access',
-      'org',
-      'ecom',
-      'admin',
-      'identity',
-      'notifications',
-      'media',
-    ] as const;
-
-    for (const service of services) {
-      const url = getServiceUrl(service, false);
-      expect(url).toMatch(/^https:\/\/.*revelations\.studio$/);
-    }
-  });
-  it('throws for unknown service', () => {
-    // @ts-expect-error - Testing invalid input
-    expect(() => getServiceUrl('unknown-service', true)).toThrow(
-      'Unknown service: unknown-service'
-    );
-  });
-});
+// `getServiceUrl` tests moved to packages/urls/src/__tests__/build-service-url.test.ts
+// as part of WP-3 (Codex-4xbuw) — the function was relocated to @codex/urls
+// to centralize routing-layer logic. See plan: ~/.claude/plans/typed-honking-canyon.md
 
 describe('validateServiceUrl', () => {
   it('allows http URLs', () => {

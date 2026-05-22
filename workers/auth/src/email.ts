@@ -9,9 +9,9 @@
  * In production, Resend delivers real emails.
  */
 
-import { getServiceUrl } from '@codex/constants';
 import { and, type Database, eq, schema } from '@codex/database';
 import { workerFetch } from '@codex/security';
+import { buildServiceUrl as getServiceUrl } from '@codex/urls';
 import { sendEmailToWorker } from '@codex/worker-utils';
 import type { AuthBindings } from './types';
 

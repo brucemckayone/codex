@@ -23,11 +23,11 @@ import {
   AgreementService,
   creatorShareFromLegacyOrgFee,
 } from '@codex/agreements';
-import { getServiceUrl } from '@codex/constants';
 import { createDbClient, type Database } from '@codex/database';
 import { ObservabilityClient } from '@codex/observability';
 import { workerFetch } from '@codex/security';
 import type { Bindings } from '@codex/shared-types';
+import { buildServiceUrl as getServiceUrl } from '@codex/urls';
 
 /**
  * Default warning lead time — fire the email when an agreement is within
