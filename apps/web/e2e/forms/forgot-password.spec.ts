@@ -3,8 +3,11 @@ import { expect, test } from '@playwright/test';
 /**
  * Forgot Password Form Integration Tests
  *
- * Tests the forgot password form validation.
- * The success case is tested but actual email sending requires backend.
+ * The page intentionally has no client-side validation: the remote
+ * `forgotPasswordForm` always returns `{ success: true }` regardless of email
+ * validity to prevent email enumeration (see auth.remote.ts). So this spec
+ * only covers structural rendering, navigation, and the loading state — there
+ * is no `.error-text` / `data-error` UI to assert against.
  */
 
 test.describe('Forgot Password Form', () => {
@@ -22,46 +25,6 @@ test.describe('Forgot Password Form', () => {
 
     // Check back to sign in link
     await expect(page.getByText('Back to Sign In')).toBeVisible();
-  });
-
-  test('shows validation error for empty email', async ({ page }) => {
-    // Submit without entering email
-    await page.click('button[type="submit"]');
-
-    // Wait for validation error
-    await expect(page.locator('.error-text')).toBeVisible({ timeout: 5000 });
-
-    // Email input should have error state
-    const emailInput = page.locator('input[name="email"]');
-    await expect(emailInput).toHaveAttribute('data-error', 'true');
-  });
-
-  test('shows validation error for invalid email format', async ({ page }) => {
-    await page.fill('input[name="email"]', 'invalid-email-format');
-    await page.click('button[type="submit"]');
-
-    // Wait for validation error
-    await expect(page.locator('.error-text')).toBeVisible({ timeout: 5000 });
-
-    // Check email input has error state
-    const emailInput = page.locator('input[name="email"]');
-    await expect(emailInput).toHaveAttribute('data-error', 'true');
-
-    // Error message should mention valid email
-    await expect(page.locator('.error-text')).toContainText(/email/i);
-  });
-
-  test('preserves email value after validation error', async ({ page }) => {
-    const testEmail = 'preserved-value';
-
-    await page.fill('input[name="email"]', testEmail);
-    await page.click('button[type="submit"]');
-
-    // Wait for error
-    await expect(page.locator('.error-text')).toBeVisible({ timeout: 5000 });
-
-    // Email should still have the value
-    await expect(page.locator('input[name="email"]')).toHaveValue(testEmail);
   });
 
   test('navigates back to login page', async ({ page }) => {
