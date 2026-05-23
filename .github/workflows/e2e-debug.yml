@@ -17,14 +17,13 @@ on:
   workflow_dispatch:
     inputs:
       test_file:
-        description: 'Specific test file to run (e.g., account/profile.spec.ts)'
+        description: 'Specific test file to run (e.g., account/notifications.spec.ts). Leave empty for full suite.'
         required: false
         type: string
       test_pattern:
-        description: 'Test pattern (grep filter)'
+        description: 'Grep filter (e.g., "account|profile"). Leave empty for full suite.'
         required: false
         type: string
-        default: 'account'
   push:
     branches:
       - '**'
@@ -228,8 +227,8 @@ jobs:
               --reporter=html \
               --workers=1
           else
-            echo "Running all account E2E tests"
-            pnpm exec playwright test e2e/account --project=e2e \
+            echo "Running full e2e suite (mirrors main CI scope)"
+            pnpm exec playwright test e2e --project=e2e \
               --reporter=list \
               --reporter=html \
               --workers=1
