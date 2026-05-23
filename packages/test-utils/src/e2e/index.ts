@@ -3,5 +3,6 @@
  * Re-exports all E2E testing utilities from @codex/test-utils
  */
 
+export * from './cookies';
 export * from './fixtures';
 export * from './helpers';
