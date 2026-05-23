@@ -50,9 +50,20 @@
   type RevenueType = 'subscription' | 'content_purchase';
 
   // ─── Role guard (client-side; studio is ssr=false) ────────────────────────
+  //
+  // Wait for `data.userRole` to be populated before deciding whether to
+  // redirect. With `ssr=false`, the layout server load runs AFTER initial
+  // hydration — so on first render `data.userRole` is `undefined`, and a
+  // naïve `userRole !== 'admin' && userRole !== 'owner'` check fires the
+  // redirect before the role has been resolved, blocking authorised users
+  // from ever seeing the page.
 
   $effect(() => {
-    if (data.userRole !== 'admin' && data.userRole !== 'owner') {
+    if (
+      data.userRole !== undefined &&
+      data.userRole !== 'admin' &&
+      data.userRole !== 'owner'
+    ) {
       goto('/studio');
     }
   });
