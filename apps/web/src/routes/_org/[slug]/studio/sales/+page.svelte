@@ -56,8 +56,11 @@
 
   let { data } = $props();
 
+  // Wait for data.userRole to populate before redirecting — ssr=false means
+  // first render has data.userRole === undefined and a naive check would
+  // redirect authorised users before the role is known.
   $effect(() => {
-    if (data.userRole !== 'owner') {
+    if (data.userRole !== undefined && data.userRole !== 'owner') {
       goto('/studio');
     }
   });

@@ -53,9 +53,10 @@
 
   let { data } = $props();
 
-  // Role guard
+  // Role guard. Wait for data.userRole to populate — ssr=false means
+  // first render has data.userRole === undefined.
   $effect(() => {
-    if (data.userRole !== 'owner') {
+    if (data.userRole !== undefined && data.userRole !== 'owner') {
       goto('/studio');
     }
   });

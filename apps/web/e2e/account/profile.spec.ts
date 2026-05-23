@@ -227,24 +227,45 @@ test.describe('Account Profile Page - Validation', () => {
     });
   });
 
-  test('shows validation error for invalid website URL', async ({ page }) => {
+  test('rejects invalid website URL via HTML5 url validation', async ({
+    page,
+  }) => {
     await navigateToAccountPage(page);
 
+    // ProfileForm renders the website field as `<input type="url" ...>` via
+    // SvelteKit Remote Functions' `field.as('url')`. The browser refuses to
+    // submit the form while the value fails URL validation, so the assertion
+    // is the input's HTML5 validity state — not a server-driven `aria-invalid`
+    // attribute (server validation doesn't run because the browser blocks
+    // submission first).
     await page.fill('input[name="website"]', 'not-a-valid-url');
     await page.click('button[type="submit"]', { noWaitAfter: true });
 
     const websiteInput = page.locator('input[name="website"]');
-    await expect(websiteInput).toHaveAttribute('aria-invalid', 'true');
+    const isValid = await websiteInput.evaluate(
+      (el: HTMLInputElement) => el.validity.valid
+    );
+    expect(isValid).toBe(false);
+
+    // Form should not have navigated away — we should still be on /account.
+    await expect(page).toHaveURL(/\/account$/);
   });
 
-  test('shows validation error for invalid twitter URL', async ({ page }) => {
+  test('rejects invalid twitter URL via HTML5 url validation', async ({
+    page,
+  }) => {
     await navigateToAccountPage(page);
 
     await page.fill('input[name="twitter"]', 'twitter.com/user');
     await page.click('button[type="submit"]', { noWaitAfter: true });
 
     const twitterInput = page.locator('input[name="twitter"]');
-    await expect(twitterInput).toHaveAttribute('aria-invalid', 'true');
+    const isValid = await twitterInput.evaluate(
+      (el: HTMLInputElement) => el.validity.valid
+    );
+    expect(isValid).toBe(false);
+
+    await expect(page).toHaveURL(/\/account$/);
   });
 });
 
