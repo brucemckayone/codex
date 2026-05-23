@@ -82,18 +82,18 @@ test.describe('Account Profile Page - Read-Only', () => {
     // Check page title
     await expect(page).toHaveTitle(/Profile.*Codex/i);
 
-    // Check main heading
-    await expect(page.locator('.profile h1')).toContainText('Profile');
+    // Check main heading (wrapper class is `.account-page` in (platform)/account/+page.svelte)
+    await expect(page.locator('.account-page h1')).toContainText('Profile');
 
-    // Check avatar section
-    await expect(page.locator('.settings-card h2').first()).toContainText(
-      'Avatar'
-    );
+    // Check avatar section — Card.Title renders real <h2> after Codex-l13ai
+    await expect(
+      page.getByRole('heading', { level: 2, name: 'Avatar' })
+    ).toBeVisible();
     await expect(page.locator('button:has-text("Upload New")')).toBeVisible();
 
     // Check personal information section
     await expect(
-      page.locator('h2:has-text("Personal Information")')
+      page.getByRole('heading', { level: 2, name: 'Personal Information' })
     ).toBeVisible();
 
     // Check form fields exist

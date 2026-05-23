@@ -314,6 +314,7 @@
           <Input
             id="username"
             {...username.as('text')}
+            aria-invalid={(username.issues()?.length ?? 0) > 0 ? 'true' : undefined}
             placeholder={m.account_username_placeholder()}
           />
           {#each username.issues() as issue}
@@ -341,7 +342,12 @@
         <!-- Website -->
         <div class="form-group">
           <Label for="website">{m.account_social_website()}</Label>
-          <Input id="website" {...website.as('url')} placeholder="https://example.com" />
+          <Input
+            id="website"
+            {...website.as('url')}
+            aria-invalid={(website.issues()?.length ?? 0) > 0 ? 'true' : undefined}
+            placeholder="https://example.com"
+          />
           {#each website.issues() as issue}
             <p class="field-error">{issue.message}</p>
           {/each}
@@ -353,6 +359,7 @@
           <Input
             id="twitter"
             {...twitter.as('url')}
+            aria-invalid={(twitter.issues()?.length ?? 0) > 0 ? 'true' : undefined}
             placeholder="https://twitter.com/username"
           />
           {#each twitter.issues() as issue}
@@ -366,6 +373,7 @@
           <Input
             id="youtube"
             {...youtube.as('url')}
+            aria-invalid={(youtube.issues()?.length ?? 0) > 0 ? 'true' : undefined}
             placeholder="https://youtube.com/channel/..."
           />
           {#each youtube.issues() as issue}
@@ -379,6 +387,7 @@
           <Input
             id="instagram"
             {...instagram.as('url')}
+            aria-invalid={(instagram.issues()?.length ?? 0) > 0 ? 'true' : undefined}
             placeholder="https://instagram.com/username"
           />
           {#each instagram.issues() as issue}

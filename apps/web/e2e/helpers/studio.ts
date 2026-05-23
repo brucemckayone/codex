@@ -87,6 +87,14 @@ export async function navigateToStudio(page: Page, orgSlug: string) {
 
 /**
  * Navigate to a specific studio page on an org subdomain.
+ *
+ * Studio uses `ssr = false` (apps/web/src/routes/_org/[slug]/studio/+layout.ts) —
+ * the entire sub-tree is client-rendered. `waitUntil: 'load'` fires when the
+ * initial HTML+JS bundle has loaded, but BEFORE Svelte has built the page
+ * client-side. A single requestAnimationFrame after that is not enough: tests
+ * race against hydration and remote-query resolution, then fail to find
+ * elements that only appear once the page is mounted. Wait for the
+ * `.studio-layout` shell to be visible — same pattern as `navigateToStudio`.
  */
 export async function navigateToStudioPage(
   page: Page,
@@ -97,7 +105,13 @@ export async function navigateToStudioPage(
   await page.goto(`http://${orgSlug}.lvh.me:${BASE_PORT}/studio${cleanPath}`, {
     waitUntil: 'load',
   });
-  // Wait for Svelte 5 hydration
+  // Wait for the studio shell to mount (proves hydration has begun and the
+  // page is being rendered, not just the HTML envelope).
+  await page.waitForSelector('.studio-layout', {
+    state: 'visible',
+    timeout: 30000,
+  });
+  // Settle Svelte 5 reactive effects.
   await page.evaluate(() => new Promise(requestAnimationFrame));
 }
 
