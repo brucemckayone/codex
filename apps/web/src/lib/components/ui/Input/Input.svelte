@@ -40,6 +40,7 @@
       class="input"
       data-error={!!error}
       data-has-toggle={type === 'password'}
+      aria-invalid={error ? 'true' : undefined}
       bind:value
       type={inputType}
       {...rest}

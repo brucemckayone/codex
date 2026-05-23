@@ -38,10 +38,14 @@ test.describe('Studio Navigation - Sidebar', () => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
     await expect(page.locator('.studio-layout')).toBeVisible();
+    // Desktop rail is the visible aside. (Mobile aside exists in DOM but
+    // is hidden via `inert` and CSS until the drawer is opened.)
     await expect(
-      page.locator('aside[aria-label="Studio navigation"]')
+      page.locator(
+        'aside[aria-label="Studio navigation"].studio-layout__rail--desktop'
+      )
     ).toBeVisible();
-    await expect(page.locator('.studio-main')).toBeVisible();
+    await expect(page.locator('.studio-layout__main')).toBeVisible();
   });
 
   test('sidebar shows all nav links for owner', async ({ page }) => {
@@ -130,70 +134,63 @@ test.describe('Studio Navigation - Mobile Drawer', () => {
   test('mobile menu toggle opens sidebar', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    // Sidebar should not have .open class initially
-    const sidebar = page.locator('.studio-sidebar');
-    await expect(sidebar).not.toHaveClass(/open/);
+    // Mobile rail should not have the --open modifier initially
+    const sidebar = page.locator('.studio-layout__rail--mobile');
+    await expect(sidebar).not.toHaveClass(/studio-layout__rail--open/);
 
-    // Click hamburger menu
-    await page.click('.menu-toggle');
+    // Click hamburger menu (topbar trigger)
+    await page.click('.studio-topbar__menu');
 
-    // Sidebar should now be open
-    await expect(sidebar).toHaveClass(/open/);
+    // Mobile rail should now be open
+    await expect(sidebar).toHaveClass(/studio-layout__rail--open/);
   });
 
   test('mobile sidebar closes on overlay click', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    // Open sidebar
-    await page.click('.menu-toggle');
-    const sidebar = page.locator('.studio-sidebar');
-    await expect(sidebar).toHaveClass(/open/);
+    await page.click('.studio-topbar__menu');
+    const sidebar = page.locator('.studio-layout__rail--mobile');
+    await expect(sidebar).toHaveClass(/studio-layout__rail--open/);
 
-    // Click overlay
-    await page.click('.sidebar-overlay');
-    await expect(sidebar).not.toHaveClass(/open/);
+    // Drawer scrim (overlay) dismisses the drawer
+    await page.click('.studio-drawer__scrim');
+    await expect(sidebar).not.toHaveClass(/studio-layout__rail--open/);
   });
 
   test('mobile sidebar closes on ESC key', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    // Open sidebar
-    await page.click('.menu-toggle');
-    const sidebar = page.locator('.studio-sidebar');
-    await expect(sidebar).toHaveClass(/open/);
+    await page.click('.studio-topbar__menu');
+    const sidebar = page.locator('.studio-layout__rail--mobile');
+    await expect(sidebar).toHaveClass(/studio-layout__rail--open/);
 
-    // Press Escape
     await page.keyboard.press('Escape');
-    await expect(sidebar).not.toHaveClass(/open/);
+    await expect(sidebar).not.toHaveClass(/studio-layout__rail--open/);
   });
 
   test('mobile sidebar closes on navigation', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    // Open sidebar
-    await page.click('.menu-toggle');
-    const sidebar = page.locator('.studio-sidebar');
-    await expect(sidebar).toHaveClass(/open/);
+    await page.click('.studio-topbar__menu');
+    const sidebar = page.locator('.studio-layout__rail--mobile');
+    await expect(sidebar).toHaveClass(/studio-layout__rail--open/);
 
-    // Click a nav link
-    await page.click('a[href="/studio/content"]');
+    // Click a nav link in the mobile drawer (scope to mobile rail)
+    await sidebar.locator('a[href="/studio/content"]').click();
     await page.waitForURL(/\/studio\/content/);
 
-    // Sidebar should close after navigation
-    await expect(sidebar).not.toHaveClass(/open/);
+    await expect(sidebar).not.toHaveClass(/studio-layout__rail--open/);
   });
 
   test('mobile close button closes sidebar', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    // Open sidebar
-    await page.click('.menu-toggle');
-    const sidebar = page.locator('.studio-sidebar');
-    await expect(sidebar).toHaveClass(/open/);
+    await page.click('.studio-topbar__menu');
+    const sidebar = page.locator('.studio-layout__rail--mobile');
+    await expect(sidebar).toHaveClass(/studio-layout__rail--open/);
 
-    // Click close button
-    await page.click('.sidebar-close');
-    await expect(sidebar).not.toHaveClass(/open/);
+    await page.click('.studio-drawer__close');
+    await expect(sidebar).not.toHaveClass(/studio-layout__rail--open/);
   });
 });
 
