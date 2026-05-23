@@ -10,9 +10,9 @@
   const { children, level = 3, class: className, ...restProps }: Props = $props();
 </script>
 
-<div class="card-title {className}" role="heading" aria-level={level} {...restProps}>
+<svelte:element this={`h${level}`} class="card-title {className ?? ''}" {...restProps}>
   {@render children()}
-</div>
+</svelte:element>
 
 <style>
   .card-title {
