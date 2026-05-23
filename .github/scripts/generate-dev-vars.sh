@@ -57,6 +57,15 @@ R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
 R2_BUCKET_MEDIA=${R2_BUCKET_MEDIA}
 EOF
       ;;
+    "organization-api")
+      # Org API needs Stripe for tier price/subscription lookups on the
+      # studio /settings/revenue-share + /settings/monetisation pages.
+      # Without it, TierService throws "STRIPE_SECRET_KEY not configured"
+      # and the agreement specs + several settings tests cascade-fail.
+      cat >> "${VARS_FILE}" << EOF
+STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+EOF
+      ;;
     "media-api")
       cat >> "${VARS_FILE}" << EOF
 RUNPOD_API_KEY=${RUNPOD_API_KEY}
