@@ -818,6 +818,20 @@ jobs:
           echo "::add-mask::$DATABASE_URL"
           pnpm --filter @codex/database db:migrate
 
+      # Seed test users and commerce data — several E2E specs (subscription
+      # cancel, subscription-cross-device, auth-flow session-persists) rely
+      # on `viewer@test.com` + `creator@test.com` existing with known
+      # passwords and a pre-existing ACTIVE subscription on Studio Alpha.
+      # Pooled URL is fine here (no DDL).
+      - name: Seed test users + commerce data
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DB_METHOD: NEON_BRANCH
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          pnpm --filter @codex/database db:seed || echo "::warning::db:seed failed — seed-dependent specs will skip"
+
       # Build all packages and workers (including Auth Worker and dependencies)
       - name: Build all packages and workers with Turborepo
         run: |
