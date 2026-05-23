@@ -71,7 +71,10 @@
   const isAuthorized = $derived(
     data.userRole === 'admin' || data.userRole === 'owner'
   );
-  const orgId = $derived(data.org.id);
+  // Optional chain: `data.org` is undefined on first render under ssr=false
+  // (server-load hasn't yet streamed); throwing here breaks all downstream
+  // deriveds and the page never mounts (heading invisible to E2E).
+  const orgId = $derived(data.org?.id);
 
   // ─── Data queries ─────────────────────────────────────────────────────────
 
