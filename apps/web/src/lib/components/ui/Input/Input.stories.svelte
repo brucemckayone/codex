@@ -59,16 +59,16 @@
 <Story name="Form Example">
   <div style="display: flex; flex-direction: column; gap: 1rem; max-width: 300px;">
     <div style="display: flex; flex-direction: column; gap: 0.25rem;">
-      <label style="font-size: 0.875rem; font-weight: 500;">Email</label>
-      <Input type="email" placeholder="you@example.com" />
+      <label for="form-example-email" style="font-size: 0.875rem; font-weight: 500;">Email</label>
+      <Input id="form-example-email" type="email" placeholder="you@example.com" />
     </div>
     <div style="display: flex; flex-direction: column; gap: 0.25rem;">
-      <label style="font-size: 0.875rem; font-weight: 500;">Password</label>
-      <Input type="password" placeholder="Enter password" />
+      <label for="form-example-password" style="font-size: 0.875rem; font-weight: 500;">Password</label>
+      <Input id="form-example-password" type="password" placeholder="Enter password" />
     </div>
     <div style="display: flex; flex-direction: column; gap: 0.25rem;">
-      <label style="font-size: 0.875rem; font-weight: 500;">Username</label>
-      <Input placeholder="username" error="Username is already taken" />
+      <label for="form-example-username" style="font-size: 0.875rem; font-weight: 500;">Username</label>
+      <Input id="form-example-username" placeholder="username" error="Username is already taken" />
     </div>
   </div>
 </Story>

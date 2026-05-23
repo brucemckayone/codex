@@ -915,10 +915,10 @@ jobs:
         run: |
           echo "::add-mask::$DATABASE_URL"
           cd apps/web
-          pnpm wrangler dev --env test --port 8787 --local &
+          pnpm wrangler dev --env test --port 5173 --local &
           echo $! > wrangler.pid
           # Wait for server to be ready
-          timeout 60 bash -c 'until curl -f http://localhost:8787 > /dev/null 2>&1; do sleep 1; done'
+          timeout 60 bash -c 'until curl -f http://localhost:5173 > /dev/null 2>&1; do sleep 1; done'
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
 
@@ -937,7 +937,7 @@ jobs:
           curl -f http://localhost:42069/health || exit 1
           curl -f http://localhost:42074/health || exit 1
           curl -f http://localhost:42072/health || exit 1
-          curl -f http://localhost:8787 || exit 1
+          curl -f http://localhost:5173 || exit 1
           echo "All workers ready"
 
       - name: Run E2E tests
@@ -952,7 +952,7 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
-          PLAYWRIGHT_BASE_URL: http://localhost:8787
+          PLAYWRIGHT_BASE_URL: http://localhost:5173
         run: |
           echo "::add-mask::$DATABASE_URL"
           echo "::add-mask::$STRIPE_SECRET_KEY"
@@ -963,7 +963,7 @@ jobs:
       - name: Run Visual tests (generate baselines)
         env:
           CI: "true"
-          PLAYWRIGHT_BASE_URL: http://localhost:8787
+          PLAYWRIGHT_BASE_URL: http://localhost:5173
         run: |
           cd apps/web
           pnpm exec playwright test --project=visual --update-snapshots || true

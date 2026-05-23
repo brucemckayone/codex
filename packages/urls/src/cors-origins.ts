@@ -39,9 +39,13 @@ export function corsOriginsFor(env: EnvName): string[] {
         'https://*-staging.revelations.studio',
       ];
     case 'production':
-      // Prod relies entirely on env.WEB_APP_URL + env.API_URL bindings
-      // (no static origins beyond those).
-      return [];
+      // Per-org subdomains (e.g. studio-alpha.revelations.studio) need
+      // wildcard coverage so BetterAuth `trustedOrigins` accepts
+      // client-side auth POSTs from any org subdomain. `WEB_APP_URL` and
+      // `API_URL` cover the platform apex + API host; the wildcard
+      // covers everything else. Audit 2026-05-22 found the previous
+      // empty return left a dormant cross-subdomain 403 risk.
+      return ['https://*.revelations.studio'];
     case 'test':
       // Tests use exact origin per existing config.
       return [];
