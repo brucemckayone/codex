@@ -20,7 +20,7 @@
 
   let { data } = $props();
 
-  const orgId = $derived(data.org.id);
+  const orgId = $derived(data.org?.id);
 
   // Role guard: admin/owner only. Wait for data.userRole to populate —
   // studio is ssr=false, so on first render data.userRole is undefined

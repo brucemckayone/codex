@@ -62,7 +62,7 @@
   });
 
   const isOwner = $derived(data.userRole === 'owner');
-  const orgId = $derived(data.org.id);
+  const orgId = $derived(data.org?.id);
 
   // ─── Client-side queries (SPA pattern) ─────────────────────────────────
   // Page renders instantly with skeletons, data streams in.
