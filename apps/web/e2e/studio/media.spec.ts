@@ -39,8 +39,9 @@ test.describe('Studio Media Page', () => {
       '/media'
     );
 
-    // Page should render (heading or upload UI)
-    await expect(page.locator('h1')).toBeVisible();
+    // The redesigned media page uses a MediaLibraryCommandBar (no <h1>); the
+    // breadcrumb leaf is the page's primary heading.
+    await expect(page.locator('.command-bar .breadcrumb-leaf')).toBeVisible();
   });
 
   test('media page shows upload zone or media grid', async ({ page }) => {
