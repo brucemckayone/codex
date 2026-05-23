@@ -82,7 +82,7 @@
   });
 
   const isOwner = $derived(data.userRole === 'owner');
-  const orgId = $derived(data.org.id);
+  const orgId = $derived(data.org?.id);
 
   // ── URL-derived state ────────────────────────────────────────────────
   const currentUrlPage = $derived(

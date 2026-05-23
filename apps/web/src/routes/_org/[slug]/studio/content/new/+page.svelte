@@ -14,8 +14,8 @@
 
   let { data } = $props();
 
-  const organizationId = $derived(data.org.id);
-  const orgSlug = $derived(data.org.slug);
+  const organizationId = $derived(data.org?.id);
+  const orgSlug = $derived(data.org?.slug);
 
   const breadcrumbs = [
     { label: 'Content', href: '/studio/content' },
