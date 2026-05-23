@@ -968,6 +968,8 @@
   "discover_empty": "No content found. Check back soon.",
   "discover_empty_description": "Try a different search or browse all content.",
   "discover_empty_search_description": "No content matched your search. Try different keywords.",
+  "discover_result_count_one": "1 result",
+  "discover_result_count_other": "{count} results",
   "discover_clear_search": "Clear search",
   "discover_empty_search": "No content found for \"{query}\". Check back soon.",
   "landing_hero_title": "Transform Your Content Journey",

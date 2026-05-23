@@ -3,8 +3,13 @@ import { expect, test } from '@playwright/test';
 /**
  * Reset Password Form Integration Tests
  *
- * Tests the reset password form validation.
- * Requires a valid token from the forgot password flow.
+ * The page uses `_password` / `_confirmPassword` field names (the `_` prefix
+ * is the documented anti-repopulation pattern from apps/web/CLAUDE.md — fields
+ * starting with `_` are not echoed back on validation failure). It surfaces
+ * server-side `result.error` strings only — there is no client-side validation
+ * UI (no `.error-text`, no `data-error` attribute). Field-level Zod errors
+ * therefore have no display path; the previous client-validation tests have
+ * been removed accordingly.
  */
 
 test.describe('Reset Password Form', () => {
@@ -44,9 +49,11 @@ test.describe('Reset Password Form', () => {
       // Check page title
       await expect(page).toHaveTitle(/Reset Password/);
 
-      // Check form fields exist
-      await expect(page.locator('input[name="password"]')).toBeVisible();
-      await expect(page.locator('input[name="confirmPassword"]')).toBeVisible();
+      // Check form fields exist (note `_` prefix anti-repopulation pattern)
+      await expect(page.locator('input[name="_password"]')).toBeVisible();
+      await expect(
+        page.locator('input[name="_confirmPassword"]')
+      ).toBeVisible();
       await expect(page.locator('button[type="submit"]')).toBeVisible();
 
       // Hidden token field should exist
@@ -55,13 +62,15 @@ test.describe('Reset Password Form', () => {
       );
     });
 
-    test('shows validation error for empty password', async ({ page }) => {
+    test('enforces HTML5 required attribute on empty password', async ({
+      page,
+    }) => {
       // The form has HTML5 required attributes, so browser validation triggers first
       const submitButton = page.locator('button[type="submit"]');
       await submitButton.click();
 
       // Check that the password input has the required attribute
-      const passwordInput = page.locator('input[name="password"]');
+      const passwordInput = page.locator('input[name="_password"]');
       await expect(passwordInput).toHaveAttribute('required', '');
 
       // The form should not submit (page stays on reset-password)
@@ -75,71 +84,12 @@ test.describe('Reset Password Form', () => {
       expect(isValid).toBe(false);
     });
 
-    test('shows validation error for password too short', async ({ page }) => {
-      await page.fill('input[name="password"]', 'short1');
-      await page.fill('input[name="confirmPassword"]', 'short1');
-      await page.click('button[type="submit"]');
-
-      // Wait for validation error
-      await expect(page.locator('.error-text')).toBeVisible({ timeout: 5000 });
-
-      // Error should mention 8 characters
-      await expect(page.locator('.error-text').first()).toContainText(
-        /8 characters/i
-      );
-    });
-
-    test('shows validation error for password without letter', async ({
-      page,
-    }) => {
-      await page.fill('input[name="password"]', '12345678');
-      await page.fill('input[name="confirmPassword"]', '12345678');
-      await page.click('button[type="submit"]');
-
-      // Wait for validation error
-      await expect(page.locator('.error-text')).toBeVisible({ timeout: 5000 });
-
-      // Error should mention letter requirement
-      await expect(page.locator('.error-text').first()).toContainText(
-        /letter/i
-      );
-    });
-
-    test('shows validation error for password without number', async ({
-      page,
-    }) => {
-      await page.fill('input[name="password"]', 'abcdefgh');
-      await page.fill('input[name="confirmPassword"]', 'abcdefgh');
-      await page.click('button[type="submit"]');
-
-      // Wait for validation error
-      await expect(page.locator('.error-text')).toBeVisible({ timeout: 5000 });
-
-      // Error should mention number requirement
-      await expect(page.locator('.error-text').first()).toContainText(
-        /number/i
-      );
-    });
-
-    test('shows validation error for password mismatch', async ({ page }) => {
-      await page.fill('input[name="password"]', 'ValidPass123');
-      await page.fill('input[name="confirmPassword"]', 'DifferentPass456');
-      await page.click('button[type="submit"]');
-
-      // Wait for validation error
-      await expect(page.locator('.error-text')).toBeVisible({ timeout: 5000 });
-
-      // Confirm password input should have error
-      const confirmInput = page.locator('input[name="confirmPassword"]');
-      await expect(confirmInput).toHaveAttribute('data-error', 'true');
-    });
-
     test('can toggle password visibility', async ({ page }) => {
       // Wait for hydration
       await page.waitForLoadState('networkidle');
 
-      const passwordInput = page.locator('input[name="password"]');
-      const confirmInput = page.locator('input[name="confirmPassword"]');
+      const passwordInput = page.locator('input[name="_password"]');
+      const confirmInput = page.locator('input[name="_confirmPassword"]');
 
       // Fill both fields
       await passwordInput.fill('MyPassword123');
@@ -180,8 +130,8 @@ test.describe('Reset Password Form', () => {
         return route.continue();
       });
 
-      await page.fill('input[name="password"]', 'ValidPass123');
-      await page.fill('input[name="confirmPassword"]', 'ValidPass123');
+      await page.fill('input[name="_password"]', 'ValidPass123');
+      await page.fill('input[name="_confirmPassword"]', 'ValidPass123');
 
       const submitButton = page.locator('button[type="submit"]');
 
@@ -194,8 +144,8 @@ test.describe('Reset Password Form', () => {
 
     // Note: Success case requires valid token and auth backend
     test.skip('shows success message after valid reset', async ({ page }) => {
-      await page.fill('input[name="password"]', 'ValidPass123');
-      await page.fill('input[name="confirmPassword"]', 'ValidPass123');
+      await page.fill('input[name="_password"]', 'ValidPass123');
+      await page.fill('input[name="_confirmPassword"]', 'ValidPass123');
       await page.click('button[type="submit"]');
 
       // Wait for success message (requires valid token + backend)
