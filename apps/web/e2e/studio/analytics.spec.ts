@@ -117,18 +117,15 @@ test.describe('Studio Analytics - Zero State', () => {
       })
     ).toBeVisible({ timeout: 20000 });
 
-    // Preset row — role="group" wrapping four preset buttons.
-    const preset30d = page.getByRole('button', { name: 'Last 30 days' });
+    // Preset row uses role="tab" + aria-selected (not button + aria-pressed);
+    // labels are "7 days" / "30 days" / "90 days" / "Year".
+    const preset30d = page.getByRole('tab', { name: '30 days' });
     await expect(preset30d).toBeVisible();
-    await expect(preset30d).toHaveAttribute('aria-pressed', 'true');
+    await expect(preset30d).toHaveAttribute('aria-selected', 'true');
 
-    await expect(
-      page.getByRole('button', { name: 'Last 7 days' })
-    ).toBeVisible();
-    await expect(
-      page.getByRole('button', { name: 'Last 90 days' })
-    ).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Last year' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: '7 days' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: '90 days' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Year' })).toBeVisible();
   });
 });
 
@@ -179,7 +176,7 @@ test.describe('Studio Analytics - Command Bar Presets', () => {
     await injectSharedStudioAuth(page, sharedAuth);
   });
 
-  test('clicking Last 7 days updates URL with startDate + endDate', async ({
+  test('clicking 7 days preset updates URL with startDate + endDate', async ({
     page,
   }) => {
     await navigateToStudioPage(
@@ -188,12 +185,13 @@ test.describe('Studio Analytics - Command Bar Presets', () => {
       '/analytics'
     );
 
-    // Wait for the page to render the command bar.
-    await expect(page.getByRole('button', { name: 'Last 7 days' })).toBeVisible(
-      { timeout: 20000 }
-    );
+    // AnalyticsCommandBar uses tab role + aria-selected (not button +
+    // aria-pressed) — label is "7 days", not "Last 7 days".
+    await expect(page.getByRole('tab', { name: '7 days' })).toBeVisible({
+      timeout: 20000,
+    });
 
-    await page.getByRole('button', { name: 'Last 7 days' }).click();
+    await page.getByRole('tab', { name: '7 days' }).click();
 
     // URL must carry both startDate and endDate.
     await page.waitForURL(/startDate=\d{4}-\d{2}-\d{2}/, { timeout: 10000 });
@@ -201,8 +199,9 @@ test.describe('Studio Analytics - Command Bar Presets', () => {
     expect(page.url()).toMatch(/endDate=\d{4}-\d{2}-\d{2}/);
 
     // The 7d preset should now be the active one.
-    await expect(
-      page.getByRole('button', { name: 'Last 7 days' })
-    ).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('tab', { name: '7 days' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
   });
 });
