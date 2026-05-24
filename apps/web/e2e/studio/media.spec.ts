@@ -51,23 +51,16 @@ test.describe('Studio Media Page', () => {
       '/media'
     );
 
-    // Should show either an upload zone, empty state, or media grid
-    const uploadZone = page.locator('.drop-zone, .upload-zone, [data-upload]');
+    // The redesigned media library uses `.tile-grid` for populated state and
+    // EmptyState (`.empty-state`) for new orgs. Upload is a viewport-wide
+    // drop overlay (not a visible inline drop zone), so the test asserts the
+    // terminal data-bound surface only.
     const emptyState = page.locator('.empty-state');
-    const mediaGrid = page.locator('.media-grid, .media-list, table');
+    const tileGrid = page.locator('.tile-grid');
 
-    const hasUpload = await uploadZone
-      .first()
-      .isVisible()
-      .catch(() => false);
-    const hasEmpty = await emptyState.isVisible().catch(() => false);
-    const hasGrid = await mediaGrid
-      .first()
-      .isVisible()
-      .catch(() => false);
-
-    // At least one UI state should be visible
-    expect(hasUpload || hasEmpty || hasGrid).toBeTruthy();
+    await expect(emptyState.or(tileGrid).first()).toBeVisible({
+      timeout: 15000,
+    });
   });
 
   test('media page shows empty state for new org', async ({ page }) => {
@@ -77,17 +70,9 @@ test.describe('Studio Media Page', () => {
       '/media'
     );
 
-    // New org should have no media — look for empty state or upload prompt
-    const emptyState = page.locator('.empty-state');
-    const uploadPrompt = page.locator('.drop-zone, .upload-zone');
-
-    const hasEmpty = await emptyState.isVisible().catch(() => false);
-    const hasUploadPrompt = await uploadPrompt
-      .first()
-      .isVisible()
-      .catch(() => false);
-
-    // One of these should show for a new org
-    expect(hasEmpty || hasUploadPrompt).toBeTruthy();
+    // New org has no media — the redesigned page shows an EmptyState (.empty-state)
+    // and upload is via a viewport-wide drop overlay (not a visible inline
+    // drop zone). Wait for the empty state to appear once data resolves.
+    await expect(page.locator('.empty-state')).toBeVisible({ timeout: 15000 });
   });
 });

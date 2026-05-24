@@ -86,8 +86,17 @@ test.describe('Studio Settings - General', () => {
       '/settings'
     );
 
+    // Timezone is now a Melt UI Select (custom combobox). The trigger is a
+    // <button role="combobox">, the menu is portalled to <body> and its
+    // options have role="option". Click the trigger to open the menu, then
+    // count rendered options.
     const timezone = page.getByRole('combobox', { name: 'Timezone' });
-    const options = timezone.locator('option');
+    await expect(timezone).toBeVisible();
+    await timezone.click();
+
+    const options = page.getByRole('option');
+    // Wait until the menu is rendered with at least one option.
+    await expect(options.first()).toBeVisible({ timeout: 5000 });
     const count = await options.count();
 
     // Should have UTC plus several timezones
