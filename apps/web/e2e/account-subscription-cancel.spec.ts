@@ -143,9 +143,12 @@ test.describe
       // Period-end text is visible BEFORE cancel (baseline for step 6).
       // Matches either the active-state label ("Current period ends …") or the
       // cancelling-state label ("This subscription will end on …").
-      const periodEndLocator = card.locator(
-        'text=/Current period ends|will end on/i'
-      );
+      // Post-cancel renders BOTH "This subscription will end on …" banner
+      // AND the static "Current period ends …" line in the meta block; use
+      // .first() to pick whichever appears (either signals success).
+      const periodEndLocator = card
+        .locator('text=/Current period ends|will end on/i')
+        .first();
       await expect(periodEndLocator).toBeVisible({ timeout: 5000 });
 
       const cancelBtn = card.getByRole('button', {
@@ -183,7 +186,7 @@ test.describe
 
       // ASSERT: currentPeriodEnd still visible (revocation is at period end).
       await expect(
-        card.locator('text=/Current period ends|will end on/i')
+        card.locator('text=/Current period ends|will end on/i').first()
       ).toBeVisible();
 
       page.off('framenavigated', onFrameNav);

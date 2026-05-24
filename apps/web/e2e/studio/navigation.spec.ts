@@ -89,42 +89,49 @@ test.describe('Studio Navigation - Sidebar', () => {
   // `force: true` bypasses Playwright's stability re-check, which fails when
   // the desktop rail expands on hover during the actionability check: the
   // link shifts mid-action and the click misses.
+  // Hover the rail first to expand it (desktop rail collapses by default and
+  // expands on pointer-enter). A bare click would race against the layout
+  // shift. After hover the rail is in its full-width state and the link is
+  // a stable hit target. Use `page.goto` URL match poll after click since
+  // SvelteKit SPA navigation doesn't fire a `load` event.
+  async function clickRailAndExpect(
+    page: import('@playwright/test').Page,
+    href: string,
+    pattern: RegExp
+  ) {
+    const link = page.locator(railLink(href));
+    await link.hover();
+    await link.click();
+    await expect(page).toHaveURL(pattern, { timeout: 10_000 });
+  }
+
   test('clicking Content nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    await page.locator(railLink('/studio/content')).click({ force: true });
-    await expect(page).toHaveURL(/\/studio\/content/);
-
-    const contentLink = page.locator(railLink('/studio/content'));
-    await expect(contentLink).toHaveClass(/active/);
+    await clickRailAndExpect(page, '/studio/content', /\/studio\/content/);
+    await expect(page.locator(railLink('/studio/content'))).toHaveClass(
+      /active/
+    );
   });
 
   test('clicking Analytics nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
-
-    await page.locator(railLink('/studio/analytics')).click({ force: true });
-    await expect(page).toHaveURL(/\/studio\/analytics/);
+    await clickRailAndExpect(page, '/studio/analytics', /\/studio\/analytics/);
   });
 
   test('clicking Team nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
-
-    await page.locator(railLink('/studio/team')).click({ force: true });
-    await expect(page).toHaveURL(/\/studio\/team/);
+    await clickRailAndExpect(page, '/studio/team', /\/studio\/team/);
   });
 
   test('clicking Settings nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
-
-    await page.locator(railLink('/studio/settings')).click({ force: true });
-    await expect(page).toHaveURL(/\/studio\/settings/);
+    await clickRailAndExpect(page, '/studio/settings', /\/studio\/settings/);
   });
 
   test('clicking Billing nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
-
-    await page.locator(railLink('/studio/billing')).click({ force: true });
-    await expect(page).toHaveURL(/\/studio\/billing/);
+    await clickRailAndExpect(page, '/studio/billing', /\/studio\/billing/);
   });
 });
 
