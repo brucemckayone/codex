@@ -61,7 +61,7 @@ test.describe('Agreements — Decline + re-propose', () => {
     await expect(proposeDialog).toBeVisible({ timeout: 5000 });
     await proposeDialog.getByRole('button', { name: /send proposal/i }).click();
     await expect(
-      ownerPage.locator('[role="status"]').filter({ hasText: /Proposal sent/i })
+      ownerPage.locator('[role="alert"]').filter({ hasText: /Proposal sent/i })
     ).toBeVisible({ timeout: 10_000 });
 
     // ─── Creator declines ───────────────────────────────────────────
@@ -84,7 +84,7 @@ test.describe('Agreements — Decline + re-propose', () => {
 
     // Toast confirms decline.
     await expect(
-      creatorPage.locator('[role="status"]').filter({ hasText: /declined/i })
+      creatorPage.locator('[role="alert"]').filter({ hasText: /declined/i })
     ).toBeVisible({ timeout: 10_000 });
 
     // Past section now lists the declined proposal once expanded.
@@ -125,7 +125,7 @@ test.describe('Agreements — Decline + re-propose', () => {
       .getByRole('button', { name: /send proposal/i })
       .click();
     await expect(
-      ownerPage.locator('[role="status"]').filter({ hasText: /Proposal sent/i })
+      ownerPage.locator('[role="alert"]').filter({ hasText: /Proposal sent/i })
     ).toBeVisible({ timeout: 10_000 });
 
     await ownerCtx.close();

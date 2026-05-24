@@ -33,15 +33,28 @@ const listPendingProposalsArgsSchema = z.object({
   proposedByRole: z.enum(['owner', 'creator']).optional(),
 });
 
+// `creatorId` is a BetterAuth-style alphanumeric nanoid (the column type
+// in `creator_organization_agreements` / `agreement_proposals` is
+// `text` referencing `users.id`). Validating with `.uuid()` silently
+// 400s every real request because BetterAuth ids look like
+// `GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b`. See feedback note
+// `zod-v4-uuid-strictness` in MEMORY.md and the worker-side schema in
+// `packages/validation/src/schemas/agreements.ts`.
+const creatorIdSchema = z
+  .string()
+  .min(1, 'Creator ID is required')
+  .max(64, 'Creator ID is too long')
+  .regex(/^[a-zA-Z0-9]+$/, 'Invalid creator ID format');
+
 const getThreadArgsSchema = z.object({
   organizationId: z.string().uuid(),
-  creatorId: z.string().uuid(),
+  creatorId: creatorIdSchema,
   revenueType: revenueTypeSchema,
 });
 
 const proposeAgreementArgsSchema = z.object({
   organizationId: z.string().uuid(),
-  creatorId: z.string().uuid(),
+  creatorId: creatorIdSchema,
   revenueType: revenueTypeSchema,
   sharePercent: z.number().int().min(0).max(10000),
   termMonths: z.number().int().min(1).max(120),
