@@ -26,10 +26,13 @@ export function corsOriginsFor(env: EnvName): string[] {
       return [
         // Auth worker's own URL for E2E tests
         'http://localhost:42069',
-        // Dev app (cross-subdomain cookies)
+        // Dev app — platform apex (cross-subdomain cookies)
         'http://lvh.me:3000',
-        // Vite dev server
         'http://lvh.me:5173',
+        // Org subdomains served by apps/web — required for cross-subdomain
+        // auth POSTs from `<slug>.lvh.me` (studio routes, brand editor, etc.)
+        'http://*.lvh.me:3000',
+        'http://*.lvh.me:5173',
         // Phone/LAN testing (any {ip}.nip.io subdomain)
         'http://*.nip.io',
       ];
@@ -47,7 +50,18 @@ export function corsOriginsFor(env: EnvName): string[] {
       // empty return left a dormant cross-subdomain 403 risk.
       return ['https://*.revelations.studio'];
     case 'test':
-      // Tests use exact origin per existing config.
-      return [];
+      // E2E test stack runs on lvh.me:5173 (apps/web) + worker ports. Studio
+      // and other authenticated cross-subdomain tests navigate to
+      // `<slug>.lvh.me:5173`, so the platform apex AND the org-subdomain
+      // wildcard are both required — without them, BetterAuth's Origin check
+      // rejects auth POSTs with INVALID_ORIGIN.
+      return [
+        // Auth worker's own URL (E2E auth fixture sets Origin = AUTH_URL)
+        'http://localhost:42069',
+        // apps/web — platform apex
+        'http://lvh.me:5173',
+        // apps/web — org subdomains (studio, brand editor, etc.)
+        'http://*.lvh.me:5173',
+      ];
   }
 }

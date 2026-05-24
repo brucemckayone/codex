@@ -8,11 +8,14 @@ describe('corsOriginsFor', () => {
     expect(origins).toContain('https://*.dev.revelations.studio');
   });
 
-  it('development includes lvh.me + nip.io + auth-worker self URL', () => {
+  it('development includes lvh.me apex + org-subdomain wildcards + nip.io + auth-worker self URL', () => {
     const origins = corsOriginsFor('development');
     expect(origins).toContain('http://lvh.me:3000');
-    expect(origins).toContain('http://localhost:42069');
     expect(origins).toContain('http://lvh.me:5173');
+    expect(origins).toContain('http://localhost:42069');
+    // Cross-subdomain coverage for `<slug>.lvh.me` (studio, brand editor)
+    expect(origins).toContain('http://*.lvh.me:3000');
+    expect(origins).toContain('http://*.lvh.me:5173');
     expect(origins).toContain('http://*.nip.io');
   });
 
@@ -28,8 +31,13 @@ describe('corsOriginsFor', () => {
     ]);
   });
 
-  it('test returns empty (tests use exact origin)', () => {
-    expect(corsOriginsFor('test')).toEqual([]);
+  it('test includes lvh.me apex + org-subdomain wildcard for studio/brand-editor E2E flows', () => {
+    const origins = corsOriginsFor('test');
+    expect(origins).toContain('http://localhost:42069');
+    expect(origins).toContain('http://lvh.me:5173');
+    // Without this wildcard, studio E2E tests navigating to `<slug>.lvh.me:5173`
+    // get rejected by BetterAuth's Origin check and the session never validates.
+    expect(origins).toContain('http://*.lvh.me:5173');
   });
 
   it('returns a new array each call (defensive — no shared mutable state)', () => {
