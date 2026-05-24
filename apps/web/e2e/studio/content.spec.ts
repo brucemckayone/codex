@@ -68,13 +68,17 @@ test.describe('Studio Content - List Page', () => {
       '/content'
     );
 
-    // New org: empty state with create CTA. Populated org: table.
+    // New org: EmptyState (.empty-state). Populated org: the redesigned list
+    // uses an <ol class="row-stack"> (no <table>) and optionally a
+    // ContentFeatureSlab. Wait for the loading skeleton to clear and then
+    // assert one of the two terminal states.
     const emptyState = page.locator('.empty-state');
-    const table = page.locator('table');
+    const rowStack = page.locator('ol.row-stack');
 
-    const hasEmpty = await emptyState.isVisible().catch(() => false);
-    const hasTable = await table.isVisible().catch(() => false);
-    expect(hasEmpty || hasTable).toBeTruthy();
+    // Either state should appear once data resolves.
+    await expect(emptyState.or(rowStack).first()).toBeVisible({
+      timeout: 15000,
+    });
   });
 
   test('create link navigates to new content page', async ({ page }) => {
@@ -116,9 +120,16 @@ test.describe('Studio Content - Create Form', () => {
     // Text fields (label-associated via id/for)
     await expect(page.getByRole('textbox', { name: 'Title' })).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Slug' })).toBeVisible();
+
+    // Description is now a RichTextEditor (Tiptap contenteditable), not a
+    // <textarea>. Multiple RichTextEditors render on the form (description
+    // + future fields can use them), so scope by the description label
+    // section. The label uses `for="description"` which targets the editor's
+    // internal element by id.
+    await expect(page.locator('label[for="description"]')).toBeVisible();
     await expect(
-      page.getByRole('textbox', { name: 'Description' })
-    ).toBeVisible();
+      page.locator('.rich-text-editor__content').first()
+    ).toBeVisible({ timeout: 10000 });
 
     // ContentForm now uses radio cards (not comboboxes) for type + access:
     //  - Content Type: `<fieldset>` + radios per type
@@ -186,9 +197,16 @@ test.describe('Studio Content - Create Submission', () => {
     const uniqueSlug = `e2e-article-${Date.now()}`;
     await page.getByRole('textbox', { name: 'Title' }).fill('E2E Test Article');
     await page.getByRole('textbox', { name: 'Slug' }).fill(uniqueSlug);
-    await page
-      .getByRole('textbox', { name: 'Description' })
-      .fill('Test article description');
+
+    // Description is now a Tiptap RichTextEditor (contenteditable div). Type
+    // into the ProseMirror element instead of filling a <textarea>. Wait for
+    // the editor to mount before typing — onMount initialises it client-side.
+    // Multiple editors may render on the form, so target the first one
+    // (description is the first field after Title/Slug).
+    const editor = page.locator('.rich-text-editor__content').first();
+    await editor.waitFor({ state: 'visible', timeout: 10000 });
+    await editor.click();
+    await page.keyboard.type('Test article description');
 
     // Switch to Article type (doesn't require mediaItemId).
     // Radios are sr-only — `.check({ force: true })` works on hidden radios.

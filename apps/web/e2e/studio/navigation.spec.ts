@@ -81,11 +81,19 @@ test.describe('Studio Navigation - Sidebar', () => {
     await expect(dashboardLink).toHaveClass(/active/);
   });
 
+  // Studio uses `ssr = false` (client-rendered SPA); SvelteKit navigates via
+  // the History API without firing a real `load` event. `waitForURL`'s
+  // default `waitUntil: 'load'` therefore hangs forever — use `toHaveURL`
+  // polling instead.
+  //
+  // `force: true` bypasses Playwright's stability re-check, which fails when
+  // the desktop rail expands on hover during the actionability check: the
+  // link shifts mid-action and the click misses.
   test('clicking Content nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    await page.click(railLink('/studio/content'));
-    await page.waitForURL(/\/studio\/content/);
+    await page.locator(railLink('/studio/content')).click({ force: true });
+    await expect(page).toHaveURL(/\/studio\/content/);
 
     const contentLink = page.locator(railLink('/studio/content'));
     await expect(contentLink).toHaveClass(/active/);
@@ -94,29 +102,29 @@ test.describe('Studio Navigation - Sidebar', () => {
   test('clicking Analytics nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    await page.click(railLink('/studio/analytics'));
-    await page.waitForURL(/\/studio\/analytics/);
+    await page.locator(railLink('/studio/analytics')).click({ force: true });
+    await expect(page).toHaveURL(/\/studio\/analytics/);
   });
 
   test('clicking Team nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    await page.click(railLink('/studio/team'));
-    await page.waitForURL(/\/studio\/team/);
+    await page.locator(railLink('/studio/team')).click({ force: true });
+    await expect(page).toHaveURL(/\/studio\/team/);
   });
 
   test('clicking Settings nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    await page.click(railLink('/studio/settings'));
-    await page.waitForURL(/\/studio\/settings/);
+    await page.locator(railLink('/studio/settings')).click({ force: true });
+    await expect(page).toHaveURL(/\/studio\/settings/);
   });
 
   test('clicking Billing nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    await page.click(railLink('/studio/billing'));
-    await page.waitForURL(/\/studio\/billing/);
+    await page.locator(railLink('/studio/billing')).click({ force: true });
+    await expect(page).toHaveURL(/\/studio\/billing/);
   });
 });
 
@@ -268,19 +276,22 @@ test.describe('Studio Navigation - Settings Tabs', () => {
 
 test.describe('Studio Navigation - Unauthenticated', () => {
   test('unauthenticated user is redirected from studio', async ({ page }) => {
-    // Clear any session cookies left over from earlier describe blocks —
-    // with the (now-correct) `.lvh.me` cookie scope, an `injectOrgCookies`
-    // call from an earlier test would otherwise authenticate this navigation.
+    // Need a REAL org slug so the parent layout resolves (otherwise the
+    // org-not-found path serves an error page at the same URL and the
+    // auth-gate redirect never fires). Create one, then strip the session
+    // cookies so the request is unauthenticated.
+    const member = await registerSharedStudioUser({ orgRole: 'owner' });
     await page.context().clearCookies();
 
-    // Try to access studio without auth — should redirect to login or org home
-    await page.goto('http://some-org.lvh.me:5173/studio', {
-      waitUntil: 'load',
-    });
+    await page.goto(
+      `http://${member.member.organization.slug}.lvh.me:5173/studio`,
+      { waitUntil: 'load' }
+    );
 
-    // Should not be on the studio page
-    const url = page.url();
-    expect(url).not.toContain('/studio');
+    // Studio +layout.server.ts redirects unauthenticated users to /login
+    await expect(page).toHaveURL(/\/login/, { timeout: 10000 });
+
+    await cleanupSharedStudioAuth(member);
   });
 });
 
