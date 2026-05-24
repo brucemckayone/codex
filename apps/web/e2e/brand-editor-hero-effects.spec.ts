@@ -1,7 +1,7 @@
 import { COOKIES } from '@codex/constants';
 import { dbHttp, schema } from '@codex/database';
 import { extractSessionCookie, parseCookieString } from '@codex/test-utils/e2e';
-import { getServiceUrl } from '@codex/urls';
+import { buildServiceUrl as getServiceUrl } from '@codex/urls';
 import { expect, test } from '@playwright/test';
 
 /**
