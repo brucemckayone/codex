@@ -177,10 +177,16 @@ test.describe('Agreements — Terminate', () => {
         timeout: 15_000,
       });
 
-      // Detail page exposes a Terminate button.
+      // Detail page exposes a Terminate button — first click reveals the
+      // confirmation panel; the second click on "Confirm terminate" inside
+      // that panel actually submits. Two-step pattern matches the danger-
+      // mutation UX used elsewhere in the studio.
       await creatorPage
-        .getByRole('button', { name: /terminate/i })
+        .getByRole('button', { name: /^Terminate$/i })
         .first()
+        .click();
+      await creatorPage
+        .getByRole('button', { name: /confirm terminate/i })
         .click();
 
       await expect(

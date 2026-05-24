@@ -39,6 +39,7 @@
     declineAgreement,
     getAgreementThread,
     listActiveAgreements,
+    listPendingProposals,
     proposeAgreement,
     terminateAgreement,
     withdrawAgreement,
@@ -81,6 +82,14 @@
   // Active agreements for the whole org (both revenue types).
   const agreementsQuery = $derived(
     isAuthorized ? listActiveAgreements({ organizationId: orgId }) : null
+  );
+
+  // Open proposals for the whole org. Both owner-proposed AND
+  // creator-countered rows — the AgreementCard derives the row state
+  // from the proposal's `proposedByRole` to label the CTA correctly
+  // ("View thread" vs "Review counter").
+  const pendingProposalsQuery = $derived(
+    isAuthorized ? listPendingProposals({ organizationId: orgId }) : null
   );
 
   // Org members — needed to render one card per team creator. We filter
@@ -129,6 +138,42 @@
     const map = new Map<string, ActiveAgreementRow>();
     for (const a of activeAgreements) {
       map.set(`${a.creatorId}:${a.revenueType}`, a);
+    }
+    return map;
+  });
+
+  /**
+   * Build a lookup of pending proposals (open status, either side) keyed on
+   * `${creatorId}:${revenueType}`. AgreementCard reads this to surface
+   * "Review counter" vs "View thread" CTAs and the awaiting-action banners.
+   * At most one open proposal can exist per (creatorId, revenueType) — the
+   * service supersedes siblings inside the accept transaction.
+   */
+  const pendingByCreatorAndType = $derived.by(() => {
+    const items = pendingProposalsQuery?.current?.items ?? [];
+    const map = new Map<
+      string,
+      {
+        sharePercent: number;
+        termMonths: number | null;
+        proposedByRole: 'owner' | 'creator';
+        waitingOnRole: 'owner' | 'creator';
+        roundNumber: number;
+      }
+    >();
+    for (const p of items) {
+      const proposedByRole = (p.proposedByRole === 'creator'
+        ? 'creator'
+        : 'owner') as 'owner' | 'creator';
+      const waitingOnRole: 'owner' | 'creator' =
+        proposedByRole === 'owner' ? 'creator' : 'owner';
+      map.set(`${p.creatorId}:${p.revenueType}`, {
+        sharePercent: p.proposedCreatorSharePercent,
+        termMonths: p.proposedTermMonths,
+        proposedByRole,
+        waitingOnRole,
+        roundNumber: p.roundNumber,
+      });
     }
     return map;
   });
@@ -244,7 +289,10 @@
       `${proposeCreatorName} will be notified.`
     );
     proposeDialogOpen = false;
-    await agreementsQuery?.refresh();
+    await Promise.all([
+      agreementsQuery?.refresh(),
+      pendingProposalsQuery?.refresh(),
+    ]);
   }
 
   // ─── Thread dialog state ─────────────────────────────────────────────────
@@ -285,7 +333,10 @@
       await acceptAgreement({ proposalId });
       toast.success('Agreement accepted', 'The new agreement is now active.');
       threadDialogOpen = false;
-      await agreementsQuery?.refresh();
+      await Promise.all([
+      agreementsQuery?.refresh(),
+      pendingProposalsQuery?.refresh(),
+    ]);
     } catch (err) {
       toast.error(
         'Could not accept proposal',
@@ -299,7 +350,10 @@
       await declineAgreement({ proposalId });
       toast.info('Proposal declined', `The creator will be notified.`);
       threadDialogOpen = false;
-      await agreementsQuery?.refresh();
+      await Promise.all([
+      agreementsQuery?.refresh(),
+      pendingProposalsQuery?.refresh(),
+    ]);
     } catch (err) {
       toast.error(
         'Could not decline proposal',
@@ -313,7 +367,10 @@
       await withdrawAgreement({ proposalId });
       toast.info('Proposal withdrawn');
       threadDialogOpen = false;
-      await agreementsQuery?.refresh();
+      await Promise.all([
+      agreementsQuery?.refresh(),
+      pendingProposalsQuery?.refresh(),
+    ]);
     } catch (err) {
       toast.error(
         'Could not withdraw proposal',
@@ -364,7 +421,10 @@
     });
     toast.success('Counter sent', `${counterCreatorName} will be notified.`);
     counterDialogOpen = false;
-    await agreementsQuery?.refresh();
+    await Promise.all([
+      agreementsQuery?.refresh(),
+      pendingProposalsQuery?.refresh(),
+    ]);
   }
 
   // ─── Terminate handler ────────────────────────────────────────────────────
@@ -373,7 +433,10 @@
     try {
       await terminateAgreement({ agreementId });
       toast.success('Agreement terminated');
-      await agreementsQuery?.refresh();
+      await Promise.all([
+      agreementsQuery?.refresh(),
+      pendingProposalsQuery?.refresh(),
+    ]);
     } catch (err) {
       toast.error(
         'Could not terminate agreement',
@@ -386,6 +449,10 @@
 
   function getAgreementFor(creatorId: string, revenueType: RevenueType) {
     return activeByCreatorAndType.get(`${creatorId}:${revenueType}`) ?? null;
+  }
+
+  function getPendingFor(creatorId: string, revenueType: RevenueType) {
+    return pendingByCreatorAndType.get(`${creatorId}:${revenueType}`) ?? null;
   }
 
   function getCreatorName(creatorId: string): string {
@@ -466,6 +533,8 @@
               {creator}
               subscriptionAgreement={getAgreementFor(creator.id, 'subscription')}
               contentPurchaseAgreement={getAgreementFor(creator.id, 'content_purchase')}
+              pendingSubscriptionProposal={getPendingFor(creator.id, 'subscription')}
+              pendingContentPurchaseProposal={getPendingFor(creator.id, 'content_purchase')}
               onPropose={(revType) =>
                 openProposeDialog(creator.id, creator.name, revType, 'propose')}
               onAmend={(revType, currentShare) =>

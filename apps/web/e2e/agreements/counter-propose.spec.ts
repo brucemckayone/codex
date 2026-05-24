@@ -91,21 +91,29 @@ test.describe('Agreements — Counter-propose round-trip', () => {
       timeout: 15_000,
     });
 
-    // The detail page exposes a counter-propose form. Find the share input
-    // (typically a slider/number) and the submit button.
-    const counterShare = creatorPage
-      .getByRole('spinbutton', { name: /share|creator share/i })
-      .or(creatorPage.locator('input[type="number"]'))
-      .first();
-    if ((await counterShare.count()) > 0) {
-      // Try slider-text-input first, fall back to a raw number input.
-      await counterShare.fill('40');
-    }
+    // The detail page surfaces an inline "Counter" button in the
+    // NegotiationThread; clicking it opens the CounterProposalDialog.
+    await creatorPage
+      .getByRole('button', { name: /^Counter$/i })
+      .first()
+      .click();
 
-    const submitCounter = creatorPage
-      .getByRole('button', { name: /send counter|submit counter|counter/i })
-      .first();
-    await submitCounter.click();
+    const counterDialog = creatorPage.getByRole('dialog');
+    await expect(counterDialog).toBeVisible({ timeout: 5000 });
+
+    // Drive the BrandSlider range input (id=counter-share inside
+    // CounterProposalDialog) — `.fill` on a range input is a no-op, so set
+    // `value` directly and dispatch a real `input` event for Svelte 5's
+    // `oninput` listener.
+    await counterDialog.locator('input#counter-share').evaluate((el) => {
+      const input = el as HTMLInputElement;
+      input.value = '40';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await counterDialog
+      .getByRole('button', { name: /send counter/i })
+      .click();
 
     // Toast confirming counter sent.
     await expect(
