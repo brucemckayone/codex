@@ -76,7 +76,7 @@ test.describe('Agreements — Multi-creator pie math', () => {
         await dialog.getByRole('button', { name: /send proposal/i }).click();
         await expect(
           ownerPage
-            .locator('[role="status"]')
+            .locator('[role="alert"]')
             .filter({ hasText: /Proposal sent/i })
         ).toBeVisible({ timeout: 10_000 });
 
@@ -101,7 +101,7 @@ test.describe('Agreements — Multi-creator pie math', () => {
           .click();
         await expect(
           creatorPage
-            .locator('[role="status"]')
+            .locator('[role="alert"]')
             .filter({ hasText: /Agreement accepted/i })
         ).toBeVisible({ timeout: 10_000 });
       }

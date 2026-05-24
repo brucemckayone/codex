@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { uuidSchema } from '../primitives';
+import { userIdSchema, uuidSchema } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
 
 /**
@@ -116,7 +116,12 @@ export type AgreementIdParamInput = z.infer<typeof agreementIdParamSchema>;
  * route layer doesn't re-check ownership.
  */
 export const proposeAgreementInputSchema = z.object({
-  creatorId: uuidSchema,
+  // BetterAuth-style user id (alphanumeric nanoid, not RFC 4122 UUID).
+  // The DB column is `creator_id text` referencing `users.id`. Using
+  // `uuidSchema` here silently 400s every real request because BetterAuth
+  // ids look like `GV762T8n0fCnqy3qxRvoMjJZ7hTTd44b`. See feedback note
+  // `zod-v4-uuid-strictness` in MEMORY.md.
+  creatorId: userIdSchema,
   revenueType: agreementRevenueTypeEnum,
   sharePercent: sharePercentSchema,
   termMonths: termMonthsSchema,
@@ -208,7 +213,8 @@ export type TerminateAgreementInput = z.infer<
  */
 export const listAgreementsQuerySchema = paginationSchema.extend({
   organizationId: uuidSchema.optional(),
-  creatorId: uuidSchema.optional(),
+  // BetterAuth user id, not UUID — see note on proposeAgreementInputSchema.
+  creatorId: userIdSchema.optional(),
   revenueType: agreementRevenueTypeEnum.optional(),
 });
 export type ListAgreementsQueryInput = z.infer<
@@ -233,7 +239,8 @@ export type GetNegotiationThreadQueryInput = z.infer<
  * GET /agreements/threads/:creatorId — owner-view thread params.
  */
 export const ownerThreadParamSchema = z.object({
-  creatorId: uuidSchema,
+  // BetterAuth user id, not UUID — see note on proposeAgreementInputSchema.
+  creatorId: userIdSchema,
 });
 export type OwnerThreadParamInput = z.infer<typeof ownerThreadParamSchema>;
 
