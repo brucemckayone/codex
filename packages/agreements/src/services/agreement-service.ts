@@ -1119,6 +1119,39 @@ export class AgreementService extends BaseService {
   }
 
   /**
+   * Creator's terminated/past agreements across all orgs (`status='terminated'`).
+   * Powers the creator-side `/studio/negotiations` "Past" section so users can
+   * see agreements they (or the org owner) have terminated. Without this,
+   * terminated agreements would be invisible to the creator: they drop out of
+   * `getActiveAgreementsForCreator` once `terminatedAt <= now`, and the
+   * proposal row that originated the agreement stays in `accepted` status —
+   * so the existing `getProposalsForCreator(['declined','withdrawn','superseded'])`
+   * enumeration never surfaces them either.
+   *
+   * Optional `since` cutoff lets callers bound the result set (e.g. last 90
+   * days for the portfolio view). Default: no cutoff.
+   */
+  async getTerminatedAgreementsForCreator(input: {
+    creatorId: string;
+    since?: Date;
+  }): Promise<CreatorOrganizationAgreement[]> {
+    try {
+      return await this.db.query.creatorOrganizationAgreements.findMany({
+        where: and(
+          eq(creatorOrganizationAgreements.creatorId, input.creatorId),
+          eq(creatorOrganizationAgreements.status, 'terminated'),
+          input.since
+            ? gt(creatorOrganizationAgreements.terminatedAt, input.since)
+            : undefined
+        ),
+        orderBy: [desc(creatorOrganizationAgreements.terminatedAt)],
+      });
+    } catch (error) {
+      this.handleError(error, 'getTerminatedAgreementsForCreator');
+    }
+  }
+
+  /**
    * Find active agreements approaching their term end (Codex-tugez).
    *
    * Filters:
