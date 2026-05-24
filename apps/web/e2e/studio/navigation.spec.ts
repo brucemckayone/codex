@@ -39,75 +39,83 @@ test.describe('Studio Navigation - Sidebar', () => {
 
     await expect(page.locator('.studio-layout')).toBeVisible();
     // Desktop rail is the visible aside. (Mobile aside exists in DOM but
-    // is hidden via `inert` and CSS until the drawer is opened.)
+    // is hidden via `inert` and CSS until the drawer is opened.) The
+    // class is unique to the desktop rail — no aria-label needed to
+    // disambiguate (and the actual aria-label lives on the inner <nav>
+    // inside StudioSidebar, not on the <aside>).
     await expect(
-      page.locator(
-        'aside[aria-label="Studio navigation"].studio-layout__rail--desktop'
-      )
+      page.locator('aside.studio-layout__rail--desktop')
     ).toBeVisible();
     await expect(page.locator('.studio-layout__main')).toBeVisible();
   });
+
+  // Each /studio link appears multiple times in the DOM (topbar brand, desktop
+  // rail brand + nav item, mobile drawer brand + nav item). Scoping to the
+  // desktop rail's nav-item class (`.studio-rail__item`) picks the canonical
+  // sidebar link and avoids strict-mode multi-match violations.
+  const railLink = (href: string) =>
+    `.studio-layout__rail--desktop .studio-rail__item[href="${href}"]`;
 
   test('sidebar shows all nav links for owner', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
     // Base links (all roles)
-    await expect(page.locator('a[href="/studio"]')).toBeVisible();
-    await expect(page.locator('a[href="/studio/content"]')).toBeVisible();
-    await expect(page.locator('a[href="/studio/media"]')).toBeVisible();
-    await expect(page.locator('a[href="/studio/analytics"]')).toBeVisible();
+    await expect(page.locator(railLink('/studio'))).toBeVisible();
+    await expect(page.locator(railLink('/studio/content'))).toBeVisible();
+    await expect(page.locator(railLink('/studio/media'))).toBeVisible();
+    await expect(page.locator(railLink('/studio/analytics'))).toBeVisible();
 
     // Admin links
-    await expect(page.locator('a[href="/studio/team"]')).toBeVisible();
-    await expect(page.locator('a[href="/studio/customers"]')).toBeVisible();
-    await expect(page.locator('a[href="/studio/settings"]')).toBeVisible();
+    await expect(page.locator(railLink('/studio/team'))).toBeVisible();
+    await expect(page.locator(railLink('/studio/customers'))).toBeVisible();
+    await expect(page.locator(railLink('/studio/settings'))).toBeVisible();
 
     // Owner links
-    await expect(page.locator('a[href="/studio/billing"]')).toBeVisible();
+    await expect(page.locator(railLink('/studio/billing'))).toBeVisible();
   });
 
   test('dashboard link is active on studio root', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    const dashboardLink = page.locator('a[href="/studio"]');
+    const dashboardLink = page.locator(railLink('/studio'));
     await expect(dashboardLink).toHaveClass(/active/);
   });
 
   test('clicking Content nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    await page.click('a[href="/studio/content"]');
+    await page.click(railLink('/studio/content'));
     await page.waitForURL(/\/studio\/content/);
 
-    const contentLink = page.locator('a[href="/studio/content"]');
+    const contentLink = page.locator(railLink('/studio/content'));
     await expect(contentLink).toHaveClass(/active/);
   });
 
   test('clicking Analytics nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    await page.click('a[href="/studio/analytics"]');
+    await page.click(railLink('/studio/analytics'));
     await page.waitForURL(/\/studio\/analytics/);
   });
 
   test('clicking Team nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    await page.click('a[href="/studio/team"]');
+    await page.click(railLink('/studio/team'));
     await page.waitForURL(/\/studio\/team/);
   });
 
   test('clicking Settings nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    await page.click('a[href="/studio/settings"]');
+    await page.click(railLink('/studio/settings'));
     await page.waitForURL(/\/studio\/settings/);
   });
 
   test('clicking Billing nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    await page.click('a[href="/studio/billing"]');
+    await page.click(railLink('/studio/billing'));
     await page.waitForURL(/\/studio\/billing/);
   });
 });
@@ -260,6 +268,11 @@ test.describe('Studio Navigation - Settings Tabs', () => {
 
 test.describe('Studio Navigation - Unauthenticated', () => {
   test('unauthenticated user is redirected from studio', async ({ page }) => {
+    // Clear any session cookies left over from earlier describe blocks —
+    // with the (now-correct) `.lvh.me` cookie scope, an `injectOrgCookies`
+    // call from an earlier test would otherwise authenticate this navigation.
+    await page.context().clearCookies();
+
     // Try to access studio without auth — should redirect to login or org home
     await page.goto('http://some-org.lvh.me:5173/studio', {
       waitUntil: 'load',
@@ -272,6 +285,12 @@ test.describe('Studio Navigation - Unauthenticated', () => {
 });
 
 test.describe('Studio Navigation - Role-Based Sidebar', () => {
+  // Same desktop-rail-scoped selector as the Sidebar describe above — the
+  // bare `a[href="..."]` would match topbar brand + drawer copies and trip
+  // Playwright's strict-mode multi-match guard.
+  const railLink = (href: string) =>
+    `.studio-layout__rail--desktop .studio-rail__item[href="${href}"]`;
+
   test('creator role does not see admin or owner sections', async ({
     page,
   }) => {
@@ -279,16 +298,16 @@ test.describe('Studio Navigation - Role-Based Sidebar', () => {
     await navigateToStudio(page, member.organization.slug);
 
     // Base links should be visible
-    await expect(page.locator('a[href="/studio"]')).toBeVisible();
-    await expect(page.locator('a[href="/studio/content"]')).toBeVisible();
+    await expect(page.locator(railLink('/studio'))).toBeVisible();
+    await expect(page.locator(railLink('/studio/content'))).toBeVisible();
 
     // Admin links should NOT be visible
-    await expect(page.locator('a[href="/studio/team"]')).not.toBeVisible();
-    await expect(page.locator('a[href="/studio/customers"]')).not.toBeVisible();
-    await expect(page.locator('a[href="/studio/settings"]')).not.toBeVisible();
+    await expect(page.locator(railLink('/studio/team'))).toHaveCount(0);
+    await expect(page.locator(railLink('/studio/customers'))).toHaveCount(0);
+    await expect(page.locator(railLink('/studio/settings'))).toHaveCount(0);
 
     // Owner links should NOT be visible
-    await expect(page.locator('a[href="/studio/billing"]')).not.toBeVisible();
+    await expect(page.locator(railLink('/studio/billing'))).toHaveCount(0);
   });
 
   test('admin role sees admin section but not owner section', async ({
@@ -298,10 +317,10 @@ test.describe('Studio Navigation - Role-Based Sidebar', () => {
     await navigateToStudio(page, member.organization.slug);
 
     // Admin links should be visible
-    await expect(page.locator('a[href="/studio/team"]')).toBeVisible();
-    await expect(page.locator('a[href="/studio/settings"]')).toBeVisible();
+    await expect(page.locator(railLink('/studio/team'))).toBeVisible();
+    await expect(page.locator(railLink('/studio/settings'))).toBeVisible();
 
     // Owner links should NOT be visible
-    await expect(page.locator('a[href="/studio/billing"]')).not.toBeVisible();
+    await expect(page.locator(railLink('/studio/billing'))).toHaveCount(0);
   });
 });
