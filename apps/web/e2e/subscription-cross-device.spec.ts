@@ -194,15 +194,18 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
     await pageB.goto(`${orgBase}/pricing`);
     await pageB.waitForLoadState('networkidle', { timeout: 15_000 });
 
-    // Wait for tiers + user's current-plan CTA to render. The "Current plan"
-    // button appears on the tier that the user is currently subscribed to.
-    // We bound loosely because subscriptionContext is streamed.
+    // Wait for the active-subscription CTAs to render. The pricing page
+    // post-redesign shows "Change Plan" + "Cancel Subscription" for the
+    // currently-subscribed tier. "Cancel Subscription" is the strongest
+    // signal that this user has an active (not-cancelling) sub on Tab B.
     await expect(
-      pageB.getByRole('button', { name: /current plan/i }).first()
+      pageB.getByRole('button', { name: /^cancel subscription$/i }).first()
     ).toBeVisible({ timeout: 15_000 });
-    // "Reactivate plan" must NOT be present yet — baseline.
+    // "Reactivate" must NOT be present yet — that only shows on a cancelling
+    // sub. Note the button is just "Reactivate" (not "Reactivate plan") per
+    // the same copy pass that removed "Current plan".
     await expect(
-      pageB.getByRole('button', { name: /reactivate plan/i })
+      pageB.getByRole('button', { name: /^Reactivate$/i })
     ).toHaveCount(0);
 
     // ── Tab A: perform the cancel ──────────────────────────────────────────
