@@ -137,7 +137,10 @@ test.describe('Studio Content - Create Form', () => {
     await expect(page.getByRole('radio', { name: 'Video' })).toBeVisible();
     await expect(page.getByRole('radio', { name: 'Article' })).toBeVisible();
 
-    // Price is a text input with a £ prefix span (not a spinbutton).
+    // Price is conditionally rendered — only shows when access type is 'paid'
+    // or 'subscribers' (AccessSection's `showPrice` derived). Click 'paid'
+    // first to surface the input, then assert visible.
+    await page.getByRole('radio', { name: /^Paid/i }).check({ force: true });
     await expect(page.locator('input#price')).toBeVisible();
 
     // Submit button
