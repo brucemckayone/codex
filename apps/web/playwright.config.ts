@@ -22,13 +22,19 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 1,
-  // Cap CI to 1 worker. The auth-worker + shared Neon ephemeral branch can't
-  // sustain parallel user-creation from 2 Playwright workers — same shape as
-  // the vitest e2e contention captured in [e2e-vitest-forks-neon-contention].
-  // Trade-off: ~2x slower wall-clock, but eliminates the CI-flake cluster
-  // (Codex-l13ai). Re-evaluate if/when the auth worker gets a connection-pool
-  // bump or tests are restructured to share users at the file level.
-  workers: process.env.CI ? 1 : undefined,
+  // CI: 2 workers (raised from 1). WP-4 of beads epic Codex-498na — the
+  // shared seeded helper (loginAsSeedViewer + fast-signin) and the
+  // CF-Connecting-IP rate-limit bypass (captureSeededCreatorCookies,
+  // createFreshOwnerWithBypass) have eliminated the auth-worker rate-limit
+  // contention that originally forced workers=1.
+  //
+  // Memory [feedback_e2e_vitest_forks_neon_contention] caps at 2 — going
+  // beyond 2 hits Neon ephemeral-branch contention (3+ parallel writers
+  // race on the same DB). Cap stays at 2.
+  //
+  // Gate criteria for keeping workers=2: ≥99% pass rate across 3 consecutive
+  // green CI runs. Rollback: flip back to 1 if a new flake cluster emerges.
+  workers: process.env.CI ? 2 : undefined,
   reporter: process.env.CI ? 'html' : 'list',
   // Authenticated tests create real users via DB (register→verify→session) which takes
   // 5-25s under parallel load (Neon DB latency). 90s accommodates auth + page load.
