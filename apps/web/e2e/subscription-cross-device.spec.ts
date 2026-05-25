@@ -198,18 +198,17 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
     await pageB.goto(`${orgBase}/pricing`);
     await pageB.waitForLoadState('networkidle', { timeout: 15_000 });
 
-    // Wait for the active-subscription CTAs to render. The pricing page
-    // post-redesign shows "Change Plan" + "Cancel Subscription" for the
-    // currently-subscribed tier. "Cancel Subscription" is the strongest
-    // signal that this user has an active (not-cancelling) sub on Tab B.
+    // Wait for the user's current-plan CTA to render on the org pricing
+    // page. The button text is "Current Plan" (with leading whitespace
+    // from the layout — match via `name: /current plan/i` which permits
+    // the substring match around the visible whitespace).
     await expect(
-      pageB.getByRole('button', { name: /^cancel subscription$/i }).first()
+      pageB.getByRole('button', { name: /current plan/i }).first()
     ).toBeVisible({ timeout: 15_000 });
-    // "Reactivate" must NOT be present yet — that only shows on a cancelling
-    // sub. Note the button is just "Reactivate" (not "Reactivate plan") per
-    // the same copy pass that removed "Current plan".
+    // "Reactivate" must NOT be present yet — that CTA only shows once the
+    // subscription is in the cancelling state.
     await expect(
-      pageB.getByRole('button', { name: /^Reactivate$/i })
+      pageB.getByRole('button', { name: /reactivate/i })
     ).toHaveCount(0);
 
     // ── Tab A: perform the cancel ──────────────────────────────────────────
@@ -239,11 +238,10 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
     });
 
     // Assert: the Reactivate button appears (Tab B has caught up).
-    // Within 2s per task constraint. The server load re-runs and the CTA flips.
-    // Button label is just "Reactivate" — the older "Reactivate plan" wording
-    // was shortened in the post-tier-redesign copy pass.
+    // The pricing tier button text includes leading whitespace from layout
+    // (matches the same /current plan/i substring pattern used pre-cancel).
     await expect(
-      pageB.getByRole('button', { name: /^Reactivate$/i }).first()
+      pageB.getByRole('button', { name: /reactivate/i }).first()
     ).toBeVisible({ timeout: 2000 });
 
     await ctxA.close();
