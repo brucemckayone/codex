@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { loginAsSeedViewer } from './helpers/seed-auth';
 
 /**
  * Cross-Device Subscription Visibility-Change E2E Tests
@@ -31,68 +32,8 @@ import { expect, test } from '@playwright/test';
  *   - SvelteKit dev server on lvh.me:5173 (wildcard DNS → 127.0.0.1)
  */
 
-const SEED_USER = {
-  email: 'viewer@test.com',
-  password: 'Test1234!',
-};
-
 const SEEDED_ORG_SLUG = 'studio-alpha';
 const SEEDED_ORG_NAME = 'Studio Alpha';
-
-async function loginAsSeedViewer(page: import('@playwright/test').Page) {
-  // Use the test-only fast-signin endpoint via lvh.me (cookie Domain=.lvh.me).
-  // Extract Set-Cookie headers from the response and inject directly into
-  // the page's browser context — Playwright's `page.request` cookie jar
-  // does NOT always merge into `page`'s cookie storage reliably (depends
-  // on whether the response has `Secure` + the actual port-pair). Manual
-  // injection is the only reliable path.
-  const response = await page.request.post(
-    'http://lvh.me:42069/api/test/fast-signin',
-    {
-      headers: { 'Content-Type': 'application/json' },
-      data: { email: SEED_USER.email, password: SEED_USER.password },
-    }
-  );
-  if (!response.ok()) {
-    throw new Error(
-      `fast-signin failed: ${response.status()} ${await response.text()}`
-    );
-  }
-  // BetterAuth issues cookies under its default names (`better-auth.session_
-  // token` + `better-auth.session_data`). SvelteKit's hooks.server.ts reads
-  // the session via `COOKIES.SESSION_NAME` ("codex-session"). Inject BOTH:
-  // the original better-auth name (for direct auth-worker calls) AND a
-  // codex-session alias pointing at the same token value (for SvelteKit).
-  // Same pattern as `apps/web/e2e/helpers/studio.ts` `injectOrgCookies`.
-  const setCookieHeaders = response.headersArray().filter((h) =>
-    h.name.toLowerCase() === 'set-cookie'
-  );
-  const browserCookies = setCookieHeaders.flatMap((h) => {
-    const pair = h.value.split(';')[0];
-    if (!pair) return [];
-    const eq = pair.indexOf('=');
-    if (eq < 0) return [];
-    const name = pair.slice(0, eq).trim();
-    const value = pair.slice(eq + 1).trim();
-    const base = {
-      value,
-      domain: '.lvh.me',
-      path: '/',
-      httpOnly: true,
-      secure: false,
-      sameSite: 'Lax' as const,
-      expires: -1,
-    };
-    const cookies = [{ name, ...base }];
-    if (name === 'better-auth.session_token') {
-      cookies.push({ name: 'codex-session', ...base });
-    }
-    return cookies;
-  });
-  await page.context().addCookies(browserCookies);
-  await page.goto('/library');
-  await expect(page).toHaveURL(/\/library/, { timeout: 10_000 });
-}
 
 function subscriptionCard(
   page: import('@playwright/test').Page,

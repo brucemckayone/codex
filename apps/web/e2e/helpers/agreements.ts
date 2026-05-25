@@ -16,7 +16,6 @@
  * for the pie-math test.
  */
 
-import { COOKIES } from '@codex/constants';
 import type { OrgMemberContext } from '@codex/shared-types';
 import {
   authFixture,
@@ -24,6 +23,7 @@ import {
   parseCookieString,
 } from '@codex/test-utils/e2e';
 import type { BrowserContext, Page } from '@playwright/test';
+import { aliasSessionCookies } from './auth-cookies';
 
 export const E2E_BASE_PORT = 5173;
 const PASSWORD = 'Test123!@#';
@@ -36,44 +36,7 @@ export async function injectAgreementCookies(
   ctx: BrowserContext | Page,
   rawCookie: string
 ): Promise<void> {
-  const parsedCookies = parseCookieString(rawCookie);
-  const browserCookies: {
-    name: string;
-    value: string;
-    domain: string;
-    path: string;
-    httpOnly: boolean;
-    secure: boolean;
-    sameSite: 'Lax' | 'Strict' | 'None';
-    expires: number;
-  }[] = [];
-
-  for (const { name, value } of parsedCookies) {
-    browserCookies.push({
-      name,
-      value,
-      domain: '.lvh.me',
-      path: '/',
-      httpOnly: true,
-      secure: false,
-      sameSite: 'Lax',
-      expires: -1,
-    });
-
-    if (name === 'better-auth.session_token') {
-      browserCookies.push({
-        name: COOKIES.SESSION_NAME,
-        value,
-        domain: '.lvh.me',
-        path: '/',
-        httpOnly: true,
-        secure: false,
-        sameSite: 'Lax',
-        expires: -1,
-      });
-    }
-  }
-
+  const browserCookies = aliasSessionCookies(parseCookieString(rawCookie));
   const context = 'context' in ctx ? ctx.context() : ctx;
   await context.clearCookies();
   await context.addCookies(browserCookies);
