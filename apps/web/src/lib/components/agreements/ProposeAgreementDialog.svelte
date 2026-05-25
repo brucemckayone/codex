@@ -208,7 +208,12 @@
       <p class="propose-form__field-hint">
         How long this rate is locked before either side can amend.
       </p>
-      <div class="propose-form__term-options" role="radiogroup" aria-label="Soft-lock term">
+      <div
+        class="propose-form__term-options"
+        role="radiogroup"
+        aria-label="Soft-lock term"
+        data-testid="propose-term-group"
+      >
         {#each termOptions as option (option.value)}
           <label class="propose-form__term-option">
             <input
@@ -218,6 +223,7 @@
               checked={termMonths === option.value}
               onchange={() => (termMonths = option.value)}
               disabled={submitting}
+              data-testid="propose-term-{option.value}"
             />
             <span>{option.label}</span>
           </label>
@@ -240,6 +246,7 @@
         maxlength="500"
         disabled={submitting}
         placeholder="e.g. Initial team agreement for season 1 content."
+        data-testid="propose-note-input"
       ></textarea>
       <span class="propose-form__char-count" aria-live="polite">
         {note.length} / 500
