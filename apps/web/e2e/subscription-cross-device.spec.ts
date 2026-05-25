@@ -238,11 +238,13 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
     });
 
     // Assert: the Reactivate button appears (Tab B has caught up).
-    // The pricing tier button text includes leading whitespace from layout
-    // (matches the same /current plan/i substring pattern used pre-cancel).
+    // The 60s cooldown on cache:org-versions invalidates (apps/web org
+    // layout) means the dispatched visibilitychange will only trigger a
+    // server load re-run on first fire — give the round-trip a generous
+    // budget for KV propagation + Svelte effect resolution.
     await expect(
       pageB.getByRole('button', { name: /reactivate/i }).first()
-    ).toBeVisible({ timeout: 2000 });
+    ).toBeVisible({ timeout: 15_000 });
 
     await ctxA.close();
     await ctxB.close();
