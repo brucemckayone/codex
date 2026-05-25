@@ -23,9 +23,9 @@
 </svelte:head>
 
 <AuthLayout title={m.auth_signup_title()}>
-  <form method="POST" use:enhance={handleSubmit} class="auth-form">
+  <form method="POST" use:enhance={handleSubmit} class="auth-form" data-testid="register-form">
     {#if form?.error}
-      <div class="auth-error" role="alert">
+      <div class="auth-error" role="alert" data-testid="register-form-error">
         <p>{form.error}</p>
       </div>
     {/if}
@@ -39,6 +39,7 @@
         autocomplete="name"
         value={form?.name ?? ''}
         error={form?.errors?.name}
+        data-testid="register-name-input"
       />
     </div>
 
@@ -51,6 +52,7 @@
         autocomplete="email"
         value={form?.email ?? ''}
         error={form?.errors?.email}
+        data-testid="register-email-input"
       />
     </div>
 
@@ -62,6 +64,7 @@
         type="password"
         autocomplete="new-password"
         error={form?.errors?.password}
+        data-testid="register-password-input"
       />
       <p class="auth-hint">At least 8 characters, one letter and one number.</p>
     </div>
@@ -74,10 +77,11 @@
         type="password"
         autocomplete="new-password"
         error={form?.errors?.confirmPassword}
+        data-testid="register-confirm-password-input"
       />
     </div>
 
-    <Button type="submit" {loading} class="auth-submit">
+    <Button type="submit" {loading} class="auth-submit" data-testid="register-submit-button">
       {loading ? m.common_loading() : m.auth_signup_button()}
     </Button>
   </form>

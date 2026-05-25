@@ -36,13 +36,13 @@
 </svelte:head>
 
 <AuthLayout title={m.auth_signin_title()}>
-  <form method="POST" use:enhance={handleSubmit} class="auth-form">
+  <form method="POST" use:enhance={handleSubmit} class="auth-form" data-testid="login-form">
     {#if data.redirect}
       <input type="hidden" name="redirect" value={data.redirect} />
     {/if}
 
     {#if form?.error}
-      <div class="auth-error" role="alert">
+      <div class="auth-error" role="alert" data-testid="login-form-error">
         <p>{form.error}</p>
       </div>
     {/if}
@@ -56,6 +56,7 @@
         autocomplete="email"
         value={form?.email ?? ''}
         error={form?.errors?.email}
+        data-testid="login-email-input"
       />
     </div>
 
@@ -67,10 +68,11 @@
         type="password"
         autocomplete="current-password"
         error={form?.errors?.password}
+        data-testid="login-password-input"
       />
     </div>
 
-    <Button type="submit" {loading} class="auth-submit">
+    <Button type="submit" {loading} class="auth-submit" data-testid="login-submit-button">
       {loading ? m.common_loading() : m.auth_signin_button()}
     </Button>
 

@@ -70,7 +70,9 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
       await cleanupPage.goto('/account/subscriptions');
       const card = subscriptionCard(cleanupPage);
       if ((await card.count()) > 0) {
-        const reactivateBtn = card.getByRole('button', { name: /reactivate/i });
+        const reactivateBtn = card.getByTestId(
+          'subscription-reactivate-button'
+        );
         if (
           (await reactivateBtn.count()) > 0 &&
           (await reactivateBtn.first().isVisible())
@@ -106,7 +108,7 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
     // If it's not active (e.g. the previous run left it cancelling and teardown
     // failed), reactivate first so the test starts from a known state.
     if (!(await badgeA.textContent())?.match(/Active/i)) {
-      const reactivateBtn = cardA.getByRole('button', { name: /reactivate/i });
+      const reactivateBtn = cardA.getByTestId('subscription-reactivate-button');
       await reactivateBtn.click();
       await expect(badgeA).toHaveText(/Active/i, { timeout: 5000 });
     }
@@ -140,26 +142,18 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
     await pageB.waitForLoadState('networkidle', { timeout: 15_000 });
 
     // Wait for the user's current-plan CTA to render on the org pricing
-    // page. The button text is "Current Plan" (with leading whitespace
-    // from the layout — match via `name: /current plan/i` which permits
-    // the substring match around the visible whitespace).
-    await expect(
-      pageB.getByRole('button', { name: /current plan/i }).first()
-    ).toBeVisible({ timeout: 15_000 });
+    // page (the disabled "Current Plan" button on the matched tier card).
+    await expect(pageB.getByTestId('tier-cta-current').first()).toBeVisible({
+      timeout: 15_000,
+    });
     // "Reactivate" must NOT be present yet — that CTA only shows once the
     // subscription is in the cancelling state.
-    await expect(
-      pageB.getByRole('button', { name: /reactivate/i })
-    ).toHaveCount(0);
+    await expect(pageB.getByTestId('tier-cta-reactivate')).toHaveCount(0);
 
     // ── Tab A: perform the cancel ──────────────────────────────────────────
-    const cancelBtn = cardA.getByRole('button', {
-      name: /^Cancel Subscription$/i,
-    });
+    const cancelBtn = cardA.getByTestId('subscription-cancel-button');
     await cancelBtn.click();
-    const confirmBtnA = pageA.getByRole('button', {
-      name: /^cancel at end of period$/i,
-    });
+    const confirmBtnA = pageA.getByTestId('cancel-dialog-confirm-button');
     await expect(confirmBtnA).toBeVisible({ timeout: 3000 });
     await confirmBtnA.click();
     await expect(badgeA).toHaveText(/Cancelling/i, { timeout: 10_000 });
@@ -183,9 +177,9 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
     // layout) means the dispatched visibilitychange will only trigger a
     // server load re-run on first fire — give the round-trip a generous
     // budget for KV propagation + Svelte effect resolution.
-    await expect(
-      pageB.getByRole('button', { name: /reactivate/i }).first()
-    ).toBeVisible({ timeout: 15_000 });
+    await expect(pageB.getByTestId('tier-cta-reactivate').first()).toBeVisible({
+      timeout: 15_000,
+    });
 
     await ctxA.close();
     await ctxB.close();

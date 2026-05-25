@@ -1071,6 +1071,7 @@
                     onclick={() => handleSubscribe(tier)}
                     loading={checkoutLoading === tier.id}
                     class="tier-cta"
+                    data-testid="tier-cta-subscribe"
                     aria-label="Subscribe to {tier.name}"
                   >
                     {m.pricing_subscribe()}
@@ -1250,6 +1251,7 @@
       <Button
         onclick={() => handleSubscribe(recommendedTier)}
         loading={checkoutLoading === recommendedTier.id}
+        data-testid="pricing-sticky-subscribe"
         aria-label="Subscribe to {recommendedTier.name}"
       >
         {m.pricing_subscribe()}
@@ -1258,6 +1260,7 @@
         <button
           type="button"
           class="sticky-bar__dismiss"
+          data-testid="pricing-sticky-dismiss"
           onclick={() => { dismissedStickyCta = true; }}
           aria-label="Dismiss"
         >
@@ -1339,7 +1342,11 @@
     </Dialog.Body>
 
     <Dialog.Footer>
-      <Button variant="ghost" onclick={closeTierChangeDialog}>
+      <Button
+        variant="ghost"
+        data-testid="tier-change-dialog-cancel"
+        onclick={closeTierChangeDialog}
+      >
         Cancel
       </Button>
       {#if tierChangePreview && tierChangeDialogTier}
@@ -1356,6 +1363,7 @@
       {:else if tierChangePreviewError}
         <Button
           variant="primary"
+          data-testid="tier-change-dialog-retry"
           onclick={() => tierChangeDialogTier && openTierChangeDialog(tierChangeDialogTier)}
         >
           Try again

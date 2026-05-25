@@ -292,7 +292,11 @@
       {#each subscriptions as sub (sub.id)}
         <Card.Root>
           <Card.Content>
-            <div class="subscription-card">
+            <div
+              class="subscription-card"
+              data-testid="subscription-card"
+              data-org-slug={sub.organization.slug}
+            >
               <div class="subscription-info">
                 <div class="subscription-org">
                   {#if sub.organization.logoUrl}
@@ -309,7 +313,7 @@
                     <span class="tier-name">{sub.tier.name}</span>
                   </div>
                 </div>
-                <Badge variant={statusVariant(sub.status)}>
+                <Badge variant={statusVariant(sub.status)} data-testid="subscription-status-badge">
                   {statusLabel(sub.status)}
                 </Badge>
               </div>
@@ -353,6 +357,7 @@
                 <Button
                   variant="ghost"
                   size="sm"
+                  data-testid="subscription-change-tier-button"
                   onclick={() => {
                     const orgUrl = buildOrgUrl(page.url, sub.organization.slug, '/pricing');
                     window.location.href = orgUrl;
@@ -364,6 +369,7 @@
                   <Button
                     variant="ghost"
                     size="sm"
+                    data-testid="subscription-cancel-button"
                     onclick={() => openCancelDialog(sub)}
                   >
                     {m.subscription_cancel()}
@@ -374,6 +380,7 @@
                     variant="primary"
                     size="sm"
                     loading={reactivatingIds.has(sub.id)}
+                    data-testid="subscription-reactivate-button"
                     onclick={() => handleReactivate(sub)}
                   >
                     {m.subscription_reactivate()}
@@ -384,6 +391,7 @@
                     variant="primary"
                     size="sm"
                     loading={resumingIds.has(sub.id)}
+                    data-testid="subscription-resume-button"
                     onclick={() => handleResume(sub)}
                   >
                     {m.subscription_resume()}
@@ -469,10 +477,19 @@
     </Dialog.Body>
 
     <Dialog.Footer>
-      <Button variant="ghost" onclick={() => { cancelDialogOpen = false; }}>
+      <Button
+        variant="ghost"
+        data-testid="cancel-dialog-dismiss-button"
+        onclick={() => { cancelDialogOpen = false; }}
+      >
         {m.monetisation_cancel()}
       </Button>
-      <Button variant="destructive" onclick={handleCancel} loading={cancelLoading}>
+      <Button
+        variant="destructive"
+        data-testid="cancel-dialog-confirm-button"
+        onclick={handleCancel}
+        loading={cancelLoading}
+      >
         {m.subscription_cancel_confirm()}
       </Button>
     </Dialog.Footer>
