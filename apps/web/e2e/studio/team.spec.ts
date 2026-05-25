@@ -97,11 +97,11 @@ test.describe('Studio Team Page', () => {
     await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 });
 
     // Email is a plain <input id="invite-email">; the role field is now a
-    // Melt UI Select rendering a <button> with an auto-generated id, labeled
-    // by a <Label for={...}>Role</Label>. Locate via the role-button's
-    // accessible name (the visible label text).
+    // Melt UI Select rendering a <button role="combobox">. Melt UI's
+    // builder adds role="combobox" to the trigger (not button), so use
+    // getByRole('combobox') to locate it.
     await expect(page.locator('#invite-email')).toBeVisible();
-    await expect(page.getByRole('button', { name: /^Role/i })).toBeVisible();
+    await expect(page.getByRole('combobox').first()).toBeVisible();
   });
 
   test('invite dialog closes on cancel', async ({ page }) => {

@@ -90,10 +90,12 @@ test.describe('Studio Navigation - Sidebar', () => {
   // the desktop rail expands on hover during the actionability check: the
   // link shifts mid-action and the click misses.
   // Hover the rail first to expand it (desktop rail collapses by default and
-  // expands on pointer-enter). A bare click would race against the layout
-  // shift. After hover the rail is in its full-width state and the link is
-  // a stable hit target. Use `page.goto` URL match poll after click since
-  // SvelteKit SPA navigation doesn't fire a `load` event.
+  // expands on pointer-enter). After hover the link is a stable hit target.
+  // Then click and wait for the URL to change via the History API.
+  // `waitForURL` with `waitUntil: 'commit'` fires the moment the URL is
+  // committed (works for SvelteKit's client-side SPA navigation — there's
+  // no `load` event for a History API push). Start the waitForURL listener
+  // BEFORE click so the navigation event isn't missed.
   async function clickRailAndExpect(
     page: import('@playwright/test').Page,
     href: string,
@@ -101,8 +103,10 @@ test.describe('Studio Navigation - Sidebar', () => {
   ) {
     const link = page.locator(railLink(href));
     await link.hover();
-    await link.click();
-    await expect(page).toHaveURL(pattern, { timeout: 10_000 });
+    await Promise.all([
+      page.waitForURL(pattern, { waitUntil: 'commit', timeout: 10_000 }),
+      link.click(),
+    ]);
   }
 
   test('clicking Content nav link navigates correctly', async ({ page }) => {
