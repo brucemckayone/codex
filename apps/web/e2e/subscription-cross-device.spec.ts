@@ -40,12 +40,15 @@ const SEEDED_ORG_SLUG = 'studio-alpha';
 const SEEDED_ORG_NAME = 'Studio Alpha';
 
 async function loginAsSeedViewer(page: import('@playwright/test').Page) {
-  // Use the test-only fast-signin endpoint (workers/auth/src/index.ts) so
-  // tight-loop test runs don't accumulate against the 5/15min auth rate
-  // limit. Inject the resulting Set-Cookie into the page context, then
-  // navigate to /library to confirm the session is good.
+  // Use the test-only fast-signin endpoint (workers/auth/src/index.ts).
+  // CRITICAL: call via `lvh.me:42069`, NOT `localhost:42069`. The auth
+  // worker's `Set-Cookie` has `Domain=.lvh.me` (cross-subdomain config).
+  // Per RFC 6265, the browser only accepts that cookie if the response
+  // host is `.lvh.me` or a subdomain — `localhost` is rejected as cross-
+  // origin. lvh.me also resolves to 127.0.0.1 so the call still hits the
+  // local worker, but the domain-match check passes.
   const response = await page.request.post(
-    'http://localhost:42069/api/test/fast-signin',
+    'http://lvh.me:42069/api/test/fast-signin',
     {
       headers: { 'Content-Type': 'application/json' },
       data: { email: SEED_USER.email, password: SEED_USER.password },

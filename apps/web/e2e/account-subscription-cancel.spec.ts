@@ -45,13 +45,12 @@ const SEEDED_ORG_NAME = 'Studio Alpha';
  * constraints require "real session through the normal login flow".
  */
 async function loginAsSeedViewer(page: import('@playwright/test').Page) {
-  // Use the test-only fast-signin endpoint (workers/auth/src/index.ts) to
-  // bypass the auth worker's 5/15min rate limit on /api/auth/sign-in/email.
-  // The Hono rate-limit middleware only gates the public endpoint;
-  // fast-signin calls `auth.handler()` directly. The returned Set-Cookie
-  // is applied to the page context by Playwright's request fixture.
+  // CRITICAL: call via `lvh.me:42069`, NOT `localhost:42069`. Auth worker's
+  // Set-Cookie carries `Domain=.lvh.me` (cross-subdomain) — RFC 6265 only
+  // accepts that if the response host is a subdomain of `.lvh.me`. lvh.me
+  // also resolves to 127.0.0.1 so the worker is still reachable.
   const response = await page.request.post(
-    'http://localhost:42069/api/test/fast-signin',
+    'http://lvh.me:42069/api/test/fast-signin',
     {
       headers: { 'Content-Type': 'application/json' },
       data: { email: SEED_USER.email, password: SEED_USER.password },
