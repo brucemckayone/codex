@@ -158,17 +158,16 @@ The seed is not re-run between iterations of the full suite. Long debug loops ac
 
 `playwright.config.ts`:
 ```typescript
-workers: process.env.CI ? 1 : undefined,   // CI: 1 worker. Local: cores.
+workers: process.env.CI ? 2 : undefined,   // CI: 2 workers. Local: cores.
 ```
 
-**Why**: auth-worker + shared Neon ephemeral branch + cookie-jar leakage across contexts caused a flake cluster (Codex-l13ai) that was the primary driver of PR #261. workers=1 is the conservative answer.
+**Why 2 (not 1, not 4+)**: the consolidation PRs (#262, #263) + the `fast-signin` test endpoint + `CF-Connecting-IP` rate-limit bypass eliminated the auth-worker rate-limit contention that originally forced `workers=1`. Memory `feedback_e2e_vitest_forks_neon_contention` caps at 2 — beyond 2 hits Neon ephemeral-branch contention (3+ parallel writers race on the same DB).
 
-**Triggers to revisit**:
-- Auth worker gets a Neon connection-pool bump (currently uses HTTP per-request)
-- All callers of `/api/auth/sign-in/email` migrate to `fast-signin` (eliminating rate-limit contention)
-- A measurement run on a feature branch shows ≥99% pass rate at workers=2 across 3 consecutive full-suite runs
+**Gate criteria for keeping workers=2**: ≥99% pass rate across 3 consecutive green CI runs.
 
-See WP-4 of beads epic `Codex-498na` for the planned measurement.
+**Rollback path**: flip `workers` back to `1` if a new flake cluster emerges. The cost is wall-clock time (~2x); the safety is determinism.
+
+**To go beyond 2**: would need either Playwright sharding across CI machines (`--shard=1/N`) OR per-test-file Neon branches (no shared DB writes). Both are larger changes.
 
 ---
 
