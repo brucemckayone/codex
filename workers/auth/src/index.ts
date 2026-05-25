@@ -253,6 +253,79 @@ app.post('/api/test/fast-register', async (c) => {
 });
 
 /**
+ * Test-only endpoint for fast sign-in (bypasses rate limiter).
+ *
+ * Mirrors the sign-in path inside `/api/test/fast-register`, but for users
+ * that already exist (seeded users in particular). Calls `auth.handler()`
+ * directly to bypass the Hono auth-rate-limit middleware so E2E suites
+ * running login flows in tight loops don't hit the 5/15min ceiling.
+ *
+ * ONLY available in development/test environments.
+ */
+app.post('/api/test/fast-signin', async (c) => {
+  const env = c.env as unknown as AuthBindings;
+  const environment = env.ENVIRONMENT || ENV_NAMES.DEVELOPMENT;
+
+  if (environment !== ENV_NAMES.DEVELOPMENT && environment !== ENV_NAMES.TEST) {
+    return c.notFound();
+  }
+
+  const { email, password } = await c.req.json<{
+    email: string;
+    password: string;
+  }>();
+
+  if (!email || !password) {
+    return c.json({ error: 'email and password are required' }, 400);
+  }
+
+  try {
+    const auth = createAuthInstance({ env, executionCtx: c.executionCtx });
+
+    const signInRequest = new Request(
+      `${env.WEB_APP_URL || 'http://localhost:42069'}/api/auth/sign-in/email`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin:
+            env.WEB_APP_URL ||
+            c.req.header('Origin') ||
+            'http://localhost:42069',
+        },
+        body: JSON.stringify({ email, password }),
+      }
+    );
+
+    const signInResponse = await auth.handler(signInRequest);
+
+    if (!signInResponse || signInResponse.status >= 400) {
+      const body = signInResponse ? await signInResponse.text() : 'null';
+      return c.json({ error: 'Sign-in failed', details: body }, 500);
+    }
+
+    const body = await signInResponse.text();
+    const headers = new Headers();
+    signInResponse.headers.forEach((value, key) => {
+      headers.append(key, value);
+    });
+    return new Response(body, { status: signInResponse.status, headers });
+  } catch (error) {
+    const obs = c.get('obs');
+    obs?.error('[TEST] fast-signin failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return c.json(
+      {
+        error: 'Fast sign-in failed',
+        details: error instanceof Error ? error.message : String(error),
+      },
+      500
+    );
+  }
+});
+
+/**
  * Security headers middleware wrapper
  * Applies appropriate security headers based on environment
  */

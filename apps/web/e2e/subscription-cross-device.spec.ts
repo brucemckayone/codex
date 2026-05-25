@@ -40,11 +40,24 @@ const SEEDED_ORG_SLUG = 'studio-alpha';
 const SEEDED_ORG_NAME = 'Studio Alpha';
 
 async function loginAsSeedViewer(page: import('@playwright/test').Page) {
-  await page.goto('/login');
-  await page.fill('input[name="email"]', SEED_USER.email);
-  await page.fill('input[name="password"]', SEED_USER.password);
-  await page.click('button[type="submit"]', { noWaitAfter: true });
-  await expect(page).toHaveURL(/\/library/, { timeout: 30_000 });
+  // Use the test-only fast-signin endpoint (workers/auth/src/index.ts) so
+  // tight-loop test runs don't accumulate against the 5/15min auth rate
+  // limit. Inject the resulting Set-Cookie into the page context, then
+  // navigate to /library to confirm the session is good.
+  const response = await page.request.post(
+    'http://localhost:42069/api/test/fast-signin',
+    {
+      headers: { 'Content-Type': 'application/json' },
+      data: { email: SEED_USER.email, password: SEED_USER.password },
+    }
+  );
+  if (!response.ok()) {
+    throw new Error(
+      `fast-signin failed: ${response.status()} ${await response.text()}`
+    );
+  }
+  await page.goto('/library');
+  await expect(page).toHaveURL(/\/library/, { timeout: 10_000 });
 }
 
 function subscriptionCard(
