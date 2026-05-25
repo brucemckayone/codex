@@ -89,13 +89,15 @@ test.describe('Studio Navigation - Sidebar', () => {
   // `force: true` bypasses Playwright's stability re-check, which fails when
   // the desktop rail expands on hover during the actionability check: the
   // link shifts mid-action and the click misses.
-  // Hover the rail first to expand it (desktop rail collapses by default and
-  // expands on pointer-enter). After hover the link is a stable hit target.
-  // Then click and wait for the URL to change via the History API.
-  // `waitForURL` with `waitUntil: 'commit'` fires the moment the URL is
-  // committed (works for SvelteKit's client-side SPA navigation — there's
-  // no `load` event for a History API push). Start the waitForURL listener
-  // BEFORE click so the navigation event isn't missed.
+  // Hover the rail to expand it (desktop rail collapses by default). Then
+  // trigger a native click via `evaluate(el => el.click())` — Playwright's
+  // synthetic click event doesn't bubble in a way that SvelteKit's
+  // client router picks up (the router listens on `document` for native
+  // anchor clicks via a delegated listener). Then poll the URL with
+  // `toHaveURL` — `waitForURL` with `waitUntil:'commit'` ALSO doesn't
+  // fire reliably here because the navigation is a History.pushState
+  // call, not a real document load. URL polling is the only path that
+  // works for studio's `ssr=false` SPA navigation.
   async function clickRailAndExpect(
     page: import('@playwright/test').Page,
     href: string,
@@ -103,10 +105,8 @@ test.describe('Studio Navigation - Sidebar', () => {
   ) {
     const link = page.locator(railLink(href));
     await link.hover();
-    await Promise.all([
-      page.waitForURL(pattern, { waitUntil: 'commit', timeout: 10_000 }),
-      link.click(),
-    ]);
+    await link.evaluate((el: HTMLElement) => el.click());
+    await expect(page).toHaveURL(pattern, { timeout: 10_000 });
   }
 
   test('clicking Content nav link navigates correctly', async ({ page }) => {
