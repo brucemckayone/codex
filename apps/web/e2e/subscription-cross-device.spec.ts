@@ -174,10 +174,12 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
 
-    // Assert: the Reactivate plan button appears (Tab B has caught up).
+    // Assert: the Reactivate button appears (Tab B has caught up).
     // Within 2s per task constraint. The server load re-runs and the CTA flips.
+    // Button label is just "Reactivate" — the older "Reactivate plan" wording
+    // was shortened in the post-tier-redesign copy pass.
     await expect(
-      pageB.getByRole('button', { name: /reactivate plan/i }).first()
+      pageB.getByRole('button', { name: /^Reactivate$/i }).first()
     ).toBeVisible({ timeout: 2000 });
 
     await ctxA.close();

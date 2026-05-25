@@ -241,10 +241,12 @@ test.describe('Account Profile Page - Validation', () => {
     await page.fill('input[name="website"]', 'not-a-valid-url');
     await page.click('button[type="submit"]', { noWaitAfter: true });
 
-    // Form should not have navigated away — we should still be on /account.
-    // 1s settle delay so any server-action redirect would have fired by now.
+    // Form should not have navigated AWAY from /account. SvelteKit Remote
+    // Functions append a `?/remote=...` query param on form submission, so
+    // the URL becomes `/account?/remote=...` — that still counts as
+    // staying on the account page (the path component is unchanged).
     await page.waitForTimeout(1_000);
-    await expect(page).toHaveURL(/\/account$/);
+    await expect(page).toHaveURL(/\/account(\?|$)/);
   });
 
   test('rejects invalid twitter URL via HTML5 url validation', async ({
