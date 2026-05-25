@@ -9,6 +9,11 @@
  */
 
 import type { Page } from '@playwright/test';
+import {
+  aliasSessionCookies,
+  type BrowserCookie,
+  parseSetCookieStrings,
+} from './auth-cookies';
 
 /**
  * The seeded creator @ Studio Alpha (commerce.ts seed).
@@ -59,8 +64,12 @@ export function buildOrgUrl(
 }
 
 /**
- * Log in as the seeded creator via the real login form. Mirrors
- * `loginAsSeedViewer` in account-subscription-cancel.spec.ts:47-55.
+ * Log in as the seeded creator via the real login form.
+ *
+ * Sibling helper to `loginAsSeedViewer` (in `helpers/seed-auth.ts`) which
+ * signs in the seeded viewer via the fast-signin test endpoint. This one
+ * uses the real form-driven path because the original spec needed to
+ * exercise the form. Prefer the seed-auth helper for new tests.
  *
  * After a successful login the page is at `/library`. Cookies are
  * scoped to `lvh.me` (the parent domain) so they propagate to any
@@ -82,60 +91,17 @@ export async function loginAsSeededCreator(page: Page): Promise<void> {
   await page.waitForURL(/\/library/, { timeout: 30_000 });
 }
 
-/** Playwright-compatible cookie shape. */
-type BrowserCookie = {
-  name: string;
-  value: string;
-  domain: string;
-  path: string;
-  httpOnly: boolean;
-  secure: boolean;
-  sameSite: 'Lax' | 'Strict' | 'None';
-  expires: number;
-};
-
 /**
- * Parse a list of Set-Cookie response header strings into Playwright cookies.
+ * Convert raw Set-Cookie header values (from `headers.getSetCookie()`) into
+ * Playwright-shaped cookies scoped to `.lvh.me`, automatically adding the
+ * `codex-session` alias for BetterAuth's session token.
  *
- * Sets BOTH the explicit name and a `codex-session` alias when the cookie is
- * `better-auth.session_token` (mirrors `apps/web/e2e/helpers/studio.ts:152-163`).
- * Domain is `.lvh.me` (with leading dot) to match every `*.lvh.me` subdomain
- * unambiguously — Chromium treats no-dot domains as host-only, which would
- * mean cookies set on `lvh.me` are NOT sent to `studio-alpha.lvh.me`.
+ * Thin wrapper around the shared parser + aliaser in `./auth-cookies` so
+ * every E2E auth helper produces the same dual-cookie shape (see
+ * apps/web/e2e/CLAUDE.md for the rationale).
  */
-function parseSetCookieHeaders(setCookieHeaders: string[]): BrowserCookie[] {
-  const cookies: BrowserCookie[] = [];
-  for (const sc of setCookieHeaders) {
-    const firstSemi = sc.indexOf(';');
-    const nameValue = firstSemi > 0 ? sc.substring(0, firstSemi) : sc;
-    const eqIdx = nameValue.indexOf('=');
-    if (eqIdx <= 0) continue;
-    const cookieName = nameValue.substring(0, eqIdx).trim();
-    const cookieValue = nameValue.substring(eqIdx + 1).trim();
-    cookies.push({
-      name: cookieName,
-      value: cookieValue,
-      domain: '.lvh.me',
-      path: '/',
-      httpOnly: true,
-      secure: false,
-      sameSite: 'Lax',
-      expires: -1,
-    });
-    if (cookieName === 'better-auth.session_token') {
-      cookies.push({
-        name: 'codex-session',
-        value: cookieValue,
-        domain: '.lvh.me',
-        path: '/',
-        httpOnly: true,
-        secure: false,
-        sameSite: 'Lax',
-        expires: -1,
-      });
-    }
-  }
-  return cookies;
+function buildBrowserCookies(setCookieHeaders: string[]): BrowserCookie[] {
+  return aliasSessionCookies(parseSetCookieStrings(setCookieHeaders));
 }
 
 /**
@@ -182,7 +148,7 @@ export async function captureSeededCreatorCookies(): Promise<BrowserCookie[]> {
     );
   }
 
-  return parseSetCookieHeaders(response.headers.getSetCookie());
+  return buildBrowserCookies(response.headers.getSetCookie());
 }
 
 /**
@@ -274,8 +240,7 @@ export async function createFreshOwnerWithBypass(opts: {
     );
   }
 
-  const setCookieHeaders = signInRes.headers.getSetCookie();
-  const cookies = parseSetCookieHeaders(setCookieHeaders);
+  const cookies = buildBrowserCookies(signInRes.headers.getSetCookie());
 
   // Step 3: Create org + membership directly via DB (mirrors orgFixture).
   const [org] = await dbHttp

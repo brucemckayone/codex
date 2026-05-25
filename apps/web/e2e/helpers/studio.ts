@@ -5,7 +5,6 @@
  * and injecting auth cookies that work across subdomains.
  */
 
-import { COOKIES } from '@codex/constants';
 import type { OrgMemberContext, OrgMemberRole } from '@codex/shared-types';
 import {
   authFixture,
@@ -13,6 +12,7 @@ import {
   parseCookieString,
 } from '@codex/test-utils/e2e';
 import type { Page } from '@playwright/test';
+import { aliasSessionCookies } from './auth-cookies';
 
 const BASE_PORT = 5173;
 
@@ -92,45 +92,7 @@ export async function injectOrgCookies(
   page: Page,
   cookie: string
 ): Promise<void> {
-  const parsedCookies = parseCookieString(cookie);
-  const browserCookies: {
-    name: string;
-    value: string;
-    domain: string;
-    path: string;
-    httpOnly: boolean;
-    secure: boolean;
-    sameSite: 'Lax' | 'Strict' | 'None';
-    expires: number;
-  }[] = [];
-
-  for (const { name, value } of parsedCookies) {
-    browserCookies.push({
-      name,
-      value,
-      domain: '.lvh.me',
-      path: '/',
-      httpOnly: true,
-      secure: false,
-      sameSite: 'Lax',
-      expires: -1,
-    });
-
-    // Add the codex-session alias for session tokens
-    if (name === 'better-auth.session_token') {
-      browserCookies.push({
-        name: COOKIES.SESSION_NAME,
-        value,
-        domain: '.lvh.me',
-        path: '/',
-        httpOnly: true,
-        secure: false,
-        sameSite: 'Lax',
-        expires: -1,
-      });
-    }
-  }
-
+  const browserCookies = aliasSessionCookies(parseCookieString(cookie));
   await page.context().clearCookies();
   await page.context().addCookies(browserCookies);
 }

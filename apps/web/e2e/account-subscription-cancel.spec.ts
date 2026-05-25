@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { loginAsSeedViewer } from './helpers/seed-auth';
 
 /**
  * Account Subscription Cancel Flow E2E Tests
@@ -32,66 +33,7 @@ import { expect, test } from '@playwright/test';
  *     auto-starts these when PLAYWRIGHT_BASE_URL is not set)
  */
 
-const SEED_USER = {
-  email: 'viewer@test.com',
-  password: 'Test1234!', // SEED_PASSWORD in packages/database/scripts/seed/constants.ts
-};
-
 const SEEDED_ORG_NAME = 'Studio Alpha';
-
-/**
- * Log in via the real login form + auth worker, then wait for the session
- * cookie to be set. We don't hit the auth worker directly because the task
- * constraints require "real session through the normal login flow".
- */
-async function loginAsSeedViewer(page: import('@playwright/test').Page) {
-  // Call fast-signin via lvh.me to satisfy cookie Domain=.lvh.me, then
-  // manually inject Set-Cookie headers into the page context — Playwright's
-  // request fixture cookie jar doesn't reliably merge into page.context().
-  const response = await page.request.post(
-    'http://lvh.me:42069/api/test/fast-signin',
-    {
-      headers: { 'Content-Type': 'application/json' },
-      data: { email: SEED_USER.email, password: SEED_USER.password },
-    }
-  );
-  if (!response.ok()) {
-    throw new Error(
-      `fast-signin failed: ${response.status()} ${await response.text()}`
-    );
-  }
-  // BetterAuth issues `better-auth.session_token`; SvelteKit reads
-  // `codex-session`. Inject both. Same pattern as `injectOrgCookies` in
-  // apps/web/e2e/helpers/studio.ts.
-  const setCookieHeaders = response
-    .headersArray()
-    .filter((h) => h.name.toLowerCase() === 'set-cookie');
-  const browserCookies = setCookieHeaders.flatMap((h) => {
-    const pair = h.value.split(';')[0];
-    if (!pair) return [];
-    const eq = pair.indexOf('=');
-    if (eq < 0) return [];
-    const name = pair.slice(0, eq).trim();
-    const value = pair.slice(eq + 1).trim();
-    const base = {
-      value,
-      domain: '.lvh.me',
-      path: '/',
-      httpOnly: true,
-      secure: false,
-      sameSite: 'Lax' as const,
-      expires: -1,
-    };
-    const cookies = [{ name, ...base }];
-    if (name === 'better-auth.session_token') {
-      cookies.push({ name: 'codex-session', ...base });
-    }
-    return cookies;
-  });
-  await page.context().addCookies(browserCookies);
-  await page.goto('/library');
-  await expect(page).toHaveURL(/\/library/, { timeout: 10_000 });
-}
 
 /**
  * Locate the subscription card for the seeded org by matching the org name.
