@@ -825,6 +825,30 @@ jobs:
       - name: Build Storybook
         run: pnpm --filter web build-storybook
 
+      # Seed test database with users (viewer@test.com, creator@test.com, etc.)
+      # and seeded orgs (studio-alpha, studio-beta, of-blood-and-bones). The
+      # Playwright web specs depend on these — without seeding, fast-signin
+      # returns 500 INVALID_EMAIL_OR_PASSWORD and the entire loginAsSeedViewer
+      # path collapses (Codex-8yxy4).
+      #
+      # --force skips the interactive confirmation prompt.
+      # STRIPE_SECRET_KEY enables real Stripe test-mode subscription for
+      # viewer@test.com; without it the seed falls back to synthetic IDs +
+      # any checkout test would fail with 422.
+      - name: Seed test database
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          DB_METHOD: NEON_BRANCH
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
+        run: |
+          echo "::add-mask::$DATABASE_URL"
+          echo "::add-mask::$STRIPE_SECRET_KEY"
+          pnpm db:seed -- --force
+
       # Generate .dev.vars.test files for workers to use in CI
       - name: Generate worker dev vars for E2E
         env:
@@ -911,6 +935,66 @@ jobs:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
 
+      # The studio +layout.server.ts calls getMyMembership + getMyOrganizations
+      # via organization-api. Without it, role=null and the layout redirects
+      # to /?error=access_denied. Studio + analytics tests all break. Part of
+      # the Codex-8yxy4 fix.
+      - name: Start Organization API Worker in background
+        run: |
+          cd workers/organization-api
+          pnpm wrangler dev --env test --port 42071 --local &
+          echo $! > organization-api-worker.pid
+          timeout 60 bash -c 'until curl -f http://localhost:42071/health > /dev/null 2>&1; do sleep 1; done'
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+
+      # Studio layout's draft-count call routes through content-api. Content
+      # list, content detail, and any media-related test path requires it.
+      - name: Start Content API Worker in background
+        run: |
+          cd workers/content-api
+          pnpm wrangler dev --env test --port 4001 --local &
+          echo $! > content-api-worker.pid
+          timeout 60 bash -c 'until curl -f http://localhost:4001/health > /dev/null 2>&1; do sleep 1; done'
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+
+      # Analytics page calls admin-api for revenue / subscribers / followers /
+      # top-content. Without it the analytics zero-state tests time out
+      # waiting for .studio-layout because the query catches throw to empty
+      # data but the cascade still confuses the role guard.
+      - name: Start Admin API Worker in background
+        run: |
+          cd workers/admin-api
+          pnpm wrangler dev --env test --port 42073 --local &
+          echo $! > admin-api-worker.pid
+          timeout 60 bash -c 'until curl -f http://localhost:42073/health > /dev/null 2>&1; do sleep 1; done'
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+
+      # Notification preferences + email template specs route through this.
+      - name: Start Notifications API Worker in background
+        run: |
+          cd workers/notifications-api
+          pnpm wrangler dev --env test --port 42075 --local &
+          echo $! > notifications-api-worker.pid
+          timeout 60 bash -c 'until curl -f http://localhost:42075/health > /dev/null 2>&1; do sleep 1; done'
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+
+      # Media upload + transcoding callback specs route through this. Uses a
+      # mock RunPod endpoint per RUNPOD_DIRECT_URL in .dev.vars.test.
+      - name: Start Media API Worker in background
+        run: |
+          cd workers/media-api
+          pnpm wrangler dev --env test --port 4002 --local &
+          echo $! > media-api-worker.pid
+          timeout 60 bash -c 'until curl -f http://localhost:4002/health > /dev/null 2>&1; do sleep 1; done'
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+
       - name: Start Wrangler dev server in background
         run: |
           echo "::add-mask::$DATABASE_URL"
@@ -934,10 +1018,15 @@ jobs:
           echo "Waiting for workers to fully initialize..."
           sleep 5
           # Verify all critical endpoints are responsive
-          curl -f http://localhost:42069/health || exit 1
-          curl -f http://localhost:42074/health || exit 1
-          curl -f http://localhost:42072/health || exit 1
-          curl -f http://localhost:5173 || exit 1
+          curl -f http://localhost:42069/health || exit 1  # auth
+          curl -f http://localhost:42074/health || exit 1  # identity-api
+          curl -f http://localhost:42072/health || exit 1  # ecom-api
+          curl -f http://localhost:42071/health || exit 1  # organization-api
+          curl -f http://localhost:4001/health || exit 1   # content-api
+          curl -f http://localhost:42073/health || exit 1  # admin-api
+          curl -f http://localhost:42075/health || exit 1  # notifications-api
+          curl -f http://localhost:4002/health || exit 1   # media-api
+          curl -f http://localhost:5173 || exit 1          # apps/web
           echo "All workers ready"
 
       - name: Run E2E tests
@@ -1013,6 +1102,46 @@ jobs:
           if [ -f workers/ecom-api/ecom-api-worker.pid ]; then
             kill $(cat workers/ecom-api/ecom-api-worker.pid) || true
             rm workers/ecom-api/ecom-api-worker.pid
+          fi
+
+      - name: Stop Organization API Worker
+        if: always()
+        run: |
+          if [ -f workers/organization-api/organization-api-worker.pid ]; then
+            kill $(cat workers/organization-api/organization-api-worker.pid) || true
+            rm workers/organization-api/organization-api-worker.pid
+          fi
+
+      - name: Stop Content API Worker
+        if: always()
+        run: |
+          if [ -f workers/content-api/content-api-worker.pid ]; then
+            kill $(cat workers/content-api/content-api-worker.pid) || true
+            rm workers/content-api/content-api-worker.pid
+          fi
+
+      - name: Stop Admin API Worker
+        if: always()
+        run: |
+          if [ -f workers/admin-api/admin-api-worker.pid ]; then
+            kill $(cat workers/admin-api/admin-api-worker.pid) || true
+            rm workers/admin-api/admin-api-worker.pid
+          fi
+
+      - name: Stop Notifications API Worker
+        if: always()
+        run: |
+          if [ -f workers/notifications-api/notifications-api-worker.pid ]; then
+            kill $(cat workers/notifications-api/notifications-api-worker.pid) || true
+            rm workers/notifications-api/notifications-api-worker.pid
+          fi
+
+      - name: Stop Media API Worker
+        if: always()
+        run: |
+          if [ -f workers/media-api/media-api-worker.pid ]; then
+            kill $(cat workers/media-api/media-api-worker.pid) || true
+            rm workers/media-api/media-api-worker.pid
           fi
 
       # Upload generated snapshots for committing to repo
