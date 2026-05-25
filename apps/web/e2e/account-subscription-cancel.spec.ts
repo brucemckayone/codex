@@ -60,6 +60,9 @@ async function loginAsSeedViewer(page: import('@playwright/test').Page) {
       `fast-signin failed: ${response.status()} ${await response.text()}`
     );
   }
+  // BetterAuth issues `better-auth.session_token`; SvelteKit reads
+  // `codex-session`. Inject both. Same pattern as `injectOrgCookies` in
+  // apps/web/e2e/helpers/studio.ts.
   const setCookieHeaders = response.headersArray().filter((h) =>
     h.name.toLowerCase() === 'set-cookie'
   );
@@ -68,18 +71,22 @@ async function loginAsSeedViewer(page: import('@playwright/test').Page) {
     if (!pair) return [];
     const eq = pair.indexOf('=');
     if (eq < 0) return [];
-    return [
-      {
-        name: pair.slice(0, eq).trim(),
-        value: pair.slice(eq + 1).trim(),
-        domain: '.lvh.me',
-        path: '/',
-        httpOnly: true,
-        secure: false,
-        sameSite: 'Lax' as const,
-        expires: -1,
-      },
-    ];
+    const name = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1).trim();
+    const base = {
+      value,
+      domain: '.lvh.me',
+      path: '/',
+      httpOnly: true,
+      secure: false,
+      sameSite: 'Lax' as const,
+      expires: -1,
+    };
+    const cookies = [{ name, ...base }];
+    if (name === 'better-auth.session_token') {
+      cookies.push({ name: 'codex-session', ...base });
+    }
+    return cookies;
   });
   await page.context().addCookies(browserCookies);
   await page.goto('/library');
