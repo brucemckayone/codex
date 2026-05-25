@@ -188,8 +188,12 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
     // Pricing page on the org subdomain — renders the user's effective tier
     // status via the layout's streamed subscriptionContext. Root-relative
     // path per CLAUDE.md rule (slug is in hostname, not path).
-    // Build URL from baseURL so we honour PLAYWRIGHT_BASE_URL in CI.
-    const baseURL = new URL(pageB.url());
+    //
+    // Derive orgBase from Tab A's URL (it's already navigated past
+    // /account/subscriptions). `pageB.url()` is `about:blank` until first
+    // goto — using that as a `new URL` source yields `about://...` and the
+    // subsequent goto silently lands on the wrong host (or about:blank).
+    const baseURL = new URL(pageA.url());
     const orgBase = `${baseURL.protocol}//${SEEDED_ORG_SLUG}.${baseURL.host}`;
     await pageB.goto(`${orgBase}/pricing`);
     await pageB.waitForLoadState('networkidle', { timeout: 15_000 });
