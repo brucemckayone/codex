@@ -45,13 +45,25 @@ const SEEDED_ORG_NAME = 'Studio Alpha';
  * constraints require "real session through the normal login flow".
  */
 async function loginAsSeedViewer(page: import('@playwright/test').Page) {
-  await page.goto('/login');
-  await page.fill('input[name="email"]', SEED_USER.email);
-  await page.fill('input[name="password"]', SEED_USER.password);
-  await page.click('button[type="submit"]', { noWaitAfter: true });
-  // Successful login redirects to /library; bound the wait generously because
-  // the auth worker + session KV round-trip can take a few seconds cold.
-  await expect(page).toHaveURL(/\/library/, { timeout: 30_000 });
+  // Use the test-only fast-signin endpoint (workers/auth/src/index.ts) to
+  // bypass the auth worker's 5/15min rate limit on /api/auth/sign-in/email.
+  // The Hono rate-limit middleware only gates the public endpoint;
+  // fast-signin calls `auth.handler()` directly. The returned Set-Cookie
+  // is applied to the page context by Playwright's request fixture.
+  const response = await page.request.post(
+    'http://localhost:42069/api/test/fast-signin',
+    {
+      headers: { 'Content-Type': 'application/json' },
+      data: { email: SEED_USER.email, password: SEED_USER.password },
+    }
+  );
+  if (!response.ok()) {
+    throw new Error(
+      `fast-signin failed: ${response.status()} ${await response.text()}`
+    );
+  }
+  await page.goto('/library');
+  await expect(page).toHaveURL(/\/library/, { timeout: 10_000 });
 }
 
 /**
