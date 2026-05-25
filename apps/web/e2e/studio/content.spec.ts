@@ -138,9 +138,13 @@ test.describe('Studio Content - Create Form', () => {
     await expect(page.getByRole('radio', { name: 'Article' })).toBeVisible();
 
     // Price is conditionally rendered — only shows when access type is 'paid'
-    // or 'subscribers' (AccessSection's `showPrice` derived). Click 'paid'
-    // first to surface the input, then assert visible.
-    await page.getByRole('radio', { name: /^Paid/i }).check({ force: true });
+    // or 'subscribers' (AccessSection's `showPrice` derived). Click the
+    // "One-time purchase" radio (the i18n label for the 'paid' access type
+    // — see messages/en.json `studio_content_form_access_paid`) first to
+    // surface the input, then assert visible.
+    await page
+      .getByRole('radio', { name: /one-time purchase/i })
+      .check({ force: true });
     await expect(page.locator('input#price')).toBeVisible();
 
     // Submit button
