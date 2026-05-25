@@ -189,6 +189,12 @@ test.describe('Studio Content - Create Form', () => {
       '/content/new'
     );
 
+    // Price is conditionally rendered behind `showPrice` (only true for paid
+    // or subscribers access). Default access is 'free' — pick 'One-time
+    // purchase' to surface the input before asserting its default value.
+    await page
+      .getByRole('radio', { name: /one-time purchase/i })
+      .check({ force: true });
     const priceField = page.locator('input#price');
     await expect(priceField).toHaveValue('0');
   });
