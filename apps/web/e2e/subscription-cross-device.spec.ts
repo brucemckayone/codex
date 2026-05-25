@@ -40,13 +40,12 @@ const SEEDED_ORG_SLUG = 'studio-alpha';
 const SEEDED_ORG_NAME = 'Studio Alpha';
 
 async function loginAsSeedViewer(page: import('@playwright/test').Page) {
-  // Use the test-only fast-signin endpoint (workers/auth/src/index.ts).
-  // CRITICAL: call via `lvh.me:42069`, NOT `localhost:42069`. The auth
-  // worker's `Set-Cookie` has `Domain=.lvh.me` (cross-subdomain config).
-  // Per RFC 6265, the browser only accepts that cookie if the response
-  // host is `.lvh.me` or a subdomain — `localhost` is rejected as cross-
-  // origin. lvh.me also resolves to 127.0.0.1 so the call still hits the
-  // local worker, but the domain-match check passes.
+  // Use the test-only fast-signin endpoint via lvh.me (cookie Domain=.lvh.me).
+  // Extract Set-Cookie headers from the response and inject directly into
+  // the page's browser context — Playwright's `page.request` cookie jar
+  // does NOT always merge into `page`'s cookie storage reliably (depends
+  // on whether the response has `Secure` + the actual port-pair). Manual
+  // injection is the only reliable path.
   const response = await page.request.post(
     'http://lvh.me:42069/api/test/fast-signin',
     {
@@ -59,6 +58,28 @@ async function loginAsSeedViewer(page: import('@playwright/test').Page) {
       `fast-signin failed: ${response.status()} ${await response.text()}`
     );
   }
+  const setCookieHeaders = response.headersArray().filter((h) =>
+    h.name.toLowerCase() === 'set-cookie'
+  );
+  const browserCookies = setCookieHeaders.flatMap((h) => {
+    const pair = h.value.split(';')[0];
+    if (!pair) return [];
+    const eq = pair.indexOf('=');
+    if (eq < 0) return [];
+    return [
+      {
+        name: pair.slice(0, eq).trim(),
+        value: pair.slice(eq + 1).trim(),
+        domain: '.lvh.me',
+        path: '/',
+        httpOnly: true,
+        secure: false,
+        sameSite: 'Lax' as const,
+        expires: -1,
+      },
+    ];
+  });
+  await page.context().addCookies(browserCookies);
   await page.goto('/library');
   await expect(page).toHaveURL(/\/library/, { timeout: 10_000 });
 }

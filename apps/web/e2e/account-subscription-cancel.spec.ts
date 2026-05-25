@@ -45,10 +45,9 @@ const SEEDED_ORG_NAME = 'Studio Alpha';
  * constraints require "real session through the normal login flow".
  */
 async function loginAsSeedViewer(page: import('@playwright/test').Page) {
-  // CRITICAL: call via `lvh.me:42069`, NOT `localhost:42069`. Auth worker's
-  // Set-Cookie carries `Domain=.lvh.me` (cross-subdomain) — RFC 6265 only
-  // accepts that if the response host is a subdomain of `.lvh.me`. lvh.me
-  // also resolves to 127.0.0.1 so the worker is still reachable.
+  // Call fast-signin via lvh.me to satisfy cookie Domain=.lvh.me, then
+  // manually inject Set-Cookie headers into the page context — Playwright's
+  // request fixture cookie jar doesn't reliably merge into page.context().
   const response = await page.request.post(
     'http://lvh.me:42069/api/test/fast-signin',
     {
@@ -61,6 +60,28 @@ async function loginAsSeedViewer(page: import('@playwright/test').Page) {
       `fast-signin failed: ${response.status()} ${await response.text()}`
     );
   }
+  const setCookieHeaders = response.headersArray().filter((h) =>
+    h.name.toLowerCase() === 'set-cookie'
+  );
+  const browserCookies = setCookieHeaders.flatMap((h) => {
+    const pair = h.value.split(';')[0];
+    if (!pair) return [];
+    const eq = pair.indexOf('=');
+    if (eq < 0) return [];
+    return [
+      {
+        name: pair.slice(0, eq).trim(),
+        value: pair.slice(eq + 1).trim(),
+        domain: '.lvh.me',
+        path: '/',
+        httpOnly: true,
+        secure: false,
+        sameSite: 'Lax' as const,
+        expires: -1,
+      },
+    ];
+  });
+  await page.context().addCookies(browserCookies);
   await page.goto('/library');
   await expect(page).toHaveURL(/\/library/, { timeout: 10_000 });
 }
