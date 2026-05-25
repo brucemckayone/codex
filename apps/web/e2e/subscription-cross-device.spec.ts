@@ -124,9 +124,19 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
     }
 
     // ── Tab B: open BEFORE the cancel so it captures the initial ACTIVE state
+    //
+    // Copy auth cookies from Tab A's context instead of re-logging-in via the
+    // form. Two consecutive form-submit logins from the same source IP can
+    // hit the auth worker's 5/15min rate-limit (auth-rate-limiter middleware)
+    // when the suite is run in a tight loop. Cookie-copy is the equivalent
+    // user state — a second tab opened by the same user — and stays under
+    // the rate-limit ceiling. Both contexts share `.lvh.me` so the cookies
+    // propagate to subdomain navigations (per the cookie-domain fix in
+    // PR #261 commit 95a2194a).
     const ctxB = await browser.newContext();
     const pageB = await ctxB.newPage();
-    await loginAsSeedViewer(pageB);
+    const aCookies = await ctxA.cookies();
+    await ctxB.addCookies(aCookies);
 
     // Pricing page on the org subdomain — renders the user's effective tier
     // status via the layout's streamed subscriptionContext. Root-relative
