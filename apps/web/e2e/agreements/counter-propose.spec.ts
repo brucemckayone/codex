@@ -111,15 +111,11 @@ test.describe('Agreements — Counter-propose round-trip', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
-    await counterDialog
-      .getByRole('button', { name: /send counter/i })
-      .click();
+    await counterDialog.getByRole('button', { name: /send counter/i }).click();
 
     // Toast confirming counter sent.
     await expect(
-      creatorPage
-        .locator('[role="alert"]')
-        .filter({ hasText: /counter|sent/i })
+      creatorPage.locator('[role="alert"]').filter({ hasText: /counter|sent/i })
     ).toBeVisible({ timeout: 10_000 });
 
     // ─── Owner reviews + accepts counter ─────────────────────────────

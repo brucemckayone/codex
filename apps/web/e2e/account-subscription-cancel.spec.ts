@@ -63,9 +63,9 @@ async function loginAsSeedViewer(page: import('@playwright/test').Page) {
   // BetterAuth issues `better-auth.session_token`; SvelteKit reads
   // `codex-session`. Inject both. Same pattern as `injectOrgCookies` in
   // apps/web/e2e/helpers/studio.ts.
-  const setCookieHeaders = response.headersArray().filter((h) =>
-    h.name.toLowerCase() === 'set-cookie'
-  );
+  const setCookieHeaders = response
+    .headersArray()
+    .filter((h) => h.name.toLowerCase() === 'set-cookie');
   const browserCookies = setCookieHeaders.flatMap((h) => {
     const pair = h.value.split(';')[0];
     if (!pair) return [];

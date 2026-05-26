@@ -70,14 +70,11 @@ test.describe('Agreements — Multi-creator pie math', () => {
         // — that's what Svelte 5's `oninput` is listening on. The dialog
         // initialiser also re-syncs from `initialShareBp` on `$effect`,
         // which already fired on mount, so the value sticks.
-        await dialog.locator('input#propose-share').evaluate(
-          (el, val) => {
-            const input = el as HTMLInputElement;
-            input.value = String(val);
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-          },
-          share
-        );
+        await dialog.locator('input#propose-share').evaluate((el, val) => {
+          const input = el as HTMLInputElement;
+          input.value = String(val);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }, share);
 
         await dialog.getByRole('button', { name: /send proposal/i }).click();
         await expect(

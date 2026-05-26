@@ -890,7 +890,10 @@ agreements.get(
         })
       );
 
-      const past: CreatorPortfolioPastRow[] = [...proposalPast, ...terminatedPast]
+      const past: CreatorPortfolioPastRow[] = [
+        ...proposalPast,
+        ...terminatedPast,
+      ]
         .sort((a, b) => {
           const aTs = a.endedAt instanceof Date ? a.endedAt.getTime() : 0;
           const bTs = b.endedAt instanceof Date ? b.endedAt.getTime() : 0;

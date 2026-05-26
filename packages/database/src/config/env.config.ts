@@ -163,8 +163,7 @@ function applyNeonConfig(
 export const DbEnvConfig = {
   rootEnvPath: ROOT_ENV_PATH,
   getDbUrl,
-  method:
-    typeof process !== 'undefined' ? (process.env?.DB_METHOD ?? '') : '',
+  method: typeof process !== 'undefined' ? (process.env?.DB_METHOD ?? '') : '',
   out: DRIZZLE_CONFIG.OUT,
   schema: DRIZZLE_CONFIG.SCHEMA,
   dialect: DATABASE_DIALECT as

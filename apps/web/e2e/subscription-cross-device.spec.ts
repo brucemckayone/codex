@@ -64,9 +64,9 @@ async function loginAsSeedViewer(page: import('@playwright/test').Page) {
   // the original better-auth name (for direct auth-worker calls) AND a
   // codex-session alias pointing at the same token value (for SvelteKit).
   // Same pattern as `apps/web/e2e/helpers/studio.ts` `injectOrgCookies`.
-  const setCookieHeaders = response.headersArray().filter((h) =>
-    h.name.toLowerCase() === 'set-cookie'
-  );
+  const setCookieHeaders = response
+    .headersArray()
+    .filter((h) => h.name.toLowerCase() === 'set-cookie');
   const browserCookies = setCookieHeaders.flatMap((h) => {
     const pair = h.value.split(';')[0];
     if (!pair) return [];

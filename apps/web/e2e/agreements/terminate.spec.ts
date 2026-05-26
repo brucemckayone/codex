@@ -190,9 +190,7 @@ test.describe('Agreements — Terminate', () => {
         .click();
 
       await expect(
-        creatorPage
-          .locator('[role="alert"]')
-          .filter({ hasText: /terminated/i })
+        creatorPage.locator('[role="alert"]').filter({ hasText: /terminated/i })
       ).toBeVisible({ timeout: 10_000 });
 
       // Owner side reflects: active-agreements section gone.
