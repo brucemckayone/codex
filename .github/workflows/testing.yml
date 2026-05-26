@@ -90,6 +90,11 @@ jobs:
       organization-api: ${{ steps.filter.outputs.organization-api }}
       notifications-api: ${{ steps.filter.outputs.notifications-api }}
       admin-api: ${{ steps.filter.outputs.admin-api }}
+      # CI infrastructure changes (workflow yaml, generate-dev-vars script,
+      # seed steps, worker startup blocks). When this is true the test jobs
+      # MUST run even when no source file changed — otherwise a workflow
+      # fix is silently never exercised in CI.
+      workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - uses: actions/checkout@v4
       - name: Filter changed packages
@@ -140,6 +145,9 @@ jobs:
               - 'workers/notifications-api/**'
             admin-api:
               - 'workers/admin-api/**'
+            workflows:
+              - '.github/workflows/testing.yml'
+              - '.github/scripts/generate-dev-vars.sh'
 
   test:
     needs: [changes, static-analysis]  # Both must pass before running tests
@@ -749,7 +757,8 @@ jobs:
       needs.worker-tests.result != 'failure' &&
       (needs.changes.outputs.web == 'true' ||
        needs.changes.outputs.auth-worker == 'true' ||
-       needs.changes.outputs.shared-types == 'true')
+       needs.changes.outputs.shared-types == 'true' ||
+       needs.changes.outputs.workflows == 'true')
     runs-on: ubuntu-latest
     environment: test
     outputs:
