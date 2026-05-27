@@ -124,13 +124,13 @@ test.describe('Studio Settings - General Mutations', () => {
 
     const newName = `Updated Studio ${Date.now()}`;
     await page.getByRole('textbox', { name: 'Platform Name' }).fill(newName);
-    // Hover-and-native-click pattern: the studio rail is position:absolute
-    // and expands on hover; Playwright's scroll-into-view path can move the
-    // cursor through the rail's hit-box, triggering the rail to animate
-    // mid-actionability check and intercepting the click. Mirrors the
-    // expectClickNavigates pattern used elsewhere.
+    // Bypass Playwright's actionability checks via direct DOM click. The
+    // studio rail is position:absolute and expands on hover; any cursor
+    // movement (including Playwright's hover OR scroll-into-view) triggers
+    // the rail to expand and intercept pointer events on the form column.
+    // The Save button's onclick is form submission — no cursor state is
+    // needed for the click to dispatch correctly.
     const saveBtn = page.getByRole('button', { name: 'Save Changes' });
-    await saveBtn.hover();
     await saveBtn.evaluate((el: HTMLElement) => el.click());
 
     // Wait for success feedback (role="status") or form to re-enable
