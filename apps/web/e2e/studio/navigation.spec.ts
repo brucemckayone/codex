@@ -1,5 +1,6 @@
-import { expect } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { test } from '../fixtures/auth';
+import { expectClickNavigates } from '../helpers/spa-nav';
 import {
   cleanupSharedStudioAuth,
   injectSharedStudioAuth,
@@ -16,6 +17,20 @@ import {
  * Tests sidebar navigation, mobile drawer behavior, and settings tabs.
  * Owner role is used for full nav access (sees all sections).
  */
+
+// Each /studio link appears multiple times in the DOM (topbar brand, desktop
+// rail brand + nav item, mobile drawer brand + nav item). Scoping to the
+// desktop rail's nav-item class (`.studio-rail__item`) picks the canonical
+// sidebar link and avoids strict-mode multi-match violations.
+const railLink = (href: string) =>
+  `.studio-layout__rail--desktop .studio-rail__item[href="${href}"]`;
+
+// Studio uses `ssr = false` so SvelteKit navigates via History.pushState —
+// `waitForURL` would hang. Plus the rail expands on hover and shifts mid-
+// click. See helpers/spa-nav.ts and apps/web/e2e/CLAUDE.md for full notes.
+async function clickRailLink(page: Page, href: string, pattern: RegExp) {
+  return expectClickNavigates(page, page.locator(railLink(href)), pattern);
+}
 
 test.describe('Studio Navigation - Sidebar', () => {
   test.describe.configure({ mode: 'serial' });
@@ -49,13 +64,6 @@ test.describe('Studio Navigation - Sidebar', () => {
     await expect(page.locator('.studio-layout__main')).toBeVisible();
   });
 
-  // Each /studio link appears multiple times in the DOM (topbar brand, desktop
-  // rail brand + nav item, mobile drawer brand + nav item). Scoping to the
-  // desktop rail's nav-item class (`.studio-rail__item`) picks the canonical
-  // sidebar link and avoids strict-mode multi-match violations.
-  const railLink = (href: string) =>
-    `.studio-layout__rail--desktop .studio-rail__item[href="${href}"]`;
-
   test('sidebar shows all nav links for owner', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
@@ -81,38 +89,10 @@ test.describe('Studio Navigation - Sidebar', () => {
     await expect(dashboardLink).toHaveClass(/active/);
   });
 
-  // Studio uses `ssr = false` (client-rendered SPA); SvelteKit navigates via
-  // the History API without firing a real `load` event. `waitForURL`'s
-  // default `waitUntil: 'load'` therefore hangs forever — use `toHaveURL`
-  // polling instead.
-  //
-  // `force: true` bypasses Playwright's stability re-check, which fails when
-  // the desktop rail expands on hover during the actionability check: the
-  // link shifts mid-action and the click misses.
-  // Hover the rail to expand it (desktop rail collapses by default). Then
-  // trigger a native click via `evaluate(el => el.click())` — Playwright's
-  // synthetic click event doesn't bubble in a way that SvelteKit's
-  // client router picks up (the router listens on `document` for native
-  // anchor clicks via a delegated listener). Then poll the URL with
-  // `toHaveURL` — `waitForURL` with `waitUntil:'commit'` ALSO doesn't
-  // fire reliably here because the navigation is a History.pushState
-  // call, not a real document load. URL polling is the only path that
-  // works for studio's `ssr=false` SPA navigation.
-  async function clickRailAndExpect(
-    page: import('@playwright/test').Page,
-    href: string,
-    pattern: RegExp
-  ) {
-    const link = page.locator(railLink(href));
-    await link.hover();
-    await link.evaluate((el: HTMLElement) => el.click());
-    await expect(page).toHaveURL(pattern, { timeout: 10_000 });
-  }
-
   test('clicking Content nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
 
-    await clickRailAndExpect(page, '/studio/content', /\/studio\/content/);
+    await clickRailLink(page, '/studio/content', /\/studio\/content/);
     await expect(page.locator(railLink('/studio/content'))).toHaveClass(
       /active/
     );
@@ -120,22 +100,22 @@ test.describe('Studio Navigation - Sidebar', () => {
 
   test('clicking Analytics nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
-    await clickRailAndExpect(page, '/studio/analytics', /\/studio\/analytics/);
+    await clickRailLink(page, '/studio/analytics', /\/studio\/analytics/);
   });
 
   test('clicking Team nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
-    await clickRailAndExpect(page, '/studio/team', /\/studio\/team/);
+    await clickRailLink(page, '/studio/team', /\/studio\/team/);
   });
 
   test('clicking Settings nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
-    await clickRailAndExpect(page, '/studio/settings', /\/studio\/settings/);
+    await clickRailLink(page, '/studio/settings', /\/studio\/settings/);
   });
 
   test('clicking Billing nav link navigates correctly', async ({ page }) => {
     await navigateToStudio(page, sharedAuth.member.organization.slug);
-    await clickRailAndExpect(page, '/studio/billing', /\/studio\/billing/);
+    await clickRailLink(page, '/studio/billing', /\/studio\/billing/);
   });
 });
 
@@ -307,12 +287,6 @@ test.describe('Studio Navigation - Unauthenticated', () => {
 });
 
 test.describe('Studio Navigation - Role-Based Sidebar', () => {
-  // Same desktop-rail-scoped selector as the Sidebar describe above — the
-  // bare `a[href="..."]` would match topbar brand + drawer copies and trip
-  // Playwright's strict-mode multi-match guard.
-  const railLink = (href: string) =>
-    `.studio-layout__rail--desktop .studio-rail__item[href="${href}"]`;
-
   test('creator role does not see admin or owner sections', async ({
     page,
   }) => {
