@@ -132,25 +132,22 @@ export async function captureSeededCreatorCookies(): Promise<BrowserCookie[]> {
   // BetterAuth's `validateFormCsrf` middleware (Node 22 undici auto-sends
   // `sec-fetch-mode: cors`; without Origin BetterAuth throws 403
   // MISSING_OR_NULL_ORIGIN).
-  const response = await fetch(
-    'http://lvh.me:42069/api/auth/sign-in/email',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'CF-Connecting-IP': syntheticIp,
-        // Origin MUST match BetterAuth's trustedOrigins for the test env
-        // (packages/urls/src/cors-origins.ts case 'test') — lvh.me:5173 is
-        // the Playwright webServer port and an entry in the trusted list.
-        // Using lvh.me:42069 here gets rejected with INVALID_ORIGIN.
-        Origin: 'http://lvh.me:5173',
-      },
-      body: JSON.stringify({
-        email: SEEDED_CREATOR.email,
-        password: SEEDED_CREATOR.password,
-      }),
-    }
-  );
+  const response = await fetch('http://lvh.me:42069/api/auth/sign-in/email', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'CF-Connecting-IP': syntheticIp,
+      // Origin MUST match BetterAuth's trustedOrigins for the test env
+      // (packages/urls/src/cors-origins.ts case 'test') — lvh.me:5173 is
+      // the Playwright webServer port and an entry in the trusted list.
+      // Using lvh.me:42069 here gets rejected with INVALID_ORIGIN.
+      Origin: 'http://lvh.me:5173',
+    },
+    body: JSON.stringify({
+      email: SEEDED_CREATOR.email,
+      password: SEEDED_CREATOR.password,
+    }),
+  });
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -235,21 +232,18 @@ export async function createFreshOwnerWithBypass(opts: {
     Math.random() * 200
   )}.${Math.floor(Math.random() * 200)}`;
   // lvh.me host + Origin header — see captureSeededCreatorCookies note above.
-  const signInRes = await fetch(
-    'http://lvh.me:42069/api/auth/sign-in/email',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'CF-Connecting-IP': syntheticIp,
-        // Origin matches the Playwright webServer port (lvh.me:5173) which
-        // is in BetterAuth's trustedOrigins for `test` env — see note in
-        // captureSeededCreatorCookies above.
-        Origin: 'http://lvh.me:5173',
-      },
-      body: JSON.stringify({ email, password }),
-    }
-  );
+  const signInRes = await fetch('http://lvh.me:42069/api/auth/sign-in/email', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'CF-Connecting-IP': syntheticIp,
+      // Origin matches the Playwright webServer port (lvh.me:5173) which
+      // is in BetterAuth's trustedOrigins for `test` env — see note in
+      // captureSeededCreatorCookies above.
+      Origin: 'http://lvh.me:5173',
+    },
+    body: JSON.stringify({ email, password }),
+  });
   if (!signInRes.ok) {
     throw new Error(
       `createFreshOwnerWithBypass: sign-in failed ${signInRes.status}: ${await signInRes.text()}`
