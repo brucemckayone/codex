@@ -45,13 +45,52 @@ const SEEDED_ORG_NAME = 'Studio Alpha';
  * constraints require "real session through the normal login flow".
  */
 async function loginAsSeedViewer(page: import('@playwright/test').Page) {
-  await page.goto('/login');
-  await page.fill('input[name="email"]', SEED_USER.email);
-  await page.fill('input[name="password"]', SEED_USER.password);
-  await page.click('button[type="submit"]', { noWaitAfter: true });
-  // Successful login redirects to /library; bound the wait generously because
-  // the auth worker + session KV round-trip can take a few seconds cold.
-  await expect(page).toHaveURL(/\/library/, { timeout: 30_000 });
+  // Call fast-signin via lvh.me to satisfy cookie Domain=.lvh.me, then
+  // manually inject Set-Cookie headers into the page context — Playwright's
+  // request fixture cookie jar doesn't reliably merge into page.context().
+  const response = await page.request.post(
+    'http://lvh.me:42069/api/test/fast-signin',
+    {
+      headers: { 'Content-Type': 'application/json' },
+      data: { email: SEED_USER.email, password: SEED_USER.password },
+    }
+  );
+  if (!response.ok()) {
+    throw new Error(
+      `fast-signin failed: ${response.status()} ${await response.text()}`
+    );
+  }
+  // BetterAuth issues `better-auth.session_token`; SvelteKit reads
+  // `codex-session`. Inject both. Same pattern as `injectOrgCookies` in
+  // apps/web/e2e/helpers/studio.ts.
+  const setCookieHeaders = response
+    .headersArray()
+    .filter((h) => h.name.toLowerCase() === 'set-cookie');
+  const browserCookies = setCookieHeaders.flatMap((h) => {
+    const pair = h.value.split(';')[0];
+    if (!pair) return [];
+    const eq = pair.indexOf('=');
+    if (eq < 0) return [];
+    const name = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1).trim();
+    const base = {
+      value,
+      domain: '.lvh.me',
+      path: '/',
+      httpOnly: true,
+      secure: false,
+      sameSite: 'Lax' as const,
+      expires: -1,
+    };
+    const cookies = [{ name, ...base }];
+    if (name === 'better-auth.session_token') {
+      cookies.push({ name: 'codex-session', ...base });
+    }
+    return cookies;
+  });
+  await page.context().addCookies(browserCookies);
+  await page.goto('/library');
+  await expect(page).toHaveURL(/\/library/, { timeout: 10_000 });
 }
 
 /**
@@ -143,9 +182,12 @@ test.describe
       // Period-end text is visible BEFORE cancel (baseline for step 6).
       // Matches either the active-state label ("Current period ends …") or the
       // cancelling-state label ("This subscription will end on …").
-      const periodEndLocator = card.locator(
-        'text=/Current period ends|will end on/i'
-      );
+      // Post-cancel renders BOTH "This subscription will end on …" banner
+      // AND the static "Current period ends …" line in the meta block; use
+      // .first() to pick whichever appears (either signals success).
+      const periodEndLocator = card
+        .locator('text=/Current period ends|will end on/i')
+        .first();
       await expect(periodEndLocator).toBeVisible({ timeout: 5000 });
 
       const cancelBtn = card.getByRole('button', {
@@ -183,7 +225,7 @@ test.describe
 
       // ASSERT: currentPeriodEnd still visible (revocation is at period end).
       await expect(
-        card.locator('text=/Current period ends|will end on/i')
+        card.locator('text=/Current period ends|will end on/i').first()
       ).toBeVisible();
 
       page.off('framenavigated', onFrameNav);

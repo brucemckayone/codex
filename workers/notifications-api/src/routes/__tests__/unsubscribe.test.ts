@@ -152,7 +152,7 @@ describe('Unsubscribe Routes', () => {
 
       // Tamper with the payload portion (flip a character)
       const parts = token.split('.');
-      const tamperedPayload = `X${parts[0]!.slice(1)}`;
+      const tamperedPayload = `X${parts[0]?.slice(1)}`;
       const tamperedToken = `${tamperedPayload}.${parts[1]}`;
 
       const res = await app.request(

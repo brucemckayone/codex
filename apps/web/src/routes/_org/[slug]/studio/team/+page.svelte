@@ -27,9 +27,14 @@
 
   let inviteDialogOpen = $state(false);
 
-  // Role guard: admin/owner only
+  // Role guard: admin/owner only. Wait for data.userRole to populate —
+  // ssr=false means first render has data.userRole === undefined.
   $effect(() => {
-    if (data.userRole !== 'admin' && data.userRole !== 'owner') {
+    if (
+      data.userRole !== undefined &&
+      data.userRole !== 'admin' &&
+      data.userRole !== 'owner'
+    ) {
       goto('/studio');
     }
   });

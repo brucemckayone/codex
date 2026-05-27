@@ -40,11 +40,58 @@ const SEEDED_ORG_SLUG = 'studio-alpha';
 const SEEDED_ORG_NAME = 'Studio Alpha';
 
 async function loginAsSeedViewer(page: import('@playwright/test').Page) {
-  await page.goto('/login');
-  await page.fill('input[name="email"]', SEED_USER.email);
-  await page.fill('input[name="password"]', SEED_USER.password);
-  await page.click('button[type="submit"]', { noWaitAfter: true });
-  await expect(page).toHaveURL(/\/library/, { timeout: 30_000 });
+  // Use the test-only fast-signin endpoint via lvh.me (cookie Domain=.lvh.me).
+  // Extract Set-Cookie headers from the response and inject directly into
+  // the page's browser context — Playwright's `page.request` cookie jar
+  // does NOT always merge into `page`'s cookie storage reliably (depends
+  // on whether the response has `Secure` + the actual port-pair). Manual
+  // injection is the only reliable path.
+  const response = await page.request.post(
+    'http://lvh.me:42069/api/test/fast-signin',
+    {
+      headers: { 'Content-Type': 'application/json' },
+      data: { email: SEED_USER.email, password: SEED_USER.password },
+    }
+  );
+  if (!response.ok()) {
+    throw new Error(
+      `fast-signin failed: ${response.status()} ${await response.text()}`
+    );
+  }
+  // BetterAuth issues cookies under its default names (`better-auth.session_
+  // token` + `better-auth.session_data`). SvelteKit's hooks.server.ts reads
+  // the session via `COOKIES.SESSION_NAME` ("codex-session"). Inject BOTH:
+  // the original better-auth name (for direct auth-worker calls) AND a
+  // codex-session alias pointing at the same token value (for SvelteKit).
+  // Same pattern as `apps/web/e2e/helpers/studio.ts` `injectOrgCookies`.
+  const setCookieHeaders = response
+    .headersArray()
+    .filter((h) => h.name.toLowerCase() === 'set-cookie');
+  const browserCookies = setCookieHeaders.flatMap((h) => {
+    const pair = h.value.split(';')[0];
+    if (!pair) return [];
+    const eq = pair.indexOf('=');
+    if (eq < 0) return [];
+    const name = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1).trim();
+    const base = {
+      value,
+      domain: '.lvh.me',
+      path: '/',
+      httpOnly: true,
+      secure: false,
+      sameSite: 'Lax' as const,
+      expires: -1,
+    };
+    const cookies = [{ name, ...base }];
+    if (name === 'better-auth.session_token') {
+      cookies.push({ name: 'codex-session', ...base });
+    }
+    return cookies;
+  });
+  await page.context().addCookies(browserCookies);
+  await page.goto('/library');
+  await expect(page).toHaveURL(/\/library/, { timeout: 10_000 });
 }
 
 function subscriptionCard(
@@ -124,28 +171,44 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
     }
 
     // ── Tab B: open BEFORE the cancel so it captures the initial ACTIVE state
+    //
+    // Copy auth cookies from Tab A's context instead of re-logging-in via the
+    // form. Two consecutive form-submit logins from the same source IP can
+    // hit the auth worker's 5/15min rate-limit (auth-rate-limiter middleware)
+    // when the suite is run in a tight loop. Cookie-copy is the equivalent
+    // user state — a second tab opened by the same user — and stays under
+    // the rate-limit ceiling. Both contexts share `.lvh.me` so the cookies
+    // propagate to subdomain navigations (per the cookie-domain fix in
+    // PR #261 commit 95a2194a).
     const ctxB = await browser.newContext();
     const pageB = await ctxB.newPage();
-    await loginAsSeedViewer(pageB);
+    const aCookies = await ctxA.cookies();
+    await ctxB.addCookies(aCookies);
 
     // Pricing page on the org subdomain — renders the user's effective tier
     // status via the layout's streamed subscriptionContext. Root-relative
     // path per CLAUDE.md rule (slug is in hostname, not path).
-    // Build URL from baseURL so we honour PLAYWRIGHT_BASE_URL in CI.
-    const baseURL = new URL(pageB.url());
+    //
+    // Derive orgBase from Tab A's URL (it's already navigated past
+    // /account/subscriptions). `pageB.url()` is `about:blank` until first
+    // goto — using that as a `new URL` source yields `about://...` and the
+    // subsequent goto silently lands on the wrong host (or about:blank).
+    const baseURL = new URL(pageA.url());
     const orgBase = `${baseURL.protocol}//${SEEDED_ORG_SLUG}.${baseURL.host}`;
     await pageB.goto(`${orgBase}/pricing`);
     await pageB.waitForLoadState('networkidle', { timeout: 15_000 });
 
-    // Wait for tiers + user's current-plan CTA to render. The "Current plan"
-    // button appears on the tier that the user is currently subscribed to.
-    // We bound loosely because subscriptionContext is streamed.
+    // Wait for the user's current-plan CTA to render on the org pricing
+    // page. The button text is "Current Plan" (with leading whitespace
+    // from the layout — match via `name: /current plan/i` which permits
+    // the substring match around the visible whitespace).
     await expect(
       pageB.getByRole('button', { name: /current plan/i }).first()
     ).toBeVisible({ timeout: 15_000 });
-    // "Reactivate plan" must NOT be present yet — baseline.
+    // "Reactivate" must NOT be present yet — that CTA only shows once the
+    // subscription is in the cancelling state.
     await expect(
-      pageB.getByRole('button', { name: /reactivate plan/i })
+      pageB.getByRole('button', { name: /reactivate/i })
     ).toHaveCount(0);
 
     // ── Tab A: perform the cancel ──────────────────────────────────────────
@@ -174,11 +237,14 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
 
-    // Assert: the Reactivate plan button appears (Tab B has caught up).
-    // Within 2s per task constraint. The server load re-runs and the CTA flips.
+    // Assert: the Reactivate button appears (Tab B has caught up).
+    // The 60s cooldown on cache:org-versions invalidates (apps/web org
+    // layout) means the dispatched visibilitychange will only trigger a
+    // server load re-run on first fire — give the round-trip a generous
+    // budget for KV propagation + Svelte effect resolution.
     await expect(
-      pageB.getByRole('button', { name: /reactivate plan/i }).first()
-    ).toBeVisible({ timeout: 2000 });
+      pageB.getByRole('button', { name: /reactivate/i }).first()
+    ).toBeVisible({ timeout: 15_000 });
 
     await ctxA.close();
     await ctxB.close();

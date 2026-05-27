@@ -26,7 +26,10 @@ import {
  * - `/api/content/public` response carries `Cache-Control: max-age=60`
  */
 
-const CONTENT_API = 'http://localhost:4001';
+// Use 127.0.0.1 explicitly — Node 20+ resolves `localhost` to `::1` first on
+// some hosts (including GitHub Actions runners), and wrangler dev does not
+// always bind to IPv6, producing ECONNREFUSED ::1:4001.
+const CONTENT_API = 'http://127.0.0.1:4001';
 
 test.describe('content cache invalidation — publish → appear', () => {
   test.describe.configure({ mode: 'serial' });

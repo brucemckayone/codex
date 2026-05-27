@@ -14,6 +14,13 @@ export interface CreateOrgMemberOptions {
   password: string;
   name?: string;
   orgRole: OrgMemberRole;
+  /**
+   * Platform-level user role passed to auth worker at registration time.
+   * Defaults to `'customer'`. Use `'creator'` for studio/content-api tests
+   * so the user is born with the right role — avoids the broken
+   * upgrade + re-login dance (which hits BetterAuth Origin check + rate limit).
+   */
+  platformRole?: string;
   organization?: {
     id: string;
     name: string;
@@ -51,7 +58,7 @@ export const orgFixture = {
       email: data.email,
       password: data.password,
       name: data.name ?? data.email.split('@')[0],
-      role: 'customer', // Default user role
+      role: data.platformRole ?? 'customer',
     });
 
     // Step 2: Get or create organization

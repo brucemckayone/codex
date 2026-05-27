@@ -64,19 +64,22 @@ test.describe('Agreements — Multi-creator pie math', () => {
         const dialog = ownerPage.getByRole('dialog');
         await expect(dialog).toBeVisible({ timeout: 5000 });
 
-        // Set creator share via the BrandSlider's text-input. The
-        // slider exposes its current value as an editable number.
-        const shareInput = dialog
-          .locator('input[type="number"], input[role="spinbutton"]')
-          .first();
-        if ((await shareInput.count()) > 0) {
-          await shareInput.fill(String(share));
-        }
+        // Set creator share by driving the range slider. BrandSliderField
+        // renders `<input type="range">` (not number/spinbutton), so we
+        // set `.value` on the DOM node and dispatch a real `input` event
+        // — that's what Svelte 5's `oninput` is listening on. The dialog
+        // initialiser also re-syncs from `initialShareBp` on `$effect`,
+        // which already fired on mount, so the value sticks.
+        await dialog.locator('input#propose-share').evaluate((el, val) => {
+          const input = el as HTMLInputElement;
+          input.value = String(val);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }, share);
 
         await dialog.getByRole('button', { name: /send proposal/i }).click();
         await expect(
           ownerPage
-            .locator('[role="status"]')
+            .locator('[role="alert"]')
             .filter({ hasText: /Proposal sent/i })
         ).toBeVisible({ timeout: 10_000 });
 
@@ -101,7 +104,7 @@ test.describe('Agreements — Multi-creator pie math', () => {
           .click();
         await expect(
           creatorPage
-            .locator('[role="status"]')
+            .locator('[role="alert"]')
             .filter({ hasText: /Agreement accepted/i })
         ).toBeVisible({ timeout: 10_000 });
       }
@@ -119,8 +122,12 @@ test.describe('Agreements — Multi-creator pie math', () => {
       );
       await expect(teamBudget).toBeVisible({ timeout: 15_000 });
 
-      // The pie copy explicitly says "post-platform" (per Decision Q1).
-      await expect(teamBudget).toContainText(/post-platform/i);
+      // The page-level lede explicitly says "post-platform revenue" (per
+      // Decision Q1). The team-budget section itself only references
+      // "platform fee", so we assert against the page header instead.
+      await expect(
+        ownerPage.locator('.revenue-share-page__lede')
+      ).toContainText(/post-platform revenue/i);
 
       // The active-agreements quick-action list contains all three.
       const activeSection = ownerPage.locator(

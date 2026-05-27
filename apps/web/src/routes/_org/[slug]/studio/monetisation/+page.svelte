@@ -53,15 +53,16 @@
 
   let { data } = $props();
 
-  // Role guard
+  // Role guard. Wait for data.userRole to populate — ssr=false means
+  // first render has data.userRole === undefined.
   $effect(() => {
-    if (data.userRole !== 'owner') {
+    if (data.userRole !== undefined && data.userRole !== 'owner') {
       goto('/studio');
     }
   });
 
   const isOwner = $derived(data.userRole === 'owner');
-  const orgId = $derived(data.org.id);
+  const orgId = $derived(data.org?.id);
 
   // ─── Client-side queries (SPA pattern) ─────────────────────────────────
   // Page renders instantly with skeletons, data streams in.

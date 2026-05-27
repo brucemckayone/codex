@@ -22,7 +22,13 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 1,
-  workers: process.env.CI ? 2 : undefined,
+  // Cap CI to 1 worker. The auth-worker + shared Neon ephemeral branch can't
+  // sustain parallel user-creation from 2 Playwright workers — same shape as
+  // the vitest e2e contention captured in [e2e-vitest-forks-neon-contention].
+  // Trade-off: ~2x slower wall-clock, but eliminates the CI-flake cluster
+  // (Codex-l13ai). Re-evaluate if/when the auth worker gets a connection-pool
+  // bump or tests are restructured to share users at the file level.
+  workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? 'html' : 'list',
   // Authenticated tests create real users via DB (register→verify→session) which takes
   // 5-25s under parallel load (Neon DB latency). 90s accommodates auth + page load.

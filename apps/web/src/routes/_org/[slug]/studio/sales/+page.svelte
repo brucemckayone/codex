@@ -56,14 +56,17 @@
 
   let { data } = $props();
 
+  // Wait for data.userRole to populate before redirecting — ssr=false means
+  // first render has data.userRole === undefined and a naive check would
+  // redirect authorised users before the role is known.
   $effect(() => {
-    if (data.userRole !== 'owner') {
+    if (data.userRole !== undefined && data.userRole !== 'owner') {
       goto('/studio');
     }
   });
 
   const isOwner = $derived(data.userRole === 'owner');
-  const orgId = $derived(data.org.id);
+  const orgId = $derived(data.org?.id);
 
   // ── URL-derived state ─────────────────────────────────────────────────
   const currentUrlPage = $derived(

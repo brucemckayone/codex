@@ -297,13 +297,16 @@ const ROGUE_ORG_ID = '999e4567-e89b-12d3-a456-426614174999';
 // User / creator ids — real UUIDs (must pass `z.uuid()` strict regex:
 // version digit [1-8] and variant [89abAB] in the correct positions).
 // `usr_xxx` placeholders fail Zod v4's UUID format check.
-const TARGET_CREATOR_ID = '44444444-4444-4444-9444-444444444444';
-const PEER_CREATOR_ID_1 = '55555555-5555-4555-9555-555555555555';
-const PEER_CREATOR_ID_2 = '66666666-6666-4666-9666-666666666666';
-const OWNER_USER_ID = '77777777-7777-4777-9777-777777777777';
-const ADMIN_USER_ID = '88888888-8888-4888-9888-888888888888';
-const MEMBER_USER_ID = '99999999-9999-4999-9999-999999999999';
-const CALLER_CREATOR_ID = 'aaaaaaaa-aaaa-4aaa-9aaa-aaaaaaaaaaaa';
+// Creator/user ids must be BetterAuth-style (alphanumeric, 1-64 chars) per
+// userIdSchema — ccda4e42 changed creatorId validation from uuidSchema to
+// userIdSchema to match the DB column (creator_id text, references users.id).
+const TARGET_CREATOR_ID = 'targetcreator44444444444444444444';
+const PEER_CREATOR_ID_1 = 'peercreator0155555555555555555555';
+const PEER_CREATOR_ID_2 = 'peercreator0266666666666666666666';
+const OWNER_USER_ID = 'ownerusid77777777777777777777';
+const ADMIN_USER_ID = 'adminusid88888888888888888888';
+const MEMBER_USER_ID = 'memberusid9999999999999999999';
+const CALLER_CREATOR_ID = 'callercreatoraaaaaaaaaaaaaaaaaa';
 const PROPOSAL_ID = '11111111-1111-4111-9111-111111111111';
 const AGREEMENT_ID = '22222222-2222-4222-9222-222222222222';
 
@@ -316,6 +319,7 @@ interface AgreementServiceMock {
   terminateAgreement: ReturnType<typeof vi.fn>;
   getActiveAgreements: ReturnType<typeof vi.fn>;
   getActiveAgreementsForCreator: ReturnType<typeof vi.fn>;
+  getTerminatedAgreementsForCreator: ReturnType<typeof vi.fn>;
   getNegotiationThread: ReturnType<typeof vi.fn>;
   getProposalsForCreator: ReturnType<typeof vi.fn>;
   getOrgName: ReturnType<typeof vi.fn>;
@@ -421,6 +425,11 @@ function createAgreementServiceMock(): AgreementServiceMock {
         effectiveUntil: null,
       },
     ]),
+    // d4f306af added `getTerminatedAgreementsForCreator` to surface terminated
+    // agreements in the creator portfolio `past` section. Default to empty so
+    // tests that don't care about terminated rows aren't affected; tests that
+    // exercise this code path override the mock locally.
+    getTerminatedAgreementsForCreator: vi.fn().mockResolvedValue([]),
     getNegotiationThread: vi.fn().mockResolvedValue([
       {
         id: PROPOSAL_ID,

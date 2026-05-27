@@ -7735,6 +7735,22 @@ export const discover_empty_search_description = () => `No content matched your 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const discover_result_count_one = () => `1 result`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const discover_result_count_other = (params) => `${params.count} results`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const discover_clear_search = () => `Clear search`
 
 

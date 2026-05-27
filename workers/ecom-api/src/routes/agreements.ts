@@ -707,7 +707,13 @@ agreements.get(
       // superseded). The 90-day `past` cutoff is still applied at slice
       // time below since pushing it into SQL would require a new query
       // arg; tracked as a follow-up if the table grows.
-      const [activeRows, ownProposals] = await Promise.all([
+      // 90-day cutoff for the `past` section — applied at SQL where possible
+      // (terminated agreements) and in-memory for proposal-derived rows so
+      // the table stays bounded as the org ages.
+      const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+      const cutoff = new Date(Date.now() - NINETY_DAYS_MS);
+
+      const [activeRows, ownProposals, terminatedRows] = await Promise.all([
         ctx.services.agreements.getActiveAgreementsForCreator({
           creatorId: ctx.user.id,
         }),
@@ -722,6 +728,14 @@ agreements.get(
             'superseded',
           ],
         }),
+        // Terminated agreements feed the `past` section — they're NOT
+        // surfaced by either source above (active query filters them out
+        // once terminatedAt <= now, and the originating proposal stays
+        // `accepted` so the proposal-status enumeration misses them).
+        ctx.services.agreements.getTerminatedAgreementsForCreator({
+          creatorId: ctx.user.id,
+          since: cutoff,
+        }),
       ]);
 
       // Per-org peer aggregate (matches GET /agreements/me semantics).
@@ -729,6 +743,7 @@ agreements.get(
         new Set([
           ...activeRows.map((a) => a.organizationId),
           ...ownProposals.map((p) => p.organizationId),
+          ...terminatedRows.map((a) => a.organizationId),
         ])
       );
       const peerByOrgAndType = new Map<
@@ -811,12 +826,22 @@ agreements.get(
         }
       }
 
-      // Past: terminal-state proposals. We deliberately use the proposal
-      // `updatedAt` rather than `respondedAt` so withdrawn proposals
-      // (which don't set `respondedAt`) still get a reasonable date.
-      const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
-      const cutoff = new Date(Date.now() - NINETY_DAYS_MS);
-      const past: CreatorPortfolioPastRow[] = ownProposals
+      // Past: terminal-state proposals + terminated active agreements.
+      //
+      // Two distinct sources, merged into one sorted list (newest-first by
+      // ended-at):
+      //   1. Proposals that ended without producing an active agreement
+      //      (declined / withdrawn / superseded). We use the proposal
+      //      `updatedAt` rather than `respondedAt` so withdrawn proposals
+      //      (which don't set `respondedAt`) still get a reasonable date.
+      //   2. Active agreements that were terminated. These don't show up
+      //      in the proposal enumeration above because the originating
+      //      proposal stays `accepted` — the lifecycle event is on the
+      //      `creator_organization_agreements` row, not the proposal row.
+      //      We surface them as past rows keyed by `currentProposalId`
+      //      (the proposal that produced the now-terminated agreement) so
+      //      the detail-page link still works.
+      const proposalPast: CreatorPortfolioPastRow[] = ownProposals
         .filter(
           (p) =>
             (p.status === 'declined' ||
@@ -824,8 +849,6 @@ agreements.get(
               p.status === 'superseded') &&
             p.updatedAt > cutoff
         )
-        .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
-        .slice(0, 50)
         .map((p) => ({
           proposalId: p.id,
           organizationId: p.organizationId,
@@ -838,6 +861,45 @@ agreements.get(
           endedAt: p.respondedAt ?? p.updatedAt,
           declineReason: p.declineReason,
         }));
+
+      const terminatedPast: CreatorPortfolioPastRow[] = terminatedRows.map(
+        (row) => ({
+          // Use the terminated agreement's `currentProposalId` if present —
+          // it points at the proposal that originated this agreement, so the
+          // detail-page link `/studio/negotiations/[proposalId]` still works.
+          // Fall back to the agreement id when the link is null (legacy data).
+          proposalId: row.currentProposalId ?? row.id,
+          organizationId: row.organizationId,
+          organizationName: nameByOrg.get(row.organizationId) ?? null,
+          revenueType: row.revenueType,
+          status: 'terminated',
+          // The legacy fee column `organizationFeePercentage` carries the
+          // OWNER share at termination — derive creator share from it. The
+          // dual-write invariant (see `acceptProposal`) guarantees
+          // `organizationFeePercentage = 10000 - creatorShare`.
+          proposedSharePercent: 10000 - row.organizationFeePercentage,
+          // Terminated rows aren't a proposal — record-keeping fields below
+          // come from the agreement, not a proposal. `proposedByRole` is
+          // unknowable from the agreement alone; we mark it `owner` as the
+          // safest default since the row was created by the owner-accept
+          // path. The UI only uses this for icon/tone, not authorisation.
+          proposedByRole: 'owner',
+          roundNumber: 1,
+          endedAt: row.terminatedAt,
+          declineReason: row.terminationReason ?? null,
+        })
+      );
+
+      const past: CreatorPortfolioPastRow[] = [
+        ...proposalPast,
+        ...terminatedPast,
+      ]
+        .sort((a, b) => {
+          const aTs = a.endedAt instanceof Date ? a.endedAt.getTime() : 0;
+          const bTs = b.endedAt instanceof Date ? b.endedAt.getTime() : 0;
+          return bTs - aTs;
+        })
+        .slice(0, 50);
 
       const payload: CreatorPortfolioPayload = {
         active,

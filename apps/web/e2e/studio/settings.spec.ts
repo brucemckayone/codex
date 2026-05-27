@@ -86,8 +86,17 @@ test.describe('Studio Settings - General', () => {
       '/settings'
     );
 
+    // Timezone is now a Melt UI Select (custom combobox). The trigger is a
+    // <button role="combobox">, the menu is portalled to <body> and its
+    // options have role="option". Click the trigger to open the menu, then
+    // count rendered options.
     const timezone = page.getByRole('combobox', { name: 'Timezone' });
-    const options = timezone.locator('option');
+    await expect(timezone).toBeVisible();
+    await timezone.click();
+
+    const options = page.getByRole('option');
+    // Wait until the menu is rendered with at least one option.
+    await expect(options.first()).toBeVisible({ timeout: 5000 });
     const count = await options.count();
 
     // Should have UTC plus several timezones
@@ -193,7 +202,7 @@ test.describe('Studio Settings - Branding', () => {
     await injectSharedStudioAuth(page, sharedAuth);
   });
 
-  test('branding page loads with color picker and logo upload', async ({
+  test('branding page renders Edit Brand Live + Logo upload', async ({
     page,
   }) => {
     await navigateToStudioPage(
@@ -202,34 +211,21 @@ test.describe('Studio Settings - Branding', () => {
       '/settings/branding'
     );
 
-    // Color picker: native color input + hex text input
+    // The branding settings page was simplified: it now exposes only a
+    // `Edit Brand Live` CTA (which opens the floating brand editor) and a
+    // logo upload card. Hex/color picker controls live INSIDE the brand
+    // editor (tested separately).
     await expect(
-      page.getByRole('textbox', { name: 'Hex color code' })
+      page.getByRole('button', { name: 'Edit Brand Live' })
     ).toBeVisible();
 
-    // Logo upload button
+    // Logo card heading is a real <h{N}> via Card.Title.
+    await expect(page.getByRole('heading', { name: 'Logo' })).toBeVisible();
+
+    // Read-only brand summary heading.
     await expect(
-      page.getByRole('button', { name: 'Upload Logo' })
+      page.getByRole('heading', { name: 'Current Brand' })
     ).toBeVisible();
-
-    // Save button for color form
-    await expect(
-      page.getByRole('button', { name: 'Save Changes' })
-    ).toBeVisible();
-  });
-
-  test('hex color input shows default blue', async ({ page }) => {
-    await navigateToStudioPage(
-      page,
-      sharedAuth.member.organization.slug,
-      '/settings/branding'
-    );
-
-    const hexInput = page.getByRole('textbox', { name: 'Hex color code' });
-    const value = await hexInput.inputValue();
-
-    // Default brand color is #3B82F6
-    expect(value.toUpperCase()).toContain('3B82F6');
   });
 
   test('Branding tab is selected on branding page', async ({ page }) => {
@@ -241,28 +237,5 @@ test.describe('Studio Settings - Branding', () => {
 
     const brandingTab = page.getByRole('tab', { name: 'Branding' });
     await expect(brandingTab).toHaveAttribute('aria-selected', 'true');
-  });
-});
-
-test.describe('Studio Settings - Branding Mutations', () => {
-  test('can save branding color', async ({ page }) => {
-    const member = await setupStudioUser(page, { orgRole: 'owner' });
-
-    await navigateToStudioPage(
-      page,
-      member.organization.slug,
-      '/settings/branding'
-    );
-
-    // Change color via hex input
-    const hexInput = page.getByRole('textbox', { name: 'Hex color code' });
-    await hexInput.clear();
-    await hexInput.fill('#FF5733');
-
-    await page.getByRole('button', { name: 'Save Changes' }).click();
-
-    // Wait for success feedback
-    const success = page.locator('[role="status"]');
-    await expect(success).toBeVisible({ timeout: 15000 });
   });
 });

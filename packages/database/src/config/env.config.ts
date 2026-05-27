@@ -145,11 +145,25 @@ function applyNeonConfig(
   );
 }
 
-// Main exported value for config/env logic
+// Main exported value for config/env logic.
+//
+// The `method` field is read eagerly from `process.env` at module-load
+// time. This module ends up in the browser bundle via transitive
+// re-exports (e.g. `@codex/agreements` → `@codex/database`), so we
+// MUST guard the `process` reference — `process` is not defined in
+// the browser, and an unguarded read throws `ReferenceError` at module
+// evaluation, which then poisons every downstream import (the page
+// that imported `@codex/agreements` for *types* crashes with an opaque
+// "Internal Error" surfaced by the SvelteKit error boundary).
+//
+// The runtime helpers (`getDbUrl`, `applyNeonConfig`) already access
+// `process.env` lazily inside their function bodies — that path is fine
+// because the browser never calls them. Only this top-level read needs
+// to be defensive.
 export const DbEnvConfig = {
   rootEnvPath: ROOT_ENV_PATH,
   getDbUrl,
-  method: process.env.DB_METHOD ?? '',
+  method: typeof process !== 'undefined' ? (process.env?.DB_METHOD ?? '') : '',
   out: DRIZZLE_CONFIG.OUT,
   schema: DRIZZLE_CONFIG.SCHEMA,
   dialect: DATABASE_DIALECT as
