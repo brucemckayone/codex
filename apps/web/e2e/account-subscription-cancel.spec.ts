@@ -54,7 +54,7 @@ function subscriptionCard(
 async function reactivateIfCancelling(page: import('@playwright/test').Page) {
   const card = subscriptionCard(page);
   if ((await card.count()) === 0) return;
-  const reactivateBtn = card.getByRole('button', { name: /reactivate/i });
+  const reactivateBtn = card.getByTestId('subscription-reactivate-button');
   if ((await reactivateBtn.count()) === 0) return;
   if (!(await reactivateBtn.first().isVisible())) return;
 
@@ -132,17 +132,13 @@ test.describe
         .first();
       await expect(periodEndLocator).toBeVisible({ timeout: 5000 });
 
-      const cancelBtn = card.getByRole('button', {
-        name: /^Cancel Subscription$/i,
-      });
+      const cancelBtn = card.getByTestId('subscription-cancel-button');
       await cancelBtn.click();
 
       // Confirmation dialog opens — confirm submission.
-      // Melt UI dialog portals to <body>; the confirm button's text is the
+      // Melt UI dialog portals to <body>; the confirm button is the
       // destructive "Cancel at end of period" CTA.
-      const confirmBtn = page.getByRole('button', {
-        name: /^cancel at end of period$/i,
-      });
+      const confirmBtn = page.getByTestId('cancel-dialog-confirm-button');
       await expect(confirmBtn).toBeVisible({ timeout: 3000 });
       await confirmBtn.click();
 
@@ -186,13 +182,9 @@ test.describe
       const statusBadge = card.locator('.badge, [class*="badge"]').first();
       // Previous test may have left ACTIVE (afterEach reactivated it) — cancel again.
       if (!(await statusBadge.textContent())?.match(/Cancelling/i)) {
-        const cancelBtn = card.getByRole('button', {
-          name: /^Cancel Subscription$/i,
-        });
+        const cancelBtn = card.getByTestId('subscription-cancel-button');
         await cancelBtn.click();
-        const confirmBtn = page.getByRole('button', {
-          name: /^cancel at end of period$/i,
-        });
+        const confirmBtn = page.getByTestId('cancel-dialog-confirm-button');
         await expect(confirmBtn).toBeVisible({ timeout: 3000 });
         await confirmBtn.click();
         await expect(statusBadge).toHaveText(/Cancelling/i, { timeout: 5000 });
@@ -223,7 +215,9 @@ test.describe
       // The subscription might still be CANCELLING from prior test if afterEach
       // couldn't reactivate (e.g. test failure). If so, reactivate first via UI.
       if ((await statusBadge.textContent())?.match(/Cancelling/i)) {
-        const reactivateBtn = card.getByRole('button', { name: /reactivate/i });
+        const reactivateBtn = card.getByTestId(
+          'subscription-reactivate-button'
+        );
         await reactivateBtn.click();
         await expect(statusBadge).toHaveText(/Active/i, { timeout: 5000 });
       }
@@ -247,13 +241,9 @@ test.describe
         await route.continue();
       });
 
-      const cancelBtn = card.getByRole('button', {
-        name: /^Cancel Subscription$/i,
-      });
+      const cancelBtn = card.getByTestId('subscription-cancel-button');
       await cancelBtn.click();
-      const confirmBtn = page.getByRole('button', {
-        name: /^cancel at end of period$/i,
-      });
+      const confirmBtn = page.getByTestId('cancel-dialog-confirm-button');
       await expect(confirmBtn).toBeVisible({ timeout: 3000 });
       await confirmBtn.click();
 
