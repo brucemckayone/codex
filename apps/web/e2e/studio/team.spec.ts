@@ -154,12 +154,13 @@ test.describe('Studio Customers Page', () => {
       '/customers'
     );
 
-    // New org: empty state. Populated org: table.
+    // New org: empty state. Populated org: table. The customers page renders
+    // `<table-skeleton>` while `customersQuery` is in-flight; under shared-DB
+    // contention the raw `isVisible()` snapshot can race the skeleton →
+    // terminal state transition. Wait for the auto-retrying matcher to settle
+    // on either terminal element (mirrors the sibling test at line 71).
     const emptyState = page.locator('.empty-state');
     const table = page.locator('table');
-
-    const hasEmpty = await emptyState.isVisible().catch(() => false);
-    const hasTable = await table.isVisible().catch(() => false);
-    expect(hasEmpty || hasTable).toBeTruthy();
+    await expect(emptyState.or(table).first()).toBeVisible({ timeout: 15000 });
   });
 });

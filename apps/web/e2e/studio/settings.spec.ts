@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import { test } from '../fixtures/auth';
+import { expectClickNavigates } from '../helpers/spa-nav';
 import {
   cleanupSharedStudioAuth,
   injectSharedStudioAuth,
@@ -123,7 +124,14 @@ test.describe('Studio Settings - General Mutations', () => {
 
     const newName = `Updated Studio ${Date.now()}`;
     await page.getByRole('textbox', { name: 'Platform Name' }).fill(newName);
-    await page.getByRole('button', { name: 'Save Changes' }).click();
+    // Hover-and-native-click pattern: the studio rail is position:absolute
+    // and expands on hover; Playwright's scroll-into-view path can move the
+    // cursor through the rail's hit-box, triggering the rail to animate
+    // mid-actionability check and intercepting the click. Mirrors the
+    // expectClickNavigates pattern used elsewhere.
+    const saveBtn = page.getByRole('button', { name: 'Save Changes' });
+    await saveBtn.hover();
+    await saveBtn.evaluate((el: HTMLElement) => el.click());
 
     // Wait for success feedback (role="status") or form to re-enable
     const success = page.locator('[role="status"]');
@@ -177,8 +185,11 @@ test.describe('Studio Settings - Tabs', () => {
       '/settings'
     );
 
-    await page.getByRole('tab', { name: 'Branding' }).click();
-    await page.waitForURL(/\/studio\/settings\/branding/);
+    await expectClickNavigates(
+      page,
+      page.getByRole('tab', { name: 'Branding' }),
+      /\/studio\/settings\/branding/
+    );
 
     const brandingTab = page.getByRole('tab', { name: 'Branding' });
     await expect(brandingTab).toHaveAttribute('aria-selected', 'true');

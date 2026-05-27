@@ -159,8 +159,16 @@ test.describe('Studio Navigation - Mobile Drawer', () => {
     const sidebar = page.locator('.studio-layout__rail--mobile');
     await expect(sidebar).toHaveClass(/studio-layout__rail--open/);
 
-    // Drawer scrim (overlay) dismisses the drawer
-    await page.click('.studio-drawer__scrim');
+    // Drawer scrim (overlay) dismisses the drawer.
+    // Click at x=360 to land outside the drawer's `min(320px, 85vw)` width
+    // — on a 375px viewport the drawer is ~319px so a centre-of-scrim click
+    // (x=187.5) lands INSIDE the drawer, not on the scrim. The scrim's
+    // z-index is `calc(var(--z-fixed) - 1)`, below the drawer, so
+    // elementFromPoint at the centre returns a drawer child and the click
+    // never reaches the scrim.
+    await page
+      .locator('.studio-drawer__scrim')
+      .click({ position: { x: 360, y: 400 } });
     await expect(sidebar).not.toHaveClass(/studio-layout__rail--open/);
   });
 
@@ -255,8 +263,11 @@ test.describe('Studio Navigation - Settings Tabs', () => {
       '/settings'
     );
 
-    await page.click('a[href="/studio/settings/branding"]');
-    await page.waitForURL(/\/studio\/settings\/branding/);
+    await expectClickNavigates(
+      page,
+      page.locator('a[href="/studio/settings/branding"]'),
+      /\/studio\/settings\/branding/
+    );
 
     const brandingTab = page.locator('.tab-trigger').filter({
       hasText: /Branding/i,
