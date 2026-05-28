@@ -179,7 +179,11 @@ test.describe('Studio Stripe Connect Onboarding', () => {
       { timeout: 30_000 }
     );
 
-    await cta.click();
+    // Bypass Playwright's actionability checks via direct DOM click. The
+    // studio rail is position:absolute and expands on hover; any cursor
+    // movement triggers the rail to expand and intercept pointer events.
+    // Same hazard the settings/navigation tests hit in PR #268.
+    await cta.evaluate((el: HTMLElement) => el.click());
 
     const remoteResp = await remotePromise;
     const body = await remoteResp.text();

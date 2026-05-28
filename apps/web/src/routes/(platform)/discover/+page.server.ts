@@ -58,12 +58,16 @@ export const load: PageServerLoad = async ({
 
   const filters = { q: search, type: type ?? 'all', sort } as const;
 
+  // PRIVATE (not DYNAMIC_PUBLIC) — the (platform) layout renders the
+  // auth-aware SidebarRailUserSection into the SSR HTML, and shared
+  // caches key by URL alone. A `public, s-maxage=300` response cached
+  // during an anonymous visit would otherwise be served to subsequent
+  // authenticated visitors, hiding their avatar trigger. CI's miniflare
+  // cache emulation made this deterministic (CF-Cache-Status: HIT served
+  // anon HTML to the auth test in nav-redesign/a11y-responsive).
   try {
     const content = await api.content.getDiscoverContent(params);
-    // Public endpoint — cacheable for all visitors. Setting AFTER the await
-    // ensures a thrown error never inherits public-cache headers (which would
-    // poison the CDN with the error response for max-age seconds).
-    setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
+    setHeaders(CACHE_HEADERS.PRIVATE);
     return {
       content: content ?? EMPTY_CONTENT,
       search,
@@ -74,9 +78,7 @@ export const load: PageServerLoad = async ({
     logger.warn('Failed to load discover content', {
       error: err instanceof Error ? err.message : String(err),
     });
-    // Cached error fallback path — handler swallowed the error, so this is
-    // a successful 200 with `error: true`. Safe to apply public cache here.
-    setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
+    setHeaders(CACHE_HEADERS.PRIVATE);
     return {
       content: EMPTY_CONTENT,
       search,

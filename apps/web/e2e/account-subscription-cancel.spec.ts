@@ -151,11 +151,15 @@ test.describe
       // round-trip to ecom-api), an `invalidate('account:subscriptions')` re-runs
       // the server load and replaces data.subscriptions. We assert on the final
       // visible state — "Cancelling" — which covers both the optimistic window
-      // and the server-reconciled window. Cap at 5s to account for worker cold-
-      // start on the first cancel of the test run.
+      // and the server-reconciled window.
+      //
+      // 10s budget matches subscription-cross-device.spec.ts:162 — under
+      // Playwright workers=2 the cancel pipeline (Stripe API + DB update +
+      // KV invalidate + SvelteKit re-render) can take >5s when another
+      // spec is concurrently hitting ecom-api/auth-worker.
       const navBaseline = navigationCount;
 
-      await expect(statusBadge).toHaveText(/Cancelling/i, { timeout: 5000 });
+      await expect(statusBadge).toHaveText(/Cancelling/i, { timeout: 10_000 });
 
       // No extra navigation fired — the update happened in place.
       // (invalidate() re-runs the server load in-place, not via a navigation.)

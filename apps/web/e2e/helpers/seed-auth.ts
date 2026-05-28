@@ -23,6 +23,23 @@ export const SEED_VIEWER = {
   password: 'Test1234!',
 } as const;
 
+/**
+ * Parallel seeded viewer with an independent Studio Alpha subscription.
+ *
+ * Use this when a spec mutates the seeded subscription (cancel/reactivate)
+ * AND another spec in the suite mutates the same row — under Playwright
+ * workers=2, two specs racing on `viewer@test.com`'s subscription is the
+ * verified root cause of cluster-B test flakes.
+ *
+ * The seed (`packages/database/scripts/seed/commerce.ts`) creates a
+ * separate real Stripe subscription for this user, so cancel/reactivate
+ * flows hit independent Stripe objects with no DB contention.
+ */
+export const SEED_VIEWER_2 = {
+  email: 'viewer2@test.com',
+  password: 'Test1234!',
+} as const;
+
 export interface LoginAsSeedOptions {
   /** Override which seeded user to sign in as. Defaults to {@link SEED_VIEWER}. */
   user?: { email: string; password: string };

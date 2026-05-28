@@ -695,66 +695,99 @@ export async function seedCommerce(db: typeof DbClient) {
   // `seedContent` — no post-hoc update needed.
 
   // ── Subscriptions ──────────────────────────────────────────────────
-  // viewer@test.com subscribes to Alpha Standard tier.
-  // This lets us test: viewer can access Standard-tier content but NOT Pro-tier.
+  // Two seeded subscribers on Alpha Standard tier:
+  //   - viewer@test.com   (primary — used by most E2E specs)
+  //   - viewer2@test.com  (parallel — used by subscription-cross-device.spec.ts
+  //                        so Playwright workers=2 doesn't race the cancel flow
+  //                        on the same row)
+  // Each gets its own real Stripe subscription (or synthetic IDs when
+  // STRIPE_SECRET_KEY is absent) so cancel/reactivate flows operate on
+  // independent Stripe objects.
   const subMonthly = TIERS.alphaStandard.priceMonthly; // £4.99
   const subPlatformFee = Math.round(subMonthly * 0.1);
   const subCreatorPayout = subMonthly - subPlatformFee;
 
-  // Default to synthetic IDs (used when STRIPE_SECRET_KEY is absent —
-  // preserves zero-config seed behaviour for fresh clones and CI).
-  let subStripeSubscriptionId: string = SYNTHETIC_STRIPE_SUBSCRIPTION_ID;
-  let subStripeCustomerId: string = SYNTHETIC_STRIPE_CUSTOMER_ID;
-  let subCurrentPeriodStart: Date = now;
-  let subCurrentPeriodEnd: Date = new Date(
-    Date.now() + 30 * 24 * 60 * 60 * 1000
-  ); // +30 days
+  type SeededSubscriber = {
+    user: { id: string; email: string; name: string };
+    subscriptionSeedId: string;
+  };
 
-  if (stripeKey && stripePriceIdsByTier) {
-    const tierPrices = stripePriceIdsByTier.get(TIERS.alphaStandard.id);
-    if (tierPrices) {
-      const stripe = new Stripe(stripeKey);
-      try {
-        const result = await createOrFindStripeSubscription(stripe, {
-          user: {
-            id: USERS.viewer.id,
-            email: USERS.viewer.email,
-            name: USERS.viewer.name,
-          },
-          tier: {
-            id: TIERS.alphaStandard.id,
-            stripePriceMonthlyId: tierPrices.stripePriceMonthlyId,
-            stripePriceAnnualId: tierPrices.stripePriceAnnualId,
-          },
-          subscriptionSeedId: SUBSCRIPTIONS.viewerAlphaStandard.id,
-          billingInterval: 'month',
-        });
-        subStripeSubscriptionId = result.stripeSubscriptionId;
-        subStripeCustomerId = result.stripeCustomerId;
-        subCurrentPeriodStart = result.currentPeriodStart;
-        subCurrentPeriodEnd = result.currentPeriodEnd;
+  async function buildSubscriptionRow({
+    user,
+    subscriptionSeedId,
+  }: SeededSubscriber) {
+    // Default to synthetic IDs (used when STRIPE_SECRET_KEY is absent —
+    // preserves zero-config seed behaviour for fresh clones and CI).
+    let stripeSubscriptionId: string = SYNTHETIC_STRIPE_SUBSCRIPTION_ID;
+    let stripeCustomerId: string = SYNTHETIC_STRIPE_CUSTOMER_ID;
+    let currentPeriodStart: Date = now;
+    let currentPeriodEnd: Date = new Date(
+      Date.now() + 30 * 24 * 60 * 60 * 1000
+    ); // +30 days
 
-        // Unified-customer invariant (Codex-cmhnv): the real Stripe Customer
-        // created above IS the viewer's canonical customer. Overwrite the
-        // synthetic `cus_test_samviewer` value seeded in seedUsers() so
-        // `users.stripe_customer_id` reflects the same Customer the
-        // subscription points to.
-        await db
-          .update(schema.users)
-          .set({ stripeCustomerId: result.stripeCustomerId })
-          .where(eq(schema.users.id, USERS.viewer.id));
+    if (stripeKey && stripePriceIdsByTier) {
+      const tierPrices = stripePriceIdsByTier.get(TIERS.alphaStandard.id);
+      if (tierPrices) {
+        const stripe = new Stripe(stripeKey);
+        try {
+          const result = await createOrFindStripeSubscription(stripe, {
+            user,
+            tier: {
+              id: TIERS.alphaStandard.id,
+              stripePriceMonthlyId: tierPrices.stripePriceMonthlyId,
+              stripePriceAnnualId: tierPrices.stripePriceAnnualId,
+            },
+            subscriptionSeedId,
+            billingInterval: 'month',
+          });
+          stripeSubscriptionId = result.stripeSubscriptionId;
+          stripeCustomerId = result.stripeCustomerId;
+          currentPeriodStart = result.currentPeriodStart;
+          currentPeriodEnd = result.currentPeriodEnd;
 
-        console.log(
-          `  ✓ Created real Stripe test-mode subscription for viewer@test.com (${subStripeSubscriptionId})`
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(
-          `Seed failed while creating real Stripe subscription for viewer@test.com: ${message}`
-        );
+          // Unified-customer invariant (Codex-cmhnv): the real Stripe Customer
+          // created above IS this user's canonical customer. Overwrite any
+          // synthetic value seeded in seedUsers() so `users.stripe_customer_id`
+          // reflects the same Customer the subscription points to.
+          await db
+            .update(schema.users)
+            .set({ stripeCustomerId: result.stripeCustomerId })
+            .where(eq(schema.users.id, user.id));
+
+          console.log(
+            `  ✓ Created real Stripe test-mode subscription for ${user.email} (${stripeSubscriptionId})`
+          );
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          throw new Error(
+            `Seed failed while creating real Stripe subscription for ${user.email}: ${message}`
+          );
+        }
       }
     }
-  } else if (!stripeKey) {
+
+    return {
+      id: subscriptionSeedId,
+      userId: user.id,
+      organizationId: ORGS.alpha.id,
+      tierId: TIERS.alphaStandard.id,
+      stripeSubscriptionId,
+      stripeCustomerId,
+      status: 'active' as const,
+      billingInterval: 'month' as const,
+      currentPeriodStart,
+      currentPeriodEnd,
+      amountCents: subMonthly,
+      platformFeeCents: subPlatformFee,
+      organizationFeeCents: 0,
+      creatorPayoutCents: subCreatorPayout,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  if (!stripeKey) {
     console.warn(
       '  ⚠ STRIPE_SECRET_KEY not set — using synthetic Stripe IDs. ' +
         'E2E tests requiring real cancel/resume flows will not run green. ' +
@@ -762,26 +795,33 @@ export async function seedCommerce(db: typeof DbClient) {
     );
   }
 
-  await db.insert(schema.subscriptions).values([
+  const seededSubscribers: SeededSubscriber[] = [
     {
-      id: SUBSCRIPTIONS.viewerAlphaStandard.id,
-      userId: USERS.viewer.id,
-      organizationId: ORGS.alpha.id,
-      tierId: TIERS.alphaStandard.id,
-      stripeSubscriptionId: subStripeSubscriptionId,
-      stripeCustomerId: subStripeCustomerId,
-      status: 'active',
-      billingInterval: 'month',
-      currentPeriodStart: subCurrentPeriodStart,
-      currentPeriodEnd: subCurrentPeriodEnd,
-      amountCents: subMonthly,
-      platformFeeCents: subPlatformFee,
-      organizationFeeCents: 0,
-      creatorPayoutCents: subCreatorPayout,
-      createdAt: now,
-      updatedAt: now,
+      user: {
+        id: USERS.viewer.id,
+        email: USERS.viewer.email,
+        name: USERS.viewer.name,
+      },
+      subscriptionSeedId: SUBSCRIPTIONS.viewerAlphaStandard.id,
     },
-  ]);
+    {
+      user: {
+        id: USERS.viewer2.id,
+        email: USERS.viewer2.email,
+        name: USERS.viewer2.name,
+      },
+      subscriptionSeedId: SUBSCRIPTIONS.viewer2AlphaStandard.id,
+    },
+  ];
+
+  // Run sequentially — parallel Stripe customers.create + subscriptions.create
+  // calls from the same script can race on idempotency keys and rate limits.
+  const subscriptionRows = [];
+  for (const subscriber of seededSubscribers) {
+    subscriptionRows.push(await buildSubscriptionRow(subscriber));
+  }
+
+  await db.insert(schema.subscriptions).values(subscriptionRows);
 
   // ── Stripe Connect accounts for monetised seed orgs ─────────────
   // Every org with subscription tiers needs a fully-active Connect account, or
