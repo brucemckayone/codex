@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loginAsSeedViewer } from './helpers/seed-auth';
+import { loginAsSeedViewer, SEED_VIEWER_2 } from './helpers/seed-auth';
 
 /**
  * Cross-Device Subscription Visibility-Change E2E Tests
@@ -21,9 +21,12 @@ import { loginAsSeedViewer } from './helpers/seed-auth';
  *          card should flip from "Current plan" (active) to the "Cancelling" /
  *          "Reactivate plan" affordance.
  *
- * Fixture strategy (same as account-subscription-cancel.spec.ts):
- *   Use the seeded viewer@test.com user, who starts each `pnpm db:seed` run with
- *   an ACTIVE subscription to studio-alpha.
+ * Fixture strategy:
+ *   Use the seeded viewer2@test.com user, who starts each `pnpm db:seed` run
+ *   with an ACTIVE subscription to studio-alpha. viewer@test.com is owned by
+ *   account-subscription-cancel.spec.ts — routing this spec to viewer2 keeps
+ *   the two cancel-flow specs on independent DB rows so Playwright workers=2
+ *   doesn't race them on the same seeded subscription.
  *
  * Idempotency: afterEach reactivates if CANCELLING so the next run starts clean.
  *
@@ -66,7 +69,7 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
     const cleanupCtx = await browser.newContext();
     const cleanupPage = await cleanupCtx.newPage();
     try {
-      await loginAsSeedViewer(cleanupPage);
+      await loginAsSeedViewer(cleanupPage, { user: SEED_VIEWER_2 });
       await cleanupPage.goto('/account/subscriptions');
       const card = subscriptionCard(cleanupPage);
       if ((await card.count()) > 0) {
@@ -98,7 +101,7 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
     // ── Tab A: log in and cancel ───────────────────────────────────────────
     const ctxA = await browser.newContext();
     const pageA = await ctxA.newPage();
-    await loginAsSeedViewer(pageA);
+    await loginAsSeedViewer(pageA, { user: SEED_VIEWER_2 });
     await pageA.goto('/account/subscriptions');
     await pageA.waitForLoadState('networkidle', { timeout: 10_000 });
 
