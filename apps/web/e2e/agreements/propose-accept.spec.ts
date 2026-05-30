@@ -1,7 +1,7 @@
 /**
  * WP-10 Scenario 1 — Propose → Accept happy path
  *
- * Owner @ `${orgSlug}.lvh.me/studio/settings/revenue-share` proposes a
+ * Owner @ `${orgSlug}.lvh.me/studio/monetisation/revenue-share` proposes a
  *   subscription agreement with the team creator (default 30%, term 6mo).
  * Creator @ `creators.lvh.me/studio/negotiations` sees the proposal in
  *   "Action required", clicks Accept.

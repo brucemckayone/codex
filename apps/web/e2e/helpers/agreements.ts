@@ -5,7 +5,7 @@
  *
  * Topology:
  *   - Owner lives in an org. They drive the studio at
- *     `${orgSlug}.lvh.me:${PORT}/studio/settings/revenue-share`.
+ *     `${orgSlug}.lvh.me:${PORT}/studio/monetisation/revenue-share`.
  *   - Creator is an org member with role `creator`. They view their
  *     personal portfolio at `creators.lvh.me:${PORT}/studio/negotiations`.
  *
@@ -136,7 +136,7 @@ export async function createOwnerWithCreators(creatorCount: number): Promise<{
  * On org subdomains the slug is in the hostname, not the path.
  */
 export function ownerRevenueSharePath(orgSlug: string): string {
-  return `http://${orgSlug}.lvh.me:${E2E_BASE_PORT}/studio/settings/revenue-share`;
+  return `http://${orgSlug}.lvh.me:${E2E_BASE_PORT}/studio/monetisation/revenue-share`;
 }
 
 /** Creator negotiations portfolio URL — uses the `creators` subdomain. */

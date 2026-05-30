@@ -1,73 +1,55 @@
 <!--
-  @component SettingsLayout
+  @component MonetisationLayout
 
-  Tabbed navigation layout for organization settings.
-  Uses Melt UI Tabs component with anchor-based triggers for SvelteKit routing.
-  Active tab is derived from the current URL pathname.
+  Tabbed hub for organization monetisation. Anchor-based triggers drive
+  SvelteKit sub-routing (each tab is its own route), mirroring the settings
+  layout pattern. Active tab is derived from the current URL pathname.
 
-  @prop {LayoutData} data - Server-loaded data (orgId from parent)
+  Tabs:
+  - Subscriptions  → /studio/monetisation            (Stripe Connect, tiers)
+  - Revenue share  → /studio/monetisation/revenue-share (creator agreements)
+
   @prop {Snippet} children - Child route content
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { navigating, page } from '$app/state';
   import * as m from '$paraglide/messages';
-  import type { LayoutData } from './$types';
 
-  const { data, children }: { data: LayoutData; children: Snippet } = $props();
+  const { children }: { children: Snippet } = $props();
 
-  const slug = $derived(page.params.slug);
-
-  // Derive active tab from pathname
   const activeTab = $derived(
-    page.url.pathname.endsWith('/branding')
-      ? 'branding'
-      : page.url.pathname.endsWith('/pricing-faq')
-        ? 'pricing-faq'
-        : 'general'
+    page.url.pathname.endsWith('/revenue-share') ? 'revenue-share' : 'subscriptions'
   );
 
-  // Derive loading tab from pending navigation
   const loadingTab = $derived(
-    navigating?.to?.url.pathname?.endsWith('/branding')
-      ? 'branding'
-      : navigating?.to?.url.pathname?.endsWith('/pricing-faq')
-        ? 'pricing-faq'
-        : navigating?.to?.url.pathname?.endsWith('/settings')
-          ? 'general'
-          : null
+    navigating?.to?.url.pathname?.endsWith('/revenue-share')
+      ? 'revenue-share'
+      : navigating?.to?.url.pathname?.endsWith('/monetisation')
+        ? 'subscriptions'
+        : null
   );
 
-  // Map nav items to tab config with i18n labels
-  const tabs = $derived([
+  const tabs = [
     {
-      value: 'general',
-      href: '/studio/settings',
-      label: m.settings_general(),
+      value: 'subscriptions',
+      href: '/studio/monetisation',
+      label: 'Subscriptions',
     },
     {
-      value: 'branding',
-      href: '/studio/settings/branding',
-      label: m.settings_branding(),
+      value: 'revenue-share',
+      href: '/studio/monetisation/revenue-share',
+      label: 'Revenue share',
     },
-    {
-      value: 'pricing-faq',
-      href: '/studio/settings/pricing-faq',
-      label: 'Pricing FAQ',
-    },
-  ]);
+  ];
 </script>
 
-<svelte:head>
-  <title>{m.settings_title()} | {data.org.name} Studio</title>
-</svelte:head>
-
-<div class="settings-layout">
-  <header class="settings-header">
-    <h1 class="settings-title">{m.settings_title()}</h1>
+<div class="monetisation-hub">
+  <header class="monetisation-hub__header">
+    <h1 class="page-title">{m.monetisation_title()}</h1>
   </header>
 
-  <nav class="settings-tabs" aria-label={m.settings_title()}>
+  <nav class="monetisation-hub__tabs" aria-label={m.monetisation_title()}>
     <div class="tabs-list" role="tablist">
       {#each tabs as tab (tab.value)}
         <a
@@ -85,26 +67,26 @@
     </div>
   </nav>
 
-  <div class="settings-content">
+  <div class="monetisation-hub__content">
     {@render children()}
   </div>
 </div>
 
 <style>
-  .settings-layout {
+  .monetisation-hub {
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
     max-width: 1200px;
   }
 
-  .settings-header {
+  .monetisation-hub__header {
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
   }
 
-  .settings-title {
+  .page-title {
     font-family: var(--font-heading);
     font-size: var(--text-2xl);
     font-weight: var(--font-bold);
@@ -113,7 +95,7 @@
     line-height: var(--leading-tight);
   }
 
-  .settings-tabs {
+  .monetisation-hub__tabs {
     border-bottom: var(--border-width) var(--border-style) var(--color-border);
   }
 
@@ -156,7 +138,7 @@
     border-bottom-color: var(--color-interactive);
   }
 
-  .settings-content {
+  .monetisation-hub__content {
     flex: 1;
     min-width: 0;
   }
@@ -180,9 +162,8 @@
       border-bottom-color: transparent;
     }
 
-    .settings-tabs {
+    .monetisation-hub__tabs {
       border-bottom: none;
     }
   }
-
 </style>
