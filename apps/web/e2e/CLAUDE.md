@@ -158,10 +158,10 @@ The seed is not re-run between iterations of the full suite. Long debug loops ac
 
 `playwright.config.ts`:
 ```typescript
-workers: process.env.CI ? 2 : undefined,   // CI: 2 workers. Local: cores.
+workers: 2,   // CI AND local both capped at 2 (the Neon ceiling).
 ```
 
-**Why 2 (not 1, not 4+)**: the consolidation PRs (#262, #263) + the `fast-signin` test endpoint + `CF-Connecting-IP` rate-limit bypass eliminated the auth-worker rate-limit contention that originally forced `workers=1`. Memory `feedback_e2e_vitest_forks_neon_contention` caps at 2 — beyond 2 hits Neon ephemeral-branch contention (3+ parallel writers race on the same DB).
+**Why 2 (not 1, not 4+)**: the consolidation PRs (#262, #263) + the `fast-signin` test endpoint + `CF-Connecting-IP` rate-limit bypass eliminated the auth-worker rate-limit contention that originally forced `workers=1`. Memory `feedback_e2e_vitest_forks_neon_contention` caps at 2 — beyond 2 hits Neon ephemeral-branch contention (3+ parallel writers race on the same DB). The local default was previously `undefined` (= one worker per CPU core, ~8 on a dev box) — 4× over the ceiling — which made the data-heavy two-actor `agreements/` specs intermittently red locally: the owner page rendered fine but the just-created creator membership read back empty/stale ("No team creators yet") so the creator card never appeared. A parallelism sweep (workers=1 → pass, 2 → pass, 8 → 4 fail + 2 flaky) confirmed real contention (not flake, not app breakage), so `workers` is now a flat `2` for CI and local alike.
 
 **Gate criteria for keeping workers=2**: ≥99% pass rate across 3 consecutive green CI runs.
 

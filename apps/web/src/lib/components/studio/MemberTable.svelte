@@ -27,6 +27,13 @@
     onRemove?: (userId: string) => void;
     loading?: boolean;
     class?: string;
+    /**
+     * Optional per-member active revenue-share summary, keyed by userId.
+     * When provided, a "Revenue share" column is rendered with a deep-link
+     * into the Monetisation > Revenue share tab. Owner-only (Codex-dhxjz);
+     * callers pass undefined to hide the column entirely.
+     */
+    revenueShareByUser?: Map<string, { label: string; active: boolean }>;
   }
 
   const {
@@ -35,9 +42,12 @@
     onRemove,
     loading = false,
     class: className = '',
+    revenueShareByUser,
   }: Props = $props();
 
   const isEmpty = $derived(members.length === 0);
+
+  const showRevenueShare = $derived(revenueShareByUser !== undefined);
 
   // Confirm dialog state for member removal
   let showRemoveConfirm = $state(false);
@@ -125,6 +135,9 @@
           <Table.Head>{m.team_col_email()}</Table.Head>
           <Table.Head>{m.team_col_role()}</Table.Head>
           <Table.Head>{m.team_col_joined()}</Table.Head>
+          {#if showRevenueShare}
+            <Table.Head>Revenue share</Table.Head>
+          {/if}
           <Table.Head>{m.team_col_actions()}</Table.Head>
         </Table.Row>
       </Table.Header>
@@ -161,6 +174,28 @@
             <Table.Cell class="date-cell">
               {formatDate(member.joinedAt)}
             </Table.Cell>
+            {#if showRevenueShare}
+              {@const rs = revenueShareByUser?.get(member.userId)}
+              <Table.Cell>
+                <div class="rev-cell">
+                  {#if rs?.active}
+                    <Badge variant="success">{rs.label}</Badge>
+                  {:else if member.role === 'owner'}
+                    <span class="rev-none">—</span>
+                  {:else}
+                    <span class="rev-none">No agreement</span>
+                  {/if}
+                  {#if member.role !== 'owner'}
+                    <a
+                      class="rev-link"
+                      href={`/studio/monetisation/revenue-share?focus=${member.userId}`}
+                    >
+                      {rs?.active ? 'Manage' : 'Set up'}
+                    </a>
+                  {/if}
+                </div>
+              </Table.Cell>
+            {/if}
             <Table.Cell>
               {#if member.role !== 'owner'}
                 <div class="actions">
@@ -243,6 +278,35 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
+  }
+
+  .rev-cell {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .rev-none {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  .rev-link {
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--color-interactive);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .rev-link:hover {
+    text-decoration: underline;
+  }
+
+  .rev-link:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+    border-radius: var(--radius-sm);
   }
 
   .remove-btn {

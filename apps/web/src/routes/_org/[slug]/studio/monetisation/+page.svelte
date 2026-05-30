@@ -362,10 +362,7 @@
   <!-- Redirecting... -->
 {:else}
 <div class="monetisation">
-  <header class="page-header">
-    <h1 class="page-title">{m.monetisation_title()}</h1>
-    <p class="page-description">{m.monetisation_description()}</p>
-  </header>
+  <p class="page-description">{m.monetisation_description()}</p>
 
   <!-- Stripe Connect Card -->
   <Card.Root>

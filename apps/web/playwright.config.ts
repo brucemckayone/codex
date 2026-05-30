@@ -32,9 +32,20 @@ export default defineConfig({
   // beyond 2 hits Neon ephemeral-branch contention (3+ parallel writers
   // race on the same DB). Cap stays at 2.
   //
+  // The cap applies LOCALLY too: local dev defaulted to `undefined` (= one
+  // worker per CPU core, i.e. 8 on a typical dev box), which is 4x over the
+  // documented ceiling. The data-heavy two-actor agreements specs
+  // (createOwnerAndCreator → org-members + agreements APIs already 3-5s
+  // serially against the shared local Neon branch) then race: the owner's
+  // revenue-share page renders fine but the org-members list returns
+  // empty/stale ("No team creators yet"), so the creator `article` card
+  // never appears and the spec times out. Proven by a parallelism sweep on
+  // this branch: workers=1 → 6 passed, workers=2 → 6 passed, workers=8
+  // (old local default) → 4 failed + 2 flaky. Cap both CI and local at 2.
+  //
   // Gate criteria for keeping workers=2: ≥99% pass rate across 3 consecutive
   // green CI runs. Rollback: flip back to 1 if a new flake cluster emerges.
-  workers: process.env.CI ? 2 : undefined,
+  workers: 2,
   reporter: process.env.CI ? 'html' : 'list',
   // Authenticated tests create real users via DB (register→verify→session) which takes
   // 5-25s under parallel load (Neon DB latency). 90s accommodates auth + page load.
