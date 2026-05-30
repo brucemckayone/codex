@@ -46,7 +46,7 @@
 
 <div class="monetisation-hub">
   <header class="monetisation-hub__header">
-    <h1 class="monetisation-hub__title">{m.monetisation_title()}</h1>
+    <h1 class="page-title">{m.monetisation_title()}</h1>
   </header>
 
   <nav class="monetisation-hub__tabs" aria-label={m.monetisation_title()}>
@@ -86,7 +86,7 @@
     gap: var(--space-1);
   }
 
-  .monetisation-hub__title {
+  .page-title {
     font-family: var(--font-heading);
     font-size: var(--text-2xl);
     font-weight: var(--font-bold);
