@@ -217,11 +217,12 @@ async function handleChargeDisputeCreated(
     amount: dispute.amount,
   });
 
-  // Unlike one-time-purchase refunds, purchases are ALWAYS org-scoped
-  // (`purchases.organizationId` is NOT NULL), so `processDispute` always
-  // returns `orgId` when a matching purchase exists. Revocation reason
-  // reuses 'refund' because the AccessRevocation reason enum is
-  // observability-only and disputes are the same access-reducing class.
+  // Org-scoped purchases revoke access within their org; orgless
+  // creator-direct purchases (`purchases.organizationId` nullable, Codex-69t7c)
+  // have no org, so `orgId` may be null — the guard below skips org-scoped
+  // revocation in that case. Revocation reason reuses 'refund' because the
+  // AccessRevocation reason enum is observability-only and disputes are the
+  // same access-reducing class.
   invalidateLibrary(c, disputeResult?.userId);
   if (disputeResult?.userId && disputeResult.orgId) {
     revokeAccess(c, disputeResult.userId, disputeResult.orgId);

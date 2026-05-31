@@ -877,9 +877,10 @@ export async function seedCommerce(db: typeof DbClient) {
         });
 
       // Heal stale rows on re-seed: if an earlier seed run (or a failed live
-      // onboarding attempt by the org owner in dev) left an inactive row for
-      // (userId, orgId), upsert points it at the freshly-activated Stripe
-      // account so subscription checkout passes the readiness gate.
+      // onboarding attempt in dev) left an inactive row for this user, upsert
+      // points it at the freshly-activated Stripe account so subscription
+      // checkout passes the readiness gate. One account per user (Codex-69t7c)
+      // → conflict target is userId alone.
       await db
         .insert(schema.stripeConnectAccounts)
         .values({
@@ -895,10 +896,7 @@ export async function seedCommerce(db: typeof DbClient) {
           updatedAt: now,
         })
         .onConflictDoUpdate({
-          target: [
-            schema.stripeConnectAccounts.userId,
-            schema.stripeConnectAccounts.organizationId,
-          ],
+          target: [schema.stripeConnectAccounts.userId],
           set: {
             stripeAccountId: accountId,
             status: chargesEnabled ? 'active' : 'onboarding',

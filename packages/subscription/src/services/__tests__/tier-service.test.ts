@@ -59,7 +59,12 @@ describe('TierService', () => {
     [creatorId] = userIds;
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // One Connect account per user (uq_stripe_connect_user, Codex-69t7c):
+    // clear the seed user's account between tests to avoid collisions.
+    await db
+      .delete(stripeConnectAccounts)
+      .where(eq(stripeConnectAccounts.userId, creatorId));
     stripe = createMockStripe();
     // X7 (Codex-z9fzv): TierService now takes an explicit dbWs for
     // transactions instead of casting `this.db` at every call site.
@@ -83,13 +88,32 @@ describe('TierService', () => {
         })
       )
       .returning();
-    await db.insert(stripeConnectAccounts).values(
-      createTestConnectAccountInput(org.id, creatorId, {
-        chargesEnabled: true,
-        payoutsEnabled: true,
-        status: 'active',
-      })
-    );
+    // Upsert on userId (uq_stripe_connect_user, Codex-69t7c) so scoping tests
+    // that build two orgs for the same creator reuse the one account.
+    await db
+      .insert(stripeConnectAccounts)
+      .values(
+        createTestConnectAccountInput(org.id, creatorId, {
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          status: 'active',
+        })
+      )
+      .onConflictDoUpdate({
+        target: stripeConnectAccounts.userId,
+        set: {
+          organizationId: org.id,
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          status: 'active',
+        },
+      });
+    // Pin the org's canonical Connect account (Codex-69t7c): org→account now
+    // resolves via primaryConnectAccountUserId, not the account's org column.
+    await db
+      .update(organizations)
+      .set({ primaryConnectAccountUserId: creatorId })
+      .where(eq(organizations.id, org.id));
     return org;
   }
 

@@ -3255,15 +3255,12 @@ export class SubscriptionService extends BaseService {
 
     // Query all unresolved payouts for this org that belong to the user
     // whose Connect account just became active.
+    // stripeAccountId is globally unique, so it alone identifies the account
+    // (one account per user, Codex-69t7c — the org condition is dropped).
     const [connectAccount] = await this.db
       .select({ userId: stripeConnectAccounts.userId })
       .from(stripeConnectAccounts)
-      .where(
-        and(
-          eq(stripeConnectAccounts.stripeAccountId, stripeAccountId),
-          eq(stripeConnectAccounts.organizationId, orgId)
-        )
-      )
+      .where(eq(stripeConnectAccounts.stripeAccountId, stripeAccountId))
       .limit(1);
 
     if (!connectAccount) {
@@ -4378,17 +4375,14 @@ export class SubscriptionService extends BaseService {
       return;
     }
 
-    // Batch-fetch all creator Connect accounts to avoid N+1 queries
+    // Batch-fetch all creator Connect accounts to avoid N+1 queries. Each
+    // creator has one account keyed by userId (Codex-69t7c), independent of
+    // which org this subscription belongs to.
     const creatorIds = creatorAgreements.map((a) => a.creatorId);
     const creatorConnects = await this.db
       .select()
       .from(stripeConnectAccounts)
-      .where(
-        and(
-          inArray(stripeConnectAccounts.userId, creatorIds),
-          eq(stripeConnectAccounts.organizationId, orgId)
-        )
-      );
+      .where(inArray(stripeConnectAccounts.userId, creatorIds));
     const connectByCreator = new Map(creatorConnects.map((c) => [c.userId, c]));
 
     // Codex-ez3tl (C1): per-creator amount uses the POST-PLATFORM pool
@@ -4706,20 +4700,15 @@ export class SubscriptionService extends BaseService {
         continue;
       }
       try {
-        // Find the Connect account row for this (orgId, userId) so we can
-        // look up the stripeAccountId. If the row is missing (rare — a
-        // Connect account was deleted but its payouts survived
-        // because of ON DELETE behaviour) skip this group; it will be
-        // re-attempted on the next sweep window.
+        // Find the user's single Connect account (by userId, Codex-69t7c) so
+        // we can look up the stripeAccountId. If the row is missing (rare — a
+        // Connect account was deleted but its payouts survived because of ON
+        // DELETE behaviour) skip this group; it will be re-attempted on the
+        // next sweep window.
         const [connect] = await this.db
           .select({ stripeAccountId: stripeConnectAccounts.stripeAccountId })
           .from(stripeConnectAccounts)
-          .where(
-            and(
-              eq(stripeConnectAccounts.organizationId, group.organizationId),
-              eq(stripeConnectAccounts.userId, group.userId)
-            )
-          )
+          .where(eq(stripeConnectAccounts.userId, group.userId))
           .limit(1);
 
         if (!connect) {

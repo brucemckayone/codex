@@ -839,20 +839,15 @@ export class PurchaseService extends BaseService {
       }
     }
 
-    // Look up Connect accounts up front. We need creator's (the org owner / a
-    // member, scoped by creatorId + organizationId) and org's (any active row
-    // for the org). The latter falls back to the same lookup as before.
+    // Look up Connect accounts up front: the creator's single account (by
+    // userId — one account per user, Codex-69t7c) and the org's canonical
+    // account (resolved via primaryConnectAccountUserId below).
     const [creatorConnect] =
       revenueSplit.creatorPayoutCents > 0
         ? await this.db
             .select()
             .from(stripeConnectAccounts)
-            .where(
-              and(
-                eq(stripeConnectAccounts.userId, creatorId),
-                eq(stripeConnectAccounts.organizationId, organizationId)
-              )
-            )
+            .where(eq(stripeConnectAccounts.userId, creatorId))
             .limit(1)
         : [undefined];
 
@@ -1613,7 +1608,7 @@ export class PurchaseService extends BaseService {
       stripeDisputeId?: string;
       disputeReason?: string;
     }
-  ): Promise<{ userId: string; orgId: string } | void> {
+  ): Promise<{ userId: string; orgId: string | null } | void> {
     try {
       const purchase = await this.db.query.purchases.findFirst({
         where: eq(purchases.stripePaymentIntentId, paymentIntentId),

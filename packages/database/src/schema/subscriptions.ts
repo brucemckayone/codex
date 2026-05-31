@@ -199,11 +199,16 @@ export const subscriptions = pgTable(
 );
 
 /**
- * Stripe Connect Accounts — org and creator Stripe Express accounts
+ * Stripe Connect Accounts — ONE account per user (creator or org owner).
  *
- * Both org owners and creators need Connect accounts to receive payouts.
- * One account per user (unique on userId). Orgs also have a unique constraint
- * on organizationId for the org-level account (the owner's).
+ * A user has exactly one Connect account (`unique(userId)`) which receives
+ * ALL of their earnings — from every org agreement they hold AND their own
+ * direct sales (Codex-69t7c, D2). An org resolves "its" account via
+ * `organizations.primaryConnectAccountUserId` → that user's single account.
+ * `organizationId` below is a NULLABLE, non-identity record of the org the
+ * account was first onboarded under; it is no longer used for resolution and
+ * is slated for removal in WP2 once every flow routes via
+ * `primaryConnectAccountUserId`.
  *
  * Onboarding: stripe.accounts.create() → stripe.accountLinks.create()
  * Verification: account.updated webhook updates chargesEnabled/payoutsEnabled
@@ -212,9 +217,13 @@ export const stripeConnectAccounts = pgTable(
   'stripe_connect_accounts',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    organizationId: uuid('organization_id')
-      .notNull()
-      .references(() => organizations.id, { onDelete: 'cascade' }),
+    // Nullable, non-identity (Codex-69t7c WP1): the org this account was first
+    // onboarded under. Org→account resolution lives on
+    // `organizations.primaryConnectAccountUserId`, NOT here. `set null` so
+    // deleting one org never destroys a user's shared single account.
+    organizationId: uuid('organization_id').references(() => organizations.id, {
+      onDelete: 'set null',
+    }),
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -241,13 +250,17 @@ export const stripeConnectAccounts = pgTable(
       .$onUpdate(() => new Date()),
   },
   (table) => [
-    // Indexes
+    // Indexes. The vestigial org index is kept until WP2 drops the column;
+    // the former idx_stripe_connect_user_id is removed because the unique
+    // constraint below already provides the user_id lookup index.
     index('idx_stripe_connect_org_id').on(table.organizationId),
-    index('idx_stripe_connect_user_id').on(table.userId),
     index('idx_stripe_connect_stripe_id').on(table.stripeAccountId),
 
-    // One Connect account per user per org
-    unique('uq_stripe_connect_user_org').on(table.userId, table.organizationId),
+    // ONE Connect account per user (Codex-69t7c WP1). Replaces the prior
+    // (user_id, organization_id) composite — a user now has a single account
+    // across all orgs; the org→account link lives on
+    // organizations.primaryConnectAccountUserId.
+    unique('uq_stripe_connect_user').on(table.userId),
 
     // CHECK constraint for status
     check(

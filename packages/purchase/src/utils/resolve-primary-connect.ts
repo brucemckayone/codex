@@ -1,26 +1,31 @@
 /**
- * Resolve the org's canonical Connect settlement account (Codex-sec7i).
+ * Resolve the org's canonical Connect settlement account (Codex-69t7c).
  *
- * The org-fee slice of any payment (one-off purchase OR subscription
- * invoice) must route to a single, deterministic Connect account. That
- * account is pinned by `organizations.primary_connect_account_user_id`.
+ * The org-fee slice of any payment (one-off purchase OR subscription invoice)
+ * must route to a single, deterministic Connect account: the one owned by the
+ * org's PRIMARY settlement user. That user is the explicitly pinned
+ * `organizations.primary_connect_account_user_id` when set, otherwise the org
+ * OWNER (the `organization_memberships` row with role 'owner' — the user who
+ * onboards the org's account). Because a user has exactly ONE Connect account
+ * (`stripe_connect_accounts` is unique on `user_id`), resolution is:
+ * org → primary-or-owner user id → that user's single account.
  *
- * Multi-creator orgs commonly have multiple `stripe_connect_accounts`
- * rows scoped to the same `organizationId` — one per creator who
- * onboarded a personal Connect for their own earnings. Without the
- * primary pin, a bare `.limit(1)` lookup over `(organizationId)` was
- * picking an arbitrary member, routing org slices to random creator
- * accounts.
+ * The account's own `organization_id` is NOT consulted — it is a nullable,
+ * vestigial onboarding-origin field (WP1). The owner fallback is DETERMINISTIC
+ * (role='owner'), unlike the prior arbitrary `.limit(1)` over that org column
+ * which Codex-sec7i set out to eliminate. The pin still wins when present, so
+ * an org can route to a non-owner once onboarding/admin sets it.
  *
- * Returns null when the org has no Connect account at all. The
- * fallback `.limit(1)` only fires for legacy orgs whose
- * `primary_connect_account_user_id` has not been backfilled — fresh
- * orgs populate it at onboarding so that branch shrinks to zero over
- * time.
+ * Returns undefined when the org has no resolvable primary/owner user, or that
+ * user has not onboarded a Connect account yet.
  */
 
 import type { DatabaseClient } from '@codex/database';
-import { organizations, stripeConnectAccounts } from '@codex/database/schema';
+import {
+  organizationMemberships,
+  organizations,
+  stripeConnectAccounts,
+} from '@codex/database/schema';
 import { and, eq } from 'drizzle-orm';
 
 type StripeConnectAccount = typeof stripeConnectAccounts.$inferSelect;
@@ -37,24 +42,30 @@ export async function resolvePrimaryConnect(
     .where(eq(organizations.id, orgId))
     .limit(1);
 
-  if (org?.primaryConnectAccountUserId) {
-    const [pinned] = await db
-      .select()
-      .from(stripeConnectAccounts)
+  // Prefer the explicit pin; until onboarding sets it, fall back to the org
+  // owner (deterministic — never an arbitrary member).
+  let targetUserId = org?.primaryConnectAccountUserId ?? null;
+  if (!targetUserId) {
+    const [owner] = await db
+      .select({ userId: organizationMemberships.userId })
+      .from(organizationMemberships)
       .where(
         and(
-          eq(stripeConnectAccounts.organizationId, orgId),
-          eq(stripeConnectAccounts.userId, org.primaryConnectAccountUserId)
+          eq(organizationMemberships.organizationId, orgId),
+          eq(organizationMemberships.role, 'owner')
         )
       )
       .limit(1);
-    if (pinned) return pinned;
+    targetUserId = owner?.userId ?? null;
   }
 
-  const [fallback] = await db
+  if (!targetUserId) return undefined;
+
+  const [account] = await db
     .select()
     .from(stripeConnectAccounts)
-    .where(eq(stripeConnectAccounts.organizationId, orgId))
+    .where(eq(stripeConnectAccounts.userId, targetUserId))
     .limit(1);
-  return fallback;
+
+  return account;
 }

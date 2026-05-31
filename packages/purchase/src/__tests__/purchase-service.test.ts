@@ -20,6 +20,7 @@ import { ContentService, MediaItemService } from '@codex/content';
 import * as schema from '@codex/database/schema';
 import { organizations } from '@codex/database/schema';
 import {
+  createTestMembershipInput,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -45,6 +46,7 @@ import {
   PurchaseNotFoundError,
 } from '../errors';
 import { PurchaseService } from '../services/purchase-service';
+import { resolvePrimaryConnect } from '../utils/resolve-primary-connect';
 
 describe('PurchaseService Integration', () => {
   let db: Database;
@@ -156,6 +158,16 @@ describe('PurchaseService Integration', () => {
       .update(schema.users)
       .set({ stripeCustomerId: null })
       .where(eq(schema.users.id, otherUserId));
+
+    // One Connect account per user (uq_stripe_connect_user, Codex-69t7c):
+    // clear seed users' accounts between tests so per-test seeds (which raw
+    // insert for these shared users) don't collide on the unique constraint.
+    await db
+      .delete(schema.stripeConnectAccounts)
+      .where(eq(schema.stripeConnectAccounts.userId, userId));
+    await db
+      .delete(schema.stripeConnectAccounts)
+      .where(eq(schema.stripeConnectAccounts.userId, otherUserId));
   });
 
   describe('createCheckoutSession', () => {
@@ -939,9 +951,9 @@ describe('PurchaseService Integration', () => {
       await contentService.publish(content.id, userId);
 
       // Seed org's Connect account row. The userId is the org owner.
-      // Idempotent: tests in this describe block share the same (userId, orgId)
-      // so subsequent calls reuse the existing row instead of conflicting on
-      // uq_stripe_connect_user_org.
+      // Idempotent: tests in this describe block share the same userId so
+      // subsequent calls reuse the existing row instead of conflicting on
+      // uq_stripe_connect_user (one account per user, Codex-69t7c).
       const stripeAccountId = `acct_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       await db
         .insert(schema.stripeConnectAccounts)
@@ -954,16 +966,20 @@ describe('PurchaseService Integration', () => {
           payoutsEnabled: true,
         })
         .onConflictDoUpdate({
-          target: [
-            schema.stripeConnectAccounts.userId,
-            schema.stripeConnectAccounts.organizationId,
-          ],
+          target: [schema.stripeConnectAccounts.userId],
           set: {
             chargesEnabled: opts.chargesEnabled ?? true,
             payoutsEnabled: true,
             status: 'active',
           },
         });
+
+      // Pin the org's canonical Connect account so resolvePrimaryConnect routes
+      // the org slice (Codex-69t7c: org→account via primaryConnectAccountUserId).
+      await db
+        .update(schema.organizations)
+        .set({ primaryConnectAccountUserId: userId })
+        .where(eq(schema.organizations.id, organizationId));
 
       return {
         content,
@@ -1158,6 +1174,9 @@ describe('PurchaseService Integration', () => {
           name: 'Connect Disabled Org',
           slug: createUniqueSlug('connect-disabled'),
           ownerId: otherUserId,
+          // Pin so resolvePrimaryConnect resolves the org's (offline) account
+          // by userId (Codex-69t7c) — an onboarding org is pinned in production.
+          primaryConnectAccountUserId: otherUserId,
         })
         .returning();
 
@@ -1769,6 +1788,9 @@ describe('PurchaseService Integration', () => {
           name: 'Refund Reversal Org',
           slug: createUniqueSlug('refund-reversal'),
           ownerId: userId,
+          // Pin so resolvePrimaryConnect resolves the org's account by userId
+          // (Codex-69t7c) — onboarded orgs are pinned in production.
+          primaryConnectAccountUserId: userId,
         })
         .returning();
       await db.insert(schema.stripeConnectAccounts).values({
@@ -1993,6 +2015,9 @@ describe('PurchaseService Integration', () => {
           name: 'Partial Refund Org',
           slug: createUniqueSlug('partial-refund'),
           ownerId: userId,
+          // Pin so resolvePrimaryConnect resolves the org's account by userId
+          // (Codex-69t7c) — onboarded orgs are pinned in production.
+          primaryConnectAccountUserId: userId,
         })
         .returning();
       await db.insert(schema.stripeConnectAccounts).values({
@@ -2283,6 +2308,9 @@ describe('PurchaseService Integration', () => {
           name: 'Pending Refund Org',
           slug: createUniqueSlug('pending-refund'),
           ownerId: userId,
+          // Pin so resolvePrimaryConnect resolves the org's (not-ready) account
+          // by userId (Codex-69t7c) so the org-fee pending row is written.
+          primaryConnectAccountUserId: userId,
         })
         .returning();
       await db.insert(schema.stripeConnectAccounts).values({
@@ -4232,6 +4260,49 @@ describe('PurchaseService Integration', () => {
           verifyUserId
         )
       ).rejects.toThrow('Failed to connect to Stripe API');
+    });
+  });
+
+  // ─── resolvePrimaryConnect — org→account resolution (Codex-69t7c) ───────
+  // Production does not pin organizations.primaryConnectAccountUserId yet, so
+  // org-fee resolution relies on the deterministic org-owner fallback. These
+  // pin that contract so a regression that drops the fallback (stranding the
+  // org-fee slice) can't ship green.
+  describe('resolvePrimaryConnect — org→account resolution (Codex-69t7c)', () => {
+    it('falls back to the org owner account when no primary pin is set', async () => {
+      const [ownerUserId] = await seedTestUsers(db, 1);
+      const [org] = await db
+        .insert(organizations)
+        .values({ name: 'RPC Owner Org', slug: createUniqueSlug('rpc-owner') })
+        .returning();
+      await db
+        .insert(schema.organizationMemberships)
+        .values(
+          createTestMembershipInput(org.id, ownerUserId, { role: 'owner' })
+        );
+      const stripeAccountId = `acct_rpc_${createUniqueSlug('a')}`;
+      await db.insert(schema.stripeConnectAccounts).values({
+        userId: ownerUserId,
+        organizationId: org.id,
+        stripeAccountId,
+        status: 'active',
+        chargesEnabled: true,
+        payoutsEnabled: true,
+      });
+
+      const account = await resolvePrimaryConnect(db, org.id);
+      expect(account?.userId).toBe(ownerUserId);
+      expect(account?.stripeAccountId).toBe(stripeAccountId);
+    });
+
+    it('returns undefined when the org has neither a primary pin nor an owner', async () => {
+      const [org] = await db
+        .insert(organizations)
+        .values({ name: 'RPC Empty Org', slug: createUniqueSlug('rpc-empty') })
+        .returning();
+
+      const account = await resolvePrimaryConnect(db, org.id);
+      expect(account).toBeUndefined();
     });
   });
 });

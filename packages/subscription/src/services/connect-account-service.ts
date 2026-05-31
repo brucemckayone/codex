@@ -25,8 +25,9 @@
 
 import { CacheType, type VersionedCache } from '@codex/cache';
 import { stripeConnectAccounts } from '@codex/database/schema';
+import { resolvePrimaryConnect } from '@codex/purchase';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { ConnectAccountNotFoundError } from '../errors';
 
@@ -220,24 +221,33 @@ export class ConnectAccountService extends BaseService {
   }
 
   /**
-   * Get Connect account for a user within an org.
+   * Get a Connect account.
+   *
+   * With `userId`, returns that user's single account (one account per user,
+   * Codex-69t7c — org-independent). With only `orgId`, resolves the org's
+   * canonical account via `organizations.primaryConnectAccountUserId`. Returns
+   * null when no matching account exists / the org has not onboarded one.
+   *
+   * NOTE: the orgId-first signature is retained for WP1 compile-compat; WP2
+   * replaces callers with explicit userId-centric methods.
    */
   async getAccount(
     orgId: string,
     userId?: string
   ): Promise<StripeConnectAccount | null> {
-    const conditions = [eq(stripeConnectAccounts.organizationId, orgId)];
+    // With userId: that user's single account (org-independent, Codex-69t7c).
     if (userId) {
-      conditions.push(eq(stripeConnectAccounts.userId, userId));
+      const [account] = await this.db
+        .select()
+        .from(stripeConnectAccounts)
+        .where(eq(stripeConnectAccounts.userId, userId))
+        .limit(1);
+      return account ?? null;
     }
 
-    const [account] = await this.db
-      .select()
-      .from(stripeConnectAccounts)
-      .where(and(...conditions))
-      .limit(1);
-
-    return account ?? null;
+    // With only orgId: resolve the org's canonical account via the shared
+    // resolver (org → primaryConnectAccountUserId → that user's account).
+    return (await resolvePrimaryConnect(this.db, orgId)) ?? null;
   }
 
   /**
@@ -372,8 +382,10 @@ export class ConnectAccountService extends BaseService {
     // Stripe's `requirements` payload changed — invalidate the cached
     // `getStatus(orgId)` response so the next read returns fresh data.
     // Idempotent: a duplicate `account.updated` delivery just bumps the
-    // version a second time, which is a no-op for correctness.
-    if (this.cache) {
+    // version a second time, which is a no-op for correctness. Skipped when
+    // organizationId is null (vestigial column, Codex-69t7c) — WP2 reworks
+    // this cache key off the org column entirely.
+    if (this.cache && updated.organizationId) {
       try {
         await this.cache.invalidate(updated.organizationId);
       } catch (error) {
@@ -414,7 +426,7 @@ export class ConnectAccountService extends BaseService {
       organizationId: updated.organizationId,
     });
 
-    if (this.cache) {
+    if (this.cache && updated.organizationId) {
       try {
         await this.cache.invalidate(updated.organizationId);
       } catch (error) {

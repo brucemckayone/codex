@@ -28,14 +28,14 @@ export const organizations = pgTable(
     websiteUrl: text('website_url'),
 
     /**
-     * The canonical Connect account owner for this org. Resolves "which
-     * Connect account is the org's?" — previously answered by an arbitrary
-     * .limit(1) because the unique constraint on stripe_connect_accounts
-     * is (user_id, organization_id), meaning N users per org are allowed
-     * to have their own Connect account. When the org has multiple, the
-     * one owned by this user is the canonical routing target for tier
-     * operations and revenue transfers. NULL means the org has not yet
-     * onboarded a Connect account.
+     * The user whose single Connect account settles this org's revenue slice
+     * (Codex-69t7c). This is now the SOLE org→account link: resolve it by
+     * reading this field, then looking up that user's one account
+     * (`stripe_connect_accounts.user_id` is unique). It replaced the former
+     * arbitrary `.limit(1)` over `stripe_connect_accounts.organization_id`,
+     * which is no longer part of account identity. Set when the org owner
+     * onboards Connect; NULL means the org has not onboarded an account yet,
+     * so its org-fee slice accrues to `pending_payouts` until one connects.
      */
     primaryConnectAccountUserId: text(
       'primary_connect_account_user_id'

@@ -95,7 +95,12 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
     payoutUserId = b;
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // One Connect account per user (uq_stripe_connect_user, Codex-69t7c):
+    // clear seed users' accounts between tests to avoid collisions.
+    await db
+      .delete(stripeConnectAccounts)
+      .where(inArray(stripeConnectAccounts.userId, [creatorId, payoutUserId]));
     stripe = createMockStripe();
   });
 
@@ -123,6 +128,12 @@ describe('SubscriptionService × FeeConfigService — pending payouts', () => {
         stripeAccountId,
       })
     );
+    // Pin the org's canonical Connect account (Codex-69t7c): org→account
+    // resolves via primaryConnectAccountUserId to the payout user's account.
+    await db
+      .update(organizations)
+      .set({ primaryConnectAccountUserId: payoutUserId })
+      .where(eq(organizations.id, org.id));
 
     const [tier] = await db
       .insert(subscriptionTiers)
