@@ -1,0 +1,166 @@
+# Codex Reviewer Roster — canonical source of truth for the codex-review swarm.
+#
+# PHILOSOPHY (set in WP-1 after user direction 2026-05-31):
+#   The codex-* family is Codex's SOLE epic+quality workflow. The legacy skills
+#   (epic-cycle, denoise, design-system, pr-review-agent-team, codebase-audit, fallow-audit, …)
+#   are HARVESTED for their checklist/domain content and then RETIRED. So this roster
+#   ABSORBS their knowledge — it does NOT delegate to them (they will not exist).
+#
+#   The swarm is deliberately SMALL: only Codex-specific conformance checks that must read
+#   the WP diff at the review gate. UI verification, dead-code, and simplification are CYCLE
+#   STEPS inside codex-epic-implement (see cycle_steps below), NOT swarm reviewers.
+#
+# Entry schema:
+#   id           short stable key (also the report grouping key)
+#   subagent_type the Agent subagent_type to spawn
+#   spec         brief path (relative to codex-review/), or null for generic
+#   scope        one-line boundary
+#   authority    the CLAUDE.md section / memory feedback that makes this binding
+#   harvest_from legacy specs/skills whose checklist content this brief absorbs (read in WP-2)
+#   spawn        always | { when_changed: [globs] }
+#
+# Collation rules (enforced by codex-review):
+corroboration:
+  two_reviewers_same_line: "elevate severity +1 tier"
+  three_reviewers_same_line: "elevate to critical"
+silent_failure_rule:
+  agent: silent-failure-hunter
+  rule: "CRITICAL findings are must-fix; return to IMPLEMENT, do NOT litigate (100% real-bug rate)."
+
+version: 2
+
+# ── THE SWARM (5) — conformance reviewers that read the diff ──────────────────
+agents:
+  - id: silent-failure-hunter
+    subagent_type: "pr-review-toolkit:silent-failure-hunter"
+    spec: null
+    scope: Error-handling integrity — catch-and-swallow, inadequate fallback, swallowed rejections, error-as-success.
+    authority: "CLAUDE.md#Error-Handling; silent_failure_rule"
+    harvest_from: []   # generic; keep as-is
+    spawn: always
+
+  - id: scoping-security
+    subagent_type: general-purpose
+    spec: agents/scoping-security.md
+    scope: >
+      Tenant data-exposure (the highest-cost defect). Every query scoped via scopedNotDeleted/
+      withCreatorScope; procedure auth policy present; worker-to-worker HMAC; rate-limit on auth;
+      Zod input validation; no PII in logs; no internal error/stack/SQL/DB-URL leaked in responses;
+      SVG/upload sanitisation.
+    authority: "CLAUDE.md#Security; packages/security/CLAUDE.md; packages/database/CLAUDE.md"
+    harvest_from:
+      - "pr-review-agent-team/agents/security.md"
+      - "pr-review-agent-team/agents/database.md (Query Scoping section)"
+      - "denoise/references/01-security-audit.md"
+    spawn:
+      when_changed:
+        - "workers/**/*.ts"
+        - "packages/*/src/services/**/*.ts"
+        - "packages/database/**/*.ts"
+        - "packages/security/**/*.ts"
+
+  - id: backend-conformance
+    subagent_type: general-purpose
+    spec: agents/backend-conformance.md
+    scope: >
+      "Is the backend wired the Codex way." MERGES 4 concerns: (1) service registry — ctx.services.* only,
+      no ad-hoc createDbClient in routes, lazy-getter registration, webhook exception; (2) API envelope —
+      {data}/{items,pagination}/{error}/204, PaginatedResult, status-per-verb; (3) typed errors —
+      ServiceError subclasses, propagate to mapErrorToResponse, no catch-and-swallow, rollback-by-throw;
+      (4) procedure() policy + BaseService + business-logic placement. Includes N+1 / query-perf check.
+    authority: "CLAUDE.md#{Service-Registry,Error-Handling,API-Response-Envelope}; workers/CLAUDE.md; packages/{worker-utils,service-errors}/CLAUDE.md"
+    harvest_from:
+      - "pr-review-agent-team/agents/services.md"
+      - "pr-review-agent-team/agents/workers.md"
+      - "pr-review-agent-team/agents/architecture.md"
+      - "denoise/references/04-performance.md (N+1 recipe)"
+      - "backend-dev (Routes/Services/Webhooks checklists)"
+    spawn:
+      when_changed:
+        - "workers/**/*.ts"
+        - "packages/*/src/services/**/*.ts"
+        - "packages/worker-utils/**/*.ts"
+
+  - id: commerce-stripe
+    subagent_type: general-purpose
+    spec: agents/commerce-stripe.md
+    scope: >
+      Money correctness (no existing skill owns this). Positive AND negative tests per state transition;
+      currency = GBP (£) not USD; Stripe Customer Portal config disables subscription_cancel/pause/update;
+      webhook HMAC verify + account-mismatch awareness; idempotency keys on charge/transfer; FOR UPDATE
+      row-locking on state-machine transitions (READ COMMITTED race guard).
+    authority: "CLAUDE.md#Currency; feedback_security_deep_test; feedback_stripe_portal_lockdown; feedback_drizzle_for_update_pattern; feedback_stripe_cli_account_mismatch; docs/payouts/README.md"
+    harvest_from:
+      - "stripe-best-practices skill"
+      - "pr-review-agent-team/agents/security.md (webhook signature section)"
+      - "backend-dev (Stripe checkout / Webhooks sections)"
+    spawn:
+      when_changed:
+        - "packages/purchase/**/*.ts"
+        - "packages/subscription/**/*.ts"
+        - "workers/ecom-api/**/*.ts"
+        - "**/*stripe*.ts"
+        - "**/*payout*.ts"
+        - "**/*price*.ts"
+
+  - id: migration-safety
+    subagent_type: general-purpose
+    spec: agents/migration-safety.md
+    scope: >
+      Schema/DB-change safety (recurring high-cost, no existing skill owns it). Never hand-write migration
+      SQL (db:generate owns snapshot+SQL); FK onDelete correctness (cascade/restrict/set-null) + leftJoin/
+      NULL handling for set-null; test cleanup FK ordering when a restricted FK is added (audit cleanupDatabase
+      + inline raw DELETEs); direct db_url (not pgbouncer) for DDL on Neon ephemeral branches.
+    authority: "feedback_drizzle_migrations; feedback_test_cleanup_fk_ordering; feedback_neon_pgbouncer_ddl_breaks; feedback_agreement_proposal_ondelete_setnull"
+    harvest_from:
+      - "pr-review-agent-team/agents/database.md (Migration Safety section)"
+    spawn:
+      when_changed:
+        - "packages/database/**/migrations/**"
+        - "packages/database/**/schema*.ts"
+        - "**/*.sql"
+        - "**/drizzle/**"
+
+# ── CYCLE STEPS (NOT swarm reviewers) — owned by codex-epic-implement stages ──
+# These read the diff too, but they are sequential STAGES of the implement cycle, not
+# parallel swarm members. Their logic/checklists are absorbed from the named legacy skills.
+cycle_steps:
+  - step: SIMPLIFY
+    stage: 5
+    absorbs: "simplify skill"
+    note: "Reuse/dedup/lonely-abstraction pass on the diff. Separate step per user direction."
+  - step: FALLOW
+    stage: 7
+    absorbs: "fallow-audit skill"
+    note: "Dead-code / unused-export / orphan detection on the diff. Separate step per user direction."
+  - step: VISUAL-VERIFY
+    stage: "6 (UI WPs only)"
+    absorbs: "design-system skill (the mandatory MCP gate: svelte-autofixer + chrome-devtools + playwright)"
+    note: "UI correctness is verified by RUNNING MCP tools, not a code-reading reviewer. Checklist harvested into codex-epic-implement/references/."
+
+# ── checklist-pointers (NOT reviewers) — narrow, high-cost traps folded into briefs/steps
+checklist_pointers:
+  - id: i18n-paraglide-dual-file
+    note: "Adding/removing message keys updates BOTH messages/<lang>.js AND barrel messages.js; never git-restore generated message files in isolation."
+    authority: "feedback_paraglide_two_generated_files; feedback_shared_generated_source"
+    home: "VISUAL-VERIFY step checklist + lint-candidate (bd create --type=task for a real lint)"
+  - id: caching-invalidation
+    note: "VersionedCache cache-aside + waitUntil invalidation + localStorage reconciliation + TTL-vs-version for static config."
+    authority: "caching skill; feedback_dont_defer_cache_issues; feedback_ttl_cache_for_rarely_mutating_config"
+    home: "backend-conformance checklist section (harvest caching skill content into the brief)"
+
+# Legacy skills to retire AFTER harvest (confirm list with user before deletion — irreversible):
+retire_after_harvest:
+  confirm_required: true
+  candidates:
+    - epic-cycle            # -> codex-epic-create + codex-epic-implement
+    - pr-review-agent-team  # -> codex-review (this swarm)
+    - denoise               # -> security/perf checklists absorbed into briefs; loop superseded by retro/crystalize
+    - codebase-audit        # -> codex-review --full
+    - fallow-audit          # -> FALLOW cycle step
+    - design-system         # -> VISUAL-VERIFY cycle step + references/ (DECISION NEEDED: design-system is large; may keep its references as a harvested reference doc)
+  keep_as_reference_candidates:  # domain knowledge, likely absorbed as references/ rather than deleted
+    - caching
+    - tanstack-db
+    - backend-dev
+    - stripe-best-practices
