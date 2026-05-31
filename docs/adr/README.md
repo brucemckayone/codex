@@ -34,4 +34,4 @@ What becomes easier/harder; follow-on work (filed as beads).
 
 ## Index
 <!-- codex-crystalize / codex-epic-retro append entries here -->
-- _none yet_
+- [ADR-0001](0001-epic-workflow-and-learning-loop.md) — The codex-* epic workflow and learning loop (accepted 2026-05-31)

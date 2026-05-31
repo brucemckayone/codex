@@ -1,5 +1,9 @@
 # Codex PR Review Agent Team
 
+> **DEPRECATED** — superseded by `codex-review` (a condensed 5-reviewer conformance swarm that harvested
+> these 9 specs). Kept as a fallback until the codex-* loop is proven on one real epic, then removed
+> (see `docs/adr/0001-epic-workflow-and-learning-loop.md`).
+
 Comprehensive PR review using 9 specialist agents with sequential handoff capability for cross-domain analysis across **full stack** (Workers → Services → Foundation → Frontend).
 
 ## Usage
