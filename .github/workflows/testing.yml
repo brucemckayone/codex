@@ -273,8 +273,22 @@ jobs:
       - name: Run tests for affected packages with Turborepo
         id: run-tests
         env:
-          # Database connection from workflow-level Neon branch
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          # Direct (non-pooled) URL — Codex-w3hav. The unit/integration
+          # suites run ONE long test file at a time (turbo --concurrency=1 +
+          # every DB package sets sequentialTests:true / fileParallelism:false),
+          # so a single file like agreement-service.test.ts (82 tests, ~186s)
+          # or organization-service.test.ts (~116s) holds ONE WebSocket
+          # connection for its whole duration. Routed through pgbouncer
+          # (db_url_with_pooler) that long-lived pooled connection gets
+          # recycled/closed mid-suite, and the next query throws
+          # "Connection terminated unexpectedly" — surfacing as a failed seed
+          # insert, FK check, or read-back SELECT (the real cause behind the
+          # flaky test(20) failures, not any test-logic bug). The direct
+          # compute endpoint is stable for the suite's lifetime — the same
+          # reason the "Apply migrations" step above uses db_url. Because the
+          # suites are sequential, only ~1 direct connection is open at a
+          # time, so the lower non-pooled ceiling is not a concern.
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           DB_METHOD: ${{ vars.DB_METHOD }}
           # R2 credentials for tests (using test buckets from environment)
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
