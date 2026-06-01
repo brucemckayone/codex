@@ -6810,7 +6810,9 @@ describe('SubscriptionService', () => {
       const result = await service.getPayoutsByCreatorBreakdown(org.id);
       expect(result).toHaveLength(1);
       expect(result[0].transactionCount).toBe(2);
-      expect(result[0].totalPaidCents).toBe(700); // 100 + 200 + 150 + 250
+      // creator_payout 200 + 250 = 450; the two organization_fee rows
+      // (100 + 150) are excluded from personal totalPaidCents (Codex-h3864).
+      expect(result[0].totalPaidCents).toBe(450);
     });
 
     it('isOrgOwner is true for the user whose membership.role = "owner"', async () => {
@@ -7077,7 +7079,7 @@ describe('SubscriptionService', () => {
       const owner = result.find((r) => r.userId === otherCreatorId);
       const creator = result.find((r) => r.userId === thirdUserId);
       expect(owner?.isOrgOwner).toBe(true);
-      expect(owner?.totalPaidCents).toBe(1000); // 150 + 850
+      expect(owner?.totalPaidCents).toBe(850); // personal earnings; org_fee 150 excluded (Codex-h3864)
       expect(owner?.orgFeePaidCents).toBe(150); // organization_fee only
       expect(creator?.isOrgOwner).toBe(false);
       expect(creator?.totalPaidCents).toBe(400);
@@ -7183,20 +7185,12 @@ describe('SubscriptionService', () => {
     });
 
     // REGRESSION (PR #204 deep-review F-3, DQ-8) — multi-creator orgs.
-    // ea08ca29 ships the orgFeePaidCents TRANSPARENCY field on the owner
-    // card, but leaves organization_fee inside totalPaidCents. DQ-8
-    // resolution (option a) requires excluding org_fee from totalPaidCents
-    // entirely — surface the org slice as a separate panel, not as
-    // personal earnings. See docs/pr-203-review/design-questions.md.
-    //
-    // Currently fails because production reports totalPaidCents=270 for the
-    // owner (the org slice). When the fix lands:
-    //   1. this assertion (owner totalPaidCents === 0) passes, vitest
-    //      flips this it.fails red, fixer removes .fails.
-    //   2. The 'orgFeePaidCents tracks ...' test above also needs its
-    //      `owner.totalPaidCents` assertion updated from 1000 → 850
-    //      (excluding org_fee from the total).
-    it.fails('F-3/DQ-8: excludes organization_fee from per-creator totalPaidCents (multi-creator regression)', async () => {
+    // ea08ca29 shipped the orgFeePaidCents transparency field but left
+    // organization_fee inside totalPaidCents. DQ-8 (option a), now resolved in
+    // Codex-69t7c.6: org_fee is excluded from totalPaidCents entirely — the org
+    // slice is a separate disclosure (orgFeePaidCents), not personal earnings
+    // (Codex-h3864). See docs/pr-203-review/design-questions.md.
+    it('F-3/DQ-8: excludes organization_fee from per-creator totalPaidCents (multi-creator regression)', async () => {
       const { org, tier1 } = await createFullOrg('h3864-exclude-orgfee');
       const sub = await seedSubscriptionForOrg(
         org.id,
