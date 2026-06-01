@@ -242,6 +242,36 @@ export const getPayoutsByCreatorBreakdownQuerySchema = z.object({
   toDate: z.string().datetime().optional(),
 });
 
+/**
+ * Creator-self-scoped payouts list (Codex-69t7c.7 / WP7).
+ *
+ * The creator-earnings counterpart of {@link listPayoutsQuerySchema}: carries
+ * NO `organizationId`. The caller is resolved from the session (`ctx.user.id`),
+ * never client-supplied (IDOR prevention, epic decision D8). A creator's
+ * payouts span every org that paid them, so org-scope is intentionally absent.
+ * Status/source/date chips share the enums with the org table for parity.
+ */
+export const listMyPayoutsQuerySchema = paginationSchema.extend({
+  status: payoutStatusFilterEnum.default('all'),
+  source: payoutSourceFilterEnum.default('all'),
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
+});
+
+/**
+ * Creator-self-scoped earnings summary (Codex-69t7c.7 / WP7). Dates only — no
+ * `organizationId` (session-scoped, spans all orgs).
+ */
+export const getMyEarningsSummaryQuerySchema = z.object({
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
+});
+
+export type ListMyPayoutsQueryInput = z.infer<typeof listMyPayoutsQuerySchema>;
+export type GetMyEarningsSummaryQueryInput = z.infer<
+  typeof getMyEarningsSummaryQuerySchema
+>;
+
 export const getCurrentSubscriptionQuerySchema = z.object({
   organizationId: uuidSchema,
 });

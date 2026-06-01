@@ -21,9 +21,11 @@ import {
   changeTierSchema,
   createSubscriptionCheckoutSchema,
   getCurrentSubscriptionQuerySchema,
+  getMyEarningsSummaryQuerySchema,
   getPayoutSummaryQuerySchema,
   getPayoutsByCreatorBreakdownQuerySchema,
   getSubscriptionStatsQuerySchema,
+  listMyPayoutsQuerySchema,
   listPayoutsQuerySchema,
   listSubscribersQuerySchema,
   reactivateSubscriptionSchema,
@@ -447,6 +449,61 @@ subscriptions.get(
         {
           status: ctx.input.query.status,
           sourceType: ctx.input.query.source,
+          fromDate: ctx.input.query.fromDate,
+          toDate: ctx.input.query.toDate,
+        }
+      );
+    },
+  })
+);
+
+/**
+ * GET /subscriptions/me/payouts
+ *
+ * Codex-69t7c.7 (WP7): the acting creator's OWN payouts across every org that
+ * paid them. Creator-self-scoped — `policy:{auth:'required'}` only (NO
+ * `requireOrgManagement`); the service filters by `ctx.user.id` + personal
+ * payout types, so the route cannot read another creator's payouts and accepts
+ * NO client-supplied userId/organizationId (IDOR prevention, epic decision D8).
+ */
+subscriptions.get(
+  '/me/payouts',
+  procedure({
+    policy: { auth: 'required' },
+    input: { query: listMyPayoutsQuerySchema },
+    handler: async (ctx) => {
+      const result = await ctx.services.subscription.listPayoutsForCreator(
+        ctx.user.id,
+        {
+          page: ctx.input.query.page,
+          limit: ctx.input.query.limit,
+          status: ctx.input.query.status,
+          sourceType: ctx.input.query.source,
+          fromDate: ctx.input.query.fromDate,
+          toDate: ctx.input.query.toDate,
+        }
+      );
+      return new PaginatedResult(result.items, result.pagination);
+    },
+  })
+);
+
+/**
+ * GET /subscriptions/me/earnings-summary
+ *
+ * Codex-69t7c.7 (WP7): KPI numbers for the creator earnings hub (earned in
+ * period, total earned, in transit, needs-attention), userId-scoped across ALL
+ * orgs. Same self-scoping invariant as /me/payouts — never client-supplied id.
+ */
+subscriptions.get(
+  '/me/earnings-summary',
+  procedure({
+    policy: { auth: 'required' },
+    input: { query: getMyEarningsSummaryQuerySchema },
+    handler: async (ctx) => {
+      return ctx.services.subscription.getEarningsSummaryForCreator(
+        ctx.user.id,
+        {
           fromDate: ctx.input.query.fromDate,
           toDate: ctx.input.query.toDate,
         }
