@@ -3154,17 +3154,21 @@ export class SubscriptionService extends BaseService {
       }
 
       if (row.status === 'paid') {
-        acc.totalPaidCents += row.amountCents;
-        if (row.sourceType === 'purchase') {
-          acc.purchasePaidCents += row.amountCents;
-        } else if (row.sourceType === 'subscription') {
-          acc.subscriptionPaidCents += row.amountCents;
-        }
-        // Track the `organization_fee` slice separately so the owner
-        // card can disclose "of which £X org fee" — keeps the owner's
-        // headline comparable to non-owner creator cards.
+        // `organization_fee` is the org-admin slice, NOT the user's personal
+        // creator earnings — it is disclosed ONLY via `orgFeePaidCents` and must
+        // never be folded into the per-creator `totalPaidCents` headline
+        // (Codex-h3864). This keeps `totalPaidCents == purchasePaidCents +
+        // subscriptionPaidCents` a clean "personal earnings" invariant; the
+        // owner card surfaces the org slice separately as "of which £X org fee".
         if (row.payoutType === 'organization_fee') {
           acc.orgFeePaidCents += row.amountCents;
+        } else {
+          acc.totalPaidCents += row.amountCents;
+          if (row.sourceType === 'purchase') {
+            acc.purchasePaidCents += row.amountCents;
+          } else if (row.sourceType === 'subscription') {
+            acc.subscriptionPaidCents += row.amountCents;
+          }
         }
         if (row.resolvedAt) {
           // Drizzle hands back `Date` for timestamp columns; defensive cast
