@@ -41,6 +41,7 @@ import {
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
+import { eq, inArray } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -98,7 +99,6 @@ describe('SubscriptionService', () => {
 
     // Clear any cached Customer id from previous tests so resolution is
     // deterministic per-test.
-    const { inArray } = await import('drizzle-orm');
     await db
       .update(users)
       .set({ stripeCustomerId: null })
@@ -108,31 +108,63 @@ describe('SubscriptionService', () => {
           [creatorId, otherCreatorId, thirdUserId].filter(Boolean)
         )
       );
+
+    // One Connect account per user (uq_stripe_connect_user, Codex-69t7c): clear
+    // the seed users' accounts between tests so re-seeding doesn't collide.
+    await db
+      .delete(stripeConnectAccounts)
+      .where(
+        inArray(
+          stripeConnectAccounts.userId,
+          [creatorId, otherCreatorId, thirdUserId].filter(Boolean)
+        )
+      );
   });
 
   afterAll(async () => {
     await teardownTestDatabase();
   });
 
-  /** Create org + connect + tiers for testing */
-  async function createFullOrg(slug?: string) {
+  /** Create org + connect + tiers for testing. ownerUserId owns the org's
+   * single Connect account (default creatorId); pass a distinct user when a
+   * test needs two orgs with two separate Connect accounts. */
+  async function createFullOrg(slug?: string, ownerUserId: string = creatorId) {
     const [org] = await db
       .insert(organizations)
       .values(
         createTestOrganizationInput({
           slug: createUniqueSlug(slug ?? 'sub'),
-          creatorId,
+          creatorId: ownerUserId,
         })
       )
       .returning();
 
-    await db.insert(stripeConnectAccounts).values(
-      createTestConnectAccountInput(org.id, creatorId, {
-        chargesEnabled: true,
-        payoutsEnabled: true,
-        status: 'active',
-      })
-    );
+    // Upsert on userId: a user has ONE Connect account (uq_stripe_connect_user,
+    // Codex-69t7c), so a helper invoked twice in one test (multi-org) reuses it.
+    await db
+      .insert(stripeConnectAccounts)
+      .values(
+        createTestConnectAccountInput(org.id, ownerUserId, {
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          status: 'active',
+        })
+      )
+      .onConflictDoUpdate({
+        target: stripeConnectAccounts.userId,
+        set: {
+          organizationId: org.id,
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          status: 'active',
+        },
+      });
+    // Pin the org's canonical Connect account (Codex-69t7c): org→account
+    // resolves via primaryConnectAccountUserId, not the account's org column.
+    await db
+      .update(organizations)
+      .set({ primaryConnectAccountUserId: ownerUserId })
+      .where(eq(organizations.id, org.id));
 
     const [tier1] = await db
       .insert(subscriptionTiers)
@@ -7256,18 +7288,21 @@ describe('SubscriptionService', () => {
      * row, an active subscription owned by `otherCreatorId` for FK
      * references on pendingPayouts, and the unique stripeAccountId.
      */
-    async function seedConnectAndSubscription(slug: string) {
-      const { org, tier1 } = await createFullOrg(slug);
+    async function seedConnectAndSubscription(
+      slug: string,
+      ownerUserId: string = creatorId
+    ) {
+      const { org, tier1 } = await createFullOrg(slug, ownerUserId);
       const stripeAccountId = `acct_w4jjk_${createUniqueSlug('a')}`;
 
-      const { eq } = await import('drizzle-orm');
-      // The createFullOrg helper inserted a connect account with a random
-      // stripeAccountId — overwrite it with our deterministic value so
-      // tests can assert the (orgId, stripeAccountId) lookup explicitly.
+      // createFullOrg inserted the owner's connect account with a random
+      // stripeAccountId — overwrite it (by userId, since a user has one
+      // account, Codex-69t7c) with our deterministic value so tests can
+      // assert the lookup explicitly.
       await db
         .update(stripeConnectAccounts)
         .set({ stripeAccountId })
-        .where(eq(stripeConnectAccounts.organizationId, org.id));
+        .where(eq(stripeConnectAccounts.userId, ownerUserId));
 
       const [sub] = await db
         .insert(subscriptions)
@@ -8018,15 +8053,19 @@ describe('SubscriptionService', () => {
      * Mirror seedConnectAndSubscription from the resolvePendingPayouts
      * block — deterministic stripeAccountId so we can drive the lookup.
      */
-    async function seedConnectAndSubscription(slug: string) {
-      const { org, tier1 } = await createFullOrg(slug);
+    async function seedConnectAndSubscription(
+      slug: string,
+      ownerUserId: string = creatorId
+    ) {
+      const { org, tier1 } = await createFullOrg(slug, ownerUserId);
       const stripeAccountId = `acct_vv77x_${createUniqueSlug('a')}`;
 
-      const { eq } = await import('drizzle-orm');
+      // Overwrite by userId (one account per user, Codex-69t7c) so distinct
+      // owners get distinct deterministic stripeAccountIds.
       await db
         .update(stripeConnectAccounts)
         .set({ stripeAccountId })
-        .where(eq(stripeConnectAccounts.organizationId, org.id));
+        .where(eq(stripeConnectAccounts.userId, ownerUserId));
 
       const [sub] = await db
         .insert(subscriptions)
@@ -8206,8 +8245,11 @@ describe('SubscriptionService', () => {
       const { sql: rawSql } = await import('drizzle-orm');
       await db.execute(rawSql`DELETE FROM payouts`);
 
-      const failOrg = await seedConnectAndSubscription('vv77x-fail');
-      const okOrg = await seedConnectAndSubscription('vv77x-ok');
+      // Two DISTINCT connect-account owners (Codex-69t7c: one account per
+      // user) so one account can fail retrieve while the other succeeds.
+      const [okOwnerId] = await seedTestUsers(db, 1);
+      const failOrg = await seedConnectAndSubscription('vv77x-fail', creatorId);
+      const okOrg = await seedConnectAndSubscription('vv77x-ok', okOwnerId);
 
       const longAgo = new Date(Date.now() - 60 * 60 * 1000);
       await db.insert(payoutsTable).values([
@@ -8223,7 +8265,7 @@ describe('SubscriptionService', () => {
           attemptedAt: longAgo,
         },
         {
-          userId: creatorId,
+          userId: okOwnerId,
           organizationId: okOrg.org.id,
           subscriptionId: okOrg.sub.id,
           amountCents: 700,
@@ -8692,7 +8734,12 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
     [creatorId, subscriberId] = userIds;
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // One Connect account per user (uq_stripe_connect_user, Codex-69t7c):
+    // clear seed users' accounts between tests to avoid collisions.
+    await db
+      .delete(stripeConnectAccounts)
+      .where(inArray(stripeConnectAccounts.userId, [creatorId, subscriberId]));
     stripe = createMockStripe();
     service = new SubscriptionService({ db, environment: 'test' }, stripe);
   });
@@ -8725,6 +8772,11 @@ describe('Payouts ledger — schema + status-column behaviour (Codex-e9v3b)', ()
         status: 'active',
       })
     );
+
+    await db
+      .update(organizations)
+      .set({ primaryConnectAccountUserId: creatorId })
+      .where(eq(organizations.id, org.id));
 
     const [tier] = await db
       .insert(subscriptionTiers)
@@ -9563,7 +9615,12 @@ describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
     [creatorId, subscriberId] = userIds;
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // One Connect account per user (uq_stripe_connect_user, Codex-69t7c):
+    // clear seed users' accounts between tests to avoid collisions.
+    await db
+      .delete(stripeConnectAccounts)
+      .where(inArray(stripeConnectAccounts.userId, [creatorId, subscriberId]));
     stripe = createMockStripe();
     service = new SubscriptionService({ db, environment: 'test' }, stripe);
   });
@@ -9588,12 +9645,28 @@ describe('Currency GBP-only enforcement (Codex-yv18n)', () => {
       )
       .returning();
 
-    await db.insert(stripeConnectAccounts).values(
-      createTestConnectAccountInput(org.id, creatorId, {
-        chargesEnabled: true,
-        payoutsEnabled: true,
-      })
-    );
+    await db
+      .insert(stripeConnectAccounts)
+      .values(
+        createTestConnectAccountInput(org.id, creatorId, {
+          chargesEnabled: true,
+          payoutsEnabled: true,
+        })
+      )
+      .onConflictDoUpdate({
+        target: stripeConnectAccounts.userId,
+        set: {
+          organizationId: org.id,
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          status: 'active',
+        },
+      });
+    // Pin the org's canonical Connect account (Codex-69t7c).
+    await db
+      .update(organizations)
+      .set({ primaryConnectAccountUserId: creatorId })
+      .where(eq(organizations.id, org.id));
 
     const [tier1] = await db
       .insert(subscriptionTiers)

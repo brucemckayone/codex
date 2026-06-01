@@ -220,6 +220,12 @@ export async function cleanupDatabase(db: Database): Promise<void> {
   await db.delete(schema.organizationPlatformAgreements);
   await db.delete(schema.content);
   await db.delete(schema.mediaItems);
+  // stripe_connect_accounts FK organizations (set null) + users (cascade);
+  // nothing references it. A user has ONE account (uq_stripe_connect_user,
+  // Codex-69t7c) and users persist across tests, so it MUST be cleared here or
+  // re-seeding the same user collides on the unique constraint
+  // (test-cleanup-fk-ordering memory). Delete before organizations.
+  await db.delete(schema.stripeConnectAccounts);
   await db.delete(schema.organizations);
   // NOTE: Users are NOT deleted - preserve them across tests
 }
@@ -250,6 +256,9 @@ export async function cleanupDatabaseComplete(db: Database): Promise<void> {
   await db.delete(schema.organizationPlatformAgreements);
   await db.delete(schema.content);
   await db.delete(schema.mediaItems);
+  // One Connect account per user (uq_stripe_connect_user, Codex-69t7c); clear
+  // before organizations/users to keep FK ordering explicit.
+  await db.delete(schema.stripeConnectAccounts);
   await db.delete(schema.organizations);
   await db.delete(schema.users);
 }

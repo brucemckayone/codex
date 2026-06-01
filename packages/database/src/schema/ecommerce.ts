@@ -418,9 +418,12 @@ export const purchases = pgTable(
     contentId: uuid('content_id')
       .notNull()
       .references(() => content.id, { onDelete: 'restrict' }),
-    organizationId: uuid('organization_id')
-      .notNull()
-      .references(() => organizations.id, { onDelete: 'restrict' }),
+    // Nullable (Codex-69t7c WP1): orgless creator-direct purchases have no
+    // organization. Org-scoped purchases still populate it; the Phase-1 gate
+    // that required it is removed in WP5.
+    organizationId: uuid('organization_id').references(() => organizations.id, {
+      onDelete: 'restrict',
+    }),
 
     // Payment (stored as integer cents to avoid rounding errors)
     amountPaidCents: integer('amount_paid_cents').notNull(),

@@ -33,6 +33,7 @@ import {
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
+import { eq, inArray } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -74,7 +75,15 @@ describe('ConnectAccountService', () => {
     orgId = org.id;
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // One Connect account per user (Codex-69t7c uq_stripe_connect_user): this
+    // suite reuses the same two seed users across many tests, so clear their
+    // accounts between tests to avoid cross-test unique(userId) collisions.
+    await db
+      .delete(stripeConnectAccounts)
+      .where(
+        inArray(stripeConnectAccounts.userId, [creatorId, otherCreatorId])
+      );
     // Don't reset IDs — unique constraint on stripeAccountId means IDs must be globally unique
     stripe = createMockStripe();
     // createMockStripe() does not ship `accounts.retrieve` — install a spy
@@ -283,6 +292,10 @@ describe('ConnectAccountService', () => {
       await db
         .insert(stripeConnectAccounts)
         .values(createTestConnectAccountInput(getOrg.id, creatorId));
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: creatorId })
+        .where(eq(organizations.id, getOrg.id));
 
       const account = await service.getAccount(getOrg.id);
       expect(account).not.toBeNull();
@@ -847,6 +860,10 @@ describe('ConnectAccountService', () => {
       await db
         .insert(stripeConnectAccounts)
         .values(createTestConnectAccountInput(dashOrg.id, creatorId));
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: creatorId })
+        .where(eq(organizations.id, dashOrg.id));
 
       const result = await service.createDashboardLink(dashOrg.id);
       expect(result.url).toBeDefined();
@@ -891,6 +908,10 @@ describe('ConnectAccountService', () => {
           status: 'active',
         })
       );
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: creatorId })
+        .where(eq(organizations.id, readyOrg.id));
 
       const ready = await service.isReady(readyOrg.id);
       expect(ready).toBe(true);
@@ -983,6 +1004,10 @@ describe('ConnectAccountService', () => {
           })
         )
         .returning();
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: creatorId })
+        .where(eq(organizations.id, reqOrg.id));
 
       const deadline = 1_800_000_000;
       (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -1039,6 +1064,10 @@ describe('ConnectAccountService', () => {
         .insert(stripeConnectAccounts)
         .values(createTestConnectAccountInput(normOrg.id, creatorId))
         .returning();
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: creatorId })
+        .where(eq(organizations.id, normOrg.id));
 
       (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: inserted.stripeAccountId,
@@ -1088,6 +1117,10 @@ describe('ConnectAccountService', () => {
           })
         )
         .returning();
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: creatorId })
+        .where(eq(organizations.id, degOrg.id));
 
       (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockRejectedValue(
         new Error('Stripe API unreachable')
@@ -1211,6 +1244,58 @@ describe('ConnectAccountService', () => {
           requirements: { currently_due: [], disabled_reason: null },
         } as unknown as Stripe.Account)
       ).resolves.toBeUndefined();
+    });
+  });
+
+  // ─── Schema invariants (Codex-69t7c WP1) ─────────────────────────────
+  describe('schema invariants (Codex-69t7c WP1)', () => {
+    it('enforces one Connect account per user (uq_stripe_connect_user)', async () => {
+      const [orgA] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('uq-a'),
+            creatorId,
+          })
+        )
+        .returning();
+      const [orgB] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('uq-b'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      await db
+        .insert(stripeConnectAccounts)
+        .values(createTestConnectAccountInput(orgA.id, creatorId));
+
+      // A second account for the same user — even under a DIFFERENT org —
+      // must violate the single-account-per-user unique constraint.
+      await expect(
+        db
+          .insert(stripeConnectAccounts)
+          .values(createTestConnectAccountInput(orgB.id, creatorId))
+      ).rejects.toThrow();
+    });
+
+    it('allows a Connect account with a null organizationId (orgless creator)', async () => {
+      const [row] = await db
+        .insert(stripeConnectAccounts)
+        .values({
+          userId: creatorId,
+          organizationId: null,
+          stripeAccountId: `acct_orgless_${createUniqueSlug('a')}`,
+          status: 'active',
+          chargesEnabled: true,
+          payoutsEnabled: true,
+        })
+        .returning();
+      expect(row.organizationId).toBeNull();
+      expect(row.userId).toBe(creatorId);
     });
   });
 });

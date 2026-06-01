@@ -27,11 +27,10 @@ import { CURRENCY } from '@codex/constants';
 import type { DatabaseWs } from '@codex/database';
 import {
   content,
-  organizations,
-  stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
+import { resolvePrimaryConnect } from '@codex/purchase';
 import {
   BaseService,
   InternalServiceError,
@@ -1011,47 +1010,13 @@ export class TierService extends BaseService {
   /**
    * Validate that the org has an active Stripe Connect account.
    *
-   * Resolves through `organizations.primary_connect_account_user_id` so
-   * orgs with multiple Connect accounts (one per user) have a single
-   * canonical source of truth. Falls back to the oldest active account
-   * only when the primary is not yet set — a safety net for orgs that
-   * onboarded before the canonical column was populated.
+   * Resolves the org's canonical account via the shared `resolvePrimaryConnect`
+   * (org → `primaryConnectAccountUserId` → that user's single account; one
+   * account per user, Codex-69t7c). No pinned account, or one missing the
+   * charges/payouts capabilities, means the org is not ready.
    */
   private async requireActiveConnect(orgId: string): Promise<void> {
-    const [org] = await this.db
-      .select({
-        primaryConnectAccountUserId: organizations.primaryConnectAccountUserId,
-      })
-      .from(organizations)
-      .where(eq(organizations.id, orgId))
-      .limit(1);
-
-    const primaryUserId = org?.primaryConnectAccountUserId ?? null;
-
-    const [account] = primaryUserId
-      ? await this.db
-          .select({
-            chargesEnabled: stripeConnectAccounts.chargesEnabled,
-            payoutsEnabled: stripeConnectAccounts.payoutsEnabled,
-          })
-          .from(stripeConnectAccounts)
-          .where(
-            and(
-              eq(stripeConnectAccounts.organizationId, orgId),
-              eq(stripeConnectAccounts.userId, primaryUserId)
-            )
-          )
-          .limit(1)
-      : await this.db
-          .select({
-            chargesEnabled: stripeConnectAccounts.chargesEnabled,
-            payoutsEnabled: stripeConnectAccounts.payoutsEnabled,
-          })
-          .from(stripeConnectAccounts)
-          .where(eq(stripeConnectAccounts.organizationId, orgId))
-          .orderBy(stripeConnectAccounts.createdAt)
-          .limit(1);
-
+    const account = await resolvePrimaryConnect(this.db, orgId);
     if (!account || !account.chargesEnabled || !account.payoutsEnabled) {
       throw new ConnectAccountNotReadyError(orgId);
     }
