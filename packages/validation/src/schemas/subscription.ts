@@ -268,6 +268,24 @@ export const connectDashboardSchema = z.object({
   organizationId: uuidSchema,
 });
 
+/**
+ * Creator-scoped Connect onboarding (Codex-69t7c.3 / WP3).
+ *
+ * Unlike {@link connectOnboardSchema}, this carries NO `organizationId`: the
+ * acting creator is always the authenticated user (`ctx.user.id`), never a
+ * client-supplied id (IDOR prevention — see epic design decision D8). The
+ * return/refresh URLs reuse the same host-allowlisted redirect schema as
+ * checkout, so an attacker cannot smuggle an open redirect through onboarding.
+ *
+ * The sibling `/connect/me/{status,sync,dashboard}` routes take no input — the
+ * creator is resolved entirely from the session — so this is the only new
+ * creator-scoped Connect schema.
+ */
+export const connectMeOnboardSchema = z.object({
+  returnUrl: checkoutRedirectUrlSchema,
+  refreshUrl: checkoutRedirectUrlSchema,
+});
+
 // ============================================================================
 // Type Exports
 // ============================================================================
@@ -304,3 +322,4 @@ export type ListSubscribersQueryInput = z.infer<
 >;
 
 export type ConnectOnboardInput = z.infer<typeof connectOnboardSchema>;
+export type ConnectMeOnboardInput = z.infer<typeof connectMeOnboardSchema>;
