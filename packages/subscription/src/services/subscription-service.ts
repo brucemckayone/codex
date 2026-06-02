@@ -295,6 +295,59 @@ export interface PayoutSummary {
 }
 
 /**
+ * A single creator-owned payout row for the creator earnings hub
+ * (Codex-69t7c.7 / WP7). Unlike {@link PayoutWithCreator} (the org-table view)
+ * this omits creator identity (it IS the caller) and subscriber denorm (a
+ * creator must not see who paid inside another org — cross-org privacy). It
+ * keeps `organizationId` so the hub can group "earned from each org".
+ */
+export interface CreatorPayoutRow {
+  id: string;
+  organizationId: string | null;
+  amountCents: number;
+  currency: string;
+  reason: string;
+  status: PayoutDisplayStatus;
+  payoutType: PayoutType;
+  sourceType: 'purchase' | 'subscription';
+  resolvedAt: string | null;
+  stripeTransferId: string | null;
+  transferGroup: string | null;
+  createdAt: string;
+  purchaseId: string | null;
+  subscriptionId: string | null;
+  stripeChargeId: string | null;
+}
+
+/**
+ * Creator earnings KPIs (Codex-69t7c.7 / WP7) — the userId-scoped counterpart
+ * of {@link PayoutSummary}. Same four numbers, INVERSE scoping invariant:
+ * where `PayoutSummary` must NEVER relax to user-only scope (an org's KPIs
+ * can't leak other orgs), this one is DELIBERATELY user-scoped ACROSS every
+ * org that paid the creator. Only `creator_payout` + `creator_payout_to_owner`
+ * count — `organization_fee`/`platform_fee` are never a creator's personal
+ * earnings (consistent with the WP6 / Codex-h3864 fix).
+ */
+export interface CreatorEarningsSummary {
+  earnedInPeriodCents: number;
+  totalEarnedCents: number;
+  inTransitCents: number;
+  needsAttentionCount: number;
+}
+
+/**
+ * Payout types that count as a creator's PERSONAL earnings (Codex-69t7c.7).
+ * Excludes `organization_fee` (the platform's per-charge org cut — attributed
+ * to the owner's userId but NOT personal earnings, see WP6) and `platform_fee`
+ * (no creator recipient). The single source of truth for the creator-scope
+ * payout filter, shared by the list query and the earnings-summary aggregates.
+ */
+const CREATOR_EARNING_PAYOUT_TYPES = [
+  'creator_payout',
+  'creator_payout_to_owner',
+] as const satisfies readonly PayoutType[];
+
+/**
  * Map the persisted `payouts.status` column to the UI display vocabulary.
  *
  * Storage column: `'paid' | 'pending' | 'failed'` (CHECK-enforced).
@@ -2844,9 +2897,18 @@ export class SubscriptionService extends BaseService {
    * Date conditions use the helper `dateWindow(createdAt, from, to)` so empty
    * args produce no SQL clauses (rather than `WHERE TRUE`).
    */
-  private buildPayoutConditions(orgId: string, options: PayoutFilterOptions) {
+  /**
+   * Status/source/date predicates shared by EVERY payout surface — the org
+   * table/rail (`buildPayoutConditions`) AND the creator earnings hub
+   * (`buildCreatorPayoutConditions`). Carries NO scope predicate, so chip
+   * semantics (a `needs_attention` chip means pending|failed everywhere) stay
+   * single-sourced regardless of whether the caller scopes by org or by user.
+   */
+  private buildPayoutFilterConditions(options: PayoutFilterOptions) {
     const { status = 'all', sourceType = 'all', fromDate, toDate } = options;
-    const conditions = [eq(payouts.organizationId, orgId)];
+    // Seed from dateWindow (SQL[], empty when no dates) into a fresh mutable
+    // array so the element type is inferred without importing the SQL type.
+    const conditions = [...dateWindow(payouts.createdAt, fromDate, toDate)];
 
     if (status === 'pending') {
       conditions.push(eq(payouts.status, 'pending'));
@@ -2866,9 +2928,36 @@ export class SubscriptionService extends BaseService {
       conditions.push(eq(payouts.sourceType, sourceType));
     }
 
-    conditions.push(...dateWindow(payouts.createdAt, fromDate, toDate));
-
     return conditions;
+  }
+
+  /**
+   * Org-scoped payout predicate set (the `/studio/payouts` table + rail).
+   * Scope predicate first, shared chip filters appended.
+   */
+  private buildPayoutConditions(orgId: string, options: PayoutFilterOptions) {
+    return [
+      eq(payouts.organizationId, orgId),
+      ...this.buildPayoutFilterConditions(options),
+    ];
+  }
+
+  /**
+   * Creator-scoped payout predicate set (Codex-69t7c.7 / WP7). Scopes by the
+   * acting user across ALL orgs and to their PERSONAL earning payout types
+   * only ({@link CREATOR_EARNING_PAYOUT_TYPES}) — the `eq(userId)` predicate is
+   * the security boundary that keeps one creator from reading another's
+   * payouts. Shares the chip filters with the org surfaces.
+   */
+  private buildCreatorPayoutConditions(
+    userId: string,
+    options: PayoutFilterOptions
+  ) {
+    return [
+      eq(payouts.userId, userId),
+      inArray(payouts.payoutType, [...CREATOR_EARNING_PAYOUT_TYPES]),
+      ...this.buildPayoutFilterConditions(options),
+    ];
   }
 
   async listPayoutsByOrg(
@@ -3045,6 +3134,141 @@ export class SubscriptionService extends BaseService {
             eq(payouts.organizationId, orgId),
             inArray(payouts.status, ['pending', 'failed'])
           )
+        ),
+    ]);
+
+    return {
+      earnedInPeriodCents: paid[0]?.inPeriod ?? 0,
+      totalEarnedCents: paid[0]?.total ?? 0,
+      inTransitCents: inTransit[0]?.sum ?? 0,
+      needsAttentionCount: needsAttention[0]?.count ?? 0,
+    };
+  }
+
+  /**
+   * Creator earnings hub (Codex-69t7c.7 / WP7): the acting creator's OWN
+   * payout rows across every org that paid them, newest first. Scoped by
+   * `buildCreatorPayoutConditions` (userId + personal payout types) — the
+   * `eq(userId)` predicate is the cross-creator isolation boundary. Unlike
+   * `listPayoutsByOrg` this paginates per-row (not per-transferGroup): a
+   * creator sees their individual slices, not an org operator's charge groups.
+   */
+  async listPayoutsForCreator(
+    userId: string,
+    options: {
+      page: number;
+      limit: number;
+    } & PayoutFilterOptions
+  ): Promise<PaginatedListResponse<CreatorPayoutRow>> {
+    const { page, limit } = options;
+    const offset = (page - 1) * limit;
+
+    const conditions = this.buildCreatorPayoutConditions(userId, options);
+
+    const [rows, [totalResult]] = await Promise.all([
+      this.db
+        .select({
+          id: payouts.id,
+          organizationId: payouts.organizationId,
+          amountCents: payouts.amountCents,
+          currency: payouts.currency,
+          reason: payouts.reason,
+          status: payouts.status,
+          payoutType: payouts.payoutType,
+          sourceType: payouts.sourceType,
+          resolvedAt: payouts.resolvedAt,
+          stripeTransferId: payouts.stripeTransferId,
+          transferGroup: payouts.transferGroup,
+          createdAt: payouts.createdAt,
+          purchaseId: payouts.purchaseId,
+          subscriptionId: payouts.subscriptionId,
+          stripeChargeId: payouts.stripeChargeId,
+        })
+        .from(payouts)
+        .where(and(...conditions))
+        .orderBy(desc(payouts.createdAt), payouts.id)
+        .limit(limit)
+        .offset(offset),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(payouts)
+        .where(and(...conditions)),
+    ]);
+
+    const total = totalResult?.count ?? 0;
+
+    return {
+      items: rows.map((row) => ({
+        id: row.id,
+        organizationId: row.organizationId ?? null,
+        amountCents: row.amountCents,
+        currency: row.currency,
+        reason: row.reason ?? '',
+        status: derivePayoutStatus(row.status),
+        payoutType: row.payoutType as PayoutType,
+        sourceType: row.sourceType as 'purchase' | 'subscription',
+        resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
+        stripeTransferId: row.stripeTransferId,
+        transferGroup: row.transferGroup ?? null,
+        createdAt: row.createdAt.toISOString(),
+        purchaseId: row.purchaseId ?? null,
+        subscriptionId: row.subscriptionId ?? null,
+        stripeChargeId: row.stripeChargeId ?? null,
+      })),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /**
+   * Creator earnings KPIs (Codex-69t7c.7 / WP7) — the userId-scoped inverse of
+   * {@link getPayoutSummary}. Three parallel aggregates over the creator's
+   * personal payout rows (userId + `CREATOR_EARNING_PAYOUT_TYPES`) across all
+   * orgs. `earnedInPeriodCents` honours the date window; the rest are lifetime.
+   */
+  async getEarningsSummaryForCreator(
+    userId: string,
+    options: { fromDate?: string; toDate?: string } = {}
+  ): Promise<CreatorEarningsSummary> {
+    const { fromDate, toDate } = options;
+
+    // Reusable scope predicate (userId + personal payout types) shared by all
+    // three aggregates, so an org-fee or another user's row can never inflate
+    // a KPI.
+    const creatorScope = [
+      eq(payouts.userId, userId),
+      inArray(payouts.payoutType, [...CREATOR_EARNING_PAYOUT_TYPES]),
+    ];
+
+    const dateConditions = dateWindow(payouts.createdAt, fromDate, toDate);
+    const inPeriodSum =
+      dateConditions.length === 0
+        ? sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`
+        : sql<number>`COALESCE(SUM(CASE WHEN ${and(...dateConditions)} THEN ${payouts.amountCents} ELSE 0 END),0)::int`;
+
+    const [paid, inTransit, needsAttention] = await Promise.all([
+      this.db
+        .select({
+          inPeriod: inPeriodSum,
+          total: sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`,
+        })
+        .from(payouts)
+        .where(and(...creatorScope, eq(payouts.status, 'paid'))),
+      this.db
+        .select({
+          sum: sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`,
+        })
+        .from(payouts)
+        .where(and(...creatorScope, eq(payouts.status, 'pending'))),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(payouts)
+        .where(
+          and(...creatorScope, inArray(payouts.status, ['pending', 'failed']))
         ),
     ]);
 
