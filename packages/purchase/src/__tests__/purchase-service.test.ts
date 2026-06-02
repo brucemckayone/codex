@@ -1291,6 +1291,180 @@ describe('PurchaseService Integration', () => {
       expect((stubStripe as any).transfers.create).not.toHaveBeenCalled();
     });
 
+    // ─── Codex-69t7c WP4 (D2/D4): single-account routing invariant ───
+    // The creator slice is resolved by `eq(stripeConnectAccounts.userId,
+    // creatorId)` — userId-only. The creator's single account carries a
+    // vestigial organizationId (nullable; the org it was first onboarded
+    // under). Here we null it out to prove routing ignores it; a regression
+    // that re-adds an organizationId predicate would miss the account and
+    // strand the slice in pending instead of firing the transfer.
+    it('routes the creator slice by userId regardless of the Connect account vestigial organizationId (Codex-69t7c D4)', async () => {
+      const { content, chargeId, paymentIntentId, stripeAccountId } =
+        await setupPaidContentWithConnect({
+          title: 'Creator userId routing',
+          priceCents: 10000,
+        });
+
+      // Sever the account's vestigial org link — userId routing must hold.
+      await db
+        .update(schema.stripeConnectAccounts)
+        .set({ organizationId: null })
+        .where(eq(schema.stripeConnectAccounts.userId, userId));
+
+      const creatorTransferId = `tr_creator_${Date.now()}`;
+      const orgTransferId = `tr_org_${Date.now()}`;
+      const createTransfer = vi
+        .fn()
+        .mockImplementation((args: { metadata?: { type?: string } }) =>
+          Promise.resolve({
+            id:
+              args?.metadata?.type === 'creator_payout'
+                ? creatorTransferId
+                : orgTransferId,
+          })
+        );
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      (mockStripe as any).transfers = { create: createTransfer };
+
+      const purchase = await purchaseService.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+      });
+
+      // Creator transfer fired to the userId-resolved account despite the
+      // null vestigial org column.
+      expect(createTransfer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          destination: stripeAccountId,
+          metadata: expect.objectContaining({ type: 'creator_payout' }),
+        }),
+        expect.objectContaining({ idempotencyKey: `${chargeId}_creator` })
+      );
+
+      const rows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+      const creatorRow = rows.find((r) => r.payoutType === 'creator_payout');
+      expect(creatorRow?.status).toBe('paid');
+      expect(creatorRow?.userId).toBe(userId);
+    });
+
+    // ─── Codex-ed446: org-fee pending row must carry a non-null userId ───
+    // When the org owner has NO Connect account at all (distinct from the
+    // offline-account case above), resolvePrimaryConnect returns undefined.
+    // The org-fee slice MUST still be recorded as a pending row attributed to
+    // the org owner (resolveOrgOwnerId fallback, mirroring the subscription
+    // path) so it persists and is swept — instead of a null-userId insert
+    // that violates check_payouts_user_required (23514) and strands the slice
+    // in the platform balance with no ledger row (the bug this locks).
+    it('Codex-ed446: org owner with no Connect account still gets a non-null-userId pending org_fee row (no 23514 strand)', async () => {
+      const [ownerUserId] = await seedTestUsers(db, 1);
+      const [org2] = await db
+        .insert(organizations)
+        .values({
+          name: 'No-Connect Owner Org',
+          slug: createUniqueSlug('no-connect-owner'),
+          ownerId: ownerUserId,
+        })
+        .returning();
+      // resolveOrgOwnerId reads organizationMemberships(role='owner'), NOT
+      // organizations.ownerId — seed the membership explicitly.
+      await db
+        .insert(schema.organizationMemberships)
+        .values(
+          createTestMembershipInput(org2.id, ownerUserId, { role: 'owner' })
+        );
+      // Deliberately seed NO stripe_connect_accounts row for ownerUserId.
+
+      const stubFeeConfig = {
+        getFeesForCreator: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 1500,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+      const stubStripe = {
+        ...mockStripe,
+        transfers: { create: vi.fn() },
+        paymentIntents: { retrieve: vi.fn() },
+      } as unknown as Stripe;
+      const service = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      const media = await mediaService.create(
+        {
+          title: 'No Connect Owner',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        ownerUserId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/no-connect/master.m3u8',
+          thumbnailKey: 'thumbnails/no-connect.jpg',
+          durationSeconds: 60,
+        },
+        ownerUserId
+      );
+      const content = await contentService.create(
+        {
+          organizationId: org2.id,
+          title: 'No Connect Owner',
+          slug: createUniqueSlug('no-connect-owner-content'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 10000,
+        },
+        ownerUserId
+      );
+      await contentService.publish(content.id, ownerUserId);
+
+      const chargeId = `ch_no_connect_${Date.now()}`;
+      const purchase = await service.completePurchase(
+        `pi_no_connect_${Date.now()}`,
+        {
+          customerId: userId,
+          contentId: content.id,
+          organizationId: org2.id,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+          stripeChargeId: chargeId,
+        }
+      );
+
+      const rows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+
+      const orgFeeRow = rows.find((r) => r.payoutType === 'organization_fee');
+      // The crux: the org-fee row EXISTS (pre-fix it was dropped by the 23514
+      // catch) and carries a non-null userId = the org owner.
+      expect(orgFeeRow).toBeDefined();
+      expect(orgFeeRow?.userId).toBe(ownerUserId);
+      expect(orgFeeRow?.status).toBe('pending');
+      expect(orgFeeRow?.reason).toBe('connect_not_ready');
+      expect(orgFeeRow?.sourceType).toBe('purchase');
+
+      // No transfer fired — there is no Connect account to receive it.
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      expect((stubStripe as any).transfers.create).not.toHaveBeenCalled();
+    });
+
     it('schema rejects paid rows with neither stripe_transfer_id nor stripe_charge_id', async () => {
       // Try to insert a paid row that satisfies neither side of the
       // check_payouts_paid_invariant OR clause. The DB MUST reject it.
