@@ -27,12 +27,13 @@ import {
   CURRENCY,
   PURCHASE_STATUS,
 } from '@codex/constants';
-import { isUniqueViolation, toIso } from '@codex/database';
+import { getConstraintName, isUniqueViolation, toIso } from '@codex/database';
 import {
   agreementProposals,
   content,
   contentAccess,
   creatorOrganizationAgreements,
+  organizationMemberships,
   payouts,
   purchases,
   refundReviews,
@@ -875,19 +876,67 @@ export class PurchaseService extends BaseService {
 
     // 3. Organization fee — secondary transfer with source_transaction.
     if (revenueSplit.organizationFeeCents > 0) {
-      await this.executePurchaseTransfer({
-        purchase,
-        organizationId,
-        amountCents: revenueSplit.organizationFeeCents,
-        payoutType: 'organization_fee',
-        rowUserId: orgConnect?.userId ?? null,
-        connect: orgConnect,
-        stripeChargeId,
-        transferGroup,
-        idempotencyKey: `${stripeChargeId}_org_fee`,
-        now,
-      });
+      // Codex-ed446: the org-fee payout row's recipient userId MUST be
+      // non-null (check_payouts_user_required). Prefer the resolved Connect
+      // account's user; when the org owner has not onboarded a Connect
+      // account, orgConnect is undefined — fall back to the org owner so a
+      // pending organization_fee row still persists and is swept (mirrors the
+      // subscription path) instead of stranding the slice via a 23514
+      // violation that the per-row catch would silently swallow.
+      const orgRowUserId =
+        orgConnect?.userId ?? (await this.resolveOrgOwnerId(organizationId));
+      if (orgRowUserId) {
+        await this.executePurchaseTransfer({
+          purchase,
+          organizationId,
+          amountCents: revenueSplit.organizationFeeCents,
+          payoutType: 'organization_fee',
+          rowUserId: orgRowUserId,
+          connect: orgConnect,
+          stripeChargeId,
+          transferGroup,
+          idempotencyKey: `${stripeChargeId}_org_fee`,
+          now,
+        });
+      } else {
+        // No Connect account AND no resolvable org owner — cannot attribute
+        // the slice to any user, so a ledger row is impossible. Surface loudly
+        // (data-integrity event) rather than emit a 23514-bound insert.
+        this.obs.error(
+          'Cannot record organization_fee payout: no Connect account and no org owner found',
+          {
+            purchaseId: purchase.id,
+            organizationId,
+            amountCents: revenueSplit.organizationFeeCents,
+          }
+        );
+      }
     }
+  }
+
+  /**
+   * Resolve an org's owner userId (Codex-ed446). The org-fee payout row MUST
+   * carry a non-null userId (check_payouts_user_required); when the org owner
+   * has not onboarded a Connect account, `resolvePrimaryConnect` returns
+   * undefined, so we fall back to the owner here rather than writing a
+   * null-userId row that violates 23514 and strands the org slice in the
+   * platform balance. Mirrors `SubscriptionService.resolveOrgOwnerId`. No
+   * ORDER BY — matches that resolver's shape; deterministic-owner ordering
+   * across multi-owner orgs is tracked separately in Codex-rjwdm.
+   */
+  private async resolveOrgOwnerId(orgId: string): Promise<string | null> {
+    const [owner] = await this.db
+      .select({ userId: organizationMemberships.userId })
+      .from(organizationMemberships)
+      .where(
+        and(
+          eq(organizationMemberships.organizationId, orgId),
+          eq(organizationMemberships.role, 'owner')
+        )
+      )
+      .limit(1);
+
+    return owner?.userId ?? null;
   }
 
   /**
@@ -951,6 +1000,10 @@ export class PurchaseService extends BaseService {
               purchaseId: purchase.id,
               organizationId,
               amountCents,
+              // Codex-ed446: surface the constraint so a CHECK violation
+              // (e.g. check_payouts_user_required, 23514) on this money-ledger
+              // insert is logged distinctly from the suppressed 23505 dup.
+              constraint: getConstraintName(err),
               error: err instanceof Error ? err.message : String(err),
             }
           );

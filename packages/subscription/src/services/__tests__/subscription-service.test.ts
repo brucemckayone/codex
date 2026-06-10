@@ -3387,6 +3387,109 @@ describe('SubscriptionService', () => {
         }));
     }
 
+    // ─── Codex-69t7c WP4 (D2/D4): single-account routing invariant ───
+    // A creator has exactly ONE Connect account (uq_stripe_connect_user) that
+    // receives their slice from EVERY org they hold an agreement with. The
+    // per-creator lookup is `inArray(stripeConnectAccounts.userId, creatorIds)`
+    // — userId-only, never (userId, organizationId). This test pays from org A
+    // while the creator's single account was onboarded under a DIFFERENT org
+    // (its vestigial organizationId points at org B). The slice MUST still
+    // route to that account by userId. A regression that re-introduces an
+    // organizationId predicate would fail to match → route the slice to a
+    // pending row instead of firing the transfer → this test goes red.
+    it('routes a creator slice to the creator single account even when that account was onboarded under a different org (multi-org creator → one account, D4)', async () => {
+      const { org, tier1 } = await createFullOrg('multiorg-creator');
+
+      // A second org; the creator's ONE Connect account records orgB as its
+      // vestigial onboarding origin — it must NOT influence routing.
+      const [orgB] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('creator-home-org'),
+            creatorId: thirdUserId,
+          })
+        )
+        .returning();
+
+      const [xorgCreatorId] = await seedTestUsers(db, 1);
+      const creatorConnect = createTestConnectAccountInput(
+        orgB.id,
+        xorgCreatorId,
+        {
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          status: 'active',
+        }
+      );
+      await db.insert(stripeConnectAccounts).values(creatorConnect);
+
+      // Active subscription agreement lives in the PAYING org (org), not orgB.
+      await seedAgreement(org.id, xorgCreatorId, 5000);
+
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+
+      // Distinct transfer ids per call so the two ledger rows (creator + org)
+      // don't collide on uq_payouts_stripe_transfer_id.
+      const createTransfer = vi
+        .fn()
+        .mockImplementation(
+          (args: { metadata?: { type?: string; creator_id?: string } }) =>
+            Promise.resolve({
+              id: `tr_${args?.metadata?.type ?? 'x'}_${args?.metadata?.creator_id ?? 'org'}_${Math.random().toString(36).slice(2, 8)}`,
+            })
+        );
+      (stripe as unknown as { transfers: unknown }).transfers = {
+        create: createTransfer,
+      };
+
+      const chargeId = 'ch_multiorg_creator';
+      const mockInvoice = createMockStripeInvoice({
+        amount_paid: 1000,
+        parent: {
+          subscription_details: { subscription: sub.stripeSubscriptionId },
+        },
+        payments: {
+          data: [
+            { payment: { charge: chargeId, payment_intent: 'pi_multiorg' } },
+          ],
+        },
+      }) as unknown as Stripe.Invoice;
+
+      await service.handleInvoicePaymentSucceeded(mockInvoice);
+
+      const creatorCalls = perCreatorTransferCalls(createTransfer);
+      const call = creatorCalls.find(
+        (c) => c.idempotencyKey === `${chargeId}_creator_${xorgCreatorId}`
+      );
+      expect(call).toBeDefined();
+      // THE PROOF: destination is the creator's single account (resolved by
+      // userId), independent of that account's vestigial organizationId (orgB).
+      expect(call?.destination).toBe(creatorConnect.stripeAccountId);
+
+      // Ledger row lands on the creator userId, status paid.
+      const rows = await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.organizationId, org.id));
+      const creatorRow = rows.find(
+        (r) =>
+          r.userId === xorgCreatorId &&
+          r.payoutType === 'creator_payout' &&
+          r.stripeChargeId === chargeId
+      );
+      expect(creatorRow).toBeDefined();
+      expect(creatorRow?.status).toBe('paid');
+      expect(creatorRow?.stripeTransferId).toBeTruthy();
+    });
+
     it('share-sum exactly 10000 bps (2 creators, 50/50): each receives floor(payout/2)', async () => {
       const { org, tier1 } = await createFullOrg('split-5050');
       const c1 = await seedCreatorWithConnect(org.id);
