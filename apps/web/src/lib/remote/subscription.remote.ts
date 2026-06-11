@@ -663,8 +663,8 @@ export const getMyPayouts = query(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
     const params = new URLSearchParams();
-    if (status) params.set('status', status);
-    if (source) params.set('source', source);
+    params.set('status', status);
+    params.set('source', source);
     if (fromDate) params.set('fromDate', fromDate);
     if (toDate) params.set('toDate', toDate);
     params.set('page', String(page));

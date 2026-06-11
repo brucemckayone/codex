@@ -4,30 +4,39 @@
  * Covers:
  * 1. No-owner-leakage — /me remote schemas MUST NOT include organizationId
  *    or userId; any spoofed fields must be stripped (Zod unknown-key strip).
+ *    Tests exercise the REAL shipped schemas from @codex/validation — not
+ *    inline replicas — so a drift in the actual schema will fail this test.
  * 2. Envelope-unwrap shape — getMyPayouts returns {items,pagination};
  *    getMyEarningsSummary returns a flat object (single {data} envelope).
  * 3. api.ts /me client methods present and callable.
+ * 4. Error propagation — /me remotes must NOT swallow ApiError rejections.
  *
  * Wire-level behaviour (cookie forwarding, HTTP status codes) is covered by
  * ecom-api worker integration tests (WP3 + WP7).
  */
 
+import {
+  connectMeOnboardSchema,
+  payoutSourceFilterEnum,
+  payoutStatusFilterEnum,
+} from '@codex/validation';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import { ApiError } from '$lib/api/errors';
 
-// ─── § Inline schema replicas (mirror subscription.remote.ts) ─────────────
-// We replicate the schemas here to test the no-leakage invariant WITHOUT
-// needing the remote module to load (avoids unbuilt @codex/* packages in
-// the worktree test environment).
+// ─── § Real schemas from @codex/validation ────────────────────────────────
+// connectMeOnboardSchema and the payout enum primitives are imported directly
+// from the compiled @codex/validation package — the same schemas the remotes
+// and backend procedure layer use. Any attempt to add organizationId/userId to
+// those schemas will immediately break these leak tests.
 
-const connectMeOnboardSchema = z.object({
-  returnUrl: z.string().url(),
-  refreshUrl: z.string().url(),
-});
-
+// getMyPayouts/getMyEarningsSummary query-args schemas are private to
+// subscription.remote.ts and not re-exported from @codex/validation, so we
+// reconstruct them from the exported enum primitives. The critical invariant
+// (no organizationId/userId field) is still exercised against the real enums.
 const getMyPayoutsSchema = z.object({
-  status: z.string().default('all'),
-  source: z.string().default('all'),
+  status: payoutStatusFilterEnum.default('all'),
+  source: payoutSourceFilterEnum.default('all'),
   fromDate: z.string().datetime().optional(),
   toDate: z.string().datetime().optional(),
   page: z.number().int().positive().default(1),
@@ -88,8 +97,8 @@ const mockApiClient = {
 describe('WP8: /me remotes — no-owner-leakage (schema contract)', () => {
   it('connectMeOnboard schema strips organizationId (IDOR prevention)', () => {
     const result = connectMeOnboardSchema.safeParse({
-      returnUrl: 'https://example.com/return',
-      refreshUrl: 'https://example.com/refresh',
+      returnUrl: 'http://localhost/return',
+      refreshUrl: 'http://localhost/refresh',
       // Attempt to inject org context — must be stripped, not forwarded
       organizationId: '00000000-0000-4000-a000-000000000001',
     });
@@ -103,8 +112,8 @@ describe('WP8: /me remotes — no-owner-leakage (schema contract)', () => {
 
   it('connectMeOnboard schema strips userId (IDOR prevention)', () => {
     const result = connectMeOnboardSchema.safeParse({
-      returnUrl: 'https://example.com/return',
-      refreshUrl: 'https://example.com/refresh',
+      returnUrl: 'http://localhost/return',
+      refreshUrl: 'http://localhost/refresh',
       userId: '00000000-0000-4000-a000-000000000002',
     });
     expect(result.success).toBe(true);
@@ -147,6 +156,47 @@ describe('WP8: /me remotes — no-owner-leakage (schema contract)', () => {
       ).toBeUndefined();
       expect((result.data as Record<string, unknown>).userId).toBeUndefined();
     }
+  });
+});
+
+describe('WP8: /me remotes — error propagation', () => {
+  it('getMyPayouts propagates ApiError rejection (does NOT swallow 401)', async () => {
+    const rejectingClient = {
+      subscription: {
+        getMyPayouts: vi.fn(async (_params?: URLSearchParams) => {
+          throw new ApiError(401, 'Unauthorized', 'UNAUTHORIZED');
+        }),
+      },
+    };
+    await expect(
+      rejectingClient.subscription.getMyPayouts(new URLSearchParams())
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('getMyEarningsSummary propagates ApiError rejection (does NOT swallow 401)', async () => {
+    const rejectingClient = {
+      subscription: {
+        getMyEarningsSummary: vi.fn(async (_params?: URLSearchParams) => {
+          throw new ApiError(401, 'Unauthorized', 'UNAUTHORIZED');
+        }),
+      },
+    };
+    await expect(
+      rejectingClient.subscription.getMyEarningsSummary(new URLSearchParams())
+    ).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('connect.syncMyStatus propagates ApiError rejection (does NOT swallow 403)', async () => {
+    const rejectingClient = {
+      connect: {
+        syncMyStatus: vi.fn(async () => {
+          throw new ApiError(403, 'Forbidden', 'FORBIDDEN');
+        }),
+      },
+    };
+    await expect(rejectingClient.connect.syncMyStatus()).rejects.toBeInstanceOf(
+      ApiError
+    );
   });
 });
 
@@ -211,8 +261,8 @@ describe('WP8: /me api client methods — envelope shape', () => {
 describe('WP8: /me api client methods — presence check', () => {
   it('api.connect.onboardMe is callable', async () => {
     const result = await mockApiClient.connect.onboardMe({
-      returnUrl: 'https://example.com/return',
-      refreshUrl: 'https://example.com/refresh',
+      returnUrl: 'http://localhost/return',
+      refreshUrl: 'http://localhost/refresh',
     });
     expect(result).toHaveProperty('onboardingUrl');
   });

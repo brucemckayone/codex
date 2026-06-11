@@ -1853,7 +1853,6 @@ export function createServerApi(
       syncMyStatus: () =>
         request<ConnectAccountStatusResponse>('ecom', '/connect/me/sync', {
           method: 'POST',
-          body: JSON.stringify({}),
         }),
 
       /**
@@ -1863,7 +1862,6 @@ export function createServerApi(
       getMyDashboardLink: () =>
         request<ConnectDashboardResponse>('ecom', '/connect/me/dashboard', {
           method: 'POST',
-          body: JSON.stringify({}),
         }),
     },
 
