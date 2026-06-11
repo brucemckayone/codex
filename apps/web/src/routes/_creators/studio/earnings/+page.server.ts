@@ -11,6 +11,7 @@
  *   STREAM payouts         — paginated ledger
  */
 import { redirect } from '@sveltejs/kit';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
@@ -27,6 +28,8 @@ export const load: PageServerLoad = async ({
     redirect(302, `/login?redirect=${encodeURIComponent(url.pathname)}`);
   }
 
+  // CACHE_HEADERS.PRIVATE is safe to set early — no cache-poisoning risk
+  // (private, no-cache is exactly what we want for error responses too).
   setHeaders(CACHE_HEADERS.PRIVATE);
 
   const api = createServerApi(platform, cookies);
@@ -37,35 +40,75 @@ export const load: PageServerLoad = async ({
   // We fire a sync BEFORE the page data load so the returned connectStatus
   // reflects the freshest Stripe state.
   const connectParam = url.searchParams.get('connect');
-  let connectReturnBanner: 'success' | 'refresh' | null = null;
+  let connectReturnBanner: 'success' | 'sync_failed' | 'refresh' | null = null;
 
   if (connectParam === 'success') {
     try {
       await api.connect.syncMyStatus();
-    } catch {
-      // Non-fatal — page will still load, connect status from next call
+      connectReturnBanner = 'success';
+    } catch (err) {
+      const errorId = locals.requestId ?? crypto.randomUUID();
+      logger.error(
+        'earnings-load:syncMyStatus failed on connect=success return',
+        {
+          errorId,
+          error: err instanceof Error ? err.message : String(err),
+          userId: locals.user.id,
+        }
+      );
+      // Do NOT report success — tell the UI the sync failed so it can warn
+      connectReturnBanner = 'sync_failed';
     }
-    connectReturnBanner = 'success';
   } else if (connectParam === 'refresh') {
     connectReturnBanner = 'refresh';
   }
 
   // ── Critical: connect status (awaited — drives page structure) ────────────
-  const connectStatus = await api.connect.getMyStatus().catch(() => null);
+  // On fetch failure return a distinct sentinel so the UI can show "retry",
+  // not silently treat the creator as never having set up payouts.
+  type ConnectStatusResult =
+    | Awaited<ReturnType<typeof api.connect.getMyStatus>>
+    | { fetchFailed: true };
+
+  const connectStatus: ConnectStatusResult = await api.connect
+    .getMyStatus()
+    .catch((err) => {
+      const errorId = locals.requestId ?? crypto.randomUUID();
+      logger.error('earnings-load:getMyStatus failed', {
+        errorId,
+        error: err instanceof Error ? err.message : String(err),
+        userId: locals.user?.id,
+      });
+      return { fetchFailed: true as const };
+    });
 
   // ── Streamed: earnings summary + payouts ──────────────────────────────────
   const earningsSummary = api.subscription
     .getMyEarningsSummary(new URLSearchParams())
-    .catch(() => null);
+    .catch((err) => {
+      const errorId = locals.requestId ?? crypto.randomUUID();
+      logger.error('earnings-load:getMyEarningsSummary failed', {
+        errorId,
+        error: err instanceof Error ? err.message : String(err),
+        userId: locals.user?.id,
+      });
+      return null;
+    });
 
   const payoutsParams = new URLSearchParams();
   payoutsParams.set('status', 'all');
   payoutsParams.set('source', 'all');
   payoutsParams.set('page', '1');
   payoutsParams.set('limit', '20');
-  const payouts = api.subscription
-    .getMyPayouts(payoutsParams)
-    .catch(() => null);
+  const payouts = api.subscription.getMyPayouts(payoutsParams).catch((err) => {
+    const errorId = locals.requestId ?? crypto.randomUUID();
+    logger.error('earnings-load:getMyPayouts failed', {
+      errorId,
+      error: err instanceof Error ? err.message : String(err),
+      userId: locals.user?.id,
+    });
+    return null;
+  });
 
   return {
     connectStatus,

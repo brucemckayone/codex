@@ -2,31 +2,40 @@
  * Earnings hub page — unit tests (WP9 — Codex-69t7c.9)
  *
  * Tests cover:
- *   - connect banner state transitions (not_started / incomplete / pending / enabled)
- *   - connect-return banner (?connect=success / ?connect=refresh)
+ *   - connect banner state transitions (not_started / incomplete / pending / enabled / fetch_failed)
+ *   - connect-return banner (?connect=success / ?connect=sync_failed / ?connect=refresh)
  *   - KPI rendering with real data
  *   - payouts empty state
  *   - filter chip rendering
+ *   - error-path: syncMyStatus rejection → sync_failed banner, no crash
+ *   - error-path: getMyStatus rejection → fetchFailed sentinel, not not_started
+ *   - error-path: earningsSummary/payouts rejection → null (no crash)
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 // ── Connect-state derivation logic ───────────────────────────────────────────
 
-type ConnectStatusShape = {
-  isConnected: boolean;
-  chargesEnabled: boolean;
-  payoutsEnabled: boolean;
-  status: 'onboarding' | 'active' | 'restricted' | 'disabled' | null;
-} | null;
+type ConnectStatusShape =
+  | {
+      isConnected: boolean;
+      chargesEnabled: boolean;
+      payoutsEnabled: boolean;
+      status: 'onboarding' | 'active' | 'restricted' | 'disabled' | null;
+    }
+  | { fetchFailed: true }
+  | null;
 
 type ConnectState =
   | 'not_started'
   | 'incomplete'
   | 'pending_verification'
-  | 'enabled';
+  | 'enabled'
+  | 'fetch_failed';
 
 function deriveConnectState(s: ConnectStatusShape): ConnectState {
-  if (!s || !s.isConnected) return 'not_started';
+  if (!s) return 'not_started';
+  if ('fetchFailed' in s) return 'fetch_failed';
+  if (!s.isConnected) return 'not_started';
   if (s.chargesEnabled && s.payoutsEnabled) return 'enabled';
   if (s.status === 'restricted' || s.status === 'disabled')
     return 'pending_verification';
@@ -102,6 +111,10 @@ describe('deriveConnectState', () => {
         status: 'onboarding',
       })
     ).toBe('incomplete');
+  });
+
+  it('returns fetch_failed when fetchFailed sentinel is present', () => {
+    expect(deriveConnectState({ fetchFailed: true })).toBe('fetch_failed');
   });
 });
 
@@ -221,28 +234,33 @@ describe('formatPence', () => {
 // ── Connect-return banner flag ───────────────────────────────────────────────
 
 function resolveConnectBanner(
-  param: string | null
-): 'success' | 'refresh' | null {
-  if (param === 'success') return 'success';
+  param: string | null,
+  syncFailed: boolean
+): 'success' | 'sync_failed' | 'refresh' | null {
+  if (param === 'success') return syncFailed ? 'sync_failed' : 'success';
   if (param === 'refresh') return 'refresh';
   return null;
 }
 
 describe('connectReturnBanner', () => {
   it('null when no connect param', () => {
-    expect(resolveConnectBanner(null)).toBeNull();
+    expect(resolveConnectBanner(null, false)).toBeNull();
   });
 
-  it('success when connect=success', () => {
-    expect(resolveConnectBanner('success')).toBe('success');
+  it('success when connect=success and sync succeeds', () => {
+    expect(resolveConnectBanner('success', false)).toBe('success');
+  });
+
+  it('sync_failed when connect=success but sync throws', () => {
+    expect(resolveConnectBanner('success', true)).toBe('sync_failed');
   });
 
   it('refresh when connect=refresh', () => {
-    expect(resolveConnectBanner('refresh')).toBe('refresh');
+    expect(resolveConnectBanner('refresh', false)).toBe('refresh');
   });
 
   it('null when unknown param value', () => {
-    expect(resolveConnectBanner('unknown')).toBeNull();
+    expect(resolveConnectBanner('unknown', false)).toBeNull();
   });
 });
 
@@ -259,5 +277,261 @@ describe('needsAttentionCount', () => {
     const count = 3;
     const hasAttention = count > 0;
     expect(hasAttention).toBe(true);
+  });
+});
+
+// ── Error-path: server load resilience ──────────────────────────────────────
+
+/**
+ * Simulates the server load logic for connect-return + getMyStatus + streams.
+ * We test the logic in isolation (no HTTP, no SvelteKit runtime) to verify
+ * the error-handling contract without needing a full integration harness.
+ */
+
+type FakeApi = {
+  connect: {
+    syncMyStatus: () => Promise<void>;
+    getMyStatus: () => Promise<{
+      isConnected: boolean;
+      chargesEnabled: boolean;
+      payoutsEnabled: boolean;
+      status: string | null;
+    }>;
+  };
+  subscription: {
+    getMyEarningsSummary: (
+      p: URLSearchParams
+    ) => Promise<{ earnedInPeriodCents: number }>;
+    getMyPayouts: (p: URLSearchParams) => Promise<{
+      items: PayoutItem[];
+      pagination: { page: number; totalPages: number };
+    }>;
+  };
+};
+
+// Mirrors the server load error-handling logic extracted for unit testing
+async function runLoadLogic(api: FakeApi, connectParam: string | null) {
+  const logger = { error: vi.fn() };
+  const requestId = 'test-req-id';
+  const userId = 'test-user-id';
+
+  let connectReturnBanner: 'success' | 'sync_failed' | 'refresh' | null = null;
+
+  if (connectParam === 'success') {
+    try {
+      await api.connect.syncMyStatus();
+      connectReturnBanner = 'success';
+    } catch (err) {
+      logger.error(
+        'earnings-load:syncMyStatus failed on connect=success return',
+        {
+          errorId: requestId,
+          error: err instanceof Error ? err.message : String(err),
+          userId,
+        }
+      );
+      connectReturnBanner = 'sync_failed';
+    }
+  } else if (connectParam === 'refresh') {
+    connectReturnBanner = 'refresh';
+  }
+
+  type ConnectResult =
+    | {
+        isConnected: boolean;
+        chargesEnabled: boolean;
+        payoutsEnabled: boolean;
+        status: string | null;
+      }
+    | { fetchFailed: true };
+  const connectStatus: ConnectResult = await api.connect
+    .getMyStatus()
+    .catch((err) => {
+      logger.error('earnings-load:getMyStatus failed', {
+        errorId: requestId,
+        error: err instanceof Error ? err.message : String(err),
+        userId,
+      });
+      return { fetchFailed: true as const };
+    });
+
+  const earningsSummary = api.subscription
+    .getMyEarningsSummary(new URLSearchParams())
+    .catch((err) => {
+      logger.error('earnings-load:getMyEarningsSummary failed', {
+        errorId: requestId,
+        error: err instanceof Error ? err.message : String(err),
+        userId,
+      });
+      return null;
+    });
+
+  const payouts = api.subscription
+    .getMyPayouts(new URLSearchParams())
+    .catch((err) => {
+      logger.error('earnings-load:getMyPayouts failed', {
+        errorId: requestId,
+        error: err instanceof Error ? err.message : String(err),
+        userId,
+      });
+      return null;
+    });
+
+  return {
+    connectReturnBanner,
+    connectStatus,
+    earningsSummary: await earningsSummary,
+    payouts: await payouts,
+    loggerCalls: logger.error.mock.calls,
+  };
+}
+
+describe('server load error-path', () => {
+  it('(a) syncMyStatus rejection → banner is sync_failed, load does not crash', async () => {
+    const api: FakeApi = {
+      connect: {
+        syncMyStatus: vi.fn().mockRejectedValue(new Error('Stripe timeout')),
+        getMyStatus: vi.fn().mockResolvedValue({
+          isConnected: true,
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          status: 'active',
+        }),
+      },
+      subscription: {
+        getMyEarningsSummary: vi
+          .fn()
+          .mockResolvedValue({ earnedInPeriodCents: 0 }),
+        getMyPayouts: vi.fn().mockResolvedValue({
+          items: [],
+          pagination: { page: 1, totalPages: 1 },
+        }),
+      },
+    };
+
+    const result = await runLoadLogic(api, 'success');
+
+    expect(result.connectReturnBanner).toBe('sync_failed');
+    // Load must not throw — we get the rest of the data
+    expect(result.connectStatus).toEqual({
+      isConnected: true,
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      status: 'active',
+    });
+    // Logger was called with the error
+    expect(result.loggerCalls.length).toBeGreaterThan(0);
+    expect(result.loggerCalls[0][0]).toContain('syncMyStatus');
+  });
+
+  it('(b) getMyStatus rejection → fetchFailed sentinel, not not_started', async () => {
+    const api: FakeApi = {
+      connect: {
+        syncMyStatus: vi.fn().mockResolvedValue(undefined),
+        getMyStatus: vi.fn().mockRejectedValue(new Error('Network error')),
+      },
+      subscription: {
+        getMyEarningsSummary: vi
+          .fn()
+          .mockResolvedValue({ earnedInPeriodCents: 0 }),
+        getMyPayouts: vi.fn().mockResolvedValue({
+          items: [],
+          pagination: { page: 1, totalPages: 1 },
+        }),
+      },
+    };
+
+    const result = await runLoadLogic(api, null);
+
+    // Must be the fetchFailed sentinel, NOT a null (which would silently show 'not_started')
+    expect(result.connectStatus).toEqual({ fetchFailed: true });
+    expect(deriveConnectState(result.connectStatus as ConnectStatusShape)).toBe(
+      'fetch_failed'
+    );
+    expect(result.loggerCalls.length).toBeGreaterThan(0);
+    expect(result.loggerCalls[0][0]).toContain('getMyStatus');
+  });
+
+  it('(c) earningsSummary rejection → null, load does not crash', async () => {
+    const api: FakeApi = {
+      connect: {
+        syncMyStatus: vi.fn().mockResolvedValue(undefined),
+        getMyStatus: vi.fn().mockResolvedValue({
+          isConnected: true,
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          status: 'active',
+        }),
+      },
+      subscription: {
+        getMyEarningsSummary: vi.fn().mockRejectedValue(new Error('Timeout')),
+        getMyPayouts: vi.fn().mockResolvedValue({
+          items: [],
+          pagination: { page: 1, totalPages: 1 },
+        }),
+      },
+    };
+
+    const result = await runLoadLogic(api, null);
+
+    expect(result.earningsSummary).toBeNull();
+    // load must still return data for the other fields
+    expect(result.connectStatus).toHaveProperty('isConnected', true);
+    expect(
+      result.loggerCalls.some((c) => c[0].includes('getMyEarningsSummary'))
+    ).toBe(true);
+  });
+
+  it('(c) payouts rejection → null, load does not crash', async () => {
+    const api: FakeApi = {
+      connect: {
+        syncMyStatus: vi.fn().mockResolvedValue(undefined),
+        getMyStatus: vi.fn().mockResolvedValue({
+          isConnected: true,
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          status: 'active',
+        }),
+      },
+      subscription: {
+        getMyEarningsSummary: vi
+          .fn()
+          .mockResolvedValue({ earnedInPeriodCents: 5000 }),
+        getMyPayouts: vi.fn().mockRejectedValue(new Error('Gateway timeout')),
+      },
+    };
+
+    const result = await runLoadLogic(api, null);
+
+    expect(result.payouts).toBeNull();
+    expect(result.earningsSummary).toEqual({ earnedInPeriodCents: 5000 });
+    expect(result.loggerCalls.some((c) => c[0].includes('getMyPayouts'))).toBe(
+      true
+    );
+  });
+
+  it('(c) both earningsSummary and payouts reject → both null, load does not crash', async () => {
+    const api: FakeApi = {
+      connect: {
+        syncMyStatus: vi.fn().mockResolvedValue(undefined),
+        getMyStatus: vi.fn().mockResolvedValue({
+          isConnected: false,
+          chargesEnabled: false,
+          payoutsEnabled: false,
+          status: null,
+        }),
+      },
+      subscription: {
+        getMyEarningsSummary: vi.fn().mockRejectedValue(new Error('error')),
+        getMyPayouts: vi.fn().mockRejectedValue(new Error('error')),
+      },
+    };
+
+    const result = await runLoadLogic(api, null);
+
+    expect(result.earningsSummary).toBeNull();
+    expect(result.payouts).toBeNull();
+    // Banner is null (no ?connect= param)
+    expect(result.connectReturnBanner).toBeNull();
   });
 });
