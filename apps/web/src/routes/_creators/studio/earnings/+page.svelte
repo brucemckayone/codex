@@ -4,15 +4,15 @@
   WP9 (Codex-69t7c.9) — Creator-scoped earnings & payouts surface.
 
   Sections:
-    1. Connect banner — not started / incomplete / pending / enabled
+    1. Connect banner — not started / incomplete / pending / enabled / fetch_failed
     2. Earnings KPI cards (streamed) — earnedInPeriodCents / totalEarnedCents /
        inTransitCents / needsAttentionCount
     3. Payouts ledger (streamed) — paginated table, status/source filter chips
 
   Connect-return handling:
-    ?connect=success  → +page.server.ts already called syncMyConnect; banner
-                        shows "connected — status refreshed"
-    ?connect=refresh  → onboarding abandoned; banner shows "resume" CTA
+    ?connect=success    → +page.server.ts called syncMyConnect; banner shows "connected"
+    ?connect=sync_failed → sync call failed; banner warns user to retry manually
+    ?connect=refresh    → onboarding abandoned; banner shows "resume" CTA
 
   Studio is `ssr = false` — all data is client-side via streamed promises that
   server loads resolve over SSR fetch (SvelteKit calls them via fetch on
@@ -37,11 +37,19 @@
   const { data }: { data: PageData } = $props();
 
   // ── Connect state ─────────────────────────────────────────────────────────
-  type ConnectStateStatus = 'not_started' | 'incomplete' | 'pending_verification' | 'enabled';
+  type ConnectStateStatus =
+    | 'not_started'
+    | 'incomplete'
+    | 'pending_verification'
+    | 'enabled'
+    | 'fetch_failed';
 
   const connectStateStatus = $derived.by<ConnectStateStatus>(() => {
     const s = data.connectStatus;
-    if (!s || !s.isConnected) return 'not_started';
+    if (!s) return 'not_started';
+    // Distinct sentinel returned by server on transient fetch error
+    if ('fetchFailed' in s && s.fetchFailed) return 'fetch_failed';
+    if (!s.isConnected) return 'not_started';
     if (s.chargesEnabled && s.payoutsEnabled) return 'enabled';
     if (s.status === 'restricted' || s.status === 'disabled') return 'pending_verification';
     // status === 'onboarding' or accountId exists but not fully enabled
@@ -51,7 +59,7 @@
   let isSyncing = $state(false);
   let isOnboarding = $state(false);
 
-  // ── Connect-return banner (from ?connect=success / ?connect=refresh) ──────
+  // ── Connect-return banner (from ?connect=success / ?connect=sync_failed / ?connect=refresh) ──
   const returnBanner = $derived(data.connectReturnBanner);
 
   // ── Filter state ──────────────────────────────────────────────────────────
@@ -122,14 +130,20 @@
     isOnboarding = true;
     try {
       const origin = browser ? window.location.origin : '';
-      const returnUrl = `${origin}/studio/earnings?connect=success`;
-      const refreshUrl = `${origin}/studio/earnings?connect=refresh`;
+      const currentPath = page.url.pathname;
+      const returnUrl = `${origin}${currentPath}?connect=success`;
+      const refreshUrl = `${origin}${currentPath}?connect=refresh`;
       const result = await connectMeOnboard({ returnUrl, refreshUrl });
       if (result?.onboardingUrl) {
         window.location.href = result.onboardingUrl;
+        // Don't reset isOnboarding — we're navigating away; keep button disabled
+        return;
+      } else {
+        toast.error(m.common_error(), 'No onboarding URL returned. Please try again.');
       }
     } catch (err) {
       toast.error('Could not start onboarding', err instanceof Error ? err.message : 'Unknown error');
+    } finally {
       isOnboarding = false;
     }
   }
@@ -141,7 +155,7 @@
       await syncMyConnect();
       toast.success('Status refreshed', 'Your Stripe account status has been updated.');
       // Remove the ?connect= param and invalidate so the server load re-runs
-      goto('/studio/earnings', { invalidateAll: true });
+      goto(page.url.pathname, { invalidateAll: true });
     } catch (err) {
       toast.error('Could not sync status', err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -198,6 +212,10 @@
     <div class="connect-banner connect-banner--success" role="status" aria-live="polite">
       <span class="connect-banner__message">{m.earnings_connect_return_success()}</span>
     </div>
+  {:else if returnBanner === 'sync_failed'}
+    <div class="connect-banner connect-banner--warning" role="alert" aria-live="assertive">
+      <span class="connect-banner__message">{m.earnings_connect_return_sync_failed()}</span>
+    </div>
   {:else if returnBanner === 'refresh'}
     <div class="connect-banner connect-banner--warning" role="status" aria-live="polite">
       <span class="connect-banner__message">{m.earnings_connect_return_refresh()}</span>
@@ -205,7 +223,21 @@
   {/if}
 
   <!-- ── Connect status banner ──────────────────────────────────────────────  -->
-  {#if connectStateStatus === 'not_started'}
+  {#if connectStateStatus === 'fetch_failed'}
+    <section class="connect-card connect-card--error" aria-label="Payout status unavailable">
+      <div class="connect-card__body">
+        <h2 class="connect-card__title">{m.earnings_connect_status_load_failed()}</h2>
+      </div>
+      <button
+        type="button"
+        class="btn btn--secondary btn--sm"
+        onclick={() => goto(page.url.pathname, { invalidateAll: true })}
+      >
+        {m.earnings_connect_status_load_failed_retry()}
+      </button>
+    </section>
+
+  {:else if connectStateStatus === 'not_started'}
     <section class="connect-card connect-card--cta" aria-label="Set up payouts">
       <div class="connect-card__body">
         <h2 class="connect-card__title">{m.earnings_connect_not_started_title()}</h2>
@@ -315,7 +347,16 @@
       </div>
     {/if}
   {:catch}
-    <!-- non-fatal — KPIs just won't show -->
+    <div class="stream-error" role="alert">
+      <span class="stream-error__message">{m.earnings_kpi_load_error()}</span>
+      <button
+        type="button"
+        class="btn btn--ghost btn--sm"
+        onclick={() => goto(page.url.pathname, { invalidateAll: true })}
+      >
+        {m.earnings_kpi_retry()}
+      </button>
+    </div>
   {/await}
 
   <!-- ── Payouts ledger (streamed) ──────────────────────────────────────────── -->
@@ -412,18 +453,30 @@
             </div>
           {/if}
         {:else}
+          <!-- Filters active but no results match — "no payouts yet" is wrong here -->
           <div class="payouts-empty">
             <p class="payouts-empty__title">{m.earnings_payouts_empty()}</p>
           </div>
         {/if}
       {:else}
+        <!-- payoutsResult is null (never fetched / no items) -->
         <div class="payouts-empty">
           <p class="payouts-empty__title">{m.earnings_payouts_empty()}</p>
           <p class="payouts-empty__description">{m.earnings_payouts_empty_description()}</p>
         </div>
       {/if}
     {:catch}
-      <!-- non-fatal — payouts table just won't show -->
+      <!-- Distinct from empty: the request failed -->
+      <div class="stream-error" role="alert">
+        <span class="stream-error__message">{m.earnings_payouts_load_error()}</span>
+        <button
+          type="button"
+          class="btn btn--ghost btn--sm"
+          onclick={() => goto(page.url.pathname, { invalidateAll: true })}
+        >
+          {m.earnings_payouts_retry()}
+        </button>
+      </div>
     {/await}
   </section>
 </div>
@@ -510,6 +563,11 @@
     border-color: var(--color-success-200);
   }
 
+  .connect-card--error {
+    background: var(--color-error-50);
+    border-color: var(--color-error-200);
+  }
+
   .connect-card__body {
     display: flex;
     flex-direction: column;
@@ -580,6 +638,23 @@
     font-weight: var(--font-semibold);
     color: var(--color-text);
     font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Stream error state ─────────────────────────────────────────────────── */
+  .stream-error {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border-radius: var(--radius-md);
+    background: var(--color-error-50);
+    border: var(--border-width) var(--border-style) var(--color-error-200);
+  }
+
+  .stream-error__message {
+    font-size: var(--text-sm);
+    color: var(--color-error-700);
+    flex: 1;
   }
 
   /* ── Payouts section ────────────────────────────────────────────────────── */

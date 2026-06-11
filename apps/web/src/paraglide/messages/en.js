@@ -9152,3 +9152,59 @@ export const earnings_status_in_transit = () => `In transit`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const earnings_status_cancelled = () => `Cancelled`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_return_sync_failed = () => `Could not refresh your Stripe status — please use the Refresh status button.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_status_load_failed = () => `Could not load your payout status. Please refresh the page.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_status_load_failed_retry = () => `Retry`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_kpi_load_error = () => `Could not load earnings data.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_kpi_retry = () => `Retry`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_load_error = () => `Could not load payout history.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_retry = () => `Retry`

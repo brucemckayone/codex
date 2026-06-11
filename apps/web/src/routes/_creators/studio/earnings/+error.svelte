@@ -1,15 +1,16 @@
 <!--
   @component CreatorEarningsError
   Fallback error page for the creator earnings hub.
+  NOTE: Never render page.error?.message — it can leak internal error details.
+  Show only the generic i18n description for user-facing display.
 -->
 <script lang="ts">
-  import { page } from '$app/state';
   import * as m from '$paraglide/messages';
 </script>
 
 <div class="error-state">
   <h1 class="error-state__title">{m.studio_error_title()}</h1>
-  <p class="error-state__description">{page.error?.message ?? m.studio_error_description()}</p>
+  <p class="error-state__description">{m.studio_error_description()}</p>
   <a href="/studio" class="error-state__link">{m.studio_error_back_to_org()}</a>
 </div>
 
