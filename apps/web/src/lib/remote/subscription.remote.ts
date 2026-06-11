@@ -573,3 +573,126 @@ export const syncConnectStatus = command(
     return api.connect.syncStatus(organizationId);
   }
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Creator-self-scoped /me remotes (Codex-69t7c.8 / WP8)
+//
+// These remotes target the /connect/me/* and /subscriptions/me/* routes from
+// WP3 + WP7. They are SELF-SCOPED to the session user — they MUST NOT accept
+// or forward an organizationId / userId parameter (IDOR prevention, epic D8).
+// The backend derives identity exclusively from the session cookie.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const connectMeOnboardCommandSchema = z.object({
+  returnUrl: z.string().url(),
+  refreshUrl: z.string().url(),
+});
+
+/**
+ * Create (or reuse) the current creator's Stripe Connect account and return
+ * the Stripe onboarding URL. Maps to POST /connect/me/onboard (201).
+ *
+ * Security invariant: NO organizationId — the backend creates the account
+ * against ctx.user.id only.
+ */
+export const connectMeOnboard = command(
+  connectMeOnboardCommandSchema,
+  async (input) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    return api.connect.onboardMe(input);
+  }
+);
+
+/**
+ * Get the current creator's Connect account status.
+ * Maps to GET /connect/me/status — no input, self-scoped.
+ */
+export const getMyConnectStatus = query(z.void(), async () => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.connect.getMyStatus();
+});
+
+/**
+ * Force a Stripe status sync for the current creator, then return the
+ * refreshed status payload. Maps to POST /connect/me/sync.
+ *
+ * Used on ?connect=success return from Stripe onboarding (webhook may not
+ * yet have landed). Returns the same shape as getMyConnectStatus.
+ */
+export const syncMyConnect = command(z.void(), async () => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.connect.syncMyStatus();
+});
+
+/**
+ * Get a Stripe Express dashboard login link for the current creator.
+ * Maps to POST /connect/me/dashboard — no input, self-scoped.
+ */
+export const getMyConnectDashboard = command(z.void(), async () => {
+  const { platform, cookies } = getRequestEvent();
+  const api = createServerApi(platform, cookies);
+  return api.connect.getMyDashboardLink();
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Creator-self-scoped payouts + earnings (Codex-69t7c.7 / WP7 → WP8 wiring)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const getMyPayoutsQueryArgsSchema = z.object({
+  status: payoutStatusFilterEnum.default('all'),
+  source: payoutSourceFilterEnum.default('all'),
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
+  page: z.number().int().positive().default(1),
+  limit: z.number().int().positive().max(100).default(20),
+});
+
+/**
+ * List the current creator's own payouts across ALL orgs that paid them
+ * (paginated). Maps to GET /subscriptions/me/payouts.
+ *
+ * Security invariant: NO organizationId / userId — the worker filters by
+ * ctx.user.id + personal payout types. Returns {items, pagination} envelope.
+ */
+export const getMyPayouts = query(
+  getMyPayoutsQueryArgsSchema,
+  async ({ status, source, fromDate, toDate, page, limit }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (source) params.set('source', source);
+    if (fromDate) params.set('fromDate', fromDate);
+    if (toDate) params.set('toDate', toDate);
+    params.set('page', String(page));
+    params.set('limit', String(limit));
+    return api.subscription.getMyPayouts(params);
+  }
+);
+
+const getMyEarningsSummaryQueryArgsSchema = z.object({
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
+});
+
+/**
+ * KPI numbers for the creator earnings hub (earned in period, total earned,
+ * in transit, needs-attention count). userId-scoped across all orgs.
+ * Maps to GET /subscriptions/me/earnings-summary — single {data} envelope.
+ *
+ * Security invariant: NO organizationId / userId — backend uses ctx.user.id.
+ */
+export const getMyEarningsSummary = query(
+  getMyEarningsSummaryQueryArgsSchema,
+  async ({ fromDate, toDate }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    const params = new URLSearchParams();
+    if (fromDate) params.set('fromDate', fromDate);
+    if (toDate) params.set('toDate', toDate);
+    return api.subscription.getMyEarningsSummary(params);
+  }
+);
