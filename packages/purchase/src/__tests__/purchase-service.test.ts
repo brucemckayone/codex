@@ -4680,6 +4680,136 @@ describe('PurchaseService Integration', () => {
       ).toBe(10000);
     });
 
+    // P1b (Codex-69t7c WP5 hardening b) — money-moved / ledger-silent guard:
+    // on the orgless path the creator transfer fires (REAL money moves to the
+    // Connect account) but the creator_payout ledger insert fails on a NON-
+    // unique DB error (e.g. a 23514 CHECK violation). That failure MUST be
+    // SURFACED via obs.error with a correlatable errorId — NOT swallowed — so
+    // the out-of-sync ledger is loud and reconcilable. (A 23505 dup is the
+    // only error that may be silently swallowed, since it means the row
+    // already exists.)
+    it('orgless path: transfer succeeds but ledger insert fails (non-unique) → error SURFACED with errorId, not swallowed', async () => {
+      const stubFeeConfig = {
+        getFeesPlatform: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 0,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+      const creatorTransferId = `tr_orgless_ledgerfail_${Date.now()}`;
+      const createTransfer = vi
+        .fn()
+        .mockResolvedValue({ id: creatorTransferId });
+      const stubStripe = {
+        ...mockStripe,
+        transfers: { create: createTransfer },
+        paymentIntents: { retrieve: vi.fn() },
+      } as unknown as Stripe;
+      const service = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      const { content, chargeId, paymentIntentId } =
+        await setupOrglessPaidContent({
+          title: 'Orgless Ledger Insert Fail',
+          priceCents: 10000,
+          creatorUserId: userId,
+        });
+
+      // Synthetic NON-unique Postgres error (23514 = check_violation). The
+      // hardening branch keys off `!isUniqueViolation(err)` (23505), so this
+      // exercises the surfaced-error path.
+      class FakeCheckViolation extends Error {
+        code = '23514';
+        constraint = 'check_payouts_paid_invariant';
+        constructor() {
+          super('simulated non-unique ledger insert failure');
+        }
+      }
+
+      // Intercept the service's DB so ONLY the creator_payout `paid` insert
+      // rejects. Every other insert (purchase, contentAccess, platform_fee,
+      // the pending fallbacks) delegates to the real builder unchanged.
+      // `db.insert` lives on the Drizzle client's prototype (not an own
+      // property), so vi.spyOn can't target it — wrap the whole client in a
+      // Proxy that intercepts `insert` and restores it after the test.
+      // biome-ignore lint/suspicious/noExplicitAny: test interception of Drizzle client
+      const serviceAny = service as any;
+      const realDb = serviceAny.db;
+      const dbProxy = new Proxy(realDb, {
+        get(target, prop, receiver) {
+          if (prop === 'insert') {
+            // biome-ignore lint/suspicious/noExplicitAny: Drizzle builder shape
+            return (table: any) => {
+              const builder = target.insert(table);
+              const realValues = builder.values.bind(builder);
+              // biome-ignore lint/suspicious/noExplicitAny: row payload
+              builder.values = (rows: any) => {
+                const row = Array.isArray(rows) ? rows[0] : rows;
+                if (
+                  row?.payoutType === 'creator_payout' &&
+                  row?.status === 'paid'
+                ) {
+                  return Promise.reject(new FakeCheckViolation());
+                }
+                return realValues(rows);
+              };
+              return builder;
+            };
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      serviceAny.db = dbProxy;
+
+      // biome-ignore lint/suspicious/noExplicitAny: spy protected obs.error
+      const errorSpy = vi.spyOn((service as any).obs, 'error');
+
+      // completePurchase MUST NOT throw — per-row isolation keeps the purchase
+      // itself successful; the ledger failure is logged, not propagated.
+      const purchase = await service.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId: null,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+      });
+      expect(purchase.organizationId).toBeNull();
+
+      // The Stripe transfer DID fire — real money moved.
+      expect(createTransfer).toHaveBeenCalledTimes(1);
+      expect(createTransfer).toHaveBeenCalledWith(
+        expect.objectContaining({ currency: 'gbp' }),
+        expect.objectContaining({ idempotencyKey: `${chargeId}_creator` })
+      );
+
+      // The failure was SURFACED via obs.error with the money-moved message
+      // AND a correlatable errorId + the Connect destination + idempotencyKey.
+      const surfaced = errorSpy.mock.calls.find(([msg]) =>
+        String(msg).includes(
+          'creator_payout transfer succeeded but payouts ledger insert failed'
+        )
+      );
+      expect(
+        surfaced,
+        'ledger-insert failure after a successful transfer must be logged at error level'
+      ).toBeDefined();
+      const surfacedMeta = surfaced![1] as Record<string, unknown>;
+      expect(typeof surfacedMeta.errorId).toBe('string');
+      expect((surfacedMeta.errorId as string).length).toBeGreaterThan(0);
+      expect(surfacedMeta.stripeTransferId).toBe(creatorTransferId);
+      expect(surfacedMeta.idempotencyKey).toBe(`${chargeId}_creator`);
+      expect(surfacedMeta.destination).toBeDefined();
+
+      serviceAny.db = realDb;
+      errorSpy.mockRestore();
+    });
+
     // P2 — orgless purchase BEFORE the creator finishes Connect onboarding:
     // creator_payout degrades to pending+connect_not_ready, platform_fee still
     // paid, NO transfer call. Mirrors the tri-party connect_not_ready path.
@@ -5049,13 +5179,11 @@ describe('PurchaseService Integration', () => {
           minTransferCents: 0,
         }),
       };
-      const createTransfer = vi
-        .fn()
-        .mockImplementation(() =>
-          Promise.resolve({
-            id: `tr_mixed_${Math.random().toString(36).slice(2, 10)}`,
-          })
-        );
+      const createTransfer = vi.fn().mockImplementation(() =>
+        Promise.resolve({
+          id: `tr_mixed_${Math.random().toString(36).slice(2, 10)}`,
+        })
+      );
       const stubStripe = {
         ...mockStripe,
         transfers: { create: createTransfer },

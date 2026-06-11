@@ -648,6 +648,22 @@ export class PurchaseService extends BaseService {
             ? 10_000 - agreementRow.sharePercent
             : fees.orgFeePercent;
 
+        // Codex-69t7c WP5 hardening (d): record the orgless org-fee-zero
+        // override decision explicitly. For a bi-party (orgless) purchase the
+        // org fee leg is forced to 0 regardless of the platform-fee config's
+        // default `orgFeePercent`; log that override so the decision is
+        // auditable rather than silently folded into the split below.
+        if (!organizationId) {
+          this.obs.info('orgless_org_fee_override', {
+            contentId: metadata.contentId,
+            creatorId: contentRecord.creatorId,
+            stripePaymentIntentId,
+            configOrgFeePercent: fees.orgFeePercent,
+            effectiveOrgFeePercent: 0,
+            reason: 'bi_party_no_org_recipient',
+          });
+        }
+
         // Step 4: Calculate revenue split, then apply min-platform-fee floor.
         // The floor is enforced in the caller (not in calculateRevenueSplit)
         // to keep the math pure. When (amount * pct / 10000) < minFee, we
@@ -769,10 +785,20 @@ export class PurchaseService extends BaseService {
           stripeChargeId: metadata.stripeChargeId,
         });
       } else if (txResult.isNew && !metadata.stripeChargeId) {
-        this.obs.warn(
-          'Purchase completed without stripeChargeId — payouts ledger entries skipped',
+        // Codex-69t7c WP5 hardening (a): a completed purchase with no
+        // stripeChargeId means writePurchasePayouts is skipped entirely, so
+        // NO creator_payout row is ever written — the creator (org-scoped OR
+        // orgless) is never paid for this sale. That is a money-loss event,
+        // not a recoverable warning: escalate to error with a correlatable
+        // errorId so it is loud in the log aggregator / Sentry-via-logs.
+        const errorId = crypto.randomUUID();
+        this.obs.error(
+          'Purchase completed without stripeChargeId — payouts ledger entries skipped; creator will NOT be paid',
           {
+            errorId,
             purchaseId: txResult.purchase.id,
+            creatorId: txResult.creatorId,
+            organizationId: txResult.organizationId,
             stripePaymentIntentId,
           }
         );
@@ -1100,13 +1126,23 @@ export class PurchaseService extends BaseService {
         });
       } catch (insertErr) {
         if (!isUniqueViolation(insertErr)) {
+          // Codex-69t7c WP5 hardening (b): the Stripe transfer ALREADY fired
+          // (real money moved to the Connect account) but the ledger row
+          // failed on a non-dup DB error — the ledger is now silently out of
+          // sync with Stripe. Emit a correlatable errorId so this money-moved
+          // / ledger-silent state is loud and reconcilable.
+          const errorId = crypto.randomUUID();
           this.obs.error(
             `${payoutType} transfer succeeded but payouts ledger insert failed`,
             {
+              errorId,
               purchaseId: purchase.id,
               organizationId,
               stripeTransferId: transfer.id,
+              destination: connect.stripeAccountId,
+              idempotencyKey,
               amountCents,
+              constraint: getConstraintName(insertErr),
               error:
                 insertErr instanceof Error
                   ? insertErr.message
@@ -1116,10 +1152,15 @@ export class PurchaseService extends BaseService {
         }
       }
     } catch (transferErr) {
+      // Codex-69t7c WP5 hardening (c): include idempotencyKey + destination
+      // (Connect account id) so a failed transfer can be traced to the exact
+      // Stripe idempotent request and recipient during reconciliation.
       this.obs.error(`${payoutType} transfer failed`, {
         purchaseId: purchase.id,
         organizationId,
         amountCents,
+        idempotencyKey,
+        destination: connect.stripeAccountId,
         error:
           transferErr instanceof Error
             ? transferErr.message

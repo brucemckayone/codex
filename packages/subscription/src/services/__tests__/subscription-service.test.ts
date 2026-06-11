@@ -8115,6 +8115,332 @@ describe('SubscriptionService', () => {
     });
   });
 
+  // ─── Orgless (bi-party) pending payout drain (Codex-69t7c WP5) ──────────────
+  //
+  // WP5 lets orgless (creator-direct) content be purchased. Those purchases
+  // write `creator_payout` rows with organizationId = NULL. The original drain
+  // filtered `eq(payouts.organizationId, orgId)` (resolvePendingPayouts) and
+  // skipped `!group.organizationId` groups (sweepUnresolvedPayouts) — SQL
+  // `col = value` never matches NULL, so orgless rows were INVISIBLE to BOTH
+  // drains and the creator's money was stranded forever. These tests prove the
+  // orgless leg is now drained by BOTH paths, and that the org-scoped
+  // (tri-party) drain is unaffected.
+  describe('orgless (bi-party) pending payout drain — Codex-69t7c WP5', () => {
+    /**
+     * Seed a creator's single Connect account (active) WITHOUT attaching the
+     * payout rows to any org. Returns the deterministic stripeAccountId so the
+     * lookup can be driven explicitly. We intentionally do NOT create an org
+     * for the payout rows — they carry organizationId = null.
+     */
+    async function seedOrglessConnect(slug: string, ownerUserId = creatorId) {
+      // createFullOrg gives the owner an active Connect account (one per user,
+      // Codex-69t7c) and an org we use only as the webhook's incidental orgId
+      // argument; the payout rows themselves stay orgless.
+      const { org } = await createFullOrg(slug, ownerUserId);
+      const stripeAccountId = `acct_wp5_${createUniqueSlug('a')}`;
+      await db
+        .update(stripeConnectAccounts)
+        .set({ stripeAccountId })
+        .where(eq(stripeConnectAccounts.userId, ownerUserId));
+      return { org, stripeAccountId };
+    }
+
+    function stubAccountsRetrieve(ready: boolean): ReturnType<typeof vi.fn> {
+      const fn = vi.fn().mockImplementation(async (accountId: string) => ({
+        id: accountId,
+        charges_enabled: ready,
+        payouts_enabled: ready,
+      }));
+      (stripe as unknown as { accounts: Record<string, unknown> }).accounts = {
+        ...((stripe as unknown as { accounts?: Record<string, unknown> })
+          .accounts ?? {}),
+        retrieve: fn,
+      };
+      return fn;
+    }
+
+    it('resolvePendingPayouts drains an orgless creator_payout row (organizationId = NULL)', async () => {
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM payouts`);
+
+      const { org, stripeAccountId } = await seedOrglessConnect('wp5-orgless');
+
+      // Orgless creator_payout: organizationId is NULL, userId is the creator,
+      // sourceType 'purchase' (orgless purchases are the WP5 source). No
+      // subscriptionId (purchase-sourced) — purchaseId/charge optional here.
+      const [orglessRow] = await db
+        .insert(payoutsTable)
+        .values({
+          userId: creatorId,
+          organizationId: null,
+          sourceType: 'purchase',
+          amountCents: 1500,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        })
+        .returning();
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      // The webhook caller passes the creator's incidental org id; the fix
+      // resolves BOTH org-scoped AND orgless rows for the account's userId.
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      expect(result).toEqual({ resolved: 1, failed: 0 });
+      expect(transferSpy).toHaveBeenCalledTimes(1);
+      expect(transferSpy.mock.calls[0]![0]).toMatchObject({
+        amount: 1500,
+        currency: 'gbp',
+        destination: stripeAccountId,
+      });
+
+      const [after] = await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.id, orglessRow.id));
+      expect(after.status).toBe('paid');
+      expect(after.resolvedAt).not.toBeNull();
+      expect(after.stripeTransferId).toMatch(/^tr_/);
+      expect(after.organizationId).toBeNull();
+    });
+
+    it('resolvePendingPayouts drains orgless AND org-scoped rows for the same creator in one pass', async () => {
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM payouts`);
+
+      const { org, tier1, stripeAccountId } =
+        await createFullOrgWithDeterministicAccount('wp5-mixed');
+
+      // Org-scoped (tri-party) subscription payout for the creator.
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+            stripeSubscriptionId: `sub_wp5_${createUniqueSlug('s')}`,
+          })
+        )
+        .returning();
+
+      const inserted = await db
+        .insert(payoutsTable)
+        .values([
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            sourceType: 'subscription',
+            amountCents: 800,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
+          },
+          {
+            userId: creatorId,
+            organizationId: null,
+            sourceType: 'purchase',
+            amountCents: 1200,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
+          },
+        ])
+        .returning();
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      // BOTH rows resolved: org-scoped + orgless.
+      expect(result).toEqual({ resolved: 2, failed: 0 });
+      expect(transferSpy).toHaveBeenCalledTimes(2);
+
+      const after = await db
+        .select()
+        .from(payoutsTable)
+        .where(
+          inArray(
+            payoutsTable.id,
+            inserted.map((r) => r.id)
+          )
+        );
+      expect(after).toHaveLength(2);
+      for (const row of after) {
+        expect(row.status).toBe('paid');
+        expect(row.resolvedAt).not.toBeNull();
+        expect(row.stripeTransferId).toMatch(/^tr_/);
+      }
+    });
+
+    it('sweepUnresolvedPayouts drains an orgless creator_payout group (organizationId = NULL, userId present)', async () => {
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM payouts`);
+
+      const { stripeAccountId } = await seedOrglessConnect('wp5-sweep-orgless');
+
+      const longAgo = new Date(Date.now() - 60 * 60 * 1000); // 1h ago
+      const [orglessRow] = await db
+        .insert(payoutsTable)
+        .values({
+          userId: creatorId,
+          organizationId: null,
+          sourceType: 'purchase',
+          amountCents: 900,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+          attemptedAt: longAgo,
+        })
+        .returning();
+
+      const retrieveSpy = stubAccountsRetrieve(true);
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.sweepUnresolvedPayouts(15);
+
+      // The orgless group is no longer skipped: it is scanned, the account is
+      // resolved by userId alone, and the row drains.
+      expect(result).toEqual({
+        groupsScanned: 1,
+        groupsResolved: 1,
+        groupsSkipped: 0,
+        errors: 0,
+      });
+      expect(retrieveSpy).toHaveBeenCalledTimes(1);
+      expect(retrieveSpy).toHaveBeenCalledWith(stripeAccountId);
+      expect(transferSpy).toHaveBeenCalledTimes(1);
+
+      const [after] = await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.id, orglessRow.id));
+      expect(after.status).toBe('paid');
+      expect(after.resolvedAt).not.toBeNull();
+      expect(after.stripeTransferId).toMatch(/^tr_/);
+      expect(after.organizationId).toBeNull();
+    });
+
+    it('sweepUnresolvedPayouts still skips genuinely unroutable rows (userId IS NULL)', async () => {
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM payouts`);
+
+      // A pending row with NO recipient userId is genuinely unroutable. (We
+      // use payoutType 'creator_payout_to_owner' only to satisfy the
+      // check_payouts_user_required carve-out is NOT hit — but that constraint
+      // forbids a null userId for non-platform_fee rows, so we model the
+      // unroutable case with a platform_fee row forced to pending instead,
+      // which is the real null-userId shape the guard defends against.)
+      const longAgo = new Date(Date.now() - 60 * 60 * 1000);
+      await db.insert(payoutsTable).values({
+        userId: null,
+        organizationId: null,
+        sourceType: 'purchase',
+        amountCents: 100,
+        currency: 'gbp',
+        status: 'pending',
+        payoutType: 'platform_fee',
+        attemptedAt: longAgo,
+      });
+
+      const retrieveSpy = stubAccountsRetrieve(true);
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.sweepUnresolvedPayouts(15);
+
+      expect(result).toEqual({
+        groupsScanned: 1,
+        groupsResolved: 0,
+        groupsSkipped: 1,
+        errors: 0,
+      });
+      // userId-null group is skipped BEFORE any Stripe call.
+      expect(retrieveSpy).not.toHaveBeenCalled();
+      expect(transferSpy).not.toHaveBeenCalled();
+    });
+
+    it('regression: org-scoped (tri-party) drain still resolves correctly', async () => {
+      const { sql: rawSql } = await import('drizzle-orm');
+      await db.execute(rawSql`DELETE FROM payouts`);
+
+      const { org, tier1, stripeAccountId } =
+        await createFullOrgWithDeterministicAccount('wp5-triparty');
+
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+            stripeSubscriptionId: `sub_wp5tri_${createUniqueSlug('s')}`,
+          })
+        )
+        .returning();
+
+      const [orgRow] = await db
+        .insert(payoutsTable)
+        .values({
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          sourceType: 'subscription',
+          amountCents: 650,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        })
+        .returning();
+
+      const transferSpy = vi.mocked(stripe.transfers.create);
+      transferSpy.mockClear();
+
+      const result = await service.resolvePendingPayouts(
+        org.id,
+        stripeAccountId
+      );
+
+      expect(result).toEqual({ resolved: 1, failed: 0 });
+      expect(transferSpy).toHaveBeenCalledTimes(1);
+
+      const [after] = await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.id, orgRow.id));
+      expect(after.status).toBe('paid');
+      expect(after.resolvedAt).not.toBeNull();
+      expect(after.stripeTransferId).toMatch(/^tr_/);
+      expect(after.organizationId).toBe(org.id);
+    });
+
+    /**
+     * createFullOrg with a deterministic stripeAccountId so the drain lookup
+     * (by userId → single account) can be asserted explicitly.
+     */
+    async function createFullOrgWithDeterministicAccount(slug: string) {
+      const { org, tier1 } = await createFullOrg(slug, creatorId);
+      const stripeAccountId = `acct_wp5_${createUniqueSlug('a')}`;
+      await db
+        .update(stripeConnectAccounts)
+        .set({ stripeAccountId })
+        .where(eq(stripeConnectAccounts.userId, creatorId));
+      return { org, tier1, stripeAccountId };
+    }
+  });
+
   // ─── sweepUnresolvedPayouts — hybrid event+sweep resolution (Codex-vv77x) ───
   //
   // Stripe docs (verified 2026-05-13) say account.updated webhooks retry for
