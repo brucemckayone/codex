@@ -4479,4 +4479,703 @@ describe('PurchaseService Integration', () => {
       expect(account).toBeUndefined();
     });
   });
+
+  // ─── Codex-69t7c WP5: orgless (bi-party) purchase pipeline ─────────────────
+  //
+  // The Phase-1 "content must belong to an organization" gate is removed.
+  // Orgless creator-direct content (content.organizationId IS NULL) is
+  // purchasable: the buyer pays the platform, the platform retains its fee
+  // (platform_fee row) and forwards the rest to the CREATOR's single Connect
+  // account (creator_payout row) via a secondary transfer keyed by userId.
+  // NO organization_fee row is written — there is no org to pay.
+  describe('completePurchase — bi-party orgless payouts (Codex-69t7c WP5)', () => {
+    /**
+     * Seed an orgless paid content item owned by `creatorUserId` (no
+     * organizationId) plus that creator's single Connect account (keyed by
+     * userId — Codex-69t7c one-account-per-user). Returns the ids the test
+     * feeds to completePurchase.
+     */
+    async function setupOrglessPaidContent(opts: {
+      title: string;
+      priceCents: number;
+      creatorUserId: string;
+      chargesEnabled?: boolean;
+      seedConnect?: boolean;
+    }) {
+      const {
+        title,
+        priceCents,
+        creatorUserId,
+        chargesEnabled = true,
+        seedConnect = true,
+      } = opts;
+      const media = await mediaService.create(
+        {
+          title,
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        creatorUserId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: `hls/${title}/master.m3u8`,
+          thumbnailKey: `thumbnails/${title}.jpg`,
+          durationSeconds: 60,
+        },
+        creatorUserId
+      );
+      // No organizationId → orgless (bi-party) personal content.
+      const content = await contentService.create(
+        {
+          title,
+          slug: createUniqueSlug(title.toLowerCase().replace(/\s+/g, '-')),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents,
+        },
+        creatorUserId
+      );
+      await contentService.publish(content.id, creatorUserId);
+
+      if (seedConnect) {
+        // The creator's SINGLE Connect account (keyed by userId). For orgless
+        // content there is no org pin — the creator slice resolves purely by
+        // `eq(stripeConnectAccounts.userId, creatorId)`. organizationId on the
+        // account row is left null (the account isn't org-scoped here).
+        await db
+          .insert(schema.stripeConnectAccounts)
+          .values({
+            userId: creatorUserId,
+            organizationId: null,
+            stripeAccountId: `acct_orgless_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            status: chargesEnabled ? 'active' : 'onboarding',
+            chargesEnabled,
+            payoutsEnabled: chargesEnabled,
+          })
+          .onConflictDoUpdate({
+            target: [schema.stripeConnectAccounts.userId],
+            set: {
+              organizationId: null,
+              chargesEnabled,
+              payoutsEnabled: chargesEnabled,
+              status: chargesEnabled ? 'active' : 'onboarding',
+            },
+          });
+      }
+
+      return {
+        content,
+        chargeId: `ch_orgless_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        paymentIntentId: `pi_orgless_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      };
+    }
+
+    // P1 — happy path: exactly TWO rows (platform_fee + creator_payout), no
+    // organization_fee; creator transfer fires once in GBP with the verbatim
+    // `${chargeId}_creator` idempotency key; the org component is zero.
+    it('writes exactly 2 bi-party rows (platform_fee + creator_payout) and fires the creator transfer — no org_fee row', async () => {
+      // The creator is `userId`; the buyer is `otherUserId`.
+      const stubFeeConfig = {
+        // getFeesPlatform is the resolver the orgless branch calls. Return a
+        // non-zero orgFeePercent to PROVE the orgless branch forces the org
+        // leg to zero regardless (RISK B in the plan).
+        getFeesPlatform: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000, // 10%
+          orgFeePercent: 1500, // 15% — MUST be ignored for orgless
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+        getFeesForCreator: vi.fn(), // must NOT be called for orgless
+      };
+      const creatorTransferId = `tr_orgless_creator_${Date.now()}`;
+      const createTransfer = vi
+        .fn()
+        .mockResolvedValue({ id: creatorTransferId });
+      const stubStripe = {
+        ...mockStripe,
+        transfers: { create: createTransfer },
+        paymentIntents: { retrieve: vi.fn() },
+      } as unknown as Stripe;
+      const service = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      const { content, chargeId, paymentIntentId } =
+        await setupOrglessPaidContent({
+          title: 'Orgless Bi-party Standard',
+          priceCents: 10000, // £100
+          creatorUserId: userId,
+        });
+
+      const purchase = await service.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId: null, // orgless
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+      });
+
+      // Orgless purchase row carries a null org.
+      expect(purchase.organizationId).toBeNull();
+
+      const rows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+
+      // EXACTLY 2 rows — platform_fee + creator_payout. NO organization_fee.
+      expect(rows).toHaveLength(2);
+      expect(
+        rows.find((r) => r.payoutType === 'organization_fee')
+      ).toBeUndefined();
+
+      // Orgless branch uses getFeesPlatform, NOT getFeesForCreator.
+      expect(stubFeeConfig.getFeesPlatform).toHaveBeenCalledTimes(1);
+      expect(stubFeeConfig.getFeesForCreator).not.toHaveBeenCalled();
+
+      // Exactly ONE secondary transfer (the creator slice), in GBP, with the
+      // verbatim idempotency key. Org slice forced to zero → no second call.
+      expect(createTransfer).toHaveBeenCalledTimes(1);
+      expect(createTransfer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          currency: 'gbp',
+          source_transaction: chargeId,
+        }),
+        expect.objectContaining({ idempotencyKey: `${chargeId}_creator` })
+      );
+
+      const platformRow = rows.find((r) => r.payoutType === 'platform_fee');
+      const creatorRow = rows.find((r) => r.payoutType === 'creator_payout');
+      expect(platformRow).toBeDefined();
+      expect(creatorRow).toBeDefined();
+
+      // Split for £100 @ platform 10%, org forced 0:
+      //   platform = ceil(10000 * 10%) = 1000
+      //   org      = 0
+      //   creator  = 10000 - 1000 - 0  = 9000
+      expect(platformRow?.amountCents).toBe(1000);
+      expect(platformRow?.status).toBe('paid');
+      expect(platformRow?.userId).toBeNull(); // platform isn't a user
+      expect(platformRow?.organizationId).toBeNull(); // orgless
+      expect(platformRow?.stripeTransferId).toBeNull();
+
+      expect(creatorRow?.amountCents).toBe(9000);
+      expect(creatorRow?.status).toBe('paid');
+      expect(creatorRow?.userId).toBe(userId); // routed to the creator
+      expect(creatorRow?.organizationId).toBeNull(); // orgless
+      expect(creatorRow?.stripeTransferId).toBe(creatorTransferId);
+      expect(creatorRow?.stripeChargeId).toBe(chargeId);
+
+      // Money conservation: platform + creator == amount (org leg is zero).
+      expect(
+        (platformRow?.amountCents ?? 0) + (creatorRow?.amountCents ?? 0)
+      ).toBe(10000);
+    });
+
+    // P2 — orgless purchase BEFORE the creator finishes Connect onboarding:
+    // creator_payout degrades to pending+connect_not_ready, platform_fee still
+    // paid, NO transfer call. Mirrors the tri-party connect_not_ready path.
+    it('degrades creator_payout to pending+connect_not_ready when the creator Connect is offline', async () => {
+      const stubFeeConfig = {
+        getFeesPlatform: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 0,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+      const createTransfer = vi.fn();
+      const stubStripe = {
+        ...mockStripe,
+        transfers: { create: createTransfer },
+        paymentIntents: { retrieve: vi.fn() },
+      } as unknown as Stripe;
+      const service = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      // Creator = otherUserId here so we don't collide with P1's userId account
+      // within the same test run; Connect seeded with chargesEnabled=false.
+      const { content, chargeId, paymentIntentId } =
+        await setupOrglessPaidContent({
+          title: 'Orgless Pre-Connect',
+          priceCents: 10000,
+          creatorUserId: otherUserId,
+          chargesEnabled: false,
+        });
+
+      const purchase = await service.completePurchase(paymentIntentId, {
+        customerId: userId,
+        contentId: content.id,
+        organizationId: null,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+      });
+
+      const rows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+
+      // 2 rows: platform_fee (paid) + creator_payout (pending). No org row.
+      expect(rows).toHaveLength(2);
+      expect(
+        rows.find((r) => r.payoutType === 'organization_fee')
+      ).toBeUndefined();
+
+      const creatorRow = rows.find((r) => r.payoutType === 'creator_payout');
+      expect(creatorRow?.status).toBe('pending');
+      expect(creatorRow?.reason).toBe('connect_not_ready');
+      expect(creatorRow?.organizationId).toBeNull();
+      expect(creatorRow?.userId).toBe(otherUserId);
+
+      const platformRow = rows.find((r) => r.payoutType === 'platform_fee');
+      expect(platformRow?.status).toBe('paid');
+
+      // No Stripe transfer call fired — Connect not ready.
+      expect(createTransfer).not.toHaveBeenCalled();
+    });
+
+    // P3 — createCheckoutSession succeeds on orgless paid+published content and
+    // OMITS organizationId from Stripe metadata (Stripe metadata values must be
+    // strings; the webhook schema re-derives null from the absent key).
+    it('createCheckoutSession succeeds for orgless content and omits organizationId from Stripe metadata', async () => {
+      const sessionsCreate = vi
+        .fn()
+        .mockResolvedValue(
+          createMockCheckoutSession('cs_orgless_1', 'pi_orgless_co_1')
+        );
+      const stubStripe = {
+        ...mockStripe,
+        checkout: { sessions: { create: sessionsCreate, retrieve: vi.fn() } },
+        customers: {
+          list: vi.fn().mockResolvedValue({ data: [], has_more: false }),
+          create: vi.fn().mockResolvedValue({
+            id: `cus_orgless_${Date.now()}`,
+            email: 'buyer@example.com',
+          }),
+        },
+      } as unknown as Stripe;
+      const service = new PurchaseService(
+        { db, environment: 'test' },
+        stubStripe
+      );
+
+      const { content } = await setupOrglessPaidContent({
+        title: 'Orgless Checkout',
+        priceCents: 4200,
+        creatorUserId: userId,
+        seedConnect: false, // checkout doesn't need the Connect account
+      });
+
+      const result = await service.createCheckoutSession(
+        {
+          contentId: content.id,
+          successUrl: 'http://localhost:3000/success',
+          cancelUrl: 'http://localhost:3000/cancel',
+        },
+        otherUserId
+      );
+
+      expect(result.sessionUrl).toBeTruthy();
+      expect(sessionsCreate).toHaveBeenCalledTimes(1);
+      const passedMetadata = sessionsCreate.mock.calls[0][0].metadata as Record<
+        string,
+        string
+      >;
+      // organizationId MUST be absent (not present, not the string "null").
+      expect(passedMetadata).not.toHaveProperty('organizationId');
+      expect(passedMetadata.contentId).toBe(content.id);
+      expect(passedMetadata.creatorId).toBe(userId);
+    });
+
+    // P4 — bi-party refund reverses the creator_payout + platform_fee rows.
+    // reversePayoutsForPurchase is data-driven (reads whatever rows exist), so
+    // with only 2 bi-party rows it reverses exactly those and never expects an
+    // org row.
+    it('refund reverses both bi-party rows (creator_payout transfer + platform_fee)', async () => {
+      const creatorTransferId = `tr_orgless_refund_${Date.now()}`;
+      const reversed: string[] = [];
+      const stubFeeConfig = {
+        getFeesPlatform: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 0,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+      const stubStripe = {
+        ...mockStripe,
+        transfers: {
+          create: vi.fn().mockResolvedValue({ id: creatorTransferId }),
+          createReversal: vi.fn().mockImplementation((id: string) => {
+            reversed.push(id);
+            return Promise.resolve({ id: `trr_${id}` });
+          }),
+        },
+        refunds: { create: vi.fn() },
+      } as unknown as Stripe;
+      const service = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      const { content, chargeId, paymentIntentId } =
+        await setupOrglessPaidContent({
+          title: 'Orgless Refund',
+          priceCents: 10000,
+          creatorUserId: userId,
+        });
+
+      const purchase = await service.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId: null,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+      });
+
+      const before = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+      expect(before).toHaveLength(2);
+
+      await service.processRefund(paymentIntentId, {
+        stripeRefundId: 're_orgless_001',
+        refundAmountCents: 10000,
+        refundReason: 'requested_by_customer',
+      });
+
+      // Only the creator_payout had a Stripe transfer → exactly one reversal.
+      // platform_fee is marked reversed without a Stripe call.
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      const reversal = (stubStripe as any).transfers.createReversal;
+      expect(reversal).toHaveBeenCalledTimes(1);
+      expect(reversed).toContain(creatorTransferId);
+
+      const after = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+      expect(after).toHaveLength(2);
+      expect(after.every((r) => r.status === 'reversed')).toBe(true);
+    });
+
+    // N1 — gate ORDER preserved: orgless but UNPUBLISHED still throws.
+    it('createCheckoutSession still throws ContentNotPurchasableError for orgless UNPUBLISHED content', async () => {
+      const media = await mediaService.create(
+        {
+          title: 'Orgless Draft',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/orgless-draft/master.m3u8',
+          thumbnailKey: 'thumbnails/orgless-draft.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+      // Orgless + paid + priced but NOT published.
+      const content = await contentService.create(
+        {
+          title: 'Orgless Draft',
+          slug: createUniqueSlug('orgless-draft'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 2999,
+        },
+        userId
+      );
+      // intentionally NOT published
+
+      await expect(
+        purchaseService.createCheckoutSession(
+          {
+            contentId: content.id,
+            successUrl: 'http://localhost:3000/success',
+            cancelUrl: 'http://localhost:3000/cancel',
+          },
+          otherUserId
+        )
+      ).rejects.toThrow(ContentNotPurchasableError);
+    });
+
+    // N2 — orgless but FREE (priceCents null) still throws.
+    it('createCheckoutSession still throws ContentNotPurchasableError for orgless FREE content', async () => {
+      const media = await mediaService.create(
+        {
+          title: 'Orgless Free',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/orgless-free/master.m3u8',
+          thumbnailKey: 'thumbnails/orgless-free.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+      const content = await contentService.create(
+        {
+          title: 'Orgless Free',
+          slug: createUniqueSlug('orgless-free'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'public',
+          accessType: 'free',
+        },
+        userId
+      );
+      await contentService.publish(content.id, userId);
+
+      await expect(
+        purchaseService.createCheckoutSession(
+          {
+            contentId: content.id,
+            successUrl: 'http://localhost:3000/success',
+            cancelUrl: 'http://localhost:3000/cancel',
+          },
+          otherUserId
+        )
+      ).rejects.toThrow(ContentNotPurchasableError);
+    });
+
+    // N3 — even with a feeConfig that returns a non-zero orgFeePercent, the
+    // orgless branch MUST force the org leg to zero (no org_fee row, no second
+    // transfer). Guards against an org slice being stranded with no recipient.
+    it('forces the org leg to zero for orgless even when fee config returns a non-zero orgFeePercent', async () => {
+      const stubFeeConfig = {
+        getFeesPlatform: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 3000, // 30% — must be ignored
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+      const createTransfer = vi
+        .fn()
+        .mockResolvedValue({ id: `tr_orgless_n3_${Date.now()}` });
+      const stubStripe = {
+        ...mockStripe,
+        transfers: { create: createTransfer },
+        paymentIntents: { retrieve: vi.fn() },
+      } as unknown as Stripe;
+      const service = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      const { content, chargeId, paymentIntentId } =
+        await setupOrglessPaidContent({
+          title: 'Orgless Zero Org Leg',
+          priceCents: 10000,
+          creatorUserId: userId,
+        });
+
+      const purchase = await service.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId: null,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+      });
+
+      // Snapshot on the purchase row: org fee component is zero, creator gets
+      // the full post-platform remainder.
+      expect(purchase.organizationFeeCents).toBe(0);
+      expect(purchase.platformFeeCents).toBe(1000);
+      expect(purchase.creatorPayoutCents).toBe(9000);
+
+      const rows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+      expect(rows).toHaveLength(2);
+      expect(
+        rows.find((r) => r.payoutType === 'organization_fee')
+      ).toBeUndefined();
+      // Only the creator transfer fired (no org transfer).
+      expect(createTransfer).toHaveBeenCalledTimes(1);
+    });
+
+    // C1 / R2 — a creator who publishes BOTH orgless and org-scoped content:
+    // the orgless purchase writes 2 rows, the org-scoped purchase writes 3,
+    // and the two flows are independent within the same run. Doubles as the
+    // org-routed regression assertion (R1 already covered by the existing
+    // tri-party suite).
+    it('keeps orgless (2 rows) and org-scoped (3 rows) flows independent for the same creator', async () => {
+      const stubFeeConfig = {
+        // org-scoped path uses getFeesForCreator (org fee > 0);
+        // orgless path uses getFeesPlatform (org leg forced to 0).
+        getFeesForCreator: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 1000, // 10% org slice for the org-scoped purchase
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+        getFeesPlatform: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 0,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+      const createTransfer = vi
+        .fn()
+        .mockImplementation(() =>
+          Promise.resolve({
+            id: `tr_mixed_${Math.random().toString(36).slice(2, 10)}`,
+          })
+        );
+      const stubStripe = {
+        ...mockStripe,
+        transfers: { create: createTransfer },
+        paymentIntents: { retrieve: vi.fn() },
+      } as unknown as Stripe;
+      const service = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      // Creator = userId. Seed an org owned by userId + the creator's single
+      // Connect (one account, used for BOTH the orgless creator slice AND, via
+      // the org pin, the org slice).
+      const [mixedOrg] = await db
+        .insert(organizations)
+        .values({
+          name: 'Mixed Flow Org',
+          slug: createUniqueSlug('mixed-flow'),
+          ownerId: userId,
+          primaryConnectAccountUserId: userId,
+        })
+        .returning();
+      await db
+        .insert(schema.stripeConnectAccounts)
+        .values({
+          userId,
+          organizationId: mixedOrg.id,
+          stripeAccountId: `acct_mixed_${Date.now()}`,
+          status: 'active',
+          chargesEnabled: true,
+          payoutsEnabled: true,
+        })
+        .onConflictDoUpdate({
+          target: [schema.stripeConnectAccounts.userId],
+          set: { chargesEnabled: true, payoutsEnabled: true, status: 'active' },
+        });
+
+      // ── Orgless purchase → 2 rows ──
+      const { content: orglessContent } = await setupOrglessPaidContent({
+        title: 'Mixed Orgless Leg',
+        priceCents: 10000,
+        creatorUserId: userId,
+        seedConnect: false, // account already seeded above
+      });
+      const orglessPi = `pi_mixed_orgless_${Date.now()}`;
+      const orglessPurchase = await service.completePurchase(orglessPi, {
+        customerId: otherUserId,
+        contentId: orglessContent.id,
+        organizationId: null,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: `ch_mixed_orgless_${Date.now()}`,
+      });
+      const orglessRows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, orglessPurchase.id));
+      expect(orglessRows).toHaveLength(2);
+      expect(orglessPurchase.organizationId).toBeNull();
+      expect(
+        orglessRows.find((r) => r.payoutType === 'organization_fee')
+      ).toBeUndefined();
+
+      // ── Org-scoped purchase by the SAME creator → 3 rows (regression) ──
+      const orgMedia = await mediaService.create(
+        {
+          title: 'Mixed Org Leg',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        orgMedia.id,
+        {
+          hlsMasterPlaylistKey: 'hls/mixed-org/master.m3u8',
+          thumbnailKey: 'thumbnails/mixed-org.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+      const orgContent = await contentService.create(
+        {
+          organizationId: mixedOrg.id,
+          title: 'Mixed Org Leg',
+          slug: createUniqueSlug('mixed-org-leg'),
+          contentType: 'video',
+          mediaItemId: orgMedia.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 10000,
+        },
+        userId
+      );
+      await contentService.publish(orgContent.id, userId);
+
+      const orgPi = `pi_mixed_org_${Date.now()}`;
+      const orgPurchase = await service.completePurchase(orgPi, {
+        customerId: otherUserId,
+        contentId: orgContent.id,
+        organizationId: mixedOrg.id,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: `ch_mixed_org_${Date.now()}`,
+      });
+      const orgRows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, orgPurchase.id));
+      // 3 rows: platform_fee + organization_fee + creator_payout.
+      expect(orgRows).toHaveLength(3);
+      expect(orgPurchase.organizationId).toBe(mixedOrg.id);
+      const orgFeeRow = orgRows.find(
+        (r) => r.payoutType === 'organization_fee'
+      );
+      expect(orgFeeRow).toBeDefined();
+      expect(orgFeeRow?.amountCents).toBe(900); // 10% of post-platform 9000
+      expect(orgFeeRow?.organizationId).toBe(mixedOrg.id);
+    });
+  });
 });

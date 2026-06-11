@@ -1,0 +1,1 @@
+ALTER TABLE "content_access" ALTER COLUMN "organization_id" DROP NOT NULL;

@@ -31,9 +31,14 @@ export const contentAccess = pgTable(
     contentId: uuid('content_id')
       .notNull()
       .references(() => content.id, { onDelete: 'cascade' }),
-    organizationId: uuid('organization_id')
-      .notNull()
-      .references(() => organizations.id, { onDelete: 'cascade' }),
+    // Nullable (Codex-69t7c WP5): orgless creator-direct (bi-party) purchases
+    // grant access to content with no organization. Mirrors the WP1 change to
+    // `purchases.organization_id`. Org-scoped grants still populate it. Access
+    // verification for paid content reads `purchases` (verifyPurchase), not
+    // this column, so a null org here does not weaken any access check.
+    organizationId: uuid('organization_id').references(() => organizations.id, {
+      onDelete: 'cascade',
+    }),
 
     // Access type with CHECK constraint enforcement
     accessType: varchar('access_type', { length: 50 }).notNull(),
