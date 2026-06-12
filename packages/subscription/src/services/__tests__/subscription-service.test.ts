@@ -8259,6 +8259,97 @@ describe('SubscriptionService', () => {
 
         expect(result.resolved).toBe(1);
       });
+
+      it('fires with creator_payout amount ONLY when org_fee rows also exist (FIX 1 regression guard)', async () => {
+        // Regression guard for PR #281 FIX 1: the pre-fix code used
+        // `unresolvedPayouts.filter(userId).reduce(amountCents)` which
+        // included organization_fee rows, inflating the email amount.
+        // This test seeds both types and asserts the email shows ONLY
+        // the creator_payout sum.
+        const { org, sub, stripeAccountId } = await seedConnectAndSubscription(
+          'wp10-notif-org-fee-mix'
+        );
+
+        await db.insert(payoutsTable).values([
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 1200,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
+          },
+          {
+            // organization_fee row attributed to the same userId (org owner).
+            // Must NOT be included in the notification amount.
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 500,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'organization_fee',
+          },
+        ]);
+
+        const transferSpy = vi.mocked(stripe.transfers.create);
+        transferSpy.mockClear();
+
+        const { serviceWithMailer, payoutMailer } =
+          buildServiceWithPayoutMailer();
+
+        const result = await serviceWithMailer.resolvePendingPayouts(
+          org.id,
+          stripeAccountId
+        );
+
+        // Both rows resolve (resolved includes all types).
+        expect(result.resolved).toBe(2);
+        // Notification fires once.
+        expect(payoutMailer).toHaveBeenCalledOnce();
+        const [params] = payoutMailer.mock.calls[0];
+        expect(params.templateName).toBe('payout-released');
+        // Amount = creator_payout ONLY (1200 pence = £12.00), NOT 1700 (1200+500).
+        expect(params.data.amountFormatted).toBe('£12.00');
+        expect(params.data.payoutCount).toBe(1); // 1 creator_payout row only
+      });
+
+      it('does NOT fire when ONLY organization_fee rows resolve (no creator_payout)', async () => {
+        // If a Connect-account activation drains only org_fee rows (no
+        // creator_payout rows), the creator notification must NOT fire.
+        const { org, sub, stripeAccountId } = await seedConnectAndSubscription(
+          'wp10-notif-org-fee-only'
+        );
+
+        await db.insert(payoutsTable).values({
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 750,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'organization_fee',
+        });
+
+        const transferSpy = vi.mocked(stripe.transfers.create);
+        transferSpy.mockClear();
+
+        const { serviceWithMailer, payoutMailer } =
+          buildServiceWithPayoutMailer();
+
+        const result = await serviceWithMailer.resolvePendingPayouts(
+          org.id,
+          stripeAccountId
+        );
+
+        expect(result.resolved).toBe(1);
+        // No creator_payout rows — notification must NOT fire.
+        expect(payoutMailer).not.toHaveBeenCalled();
+      });
     });
     // ─── end WP-10 payout-released notification ───────────────────────────────
   });

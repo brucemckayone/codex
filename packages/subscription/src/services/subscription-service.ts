@@ -3639,11 +3639,29 @@ export class SubscriptionService extends BaseService {
     });
 
     // WP-10 (Codex-69t7c.10): fire payout-released notification when at least
-    // one payout transitioned pending→paid. Fires ONCE per
+    // one creator_payout transitioned pending→paid. Fires ONCE per
     // resolvePendingPayouts invocation (one notification per activation event,
     // not per-row). Fire-and-forget post-loop — notification failure MUST NOT
     // roll back or block the already-committed transfers.
-    if (resolved > 0 && this.payoutMailer) {
+    //
+    // Gate on creator_payout rows ONLY — organization_fee rows are the org
+    // admin's slice, not the creator's personal earnings. The `resolved`
+    // counter above covers all payout types; we accumulate a separate creator-
+    // only counter from the pre-loop snapshot so the email amount matches what
+    // was actually transferred to the creator.
+    const resolvedCreatorPayoutCents = unresolvedPayouts
+      .filter(
+        (p) =>
+          p.userId === connectAccount.userId &&
+          p.payoutType === 'creator_payout'
+      )
+      .reduce((sum, p) => sum + p.amountCents, 0);
+    const resolvedCreatorPayouts = unresolvedPayouts.filter(
+      (p) =>
+        p.userId === connectAccount.userId && p.payoutType === 'creator_payout'
+    ).length;
+
+    if (resolvedCreatorPayouts > 0 && this.payoutMailer) {
       try {
         const [creatorRow] = await this.db
           .select({ email: users.email })
@@ -3652,15 +3670,12 @@ export class SubscriptionService extends BaseService {
           .limit(1);
 
         if (creatorRow?.email) {
-          const totalResolved = unresolvedPayouts
-            .filter((p) => p.userId === connectAccount.userId)
-            .reduce((sum, p) => sum + p.amountCents, 0);
-          const amountFormatted = `£${(totalResolved / 100).toFixed(2)}`;
+          const amountFormatted = `£${(resolvedCreatorPayoutCents / 100).toFixed(2)}`;
           const dashboardUrl = this.webAppUrl
             ? `${this.webAppUrl}/studio/earnings`
             : '/studio/earnings';
 
-          this.payoutMailer({
+          void this.payoutMailer({
             to: creatorRow.email,
             templateName: 'payout-released',
             category: 'transactional',
@@ -3669,7 +3684,7 @@ export class SubscriptionService extends BaseService {
             data: {
               creatorName: creatorRow.email, // fallback; template can resolve display name
               amountFormatted,
-              payoutCount: resolved,
+              payoutCount: resolvedCreatorPayouts,
               dashboardUrl,
             },
           });
@@ -3679,7 +3694,7 @@ export class SubscriptionService extends BaseService {
         this.obs.warn('payout-released notification dispatch failed', {
           organizationId: orgId,
           stripeAccountId,
-          resolved,
+          resolvedCreatorPayouts,
           error: err instanceof Error ? err.message : String(err),
         });
       }

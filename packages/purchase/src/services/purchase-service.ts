@@ -1137,7 +1137,10 @@ export class PurchaseService extends BaseService {
             }
           );
         }
-        // isUniqueViolation = idempotent replay — row already exists, skip notification.
+        // freshInsert stays false for two distinct cases:
+        // 1. isUniqueViolation: idempotent replay — row already exists (skip notification).
+        // 2. Other insert error: insert failed for a non-dup reason (also skip notification).
+        // Both leave freshInsert=false and correctly suppress the mailer.
       }
 
       // WP-10 (Codex-69t7c.10): fire creator-connect-needed notification
@@ -1157,7 +1160,7 @@ export class PurchaseService extends BaseService {
           const dashboardUrl = this.webAppUrl
             ? `${this.webAppUrl}/studio/earnings`
             : '/studio/earnings';
-          this.mailer({
+          void this.mailer({
             to: creatorEmail,
             templateName: 'creator-connect-needed',
             category: 'transactional',
