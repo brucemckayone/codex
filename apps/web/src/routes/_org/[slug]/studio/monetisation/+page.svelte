@@ -372,7 +372,11 @@
         {#if dataLoading}
           <Skeleton width="80px" height="var(--space-6)" class="skeleton-circle" />
         {:else}
-          <Badge variant={connectStatusVariant(connectStatus.status)}>
+          <Badge
+            variant={connectStatusVariant(connectStatus.status)}
+            data-testid="connect-status-badge"
+            data-connect-status={connectStatus.status ?? 'not_connected'}
+          >
             {connectStatusLabel(connectStatus.status)}
           </Badge>
         {/if}
@@ -444,7 +448,7 @@
 
         <div class="connect-actions">
           {#if !connectStatus.isConnected}
-            <Button onclick={handleConnectOnboard} loading={connectLoading}>
+            <Button onclick={handleConnectOnboard} loading={connectLoading} data-testid="connect-stripe-btn">
               {m.monetisation_connect_start()}
             </Button>
           {:else if connectStatus.chargesEnabled && connectStatus.payoutsEnabled}
