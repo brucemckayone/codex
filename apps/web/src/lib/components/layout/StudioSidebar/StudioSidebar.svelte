@@ -69,6 +69,7 @@
     payouts: BanknoteIcon,
     billing: CreditCardIcon,
     agreements: FileTextIcon,
+    earnings: CoinsIcon,
   };
 
   interface StudioUser {
