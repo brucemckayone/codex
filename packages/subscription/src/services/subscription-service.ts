@@ -621,20 +621,32 @@ export class SubscriptionService extends BaseService {
    *   min-transfer floor.
    */
   private async resolvePayoutFees(
-    orgId: string,
+    orgId: string | null,
     ctx: FeeContext,
     creatorId?: string
   ): Promise<FeeConfig> {
     if (!this.feeConfig) {
       return {
         platformFeePercent: FEES.PLATFORM_PERCENT,
+        // Codex-69t7c WP5: orgless (bi-party) payouts carry NO org fee leg —
+        // the creator keeps 100% of post-platform. Mirror that in the
+        // no-FeeConfigService fallback so unit tests on the orgless drain
+        // path see a zero org fee, not the org/subscription default.
         orgFeePercent:
-          ctx === 'subscription'
-            ? FEES.SUBSCRIPTION_ORG_PERCENT
-            : FEES.ORG_PERCENT,
+          orgId === null
+            ? 0
+            : ctx === 'subscription'
+              ? FEES.SUBSCRIPTION_ORG_PERCENT
+              : FEES.ORG_PERCENT,
         minPlatformFeeCents: 0,
         minTransferCents: 0,
       };
+    }
+    // Codex-69t7c WP5: orgless rows have no org to resolve per-creator or
+    // per-org overrides against — use the platform-level fee policy, which
+    // owns the same `minTransferCents` floor the org/creator configs carry.
+    if (orgId === null) {
+      return this.feeConfig.getFeesPlatform(ctx);
     }
     return creatorId
       ? this.feeConfig.getFeesForCreator(orgId, creatorId, ctx)
@@ -3472,10 +3484,17 @@ export class SubscriptionService extends BaseService {
    *   - On success: sets resolvedAt and stripeTransferId
    *   - On failure: logs and continues to the next payout (batch is best-effort)
    *
+   * Codex-69t7c WP5: `orgId` is `string | null`. Regardless of which value the
+   * caller passes, the recipient is identified by the Connect account's
+   * userId, and BOTH that user's org-scoped (organizationId = orgId) AND
+   * orgless (organizationId IS NULL) pending rows are drained in one pass —
+   * SQL `col = value` never matches NULL, so the orgless leg would otherwise
+   * be stranded. A `null` orgId resolves ONLY the orgless leg.
+   *
    * Returns the count of successfully resolved payouts.
    */
   async resolvePendingPayouts(
-    orgId: string,
+    orgId: string | null,
     stripeAccountId: string
   ): Promise<{ resolved: number; failed: number }> {
     let resolved = 0;
@@ -3499,14 +3518,31 @@ export class SubscriptionService extends BaseService {
       return { resolved: 0, failed: 0 };
     }
 
+    // Codex-69t7c WP5: a single Connect account belongs to ONE creator
+    // (routed by userId), but that creator can accrue BOTH org-scoped
+    // (tri-party) pending rows (organizationId = orgId) AND orgless
+    // (bi-party) pending rows (organizationId IS NULL). SQL `col = value`
+    // never matches NULL, so the original `eq(payouts.organizationId, orgId)`
+    // filter rendered every orgless `creator_payout` row invisible to this
+    // primary webhook drain — stranding the creator's money indefinitely.
+    // Match BOTH shapes for this user so both legs resolve in one pass.
     const unresolvedPayouts = await this.db
       .select()
       .from(payouts)
       .where(
         and(
           eq(payouts.userId, connectAccount.userId),
-          eq(payouts.organizationId, orgId),
-          eq(payouts.status, 'pending')
+          eq(payouts.status, 'pending'),
+          // A non-null orgId resolves BOTH that org's rows AND the creator's
+          // orgless rows in one pass; a null orgId (orgless-only caller, e.g.
+          // the sweep's orgless group) resolves ONLY the orgless rows. `eq`
+          // cannot take a null comparand, so branch on it.
+          orgId === null
+            ? isNull(payouts.organizationId)
+            : or(
+                eq(payouts.organizationId, orgId),
+                isNull(payouts.organizationId)
+              )
         )
       );
 
@@ -3521,30 +3557,46 @@ export class SubscriptionService extends BaseService {
       count: unresolvedPayouts.length,
     });
 
-    // Codex-iivne: group pending rows by sourceType so a creator with
-    // many sub-threshold pending rows (multi-creator split scenarios)
-    // gets resolved when the SUM clears the min-transfer floor —
-    // rather than every row failing the per-row floor check and piling
-    // up indefinitely. Fee policy depends on sourceType, so the group
-    // key reflects it. Two possible groups: 'purchase' + 'subscription'.
-    const groups: Record<
-      'purchase' | 'subscription',
-      typeof unresolvedPayouts
-    > = { purchase: [], subscription: [] };
+    // Codex-iivne + Codex-69t7c WP5: group pending rows by (orgScope,
+    // sourceType) so a creator with many sub-threshold pending rows
+    // (multi-creator split scenarios) gets resolved when the SUM clears the
+    // min-transfer floor — rather than every row failing the per-row floor
+    // check and piling up indefinitely. Fee policy depends on BOTH the
+    // org-scope (orgless → platform-only fees; org-scoped → per-creator
+    // fees) AND the sourceType, so the group key reflects both. The org
+    // attached to each group drives fee resolution in transferPendingGroup:
+    // orgless rows carry `null` and resolve fees via getFeesPlatform().
+    type PendingGroupKey =
+      `${'org' | 'orgless'}:${'purchase' | 'subscription'}`;
+    const groups = new Map<
+      PendingGroupKey,
+      { orgId: string | null; rows: typeof unresolvedPayouts }
+    >();
     for (const payout of unresolvedPayouts) {
-      const key =
+      const orgScope = payout.organizationId === null ? 'orgless' : 'org';
+      const source =
         payout.sourceType === 'purchase' ? 'purchase' : 'subscription';
-      groups[key].push(payout);
+      const key: PendingGroupKey = `${orgScope}:${source}`;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.rows.push(payout);
+      } else {
+        groups.set(key, {
+          orgId: payout.organizationId,
+          rows: [payout],
+        });
+      }
     }
 
-    for (const [sourceType, group] of Object.entries(groups) as Array<
-      ['purchase' | 'subscription', typeof unresolvedPayouts]
-    >) {
-      if (group.length === 0) continue;
+    for (const [key, { orgId: groupOrgId, rows }] of groups) {
+      if (rows.length === 0) continue;
+      const sourceType: 'purchase' | 'subscription' = key.endsWith('purchase')
+        ? 'purchase'
+        : 'subscription';
       const groupResult = await this.transferPendingGroup(
-        group,
+        rows,
         sourceType,
-        orgId,
+        groupOrgId,
         stripeAccountId,
         connectAccount.userId
       );
@@ -3564,11 +3616,18 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
-   * Codex-iivne: resolve one (userId, sourceType) group of pending
+   * Codex-iivne: resolve one (userId, orgScope, sourceType) group of pending
    * payouts. Caller has already filtered by Connect account userId, so
    * every row in `group` shares one recipient. Fee policy is looked up
    * once per call (was: per-row); floor evaluates against the SUM
    * (was: each row individually).
+   *
+   * Codex-69t7c WP5: `orgId` is `string | null`. A null org marks an orgless
+   * (bi-party) group — fee/floor resolution routes through the platform-level
+   * policy (getFeesPlatform) rather than per-org/per-creator config. The
+   * transfer itself is identical: per-row GBP-guarded `stripe.transfers.create`
+   * to the userId→single Connect account, verbatim `payout_${id}` idempotency
+   * key, per-row error isolation.
    *
    * The schema invariant `uq_payouts_stripe_transfer_id` forbids
    * shared stripeTransferId across rows, so per-row transfers fire
@@ -3577,7 +3636,7 @@ export class SubscriptionService extends BaseService {
   private async transferPendingGroup(
     group: (typeof payouts.$inferSelect)[],
     sourceType: 'purchase' | 'subscription',
-    orgId: string,
+    orgId: string | null,
     stripeAccountId: string,
     userId: string
   ): Promise<{ resolved: number; failed: number }> {
@@ -4919,20 +4978,26 @@ export class SubscriptionService extends BaseService {
     }
 
     for (const group of groups) {
-      // Codex-h69cg: payouts.userId and .organizationId are nullable to admit
-      // platform_fee rows. Those are always status='paid' so they would never
-      // appear in this sweep, but defence-in-depth: skip any group missing
-      // either field — it can't be routed to a Connect account anyway.
-      if (!group.organizationId || !group.userId) {
+      // Codex-h69cg + Codex-69t7c WP5: payouts.userId and .organizationId are
+      // both nullable. A null `userId` is the genuinely UNROUTABLE case —
+      // platform_fee rows (always status='paid', so they shouldn't surface
+      // here) or any row with no recipient — skip those. A null
+      // `organizationId` is NOT unroutable: orgless (bi-party) creator_payout
+      // rows carry organizationId=NULL but a real userId, and MUST be drained.
+      // The original `!group.organizationId` guard skipped every orgless group,
+      // so the cron safety-net never resolved orgless rows — stranding money.
+      if (!group.userId) {
         groupsSkipped++;
         continue;
       }
       try {
         // Find the user's single Connect account (by userId, Codex-69t7c) so
-        // we can look up the stripeAccountId. If the row is missing (rare — a
-        // Connect account was deleted but its payouts survived because of ON
-        // DELETE behaviour) skip this group; it will be re-attempted on the
-        // next sweep window.
+        // we can look up the stripeAccountId. This resolves the recipient by
+        // userId ALONE — independent of org — which is exactly what lets an
+        // orgless group (organizationId=NULL) route to a Connect account. If
+        // the row is missing (rare — a Connect account was deleted but its
+        // payouts survived because of ON DELETE behaviour) skip this group; it
+        // will be re-attempted on the next sweep window.
         const [connect] = await this.db
           .select({ stripeAccountId: stripeConnectAccounts.stripeAccountId })
           .from(stripeConnectAccounts)
