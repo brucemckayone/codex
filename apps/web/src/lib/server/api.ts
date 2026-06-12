@@ -54,6 +54,7 @@ import type {
   UserData,
 } from '@codex/shared-types';
 import type {
+  CreatorEarningsSummary,
   CreatorPayoutBreakdown,
   PayoutSummary,
   PayoutWithCreator,
@@ -66,6 +67,7 @@ import {
 import type {
   CancelSubscriptionInput,
   ChangeTierInput,
+  ConnectMeOnboardInput,
   ConnectOnboardInput,
   CreateCheckoutInput,
   CreatePortalSessionInput,
@@ -1741,6 +1743,33 @@ export function createServerApi(
           'ecom',
           withOrg('/subscriptions/payouts/by-creator', organizationId, params)
         ),
+
+      // ── Creator-self-scoped /me routes (Codex-69t7c.7 / WP7) ─────────────
+      // These routes are scoped to the SESSION USER only — they return the
+      // acting creator's OWN payouts across ALL orgs that paid them.
+      // NEVER forward organizationId / userId (IDOR prevention, epic D8).
+
+      /**
+       * List the current creator's own payouts (paginated).
+       * GET /subscriptions/me/payouts — self-scoped, no org context.
+       * Returns `{ items: PayoutWithCreator[], pagination }` envelope.
+       */
+      getMyPayouts: (params?: URLSearchParams) =>
+        request<PaginatedListResponse<PayoutWithCreator>>(
+          'ecom',
+          `/subscriptions/me/payouts${params?.toString() ? `?${params.toString()}` : ''}`
+        ),
+
+      /**
+       * KPI numbers for the creator earnings hub (earned in period, total
+       * earned, in transit, needs-attention). userId-scoped across all orgs.
+       * GET /subscriptions/me/earnings-summary — single-item `{data}` envelope.
+       */
+      getMyEarningsSummary: (params?: URLSearchParams) =>
+        request<CreatorEarningsSummary>(
+          'ecom',
+          `/subscriptions/me/earnings-summary${params?.toString() ? `?${params.toString()}` : ''}`
+        ),
     },
 
     /**
@@ -1794,6 +1823,46 @@ export function createServerApi(
             body: JSON.stringify({ organizationId }),
           }
         ),
+
+      // ── Creator-self-scoped /me routes (Codex-69t7c.3 / WP3) ──────────────
+      // These routes are scoped to the SESSION USER only. No org context.
+      // NEVER forward organizationId / userId — the backend derives identity
+      // from the session cookie (IDOR prevention, epic decision D8).
+
+      /**
+       * Create (or reuse) the current creator's Connect account and return
+       * the Stripe onboarding URL. POST /connect/me/onboard — 201.
+       */
+      onboardMe: (data: ConnectMeOnboardInput) =>
+        request<ConnectOnboardResponse>('ecom', '/connect/me/onboard', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+
+      /**
+       * Get the current creator's Connect account status.
+       * GET /connect/me/status — self-scoped, no body/query params.
+       */
+      getMyStatus: () =>
+        request<ConnectAccountStatusResponse>('ecom', '/connect/me/status'),
+
+      /**
+       * Force a Stripe status sync for the current creator, then return
+       * the refreshed status payload. POST /connect/me/sync — no body.
+       */
+      syncMyStatus: () =>
+        request<ConnectAccountStatusResponse>('ecom', '/connect/me/sync', {
+          method: 'POST',
+        }),
+
+      /**
+       * Get a Stripe Express dashboard login link for the current creator.
+       * POST /connect/me/dashboard — no body.
+       */
+      getMyDashboardLink: () =>
+        request<ConnectDashboardResponse>('ecom', '/connect/me/dashboard', {
+          method: 'POST',
+        }),
     },
 
     /**
