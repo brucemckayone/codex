@@ -47,7 +47,7 @@ Defer when:
 
 ### Stage 1 — Load the epic's history
 - `bd show <epic-id>` + `bd list --parent <epic-id> --json` (or by label) — the WPs + their close reasons.
-- **Audit tally:** `scripts/audit-tally.sh <epic-id>` — per-WP stage completeness + swarm counts. Flag any `partial`/`missing` WP (a skipped gate is itself a finding).
+- **Audit tally:** `.claude/skills/codex-epic-retro/scripts/audit-tally.sh <epic-id>` — per-WP stage completeness + swarm counts. Flag any `partial`/`missing` WP (a skipped gate is itself a finding). (Path is skill-relative; from repo root use the full `.claude/skills/...` path or it silently misfires with "no such file".)
 - Read the merged PRs (`gh pr view`) and the `codex-review` findings recorded in each WP's audit (`swarm-end` tallies).
 - If a prior retro exists for a related area, read `docs/epics/retros/*.md` for patterns to re-check.
 
@@ -109,4 +109,4 @@ Add any 3+-cycle recurring gap to `docs/crystalizations/ROLLING-INVENTORY.md` wi
 
 ## Related
 - `codex-epic-implement` (writes the audit trail) · `codex-review` (its findings feed Stage 2) · `codex-crystalize` (consumes the ROLLING-INVENTORY) · `docs/epics/conventions.md` §5 (the ladder).
-- `scripts/audit-tally.sh`.
+- `.claude/skills/codex-epic-retro/scripts/audit-tally.sh`.

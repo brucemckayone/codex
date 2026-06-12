@@ -49,6 +49,7 @@ The cycle IS the architecture. **Never skip a stage. Never batch closures.**
 | R6 | SHIP runs `gate.sh` and trusts only its terminal marker. NEVER `--no-verify`. | `feedback_run_tests_locally_before_push`; gate-exit-code-masked-by-pipe. |
 | R7 | NEVER `as any` / `@ts-ignore`. Money/auth code needs positive AND negative tests. | `feedback_modularity_no_any`, `feedback_security_deep_test`. |
 | R8 | Background agents work in worktree isolation; main chat orchestrates only (no edits while agents run). Clean worktrees at SHIP. | `feedback_worktree_content_bleed_bidirectional`. |
+| R9 | A WP PR's base branch MUST be trunk (`dev`/`main`), never a sibling WP branch unless intentionally stacked. Verify at SHIP (stage 9). | Codex-69t7c WP9 #280 merged into the WP8 branch → stranded off `dev` → forced re-land #283. |
 
 ---
 
