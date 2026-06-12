@@ -47,7 +47,7 @@ Defer when:
 
 ### Stage 1 — Load the epic's history
 - `bd show <epic-id>` + `bd list --parent <epic-id> --json` (or by label) — the WPs + their close reasons.
-- **Audit tally:** `.claude/skills/codex-epic-retro/scripts/audit-tally.sh <epic-id>` — per-WP stage completeness + swarm counts. Flag any `partial`/`missing` WP (a skipped gate is itself a finding). (Path is skill-relative; from repo root use the full `.claude/skills/...` path or it silently misfires with "no such file".)
+- **Audit tally:** `.claude/skills/codex-epic-retro/scripts/audit-tally.sh <epic-id>` — per-WP stage completeness + swarm counts, plus an appended `git-trail:<c>c/<f>fix[/PRs]` cross-check column. Flag any `partial`/`missing` WP (a skipped gate is itself a finding). If the bd-audit trail is empty the script reconstructs the WP list FROM the git topology (so it is never blind — Codex-3l73h); the git-trail proves *shipped/reviewed/merged*, NOT that the 10 gates ran — treat an all-`missing`/git-only result as the emission-discipline finding it is. For an OLDER epic whose WP commits aren't the most-recent block, scope with `GIT_TRAIL_RANGE=<git-range>`. (Path is skill-relative; from repo root use the full `.claude/skills/...` path or it silently misfires with "no such file".)
 - Read the merged PRs (`gh pr view`) and the `codex-review` findings recorded in each WP's audit (`swarm-end` tallies).
 - If a prior retro exists for a related area, read `docs/epics/retros/*.md` for patterns to re-check.
 
