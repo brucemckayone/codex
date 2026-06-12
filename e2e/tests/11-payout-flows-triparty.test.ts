@@ -5,33 +5,31 @@
  *
  * Flow B — tri-party (org ↔ creator agreement):
  *   1. Org owner creates an organization and onboards Stripe Connect
- *      (POST /connect/onboard for the org).
+ *      (POST /connect/onboard for the org). We also seed the org's
+ *      primaryConnectAccountUserId and a chargesEnabled Connect account
+ *      so organization_fee rows ARE written.
  *   2. Creator joins the org and the owner proposes a revenue-share
  *      agreement (POST /agreements/propose).
  *   3. Creator accepts the agreement (POST /agreements/:id/accept).
- *   4. A purchase is completed via Stripe webhook. With an active agreement,
- *      writePurchasePayouts writes:
- *        - platform_fee   (status=paid or pending)
- *        - creator_payout (status=paid or pending)
- *        - organization_fee (status=paid or pending)
- *   5. If the creator's Connect account is not active, the creator_payout
- *      row is status='pending' (connect_not_ready). When the Connect
- *      account activates, resolvePendingPayouts drains those pending rows.
- *      We simulate this by calling POST /connect/me/sync (which in test
- *      env may not actually activate the account, but exercises the route).
- *   6. Assert the creator's /subscriptions/me/payouts returns the row.
- *   7. Assert the org owner's /subscriptions/payouts returns the org row.
+ *   4. A purchase is completed via Stripe webhook. With an active agreement
+ *      and a chargesEnabled org Connect account, writePurchasePayouts writes:
+ *        - platform_fee   (status=paid)
+ *        - creator_payout (status=pending, reason=connect_not_ready)
+ *        - organization_fee (status=paid with live Stripe key, status=failed locally)
+ *   5. Assert EXACTLY 3 payout rows.
+ *   6. Simulate account.updated webhook (chargesEnabled=true, payoutsEnabled=true)
+ *      for the CREATOR's Connect account → assert creator_payout transitions
+ *      to status='paid' (resolvePendingPayouts exercise — AC-b).
+ *   7. Assert the creator's /subscriptions/me/payouts returns the row.
+ *   8. Assert the org owner's /subscriptions/payouts returns the org row.
  *
  * WP11 acceptance: in-org agreement purchase → three payout rows →
  * creator sees own row on /me/payouts, org owner sees org rows on /payouts.
+ * Creator's pending row transitions to paid on Connect activation (AC-b).
  *
- * Notes:
- * - Without a live Stripe key the PaymentIntent retrieve fails → payout
- *   rows are not written (money-loss guard). In that case we assert the
- *   agreement and purchase state only. CI exercises the full path.
- * - resolvePendingPayouts fires via the connect webhook when the account
- *   activates. We don't simulate that webhook here (would need Stripe CLI);
- *   instead we assert the pending row is present (pre-activation state).
+ * Env skip-gate: STRIPE_WEBHOOK_SECRET_BOOKING and
+ * STRIPE_WEBHOOK_SECRET_CONNECT are required for the payout pipeline and
+ * the account.updated simulation respectively. Tests skip cleanly without them.
  */
 
 import { closeDbPool, dbHttp, schema } from '@codex/database';
@@ -45,10 +43,77 @@ import { and, eq } from 'drizzle-orm';
 import { afterAll, describe, expect, test } from 'vitest';
 import {
   createCheckoutCompletedEvent,
+  generateStripeSignature,
   sendSignedWebhook,
 } from '../helpers/stripe-webhook';
 import { createScopedTestContext } from '../helpers/test-isolation';
 import { WORKER_URLS } from '../helpers/worker-urls';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Send any Stripe event with a valid HMAC signature.
+ * sendSignedWebhook is typed to StripeCheckoutWebhookEvent; this helper
+ * accepts any serialisable object for connect and other event types.
+ */
+async function sendSignedWebhookRaw(
+  url: string,
+  event: unknown,
+  secret: string
+): Promise<Response> {
+  const rawBody = JSON.stringify(event);
+  const signature = generateStripeSignature(rawBody, secret);
+  return fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'stripe-signature': signature,
+    },
+    body: rawBody,
+  });
+}
+
+/**
+ * Build an account.updated event with chargesEnabled=true + payoutsEnabled=true
+ * for the given stripeAccountId and orgId (in metadata).
+ * Sending this to /webhooks/stripe/connect triggers resolvePendingPayouts.
+ */
+function createAccountUpdatedEvent(params: {
+  stripeAccountId: string;
+  orgId: string;
+}) {
+  const timestamp = Math.floor(Date.now() / 1000);
+  return {
+    id: `evt_test_acct_${timestamp}_${Math.random().toString(36).slice(2)}`,
+    object: 'event' as const,
+    api_version: '2025-10-29.clover',
+    created: timestamp,
+    livemode: false,
+    type: 'account.updated' as const,
+    account: params.stripeAccountId,
+    data: {
+      object: {
+        id: params.stripeAccountId,
+        object: 'account' as const,
+        charges_enabled: true,
+        payouts_enabled: true,
+        metadata: {
+          codex_organization_id: params.orgId,
+        },
+        // Minimal required fields
+        type: 'express',
+        country: 'GB',
+        default_currency: 'gbp',
+        details_submitted: true,
+        requirements: { disabled_reason: null, errors: [] },
+      },
+    },
+    pending_webhooks: 1,
+    request: { id: null, idempotency_key: null },
+  } as const;
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -59,7 +124,15 @@ describe('Tri-party (in-org agreement) payout flows', () => {
     await closeDbPool();
   });
 
-  test('should write platform_fee + creator_payout + organization_fee rows for in-org purchase with agreement', async () => {
+  test('should write platform_fee + creator_payout + organization_fee rows for in-org purchase, then release creator_payout on Connect activation', async () => {
+    // ── Env skip-gate ────────────────────────────────────────────────────────
+    const bookingSecret = process.env.STRIPE_WEBHOOK_SECRET_BOOKING;
+    const connectSecret = process.env.STRIPE_WEBHOOK_SECRET_CONNECT;
+    if (!bookingSecret || !connectSecret) {
+      test.skip();
+      return;
+    }
+
     const ctx = createScopedTestContext();
 
     // ======================================================================
@@ -94,25 +167,30 @@ describe('Tri-party (in-org agreement) payout flows', () => {
     expect(organization.id).toBeDefined();
 
     // ======================================================================
-    // Step 2: Onboard Stripe Connect for the org (POST /connect/onboard)
+    // Step 2: Seed org Connect account with chargesEnabled=true so that
+    //         organization_fee rows ARE written (not just pending).
+    //         The /connect/onboard route may fail Stripe-side without a live key,
+    //         so we seed directly into the DB and wire primaryConnectAccountUserId.
     // ======================================================================
-    // In test env this may fail Stripe-side (no live key) but still
-    // upserts a stripeConnectAccounts row (creates a Stripe test account
-    // or returns 400 from Stripe — the route handles both gracefully).
-    // Onboard org Connect — fire-and-forget, accept any status (Stripe may reject
-    // in test env with no live key; DB row may or may not exist, and that's fine).
-    await httpClient.post(`${WORKER_URLS.ecom}/connect/onboard`, {
-      headers: {
-        Cookie: ownerCookie,
-        'Content-Type': 'application/json',
-        Origin: WORKER_URLS.ecom,
-      },
-      data: {
-        organizationId: organization.id,
-        returnUrl: `http://localhost:5173/studio/monetisation?connect=success`,
-        refreshUrl: `http://localhost:5173/studio/monetisation?connect=refresh`,
-      },
+    const orgStripeAccountId = `acct_test_org_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+    // Insert an active Connect account for the org owner
+    await dbHttp.insert(schema.stripeConnectAccounts).values({
+      userId: owner.id,
+      organizationId: organization.id,
+      stripeAccountId: orgStripeAccountId,
+      status: 'active',
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      onboardingCompletedAt: new Date(),
     });
+
+    // Wire the org's primaryConnectAccountUserId so writePurchasePayouts
+    // can resolve the org's Connect account and write the organization_fee row.
+    await dbHttp
+      .update(schema.organizations)
+      .set({ primaryConnectAccountUserId: owner.id })
+      .where(eq(schema.organizations.id, organization.id));
 
     // ======================================================================
     // Step 3: Register creator + add to org as member
@@ -125,9 +203,6 @@ describe('Tri-party (in-org agreement) payout flows', () => {
         role: 'creator',
       });
 
-    // Add creator as member of the org (owner-side invitation flow
-    // via direct DB insert — mirrors 04-paid-content-purchase.test.ts pattern
-    // of using createDatabaseFixture for org setup).
     await dbHttp.insert(schema.organizationMemberships).values({
       organizationId: organization.id,
       userId: creator.id,
@@ -137,20 +212,38 @@ describe('Tri-party (in-org agreement) payout flows', () => {
     });
 
     // ======================================================================
-    // Step 4: Creator onboards their personal Connect account
+    // Step 4: Creator onboards their personal Connect account (status=onboarding)
+    //         so that creator_payout is written as pending/connect_not_ready.
     // ======================================================================
-    // Creator onboards personal Connect — fire-and-forget.
-    await httpClient.post(`${WORKER_URLS.ecom}/connect/me/onboard`, {
-      headers: {
-        Cookie: creatorCookie,
-        'Content-Type': 'application/json',
-        Origin: WORKER_URLS.ecom,
-      },
-      data: {
-        returnUrl: 'http://localhost:5173/studio/earnings?connect=success',
-        refreshUrl: 'http://localhost:5173/studio/earnings?connect=refresh',
-      },
-    });
+    const onboardResponse = await httpClient.post(
+      `${WORKER_URLS.ecom}/connect/me/onboard`,
+      {
+        headers: {
+          Cookie: creatorCookie,
+          'Content-Type': 'application/json',
+          Origin: WORKER_URLS.ecom,
+        },
+        data: {
+          returnUrl: 'http://localhost:5173/studio/earnings?connect=success',
+          refreshUrl: 'http://localhost:5173/studio/earnings?connect=refresh',
+        },
+      }
+    );
+    expect([200, 201]).toContain(onboardResponse.status);
+
+    // Assert the creator's Connect row was created in onboarding state
+    const [creatorConnectRow] = await dbHttp
+      .select({
+        id: schema.stripeConnectAccounts.id,
+        stripeAccountId: schema.stripeConnectAccounts.stripeAccountId,
+        status: schema.stripeConnectAccounts.status,
+      })
+      .from(schema.stripeConnectAccounts)
+      .where(eq(schema.stripeConnectAccounts.userId, creator.id))
+      .limit(1);
+    expect(creatorConnectRow).toBeDefined();
+    expect(creatorConnectRow?.status).toBe('onboarding');
+    const creatorStripeAccountId = creatorConnectRow?.stripeAccountId;
 
     // ======================================================================
     // Step 5: Propose revenue-share agreement (owner → creator)
@@ -212,7 +305,6 @@ describe('Tri-party (in-org agreement) payout flows', () => {
       )
       .limit(1);
 
-    // The agreement should be active after acceptance
     expect(agreementRow).toBeDefined();
     expect(agreementRow?.status).toBe('active');
 
@@ -311,14 +403,14 @@ describe('Tri-party (in-org agreement) payout flows', () => {
     const webhookResponse = await sendSignedWebhook(
       `${WORKER_URLS.ecom}/webhooks/stripe/booking`,
       webhookEvent,
-      process.env.STRIPE_WEBHOOK_SECRET_BOOKING as string
+      bookingSecret
     );
     expect(webhookResponse.status).toBe(200);
     const webhookResult = await webhookResponse.json();
     expect(webhookResult.received).toBe(true);
 
     // ======================================================================
-    // Step 9: Verify purchase + payout rows
+    // Step 9: Verify purchase + assert EXACTLY 3 payout rows (unconditional)
     // ======================================================================
     const [purchase] = await dbHttp
       .select()
@@ -341,93 +433,153 @@ describe('Tri-party (in-org agreement) payout flows', () => {
       .from(schema.payouts)
       .where(eq(schema.payouts.purchaseId, purchase.id));
 
-    if (payoutRows.length > 0) {
-      // Full assertion — Stripe live key available
-      const platformFeeRow = payoutRows.find(
-        (r) => r.payoutType === 'platform_fee'
-      );
-      const creatorPayoutRow = payoutRows.find(
-        (r) => r.payoutType === 'creator_payout'
-      );
-      // organization_fee row is only written if org has a Connect account
-      // and organizationFeeCents > 0. May be absent if orgConnect not set up.
-      // We don't assert it here since Connect setup in test env is best-effort.
+    // MUST be exactly 3 rows: platform_fee + creator_payout + organization_fee.
+    // The org's Connect account has chargesEnabled=true (seeded above), so the
+    // organization_fee transfer path runs and writes the third row.
+    // Absence of rows → payout pipeline broken.
+    // Only 2 rows → organization_fee missing (org Connect not resolved).
+    expect(payoutRows).toHaveLength(3);
 
-      // All other row types expected for a tri-party in-org purchase
-      expect(platformFeeRow).toBeDefined();
-      expect(creatorPayoutRow).toBeDefined();
+    const platformFeeRow = payoutRows.find(
+      (r) => r.payoutType === 'platform_fee'
+    );
+    const creatorPayoutRow = payoutRows.find(
+      (r) => r.payoutType === 'creator_payout'
+    );
+    const orgFeeRow = payoutRows.find(
+      (r) => r.payoutType === 'organization_fee'
+    );
 
-      // platform_fee: retained on platform
-      expect(platformFeeRow?.status).toBe('paid');
-      expect(platformFeeRow?.userId).toBeNull();
-      expect(platformFeeRow?.organizationId).toBe(organization.id);
-      expect(platformFeeRow?.sourceType).toBe('purchase');
+    expect(platformFeeRow).toBeDefined();
+    expect(creatorPayoutRow).toBeDefined();
+    expect(orgFeeRow).toBeDefined();
 
-      // creator_payout: to the creator
-      expect(creatorPayoutRow?.userId).toBe(creator.id);
-      expect(creatorPayoutRow?.organizationId).toBe(organization.id);
-      expect(['pending', 'paid']).toContain(creatorPayoutRow?.status);
-      if (creatorPayoutRow?.status === 'pending') {
-        expect(creatorPayoutRow?.reason).toBe('connect_not_ready');
+    // platform_fee: retained on platform
+    expect(platformFeeRow?.status).toBe('paid');
+    expect(platformFeeRow?.userId).toBeNull();
+    expect(platformFeeRow?.organizationId).toBe(organization.id);
+    expect(platformFeeRow?.sourceType).toBe('purchase');
+
+    // creator_payout: creator's Connect is onboarding → pending/connect_not_ready
+    expect(creatorPayoutRow?.status).toBe('pending');
+    expect(creatorPayoutRow?.reason).toBe('connect_not_ready');
+    expect(creatorPayoutRow?.userId).toBe(creator.id);
+    expect(creatorPayoutRow?.organizationId).toBe(organization.id);
+    expect(creatorPayoutRow?.sourceType).toBe('purchase');
+    expect(creatorPayoutRow?.amountCents).toBeGreaterThan(0);
+
+    // organization_fee: org Connect has chargesEnabled=true → transfer attempted.
+    // With live Stripe key: status='paid'. Without (local/CI-no-key): transfer throws
+    // → status='failed' (transfer_failed). Both prove the row IS written (the 3-row AC).
+    expect(['paid', 'failed']).toContain(orgFeeRow?.status);
+    expect(orgFeeRow?.userId).toBe(owner.id);
+    expect(orgFeeRow?.organizationId).toBe(organization.id);
+    expect(orgFeeRow?.sourceType).toBe('purchase');
+    expect(orgFeeRow?.amountCents).toBeGreaterThan(0);
+
+    // Sum check: all three rows ≤ amountCents
+    const total = payoutRows.reduce((s, r) => s + r.amountCents, 0);
+    expect(total).toBeLessThanOrEqual(amountCents);
+    expect(total).toBeGreaterThan(0);
+
+    // ======================================================================
+    // Step 10: Simulate account.updated webhook for CREATOR's Connect account
+    //          (chargesEnabled=true) → resolvePendingPayouts must run and
+    //          transition creator_payout from 'pending' to 'paid' (AC-b).
+    // ======================================================================
+    // The account.updated handler reads the CURRENT DB row for wasActive,
+    // then calls handleAccountUpdated (persists new state), then fires
+    // resolvePendingPayouts via waitUntil. We poll the DB after the webhook
+    // returns to give waitUntil time to settle.
+    const accountUpdatedEvent = createAccountUpdatedEvent({
+      stripeAccountId: creatorStripeAccountId,
+      orgId: organization.id,
+    });
+
+    const connectWebhookResponse = await sendSignedWebhookRaw(
+      `${WORKER_URLS.ecom}/webhooks/stripe/connect`,
+      accountUpdatedEvent,
+      connectSecret
+    );
+    expect(connectWebhookResponse.status).toBe(200);
+    const connectResult = await connectWebhookResponse.json();
+    // The handler always returns { received: true } for known event types
+    expect(connectResult.received).toBe(true);
+
+    // resolvePendingPayouts runs in waitUntil — poll DB until the row
+    // transitions or the test times out (vitest timeout governs).
+    // We give it up to 15 s in 500 ms increments.
+    let resolvedPayoutRow:
+      | { status: string; reason: string | null }
+      | undefined;
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      const [row] = await dbHttp
+        .select({
+          status: schema.payouts.status,
+          reason: schema.payouts.reason,
+        })
+        .from(schema.payouts)
+        .where(eq(schema.payouts.id, creatorPayoutRow?.id))
+        .limit(1);
+      if (row?.status === 'paid') {
+        resolvedPayoutRow = row;
+        break;
       }
-      expect(creatorPayoutRow?.sourceType).toBe('purchase');
-
-      // Sum check: platform + creator (+ org if present) ≤ amountCents
-      const total = payoutRows.reduce((s, r) => s + r.amountCents, 0);
-      expect(total).toBeLessThanOrEqual(amountCents);
-      expect(total).toBeGreaterThan(0);
-
-      // ====================================================================
-      // Step 10: Assert payout visible on creator's /me/payouts
-      // ====================================================================
-      const myPayoutsResponse = await httpClient.get(
-        `${WORKER_URLS.ecom}/subscriptions/me/payouts`,
-        {
-          headers: {
-            Cookie: creatorCookie,
-            Origin: WORKER_URLS.ecom,
-          },
-        }
-      );
-      await expectSuccessResponse(myPayoutsResponse);
-      const myPayoutsData = await myPayoutsResponse.json();
-      expect(myPayoutsData.items).toBeDefined();
-      expect(Array.isArray(myPayoutsData.items)).toBe(true);
-
-      const creatorRow = myPayoutsData.items.find(
-        (p: { purchaseId?: string; payoutType?: string }) =>
-          p.purchaseId === purchase.id && p.payoutType === 'creator_payout'
-      );
-      expect(creatorRow).toBeDefined();
-
-      // ====================================================================
-      // Step 11: Assert org owner can see payouts via /subscriptions/payouts
-      // ====================================================================
-      const orgPayoutsResponse = await httpClient.get(
-        `${WORKER_URLS.ecom}/subscriptions/payouts?organizationId=${organization.id}`,
-        {
-          headers: {
-            Cookie: ownerCookie,
-            Origin: WORKER_URLS.ecom,
-          },
-        }
-      );
-      await expectSuccessResponse(orgPayoutsResponse);
-      const orgPayoutsData = await orgPayoutsResponse.json();
-      expect(orgPayoutsData.items).toBeDefined();
-      expect(Array.isArray(orgPayoutsData.items)).toBe(true);
-
-      // Org-scoped payouts include the rows for this org's purchases
-      const orgRow = orgPayoutsData.items.find(
-        (p: { purchaseId?: string }) => p.purchaseId === purchase.id
-      );
-      expect(orgRow).toBeDefined();
-    } else {
-      // No payout rows: Stripe PaymentIntent retrieve failed (no live key).
-      // Purchase and agreement state still verifiable.
-      expect(purchase?.status).toBe('completed');
-      expect(agreementRow?.status).toBe('active');
+      await new Promise((r) => setTimeout(r, 500));
     }
+
+    // AC-b: the pending creator_payout must have transitioned to 'paid'
+    // once the Connect account activates.
+    expect(resolvedPayoutRow).toBeDefined();
+    expect(resolvedPayoutRow?.status).toBe('paid');
+    expect(resolvedPayoutRow?.reason).toBeNull();
+
+    // ======================================================================
+    // Step 11: Assert payout visible on creator's /me/payouts
+    // ======================================================================
+    const myPayoutsResponse = await httpClient.get(
+      `${WORKER_URLS.ecom}/subscriptions/me/payouts`,
+      {
+        headers: {
+          Cookie: creatorCookie,
+          Origin: WORKER_URLS.ecom,
+        },
+      }
+    );
+    await expectSuccessResponse(myPayoutsResponse);
+    const myPayoutsData = await myPayoutsResponse.json();
+    expect(myPayoutsData.items).toBeDefined();
+    expect(Array.isArray(myPayoutsData.items)).toBe(true);
+
+    const creatorRow = myPayoutsData.items.find(
+      (p: { purchaseId?: string; payoutType?: string }) =>
+        p.purchaseId === purchase.id && p.payoutType === 'creator_payout'
+    );
+    expect(creatorRow).toBeDefined();
+
+    // ======================================================================
+    // Step 12: Assert org owner can see payouts via /subscriptions/payouts
+    // ======================================================================
+    const orgPayoutsResponse = await httpClient.get(
+      `${WORKER_URLS.ecom}/subscriptions/payouts?organizationId=${organization.id}`,
+      {
+        headers: {
+          Cookie: ownerCookie,
+          Origin: WORKER_URLS.ecom,
+        },
+      }
+    );
+    await expectSuccessResponse(orgPayoutsResponse);
+    const orgPayoutsData = await orgPayoutsResponse.json();
+    expect(orgPayoutsData.items).toBeDefined();
+    expect(Array.isArray(orgPayoutsData.items)).toBe(true);
+
+    // Org-scoped payouts include the rows for this org's purchases
+    const orgRow = orgPayoutsData.items.find(
+      (p: { purchaseId?: string }) => p.purchaseId === purchase.id
+    );
+    expect(orgRow).toBeDefined();
   }, 300_000); // 5 min
 
   test('GET /agreements/me returns active agreement for creator', async () => {
@@ -520,14 +672,26 @@ describe('Tri-party (in-org agreement) payout flows', () => {
     );
     await expectSuccessResponse(meResponse);
     const meData = await meResponse.json();
-    // Response may be paginated or a single item depending on route shape
-    // Check for items array or data object
-    const agreements = meData.items ?? (meData.data ? [meData.data] : []);
+
+    // Assert the response envelope shape explicitly before normalising.
+    // The /agreements/me route follows the standard list envelope: { items: [...] }.
+    // If the shape is wrong we want a loud failure, not silent empty-array behaviour.
+    if (!meData.items && !meData.data) {
+      throw new Error(
+        `/agreements/me returned unexpected shape: ${JSON.stringify(meData)}`
+      );
+    }
+    // Normalise: list endpoint returns { items: [...] }, single-item returns { data: {...} }
+    const agreements = Array.isArray(meData.items)
+      ? (meData.items as unknown[])
+      : meData.data
+        ? [meData.data]
+        : [];
     expect(Array.isArray(agreements)).toBe(true);
 
     const myAgreement = agreements.find(
-      (a: { organizationId?: string; status?: string }) =>
-        a.organizationId === organization.id
+      (a: unknown) =>
+        (a as { organizationId?: string }).organizationId === organization.id
     );
     expect(myAgreement).toBeDefined();
   }, 120_000);

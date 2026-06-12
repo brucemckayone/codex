@@ -23,13 +23,10 @@
  * WP11 acceptance: bi-party (orgless) purchase → two payout rows →
  * visible on /me/payouts → refund reverses both.
  *
- * Notes:
- * - We do NOT call Stripe's live API for Connect account activation; the
- *   test proves the DB-layer payout pipeline using the same signed-webhook
- *   pattern as 04-paid-content-purchase.test.ts.
- * - platform_fee rows have userId=null (platform isn't a user); the DB
- *   constraint allows this for payoutType='platform_fee'.
- * - Currency is GBP (£) per platform default.
+ * Env skip-gate: tests that exercise the full webhook pipeline require
+ * STRIPE_WEBHOOK_SECRET_BOOKING and STRIPE_WEBHOOK_SECRET_PAYMENT.
+ * Without these the worker rejects the HMAC signature before any payout
+ * logic runs. Tests skip cleanly rather than passing hollow.
  */
 
 import { closeDbPool, dbHttp, schema } from '@codex/database';
@@ -43,6 +40,7 @@ import { and, eq } from 'drizzle-orm';
 import { afterAll, describe, expect, test } from 'vitest';
 import {
   createCheckoutCompletedEvent,
+  generateStripeSignature,
   sendSignedWebhook,
 } from '../helpers/stripe-webhook';
 import { createScopedTestContext } from '../helpers/test-isolation';
@@ -93,6 +91,29 @@ function createChargeRefundedEvent(params: {
   } as const;
 }
 
+/**
+ * Send any Stripe event (not just checkout.session.completed) with a valid
+ * HMAC signature. sendSignedWebhook is typed to StripeCheckoutWebhookEvent;
+ * this helper accepts any serialisable object so we can send charge.refunded,
+ * account.updated, etc.
+ */
+async function sendSignedWebhookRaw(
+  url: string,
+  event: unknown,
+  secret: string
+): Promise<Response> {
+  const rawBody = JSON.stringify(event);
+  const signature = generateStripeSignature(rawBody, secret);
+  return fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'stripe-signature': signature,
+    },
+    body: rawBody,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -103,6 +124,16 @@ describe('Bi-party (orgless) payout flows', () => {
   });
 
   test('should write platform_fee + creator_payout rows on orgless purchase, surface on /me/payouts, then reverse on refund', async () => {
+    // ── Env skip-gate ────────────────────────────────────────────────────────
+    // Both webhook secrets are required. Without them the worker rejects the
+    // HMAC signature before any payout logic runs.
+    const bookingSecret = process.env.STRIPE_WEBHOOK_SECRET_BOOKING;
+    const paymentSecret = process.env.STRIPE_WEBHOOK_SECRET_PAYMENT;
+    if (!bookingSecret || !paymentSecret) {
+      test.skip();
+      return;
+    }
+
     const ctx = createScopedTestContext();
 
     // ======================================================================
@@ -139,19 +170,22 @@ describe('Bi-party (orgless) payout flows', () => {
     const onboardData = await onboardResponse.json();
     const onboard = unwrapApiResponse(onboardData);
     expect(onboard).toBeDefined();
-    // onboardingUrl may be null in test env (no live Stripe key) — we only
-    // care that the row was inserted, not that Stripe responded.
 
-    // Verify the stripeConnectAccounts row was created for this user.
-    // If no row exists the Connect service may have skipped the Stripe call
-    // (no live key in E2E env). Both paths are valid — what matters is that
-    // the payout pipeline can see any row (or not) and still writes rows.
-    // We proceed regardless.
-    await dbHttp
-      .select({ id: schema.stripeConnectAccounts.id })
+    // Assert the stripeConnectAccounts row was created — this is mandatory.
+    // Without the row the payout pipeline cannot write a pending creator_payout.
+    const [connectRow] = await dbHttp
+      .select({
+        id: schema.stripeConnectAccounts.id,
+        stripeAccountId: schema.stripeConnectAccounts.stripeAccountId,
+        status: schema.stripeConnectAccounts.status,
+      })
       .from(schema.stripeConnectAccounts)
       .where(eq(schema.stripeConnectAccounts.userId, creator.id))
       .limit(1);
+    expect(connectRow).toBeDefined();
+    expect(connectRow?.id).toBeDefined();
+    // Row must be in 'onboarding' state (not active) so creator_payout lands as pending
+    expect(connectRow?.status).toBe('onboarding');
 
     // ======================================================================
     // Step 2: Create and publish orgless paid content (organizationId = null)
@@ -267,7 +301,7 @@ describe('Bi-party (orgless) payout flows', () => {
     const webhookResponse = await sendSignedWebhook(
       `${WORKER_URLS.ecom}/webhooks/stripe/booking`,
       webhookEvent,
-      process.env.STRIPE_WEBHOOK_SECRET_BOOKING as string
+      bookingSecret
     );
     expect(webhookResponse.status).toBe(200);
     const webhookResult = await webhookResponse.json();
@@ -295,157 +329,144 @@ describe('Bi-party (orgless) payout flows', () => {
     expect(purchase.organizationId).toBeNull();
 
     // ======================================================================
-    // Step 5: Assert payout rows — platform_fee + creator_payout
+    // Step 5: Assert EXACTLY 2 payout rows — platform_fee + creator_payout
+    //         (unconditional — this is the core acceptance criterion)
     // ======================================================================
-    // The purchase webhook handler calls completePurchase → writePurchasePayouts.
-    // However, it retrieves the PaymentIntent from Stripe to get the chargeId.
-    // In E2E test env (no live Stripe key), the PaymentIntent retrieve will
-    // fail → stripeChargeId stays null → writePurchasePayouts is skipped
-    // entirely (money-loss guard log + no rows written). This is the correct
-    // production safety behaviour when Stripe is unreachable.
-    //
-    // We assert the presence of rows ONLY when the charge id is present.
-    // If no rows: we skip the payout-row assertions (CI with live Stripe key
-    // will exercise the full path). This mirrors how 04-paid-content-purchase
-    // works — the test validates the flow, not the Stripe live-key path.
+    // Webhooks are HMAC-signed locally; no live Stripe key is required for
+    // the payout-row write path. Two rows are the non-negotiable AC:
+    // - Absence means the payout pipeline is broken.
+    // - An extra row means an erroneous organization_fee was written on an
+    //   orgless purchase (regression in org-scoping logic).
     const payoutRows = await dbHttp
       .select()
       .from(schema.payouts)
       .where(eq(schema.payouts.purchaseId, purchase.id));
 
-    if (payoutRows.length > 0) {
-      // Full assertion path — Stripe live key available in this env
-      const platformFeeRow = payoutRows.find(
-        (r) => r.payoutType === 'platform_fee'
-      );
-      const creatorPayoutRow = payoutRows.find(
-        (r) => r.payoutType === 'creator_payout'
-      );
+    expect(payoutRows).toHaveLength(2);
 
-      expect(platformFeeRow).toBeDefined();
-      expect(creatorPayoutRow).toBeDefined();
+    const platformFeeRow = payoutRows.find(
+      (r) => r.payoutType === 'platform_fee'
+    );
+    const creatorPayoutRow = payoutRows.find(
+      (r) => r.payoutType === 'creator_payout'
+    );
 
-      // platform_fee: retained on platform balance → status='paid'
-      expect(platformFeeRow?.status).toBe('paid');
-      // userId is null for platform_fee rows (platform isn't a user)
-      expect(platformFeeRow?.userId).toBeNull();
-      // organizationId is null for orgless purchases
-      expect(platformFeeRow?.organizationId).toBeNull();
-      expect(platformFeeRow?.sourceType).toBe('purchase');
-      expect(platformFeeRow?.amountCents).toBeGreaterThan(0);
+    expect(platformFeeRow).toBeDefined();
+    expect(creatorPayoutRow).toBeDefined();
 
-      // creator_payout: Connect account not yet active → pending/connect_not_ready
-      // (or paid if the Connect account happened to be active)
-      expect(['pending', 'paid']).toContain(creatorPayoutRow?.status);
-      if (creatorPayoutRow?.status === 'pending') {
-        expect(creatorPayoutRow?.reason).toBe('connect_not_ready');
+    // platform_fee: retained on platform balance → status='paid'
+    expect(platformFeeRow?.status).toBe('paid');
+    // userId is null for platform_fee rows (platform isn't a user)
+    expect(platformFeeRow?.userId).toBeNull();
+    // organizationId is null for orgless purchases
+    expect(platformFeeRow?.organizationId).toBeNull();
+    expect(platformFeeRow?.sourceType).toBe('purchase');
+    expect(platformFeeRow?.amountCents).toBeGreaterThan(0);
+
+    // creator_payout: Connect account is onboarding (not active) → pending
+    // The connect_not_ready reason is set by writePurchasePayouts when the
+    // creator's Connect row exists but chargesEnabled=false.
+    expect(creatorPayoutRow?.status).toBe('pending');
+    expect(creatorPayoutRow?.reason).toBe('connect_not_ready');
+    expect(creatorPayoutRow?.userId).toBe(creator.id);
+    expect(creatorPayoutRow?.organizationId).toBeNull();
+    expect(creatorPayoutRow?.sourceType).toBe('purchase');
+    expect(creatorPayoutRow?.amountCents).toBeGreaterThan(0);
+
+    // platform_fee + creator_payout must sum to at most amountCents
+    const total =
+      (platformFeeRow?.amountCents ?? 0) + (creatorPayoutRow?.amountCents ?? 0);
+    expect(total).toBeLessThanOrEqual(amountCents);
+    expect(total).toBeGreaterThan(0);
+
+    // ======================================================================
+    // Step 6: Assert payout visible on creator's /me/payouts endpoint
+    // ======================================================================
+    const myPayoutsResponse = await httpClient.get(
+      `${WORKER_URLS.ecom}/subscriptions/me/payouts`,
+      {
+        headers: {
+          Cookie: creatorCookie,
+          Origin: WORKER_URLS.ecom,
+        },
       }
-      expect(creatorPayoutRow?.userId).toBe(creator.id);
-      expect(creatorPayoutRow?.organizationId).toBeNull();
-      expect(creatorPayoutRow?.sourceType).toBe('purchase');
-      expect(creatorPayoutRow?.amountCents).toBeGreaterThan(0);
+    );
+    await expectSuccessResponse(myPayoutsResponse);
+    const myPayoutsData = await myPayoutsResponse.json();
+    // Response is paginated: { items: [...], pagination: {...} }
+    expect(myPayoutsData.items).toBeDefined();
+    expect(Array.isArray(myPayoutsData.items)).toBe(true);
 
-      // platform_fee + creator_payout must sum to at most amountCents
-      const total =
-        (platformFeeRow?.amountCents ?? 0) +
-        (creatorPayoutRow?.amountCents ?? 0);
-      expect(total).toBeLessThanOrEqual(amountCents);
-      expect(total).toBeGreaterThan(0);
+    const myPayoutRow = myPayoutsData.items.find(
+      (p: { purchaseId?: string }) => p.purchaseId === purchase.id
+    );
+    expect(myPayoutRow).toBeDefined();
 
-      // ====================================================================
-      // Step 6: Assert payout visible on creator's /me/payouts endpoint
-      // ====================================================================
-      const myPayoutsResponse = await httpClient.get(
-        `${WORKER_URLS.ecom}/subscriptions/me/payouts`,
-        {
-          headers: {
-            Cookie: creatorCookie,
-            Origin: WORKER_URLS.ecom,
-          },
-        }
-      );
-      await expectSuccessResponse(myPayoutsResponse);
-      const myPayoutsData = await myPayoutsResponse.json();
-      // Response is paginated: { items: [...], pagination: {...} }
-      expect(myPayoutsData.items).toBeDefined();
-      expect(Array.isArray(myPayoutsData.items)).toBe(true);
+    // Earnings summary: totalEarnedCents must be >= the creator's payout amount
+    // (covers both pending and paid creator rows, not just >0)
+    const summaryResponse = await httpClient.get(
+      `${WORKER_URLS.ecom}/subscriptions/me/earnings-summary`,
+      {
+        headers: {
+          Cookie: creatorCookie,
+          Origin: WORKER_URLS.ecom,
+        },
+      }
+    );
+    await expectSuccessResponse(summaryResponse);
+    const summaryData = await summaryResponse.json();
+    const summary = unwrapApiResponse(summaryData);
+    // totalEarnedCents must be at least the creator's payout amount
+    expect(summary.totalEarnedCents).toBeGreaterThanOrEqual(
+      creatorPayoutRow?.amountCents
+    );
 
-      const myPayoutRow = myPayoutsData.items.find(
-        (p: { purchaseId?: string }) => p.purchaseId === purchase.id
-      );
-      expect(myPayoutRow).toBeDefined();
+    // ======================================================================
+    // Step 7: Refund → assert BOTH payout rows reversed/cancelled
+    //         (unconditional — this is the core refund-reversal AC)
+    // ======================================================================
+    const stripeRefundId = `re_test_biparty_${Date.now()}`;
+    const refundEvent = createChargeRefundedEvent({
+      paymentIntentId,
+      chargeId,
+      amountRefundedCents: amountCents,
+      stripeRefundId,
+    });
 
-      // Earnings summary: totalEarnedCents must be > 0
-      const summaryResponse = await httpClient.get(
-        `${WORKER_URLS.ecom}/subscriptions/me/earnings-summary`,
-        {
-          headers: {
-            Cookie: creatorCookie,
-            Origin: WORKER_URLS.ecom,
-          },
-        }
-      );
-      await expectSuccessResponse(summaryResponse);
-      const summaryData = await summaryResponse.json();
-      const summary = unwrapApiResponse(summaryData);
-      // totalEarnedCents includes pending + paid creator rows
-      expect(summary.totalEarnedCents).toBeGreaterThan(0);
+    const refundWebhookResponse = await sendSignedWebhookRaw(
+      `${WORKER_URLS.ecom}/webhooks/stripe/payment`,
+      refundEvent,
+      paymentSecret
+    );
+    expect(refundWebhookResponse.status).toBe(200);
+    const refundResult = await refundWebhookResponse.json();
+    expect(refundResult.received).toBe(true);
 
-      // ====================================================================
-      // Step 7: Refund → assert payout rows reversed/cancelled
-      // ====================================================================
-      const stripeRefundId = `re_test_biparty_${Date.now()}`;
-      const refundEvent = createChargeRefundedEvent({
-        paymentIntentId,
-        chargeId,
-        amountRefundedCents: amountCents,
-        stripeRefundId,
-      });
+    // Verify purchase status updated to refunded
+    const [refundedPurchase] = await dbHttp
+      .select({ status: schema.purchases.status })
+      .from(schema.purchases)
+      .where(eq(schema.purchases.id, purchase.id))
+      .limit(1);
+    expect(refundedPurchase?.status).toBe('refunded');
 
-      const refundWebhookResponse = await sendSignedWebhook(
-        `${WORKER_URLS.ecom}/webhooks/stripe/payment`,
-        refundEvent as unknown as Parameters<typeof sendSignedWebhook>[1],
-        process.env.STRIPE_WEBHOOK_SECRET_PAYMENT as string
-      );
-      expect(refundWebhookResponse.status).toBe(200);
-      const refundResult = await refundWebhookResponse.json();
-      expect(refundResult.received).toBe(true);
+    // Verify payout rows reversed — BOTH must be in a terminal refund state
+    const reversedPayoutRows = await dbHttp
+      .select()
+      .from(schema.payouts)
+      .where(eq(schema.payouts.purchaseId, purchase.id));
 
-      // Verify purchase status updated to refunded
-      const [refundedPurchase] = await dbHttp
-        .select({ status: schema.purchases.status })
-        .from(schema.purchases)
-        .where(eq(schema.purchases.id, purchase.id))
-        .limit(1);
-      expect(refundedPurchase?.status).toBe('refunded');
+    const reversedPlatformFee = reversedPayoutRows.find(
+      (r) => r.payoutType === 'platform_fee'
+    );
+    const reversedCreatorPayout = reversedPayoutRows.find(
+      (r) => r.payoutType === 'creator_payout'
+    );
 
-      // Verify payout rows reversed
-      const reversedPayoutRows = await dbHttp
-        .select()
-        .from(schema.payouts)
-        .where(eq(schema.payouts.purchaseId, purchase.id));
-
-      const reversedPlatformFee = reversedPayoutRows.find(
-        (r) => r.payoutType === 'platform_fee'
-      );
-      const reversedCreatorPayout = reversedPayoutRows.find(
-        (r) => r.payoutType === 'creator_payout'
-      );
-
-      // platform_fee (was paid) → 'reversed'
-      expect(reversedPlatformFee?.status).toBe('reversed');
-      // creator_payout (was pending/paid) → 'cancelled_by_refund' or 'reversed'
-      // pending rows → cancelled_by_refund; paid rows → reversed
-      expect(['cancelled_by_refund', 'reversed']).toContain(
-        reversedCreatorPayout?.status
-      );
-    } else {
-      // No payout rows: Stripe PaymentIntent retrieve failed (no live key).
-      // This is correct E2E behaviour in environments without STRIPE_SECRET_KEY.
-      // The full path is exercised in CI with the live key.
-      // We still assert the purchase record is present and complete.
-      expect(purchase?.status).toBe('completed');
-    }
+    // platform_fee (was paid) → 'reversed'
+    expect(reversedPlatformFee?.status).toBe('reversed');
+    // creator_payout (was pending/connect_not_ready) → 'cancelled_by_refund'
+    expect(reversedCreatorPayout?.status).toBe('cancelled_by_refund');
   }, 300_000); // 5 min — mirrors 04-paid-content-purchase
 
   test('creator /connect/me/status returns 200 with isConnected field', async () => {
@@ -481,20 +502,49 @@ describe('Bi-party (orgless) payout flows', () => {
   test('creator cannot read another creator payouts via /me/payouts (IDOR prevention)', async () => {
     const ctx = createScopedTestContext();
 
-    const { cookie: creatorACookie } = await authFixture.registerUser({
-      email: ctx.email('creator-a'),
-      password: 'SecurePassword123!',
-      name: ctx.name('Creator A'),
-      role: 'creator',
-    });
-    const { cookie: creatorBCookie } = await authFixture.registerUser({
+    const { cookie: creatorACookie, user: creatorA } =
+      await authFixture.registerUser({
+        email: ctx.email('creator-a'),
+        password: 'SecurePassword123!',
+        name: ctx.name('Creator A'),
+        role: 'creator',
+      });
+    const { user: creatorB } = await authFixture.registerUser({
       email: ctx.email('creator-b'),
       password: 'SecurePassword123!',
       name: ctx.name('Creator B'),
       role: 'creator',
     });
 
-    // Creator A fetches their payouts — should return 200 (empty list, not another creator's data)
+    // Seed a real payout row for creator B so there is concrete data to
+    // potentially leak. Uses status='pending' (no stripeTransferId or
+    // stripeChargeId required by the DB CHECK constraint for pending rows).
+    await dbHttp.insert(schema.payouts).values({
+      userId: creatorB.id,
+      organizationId: null,
+      purchaseId: null,
+      amountCents: 500,
+      payoutType: 'creator_payout',
+      status: 'pending',
+      reason: 'connect_not_ready',
+      sourceType: 'purchase',
+    });
+
+    // Fetch creator B's seeded payout row ID so we can assert A doesn't see it
+    const [bPayoutRow] = await dbHttp
+      .select({ id: schema.payouts.id, userId: schema.payouts.userId })
+      .from(schema.payouts)
+      .where(
+        and(
+          eq(schema.payouts.userId, creatorB.id),
+          eq(schema.payouts.amountCents, 500)
+        )
+      )
+      .limit(1);
+    expect(bPayoutRow).toBeDefined();
+    expect(bPayoutRow?.userId).toBe(creatorB.id);
+
+    // Creator A fetches /me/payouts — must NOT contain creator B's row
     const aResponse = await httpClient.get(
       `${WORKER_URLS.ecom}/subscriptions/me/payouts`,
       {
@@ -505,18 +555,21 @@ describe('Bi-party (orgless) payout flows', () => {
       }
     );
     await expectSuccessResponse(aResponse);
+    const aData = await aResponse.json();
+    expect(aData.items).toBeDefined();
+    expect(Array.isArray(aData.items)).toBe(true);
 
-    // Creator B fetches their payouts — independent, no leak
-    const bResponse = await httpClient.get(
-      `${WORKER_URLS.ecom}/subscriptions/me/payouts`,
-      {
-        headers: {
-          Cookie: creatorBCookie,
-          Origin: WORKER_URLS.ecom,
-        },
-      }
+    // IDOR assertion: creator A must not see creator B's payout row
+    const leak = aData.items.find(
+      (p: { id?: string; userId?: string }) =>
+        p.id === bPayoutRow?.id || p.userId === creatorB.id
     );
-    await expectSuccessResponse(bResponse);
+    expect(leak).toBeUndefined();
+
+    // All items returned to creator A must belong to creator A
+    for (const item of aData.items as Array<{ userId?: string }>) {
+      expect(item.userId).toBe(creatorA.id);
+    }
 
     // Unauthenticated request must be rejected
     const unauthResponse = await httpClient.get(
