@@ -154,10 +154,17 @@ export class ContentService extends BaseService {
             // Tier is only meaningful for 'subscribers' (required) and 'paid'
             // (optional, hybrid). Clamp to null for the other access modes so
             // we never persist a nonsensical (accessType, minimumTierId) pair.
+            // Also clamp for ORGLESS content (Codex-up7bx): subscription_tiers
+            // is org-scoped, so a tier on content with no organizationId is
+            // invalid (no org to resolve it against). The Zod schema rejects
+            // this combination outright; this clamp is the defensive backstop
+            // for any direct service caller that bypasses validation — never
+            // persist a row the access layer must then fail closed on.
             minimumTierId:
               (validated.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS ||
                 validated.accessType === CONTENT_ACCESS_TYPE.PAID) &&
-              validated.minimumTierId
+              validated.minimumTierId &&
+              validated.organizationId
                 ? validated.minimumTierId
                 : null,
             status: CONTENT_STATUS.DRAFT, // Always start as draft
@@ -280,10 +287,24 @@ export class ContentService extends BaseService {
         // the DB and the access service continues to honour it (e.g. paid
         // content still granting subscribers access via the hybrid branch).
         const accessTypeUpdating = restValidated.accessType;
-        const clearTier =
+        const accessTypeIncompatible =
           accessTypeUpdating !== undefined &&
           accessTypeUpdating !== CONTENT_ACCESS_TYPE.SUBSCRIBERS &&
           accessTypeUpdating !== CONTENT_ACCESS_TYPE.PAID;
+
+        // Codex-up7bx: a tier is only valid on org-scoped content. Determine
+        // the org the row will have AFTER this update (the incoming value when
+        // the payload touches organizationId, otherwise the existing value).
+        // If that resolves to orgless, the tier must be cleared — moving
+        // content out of an org (or setting it on already-orgless content)
+        // can never leave a dangling minimumTierId for the access layer to
+        // honour. Mirrors the create-path clamp + the read-path fail-closed
+        // guard in ContentAccessService.
+        const resultingOrgId =
+          'organizationId' in restValidated
+            ? restValidated.organizationId
+            : existing.organizationId;
+        const clearTier = accessTypeIncompatible || resultingOrgId == null;
 
         // Update content
         const [updated] = await tx

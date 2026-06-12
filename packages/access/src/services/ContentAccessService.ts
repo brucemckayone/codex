@@ -264,6 +264,26 @@ export class ContentAccessService extends BaseService {
 
     const orgId = contentRecord.organizationId;
 
+    // ── Fail-closed guard: orgless content can never tier-gate (Codex-up7bx) ──
+    // `subscription_tiers` is org-scoped (FK to organizations, unique per org),
+    // so a `minimumTierId` on content with NO `organizationId` is a semantically
+    // invalid row — there is no org against which a subscription/tier could be
+    // checked. Earlier this slipped through every branch that conjoined the
+    // subscription check with `orgId` being truthy, silently SKIPPING the tier
+    // gate and granting access. Deny here, before any branch, so a pre-existing
+    // bad row (regardless of how it was written) is never silently unlocked.
+    if (orgId == null && contentRecord.minimumTierId != null) {
+      this.obs.warn('Access denied - orgless content with tier gate', {
+        userId,
+        contentId,
+        minimumTierId: contentRecord.minimumTierId,
+        securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+        severity: LOG_SEVERITY.MEDIUM,
+        eventType: LOG_EVENTS.ACCESS_CONTROL,
+      });
+      return false;
+    }
+
     // Inline reusable helpers — mirror the branches in getStreamingUrl.
     const MANAGEMENT_ROLES: string[] = [
       ORGANIZATION_ROLES.OWNER,
@@ -506,6 +526,33 @@ export class ContentAccessService extends BaseService {
               });
 
               throw new ContentNotFoundError(input.contentId);
+            }
+
+            // ── Fail-closed guard: orgless content can never tier-gate ──
+            // (Codex-up7bx) `subscription_tiers` is org-scoped, so content
+            // with a `minimumTierId` but NO `organizationId` is a semantically
+            // invalid row: there is no org against which the tier/subscription
+            // could be resolved. Every accessType branch below conjoins the
+            // subscription check with `organizationId` being present, which
+            // for such a row silently SKIPS the gate and (in the free/paid
+            // arms) grants access. Deny up front so a pre-existing bad row —
+            // however it was written — is never silently unlocked. This must
+            // precede the accessType branching.
+            if (
+              contentRecord.organizationId == null &&
+              contentRecord.minimumTierId != null
+            ) {
+              this.obs.warn('Access denied - orgless content with tier gate', {
+                userId,
+                contentId: input.contentId,
+                minimumTierId: contentRecord.minimumTierId,
+                securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
+                severity: LOG_SEVERITY.MEDIUM,
+                eventType: LOG_EVENTS.ACCESS_CONTROL,
+              });
+              throw new AccessDeniedError(userId, input.contentId, {
+                reason: 'orgless_tier_gate',
+              });
             }
 
             // NOTE: Media item existence is NOT checked here. Written content
