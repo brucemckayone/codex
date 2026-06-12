@@ -8819,7 +8819,7 @@ export const library_filter_group_progress = () => `Progress`
 
 
 /**
- * 
+ *
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
@@ -8827,6 +8827,7 @@ export const library_filter_group_type = () => `Type`
 
 
 /**
+
  * 
  * @returns {string}
  */
@@ -9208,3 +9209,34 @@ export const earnings_payouts_load_error = () => `Could not load payout history.
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const earnings_payouts_retry = () => `Retry`
+
+/**
+ *
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const email_creator_connect_needed_subject = () => `Action required: connect Stripe to receive your payout`
+
+
+/**
+ *
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const email_creator_connect_needed_body = () => `A payout is waiting for you. Connect your Stripe account to receive it.`
+
+
+/**
+ *
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const email_payout_released_subject = () => `Your payout is on its way`
+
+
+/**
+ *
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const email_payout_released_body = () => `Your pending earnings have been transferred to your Stripe account.`

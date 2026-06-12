@@ -1465,6 +1465,248 @@ describe('PurchaseService Integration', () => {
       expect((stubStripe as any).transfers.create).not.toHaveBeenCalled();
     });
 
+    // ─── WP-10 (Codex-69t7c.10): creator-connect-needed notification ─────────
+    //
+    // Mirrors the existing connect_not_ready test structure: each test creates
+    // its own content + connect account (chargesEnabled=false) and instantiates
+    // PurchaseService locally with a mock mailer injected.
+    describe('creator-connect-needed notification (WP-10)', () => {
+      /**
+       * Build a paid content item owned by `otherUserId` in a fresh org, with
+       * the Connect account set to chargesEnabled=false so the creator_payout
+       * parks as pending. Returns content + org + stripe stub.
+       */
+      async function setupDisconnectedContent(titleSuffix: string) {
+        // Create a fresh org per test so there are no conflicts on the
+        // stripeConnectAccounts unique constraint.
+        const [localOrg] = await db
+          .insert(organizations)
+          .values({
+            name: `WP10 Org ${titleSuffix}`,
+            slug: createUniqueSlug(`wp10-org-${titleSuffix}`),
+            ownerId: otherUserId,
+          })
+          .returning();
+        await db.insert(schema.stripeConnectAccounts).values({
+          userId: otherUserId,
+          organizationId: localOrg.id,
+          stripeAccountId: `acct_wp10_${titleSuffix}_${Date.now()}`,
+          status: 'onboarding',
+          chargesEnabled: false,
+          payoutsEnabled: false,
+        });
+
+        const media = await mediaService.create(
+          {
+            title: `WP10 ${titleSuffix}`,
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            fileSizeBytes: 1024 * 1024,
+          },
+          otherUserId
+        );
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: `hls/wp10-${titleSuffix}/master.m3u8`,
+            thumbnailKey: `thumbnails/wp10-${titleSuffix}.jpg`,
+            durationSeconds: 60,
+          },
+          otherUserId
+        );
+        const testContent = await contentService.create(
+          {
+            organizationId: localOrg!.id,
+            title: `WP10 ${titleSuffix}`,
+            slug: createUniqueSlug(`wp10-${titleSuffix}`),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'purchased_only',
+            accessType: 'paid',
+            priceCents: 5000,
+          },
+          otherUserId
+        );
+        await contentService.publish(testContent.id, otherUserId);
+
+        const localStubStripe = {
+          ...mockStripe,
+          transfers: { create: vi.fn() },
+          paymentIntents: { retrieve: vi.fn() },
+        } as unknown as Stripe;
+
+        return {
+          content: testContent,
+          org: localOrg!,
+          stubStripe: localStubStripe,
+        };
+      }
+
+      it('fires creator-connect-needed once when creator_payout parks as pending', async () => {
+        const {
+          content: c,
+          org,
+          stubStripe: ss,
+        } = await setupDisconnectedContent('fires');
+        const mailer = vi.fn();
+        const svc = new PurchaseService(
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          { db, environment: 'test', mailer } as any,
+          ss
+        );
+
+        const chargeId = `ch_wp10_fires_${Date.now()}`;
+        await svc.completePurchase(`pi_wp10_fires_${Date.now()}`, {
+          customerId: userId,
+          contentId: c.id,
+          organizationId: org.id,
+          amountPaidCents: 5000,
+          currency: 'gbp',
+          stripeChargeId: chargeId,
+        });
+
+        // Notification fires once for the creator_payout row.
+        expect(mailer).toHaveBeenCalledOnce();
+        const [params] = mailer.mock.calls[0];
+        expect(params.templateName).toBe('creator-connect-needed');
+        expect(params.category).toBe('transactional');
+        expect(params.data.amountFormatted).toMatch(/£/);
+        expect(params.data.dashboardUrl).toMatch(/earnings/);
+      });
+
+      it('does NOT fire when mailer is not injected (graceful degrade)', async () => {
+        const {
+          content: c,
+          org,
+          stubStripe: ss,
+        } = await setupDisconnectedContent('no-mailer');
+        const svc = new PurchaseService(
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          { db, environment: 'test' } as any,
+          ss
+        );
+
+        const chargeId = `ch_wp10_nomailer_${Date.now()}`;
+        await expect(
+          svc.completePurchase(`pi_wp10_nomailer_${Date.now()}`, {
+            customerId: userId,
+            contentId: c.id,
+            organizationId: org.id,
+            amountPaidCents: 5000,
+            currency: 'gbp',
+            stripeChargeId: chargeId,
+          })
+        ).resolves.toBeDefined();
+      });
+
+      it('fires ONLY for creator_payout, NOT for organization_fee (even when both park)', async () => {
+        const {
+          content: c,
+          org,
+          stubStripe: ss,
+        } = await setupDisconnectedContent('orgfee-only-one-notif');
+        const mailer = vi.fn();
+        const stubFeeWithOrg = {
+          getFeesForCreator: vi.fn().mockResolvedValue({
+            platformFeePercent: 1000,
+            orgFeePercent: 1500,
+            minPlatformFeeCents: 0,
+            minTransferCents: 0,
+          }),
+        };
+        const svc = new PurchaseService(
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          {
+            db,
+            environment: 'test',
+            feeConfig: stubFeeWithOrg as any,
+            mailer,
+          } as any,
+          ss
+        );
+
+        const chargeId = `ch_wp10_orgfee_${Date.now()}`;
+        await svc.completePurchase(`pi_wp10_orgfee_${Date.now()}`, {
+          customerId: userId,
+          contentId: c.id,
+          organizationId: org.id,
+          amountPaidCents: 5000,
+          currency: 'gbp',
+          stripeChargeId: chargeId,
+        });
+
+        // Only ONE notification — for creator_payout only.
+        expect(mailer).toHaveBeenCalledOnce();
+        expect(mailer.mock.calls[0][0].templateName).toBe(
+          'creator-connect-needed'
+        );
+      });
+
+      it('swallows mailer throw — purchase still completes', async () => {
+        const {
+          content: c,
+          org,
+          stubStripe: ss,
+        } = await setupDisconnectedContent('mailer-throws');
+        const throwingMailer = vi.fn().mockImplementation(() => {
+          throw new Error('smtp down');
+        });
+        const svc = new PurchaseService(
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          { db, environment: 'test', mailer: throwingMailer } as any,
+          ss
+        );
+
+        const chargeId = `ch_wp10_throw_${Date.now()}`;
+        await expect(
+          svc.completePurchase(`pi_wp10_throw_${Date.now()}`, {
+            customerId: userId,
+            contentId: c.id,
+            organizationId: org.id,
+            amountPaidCents: 5000,
+            currency: 'gbp',
+            stripeChargeId: chargeId,
+          })
+        ).resolves.toBeDefined();
+      });
+
+      it('does NOT re-fire on idempotent replay (purchase already processed)', async () => {
+        const {
+          content: c,
+          org,
+          stubStripe: ss,
+        } = await setupDisconnectedContent('idempotent');
+        const mailer = vi.fn();
+        const svc = new PurchaseService(
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          { db, environment: 'test', mailer } as any,
+          ss
+        );
+
+        const piId = `pi_wp10_idem_${Date.now()}`;
+        const chargeId = `ch_wp10_idem_${Date.now()}`;
+        const meta = {
+          customerId: userId,
+          contentId: c.id,
+          organizationId: org.id,
+          amountPaidCents: 5000,
+          currency: 'gbp',
+          stripeChargeId: chargeId,
+        };
+
+        // First call — purchase + payout rows created, notification fires.
+        await svc.completePurchase(piId, meta);
+        expect(mailer).toHaveBeenCalledOnce();
+        mailer.mockClear();
+
+        // Second call — completePurchase returns early (idempotent on PI).
+        // No payout insert → no notification.
+        await svc.completePurchase(piId, meta);
+        expect(mailer).not.toHaveBeenCalled();
+      });
+    });
+    // ─── end WP-10 creator-connect-needed notification ────────────────────────
+
     it('schema rejects paid rows with neither stripe_transfer_id nor stripe_charge_id', async () => {
       // Try to insert a paid row that satisfies neither side of the
       // check_payouts_paid_invariant OR clause. The DB MUST reject it.

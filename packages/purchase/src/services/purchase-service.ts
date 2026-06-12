@@ -115,15 +115,43 @@ import {
 } from './revenue-calculator';
 
 /**
+ * Fire-and-forget email dispatch used by the purchase payout path.
+ *
+ * Matches the shape of `SendEmailToWorkerParams` from `@codex/worker-utils`
+ * so the registry can wire `sendEmailToWorker(env, ctx, params)` directly.
+ * Returns `void` — failures are the mailer's concern. The purchase money
+ * path MUST NOT block or throw on notification failure.
+ */
+export type PurchaseMailer = (params: {
+  to: string;
+  toName?: string;
+  templateName: 'creator-connect-needed';
+  category: 'transactional';
+  userId?: string;
+  organizationId?: string | null;
+  data: Record<string, string | number | boolean>;
+}) => void;
+
+/**
  * Configuration for `PurchaseService`.
  *
  * Adds optional `feeConfig` (Codex-m644n) so the one-off purchase flow can
  * resolve DB-configurable fees via the 3-tier fallback chain. When absent,
  * the service uses the `DEFAULT_*` constants — bit-for-bit pre-Codex-m644n
  * behaviour (covered by existing tests).
+ *
+ * Adds optional `mailer` (WP-10 — Codex-69t7c.10): when wired, fires a
+ * `creator-connect-needed` notification fire-and-forget after a pending
+ * `creator_payout` row is parked. Notification failure MUST NOT block or
+ * roll back the payout ledger write.
+ *
+ * Adds optional `webAppUrl` to build the dashboard deep-link embedded in
+ * payout notifications. When absent the URL is omitted gracefully.
  */
 interface PurchaseServiceConfig extends ServiceConfig {
   feeConfig?: FeeConfigService;
+  mailer?: PurchaseMailer;
+  webAppUrl?: string;
 }
 
 /**
@@ -186,17 +214,21 @@ function coercePurchaseStatus(s: string): PurchaseListStatus {
 export class PurchaseService extends BaseService {
   private readonly stripe: Stripe;
   private readonly feeConfig: FeeConfigService | undefined;
+  private readonly mailer: PurchaseMailer | undefined;
+  private readonly webAppUrl: string | undefined;
 
   /**
    * Initialize purchase service
    *
-   * @param config - Service configuration (db, environment, optional feeConfig)
+   * @param config - Service configuration (db, environment, optional feeConfig, optional mailer)
    * @param stripe - Stripe client instance
    */
   constructor(config: PurchaseServiceConfig, stripe: Stripe) {
     super(config);
     this.stripe = stripe;
     this.feeConfig = config.feeConfig;
+    this.mailer = config.mailer;
+    this.webAppUrl = config.webAppUrl;
   }
 
   /**
@@ -913,6 +945,24 @@ export class PurchaseService extends BaseService {
             .limit(1)
         : [undefined];
 
+    // WP-10 (Codex-69t7c.10): resolve creator email for connect-needed
+    // notification. Only fetched when we will attempt a creator_payout and
+    // the Connect account is not ready — avoids a DB round-trip on the hot
+    // paid path. Null is safe: notification is best-effort.
+    let creatorEmail: string | null = null;
+    if (
+      revenueSplit.creatorPayoutCents > 0 &&
+      !creatorConnect?.chargesEnabled &&
+      this.mailer
+    ) {
+      const [creatorRow] = await this.db
+        .select({ email: users.email })
+        .from(users)
+        .where(eq(users.id, creatorId))
+        .limit(1);
+      creatorEmail = creatorRow?.email ?? null;
+    }
+
     // Codex-sec7i: org slice routes to the pinned Connect account.
     // Codex-69t7c WP5: only resolve when there IS an org — orgless purchases
     // never carve an org slice (organizationFeeCents is forced to 0 upstream),
@@ -935,6 +985,7 @@ export class PurchaseService extends BaseService {
         transferGroup,
         idempotencyKey: `${stripeChargeId}_creator`,
         now,
+        creatorEmail,
       });
     }
 
@@ -1035,6 +1086,8 @@ export class PurchaseService extends BaseService {
     transferGroup: string;
     idempotencyKey: string;
     now: Date;
+    /** WP-10: creator email for connect-needed notification (creator_payout only). */
+    creatorEmail?: string | null;
   }): Promise<void> {
     const {
       purchase,
@@ -1047,9 +1100,13 @@ export class PurchaseService extends BaseService {
       transferGroup,
       idempotencyKey,
       now,
+      creatorEmail,
     } = params;
 
     if (!connect?.chargesEnabled) {
+      // Track whether the ledger row was freshly inserted so the notification
+      // is not re-fired on idempotent replay (webhook redelivery).
+      let freshInsert = false;
       try {
         await this.db.insert(payouts).values({
           userId: rowUserId,
@@ -1063,6 +1120,7 @@ export class PurchaseService extends BaseService {
           stripeChargeId,
           transferGroup,
         });
+        freshInsert = true;
       } catch (err) {
         if (!isUniqueViolation(err)) {
           this.obs.error(
@@ -1079,7 +1137,51 @@ export class PurchaseService extends BaseService {
             }
           );
         }
+        // freshInsert stays false for two distinct cases:
+        // 1. isUniqueViolation: idempotent replay — row already exists (skip notification).
+        // 2. Other insert error: insert failed for a non-dup reason (also skip notification).
+        // Both leave freshInsert=false and correctly suppress the mailer.
       }
+
+      // WP-10 (Codex-69t7c.10): fire creator-connect-needed notification
+      // fire-and-forget AFTER the ledger write. Only fires on FRESH insert
+      // (idempotency: if the row already existed this was a replay, not a new
+      // park). Only for creator_payout rows (not organization_fee). Failure is
+      // swallowed — a notification miss must NEVER block or reverse the payout.
+      if (
+        freshInsert &&
+        payoutType === 'creator_payout' &&
+        creatorEmail &&
+        rowUserId &&
+        this.mailer
+      ) {
+        try {
+          const amountFormatted = `£${(amountCents / 100).toFixed(2)}`;
+          const dashboardUrl = this.webAppUrl
+            ? `${this.webAppUrl}/studio/earnings`
+            : '/studio/earnings';
+          void this.mailer({
+            to: creatorEmail,
+            templateName: 'creator-connect-needed',
+            category: 'transactional',
+            userId: rowUserId,
+            organizationId,
+            data: {
+              creatorName: creatorEmail, // fallback; template can resolve display name
+              amountFormatted,
+              dashboardUrl,
+            },
+          });
+        } catch (err) {
+          // Swallow — notification failure must not surface in the payout path.
+          this.obs.warn('creator-connect-needed notification dispatch failed', {
+            purchaseId: purchase.id,
+            organizationId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
       return;
     }
 

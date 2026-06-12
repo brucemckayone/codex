@@ -1101,6 +1101,7 @@
   "library_filter_group_access": "Access",
   "library_filter_group_progress": "Progress",
   "library_filter_group_type": "Type",
+
   "earnings_page_title": "Earnings & Payouts",
   "earnings_page_subtitle": "Your creator earnings across all organisations",
   "earnings_connect_not_started_title": "Set up payouts",
@@ -1148,5 +1149,9 @@
   "earnings_kpi_load_error": "Could not load earnings data.",
   "earnings_kpi_retry": "Retry",
   "earnings_payouts_load_error": "Could not load payout history.",
-  "earnings_payouts_retry": "Retry"
+  "earnings_payouts_retry": "Retry",
+  "email_creator_connect_needed_subject": "Action required: connect Stripe to receive your payout",
+  "email_creator_connect_needed_body": "A payout is waiting for you. Connect your Stripe account to receive it.",
+  "email_payout_released_subject": "Your payout is on its way",
+  "email_payout_released_body": "Your pending earnings have been transferred to your Stripe account."
 }

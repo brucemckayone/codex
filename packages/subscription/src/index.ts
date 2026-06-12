@@ -89,7 +89,10 @@ export type {
   WebhookEmailPayload,
   WebhookHandlerResult,
 } from './services/subscription-service';
-export { SubscriptionService } from './services/subscription-service';
+export {
+  type PayoutReleasedMailer,
+  SubscriptionService,
+} from './services/subscription-service';
 export {
   type TierPricePropagator,
   TierService,

@@ -551,6 +551,14 @@ interface SubscriptionServiceConfig extends ServiceConfig {
    * back to the `FEES.*` constants — bit-for-bit pre-Codex-m644n behaviour.
    */
   feeConfig?: FeeConfigService;
+  /**
+   * Optional mailer thunk used by `resolvePendingPayouts` (WP-10 —
+   * Codex-69t7c.10) to fire a `payout-released` notification after pending
+   * payouts transition to paid. Same pattern as `mailer` — the service stays
+   * unaware of Bindings / ExecutionContext. When absent the notification is
+   * silently skipped; the payout still succeeds.
+   */
+  payoutMailer?: PayoutReleasedMailer;
 }
 
 /**
@@ -564,6 +572,22 @@ type TierPriceChangeMailer = (params: {
   to: string;
   toName?: string;
   templateName: 'subscription-tier-price-change';
+  category: 'transactional';
+  userId?: string;
+  organizationId?: string | null;
+  data: Record<string, string | number | boolean>;
+}) => void;
+
+/**
+ * Fire-and-forget email dispatch used by the payout-released notification
+ * (WP-10 — Codex-69t7c.10). Fires after pending payouts transition to paid
+ * in `resolvePendingPayouts`. Same pattern as `TierPriceChangeMailer` — the
+ * service stays unaware of Bindings / ExecutionContext.
+ */
+export type PayoutReleasedMailer = (params: {
+  to: string;
+  toName?: string;
+  templateName: 'payout-released';
   category: 'transactional';
   userId?: string;
   organizationId?: string | null;
@@ -592,6 +616,7 @@ export class SubscriptionService extends BaseService {
   private readonly cache: VersionedCache | undefined;
   private readonly waitUntil: WaitUntilFn | undefined;
   private readonly mailer: TierPriceChangeMailer | undefined;
+  private readonly payoutMailer: PayoutReleasedMailer | undefined;
   private readonly webAppUrl: string | undefined;
   private readonly feeConfig: FeeConfigService | undefined;
 
@@ -601,6 +626,7 @@ export class SubscriptionService extends BaseService {
     this.cache = config.cache;
     this.waitUntil = config.waitUntil;
     this.mailer = config.mailer;
+    this.payoutMailer = config.payoutMailer;
     this.webAppUrl = config.webAppUrl;
     this.feeConfig = config.feeConfig;
   }
@@ -3611,6 +3637,68 @@ export class SubscriptionService extends BaseService {
       failed,
       total: unresolvedPayouts.length,
     });
+
+    // WP-10 (Codex-69t7c.10): fire payout-released notification when at least
+    // one creator_payout transitioned pending→paid. Fires ONCE per
+    // resolvePendingPayouts invocation (one notification per activation event,
+    // not per-row). Fire-and-forget post-loop — notification failure MUST NOT
+    // roll back or block the already-committed transfers.
+    //
+    // Gate on creator_payout rows ONLY — organization_fee rows are the org
+    // admin's slice, not the creator's personal earnings. The `resolved`
+    // counter above covers all payout types; we accumulate a separate creator-
+    // only counter from the pre-loop snapshot so the email amount matches what
+    // was actually transferred to the creator.
+    const resolvedCreatorPayoutCents = unresolvedPayouts
+      .filter(
+        (p) =>
+          p.userId === connectAccount.userId &&
+          p.payoutType === 'creator_payout'
+      )
+      .reduce((sum, p) => sum + p.amountCents, 0);
+    const resolvedCreatorPayouts = unresolvedPayouts.filter(
+      (p) =>
+        p.userId === connectAccount.userId && p.payoutType === 'creator_payout'
+    ).length;
+
+    if (resolvedCreatorPayouts > 0 && this.payoutMailer) {
+      try {
+        const [creatorRow] = await this.db
+          .select({ email: users.email })
+          .from(users)
+          .where(eq(users.id, connectAccount.userId))
+          .limit(1);
+
+        if (creatorRow?.email) {
+          const amountFormatted = `£${(resolvedCreatorPayoutCents / 100).toFixed(2)}`;
+          const dashboardUrl = this.webAppUrl
+            ? `${this.webAppUrl}/studio/earnings`
+            : '/studio/earnings';
+
+          void this.payoutMailer({
+            to: creatorRow.email,
+            templateName: 'payout-released',
+            category: 'transactional',
+            userId: connectAccount.userId,
+            organizationId: orgId,
+            data: {
+              creatorName: creatorRow.email, // fallback; template can resolve display name
+              amountFormatted,
+              payoutCount: resolvedCreatorPayouts,
+              dashboardUrl,
+            },
+          });
+        }
+      } catch (err) {
+        // Swallow — notification failure must not surface after committed transfers.
+        this.obs.warn('payout-released notification dispatch failed', {
+          organizationId: orgId,
+          stripeAccountId,
+          resolvedCreatorPayouts,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
 
     return { resolved, failed };
   }

@@ -114,15 +114,22 @@ test.describe('Studio Stripe Connect Onboarding', () => {
       timeout: 30_000,
     });
 
-    // Wait for client-side queries (getConnectStatus) to settle. The
-    // connect status badge is rendered inside a Skeleton until the query
-    // resolves; the actual status badge has the localised label.
-    await expect(page.locator('text=/Not connected/i').first()).toBeVisible({
-      timeout: 20_000,
-    });
+    // Wait for client-side queries (getConnectStatus) to settle. Use the
+    // data-testid attribute (Codex-23f89 fix) instead of text matching — the
+    // badge text is i18n-driven and can break on message-key renames. The
+    // data-connect-status attribute carries the canonical status value.
+    await expect(
+      page.locator('[data-testid="connect-status-badge"]')
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(
+      page.locator(
+        '[data-testid="connect-status-badge"][data-connect-status="not_connected"]'
+      )
+    ).toBeVisible({ timeout: 5_000 });
 
-    // CTA: "Connect Stripe Account" (matches monetisation_connect_start label).
-    const cta = page.getByRole('button', { name: /Connect Stripe Account/i });
+    // CTA: use data-testid (Codex-23f89 fix) — role+name selector stays as
+    // defence-in-depth since the button text is stable English copy.
+    const cta = page.locator('[data-testid="connect-stripe-btn"]');
     await expect(cta).toBeVisible();
     await expect(cta).toBeEnabled();
   });
@@ -139,7 +146,7 @@ test.describe('Studio Stripe Connect Onboarding', () => {
       timeout: 30_000,
     });
 
-    const cta = page.getByRole('button', { name: /Connect Stripe Account/i });
+    const cta = page.locator('[data-testid="connect-stripe-btn"]');
     await expect(cta).toBeVisible({ timeout: 20_000 });
 
     // Block the actual redirect to Stripe so the test doesn't navigate into
