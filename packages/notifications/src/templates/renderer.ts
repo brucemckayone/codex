@@ -259,6 +259,15 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
     'actionRequired',
     'dashboardUrl',
   ],
+  // Payout notifications (WP-10 — Codex-69t7c.10)
+  // Transactional: these touch billing state and must always be delivered.
+  'creator-connect-needed': ['creatorName', 'amountFormatted', 'dashboardUrl'],
+  'payout-released': [
+    'creatorName',
+    'amountFormatted',
+    'payoutCount',
+    'dashboardUrl',
+  ],
 
   // Engagement
   'new-content-published': [
@@ -377,6 +386,9 @@ const TRANSACTIONAL_TEMPLATES = new Set([
   'transcoding-complete',
   'transcoding-failed',
   'connect-account-status',
+  // Payout notifications (WP-10 — Codex-69t7c.10): touch billing state.
+  'creator-connect-needed',
+  'payout-released',
   // Revenue-share agreements (WP-5 — Codex-90de9): commercial contract,
   // not marketable.
   'agreement-proposed-by-owner',

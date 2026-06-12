@@ -8113,6 +8113,245 @@ describe('SubscriptionService', () => {
       ).toBeDefined();
       expect(legacyCall![0]).not.toHaveProperty('source_transaction');
     });
+
+    // ─── WP-10 (Codex-69t7c.10): payout-released notification ─────────────────
+    describe('payout-released notification (WP-10)', () => {
+      /**
+       * Build a SubscriptionService with a mock `payoutMailer` injected.
+       */
+      function buildServiceWithPayoutMailer() {
+        const payoutMailer = vi.fn();
+        const serviceWithMailer = new SubscriptionService(
+          {
+            db,
+            environment: 'test' as const,
+            payoutMailer,
+          },
+          stripe
+        );
+        return { serviceWithMailer, payoutMailer };
+      }
+
+      it('fires payout-released once when payouts transition pending→paid', async () => {
+        const { org, sub, stripeAccountId } =
+          await seedConnectAndSubscription('wp10-notif-fires');
+
+        await db.insert(payoutsTable).values([
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 1500,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
+          },
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 800,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
+          },
+        ]);
+
+        const transferSpy = vi.mocked(stripe.transfers.create);
+        transferSpy.mockClear();
+
+        const { serviceWithMailer, payoutMailer } =
+          buildServiceWithPayoutMailer();
+
+        const result = await serviceWithMailer.resolvePendingPayouts(
+          org.id,
+          stripeAccountId
+        );
+
+        expect(result.resolved).toBe(2);
+        // Notification fires ONCE (not per-row)
+        expect(payoutMailer).toHaveBeenCalledOnce();
+        const [params] = payoutMailer.mock.calls[0];
+        expect(params.templateName).toBe('payout-released');
+        expect(params.category).toBe('transactional');
+        expect(params.data.payoutCount).toBe(2);
+        expect(params.data.amountFormatted).toMatch(/£/);
+        expect(params.data.dashboardUrl).toMatch(/earnings/);
+      });
+
+      it('does NOT fire when resolved === 0 (no payouts drained)', async () => {
+        const { org, stripeAccountId } = await seedConnectAndSubscription(
+          'wp10-notif-no-payouts'
+        );
+
+        // No pending rows seeded — nothing to resolve.
+        const { serviceWithMailer, payoutMailer } =
+          buildServiceWithPayoutMailer();
+
+        await serviceWithMailer.resolvePendingPayouts(org.id, stripeAccountId);
+
+        expect(payoutMailer).not.toHaveBeenCalled();
+      });
+
+      it('does NOT fire when payoutMailer is not injected (graceful degrade)', async () => {
+        const { org, sub, stripeAccountId } = await seedConnectAndSubscription(
+          'wp10-notif-no-mailer'
+        );
+
+        await db.insert(payoutsTable).values({
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 900,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        });
+
+        const transferSpy = vi.mocked(stripe.transfers.create);
+        transferSpy.mockClear();
+
+        // Use the default `service` (no payoutMailer injected).
+        const result = await service.resolvePendingPayouts(
+          org.id,
+          stripeAccountId
+        );
+
+        // Payout must still succeed even without mailer.
+        expect(result.resolved).toBe(1);
+        // No mailer call since it wasn't injected.
+      });
+
+      it('swallows notification failure — payout result is unaffected', async () => {
+        const { org, sub, stripeAccountId } =
+          await seedConnectAndSubscription('wp10-notif-throw');
+
+        await db.insert(payoutsTable).values({
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 600,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'creator_payout',
+        });
+
+        const transferSpy = vi.mocked(stripe.transfers.create);
+        transferSpy.mockClear();
+
+        const throwingMailer = vi.fn().mockImplementation(() => {
+          throw new Error('network down');
+        });
+        const serviceWithThrowingMailer = new SubscriptionService(
+          { db, environment: 'test' as const, payoutMailer: throwingMailer },
+          stripe
+        );
+
+        // Must NOT throw even if the mailer explodes.
+        const result = await serviceWithThrowingMailer.resolvePendingPayouts(
+          org.id,
+          stripeAccountId
+        );
+
+        expect(result.resolved).toBe(1);
+      });
+
+      it('fires with creator_payout amount ONLY when org_fee rows also exist (FIX 1 regression guard)', async () => {
+        // Regression guard for PR #281 FIX 1: the pre-fix code used
+        // `unresolvedPayouts.filter(userId).reduce(amountCents)` which
+        // included organization_fee rows, inflating the email amount.
+        // This test seeds both types and asserts the email shows ONLY
+        // the creator_payout sum.
+        const { org, sub, stripeAccountId } = await seedConnectAndSubscription(
+          'wp10-notif-org-fee-mix'
+        );
+
+        await db.insert(payoutsTable).values([
+          {
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 1200,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'creator_payout',
+          },
+          {
+            // organization_fee row attributed to the same userId (org owner).
+            // Must NOT be included in the notification amount.
+            userId: creatorId,
+            organizationId: org.id,
+            subscriptionId: sub.id,
+            amountCents: 500,
+            currency: 'gbp',
+            reason: 'connect_not_ready',
+            status: 'pending',
+            payoutType: 'organization_fee',
+          },
+        ]);
+
+        const transferSpy = vi.mocked(stripe.transfers.create);
+        transferSpy.mockClear();
+
+        const { serviceWithMailer, payoutMailer } =
+          buildServiceWithPayoutMailer();
+
+        const result = await serviceWithMailer.resolvePendingPayouts(
+          org.id,
+          stripeAccountId
+        );
+
+        // Both rows resolve (resolved includes all types).
+        expect(result.resolved).toBe(2);
+        // Notification fires once.
+        expect(payoutMailer).toHaveBeenCalledOnce();
+        const [params] = payoutMailer.mock.calls[0];
+        expect(params.templateName).toBe('payout-released');
+        // Amount = creator_payout ONLY (1200 pence = £12.00), NOT 1700 (1200+500).
+        expect(params.data.amountFormatted).toBe('£12.00');
+        expect(params.data.payoutCount).toBe(1); // 1 creator_payout row only
+      });
+
+      it('does NOT fire when ONLY organization_fee rows resolve (no creator_payout)', async () => {
+        // If a Connect-account activation drains only org_fee rows (no
+        // creator_payout rows), the creator notification must NOT fire.
+        const { org, sub, stripeAccountId } = await seedConnectAndSubscription(
+          'wp10-notif-org-fee-only'
+        );
+
+        await db.insert(payoutsTable).values({
+          userId: creatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 750,
+          currency: 'gbp',
+          reason: 'connect_not_ready',
+          status: 'pending',
+          payoutType: 'organization_fee',
+        });
+
+        const transferSpy = vi.mocked(stripe.transfers.create);
+        transferSpy.mockClear();
+
+        const { serviceWithMailer, payoutMailer } =
+          buildServiceWithPayoutMailer();
+
+        const result = await serviceWithMailer.resolvePendingPayouts(
+          org.id,
+          stripeAccountId
+        );
+
+        expect(result.resolved).toBe(1);
+        // No creator_payout rows — notification must NOT fire.
+        expect(payoutMailer).not.toHaveBeenCalled();
+      });
+    });
+    // ─── end WP-10 payout-released notification ───────────────────────────────
   });
 
   // ─── Orgless (bi-party) pending payout drain (Codex-69t7c WP5) ──────────────

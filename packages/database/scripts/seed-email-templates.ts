@@ -342,6 +342,28 @@ If you have any questions, please contact our support team at {{supportEmail}}.
     description:
       'Sent to creator when their Stripe Connect account status changes',
   },
+  // ============ Payout Notifications (WP-10 — Codex-69t7c.10) ============
+  {
+    name: 'creator-connect-needed',
+    scope: 'global' as const,
+    subject:
+      'Action required: connect Stripe to receive your payout of {{amountFormatted}}',
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}.details{background:#fefce8;padding:20px;border-radius:8px;margin:20px 0;border:1px solid #fef08a}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>Connect Stripe to receive your payout</h1><p>Hi {{creatorName}},</p><p>A payout of <strong>{{amountFormatted}}</strong> is waiting for you, but you haven't connected a Stripe account yet.</p><div class="details"><p style="margin:5px 0;">Your earnings are held safely and will be released the moment you connect your Stripe account and it is approved.</p></div><p>Connect your Stripe account from your Earnings dashboard to receive this payout.</p><p style="text-align:center;margin:30px 0;"><a href="{{dashboardUrl}}" class="button" style="color:white;">Connect Stripe Account</a></p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>`,
+    textBody: `Hi {{creatorName}},\n\nA payout of {{amountFormatted}} is waiting for you, but you haven't connected a Stripe account yet.\n\nYour earnings are held safely and will be released the moment you connect your Stripe account and it is approved.\n\nConnect your Stripe account from your Earnings dashboard:\n{{dashboardUrl}}\n\n{{platformName}}`,
+    status: 'active' as const,
+    description:
+      'Sent to a creator when a payout is parked as pending because they have no Connect account (WP-10).',
+  },
+  {
+    name: 'payout-released',
+    scope: 'global' as const,
+    subject: 'Your payout of {{amountFormatted}} is on its way',
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}.details{background:#f0fdf4;padding:20px;border-radius:8px;margin:20px 0;border:1px solid #bbf7d0}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>Your payout is on its way!</h1><p>Hi {{creatorName}},</p><p>Great news — your pending earnings have been transferred to your Stripe account.</p><div class="details"><p style="margin:5px 0;"><strong>Total transferred:</strong> {{amountFormatted}}</p><p style="margin:5px 0;"><strong>Payouts released:</strong> {{payoutCount}}</p></div><p>Funds typically appear in your bank account within 2 business days depending on your Stripe payout schedule.</p><p style="text-align:center;margin:30px 0;"><a href="{{dashboardUrl}}" class="button" style="color:white;">View Earnings</a></p><div class="footer"><p>{{platformName}} - <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p></div></div></body></html>`,
+    textBody: `Hi {{creatorName}},\n\nGreat news — your pending earnings have been transferred to your Stripe account.\n\nTotal transferred: {{amountFormatted}}\nPayouts released: {{payoutCount}}\n\nFunds typically appear in your bank account within 2 business days depending on your Stripe payout schedule.\n\nView your earnings:\n{{dashboardUrl}}\n\n{{platformName}}`,
+    status: 'active' as const,
+    description:
+      'Sent to a creator when pending payouts transition to paid after Connect activation (WP-10).',
+  },
   // ============ Engagement (P3) ============
   {
     name: 'new-content-published',

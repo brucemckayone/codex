@@ -1117,5 +1117,10 @@
   "explore_sort_heading": "Sort by",
   "library_filter_group_access": "Access",
   "library_filter_group_progress": "Progress",
-  "library_filter_group_type": "Type"
+  "library_filter_group_type": "Type",
+
+  "email_creator_connect_needed_subject": "Action required: connect Stripe to receive your payout",
+  "email_creator_connect_needed_body": "A payout is waiting for you. Connect your Stripe account to receive it.",
+  "email_payout_released_subject": "Your payout is on its way",
+  "email_payout_released_body": "Your pending earnings have been transferred to your Stripe account."
 }

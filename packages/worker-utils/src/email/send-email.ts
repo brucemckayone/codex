@@ -39,9 +39,14 @@ export function sendEmailToWorker(
 
   executionCtx.waitUntil(
     workerFetch(url, { method: 'POST', body }, env.WORKER_SHARED_SECRET).catch(
-      () => {
-        // Silently swallow -- email failures must not break calling worker.
-        // The notifications-api audit log captures failures on its side.
+      (err: unknown) => {
+        // Log transport failures so CF Workers logs capture them. Email
+        // failures must not break the calling worker — behaviour unchanged.
+        console.error('[sendEmailToWorker] transport failed', {
+          templateName: params.templateName,
+          to: params.to,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     )
   );
