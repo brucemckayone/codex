@@ -576,6 +576,90 @@ describe('Content Schemas', () => {
       ).not.toThrow();
     });
   });
+
+  describe('orgless content cannot be tier-gated (Codex-up7bx)', () => {
+    // subscription_tiers is org-scoped; a tier on content with no
+    // organizationId is a semantically invalid row the access layer must
+    // fail closed on. The write schema rejects it outright.
+    const tierUuid = '123e4567-e89b-12d3-a456-426614174000';
+    const orgUuid = '223e4567-e89b-12d3-a456-426614174000';
+    const mediaUuid = '323e4567-e89b-12d3-a456-426614174000';
+
+    const orglessBase = {
+      title: 'T',
+      slug: 'orgless-test',
+      contentType: 'video' as const,
+      mediaItemId: mediaUuid,
+    };
+
+    it('rejects orgless paid content with a tier (hybrid mode needs an org)', () => {
+      expect(() =>
+        createContentSchema.parse({
+          ...orglessBase,
+          accessType: 'paid',
+          priceCents: 1000,
+          minimumTierId: tierUuid,
+          // organizationId intentionally absent
+        })
+      ).toThrow(/orgless content cannot be tier-gated/i);
+    });
+
+    it('rejects orgless paid content with an explicitly-null org and a tier', () => {
+      expect(() =>
+        createContentSchema.parse({
+          ...orglessBase,
+          accessType: 'paid',
+          priceCents: 1000,
+          minimumTierId: tierUuid,
+          organizationId: null,
+        })
+      ).toThrow(/orgless content cannot be tier-gated/i);
+    });
+
+    it('accepts org-scoped paid content with a tier (the legitimate counterpart)', () => {
+      expect(() =>
+        createContentSchema.parse({
+          ...orglessBase,
+          accessType: 'paid',
+          priceCents: 1000,
+          minimumTierId: tierUuid,
+          organizationId: orgUuid,
+        })
+      ).not.toThrow();
+    });
+
+    it('accepts orgless content with NO tier (unchanged)', () => {
+      expect(() =>
+        createContentSchema.parse({
+          ...orglessBase,
+          accessType: 'free',
+        })
+      ).not.toThrow();
+    });
+
+    it('rejects a partial update that sets a tier while clearing the org', () => {
+      expect(() =>
+        updateContentSchema.parse({
+          accessType: 'paid',
+          priceCents: 1000,
+          minimumTierId: tierUuid,
+          organizationId: null,
+        })
+      ).toThrow(/orgless content cannot be tier-gated/i);
+    });
+
+    it('defers the tier-without-org case to the service when org is omitted from the update', () => {
+      // organizationId absent → schema can't reason about the existing row;
+      // ContentService.update() applies the defensive clamp.
+      expect(() =>
+        updateContentSchema.parse({
+          accessType: 'paid',
+          priceCents: 1000,
+          minimumTierId: tierUuid,
+        })
+      ).not.toThrow();
+    });
+  });
 });
 
 describe('Query Schemas', () => {

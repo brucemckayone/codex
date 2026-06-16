@@ -19,10 +19,16 @@
  * - No cleanup needed - fresh database for this file
  */
 
-import { mediaItems, organizations } from '@codex/database/schema';
+import {
+  content,
+  mediaItems,
+  organizations,
+  subscriptionTiers,
+} from '@codex/database/schema';
 import {
   createTestMediaItemInput,
   createTestOrganizationInput,
+  createTestTierInput,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -223,6 +229,90 @@ describe('ContentService', () => {
 
         // Assert
         expect(result.organizationId).toBeNull();
+      });
+
+      it('rejects orgless content with a minimumTierId set (Codex-up7bx)', async () => {
+        // subscription_tiers is org-scoped, so a tier on orgless content is
+        // a semantically invalid row. The write schema rejects it at create().
+        const [media] = await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning();
+
+        const input = {
+          title: 'Orgless Tier Content',
+          slug: createUniqueSlug('orgless-tier'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'public',
+          accessType: 'paid',
+          priceCents: 1000,
+          // no organizationId
+          minimumTierId: '123e4567-e89b-12d3-a456-426614174000',
+          tags: [],
+        } as unknown as CreateContentInput;
+
+        await expect(service.create(input, creatorId)).rejects.toThrow(
+          /orgless content cannot be tier-gated/i
+        );
+      });
+
+      it('clears a lingering tier when content is updated to be orgless (Codex-up7bx)', async () => {
+        // Seed org-scoped subscriber content WITH a real tier, then move it
+        // out of the org via update. The service must clamp the now-dangling
+        // tier to null so the access layer never has to fail closed on it.
+        const [org] = await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning();
+
+        const [tier] = await db
+          .insert(subscriptionTiers)
+          .values(createTestTierInput(org.id, { sortOrder: 1 }))
+          .returning();
+
+        const [media] = await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning();
+
+        // Insert a valid org-scoped tier-gated row directly (bypasses the
+        // create schema, mirroring how legitimate subscriber content lands).
+        const [seeded] = await db
+          .insert(content)
+          .values({
+            creatorId,
+            organizationId: org.id,
+            mediaItemId: media.id,
+            title: 'Org Tier Content',
+            slug: createUniqueSlug('org-tier'),
+            contentType: 'video',
+            accessType: 'subscribers',
+            minimumTierId: tier.id,
+            status: 'draft',
+          })
+          .returning();
+
+        // Update to orgless WITHOUT touching minimumTierId in the payload —
+        // the schema can't reason here; the service clamp must clear the tier.
+        const updated = await service.update(
+          seeded.id,
+          { organizationId: null },
+          creatorId
+        );
+
+        expect(updated.organizationId).toBeNull();
+        expect(updated.minimumTierId).toBeNull();
       });
 
       it('should create content with tags and category', async () => {
