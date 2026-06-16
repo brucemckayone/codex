@@ -107,15 +107,15 @@
       "kv_namespaces": [
         {
           "binding": "RATE_LIMIT_KV",
-          "id": "cea7153364974737b16870df08f31083"
+          "id": "06b7205ce78042ca9cad7b7e582ddf21"
         },
         {
           "binding": "AUTH_SESSION_KV",
-          "id": "82d04a4236df4aac8e9d87793344f0ed"
+          "id": "aab4025dcb5c44ad8d1156bcfda055d2"
         },
         {
           "binding": "CACHE_KV",
-          "id": "c5e85d4c8ecb46f9a3e5d4d96a14e9f1"
+          "id": "499d67770dc2405ab80cba5629b16511"
         }
       ],
       "r2_buckets": [
