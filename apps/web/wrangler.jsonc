@@ -57,6 +57,12 @@
       "vars": {
         "ENVIRONMENT": "production"
       },
+      "kv_namespaces": [
+        {
+          "binding": "CACHE_KV",
+          "id": "499d67770dc2405ab80cba5629b16511"
+        }
+      ],
       "routes": [
         // Specific routes first (for priority)
         {
