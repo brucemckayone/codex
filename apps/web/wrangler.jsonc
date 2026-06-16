@@ -143,8 +143,8 @@
     // Note: Preview configs are generated dynamically
   }
 
-  // Note: Secrets to be set via wrangler CLI or CI/CD:
-  // - DATABASE_URL
-  // - SESSION_SECRET
-  // - PUBLIC_APP_URL
+  // Note: Runtime secret set via wrangler CLI / CI-CD:
+  // - DATABASE_URL — SSR reads platform.env.DATABASE_URL
+  // PUBLIC_APP_URL is a build-time var (set in the deploy workflow build step).
+  // No SESSION_SECRET: the web app validates sessions via the auth worker, not locally.
 }
