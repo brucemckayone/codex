@@ -58,10 +58,6 @@ Two distinct HMAC mechanisms — do not confuse them:
 | `WORKER_SHARED_SECRET` | Yes | HMAC secret for worker-to-worker auth |
 | `RATE_LIMIT_KV` | Yes | Rate limiting |
 | `AUTH_SESSION_KV` | Yes | Session auth (KV check on startup) |
-| `B2_ENDPOINT` | Yes | Backblaze B2 endpoint (media storage) |
-| `B2_KEY_ID` | Yes | B2 application key ID |
-| `B2_APP_KEY` | Yes | B2 application key |
-| `B2_BUCKET` | Yes | B2 bucket name |
 | `ORPHAN_CLEANUP_DO` | No | Durable Object namespace for cleanup DO |
 | `ENVIRONMENT` | No | `development` / `production` |
 | `API_URL` | No | Base URL used in RunPod webhook callback config |
@@ -82,7 +78,6 @@ Two distinct HMAC mechanisms — do not confuse them:
 - **`waitUntil` for dispatch**: `triggerJobInternal` returns `{ dispatchPromise }` — the actual RunPod API call runs via `ctx.executionCtx.waitUntil(dispatchPromise)` so the HTTP response is returned before RunPod is called.
 - **Orphan cleanup DO**: Singleton instance (`idFromName('singleton')`), alarms run every hour, processes 50 orphans/run, max 3 retries per file.
 - **No database check in health**: Only KV checked on startup (`RATE_LIMIT_KV`, `AUTH_SESSION_KV`).
-- **B2 credentials** are passed to RunPod via its secret manager — they are not sent in webhook payloads.
 
 ## Reference Files
 
