@@ -288,6 +288,13 @@ async function waitForHealth(
 ): Promise<void> {
   console.log(`🔍 Waiting for ${worker.name} health check...`);
 
+  // Track the last failure detail so a timeout is diagnosable. Without this, a
+  // worker that responds-but-unhealthy (500 from a missing required env var, or
+  // 503 from a failing DB/KV sub-check) looks identical to one that never came
+  // up — which hid a chronic ecom-api /health 500 (empty STRIPE_SECRET_KEY) for
+  // days, since the suite aborts here at global setup before any test runs.
+  let lastDetail = 'no response (connection refused on every attempt)';
+
   for (let i = 0; i < maxRetries; i++) {
     try {
       const response = await fetch(worker.healthUrl);
@@ -295,6 +302,8 @@ async function waitForHealth(
         console.log(`✅ ${worker.name} health check passed`);
         return;
       }
+      const body = await response.text().catch(() => '');
+      lastDetail = `HTTP ${response.status} — ${body.slice(0, 300)}`;
     } catch (_error) {
       // Connection refused is expected while starting up
     }
@@ -303,7 +312,7 @@ async function waitForHealth(
   }
 
   throw new Error(
-    `${worker.name} health check failed after ${maxRetries} attempts`
+    `${worker.name} health check failed after ${maxRetries} attempts (last: ${lastDetail})`
   );
 }
 

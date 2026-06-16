@@ -38,8 +38,8 @@ EOF
   case "${worker}" in
     "ecom-api")
       cat >> "${VARS_FILE}" << EOF
-STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
-STRIPE_WEBHOOK_SECRET_BOOKING=${STRIPE_WEBHOOK_SECRET_BOOKING}
+STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-sk_test_ci_placeholder_do_not_use}
+STRIPE_WEBHOOK_SECRET_BOOKING=${STRIPE_WEBHOOK_SECRET_BOOKING:-whsec_ci_booking_placeholder_32_chars}
 STRIPE_WEBHOOK_SECRET_PAYMENT=${STRIPE_WEBHOOK_SECRET_PAYMENT:-whsec_ci_payment_placeholder_32_chars__}
 STRIPE_WEBHOOK_SECRET_SUBSCRIPTION=${STRIPE_WEBHOOK_SECRET_SUBSCRIPTION:-whsec_ci_subscription_placeholder_32_}
 STRIPE_WEBHOOK_SECRET_CONNECT=${STRIPE_WEBHOOK_SECRET_CONNECT:-whsec_ci_connect_placeholder_32_chars}
@@ -49,8 +49,8 @@ EOF
       ;;
     "content-api")
       cat >> "${VARS_FILE}" << EOF
-STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
-STRIPE_WEBHOOK_SECRET_BOOKING=${STRIPE_WEBHOOK_SECRET_BOOKING}
+STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-sk_test_ci_placeholder_do_not_use}
+STRIPE_WEBHOOK_SECRET_BOOKING=${STRIPE_WEBHOOK_SECRET_BOOKING:-whsec_ci_booking_placeholder_32_chars}
 R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
 R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
 R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
@@ -63,7 +63,7 @@ EOF
       # Without it, TierService throws "STRIPE_SECRET_KEY not configured"
       # and the agreement specs + several settings tests cascade-fail.
       cat >> "${VARS_FILE}" << EOF
-STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-sk_test_ci_placeholder_do_not_use}
 EOF
       ;;
     "media-api")
