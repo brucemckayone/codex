@@ -82,6 +82,15 @@ Rules:
   left no audit entry is itself a drift signal the retro flags.
 - Standalone `/codex-review` (no WP context) skips audit entries but still prints the tally header.
 - Stage names (canonical): `0 PREFLIGHT, 1 ORIENT, 2 VERIFY, 3 IMPLEMENT, 4 TEST, 5 SIMPLIFY, 6 REVIEW, 7 FALLOW, 8 REGRESSION, 9 SHIP`.
+- The SHIP gate auto-emits stage-9 (`gate.sh --wp <id>`); stages 0–8 are emitted manually (Codex-3l73h).
+
+**Git-trail cross-check (fallback, NOT a substitute substrate).** This bd-audit trail stays the
+PRIMARY data source. But Codex-69t7c shipped 11/11 WPs with zero rows (emission was skipped), so
+`audit-tally.sh` now *falls back* to the git commit topology when the trail is empty/partial: it scans
+`feat/test/…: WP-N` commits, trailing `fix(…): WP-N … review` follow-ups, and `(#PR)` merge refs, and
+appends a `git-trail:<c>c/<f>fix[/PRs]` column so a future retro is never blind. The git-trail only
+proves a WP *shipped / was reviewed / merged* — it canNOT prove the 10 gates ran. Fix the emission gap
+(above); the git-trail is a safety net, not a licence to skip `bd audit record`.
 
 ---
 

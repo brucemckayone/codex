@@ -42,7 +42,7 @@ The cycle IS the architecture. **Never skip a stage. Never batch closures.**
 | # | Rule | Why |
 |---|---|---|
 | R1 | One WP at a time through all 10 stages. Never batch. | Each gate catches a different defect class. |
-| R2 | Write a `bd audit record` entry on every stage EXIT. | This is the trail `codex-epic-retro` measures; a missing entry is a drift signal. |
+| R2 | Write a `bd audit record` entry on every stage EXIT (the §2 table's last column IS the command — run it before advancing). SHIP auto-emits stage-9 via `gate.sh --wp <id>`; stages 0–8 are manual. | This is the trail `codex-epic-retro` measures; a missing entry is a drift signal. Codex-69t7c shipped 11/11 WPs with ZERO audit rows — emission was skipped, the retro went blind (Codex-3l73h). |
 | R3 | VERIFY (stage 2) surfaces the plan and asks "what's wrong with this plan?" — not "looks good?". Redirect → back to ORIENT. | Per nmemo; catches scope drift before code. `--autonomous` skips with an `autonomous` label. |
 | R4 | `codex-review` CRITICAL/HIGH must be fixed before SHIP. `silent-failure-hunter` CRITICAL = must-fix, no litigation. | 100% real-bug rate. |
 | R5 | Branch `feat/<wp-id>-<slug>`. NEVER push to main/dev directly. Re-check `git branch --show-current` before every git op. | `feedback_agent_branch_not_main`, `feedback_main_worktree_head_shift`. |
@@ -55,20 +55,29 @@ The cycle IS the architecture. **Never skip a stage. Never batch closures.**
 
 ## §2 — The 10-stage cycle
 
-| # | Stage | Gate to advance | bd-audit on exit |
-|---|---|---|---|
-| 0 | PREFLIGHT | on `feat/<wp>` branch off a clean tree; WP is `bd ready` | `stage-0 PREFLIGHT complete` |
-| 1 | ORIENT | plan written to the WP as a bd comment; stale pointers verified; retro-scan run | `stage-1 ORIENT complete` |
-| 2 | VERIFY | user confirms the plan (or `--autonomous`) | `stage-2 VERIFY complete` |
-| 3 | IMPLEMENT | code compiles; Codex patterns followed | `stage-3 IMPLEMENT complete` |
-| 4 | TEST | `pnpm test --filter` + `typecheck` green; pos+neg for money/auth | `stage-4 TEST complete` |
-| 5 | SIMPLIFY | `/simplify` findings applied or rejected-with-reason | `stage-5 SIMPLIFY complete` |
-| 6 | REVIEW | `codex-review` no CRITICAL/HIGH left; (UI) VISUAL-VERIFY MCP gate passed | `stage-6 REVIEW complete` |
-| 7 | FALLOW | no new dead code / unused exports (verified vs `src/`) | `stage-7 FALLOW complete` |
-| 8 | REGRESSION | full affected suite green; migration applied to fresh DB if touched | `stage-8 REGRESSION complete` |
-| 9 | SHIP | `gate.sh` → `✓ ALL GATES PASSED`; worktrees clean; pushed; PR open | `stage-9 SHIP complete` |
+The **bd-audit on exit** column is a literal checklist: before you advance past a stage, run that exact
+`bd audit record` (R2). This is the only trail `codex-epic-retro` reads — a skipped row blinds the retro.
+Set `WP=<wp-id>` once at PREFLIGHT and reuse it. **Stage 9 is auto-emitted by `gate.sh --wp "$WP"`; stages 0–8 are manual.**
 
-Audit entry shape (see conventions §3):
+```bash
+WP=Codex-xxxx.N   # set once; every audit row below uses it
+audit() { bd audit record --kind=tool_call --issue-id="$WP" --tool-name=codex-epic-implement --prompt="$1"; }
+```
+
+| # | Stage | Gate to advance | bd-audit on exit — RUN before advancing |
+|---|---|---|---|
+| 0 | PREFLIGHT | on `feat/<wp>` branch off a clean tree; WP is `bd ready` | `audit "stage-0 PREFLIGHT complete"` |
+| 1 | ORIENT | plan written to the WP as a bd comment; stale pointers verified; retro-scan run | `audit "stage-1 ORIENT complete"` |
+| 2 | VERIFY | user confirms the plan (or `--autonomous`) | `audit "stage-2 VERIFY complete"` |
+| 3 | IMPLEMENT | code compiles; Codex patterns followed | `audit "stage-3 IMPLEMENT complete"` |
+| 4 | TEST | `pnpm test --filter` + `typecheck` green; pos+neg for money/auth | `audit "stage-4 TEST complete"` |
+| 5 | SIMPLIFY | `/simplify` findings applied or rejected-with-reason | `audit "stage-5 SIMPLIFY complete"` |
+| 6 | REVIEW | `codex-review` no CRITICAL/HIGH left; (UI) VISUAL-VERIFY MCP gate passed | (codex-review writes `swarm-start`/`swarm-end`) → `audit "stage-6 REVIEW complete"` |
+| 7 | FALLOW | no new dead code / unused exports (verified vs `src/`) | `audit "stage-7 FALLOW complete"` |
+| 8 | REGRESSION | full affected suite green; migration applied to fresh DB if touched | `audit "stage-8 REGRESSION complete"` |
+| 9 | SHIP | `gate.sh --wp "$WP"` → `✓ ALL GATES PASSED`; worktrees clean; pushed; PR open | **auto-emitted by `gate.sh`** (`stage-9 SHIP complete`) |
+
+Audit entry shape (see conventions §3): the `audit` helper above expands to
 ```bash
 bd audit record --kind=tool_call --issue-id=<wp> --tool-name=codex-epic-implement --prompt="stage-<N> <NAME> complete"
 ```
@@ -133,7 +142,9 @@ bd ready                      # the WP must appear with no open blockers
 
 ### Stage 9 — SHIP (gate + push)
 ```bash
-.claude/skills/codex-epic-implement/scripts/gate.sh --pkg <filter>   # trust ONLY "✓ ALL GATES PASSED"
+.claude/skills/codex-epic-implement/scripts/gate.sh --pkg <filter> --wp "$WP"   # trust ONLY "✓ ALL GATES PASSED"
+#   --wp "$WP" auto-emits the stage-9 SHIP bd-audit record on PASS (Codex-3l73h). Best-effort: a bd
+#   failure can NEVER flip the gate's PASS/FAIL or its terminal marker. Omit only if not on a tracked WP.
 git worktree list                                                    # remove any agent-* worktrees: git worktree remove --force --force <path>
 git commit -m "feat(<scope>): WP-N <subject>"                        # conventional; co-author trailer
 git push -u origin feat/<wp-id>-<slug>
