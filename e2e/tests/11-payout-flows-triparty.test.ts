@@ -265,9 +265,10 @@ describe('Tri-party (in-org agreement) payout flows', () => {
         data: {
           creatorId: creator.id,
           revenueType: 'content_purchase',
-          // 70% to creator (post-platform basis points: 7000 / 10000)
-          creatorShareBps: 7000,
-          notes: 'E2E test agreement',
+          // 70% to creator. sharePercent is in basis points (7000 / 10000).
+          sharePercent: 7000,
+          termMonths: 12,
+          note: 'E2E test agreement',
         },
       }
     );
@@ -646,8 +647,9 @@ describe('Tri-party (in-org agreement) payout flows', () => {
         data: {
           creatorId: creator.id,
           revenueType: 'content_purchase',
-          creatorShareBps: 6000,
-          notes: 'E2E /me test',
+          sharePercent: 6000,
+          termMonths: 12,
+          note: 'E2E /me test',
         },
       }
     );

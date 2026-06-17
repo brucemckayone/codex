@@ -33,9 +33,9 @@ export interface ScopedTestContext {
   email: (base: string) => string;
 
   /**
-   * Generate a unique slug
+   * Generate a unique, slug-safe value (lowercase, hyphen-separated).
    * @param base - Base identifier (e.g., "org", "content")
-   * @returns Slug like "t_a1b2c3d4_org"
+   * @returns Slug like "t-a1b2c3d4-org"
    */
   slug: (base: string) => string;
 
@@ -61,7 +61,7 @@ export interface ScopedTestContext {
  * ```typescript
  * const ctx = createScopedTestContext();
  * const email = ctx.email('buyer'); // "t_a1b2c3d4_buyer@example.com"
- * const slug = ctx.slug('org');     // "t_a1b2c3d4_org"
+ * const slug = ctx.slug('org');     // "t-a1b2c3d4-org"
  * ```
  *
  * All data created with the same context instance shares the same prefix,
@@ -73,7 +73,16 @@ export function createScopedTestContext(): ScopedTestContext {
   return {
     prefix,
     email: (base: string) => `${prefix}${base}@example.com`,
-    slug: (base: string) => `${prefix}${base}`,
+    // Slug-safe: org/content slug schemas allow only lowercase letters,
+    // digits, and single hyphens (no underscores, no leading/trailing
+    // hyphens). The shared prefix uses underscores (fine for emails/ids),
+    // so slugify the combined value here — otherwise org creation 400s with
+    // VALIDATION_ERROR on body.slug.
+    slug: (base: string) =>
+      `${prefix}${base}`
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, ''),
     id: (base: string) => `${prefix}${base}`,
     name: (base: string) => `${prefix.slice(0, -1)} ${base}`,
   };
