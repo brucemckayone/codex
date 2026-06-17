@@ -18,7 +18,7 @@ set -e
 #   - R2_BUCKET_MEDIA, R2_BUCKET_ASSETS, R2_BUCKET_PLATFORM, R2_BUCKET_RESOURCES (vars)
 #   - STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET_* (secrets, ecom-api only)
 #   - BETTER_AUTH_SECRET, SESSION_SECRET (secrets, auth only)
-#   - RUNPOD_*, B2_* (secrets, media-api only)
+#   - RUNPOD_* (secrets, media-api only)
 #   - WORKER_SHARED_SECRET (secret, every worker that makes or receives a
 #     worker-to-worker HMAC call: auth, content-api, ecom-api, organization-api,
 #     identity-api, notifications-api, media-api — NOT admin-api)
@@ -170,11 +170,7 @@ EOF
   "RUNPOD_API_KEY":"${RUNPOD_API_KEY}",
   "RUNPOD_ENDPOINT_ID":"${RUNPOD_ENDPOINT_ID}",
   "RUNPOD_WEBHOOK_SECRET":"${RUNPOD_WEBHOOK_SECRET}",
-  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET}",
-  "B2_ENDPOINT":"${B2_ENDPOINT}",
-  "B2_KEY_ID":"${B2_KEY_ID}",
-  "B2_APP_KEY":"${B2_APP_KEY}",
-  "B2_BUCKET":"${B2_BUCKET}"
+  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET}"
 }
 EOF
 )
