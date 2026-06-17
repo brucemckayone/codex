@@ -123,14 +123,20 @@ describe('Bi-party (orgless) payout flows', () => {
     await closeDbPool();
   });
 
-  test('should write platform_fee + creator_payout rows on orgless purchase, surface on /me/payouts, then reverse on refund', async () => {
+  test('should write platform_fee + creator_payout rows on orgless purchase, surface on /me/payouts, then reverse on refund', async ({
+    skip,
+  }) => {
     // ── Env skip-gate ────────────────────────────────────────────────────────
     // Both webhook secrets are required. Without them the worker rejects the
     // HMAC signature before any payout logic runs.
+    // Runtime skip via the test context (`ctx.skip()`). `test.skip()` is the
+    // collection-time chained modifier; calling it inside a running test body
+    // throws "Calling the test function inside another test function" and, with
+    // CI bail:1, aborts the entire e2e:api suite (Codex-730tq.9).
     const bookingSecret = process.env.STRIPE_WEBHOOK_SECRET_BOOKING;
     const paymentSecret = process.env.STRIPE_WEBHOOK_SECRET_PAYMENT;
     if (!bookingSecret || !paymentSecret) {
-      test.skip();
+      skip();
       return;
     }
 
