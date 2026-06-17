@@ -124,12 +124,18 @@ describe('Tri-party (in-org agreement) payout flows', () => {
     await closeDbPool();
   });
 
-  test('should write platform_fee + creator_payout + organization_fee rows for in-org purchase, then release creator_payout on Connect activation', async () => {
+  test('should write platform_fee + creator_payout + organization_fee rows for in-org purchase, then release creator_payout on Connect activation', async ({
+    skip,
+  }) => {
     // ── Env skip-gate ────────────────────────────────────────────────────────
+    // Runtime skip via the test context (`ctx.skip()`). `test.skip()` is the
+    // collection-time chained modifier; calling it inside a running test body
+    // throws "Calling the test function inside another test function" and, with
+    // CI bail:1, aborts the entire e2e:api suite (Codex-730tq.9).
     const bookingSecret = process.env.STRIPE_WEBHOOK_SECRET_BOOKING;
     const connectSecret = process.env.STRIPE_WEBHOOK_SECRET_CONNECT;
     if (!bookingSecret || !connectSecret) {
-      test.skip();
+      skip();
       return;
     }
 
@@ -259,9 +265,10 @@ describe('Tri-party (in-org agreement) payout flows', () => {
         data: {
           creatorId: creator.id,
           revenueType: 'content_purchase',
-          // 70% to creator (post-platform basis points: 7000 / 10000)
-          creatorShareBps: 7000,
-          notes: 'E2E test agreement',
+          // 70% to creator. sharePercent is in basis points (7000 / 10000).
+          sharePercent: 7000,
+          termMonths: 12,
+          note: 'E2E test agreement',
         },
       }
     );
@@ -640,8 +647,9 @@ describe('Tri-party (in-org agreement) payout flows', () => {
         data: {
           creatorId: creator.id,
           revenueType: 'content_purchase',
-          creatorShareBps: 6000,
-          notes: 'E2E /me test',
+          sharePercent: 6000,
+          termMonths: 12,
+          note: 'E2E /me test',
         },
       }
     );
