@@ -1,4 +1,6 @@
+import { DOMAINS } from '@codex/constants';
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
+import { ENV_HOSTS } from '@codex/urls';
 
 /**
  * Configuration for the dev-only Cloudflare Custom Domain provisioner.
@@ -6,17 +8,19 @@ import { BaseService, type ServiceConfig } from '@codex/service-errors';
  * The service is a no-op outside the `dev` deployed environment, so the
  * Cloudflare credentials are optional — missing creds just turn off the
  * provisioning step rather than failing the org-create flow.
+ *
+ * WP-6 (Codex-0hxw4) removed the `zoneName` config injection — the value
+ * was always `DOMAINS.PROD` (`revelations.studio`), the single DNS zone
+ * for the entire prod/staging/dev hierarchy. The hostname pattern is now
+ * derived from `ENV_HOSTS.dev.orgHost(slug)` instead of string-templated
+ * from injected config, keeping the dev domain string in lockstep with
+ * the rest of the routing centralization.
  */
 export interface DevDomainServiceConfig extends ServiceConfig {
   /** Cloudflare API token with `Workers Scripts: Edit` scope. */
   cloudflareApiToken?: string;
   /** Cloudflare account ID hosting the dev workers. */
   cloudflareAccountId?: string;
-  /**
-   * The DNS zone name (e.g. `revelations.studio`). Dev hostnames are built
-   * as `{slug}.dev.{zoneName}`.
-   */
-  zoneName: string;
   /**
    * The name of the dev web worker that org subdomains should bind to.
    * For Codex this is `codex-web-dev`.
@@ -29,6 +33,15 @@ interface CloudflareWorkerDomain {
   hostname: string;
   service: string;
 }
+
+/**
+ * The Cloudflare DNS zone hosting the dev hierarchy. `revelations.studio`
+ * is the single parent zone for prod (`revelations.studio`), staging
+ * (`*-staging.revelations.studio`), AND dev (`*.dev.revelations.studio`).
+ * Sourced from `DOMAINS.PROD` so any future zone rename stays consistent
+ * with the rest of `@codex/constants`.
+ */
+const CLOUDFLARE_ZONE_NAME = DOMAINS.PROD;
 
 /**
  * Provisions and removes Cloudflare Workers Custom Domains for dev orgs.
@@ -52,7 +65,6 @@ interface CloudflareWorkerDomain {
 export class DevDomainService extends BaseService {
   private readonly apiToken?: string;
   private readonly accountId?: string;
-  private readonly zoneName: string;
   private readonly webWorkerName: string;
   private cachedZoneId?: string;
 
@@ -60,7 +72,6 @@ export class DevDomainService extends BaseService {
     super(config);
     this.apiToken = config.cloudflareApiToken;
     this.accountId = config.cloudflareAccountId;
-    this.zoneName = config.zoneName;
     this.webWorkerName = config.webWorkerName;
   }
 
@@ -137,8 +148,15 @@ export class DevDomainService extends BaseService {
     return Boolean(this.apiToken && this.accountId);
   }
 
+  /**
+   * The Cloudflare Custom Domain hostname for a given org slug. Sourced
+   * from `ENV_HOSTS.dev.orgHost` (since WP-6 / Codex-0hxw4) so the
+   * pattern stays in lockstep with the rest of the routing layer —
+   * change `ENV_HOSTS.dev.orgHost` in one place to update every hostname
+   * derivation in the codebase.
+   */
   private hostnameFor(slug: string): string {
-    return `${slug}.dev.${this.zoneName}`;
+    return ENV_HOSTS.dev.orgHost(slug);
   }
 
   private headers(): Record<string, string> {
@@ -162,7 +180,7 @@ export class DevDomainService extends BaseService {
   private async resolveZoneId(): Promise<string> {
     if (this.cachedZoneId) return this.cachedZoneId;
     const res = await fetch(
-      `https://api.cloudflare.com/client/v4/zones?name=${encodeURIComponent(this.zoneName)}`,
+      `https://api.cloudflare.com/client/v4/zones?name=${encodeURIComponent(CLOUDFLARE_ZONE_NAME)}`,
       { headers: this.headers() }
     );
     const body = (await res.json()) as {
@@ -173,7 +191,7 @@ export class DevDomainService extends BaseService {
     const zoneId = body.result?.[0]?.id;
     if (!body.success || !zoneId) {
       throw new Error(
-        `Failed to resolve zone id for ${this.zoneName}: ${JSON.stringify(body.errors ?? body)}`
+        `Failed to resolve zone id for ${CLOUDFLARE_ZONE_NAME}: ${JSON.stringify(body.errors ?? body)}`
       );
     }
     this.cachedZoneId = zoneId;

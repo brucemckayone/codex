@@ -43,6 +43,18 @@ export const USERS = {
     role: 'customer',
     username: 'samviewer',
   },
+  // Parallel seed-viewer with an independent Studio Alpha subscription.
+  // Why: under Playwright workers=2, account-subscription-cancel.spec.ts and
+  // subscription-cross-device.spec.ts both mutate the SAME seeded row when
+  // both run against viewer@test.com. Routing the cross-device spec to
+  // viewer2 eliminates the shared-row race without changing test semantics.
+  viewer2: {
+    id: seedTextId('seed-user-viewer2'),
+    name: 'Casey Viewer',
+    email: 'viewer2@test.com',
+    role: 'customer',
+    username: 'caseyviewer',
+  },
   admin: {
     id: seedTextId('seed-user-admin'),
     name: 'Jordan Admin',
@@ -125,6 +137,7 @@ export const USER_JOINED_DAYS_AGO: Partial<Record<string, number>> = {
 export const ACCOUNTS = {
   creator: { id: seedTextId('seed-account-creator') },
   viewer: { id: seedTextId('seed-account-viewer') },
+  viewer2: { id: seedTextId('seed-account-viewer2') },
   admin: { id: seedTextId('seed-account-admin') },
   fresh: { id: seedTextId('seed-account-fresh') },
   newCreator: { id: seedTextId('seed-account-new-creator') },
@@ -145,6 +158,10 @@ export const SESSIONS = {
   viewer: {
     id: seedTextId('seed-session-viewer'),
     token: seedTextId('seed-token-viewer'),
+  },
+  viewer2: {
+    id: seedTextId('seed-session-viewer2'),
+    token: seedTextId('seed-token-viewer2'),
   },
   admin: {
     id: seedTextId('seed-session-admin'),
@@ -215,6 +232,9 @@ export const MEMBERSHIPS = {
   creatorAlphaOwner: { id: seedUuid('seed-membership-creator-alpha-owner') },
   viewerAlphaSubscriber: {
     id: seedUuid('seed-membership-viewer-alpha-subscriber'),
+  },
+  viewer2AlphaSubscriber: {
+    id: seedUuid('seed-membership-viewer2-alpha-subscriber'),
   },
   adminBetaOwner: { id: seedUuid('seed-membership-admin-beta-owner') },
   viewerBetaSubscriber: {
@@ -781,6 +801,9 @@ export const PLAYBACK = {
 export const SUBSCRIPTIONS = {
   viewerAlphaStandard: {
     id: seedUuid('seed-subscription-viewer-alpha-standard'),
+  },
+  viewer2AlphaStandard: {
+    id: seedUuid('seed-subscription-viewer2-alpha-standard'),
   },
 } as const;
 

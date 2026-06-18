@@ -20,6 +20,7 @@ import { ContentService, MediaItemService } from '@codex/content';
 import * as schema from '@codex/database/schema';
 import { organizations } from '@codex/database/schema';
 import {
+  createTestMembershipInput,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -45,6 +46,7 @@ import {
   PurchaseNotFoundError,
 } from '../errors';
 import { PurchaseService } from '../services/purchase-service';
+import { resolvePrimaryConnect } from '../utils/resolve-primary-connect';
 
 describe('PurchaseService Integration', () => {
   let db: Database;
@@ -156,6 +158,16 @@ describe('PurchaseService Integration', () => {
       .update(schema.users)
       .set({ stripeCustomerId: null })
       .where(eq(schema.users.id, otherUserId));
+
+    // One Connect account per user (uq_stripe_connect_user, Codex-69t7c):
+    // clear seed users' accounts between tests so per-test seeds (which raw
+    // insert for these shared users) don't collide on the unique constraint.
+    await db
+      .delete(schema.stripeConnectAccounts)
+      .where(eq(schema.stripeConnectAccounts.userId, userId));
+    await db
+      .delete(schema.stripeConnectAccounts)
+      .where(eq(schema.stripeConnectAccounts.userId, otherUserId));
   });
 
   describe('createCheckoutSession', () => {
@@ -939,9 +951,9 @@ describe('PurchaseService Integration', () => {
       await contentService.publish(content.id, userId);
 
       // Seed org's Connect account row. The userId is the org owner.
-      // Idempotent: tests in this describe block share the same (userId, orgId)
-      // so subsequent calls reuse the existing row instead of conflicting on
-      // uq_stripe_connect_user_org.
+      // Idempotent: tests in this describe block share the same userId so
+      // subsequent calls reuse the existing row instead of conflicting on
+      // uq_stripe_connect_user (one account per user, Codex-69t7c).
       const stripeAccountId = `acct_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       await db
         .insert(schema.stripeConnectAccounts)
@@ -954,16 +966,20 @@ describe('PurchaseService Integration', () => {
           payoutsEnabled: true,
         })
         .onConflictDoUpdate({
-          target: [
-            schema.stripeConnectAccounts.userId,
-            schema.stripeConnectAccounts.organizationId,
-          ],
+          target: [schema.stripeConnectAccounts.userId],
           set: {
             chargesEnabled: opts.chargesEnabled ?? true,
             payoutsEnabled: true,
             status: 'active',
           },
         });
+
+      // Pin the org's canonical Connect account so resolvePrimaryConnect routes
+      // the org slice (Codex-69t7c: org→account via primaryConnectAccountUserId).
+      await db
+        .update(schema.organizations)
+        .set({ primaryConnectAccountUserId: userId })
+        .where(eq(schema.organizations.id, organizationId));
 
       return {
         content,
@@ -1158,6 +1174,9 @@ describe('PurchaseService Integration', () => {
           name: 'Connect Disabled Org',
           slug: createUniqueSlug('connect-disabled'),
           ownerId: otherUserId,
+          // Pin so resolvePrimaryConnect resolves the org's (offline) account
+          // by userId (Codex-69t7c) — an onboarding org is pinned in production.
+          primaryConnectAccountUserId: otherUserId,
         })
         .returning();
 
@@ -1271,6 +1290,422 @@ describe('PurchaseService Integration', () => {
       // biome-ignore lint/suspicious/noExplicitAny: test mock
       expect((stubStripe as any).transfers.create).not.toHaveBeenCalled();
     });
+
+    // ─── Codex-69t7c WP4 (D2/D4): single-account routing invariant ───
+    // The creator slice is resolved by `eq(stripeConnectAccounts.userId,
+    // creatorId)` — userId-only. The creator's single account carries a
+    // vestigial organizationId (nullable; the org it was first onboarded
+    // under). Here we null it out to prove routing ignores it; a regression
+    // that re-adds an organizationId predicate would miss the account and
+    // strand the slice in pending instead of firing the transfer.
+    it('routes the creator slice by userId regardless of the Connect account vestigial organizationId (Codex-69t7c D4)', async () => {
+      const { content, chargeId, paymentIntentId, stripeAccountId } =
+        await setupPaidContentWithConnect({
+          title: 'Creator userId routing',
+          priceCents: 10000,
+        });
+
+      // Sever the account's vestigial org link — userId routing must hold.
+      await db
+        .update(schema.stripeConnectAccounts)
+        .set({ organizationId: null })
+        .where(eq(schema.stripeConnectAccounts.userId, userId));
+
+      const creatorTransferId = `tr_creator_${Date.now()}`;
+      const orgTransferId = `tr_org_${Date.now()}`;
+      const createTransfer = vi
+        .fn()
+        .mockImplementation((args: { metadata?: { type?: string } }) =>
+          Promise.resolve({
+            id:
+              args?.metadata?.type === 'creator_payout'
+                ? creatorTransferId
+                : orgTransferId,
+          })
+        );
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      (mockStripe as any).transfers = { create: createTransfer };
+
+      const purchase = await purchaseService.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+      });
+
+      // Creator transfer fired to the userId-resolved account despite the
+      // null vestigial org column.
+      expect(createTransfer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          destination: stripeAccountId,
+          metadata: expect.objectContaining({ type: 'creator_payout' }),
+        }),
+        expect.objectContaining({ idempotencyKey: `${chargeId}_creator` })
+      );
+
+      const rows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+      const creatorRow = rows.find((r) => r.payoutType === 'creator_payout');
+      expect(creatorRow?.status).toBe('paid');
+      expect(creatorRow?.userId).toBe(userId);
+    });
+
+    // ─── Codex-ed446: org-fee pending row must carry a non-null userId ───
+    // When the org owner has NO Connect account at all (distinct from the
+    // offline-account case above), resolvePrimaryConnect returns undefined.
+    // The org-fee slice MUST still be recorded as a pending row attributed to
+    // the org owner (resolveOrgOwnerId fallback, mirroring the subscription
+    // path) so it persists and is swept — instead of a null-userId insert
+    // that violates check_payouts_user_required (23514) and strands the slice
+    // in the platform balance with no ledger row (the bug this locks).
+    it('Codex-ed446: org owner with no Connect account still gets a non-null-userId pending org_fee row (no 23514 strand)', async () => {
+      const [ownerUserId] = await seedTestUsers(db, 1);
+      const [org2] = await db
+        .insert(organizations)
+        .values({
+          name: 'No-Connect Owner Org',
+          slug: createUniqueSlug('no-connect-owner'),
+          ownerId: ownerUserId,
+        })
+        .returning();
+      // resolveOrgOwnerId reads organizationMemberships(role='owner'), NOT
+      // organizations.ownerId — seed the membership explicitly.
+      await db
+        .insert(schema.organizationMemberships)
+        .values(
+          createTestMembershipInput(org2.id, ownerUserId, { role: 'owner' })
+        );
+      // Deliberately seed NO stripe_connect_accounts row for ownerUserId.
+
+      const stubFeeConfig = {
+        getFeesForCreator: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 1500,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+      const stubStripe = {
+        ...mockStripe,
+        transfers: { create: vi.fn() },
+        paymentIntents: { retrieve: vi.fn() },
+      } as unknown as Stripe;
+      const service = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      const media = await mediaService.create(
+        {
+          title: 'No Connect Owner',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        ownerUserId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/no-connect/master.m3u8',
+          thumbnailKey: 'thumbnails/no-connect.jpg',
+          durationSeconds: 60,
+        },
+        ownerUserId
+      );
+      const content = await contentService.create(
+        {
+          organizationId: org2.id,
+          title: 'No Connect Owner',
+          slug: createUniqueSlug('no-connect-owner-content'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 10000,
+        },
+        ownerUserId
+      );
+      await contentService.publish(content.id, ownerUserId);
+
+      const chargeId = `ch_no_connect_${Date.now()}`;
+      const purchase = await service.completePurchase(
+        `pi_no_connect_${Date.now()}`,
+        {
+          customerId: userId,
+          contentId: content.id,
+          organizationId: org2.id,
+          amountPaidCents: 10000,
+          currency: 'gbp',
+          stripeChargeId: chargeId,
+        }
+      );
+
+      const rows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+
+      const orgFeeRow = rows.find((r) => r.payoutType === 'organization_fee');
+      // The crux: the org-fee row EXISTS (pre-fix it was dropped by the 23514
+      // catch) and carries a non-null userId = the org owner.
+      expect(orgFeeRow).toBeDefined();
+      expect(orgFeeRow?.userId).toBe(ownerUserId);
+      expect(orgFeeRow?.status).toBe('pending');
+      expect(orgFeeRow?.reason).toBe('connect_not_ready');
+      expect(orgFeeRow?.sourceType).toBe('purchase');
+
+      // No transfer fired — there is no Connect account to receive it.
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      expect((stubStripe as any).transfers.create).not.toHaveBeenCalled();
+    });
+
+    // ─── WP-10 (Codex-69t7c.10): creator-connect-needed notification ─────────
+    //
+    // Mirrors the existing connect_not_ready test structure: each test creates
+    // its own content + connect account (chargesEnabled=false) and instantiates
+    // PurchaseService locally with a mock mailer injected.
+    describe('creator-connect-needed notification (WP-10)', () => {
+      /**
+       * Build a paid content item owned by `otherUserId` in a fresh org, with
+       * the Connect account set to chargesEnabled=false so the creator_payout
+       * parks as pending. Returns content + org + stripe stub.
+       */
+      async function setupDisconnectedContent(titleSuffix: string) {
+        // Create a fresh org per test so there are no conflicts on the
+        // stripeConnectAccounts unique constraint.
+        const [localOrg] = await db
+          .insert(organizations)
+          .values({
+            name: `WP10 Org ${titleSuffix}`,
+            slug: createUniqueSlug(`wp10-org-${titleSuffix}`),
+            ownerId: otherUserId,
+          })
+          .returning();
+        await db.insert(schema.stripeConnectAccounts).values({
+          userId: otherUserId,
+          organizationId: localOrg.id,
+          stripeAccountId: `acct_wp10_${titleSuffix}_${Date.now()}`,
+          status: 'onboarding',
+          chargesEnabled: false,
+          payoutsEnabled: false,
+        });
+
+        const media = await mediaService.create(
+          {
+            title: `WP10 ${titleSuffix}`,
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            fileSizeBytes: 1024 * 1024,
+          },
+          otherUserId
+        );
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: `hls/wp10-${titleSuffix}/master.m3u8`,
+            thumbnailKey: `thumbnails/wp10-${titleSuffix}.jpg`,
+            durationSeconds: 60,
+          },
+          otherUserId
+        );
+        const testContent = await contentService.create(
+          {
+            organizationId: localOrg!.id,
+            title: `WP10 ${titleSuffix}`,
+            slug: createUniqueSlug(`wp10-${titleSuffix}`),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'purchased_only',
+            accessType: 'paid',
+            priceCents: 5000,
+          },
+          otherUserId
+        );
+        await contentService.publish(testContent.id, otherUserId);
+
+        const localStubStripe = {
+          ...mockStripe,
+          transfers: { create: vi.fn() },
+          paymentIntents: { retrieve: vi.fn() },
+        } as unknown as Stripe;
+
+        return {
+          content: testContent,
+          org: localOrg!,
+          stubStripe: localStubStripe,
+        };
+      }
+
+      it('fires creator-connect-needed once when creator_payout parks as pending', async () => {
+        const {
+          content: c,
+          org,
+          stubStripe: ss,
+        } = await setupDisconnectedContent('fires');
+        const mailer = vi.fn();
+        const svc = new PurchaseService(
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          { db, environment: 'test', mailer } as any,
+          ss
+        );
+
+        const chargeId = `ch_wp10_fires_${Date.now()}`;
+        await svc.completePurchase(`pi_wp10_fires_${Date.now()}`, {
+          customerId: userId,
+          contentId: c.id,
+          organizationId: org.id,
+          amountPaidCents: 5000,
+          currency: 'gbp',
+          stripeChargeId: chargeId,
+        });
+
+        // Notification fires once for the creator_payout row.
+        expect(mailer).toHaveBeenCalledOnce();
+        const [params] = mailer.mock.calls[0];
+        expect(params.templateName).toBe('creator-connect-needed');
+        expect(params.category).toBe('transactional');
+        expect(params.data.amountFormatted).toMatch(/£/);
+        expect(params.data.dashboardUrl).toMatch(/earnings/);
+      });
+
+      it('does NOT fire when mailer is not injected (graceful degrade)', async () => {
+        const {
+          content: c,
+          org,
+          stubStripe: ss,
+        } = await setupDisconnectedContent('no-mailer');
+        const svc = new PurchaseService(
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          { db, environment: 'test' } as any,
+          ss
+        );
+
+        const chargeId = `ch_wp10_nomailer_${Date.now()}`;
+        await expect(
+          svc.completePurchase(`pi_wp10_nomailer_${Date.now()}`, {
+            customerId: userId,
+            contentId: c.id,
+            organizationId: org.id,
+            amountPaidCents: 5000,
+            currency: 'gbp',
+            stripeChargeId: chargeId,
+          })
+        ).resolves.toBeDefined();
+      });
+
+      it('fires ONLY for creator_payout, NOT for organization_fee (even when both park)', async () => {
+        const {
+          content: c,
+          org,
+          stubStripe: ss,
+        } = await setupDisconnectedContent('orgfee-only-one-notif');
+        const mailer = vi.fn();
+        const stubFeeWithOrg = {
+          getFeesForCreator: vi.fn().mockResolvedValue({
+            platformFeePercent: 1000,
+            orgFeePercent: 1500,
+            minPlatformFeeCents: 0,
+            minTransferCents: 0,
+          }),
+        };
+        const svc = new PurchaseService(
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          {
+            db,
+            environment: 'test',
+            feeConfig: stubFeeWithOrg as any,
+            mailer,
+          } as any,
+          ss
+        );
+
+        const chargeId = `ch_wp10_orgfee_${Date.now()}`;
+        await svc.completePurchase(`pi_wp10_orgfee_${Date.now()}`, {
+          customerId: userId,
+          contentId: c.id,
+          organizationId: org.id,
+          amountPaidCents: 5000,
+          currency: 'gbp',
+          stripeChargeId: chargeId,
+        });
+
+        // Only ONE notification — for creator_payout only.
+        expect(mailer).toHaveBeenCalledOnce();
+        expect(mailer.mock.calls[0][0].templateName).toBe(
+          'creator-connect-needed'
+        );
+      });
+
+      it('swallows mailer throw — purchase still completes', async () => {
+        const {
+          content: c,
+          org,
+          stubStripe: ss,
+        } = await setupDisconnectedContent('mailer-throws');
+        const throwingMailer = vi.fn().mockImplementation(() => {
+          throw new Error('smtp down');
+        });
+        const svc = new PurchaseService(
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          { db, environment: 'test', mailer: throwingMailer } as any,
+          ss
+        );
+
+        const chargeId = `ch_wp10_throw_${Date.now()}`;
+        await expect(
+          svc.completePurchase(`pi_wp10_throw_${Date.now()}`, {
+            customerId: userId,
+            contentId: c.id,
+            organizationId: org.id,
+            amountPaidCents: 5000,
+            currency: 'gbp',
+            stripeChargeId: chargeId,
+          })
+        ).resolves.toBeDefined();
+      });
+
+      it('does NOT re-fire on idempotent replay (purchase already processed)', async () => {
+        const {
+          content: c,
+          org,
+          stubStripe: ss,
+        } = await setupDisconnectedContent('idempotent');
+        const mailer = vi.fn();
+        const svc = new PurchaseService(
+          // biome-ignore lint/suspicious/noExplicitAny: test stub
+          { db, environment: 'test', mailer } as any,
+          ss
+        );
+
+        const piId = `pi_wp10_idem_${Date.now()}`;
+        const chargeId = `ch_wp10_idem_${Date.now()}`;
+        const meta = {
+          customerId: userId,
+          contentId: c.id,
+          organizationId: org.id,
+          amountPaidCents: 5000,
+          currency: 'gbp',
+          stripeChargeId: chargeId,
+        };
+
+        // First call — purchase + payout rows created, notification fires.
+        await svc.completePurchase(piId, meta);
+        expect(mailer).toHaveBeenCalledOnce();
+        mailer.mockClear();
+
+        // Second call — completePurchase returns early (idempotent on PI).
+        // No payout insert → no notification.
+        await svc.completePurchase(piId, meta);
+        expect(mailer).not.toHaveBeenCalled();
+      });
+    });
+    // ─── end WP-10 creator-connect-needed notification ────────────────────────
 
     it('schema rejects paid rows with neither stripe_transfer_id nor stripe_charge_id', async () => {
       // Try to insert a paid row that satisfies neither side of the
@@ -1769,6 +2204,9 @@ describe('PurchaseService Integration', () => {
           name: 'Refund Reversal Org',
           slug: createUniqueSlug('refund-reversal'),
           ownerId: userId,
+          // Pin so resolvePrimaryConnect resolves the org's account by userId
+          // (Codex-69t7c) — onboarded orgs are pinned in production.
+          primaryConnectAccountUserId: userId,
         })
         .returning();
       await db.insert(schema.stripeConnectAccounts).values({
@@ -1993,6 +2431,9 @@ describe('PurchaseService Integration', () => {
           name: 'Partial Refund Org',
           slug: createUniqueSlug('partial-refund'),
           ownerId: userId,
+          // Pin so resolvePrimaryConnect resolves the org's account by userId
+          // (Codex-69t7c) — onboarded orgs are pinned in production.
+          primaryConnectAccountUserId: userId,
         })
         .returning();
       await db.insert(schema.stripeConnectAccounts).values({
@@ -2283,6 +2724,9 @@ describe('PurchaseService Integration', () => {
           name: 'Pending Refund Org',
           slug: createUniqueSlug('pending-refund'),
           ownerId: userId,
+          // Pin so resolvePrimaryConnect resolves the org's (not-ready) account
+          // by userId (Codex-69t7c) so the org-fee pending row is written.
+          primaryConnectAccountUserId: userId,
         })
         .returning();
       await db.insert(schema.stripeConnectAccounts).values({
@@ -4232,6 +4676,876 @@ describe('PurchaseService Integration', () => {
           verifyUserId
         )
       ).rejects.toThrow('Failed to connect to Stripe API');
+    });
+  });
+
+  // ─── resolvePrimaryConnect — org→account resolution (Codex-69t7c) ───────
+  // Production does not pin organizations.primaryConnectAccountUserId yet, so
+  // org-fee resolution relies on the deterministic org-owner fallback. These
+  // pin that contract so a regression that drops the fallback (stranding the
+  // org-fee slice) can't ship green.
+  describe('resolvePrimaryConnect — org→account resolution (Codex-69t7c)', () => {
+    it('falls back to the org owner account when no primary pin is set', async () => {
+      const [ownerUserId] = await seedTestUsers(db, 1);
+      const [org] = await db
+        .insert(organizations)
+        .values({ name: 'RPC Owner Org', slug: createUniqueSlug('rpc-owner') })
+        .returning();
+      await db
+        .insert(schema.organizationMemberships)
+        .values(
+          createTestMembershipInput(org.id, ownerUserId, { role: 'owner' })
+        );
+      const stripeAccountId = `acct_rpc_${createUniqueSlug('a')}`;
+      await db.insert(schema.stripeConnectAccounts).values({
+        userId: ownerUserId,
+        organizationId: org.id,
+        stripeAccountId,
+        status: 'active',
+        chargesEnabled: true,
+        payoutsEnabled: true,
+      });
+
+      const account = await resolvePrimaryConnect(db, org.id);
+      expect(account?.userId).toBe(ownerUserId);
+      expect(account?.stripeAccountId).toBe(stripeAccountId);
+    });
+
+    it('returns undefined when the org has neither a primary pin nor an owner', async () => {
+      const [org] = await db
+        .insert(organizations)
+        .values({ name: 'RPC Empty Org', slug: createUniqueSlug('rpc-empty') })
+        .returning();
+
+      const account = await resolvePrimaryConnect(db, org.id);
+      expect(account).toBeUndefined();
+    });
+  });
+
+  // ─── Codex-69t7c WP5: orgless (bi-party) purchase pipeline ─────────────────
+  //
+  // The Phase-1 "content must belong to an organization" gate is removed.
+  // Orgless creator-direct content (content.organizationId IS NULL) is
+  // purchasable: the buyer pays the platform, the platform retains its fee
+  // (platform_fee row) and forwards the rest to the CREATOR's single Connect
+  // account (creator_payout row) via a secondary transfer keyed by userId.
+  // NO organization_fee row is written — there is no org to pay.
+  describe('completePurchase — bi-party orgless payouts (Codex-69t7c WP5)', () => {
+    /**
+     * Seed an orgless paid content item owned by `creatorUserId` (no
+     * organizationId) plus that creator's single Connect account (keyed by
+     * userId — Codex-69t7c one-account-per-user). Returns the ids the test
+     * feeds to completePurchase.
+     */
+    async function setupOrglessPaidContent(opts: {
+      title: string;
+      priceCents: number;
+      creatorUserId: string;
+      chargesEnabled?: boolean;
+      seedConnect?: boolean;
+    }) {
+      const {
+        title,
+        priceCents,
+        creatorUserId,
+        chargesEnabled = true,
+        seedConnect = true,
+      } = opts;
+      const media = await mediaService.create(
+        {
+          title,
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        creatorUserId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: `hls/${title}/master.m3u8`,
+          thumbnailKey: `thumbnails/${title}.jpg`,
+          durationSeconds: 60,
+        },
+        creatorUserId
+      );
+      // No organizationId → orgless (bi-party) personal content.
+      const content = await contentService.create(
+        {
+          title,
+          slug: createUniqueSlug(title.toLowerCase().replace(/\s+/g, '-')),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents,
+        },
+        creatorUserId
+      );
+      await contentService.publish(content.id, creatorUserId);
+
+      if (seedConnect) {
+        // The creator's SINGLE Connect account (keyed by userId). For orgless
+        // content there is no org pin — the creator slice resolves purely by
+        // `eq(stripeConnectAccounts.userId, creatorId)`. organizationId on the
+        // account row is left null (the account isn't org-scoped here).
+        await db
+          .insert(schema.stripeConnectAccounts)
+          .values({
+            userId: creatorUserId,
+            organizationId: null,
+            stripeAccountId: `acct_orgless_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            status: chargesEnabled ? 'active' : 'onboarding',
+            chargesEnabled,
+            payoutsEnabled: chargesEnabled,
+          })
+          .onConflictDoUpdate({
+            target: [schema.stripeConnectAccounts.userId],
+            set: {
+              organizationId: null,
+              chargesEnabled,
+              payoutsEnabled: chargesEnabled,
+              status: chargesEnabled ? 'active' : 'onboarding',
+            },
+          });
+      }
+
+      return {
+        content,
+        chargeId: `ch_orgless_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        paymentIntentId: `pi_orgless_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      };
+    }
+
+    // P1 — happy path: exactly TWO rows (platform_fee + creator_payout), no
+    // organization_fee; creator transfer fires once in GBP with the verbatim
+    // `${chargeId}_creator` idempotency key; the org component is zero.
+    it('writes exactly 2 bi-party rows (platform_fee + creator_payout) and fires the creator transfer — no org_fee row', async () => {
+      // The creator is `userId`; the buyer is `otherUserId`.
+      const stubFeeConfig = {
+        // getFeesPlatform is the resolver the orgless branch calls. Return a
+        // non-zero orgFeePercent to PROVE the orgless branch forces the org
+        // leg to zero regardless (RISK B in the plan).
+        getFeesPlatform: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000, // 10%
+          orgFeePercent: 1500, // 15% — MUST be ignored for orgless
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+        getFeesForCreator: vi.fn(), // must NOT be called for orgless
+      };
+      const creatorTransferId = `tr_orgless_creator_${Date.now()}`;
+      const createTransfer = vi
+        .fn()
+        .mockResolvedValue({ id: creatorTransferId });
+      const stubStripe = {
+        ...mockStripe,
+        transfers: { create: createTransfer },
+        paymentIntents: { retrieve: vi.fn() },
+      } as unknown as Stripe;
+      const service = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      const { content, chargeId, paymentIntentId } =
+        await setupOrglessPaidContent({
+          title: 'Orgless Bi-party Standard',
+          priceCents: 10000, // £100
+          creatorUserId: userId,
+        });
+
+      const purchase = await service.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId: null, // orgless
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+      });
+
+      // Orgless purchase row carries a null org.
+      expect(purchase.organizationId).toBeNull();
+
+      const rows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+
+      // EXACTLY 2 rows — platform_fee + creator_payout. NO organization_fee.
+      expect(rows).toHaveLength(2);
+      expect(
+        rows.find((r) => r.payoutType === 'organization_fee')
+      ).toBeUndefined();
+
+      // Orgless branch uses getFeesPlatform, NOT getFeesForCreator.
+      expect(stubFeeConfig.getFeesPlatform).toHaveBeenCalledTimes(1);
+      expect(stubFeeConfig.getFeesForCreator).not.toHaveBeenCalled();
+
+      // Exactly ONE secondary transfer (the creator slice), in GBP, with the
+      // verbatim idempotency key. Org slice forced to zero → no second call.
+      expect(createTransfer).toHaveBeenCalledTimes(1);
+      expect(createTransfer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          currency: 'gbp',
+          source_transaction: chargeId,
+        }),
+        expect.objectContaining({ idempotencyKey: `${chargeId}_creator` })
+      );
+
+      const platformRow = rows.find((r) => r.payoutType === 'platform_fee');
+      const creatorRow = rows.find((r) => r.payoutType === 'creator_payout');
+      expect(platformRow).toBeDefined();
+      expect(creatorRow).toBeDefined();
+
+      // Split for £100 @ platform 10%, org forced 0:
+      //   platform = ceil(10000 * 10%) = 1000
+      //   org      = 0
+      //   creator  = 10000 - 1000 - 0  = 9000
+      expect(platformRow?.amountCents).toBe(1000);
+      expect(platformRow?.status).toBe('paid');
+      expect(platformRow?.userId).toBeNull(); // platform isn't a user
+      expect(platformRow?.organizationId).toBeNull(); // orgless
+      expect(platformRow?.stripeTransferId).toBeNull();
+
+      expect(creatorRow?.amountCents).toBe(9000);
+      expect(creatorRow?.status).toBe('paid');
+      expect(creatorRow?.userId).toBe(userId); // routed to the creator
+      expect(creatorRow?.organizationId).toBeNull(); // orgless
+      expect(creatorRow?.stripeTransferId).toBe(creatorTransferId);
+      expect(creatorRow?.stripeChargeId).toBe(chargeId);
+
+      // Money conservation: platform + creator == amount (org leg is zero).
+      expect(
+        (platformRow?.amountCents ?? 0) + (creatorRow?.amountCents ?? 0)
+      ).toBe(10000);
+    });
+
+    // P1b (Codex-69t7c WP5 hardening b) — money-moved / ledger-silent guard:
+    // on the orgless path the creator transfer fires (REAL money moves to the
+    // Connect account) but the creator_payout ledger insert fails on a NON-
+    // unique DB error (e.g. a 23514 CHECK violation). That failure MUST be
+    // SURFACED via obs.error with a correlatable errorId — NOT swallowed — so
+    // the out-of-sync ledger is loud and reconcilable. (A 23505 dup is the
+    // only error that may be silently swallowed, since it means the row
+    // already exists.)
+    it('orgless path: transfer succeeds but ledger insert fails (non-unique) → error SURFACED with errorId, not swallowed', async () => {
+      const stubFeeConfig = {
+        getFeesPlatform: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 0,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+      const creatorTransferId = `tr_orgless_ledgerfail_${Date.now()}`;
+      const createTransfer = vi
+        .fn()
+        .mockResolvedValue({ id: creatorTransferId });
+      const stubStripe = {
+        ...mockStripe,
+        transfers: { create: createTransfer },
+        paymentIntents: { retrieve: vi.fn() },
+      } as unknown as Stripe;
+      const service = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      const { content, chargeId, paymentIntentId } =
+        await setupOrglessPaidContent({
+          title: 'Orgless Ledger Insert Fail',
+          priceCents: 10000,
+          creatorUserId: userId,
+        });
+
+      // Synthetic NON-unique Postgres error (23514 = check_violation). The
+      // hardening branch keys off `!isUniqueViolation(err)` (23505), so this
+      // exercises the surfaced-error path.
+      class FakeCheckViolation extends Error {
+        code = '23514';
+        constraint = 'check_payouts_paid_invariant';
+        constructor() {
+          super('simulated non-unique ledger insert failure');
+        }
+      }
+
+      // Intercept the service's DB so ONLY the creator_payout `paid` insert
+      // rejects. Every other insert (purchase, contentAccess, platform_fee,
+      // the pending fallbacks) delegates to the real builder unchanged.
+      // `db.insert` lives on the Drizzle client's prototype (not an own
+      // property), so vi.spyOn can't target it — wrap the whole client in a
+      // Proxy that intercepts `insert` and restores it after the test.
+      // biome-ignore lint/suspicious/noExplicitAny: test interception of Drizzle client
+      const serviceAny = service as any;
+      const realDb = serviceAny.db;
+      const dbProxy = new Proxy(realDb, {
+        get(target, prop, receiver) {
+          if (prop === 'insert') {
+            // biome-ignore lint/suspicious/noExplicitAny: Drizzle builder shape
+            return (table: any) => {
+              const builder = target.insert(table);
+              const realValues = builder.values.bind(builder);
+              // biome-ignore lint/suspicious/noExplicitAny: row payload
+              builder.values = (rows: any) => {
+                const row = Array.isArray(rows) ? rows[0] : rows;
+                if (
+                  row?.payoutType === 'creator_payout' &&
+                  row?.status === 'paid'
+                ) {
+                  return Promise.reject(new FakeCheckViolation());
+                }
+                return realValues(rows);
+              };
+              return builder;
+            };
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      serviceAny.db = dbProxy;
+
+      // biome-ignore lint/suspicious/noExplicitAny: spy protected obs.error
+      const errorSpy = vi.spyOn((service as any).obs, 'error');
+
+      // completePurchase MUST NOT throw — per-row isolation keeps the purchase
+      // itself successful; the ledger failure is logged, not propagated.
+      const purchase = await service.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId: null,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+      });
+      expect(purchase.organizationId).toBeNull();
+
+      // The Stripe transfer DID fire — real money moved.
+      expect(createTransfer).toHaveBeenCalledTimes(1);
+      expect(createTransfer).toHaveBeenCalledWith(
+        expect.objectContaining({ currency: 'gbp' }),
+        expect.objectContaining({ idempotencyKey: `${chargeId}_creator` })
+      );
+
+      // The failure was SURFACED via obs.error with the money-moved message
+      // AND a correlatable errorId + the Connect destination + idempotencyKey.
+      const surfaced = errorSpy.mock.calls.find(([msg]) =>
+        String(msg).includes(
+          'creator_payout transfer succeeded but payouts ledger insert failed'
+        )
+      );
+      expect(
+        surfaced,
+        'ledger-insert failure after a successful transfer must be logged at error level'
+      ).toBeDefined();
+      const surfacedMeta = surfaced![1] as Record<string, unknown>;
+      expect(typeof surfacedMeta.errorId).toBe('string');
+      expect((surfacedMeta.errorId as string).length).toBeGreaterThan(0);
+      expect(surfacedMeta.stripeTransferId).toBe(creatorTransferId);
+      expect(surfacedMeta.idempotencyKey).toBe(`${chargeId}_creator`);
+      expect(surfacedMeta.destination).toBeDefined();
+
+      serviceAny.db = realDb;
+      errorSpy.mockRestore();
+    });
+
+    // P2 — orgless purchase BEFORE the creator finishes Connect onboarding:
+    // creator_payout degrades to pending+connect_not_ready, platform_fee still
+    // paid, NO transfer call. Mirrors the tri-party connect_not_ready path.
+    it('degrades creator_payout to pending+connect_not_ready when the creator Connect is offline', async () => {
+      const stubFeeConfig = {
+        getFeesPlatform: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 0,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+      const createTransfer = vi.fn();
+      const stubStripe = {
+        ...mockStripe,
+        transfers: { create: createTransfer },
+        paymentIntents: { retrieve: vi.fn() },
+      } as unknown as Stripe;
+      const service = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      // Creator = otherUserId here so we don't collide with P1's userId account
+      // within the same test run; Connect seeded with chargesEnabled=false.
+      const { content, chargeId, paymentIntentId } =
+        await setupOrglessPaidContent({
+          title: 'Orgless Pre-Connect',
+          priceCents: 10000,
+          creatorUserId: otherUserId,
+          chargesEnabled: false,
+        });
+
+      const purchase = await service.completePurchase(paymentIntentId, {
+        customerId: userId,
+        contentId: content.id,
+        organizationId: null,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+      });
+
+      const rows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+
+      // 2 rows: platform_fee (paid) + creator_payout (pending). No org row.
+      expect(rows).toHaveLength(2);
+      expect(
+        rows.find((r) => r.payoutType === 'organization_fee')
+      ).toBeUndefined();
+
+      const creatorRow = rows.find((r) => r.payoutType === 'creator_payout');
+      expect(creatorRow?.status).toBe('pending');
+      expect(creatorRow?.reason).toBe('connect_not_ready');
+      expect(creatorRow?.organizationId).toBeNull();
+      expect(creatorRow?.userId).toBe(otherUserId);
+
+      const platformRow = rows.find((r) => r.payoutType === 'platform_fee');
+      expect(platformRow?.status).toBe('paid');
+
+      // No Stripe transfer call fired — Connect not ready.
+      expect(createTransfer).not.toHaveBeenCalled();
+    });
+
+    // P3 — createCheckoutSession succeeds on orgless paid+published content and
+    // OMITS organizationId from Stripe metadata (Stripe metadata values must be
+    // strings; the webhook schema re-derives null from the absent key).
+    it('createCheckoutSession succeeds for orgless content and omits organizationId from Stripe metadata', async () => {
+      const sessionsCreate = vi
+        .fn()
+        .mockResolvedValue(
+          createMockCheckoutSession('cs_orgless_1', 'pi_orgless_co_1')
+        );
+      const stubStripe = {
+        ...mockStripe,
+        checkout: { sessions: { create: sessionsCreate, retrieve: vi.fn() } },
+        customers: {
+          list: vi.fn().mockResolvedValue({ data: [], has_more: false }),
+          create: vi.fn().mockResolvedValue({
+            id: `cus_orgless_${Date.now()}`,
+            email: 'buyer@example.com',
+          }),
+        },
+      } as unknown as Stripe;
+      const service = new PurchaseService(
+        { db, environment: 'test' },
+        stubStripe
+      );
+
+      const { content } = await setupOrglessPaidContent({
+        title: 'Orgless Checkout',
+        priceCents: 4200,
+        creatorUserId: userId,
+        seedConnect: false, // checkout doesn't need the Connect account
+      });
+
+      const result = await service.createCheckoutSession(
+        {
+          contentId: content.id,
+          successUrl: 'http://localhost:3000/success',
+          cancelUrl: 'http://localhost:3000/cancel',
+        },
+        otherUserId
+      );
+
+      expect(result.sessionUrl).toBeTruthy();
+      expect(sessionsCreate).toHaveBeenCalledTimes(1);
+      const passedMetadata = sessionsCreate.mock.calls[0][0].metadata as Record<
+        string,
+        string
+      >;
+      // organizationId MUST be absent (not present, not the string "null").
+      expect(passedMetadata).not.toHaveProperty('organizationId');
+      expect(passedMetadata.contentId).toBe(content.id);
+      expect(passedMetadata.creatorId).toBe(userId);
+    });
+
+    // P4 — bi-party refund reverses the creator_payout + platform_fee rows.
+    // reversePayoutsForPurchase is data-driven (reads whatever rows exist), so
+    // with only 2 bi-party rows it reverses exactly those and never expects an
+    // org row.
+    it('refund reverses both bi-party rows (creator_payout transfer + platform_fee)', async () => {
+      const creatorTransferId = `tr_orgless_refund_${Date.now()}`;
+      const reversed: string[] = [];
+      const stubFeeConfig = {
+        getFeesPlatform: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 0,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+      const stubStripe = {
+        ...mockStripe,
+        transfers: {
+          create: vi.fn().mockResolvedValue({ id: creatorTransferId }),
+          createReversal: vi.fn().mockImplementation((id: string) => {
+            reversed.push(id);
+            return Promise.resolve({ id: `trr_${id}` });
+          }),
+        },
+        refunds: { create: vi.fn() },
+      } as unknown as Stripe;
+      const service = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      const { content, chargeId, paymentIntentId } =
+        await setupOrglessPaidContent({
+          title: 'Orgless Refund',
+          priceCents: 10000,
+          creatorUserId: userId,
+        });
+
+      const purchase = await service.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId: null,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+      });
+
+      const before = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+      expect(before).toHaveLength(2);
+
+      await service.processRefund(paymentIntentId, {
+        stripeRefundId: 're_orgless_001',
+        refundAmountCents: 10000,
+        refundReason: 'requested_by_customer',
+      });
+
+      // Only the creator_payout had a Stripe transfer → exactly one reversal.
+      // platform_fee is marked reversed without a Stripe call.
+      // biome-ignore lint/suspicious/noExplicitAny: test mock
+      const reversal = (stubStripe as any).transfers.createReversal;
+      expect(reversal).toHaveBeenCalledTimes(1);
+      expect(reversed).toContain(creatorTransferId);
+
+      const after = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+      expect(after).toHaveLength(2);
+      expect(after.every((r) => r.status === 'reversed')).toBe(true);
+    });
+
+    // N1 — gate ORDER preserved: orgless but UNPUBLISHED still throws.
+    it('createCheckoutSession still throws ContentNotPurchasableError for orgless UNPUBLISHED content', async () => {
+      const media = await mediaService.create(
+        {
+          title: 'Orgless Draft',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/orgless-draft/master.m3u8',
+          thumbnailKey: 'thumbnails/orgless-draft.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+      // Orgless + paid + priced but NOT published.
+      const content = await contentService.create(
+        {
+          title: 'Orgless Draft',
+          slug: createUniqueSlug('orgless-draft'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 2999,
+        },
+        userId
+      );
+      // intentionally NOT published
+
+      await expect(
+        purchaseService.createCheckoutSession(
+          {
+            contentId: content.id,
+            successUrl: 'http://localhost:3000/success',
+            cancelUrl: 'http://localhost:3000/cancel',
+          },
+          otherUserId
+        )
+      ).rejects.toThrow(ContentNotPurchasableError);
+    });
+
+    // N2 — orgless but FREE (priceCents null) still throws.
+    it('createCheckoutSession still throws ContentNotPurchasableError for orgless FREE content', async () => {
+      const media = await mediaService.create(
+        {
+          title: 'Orgless Free',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: 'hls/orgless-free/master.m3u8',
+          thumbnailKey: 'thumbnails/orgless-free.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+      const content = await contentService.create(
+        {
+          title: 'Orgless Free',
+          slug: createUniqueSlug('orgless-free'),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'public',
+          accessType: 'free',
+        },
+        userId
+      );
+      await contentService.publish(content.id, userId);
+
+      await expect(
+        purchaseService.createCheckoutSession(
+          {
+            contentId: content.id,
+            successUrl: 'http://localhost:3000/success',
+            cancelUrl: 'http://localhost:3000/cancel',
+          },
+          otherUserId
+        )
+      ).rejects.toThrow(ContentNotPurchasableError);
+    });
+
+    // N3 — even with a feeConfig that returns a non-zero orgFeePercent, the
+    // orgless branch MUST force the org leg to zero (no org_fee row, no second
+    // transfer). Guards against an org slice being stranded with no recipient.
+    it('forces the org leg to zero for orgless even when fee config returns a non-zero orgFeePercent', async () => {
+      const stubFeeConfig = {
+        getFeesPlatform: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 3000, // 30% — must be ignored
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+      const createTransfer = vi
+        .fn()
+        .mockResolvedValue({ id: `tr_orgless_n3_${Date.now()}` });
+      const stubStripe = {
+        ...mockStripe,
+        transfers: { create: createTransfer },
+        paymentIntents: { retrieve: vi.fn() },
+      } as unknown as Stripe;
+      const service = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      const { content, chargeId, paymentIntentId } =
+        await setupOrglessPaidContent({
+          title: 'Orgless Zero Org Leg',
+          priceCents: 10000,
+          creatorUserId: userId,
+        });
+
+      const purchase = await service.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId: null,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: chargeId,
+      });
+
+      // Snapshot on the purchase row: org fee component is zero, creator gets
+      // the full post-platform remainder.
+      expect(purchase.organizationFeeCents).toBe(0);
+      expect(purchase.platformFeeCents).toBe(1000);
+      expect(purchase.creatorPayoutCents).toBe(9000);
+
+      const rows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, purchase.id));
+      expect(rows).toHaveLength(2);
+      expect(
+        rows.find((r) => r.payoutType === 'organization_fee')
+      ).toBeUndefined();
+      // Only the creator transfer fired (no org transfer).
+      expect(createTransfer).toHaveBeenCalledTimes(1);
+    });
+
+    // C1 / R2 — a creator who publishes BOTH orgless and org-scoped content:
+    // the orgless purchase writes 2 rows, the org-scoped purchase writes 3,
+    // and the two flows are independent within the same run. Doubles as the
+    // org-routed regression assertion (R1 already covered by the existing
+    // tri-party suite).
+    it('keeps orgless (2 rows) and org-scoped (3 rows) flows independent for the same creator', async () => {
+      const stubFeeConfig = {
+        // org-scoped path uses getFeesForCreator (org fee > 0);
+        // orgless path uses getFeesPlatform (org leg forced to 0).
+        getFeesForCreator: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 1000, // 10% org slice for the org-scoped purchase
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+        getFeesPlatform: vi.fn().mockResolvedValue({
+          platformFeePercent: 1000,
+          orgFeePercent: 0,
+          minPlatformFeeCents: 0,
+          minTransferCents: 0,
+        }),
+      };
+      const createTransfer = vi.fn().mockImplementation(() =>
+        Promise.resolve({
+          id: `tr_mixed_${Math.random().toString(36).slice(2, 10)}`,
+        })
+      );
+      const stubStripe = {
+        ...mockStripe,
+        transfers: { create: createTransfer },
+        paymentIntents: { retrieve: vi.fn() },
+      } as unknown as Stripe;
+      const service = new PurchaseService(
+        // biome-ignore lint/suspicious/noExplicitAny: test stub
+        { db, environment: 'test', feeConfig: stubFeeConfig as any },
+        stubStripe
+      );
+
+      // Creator = userId. Seed an org owned by userId + the creator's single
+      // Connect (one account, used for BOTH the orgless creator slice AND, via
+      // the org pin, the org slice).
+      const [mixedOrg] = await db
+        .insert(organizations)
+        .values({
+          name: 'Mixed Flow Org',
+          slug: createUniqueSlug('mixed-flow'),
+          ownerId: userId,
+          primaryConnectAccountUserId: userId,
+        })
+        .returning();
+      await db
+        .insert(schema.stripeConnectAccounts)
+        .values({
+          userId,
+          organizationId: mixedOrg.id,
+          stripeAccountId: `acct_mixed_${Date.now()}`,
+          status: 'active',
+          chargesEnabled: true,
+          payoutsEnabled: true,
+        })
+        .onConflictDoUpdate({
+          target: [schema.stripeConnectAccounts.userId],
+          set: { chargesEnabled: true, payoutsEnabled: true, status: 'active' },
+        });
+
+      // ── Orgless purchase → 2 rows ──
+      const { content: orglessContent } = await setupOrglessPaidContent({
+        title: 'Mixed Orgless Leg',
+        priceCents: 10000,
+        creatorUserId: userId,
+        seedConnect: false, // account already seeded above
+      });
+      const orglessPi = `pi_mixed_orgless_${Date.now()}`;
+      const orglessPurchase = await service.completePurchase(orglessPi, {
+        customerId: otherUserId,
+        contentId: orglessContent.id,
+        organizationId: null,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: `ch_mixed_orgless_${Date.now()}`,
+      });
+      const orglessRows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, orglessPurchase.id));
+      expect(orglessRows).toHaveLength(2);
+      expect(orglessPurchase.organizationId).toBeNull();
+      expect(
+        orglessRows.find((r) => r.payoutType === 'organization_fee')
+      ).toBeUndefined();
+
+      // ── Org-scoped purchase by the SAME creator → 3 rows (regression) ──
+      const orgMedia = await mediaService.create(
+        {
+          title: 'Mixed Org Leg',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          fileSizeBytes: 1024 * 1024,
+        },
+        userId
+      );
+      await mediaService.markAsReady(
+        orgMedia.id,
+        {
+          hlsMasterPlaylistKey: 'hls/mixed-org/master.m3u8',
+          thumbnailKey: 'thumbnails/mixed-org.jpg',
+          durationSeconds: 60,
+        },
+        userId
+      );
+      const orgContent = await contentService.create(
+        {
+          organizationId: mixedOrg.id,
+          title: 'Mixed Org Leg',
+          slug: createUniqueSlug('mixed-org-leg'),
+          contentType: 'video',
+          mediaItemId: orgMedia.id,
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 10000,
+        },
+        userId
+      );
+      await contentService.publish(orgContent.id, userId);
+
+      const orgPi = `pi_mixed_org_${Date.now()}`;
+      const orgPurchase = await service.completePurchase(orgPi, {
+        customerId: otherUserId,
+        contentId: orgContent.id,
+        organizationId: mixedOrg.id,
+        amountPaidCents: 10000,
+        currency: 'gbp',
+        stripeChargeId: `ch_mixed_org_${Date.now()}`,
+      });
+      const orgRows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, orgPurchase.id));
+      // 3 rows: platform_fee + organization_fee + creator_payout.
+      expect(orgRows).toHaveLength(3);
+      expect(orgPurchase.organizationId).toBe(mixedOrg.id);
+      const orgFeeRow = orgRows.find(
+        (r) => r.payoutType === 'organization_fee'
+      );
+      expect(orgFeeRow).toBeDefined();
+      expect(orgFeeRow?.amountCents).toBe(900); // 10% of post-platform 9000
+      expect(orgFeeRow?.organizationId).toBe(mixedOrg.id);
     });
   });
 });

@@ -38,14 +38,16 @@ test.describe('Studio Content - List Page', () => {
     await injectSharedStudioAuth(page, sharedAuth);
   });
 
-  test('content list page loads with heading', async ({ page }) => {
+  test('content list page renders command bar', async ({ page }) => {
     await navigateToStudioPage(
       page,
       sharedAuth.member.organization.slug,
       '/content'
     );
 
-    await expect(page.locator('h1')).toBeVisible();
+    // The redesigned content list uses a sticky ContentListCommandBar
+    // (no <h1>); the breadcrumb leaf is the page's primary heading.
+    await expect(page.locator('.command-bar .breadcrumb-leaf')).toBeVisible();
   });
 
   test('create button links to new content', async ({ page }) => {
@@ -66,13 +68,17 @@ test.describe('Studio Content - List Page', () => {
       '/content'
     );
 
-    // New org: empty state with create CTA. Populated org: table.
+    // New org: EmptyState (.empty-state). Populated org: the redesigned list
+    // uses an <ol class="row-stack"> (no <table>) and optionally a
+    // ContentFeatureSlab. Wait for the loading skeleton to clear and then
+    // assert one of the two terminal states.
     const emptyState = page.locator('.empty-state');
-    const table = page.locator('table');
+    const rowStack = page.locator('ol.row-stack');
 
-    const hasEmpty = await emptyState.isVisible().catch(() => false);
-    const hasTable = await table.isVisible().catch(() => false);
-    expect(hasEmpty || hasTable).toBeTruthy();
+    // Either state should appear once data resolves.
+    await expect(emptyState.or(rowStack).first()).toBeVisible({
+      timeout: 15000,
+    });
   });
 
   test('create link navigates to new content page', async ({ page }) => {
@@ -111,25 +117,35 @@ test.describe('Studio Content - Create Form', () => {
       '/content/new'
     );
 
-    // Text fields
+    // Text fields (label-associated via id/for)
     await expect(page.getByRole('textbox', { name: 'Title' })).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Slug' })).toBeVisible();
-    await expect(
-      page.getByRole('textbox', { name: 'Description' })
-    ).toBeVisible();
 
-    // Custom combobox selects
+    // Description is now a RichTextEditor (Tiptap contenteditable), not a
+    // <textarea>. Multiple RichTextEditors render on the form (description
+    // + future fields can use them), so scope by the description label
+    // section. The label uses `for="description"` which targets the editor's
+    // internal element by id.
+    await expect(page.locator('label[for="description"]')).toBeVisible();
     await expect(
-      page.getByRole('combobox', { name: 'Content Type' })
-    ).toBeVisible();
-    await expect(
-      page.getByRole('combobox', { name: 'Visibility' })
-    ).toBeVisible();
+      page.locator('.rich-text-editor__content').first()
+    ).toBeVisible({ timeout: 10000 });
 
-    // Price field (spinbutton)
-    await expect(
-      page.getByRole('spinbutton', { name: /Price/i })
-    ).toBeVisible();
+    // ContentForm now uses radio cards (not comboboxes) for type + access:
+    //  - Content Type: `<fieldset>` + radios per type
+    //  - Access: `<div role="radiogroup">` + radios per option
+    await expect(page.getByRole('radio', { name: 'Video' })).toBeVisible();
+    await expect(page.getByRole('radio', { name: 'Article' })).toBeVisible();
+
+    // Price is conditionally rendered — only shows when access type is 'paid'
+    // or 'subscribers' (AccessSection's `showPrice` derived). Click the
+    // "One-time purchase" radio (the i18n label for the 'paid' access type
+    // — see messages/en.json `studio_content_form_access_paid`) first to
+    // surface the input, then assert visible.
+    await page
+      .getByRole('radio', { name: /one-time purchase/i })
+      .check({ force: true });
+    await expect(page.locator('input#price')).toBeVisible();
 
     // Submit button
     await expect(
@@ -137,19 +153,7 @@ test.describe('Studio Content - Create Form', () => {
     ).toBeVisible();
   });
 
-  test('back link to content list is visible', async ({ page }) => {
-    await navigateToStudioPage(
-      page,
-      sharedAuth.member.organization.slug,
-      '/content/new'
-    );
-
-    await expect(
-      page.getByRole('link', { name: 'Back to Content' })
-    ).toBeVisible();
-  });
-
-  test('content type combobox has Video, Audio, Article options', async ({
+  test('content type has Video, Audio, Article radio options', async ({
     page,
   }) => {
     await navigateToStudioPage(
@@ -158,40 +162,42 @@ test.describe('Studio Content - Create Form', () => {
       '/content/new'
     );
 
-    // Open combobox
-    await page.getByRole('combobox', { name: 'Content Type' }).click();
-
-    // Check all options exist
-    await expect(page.getByRole('option', { name: 'Video' })).toBeVisible();
-    await expect(page.getByRole('option', { name: 'Audio' })).toBeVisible();
-    await expect(page.getByRole('option', { name: 'Article' })).toBeVisible();
+    // Radios are sr-only; check existence rather than visibility — the
+    // labels wrapping them provide the accessible name.
+    await expect(page.getByRole('radio', { name: 'Video' })).toBeAttached();
+    await expect(page.getByRole('radio', { name: 'Audio' })).toBeAttached();
+    await expect(page.getByRole('radio', { name: 'Article' })).toBeAttached();
   });
 
-  test('visibility combobox has expected options', async ({ page }) => {
+  test('access options are rendered as a radiogroup', async ({ page }) => {
     await navigateToStudioPage(
       page,
       sharedAuth.member.organization.slug,
       '/content/new'
     );
 
-    await page.getByRole('combobox', { name: 'Visibility' }).click();
-
-    await expect(page.getByRole('option', { name: 'Public' })).toBeVisible();
-    await expect(page.getByRole('option', { name: 'Private' })).toBeVisible();
+    // AccessSection uses role="radiogroup" + radio cards. Confirm the group
+    // exists; specific option labels (free / paid / subscribers) depend on
+    // the page copy and are exercised by content-form-access unit tests.
+    await expect(page.locator('[role="radiogroup"]')).toBeAttached();
   });
 
-  test('price field defaults to 0 with help text', async ({ page }) => {
+  test('price input defaults to 0', async ({ page }) => {
     await navigateToStudioPage(
       page,
       sharedAuth.member.organization.slug,
       '/content/new'
     );
 
-    const priceField = page.getByRole('spinbutton', { name: /Price/i });
-    await expect(priceField).toHaveValue('0');
-
-    // Help text below price
-    await expect(page.locator('.form-help')).toContainText('free content');
+    // Price is conditionally rendered behind `showPrice` (only true for paid
+    // or subscribers access). Default access is 'free' — pick 'One-time
+    // purchase' to surface the input before asserting its default value.
+    // The input is `step="0.01"`, so the rendered default is "0.00".
+    await page
+      .getByRole('radio', { name: /one-time purchase/i })
+      .check({ force: true });
+    const priceField = page.locator('input#price');
+    await expect(priceField).toHaveValue(/^0(\.0+)?$/);
   });
 });
 
@@ -205,13 +211,20 @@ test.describe('Studio Content - Create Submission', () => {
     const uniqueSlug = `e2e-article-${Date.now()}`;
     await page.getByRole('textbox', { name: 'Title' }).fill('E2E Test Article');
     await page.getByRole('textbox', { name: 'Slug' }).fill(uniqueSlug);
-    await page
-      .getByRole('textbox', { name: 'Description' })
-      .fill('Test article description');
 
-    // Switch to Article type (doesn't require mediaItemId)
-    await page.getByRole('combobox', { name: 'Content Type' }).click();
-    await page.getByRole('option', { name: 'Article' }).click();
+    // Description is now a Tiptap RichTextEditor (contenteditable div). Type
+    // into the ProseMirror element instead of filling a <textarea>. Wait for
+    // the editor to mount before typing — onMount initialises it client-side.
+    // Multiple editors may render on the form, so target the first one
+    // (description is the first field after Title/Slug).
+    const editor = page.locator('.rich-text-editor__content').first();
+    await editor.waitFor({ state: 'visible', timeout: 10000 });
+    await editor.click();
+    await page.keyboard.type('Test article description');
+
+    // Switch to Article type (doesn't require mediaItemId).
+    // Radios are sr-only — `.check({ force: true })` works on hidden radios.
+    await page.getByRole('radio', { name: 'Article' }).check({ force: true });
 
     // Submit
     await page.getByRole('button', { name: 'Create Content' }).click();

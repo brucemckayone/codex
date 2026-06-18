@@ -27,12 +27,13 @@ import {
   CURRENCY,
   PURCHASE_STATUS,
 } from '@codex/constants';
-import { isUniqueViolation, toIso } from '@codex/database';
+import { getConstraintName, isUniqueViolation, toIso } from '@codex/database';
 import {
   agreementProposals,
   content,
   contentAccess,
   creatorOrganizationAgreements,
+  organizationMemberships,
   payouts,
   purchases,
   refundReviews,
@@ -114,15 +115,43 @@ import {
 } from './revenue-calculator';
 
 /**
+ * Fire-and-forget email dispatch used by the purchase payout path.
+ *
+ * Matches the shape of `SendEmailToWorkerParams` from `@codex/worker-utils`
+ * so the registry can wire `sendEmailToWorker(env, ctx, params)` directly.
+ * Returns `void` — failures are the mailer's concern. The purchase money
+ * path MUST NOT block or throw on notification failure.
+ */
+export type PurchaseMailer = (params: {
+  to: string;
+  toName?: string;
+  templateName: 'creator-connect-needed';
+  category: 'transactional';
+  userId?: string;
+  organizationId?: string | null;
+  data: Record<string, string | number | boolean>;
+}) => void;
+
+/**
  * Configuration for `PurchaseService`.
  *
  * Adds optional `feeConfig` (Codex-m644n) so the one-off purchase flow can
  * resolve DB-configurable fees via the 3-tier fallback chain. When absent,
  * the service uses the `DEFAULT_*` constants — bit-for-bit pre-Codex-m644n
  * behaviour (covered by existing tests).
+ *
+ * Adds optional `mailer` (WP-10 — Codex-69t7c.10): when wired, fires a
+ * `creator-connect-needed` notification fire-and-forget after a pending
+ * `creator_payout` row is parked. Notification failure MUST NOT block or
+ * roll back the payout ledger write.
+ *
+ * Adds optional `webAppUrl` to build the dashboard deep-link embedded in
+ * payout notifications. When absent the URL is omitted gracefully.
  */
 interface PurchaseServiceConfig extends ServiceConfig {
   feeConfig?: FeeConfigService;
+  mailer?: PurchaseMailer;
+  webAppUrl?: string;
 }
 
 /**
@@ -185,17 +214,21 @@ function coercePurchaseStatus(s: string): PurchaseListStatus {
 export class PurchaseService extends BaseService {
   private readonly stripe: Stripe;
   private readonly feeConfig: FeeConfigService | undefined;
+  private readonly mailer: PurchaseMailer | undefined;
+  private readonly webAppUrl: string | undefined;
 
   /**
    * Initialize purchase service
    *
-   * @param config - Service configuration (db, environment, optional feeConfig)
+   * @param config - Service configuration (db, environment, optional feeConfig, optional mailer)
    * @param stripe - Stripe client instance
    */
   constructor(config: PurchaseServiceConfig, stripe: Stripe) {
     super(config);
     this.stripe = stripe;
     this.feeConfig = config.feeConfig;
+    this.mailer = config.mailer;
+    this.webAppUrl = config.webAppUrl;
   }
 
   /**
@@ -249,17 +282,13 @@ export class PurchaseService extends BaseService {
         });
       }
 
-      // Phase 1: Paid content must belong to an organization
-      if (contentRecord.organizationId == null) {
-        throw new ContentNotPurchasableError(
-          validated.contentId,
-          'not_published',
-          {
-            reason:
-              'Content must belong to an organization to be purchasable (Phase 1)',
-          }
-        );
-      }
+      // Codex-69t7c WP5: the Phase-1 "must belong to an organization" gate is
+      // removed. Orgless creator-direct (bi-party) content is purchasable —
+      // `content.organizationId IS NULL` is a valid, supported state. The
+      // creator slice routes to the creator's single Connect account (by
+      // userId) and NO organization_fee leg is written. Everything downstream
+      // (purchases.organizationId, payouts.organizationId, the webhook
+      // checkoutSessionMetadataSchema) is already nullable.
 
       // Check content is published
       if (contentRecord.status !== CONTENT_STATUS.PUBLISHED) {
@@ -339,19 +368,22 @@ export class PurchaseService extends BaseService {
         });
       }
 
-      // Hoist captured non-null fields BEFORE the closure. TypeScript loses
-      // narrowing of property accesses (`contentRecord.priceCents`,
-      // `contentRecord.organizationId`) across closure boundaries — locals
-      // preserve the narrowed `number` / `string` types we already validated
-      // earlier in this function.
+      // Hoist captured non-null `priceCents` BEFORE the closure. TypeScript
+      // loses narrowing of property accesses (`contentRecord.priceCents`)
+      // across closure boundaries — the local preserves the narrowed `number`
+      // type we already validated earlier in this function.
+      //
+      // Codex-69t7c WP5: `organizationId` is intentionally NOT non-null here —
+      // orgless (bi-party) content has `organizationId === null`, which is a
+      // supported purchase. Only `priceCents` is a hard invariant at this point
+      // (the free/unpriced guard above already rejected null/<=0).
       const priceCents = contentRecord.priceCents;
       const organizationId = contentRecord.organizationId;
-      if (priceCents === null || organizationId === null) {
+      if (priceCents === null) {
         // Already validated upstream; this guards the type narrowing only.
-        throw new PaymentProcessingError(
-          'Content missing price or organization at checkout',
-          { contentId: validated.contentId }
-        );
+        throw new PaymentProcessingError('Content missing price at checkout', {
+          contentId: validated.contentId,
+        });
       }
 
       // `withStaleCustomerRecovery` resolves a customer id and self-heals
@@ -391,10 +423,16 @@ export class PurchaseService extends BaseService {
             // charge via `source_transaction`.
             success_url: validated.successUrl,
             cancel_url: validated.cancelUrl,
+            // Codex-69t7c WP5: `organizationId` is OMITTED for orgless
+            // (bi-party) content. Stripe metadata values must be strings, so
+            // we cannot pass `null`; and an empty string would fail the
+            // webhook's `uuidSchema` round-trip in checkoutSessionMetadataSchema.
+            // Omitting the key lets that schema's `.default(null)` re-derive
+            // `null` on the completePurchase side.
             metadata: {
               contentId: validated.contentId,
               customerId,
-              organizationId,
+              ...(organizationId !== null ? { organizationId } : {}),
               creatorId: contentRecord.creatorId,
               contentTitle: contentRecord.title,
             },
@@ -512,29 +550,31 @@ export class PurchaseService extends BaseService {
           );
         }
 
+        // Codex-69t7c WP5: `organizationId` is legitimately nullable now.
+        // Org-scoped purchases populate it (from metadata or the content row);
+        // orgless creator-direct (bi-party) purchases have `null`. The Phase-1
+        // "personal content cannot be purchased" throw is removed.
         const organizationId =
           metadata.organizationId ?? contentRecord.organizationId;
 
-        // Phase 1: Personal content (organizationId = null) cannot be purchased
-        if (!organizationId) {
-          throw new PaymentProcessingError(
-            'Personal content purchases not supported - content must belong to an organization',
-            {
-              contentId: metadata.contentId,
-              stripePaymentIntentId,
-            }
-          );
-        }
-
         // Step 3: Resolve fees via FeeConfigService when available (Codex-m644n).
+        //
+        // Codex-69t7c WP5: branch on org presence.
+        //   - org-scoped → getFeesForCreator(orgId, creatorId) — platform leg
+        //     PLUS the org's per-creator override (unchanged tri-party path).
+        //   - orgless (bi-party) → getFeesPlatform() — platform-only fees; there
+        //     is no organization to carve a slice for, so the org leg is forced
+        //     to ZERO below regardless of any default `orgFeePercent`.
         // Falls back to legacy constants when no resolver is injected — preserves
         // the pre-m644n behaviour covered by existing tests.
         const fees = this.feeConfig
-          ? await this.feeConfig.getFeesForCreator(
-              organizationId,
-              contentRecord.creatorId,
-              'one_off'
-            )
+          ? organizationId
+            ? await this.feeConfig.getFeesForCreator(
+                organizationId,
+                contentRecord.creatorId,
+                'one_off'
+              )
+            : await this.feeConfig.getFeesPlatform('one_off')
           : {
               platformFeePercent: DEFAULT_PLATFORM_FEE_PERCENTAGE,
               orgFeePercent: DEFAULT_ORG_FEE_PERCENTAGE,
@@ -566,55 +606,95 @@ export class PurchaseService extends BaseService {
         // makes the predicate non-deterministic — webhook replays
         // can land on the wrong side of an agreement boundary that
         // occurred mid-millisecond.
+        // Codex-69t7c WP5: the creator-org agreement lookup is org-scoped, so
+        // it only runs for org-scoped purchases. Orgless (bi-party) content has
+        // no organization and therefore no `creator_organization_agreements`
+        // row — skip the query entirely (it would also fail to typecheck
+        // against the nullable `organizationId`).
         const purchasedAt = new Date();
-        const [agreementRow] = await tx
-          .select({
-            sharePercent: agreementProposals.proposedCreatorSharePercent,
-          })
-          .from(creatorOrganizationAgreements)
-          .innerJoin(
-            agreementProposals,
-            eq(
-              agreementProposals.id,
-              creatorOrganizationAgreements.currentProposalId
-            )
-          )
-          .where(
-            and(
-              eq(creatorOrganizationAgreements.organizationId, organizationId),
-              eq(
-                creatorOrganizationAgreements.creatorId,
-                contentRecord.creatorId
-              ),
-              eq(creatorOrganizationAgreements.revenueType, 'content_purchase'),
-              // Per Decision Q3: active-as-of-purchase-date. The schema
-              // check enforces (status='terminated') = (terminatedAt IS
-              // NOT NULL) — status='active' implies terminatedAt is NULL.
-              or(
-                eq(creatorOrganizationAgreements.status, 'active'),
-                and(
-                  eq(creatorOrganizationAgreements.status, 'terminated'),
-                  gt(creatorOrganizationAgreements.terminatedAt, purchasedAt)
+        const [agreementRow] = organizationId
+          ? await tx
+              .select({
+                sharePercent: agreementProposals.proposedCreatorSharePercent,
+              })
+              .from(creatorOrganizationAgreements)
+              .innerJoin(
+                agreementProposals,
+                eq(
+                  agreementProposals.id,
+                  creatorOrganizationAgreements.currentProposalId
                 )
-              ),
-              lte(creatorOrganizationAgreements.effectiveFrom, purchasedAt),
-              or(
-                isNull(creatorOrganizationAgreements.effectiveUntil),
-                gt(creatorOrganizationAgreements.effectiveUntil, purchasedAt)
               )
-            )
-          )
-          .limit(1);
+              .where(
+                and(
+                  eq(
+                    creatorOrganizationAgreements.organizationId,
+                    organizationId
+                  ),
+                  eq(
+                    creatorOrganizationAgreements.creatorId,
+                    contentRecord.creatorId
+                  ),
+                  eq(
+                    creatorOrganizationAgreements.revenueType,
+                    'content_purchase'
+                  ),
+                  // Per Decision Q3: active-as-of-purchase-date. The schema
+                  // check enforces (status='terminated') = (terminatedAt IS
+                  // NOT NULL) — status='active' implies terminatedAt is NULL.
+                  or(
+                    eq(creatorOrganizationAgreements.status, 'active'),
+                    and(
+                      eq(creatorOrganizationAgreements.status, 'terminated'),
+                      gt(
+                        creatorOrganizationAgreements.terminatedAt,
+                        purchasedAt
+                      )
+                    )
+                  ),
+                  lte(creatorOrganizationAgreements.effectiveFrom, purchasedAt),
+                  or(
+                    isNull(creatorOrganizationAgreements.effectiveUntil),
+                    gt(
+                      creatorOrganizationAgreements.effectiveUntil,
+                      purchasedAt
+                    )
+                  )
+                )
+              )
+              .limit(1)
+          : [undefined];
 
-        // If an agreement is present, derive the org's cut from
-        // 10000 - creator_share. If not, fall through to the
-        // FeeConfigService-resolved value — that is the Q1 fallback
-        // ("org keeps 100% of post-platform" when nothing else
-        // applies; the org-fee resolution defaults to 100% post-platform
-        // unless an admin has overridden it).
-        const effectiveOrgFeePercent = agreementRow
-          ? 10_000 - agreementRow.sharePercent
-          : fees.orgFeePercent;
+        // Codex-69t7c WP5: for orgless (bi-party) purchases the org leg is
+        // ALWAYS zero — there is no organization to pay, so the creator keeps
+        // 100% of the post-platform amount. We force `0` here rather than
+        // trusting `fees.orgFeePercent`, which for the platform-fee config can
+        // carry a non-zero default that would otherwise strand a slice with no
+        // recipient. For org-scoped purchases: if an agreement is present,
+        // derive the org's cut from 10000 - creator_share; otherwise fall
+        // through to the FeeConfigService-resolved value (the Q1 fallback —
+        // "org keeps 100% of post-platform" unless an admin overrode it).
+        const effectiveOrgFeePercent = !organizationId
+          ? 0
+          : agreementRow
+            ? 10_000 - agreementRow.sharePercent
+            : fees.orgFeePercent;
+
+        // Codex-69t7c WP5 hardening (d): record the orgless org-fee-zero
+        // override decision explicitly. For a bi-party (orgless) purchase the
+        // org fee leg is forced to 0 regardless of the platform-fee config's
+        // default `orgFeePercent`; log that override so the decision is
+        // auditable rather than silently folded into the split below.
+        if (!organizationId) {
+          this.obs.info('orgless_org_fee_override', {
+            contentId: metadata.contentId,
+            creatorId: contentRecord.creatorId,
+            stripePaymentIntentId,
+            configOrgFeePercent: fees.orgFeePercent,
+            effectiveOrgFeePercent: 0,
+            reason: 'bi_party_no_org_recipient',
+          });
+        }
 
         // Step 4: Calculate revenue split, then apply min-platform-fee floor.
         // The floor is enforced in the caller (not in calculateRevenueSplit)
@@ -737,10 +817,20 @@ export class PurchaseService extends BaseService {
           stripeChargeId: metadata.stripeChargeId,
         });
       } else if (txResult.isNew && !metadata.stripeChargeId) {
-        this.obs.warn(
-          'Purchase completed without stripeChargeId — payouts ledger entries skipped',
+        // Codex-69t7c WP5 hardening (a): a completed purchase with no
+        // stripeChargeId means writePurchasePayouts is skipped entirely, so
+        // NO creator_payout row is ever written — the creator (org-scoped OR
+        // orgless) is never paid for this sale. That is a money-loss event,
+        // not a recoverable warning: escalate to error with a correlatable
+        // errorId so it is loud in the log aggregator / Sentry-via-logs.
+        const errorId = crypto.randomUUID();
+        this.obs.error(
+          'Purchase completed without stripeChargeId — payouts ledger entries skipped; creator will NOT be paid',
           {
+            errorId,
             purchaseId: txResult.purchase.id,
+            creatorId: txResult.creatorId,
+            organizationId: txResult.organizationId,
             stripePaymentIntentId,
           }
         );
@@ -792,7 +882,11 @@ export class PurchaseService extends BaseService {
       creatorPayoutCents: number;
     };
     creatorId: string;
-    organizationId: string;
+    // Codex-69t7c WP5: nullable for orgless (bi-party) purchases. When null the
+    // org-fee leg is unreachable (organizationFeeCents is forced to 0 upstream),
+    // and the payout rows carry organizationId=null (payouts.organization_id is
+    // nullable). The creator slice still routes by userId.
+    organizationId: string | null;
     stripeChargeId: string;
   }): Promise<void> {
     const {
@@ -839,26 +933,42 @@ export class PurchaseService extends BaseService {
       }
     }
 
-    // Look up Connect accounts up front. We need creator's (the org owner / a
-    // member, scoped by creatorId + organizationId) and org's (any active row
-    // for the org). The latter falls back to the same lookup as before.
+    // Look up Connect accounts up front: the creator's single account (by
+    // userId — one account per user, Codex-69t7c) and the org's canonical
+    // account (resolved via primaryConnectAccountUserId below).
     const [creatorConnect] =
       revenueSplit.creatorPayoutCents > 0
         ? await this.db
             .select()
             .from(stripeConnectAccounts)
-            .where(
-              and(
-                eq(stripeConnectAccounts.userId, creatorId),
-                eq(stripeConnectAccounts.organizationId, organizationId)
-              )
-            )
+            .where(eq(stripeConnectAccounts.userId, creatorId))
             .limit(1)
         : [undefined];
 
+    // WP-10 (Codex-69t7c.10): resolve creator email for connect-needed
+    // notification. Only fetched when we will attempt a creator_payout and
+    // the Connect account is not ready — avoids a DB round-trip on the hot
+    // paid path. Null is safe: notification is best-effort.
+    let creatorEmail: string | null = null;
+    if (
+      revenueSplit.creatorPayoutCents > 0 &&
+      !creatorConnect?.chargesEnabled &&
+      this.mailer
+    ) {
+      const [creatorRow] = await this.db
+        .select({ email: users.email })
+        .from(users)
+        .where(eq(users.id, creatorId))
+        .limit(1);
+      creatorEmail = creatorRow?.email ?? null;
+    }
+
     // Codex-sec7i: org slice routes to the pinned Connect account.
+    // Codex-69t7c WP5: only resolve when there IS an org — orgless purchases
+    // never carve an org slice (organizationFeeCents is forced to 0 upstream),
+    // so this stays undefined and the org-fee branch below is skipped.
     const orgConnect =
-      revenueSplit.organizationFeeCents > 0
+      organizationId !== null && revenueSplit.organizationFeeCents > 0
         ? await resolvePrimaryConnect(this.db, organizationId)
         : undefined;
 
@@ -875,24 +985,77 @@ export class PurchaseService extends BaseService {
         transferGroup,
         idempotencyKey: `${stripeChargeId}_creator`,
         now,
+        creatorEmail,
       });
     }
 
     // 3. Organization fee — secondary transfer with source_transaction.
-    if (revenueSplit.organizationFeeCents > 0) {
-      await this.executePurchaseTransfer({
-        purchase,
-        organizationId,
-        amountCents: revenueSplit.organizationFeeCents,
-        payoutType: 'organization_fee',
-        rowUserId: orgConnect?.userId ?? null,
-        connect: orgConnect,
-        stripeChargeId,
-        transferGroup,
-        idempotencyKey: `${stripeChargeId}_org_fee`,
-        now,
-      });
+    // Codex-69t7c WP5: `organizationId !== null` is part of the guard. Orgless
+    // (bi-party) purchases force organizationFeeCents to 0 upstream, so this
+    // branch is unreachable for them; the null-check also narrows
+    // `organizationId` to `string` for the resolvers below.
+    if (organizationId !== null && revenueSplit.organizationFeeCents > 0) {
+      // Codex-ed446: the org-fee payout row's recipient userId MUST be
+      // non-null (check_payouts_user_required). Prefer the resolved Connect
+      // account's user; when the org owner has not onboarded a Connect
+      // account, orgConnect is undefined — fall back to the org owner so a
+      // pending organization_fee row still persists and is swept (mirrors the
+      // subscription path) instead of stranding the slice via a 23514
+      // violation that the per-row catch would silently swallow.
+      const orgRowUserId =
+        orgConnect?.userId ?? (await this.resolveOrgOwnerId(organizationId));
+      if (orgRowUserId) {
+        await this.executePurchaseTransfer({
+          purchase,
+          organizationId,
+          amountCents: revenueSplit.organizationFeeCents,
+          payoutType: 'organization_fee',
+          rowUserId: orgRowUserId,
+          connect: orgConnect,
+          stripeChargeId,
+          transferGroup,
+          idempotencyKey: `${stripeChargeId}_org_fee`,
+          now,
+        });
+      } else {
+        // No Connect account AND no resolvable org owner — cannot attribute
+        // the slice to any user, so a ledger row is impossible. Surface loudly
+        // (data-integrity event) rather than emit a 23514-bound insert.
+        this.obs.error(
+          'Cannot record organization_fee payout: no Connect account and no org owner found',
+          {
+            purchaseId: purchase.id,
+            organizationId,
+            amountCents: revenueSplit.organizationFeeCents,
+          }
+        );
+      }
     }
+  }
+
+  /**
+   * Resolve an org's owner userId (Codex-ed446). The org-fee payout row MUST
+   * carry a non-null userId (check_payouts_user_required); when the org owner
+   * has not onboarded a Connect account, `resolvePrimaryConnect` returns
+   * undefined, so we fall back to the owner here rather than writing a
+   * null-userId row that violates 23514 and strands the org slice in the
+   * platform balance. Mirrors `SubscriptionService.resolveOrgOwnerId`. No
+   * ORDER BY — matches that resolver's shape; deterministic-owner ordering
+   * across multi-owner orgs is tracked separately in Codex-rjwdm.
+   */
+  private async resolveOrgOwnerId(orgId: string): Promise<string | null> {
+    const [owner] = await this.db
+      .select({ userId: organizationMemberships.userId })
+      .from(organizationMemberships)
+      .where(
+        and(
+          eq(organizationMemberships.organizationId, orgId),
+          eq(organizationMemberships.role, 'owner')
+        )
+      )
+      .limit(1);
+
+    return owner?.userId ?? null;
   }
 
   /**
@@ -905,7 +1068,10 @@ export class PurchaseService extends BaseService {
    */
   private async executePurchaseTransfer(params: {
     purchase: Purchase;
-    organizationId: string;
+    // Codex-69t7c WP5: nullable for orgless (bi-party) creator_payout rows.
+    // Written verbatim onto the payouts row (payouts.organization_id is
+    // nullable). The org-fee path always passes a non-null org.
+    organizationId: string | null;
     amountCents: number;
     payoutType: 'creator_payout' | 'organization_fee';
     rowUserId: string | null;
@@ -920,6 +1086,8 @@ export class PurchaseService extends BaseService {
     transferGroup: string;
     idempotencyKey: string;
     now: Date;
+    /** WP-10: creator email for connect-needed notification (creator_payout only). */
+    creatorEmail?: string | null;
   }): Promise<void> {
     const {
       purchase,
@@ -932,9 +1100,13 @@ export class PurchaseService extends BaseService {
       transferGroup,
       idempotencyKey,
       now,
+      creatorEmail,
     } = params;
 
     if (!connect?.chargesEnabled) {
+      // Track whether the ledger row was freshly inserted so the notification
+      // is not re-fired on idempotent replay (webhook redelivery).
+      let freshInsert = false;
       try {
         await this.db.insert(payouts).values({
           userId: rowUserId,
@@ -948,6 +1120,7 @@ export class PurchaseService extends BaseService {
           stripeChargeId,
           transferGroup,
         });
+        freshInsert = true;
       } catch (err) {
         if (!isUniqueViolation(err)) {
           this.obs.error(
@@ -956,11 +1129,59 @@ export class PurchaseService extends BaseService {
               purchaseId: purchase.id,
               organizationId,
               amountCents,
+              // Codex-ed446: surface the constraint so a CHECK violation
+              // (e.g. check_payouts_user_required, 23514) on this money-ledger
+              // insert is logged distinctly from the suppressed 23505 dup.
+              constraint: getConstraintName(err),
               error: err instanceof Error ? err.message : String(err),
             }
           );
         }
+        // freshInsert stays false for two distinct cases:
+        // 1. isUniqueViolation: idempotent replay — row already exists (skip notification).
+        // 2. Other insert error: insert failed for a non-dup reason (also skip notification).
+        // Both leave freshInsert=false and correctly suppress the mailer.
       }
+
+      // WP-10 (Codex-69t7c.10): fire creator-connect-needed notification
+      // fire-and-forget AFTER the ledger write. Only fires on FRESH insert
+      // (idempotency: if the row already existed this was a replay, not a new
+      // park). Only for creator_payout rows (not organization_fee). Failure is
+      // swallowed — a notification miss must NEVER block or reverse the payout.
+      if (
+        freshInsert &&
+        payoutType === 'creator_payout' &&
+        creatorEmail &&
+        rowUserId &&
+        this.mailer
+      ) {
+        try {
+          const amountFormatted = `£${(amountCents / 100).toFixed(2)}`;
+          const dashboardUrl = this.webAppUrl
+            ? `${this.webAppUrl}/studio/earnings`
+            : '/studio/earnings';
+          void this.mailer({
+            to: creatorEmail,
+            templateName: 'creator-connect-needed',
+            category: 'transactional',
+            userId: rowUserId,
+            organizationId,
+            data: {
+              creatorName: creatorEmail, // fallback; template can resolve display name
+              amountFormatted,
+              dashboardUrl,
+            },
+          });
+        } catch (err) {
+          // Swallow — notification failure must not surface in the payout path.
+          this.obs.warn('creator-connect-needed notification dispatch failed', {
+            purchaseId: purchase.id,
+            organizationId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
       return;
     }
 
@@ -1007,13 +1228,23 @@ export class PurchaseService extends BaseService {
         });
       } catch (insertErr) {
         if (!isUniqueViolation(insertErr)) {
+          // Codex-69t7c WP5 hardening (b): the Stripe transfer ALREADY fired
+          // (real money moved to the Connect account) but the ledger row
+          // failed on a non-dup DB error — the ledger is now silently out of
+          // sync with Stripe. Emit a correlatable errorId so this money-moved
+          // / ledger-silent state is loud and reconcilable.
+          const errorId = crypto.randomUUID();
           this.obs.error(
             `${payoutType} transfer succeeded but payouts ledger insert failed`,
             {
+              errorId,
               purchaseId: purchase.id,
               organizationId,
               stripeTransferId: transfer.id,
+              destination: connect.stripeAccountId,
+              idempotencyKey,
               amountCents,
+              constraint: getConstraintName(insertErr),
               error:
                 insertErr instanceof Error
                   ? insertErr.message
@@ -1023,10 +1254,15 @@ export class PurchaseService extends BaseService {
         }
       }
     } catch (transferErr) {
+      // Codex-69t7c WP5 hardening (c): include idempotencyKey + destination
+      // (Connect account id) so a failed transfer can be traced to the exact
+      // Stripe idempotent request and recipient during reconciliation.
       this.obs.error(`${payoutType} transfer failed`, {
         purchaseId: purchase.id,
         organizationId,
         amountCents,
+        idempotencyKey,
+        destination: connect.stripeAccountId,
         error:
           transferErr instanceof Error
             ? transferErr.message
@@ -1613,7 +1849,7 @@ export class PurchaseService extends BaseService {
       stripeDisputeId?: string;
       disputeReason?: string;
     }
-  ): Promise<{ userId: string; orgId: string } | void> {
+  ): Promise<{ userId: string; orgId: string | null } | void> {
     try {
       const purchase = await this.db.query.purchases.findFirst({
         where: eq(purchases.stripePaymentIntentId, paymentIntentId),

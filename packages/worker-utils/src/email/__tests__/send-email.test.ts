@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock dependencies before import
-vi.mock('@codex/constants', () => ({
-  getServiceUrl: vi.fn().mockReturnValue('http://localhost:42075'),
+vi.mock('@codex/urls', () => ({
+  buildServiceUrl: vi.fn().mockReturnValue('http://localhost:42075'),
 }));
 
 vi.mock('@codex/security', () => ({
   workerFetch: vi.fn().mockResolvedValue(new Response('{}', { status: 200 })),
 }));
 
-import { getServiceUrl } from '@codex/constants';
 import { workerFetch } from '@codex/security';
 import type { Bindings } from '@codex/shared-types';
+import { buildServiceUrl as getServiceUrl } from '@codex/urls';
 import { sendEmailToWorker } from '../send-email';
 
 describe('sendEmailToWorker', () => {

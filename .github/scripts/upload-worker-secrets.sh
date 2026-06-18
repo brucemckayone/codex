@@ -18,7 +18,11 @@ set -e
 #   - R2_BUCKET_MEDIA, R2_BUCKET_ASSETS, R2_BUCKET_PLATFORM, R2_BUCKET_RESOURCES (vars)
 #   - STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET_* (secrets, ecom-api only)
 #   - BETTER_AUTH_SECRET, SESSION_SECRET (secrets, auth only)
-#   - RUNPOD_*, B2_*, WORKER_SHARED_SECRET (secrets, media-api only)
+#   - RUNPOD_* (secrets, media-api only)
+#   - WORKER_SHARED_SECRET (secret, every worker that makes or receives a
+#     worker-to-worker HMAC call: auth, content-api, ecom-api, organization-api,
+#     identity-api, notifications-api, media-api — NOT admin-api)
+#   - RESEND_API_KEY (secret, notifications-api only)
 
 ENVIRONMENT=$1
 WORKER=$2
@@ -84,7 +88,8 @@ case "$WORKER" in
   "STRIPE_WEBHOOK_SECRET_CONNECT":"${STRIPE_WEBHOOK_SECRET_CONNECT}",
   "STRIPE_WEBHOOK_SECRET_CUSTOMER":"${STRIPE_WEBHOOK_SECRET_CUSTOMER}",
   "STRIPE_WEBHOOK_SECRET_BOOKING":"${STRIPE_WEBHOOK_SECRET_BOOKING}",
-  "STRIPE_WEBHOOK_SECRET_DISPUTE":"${STRIPE_WEBHOOK_SECRET_DISPUTE}"
+  "STRIPE_WEBHOOK_SECRET_DISPUTE":"${STRIPE_WEBHOOK_SECRET_DISPUTE}",
+  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:-}"
 }
 EOF
 )
@@ -96,7 +101,8 @@ EOF
   "DATABASE_URL":"${DATABASE_URL}",
   "R2_ACCOUNT_ID":"${R2_ACCOUNT_ID}",
   "R2_ACCESS_KEY_ID":"${R2_ACCESS_KEY_ID}",
-  "R2_SECRET_ACCESS_KEY":"${R2_SECRET_ACCESS_KEY}"
+  "R2_SECRET_ACCESS_KEY":"${R2_SECRET_ACCESS_KEY}",
+  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:-}"
 }
 EOF
 )
@@ -132,7 +138,8 @@ EOF
 {
   "DATABASE_URL":"${DATABASE_URL}",
   "CLOUDFLARE_API_TOKEN":"${CLOUDFLARE_API_TOKEN:-}",
-  "CLOUDFLARE_ACCOUNT_ID":"${CLOUDFLARE_ACCOUNT_ID:-}"
+  "CLOUDFLARE_ACCOUNT_ID":"${CLOUDFLARE_ACCOUNT_ID:-}",
+  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:-}"
 }
 EOF
 )
@@ -142,10 +149,15 @@ EOF
     # WORKER_SHARED_SECRET required: notifications-api accepts worker-HMAC
     # signed /internal/send calls from other workers (auth → welcome email,
     # org-api → invite email, etc).
+    # RESEND_API_KEY required in production: the email service (service-registry.ts)
+    # throws on the FIRST send when USE_MOCK_EMAIL is unset and RESEND_API_KEY is
+    # absent. It is OPTIONAL at boot, so a missing key silently passes /health and
+    # only fails when an email is actually sent — hence it must be pushed here.
     SECRETS_JSON=$(cat <<EOF
 {
   "DATABASE_URL":"${DATABASE_URL}",
-  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:-}"
+  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:-}",
+  "RESEND_API_KEY":"${RESEND_API_KEY:-}"
 }
 EOF
 )
@@ -158,22 +170,21 @@ EOF
   "RUNPOD_API_KEY":"${RUNPOD_API_KEY}",
   "RUNPOD_ENDPOINT_ID":"${RUNPOD_ENDPOINT_ID}",
   "RUNPOD_WEBHOOK_SECRET":"${RUNPOD_WEBHOOK_SECRET}",
-  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET}",
-  "B2_ENDPOINT":"${B2_ENDPOINT}",
-  "B2_KEY_ID":"${B2_KEY_ID}",
-  "B2_APP_KEY":"${B2_APP_KEY}",
-  "B2_BUCKET":"${B2_BUCKET}"
+  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET}"
 }
 EOF
 )
     ;;
 
   auth)
+    # WORKER_SHARED_SECRET: auth signs worker-HMAC calls to notifications-api for
+    # transactional email (welcome / verification) via sendEmailToWorker (email.ts).
     SECRETS_JSON=$(cat <<EOF
 {
   "DATABASE_URL":"${DATABASE_URL}",
   "SESSION_SECRET":"${SESSION_SECRET}",
-  "BETTER_AUTH_SECRET":"${BETTER_AUTH_SECRET}"
+  "BETTER_AUTH_SECRET":"${BETTER_AUTH_SECRET}",
+  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:-}"
 }
 EOF
 )

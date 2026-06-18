@@ -1,9 +1,5 @@
-import {
-  COOKIES,
-  getCookieConfig,
-  HEADERS,
-  MIME_TYPES,
-} from '@codex/constants';
+import { COOKIES, HEADERS, MIME_TYPES } from '@codex/constants';
+import { getCookieConfig } from '@codex/urls';
 import { authRegisterSchema } from '@codex/validation';
 import { fail, isRedirect, redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
@@ -53,11 +49,24 @@ export const actions: Actions = {
 
     try {
       // 2. Call Auth Worker
+      // Forward the browser Origin so BetterAuth's trustedOrigins check
+      // accepts the server-side fetch. Without this header, BetterAuth
+      // rejects the request with "Missing or null Origin" because the
+      // server-side fetch from SvelteKit has no Origin by default — the
+      // app-server then bubbles a 500 "An unexpected error occurred." back
+      // to the register form and the test (and any real user) never
+      // reaches /verify-email.
       const authUrl = serverApiUrl(platform, 'auth');
+      const incomingOrigin = request.headers.get('origin');
+      const incomingHost = request.headers.get('host');
+      const forwardedOrigin =
+        incomingOrigin ??
+        (incomingHost ? `http://${incomingHost}` : 'http://lvh.me:5173');
       const res = await fetch(`${authUrl}/api/auth/sign-up/email`, {
         method: 'POST',
         headers: {
           [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
+          Origin: forwardedOrigin,
         },
         body: JSON.stringify({
           name: result.data.name,

@@ -26,6 +26,7 @@
     "@codex/platform-settings": "workspace:*",
     "@codex/security": "workspace:*",
     "@codex/shared-types": "workspace:*",
+    "@codex/urls": "workspace:*",
     "@codex/validation": "workspace:*",
     "@codex/worker-utils": "workspace:*",
     "drizzle-orm": "^0.44.2",

@@ -1,4 +1,4 @@
-import { getServiceUrl } from '@codex/constants';
+import { buildServiceUrl as getServiceUrl } from '@codex/urls';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 

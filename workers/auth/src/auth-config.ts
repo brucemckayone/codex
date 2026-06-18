@@ -9,6 +9,7 @@
 import { AUTH_ROLES, COOKIES, DOMAINS, ENV_NAMES } from '@codex/constants';
 import { createDbClient, schema } from '@codex/database';
 import { createKVSecondaryStorage } from '@codex/security';
+import { cookieDomainFor, corsOriginsFor, type EnvName } from '@codex/urls';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { createAuthMiddleware } from 'better-auth/api';
@@ -27,23 +28,42 @@ interface AuthConfigOptions {
 }
 
 /**
- * Derive the cross-subdomain cookie domain from WEB_APP_URL.
+ * Resolve the cross-subdomain cookie domain for BetterAuth. Delegates to
+ * `cookieDomainFor` (@codex/urls) — the centralised host+env derivation
+ * that replaced the historical `getDevCookieDomain` function in this file.
  *
- * - lvh.me URLs → `.lvh.me`
- * - nip.io URLs (e.g. `http://192.168.1.10.nip.io:3000`) → `.192.168.1.10.nip.io`
- * - Fallback → `.lvh.me`
+ * BetterAuth-specific policy preserved from the legacy ternary:
+ *   - test env returns `undefined` (tests use exact origin)
+ *   - DEVELOPMENT env with no host-derived scope falls back to `.lvh.me`
+ *     (matches OLD `getDevCookieDomain`'s default — keeps local-dev with
+ *     `WEB_APP_URL=http://localhost:3000` working cross-subdomain)
+ *   - Unknown/missing ENVIRONMENT falls back to `.revelations.studio`
+ *     (matches OLD else-branch of the env-ternary — safer default than
+ *     `undefined` which would silently disable cross-subdomain cookies)
  */
-function getDevCookieDomain(env: AuthBindings): string {
+function resolveCrossSubDomainCookieDomain(
+  env: AuthBindings
+): string | undefined {
+  if (env.ENVIRONMENT === ENV_NAMES.TEST) return undefined;
+  const host = parseWebAppHost(env.WEB_APP_URL);
+  const derived = cookieDomainFor({
+    host,
+    env: env.ENVIRONMENT as EnvName | undefined,
+  });
+  if (derived !== undefined) return derived;
+  // Fallback: preserve OLD getDevCookieDomain default for DEVELOPMENT,
+  // OLD else-branch default for everything else.
+  if (env.ENVIRONMENT === ENV_NAMES.DEVELOPMENT) return `.${DOMAINS.DEV}`;
+  return `.${DOMAINS.PROD}`;
+}
+
+function parseWebAppHost(webAppUrl: string | undefined): string | undefined {
+  if (!webAppUrl) return undefined;
   try {
-    const hostname = new URL(env.WEB_APP_URL || '').hostname;
-    if (hostname.endsWith('nip.io')) {
-      const match = hostname.match(/(\d+\.\d+\.\d+\.\d+\.nip\.io)$/);
-      if (match) return `.${match[1]}`;
-    }
+    return new URL(webAppUrl).hostname;
   } catch {
-    /* fall through to default */
+    return undefined;
   }
-  return `.${DOMAINS.DEV}`;
 }
 
 /**
@@ -190,21 +210,14 @@ export function createAuthInstance(options: AuthConfigOptions) {
     trustedOrigins: [
       env.WEB_APP_URL,
       env.API_URL,
-      // Deployed dev (long-lived dev.revelations.studio branch). Browser
-      // requests come from the platform apex AND from per-org subdomains
-      // (studio-alpha.dev.revelations.studio etc), so a wildcard is needed.
-      ...(env.ENVIRONMENT === ENV_NAMES.DEV
-        ? [`https://${DOMAINS.DEV_REMOTE}`, `https://*.${DOMAINS.DEV_REMOTE}`]
-        : []),
-      // Local dev origins
-      ...(env.ENVIRONMENT === ENV_NAMES.DEVELOPMENT
-        ? [
-            'http://localhost:42069', // Auth worker's own URL for E2E tests
-            'http://lvh.me:3000', // Dev app (cross-subdomain cookies)
-            'http://lvh.me:5173', // Vite dev server
-            'http://*.nip.io', // Phone/LAN testing (any {ip}.nip.io subdomain)
-          ]
-        : []),
+      // Per-env static origins from `@codex/urls`. Includes wildcards for
+      // dev (`*.dev.revelations.studio`), staging (`*-staging.revelations.studio`),
+      // production (`*.revelations.studio` — closes the dormant cross-subdomain
+      // 403 risk surfaced in the 2026-05-22 post-epic audit), and the
+      // lvh.me/nip.io/localhost set for local dev. `WEB_APP_URL` and `API_URL`
+      // above carry the per-binding apex + API host that aren't in the
+      // static list.
+      ...corsOriginsFor(env.ENVIRONMENT as EnvName),
     ].filter((url): url is string => Boolean(url)),
 
     // Cross-subdomain cookie support
@@ -214,14 +227,11 @@ export function createAuthInstance(options: AuthConfigOptions) {
     advanced: {
       crossSubDomainCookies: {
         enabled: true,
-        domain:
-          env.ENVIRONMENT === ENV_NAMES.DEVELOPMENT
-            ? getDevCookieDomain(env) // .lvh.me or .{ip}.nip.io based on WEB_APP_URL
-            : env.ENVIRONMENT === ENV_NAMES.TEST
-              ? undefined // Tests use exact origin
-              : env.ENVIRONMENT === ENV_NAMES.DEV
-                ? `.${DOMAINS.DEV_REMOTE}` // .dev.revelations.studio
-                : `.${DOMAINS.PROD}`,
+        // Domain derivation centralised in `cookieDomainFor` (@codex/urls)
+        // since WP-5a (Codex-ora41). Byte-equal fixture matrix in
+        // packages/urls/src/__tests__/cookie-domain-fixtures.test.ts pins
+        // the contract for every known host across all envs.
+        domain: resolveCrossSubDomainCookieDomain(env),
       },
     },
   });

@@ -53,15 +53,16 @@
 
   let { data } = $props();
 
-  // Role guard
+  // Role guard. Wait for data.userRole to populate — ssr=false means
+  // first render has data.userRole === undefined.
   $effect(() => {
-    if (data.userRole !== 'owner') {
+    if (data.userRole !== undefined && data.userRole !== 'owner') {
       goto('/studio');
     }
   });
 
   const isOwner = $derived(data.userRole === 'owner');
-  const orgId = $derived(data.org.id);
+  const orgId = $derived(data.org?.id);
 
   // ─── Client-side queries (SPA pattern) ─────────────────────────────────
   // Page renders instantly with skeletons, data streams in.
@@ -361,10 +362,7 @@
   <!-- Redirecting... -->
 {:else}
 <div class="monetisation">
-  <header class="page-header">
-    <h1 class="page-title">{m.monetisation_title()}</h1>
-    <p class="page-description">{m.monetisation_description()}</p>
-  </header>
+  <p class="page-description">{m.monetisation_description()}</p>
 
   <!-- Stripe Connect Card -->
   <Card.Root>
@@ -374,7 +372,11 @@
         {#if dataLoading}
           <Skeleton width="80px" height="var(--space-6)" class="skeleton-circle" />
         {:else}
-          <Badge variant={connectStatusVariant(connectStatus.status)}>
+          <Badge
+            variant={connectStatusVariant(connectStatus.status)}
+            data-testid="connect-status-badge"
+            data-connect-status={connectStatus.status ?? 'not_connected'}
+          >
             {connectStatusLabel(connectStatus.status)}
           </Badge>
         {/if}
@@ -446,7 +448,7 @@
 
         <div class="connect-actions">
           {#if !connectStatus.isConnected}
-            <Button onclick={handleConnectOnboard} loading={connectLoading}>
+            <Button onclick={handleConnectOnboard} loading={connectLoading} data-testid="connect-stripe-btn">
               {m.monetisation_connect_start()}
             </Button>
           {:else if connectStatus.chargesEnabled && connectStatus.payoutsEnabled}

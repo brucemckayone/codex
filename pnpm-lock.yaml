@@ -138,6 +138,9 @@ importers:
       '@codex/test-utils':
         specifier: workspace:*
         version: link:../../packages/test-utils
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../../packages/urls
       '@codex/validation':
         specifier: workspace:*
         version: link:../../packages/validation
@@ -322,6 +325,9 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../packages/shared-types
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../packages/urls
     devDependencies:
       '@aws-sdk/client-s3':
         specifier: ^3.937.0
@@ -829,6 +835,9 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../shared-types
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../urls
       '@codex/validation':
         specifier: workspace:*
         version: link:../validation
@@ -1078,6 +1087,9 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../shared-types
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../urls
       '@neondatabase/serverless':
         specifier: ^0.10.4
         version: 0.10.4
@@ -1146,6 +1158,19 @@ importers:
       vitest:
         specifier: ^4.0.2
         version: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.8.9)(jiti@2.6.1)(jsdom@27.4.0)(tsx@4.20.6)(yaml@2.8.1)
+
+  packages/urls:
+    dependencies:
+      '@codex/constants':
+        specifier: workspace:*
+        version: link:../constants
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vite:
+        specifier: ^7.2.2
+        version: 7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
 
   packages/validation:
     dependencies:
@@ -1237,6 +1262,9 @@ importers:
       '@codex/transcoding':
         specifier: workspace:*
         version: link:../transcoding
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../urls
       '@codex/validation':
         specifier: workspace:*
         version: link:../validation
@@ -1341,6 +1369,9 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../../packages/urls
       '@codex/validation':
         specifier: workspace:*
         version: link:../../packages/validation
@@ -1706,6 +1737,9 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../../packages/urls
       '@codex/validation':
         specifier: workspace:*
         version: link:../../packages/validation

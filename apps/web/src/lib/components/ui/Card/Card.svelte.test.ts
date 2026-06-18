@@ -156,7 +156,7 @@ describe('CardTitle', () => {
     expect(document.body.textContent).toContain('My Title');
   });
 
-  test('has heading role with default level 3', () => {
+  test('renders as a real heading element at default level 3', () => {
     const children = createRawSnippet(() => ({
       render: () => '<span>Title</span>',
     }));
@@ -166,12 +166,15 @@ describe('CardTitle', () => {
       props: { children },
     });
 
+    // CardTitle now uses <svelte:element this={`h${level}`}> so it renders
+    // a real <h{level}> rather than a <div role="heading">. Real heading
+    // elements carry implicit role+level — strictly more accessible than
+    // the ARIA equivalent and discoverable by Playwright's `getByRole`.
     const title = document.querySelector('.card-title');
-    expect(title?.getAttribute('role')).toBe('heading');
-    expect(title?.getAttribute('aria-level')).toBe('3');
+    expect(title?.tagName.toLowerCase()).toBe('h3');
   });
 
-  test('accepts custom heading level', () => {
+  test('accepts custom heading level via real element', () => {
     const children = createRawSnippet(() => ({
       render: () => '<span>Title</span>',
     }));
@@ -182,7 +185,7 @@ describe('CardTitle', () => {
     });
 
     const title = document.querySelector('.card-title');
-    expect(title?.getAttribute('aria-level')).toBe('2');
+    expect(title?.tagName.toLowerCase()).toBe('h2');
   });
 
   test('applies custom className', () => {

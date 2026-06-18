@@ -1,4 +1,5 @@
-import { COOKIES, getCookieConfig } from '@codex/constants';
+import { COOKIES } from '@codex/constants';
+import { getCookieConfig } from '@codex/urls';
 import { redirect } from '@sveltejs/kit';
 import { invalidateAuthSession } from '$lib/server/auth-utils';
 import { buildPlatformUrl } from '$lib/utils/subdomain';

@@ -1,4 +1,4 @@
-import { getServiceUrl } from '@codex/constants';
+import { buildServiceUrl as getServiceUrl } from '@codex/urls';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, platform }) => {

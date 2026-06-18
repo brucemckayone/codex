@@ -51,12 +51,13 @@
     breakdown.transactionCount === 1 ? 'transaction' : 'transactions'
   );
 
-  // Owner-card composition disclosure (Codex-6nt4l). The owner's
-  // `totalPaidCents` mixes `organization_fee` rows with any
-  // `creator_payout_to_owner` slice — non-owner creators see only their
-  // own `creator_payout` rows. Surfacing the org-fee subset keeps the
-  // owner card visually comparable with the rest of the rail rather
-  // than always headlining "biggest number" for accounting reasons.
+  // Owner-card composition disclosure (Codex-6nt4l, Codex-h3864). The owner's
+  // `totalPaidCents` is personal creator earnings only (`creator_payout` +
+  // `creator_payout_to_owner`); the `organization_fee` slice is NOT folded in —
+  // it is surfaced separately as `orgFeePaidCents` ("of which £X org fee").
+  // Non-owner creators see only their own `creator_payout` rows. The separate
+  // org-fee disclosure keeps the owner card comparable with the rest of the
+  // rail rather than headlining a total inflated by the org slice.
   const showOrgFeeBreakdown = $derived(
     breakdown.isOrgOwner && breakdown.orgFeePaidCents > 0
   );

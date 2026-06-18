@@ -439,6 +439,23 @@ export const createContentSchema = baseContentSchema
         'Subscription tier is only valid for subscriber-gated or paid-hybrid content',
       path: ['minimumTierId'],
     }
+  )
+  .refine(
+    (data) => {
+      // Codex-up7bx: `subscription_tiers` is org-scoped (FK to organizations,
+      // unique per org), so a `minimumTierId` is only meaningful on content
+      // that belongs to an organization. Orgless (creator-direct) content with
+      // a tier set is a semantically invalid row — there is no org against
+      // which a subscription/tier could be resolved — and the access layer
+      // must fail closed on it. Reject the combination here at the write
+      // boundary so such a row is never created in the first place.
+      return !data.minimumTierId || !!data.organizationId;
+    },
+    {
+      message:
+        'Subscription tier requires an organisation — orgless content cannot be tier-gated',
+      path: ['minimumTierId'],
+    }
   );
 
 export type CreateContentInput = z.infer<typeof createContentSchema>;
@@ -450,22 +467,43 @@ export type CreateContentInput = z.infer<typeof createContentSchema>;
  * "did the admin leave a tier set when switching to an incompatible mode?"
  * case is handled defensively in ContentService.update() (see content-service.ts).
  */
-export const updateContentSchema = baseContentSchema.partial().refine(
-  (data) => {
-    // Only evaluate when the caller sent both fields. If accessType is absent,
-    // the DB value stands and we can't reason about the combination here.
-    if (data.accessType === undefined || !data.minimumTierId) return true;
-    return (
-      data.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS ||
-      data.accessType === CONTENT_ACCESS_TYPE.PAID
-    );
-  },
-  {
-    message:
-      'Subscription tier is only valid for subscriber-gated or paid-hybrid content',
-    path: ['minimumTierId'],
-  }
-);
+export const updateContentSchema = baseContentSchema
+  .partial()
+  .refine(
+    (data) => {
+      // Only evaluate when the caller sent both fields. If accessType is absent,
+      // the DB value stands and we can't reason about the combination here.
+      if (data.accessType === undefined || !data.minimumTierId) return true;
+      return (
+        data.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS ||
+        data.accessType === CONTENT_ACCESS_TYPE.PAID
+      );
+    },
+    {
+      message:
+        'Subscription tier is only valid for subscriber-gated or paid-hybrid content',
+      path: ['minimumTierId'],
+    }
+  )
+  .refine(
+    (data) => {
+      // Codex-up7bx: reject an update that sets a tier while simultaneously
+      // clearing the organisation (organizationId explicitly null in the same
+      // payload). Tiers are org-scoped, so orgless content can never be
+      // tier-gated. When organizationId is ABSENT from the payload the existing
+      // org value stands and we can't reason here — ContentService.update()
+      // applies the defensive clamp for the "tier left set on an already-orgless
+      // row" case.
+      if (!data.minimumTierId) return true;
+      if (!('organizationId' in data)) return true;
+      return data.organizationId != null;
+    },
+    {
+      message:
+        'Subscription tier requires an organisation — orgless content cannot be tier-gated',
+      path: ['minimumTierId'],
+    }
+  );
 
 export type UpdateContentInput = z.infer<typeof updateContentSchema>;
 

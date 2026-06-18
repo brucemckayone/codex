@@ -38,6 +38,7 @@ import {
   createEnvValidationMiddleware,
   createKvCheck,
   createWorker,
+  standardDatabaseCheck,
 } from '@codex/worker-utils';
 // Import route modules
 import transcodingRoutes from './routes/transcoding';
@@ -58,6 +59,10 @@ const app = createWorker({
   enableSecurityHeaders: true,
   enableGlobalAuth: false, // Using route-level procedure() instead
   healthCheck: {
+    // DB check added 2026-05-22 (post-epic audit) — without it the WP-9
+    // smoke gate would have missed media-api DB regressions on deploy,
+    // even though the transcoding routes query the DB on every request.
+    checkDatabase: standardDatabaseCheck,
     checkKV: createKvCheck(['RATE_LIMIT_KV', 'AUTH_SESSION_KV']),
   },
 });
@@ -77,10 +82,6 @@ app.use(
       'RUNPOD_WEBHOOK_SECRET',
       'WORKER_SHARED_SECRET',
       'RATE_LIMIT_KV',
-      'B2_ENDPOINT',
-      'B2_KEY_ID',
-      'B2_APP_KEY',
-      'B2_BUCKET',
     ],
     optional: ['ENVIRONMENT', 'WEB_APP_URL', 'API_URL'],
   })

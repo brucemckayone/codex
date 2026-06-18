@@ -374,47 +374,53 @@ jobs:
 
       # --- POST-DEPLOYMENT VERIFICATION ---
 
+      # After-deploy smoke gate (WP-9, Codex-ikum9). Catches silent 500s from
+      # broken bindings, missing env vars, or routing misconfig that
+      # wrangler-deploy alone cannot detect. Every worker exposes /health via
+      # createWorker() in @codex/worker-utils — a non-2xx response means the
+      # worker is alive but its DB/KV/R2 wiring is broken, which is exactly
+      # the silent-failure mode this gate exists to catch. Any non-2xx fails
+      # the workflow with a GitHub annotation pointing at the failing URL.
       - name: Smoke tests
         timeout-minutes: 5
         run: |
           echo "## 🚧 Dev Smoke Tests" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           FAILED=0
-          # A "healthy" worker is one that responds with ANY non-network
-          # HTTP status. We drop `curl -f` (which treats 4xx/5xx as failure)
-          # because Hono workers correctly return 404 from `/` when no
-          # route is defined — that's NOT a deploy failure, it just means
-          # the worker is alive and dispatching. We treat curl exit 0 (got
-          # a response) as success and any non-zero (network/TLS error) as
-          # failure. A 5xx body is reported but doesn't fail the deploy.
+          # Strict gate: only 2xx passes. `curl -f` returns non-zero on 4xx/5xx
+          # so any unhealthy worker fails the step. `--max-time 15` prevents
+          # indefinite hangs on DNS/TLS issues. GitHub annotations (::error::)
+          # surface the failure URL directly in the PR/checks UI.
           check_health() {
             local service_name=$1
             local url=$2
             local status
-            status=$(curl -L -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" 2>&1)
+            # --max-redirs 0 prevents stale Cloudflare worker mappings from
+            # masking a broken deploy (a 301 to a working old instance would
+            # otherwise pass the gate). Audit 2026-05-22.
+            status=$(curl -s -o /tmp/body.txt -w '%{http_code}' --max-time 15 --max-redirs 0 "$url" 2>&1)
             local exit_code=$?
-            if [ $exit_code -eq 0 ] && [ -n "$status" ] && [ "$status" != "000" ]; then
+            if [ $exit_code -eq 0 ] && [ "$status" -ge 200 ] && [ "$status" -lt 300 ]; then
               echo "✅ $service_name (HTTP $status)" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "❌ $service_name ($url) — curl exit=$exit_code status=$status" >> $GITHUB_STEP_SUMMARY
-              return 1
+              return 0
             fi
+            echo "::error title=Dev smoke failed::$service_name at $url returned HTTP $status (curl exit=$exit_code)"
+            echo "❌ $service_name ($url) — HTTP $status, curl exit=$exit_code" >> $GITHUB_STEP_SUMMARY
+            return 1
           }
           echo "⏳ Waiting 30s for propagation..."
           sleep 30
-          # Hit `/` rather than `/health` — `/health` isn't reliably wired
-          # on every worker (it may be gated by middleware or simply absent).
-          # `/` reaching the worker proves the worker is live and the custom
-          # domain binding is working, which is what we actually want to
-          # smoke-test post-deploy.
-          check_health "Media API" "https://media-api.dev.revelations.studio/" || FAILED=1
-          check_health "Ecom API" "https://ecom-api.dev.revelations.studio/" || FAILED=1
-          check_health "Content API" "https://content-api.dev.revelations.studio/" || FAILED=1
-          check_health "Identity API" "https://identity-api.dev.revelations.studio/" || FAILED=1
-          check_health "Organization API" "https://organization-api.dev.revelations.studio/" || FAILED=1
-          check_health "Notifications API" "https://notifications-api.dev.revelations.studio/" || FAILED=1
-          check_health "Admin API" "https://admin-api.dev.revelations.studio/" || FAILED=1
-          check_health "Auth Worker" "https://auth.dev.revelations.studio/" || FAILED=1
+          # Hit /health on each worker — JSON body contains DB/KV/R2 wiring
+          # status. Web app hits / (no /health route on SvelteKit). All URLs
+          # confirmed reachable via manual probe pre-merge (Codex-ikum9).
+          check_health "Media API" "https://media-api.dev.revelations.studio/health" || FAILED=1
+          check_health "Ecom API" "https://ecom-api.dev.revelations.studio/health" || FAILED=1
+          check_health "Content API" "https://content-api.dev.revelations.studio/health" || FAILED=1
+          check_health "Identity API" "https://identity-api.dev.revelations.studio/health" || FAILED=1
+          check_health "Organization API" "https://organization-api.dev.revelations.studio/health" || FAILED=1
+          check_health "Notifications API" "https://notifications-api.dev.revelations.studio/health" || FAILED=1
+          check_health "Admin API" "https://admin-api.dev.revelations.studio/health" || FAILED=1
+          check_health "Auth Worker" "https://auth.dev.revelations.studio/health" || FAILED=1
           check_health "Web App" "https://dev.revelations.studio/" || FAILED=1
           if [ $FAILED -eq 0 ]; then
             echo "✅ **All dev services passed smoke tests**" >> $GITHUB_STEP_SUMMARY

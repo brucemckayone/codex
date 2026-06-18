@@ -22,14 +22,21 @@
     updateMemberRole,
     removeMember,
   } from '$lib/remote/org.remote';
+  import { listActiveAgreements } from '$lib/remote/agreements.remote';
+  import type { CreatorOrganizationAgreement } from '@codex/agreements';
 
   let { data } = $props();
 
   let inviteDialogOpen = $state(false);
 
-  // Role guard: admin/owner only
+  // Role guard: admin/owner only. Wait for data.userRole to populate —
+  // ssr=false means first render has data.userRole === undefined.
   $effect(() => {
-    if (data.userRole !== 'admin' && data.userRole !== 'owner') {
+    if (
+      data.userRole !== undefined &&
+      data.userRole !== 'admin' &&
+      data.userRole !== 'owner'
+    ) {
       goto('/studio');
     }
   });
@@ -39,6 +46,38 @@
   const membersQuery = $derived(
     isAuthorized ? getOrgMembers({ orgId: data.org.id, limit: 50 }) : null
   );
+
+  // Revenue-share lives in the owner-only Monetisation hub, so the per-member
+  // status column + entry point are owner-gated too (Codex-dhxjz).
+  const isOwner = $derived(data.userRole === 'owner');
+
+  const agreementsQuery = $derived(
+    isOwner ? listActiveAgreements({ organizationId: data.org.id }) : null
+  );
+
+  // Map userId → compact active-agreement summary for the table column. Share
+  // derives from the legacy org-fee column (10000 - fee, in basis points),
+  // matching the revenue-share page. Both revenue types fold into one label,
+  // e.g. "30% subs · 20% sales". Undefined when not owner → column hidden.
+  const revenueShareByUser = $derived.by(() => {
+    if (!isOwner) return undefined;
+    const rows = (agreementsQuery?.current?.items ??
+      []) as CreatorOrganizationAgreement[];
+    const map = new Map<string, { label: string; active: boolean }>();
+    for (const a of rows) {
+      const sharePercent = (10000 - a.organizationFeePercentage) / 100;
+      const part =
+        a.revenueType === 'subscription'
+          ? `${sharePercent}% subs`
+          : `${sharePercent}% sales`;
+      const existing = map.get(a.creatorId);
+      map.set(a.creatorId, {
+        active: true,
+        label: existing ? `${existing.label} · ${part}` : part,
+      });
+    }
+    return map;
+  });
 
   async function handleInvite(email: string, role: string) {
     await inviteMember({
@@ -77,6 +116,11 @@
 <div class="team-page">
   <PageHeader title={m.team_title()}>
     {#snippet actions()}
+      {#if isOwner}
+        <a class="btn btn-secondary" href="/studio/monetisation/revenue-share">
+          Manage revenue share
+        </a>
+      {/if}
       <button class="btn btn-primary" onclick={() => (inviteDialogOpen = true)}>
         <UserPlusIcon size={16} />
         {m.team_invite()}
@@ -102,6 +146,7 @@
         members={(membersQuery?.current?.items ?? []).filter((m) => m.role !== 'subscriber')}
         onChangeRole={handleChangeRole}
         onRemove={handleRemove}
+        {revenueShareByUser}
       />
     {/if}
   </section>
@@ -179,6 +224,22 @@
   }
 
   .btn-primary:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+  }
+
+  .btn-secondary {
+    background-color: transparent;
+    color: var(--color-text);
+    border: var(--border-width) var(--border-style) var(--color-border);
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background-color: var(--color-surface-secondary);
+    border-color: var(--color-border-strong);
+  }
+
+  .btn-secondary:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
   }

@@ -1,4 +1,4 @@
-import { getServiceUrl } from '@codex/constants';
+import { buildServiceUrl as getServiceUrl } from '@codex/urls';
 import { httpClient } from '../helpers/http-client';
 import type { RegisteredUser } from '../helpers/types';
 

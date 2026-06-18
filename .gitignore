@@ -121,3 +121,8 @@ packages/database/.backfill/
 
 # Local-only shader verification scripts
 apps/web/.*-shot.mjs
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key

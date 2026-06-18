@@ -41,8 +41,14 @@
 
   // ─── Auth / role guard ────────────────────────────────────────────────
   // Preserve parity with FE-7: admin + owner only.
+  // Wait for data.userRole to populate — ssr=false means first render has
+  // data.userRole === undefined (would falsely redirect authorised users).
   $effect(() => {
-    if (data.userRole !== 'admin' && data.userRole !== 'owner') {
+    if (
+      data.userRole !== undefined &&
+      data.userRole !== 'admin' &&
+      data.userRole !== 'owner'
+    ) {
       goto('/studio');
     }
   });

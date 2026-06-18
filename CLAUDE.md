@@ -25,6 +25,7 @@ When working with beads, you MUST have a full understanding of how tasks fit int
 | Work with R2/KV | [packages/cloudflare-clients/CLAUDE.md](packages/cloudflare-clients/CLAUDE.md) |
 | Work with caching/versions | [packages/cache/CLAUDE.md](packages/cache/CLAUDE.md) (if exists), [apps/web/CLAUDE.md](apps/web/CLAUDE.md) |
 | Work with payouts / Stripe transfers | [docs/payouts/README.md](docs/payouts/README.md) — pipeline + fee config |
+| Run an epic (scope → ship → retro) | [docs/epics/conventions.md](docs/epics/conventions.md) + skills `codex-epic-create` → `codex-epic-implement` → `codex-review` → `codex-epic-retro` → `codex-crystalize` (the canonical epic+quality workflow; replaces `epic-cycle`) |
 
 ---
 

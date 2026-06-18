@@ -76,7 +76,10 @@ export {
   type PlatformFeeConfigUpdate,
 } from './services/fee-config-service';
 // Service
-export { PurchaseService } from './services/purchase-service';
+export {
+  type PurchaseMailer,
+  PurchaseService,
+} from './services/purchase-service';
 // Customer resolution (Codex-49gev)
 export {
   isStaleCustomerError,

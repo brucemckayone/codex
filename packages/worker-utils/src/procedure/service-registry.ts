@@ -366,7 +366,9 @@ export function createServiceRegistry(
             typeof env.CLOUDFLARE_ACCOUNT_ID === 'string'
               ? env.CLOUDFLARE_ACCOUNT_ID
               : undefined,
-          zoneName: 'revelations.studio',
+          // zoneName removed in WP-6 — DevDomainService now derives the
+          // hostname from ENV_HOSTS.dev.orgHost and the Cloudflare zone
+          // name internally (always `revelations.studio`).
           webWorkerName: 'codex-web-dev',
         });
       }
@@ -429,6 +431,23 @@ export function createServiceRegistry(
 
     get purchase() {
       if (!_purchase) {
+        // WP-10 (Codex-69t7c.10): wire creator-connect-needed mailer so a
+        // parked creator_payout fires a notification fire-and-forget.
+        // Same pattern as the subscription mailer above.
+        const purchaseMailer = executionCtx
+          ? (params: {
+              to: string;
+              toName?: string;
+              templateName: 'creator-connect-needed';
+              category: 'transactional';
+              userId?: string;
+              organizationId?: string | null;
+              data: Record<string, string | number | boolean>;
+            }) => {
+              sendEmailToWorker(env, executionCtx, params);
+            }
+          : undefined;
+
         _purchase = new PurchaseService(
           {
             db: getSharedDb(),
@@ -436,6 +455,8 @@ export function createServiceRegistry(
             // Codex-m644n: inject FeeConfigService so completePurchase walks
             // the 3-tier fallback chain instead of hardcoding DEFAULT_* consts.
             feeConfig: registry.feeConfig,
+            mailer: purchaseMailer,
+            webAppUrl: env.WEB_APP_URL,
           },
           getStripeClient()
         );
@@ -579,6 +600,24 @@ export function createServiceRegistry(
         // without needing to re-send.
         const webAppUrl = env.WEB_APP_URL;
 
+        // WP-10 (Codex-69t7c.10): wire payout-released mailer so
+        // resolvePendingPayouts fires a notification after pending→paid.
+        // Same pattern as `mailer` above — service stays unaware of
+        // Bindings / ExecutionContext.
+        const payoutMailer = executionCtx
+          ? (params: {
+              to: string;
+              toName?: string;
+              templateName: 'payout-released';
+              category: 'transactional';
+              userId?: string;
+              organizationId?: string | null;
+              data: Record<string, string | number | boolean>;
+            }) => {
+              sendEmailToWorker(env, executionCtx, params);
+            }
+          : undefined;
+
         _subscription = new SubscriptionService(
           {
             db: getSharedDb(),
@@ -586,6 +625,7 @@ export function createServiceRegistry(
             cache,
             waitUntil,
             mailer,
+            payoutMailer,
             webAppUrl,
             // Codex-m644n: inject FeeConfigService so invoice + tier-change
             // flows resolve fees via the 3-tier fallback chain. Per-creator

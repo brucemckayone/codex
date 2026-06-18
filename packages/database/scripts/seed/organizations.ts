@@ -55,6 +55,15 @@ export async function seedOrganizations(db: typeof DbClient) {
       updatedAt: now,
     },
     {
+      id: MEMBERSHIPS.viewer2AlphaSubscriber.id,
+      organizationId: ORGS.alpha.id,
+      userId: USERS.viewer2.id,
+      role: 'subscriber',
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
       id: MEMBERSHIPS.adminBetaOwner.id,
       organizationId: ORGS.beta.id,
       userId: USERS.admin.id,

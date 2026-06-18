@@ -2782,5 +2782,308 @@ describe('ContentAccessService Integration', () => {
         }
       });
     });
+
+    // ──────────────────────────────────────────────────────────────────
+    // Orgless tier-gate bypass (Codex-up7bx)
+    //
+    // `subscription_tiers` is org-scoped. Content with a `minimumTierId` but
+    // NO `organizationId` is a semantically invalid row: there is no org to
+    // resolve the tier against. Previously every access-decision branch
+    // conjoined the subscription check with `organizationId` being truthy, so
+    // for such a row the tier gate was SILENTLY SKIPPED and access fell
+    // through to the free/purchase arm and was GRANTED to users without a
+    // subscription. The fix fails closed: orgless + tier ⇒ DENY everywhere.
+    //
+    // These rows can't be produced via the (now-hardened) write path, so we
+    // seed the invalid state by patching the row directly with `db.update`,
+    // exactly as the subscriber/team helpers above do.
+    // ──────────────────────────────────────────────────────────────────
+    describe('Orgless tier-gated content fails closed (Codex-up7bx)', () => {
+      /** Create a real org + tier (tiers are always org-scoped). */
+      async function seedOrgAndTier(slugPrefix: string) {
+        const [tierOrg] = await db
+          .insert(organizations)
+          .values({
+            name: `Orgless Guard Org ${slugPrefix}`,
+            slug: createUniqueSlug(`orgless-guard-${slugPrefix}`),
+          })
+          .returning();
+        if (!tierOrg) throw new Error('Failed to create tier org');
+
+        const [tier] = await db
+          .insert(subscriptionTiers)
+          .values(
+            createTestTierInput(tierOrg.id, {
+              name: 'Orgless Guard Tier',
+              sortOrder: 1,
+            })
+          )
+          .returning();
+        if (!tier) throw new Error('Failed to create tier');
+
+        return { tierOrgId: tierOrg.id, tierId: tier.id };
+      }
+
+      /**
+       * Seed a PUBLISHED content row in the invalid (orgless + minimumTierId)
+       * state. Creates the row as orgless free content (passes the write
+       * path), then patches accessType/priceCents/minimumTierId directly while
+       * keeping organizationId NULL.
+       */
+      async function seedOrglessTierGatedContent(opts: {
+        slugPrefix: string;
+        creator: string;
+        accessType: 'paid' | 'subscribers' | 'free';
+        priceCents: number;
+        minimumTierId: string;
+      }) {
+        const media = await mediaService.create(
+          {
+            title: `${opts.slugPrefix} Video`,
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: getOriginalKey(
+              opts.creator,
+              crypto.randomUUID(),
+              `${opts.slugPrefix}.mp4`
+            ),
+            fileSizeBytes: 1024,
+          },
+          opts.creator
+        );
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: `hls/${opts.slugPrefix}/master.m3u8`,
+            thumbnailKey: `thumbnails/${opts.slugPrefix}.jpg`,
+            durationSeconds: 120,
+          },
+          opts.creator
+        );
+
+        // Orgless free content — clears the create schema.
+        const item = await contentService.create(
+          {
+            title: `${opts.slugPrefix} Content`,
+            slug: createUniqueSlug(opts.slugPrefix),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'public',
+            priceCents: 0,
+            tags: [],
+          },
+          opts.creator
+        );
+        await contentService.publish(item.id, opts.creator);
+
+        // Force the invalid state: orgless (organizationId stays NULL) + a tier.
+        await db
+          .update(content)
+          .set({
+            organizationId: null,
+            accessType: opts.accessType,
+            priceCents: opts.priceCents,
+            minimumTierId: opts.minimumTierId,
+          })
+          .where(eq(content.id, item.id));
+
+        return item;
+      }
+
+      it('getStreamingUrl DENIES orgless paid content with a tier, even for a purchaser', async () => {
+        // A purchase would normally unlock paid content — but an orgless tier
+        // gate is invalid, so the fail-closed guard must deny BEFORE the
+        // purchase path is even consulted.
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(true);
+
+        const { tierId } = await seedOrgAndTier('paid-purchaser');
+        const [viewerId] = await seedTestUsers(db, 1);
+
+        const item = await seedOrglessTierGatedContent({
+          slugPrefix: 'orgless-paid-purchaser',
+          creator: userId,
+          accessType: 'paid',
+          priceCents: 1500,
+          minimumTierId: tierId,
+        });
+
+        await expect(
+          accessService.getStreamingUrl(viewerId, {
+            contentId: item.id,
+            expirySeconds: 3600,
+          })
+        ).rejects.toThrow(AccessDeniedError);
+
+        // Guard fires before the purchase check.
+        expect(mockPurchaseService.verifyPurchase).not.toHaveBeenCalled();
+      });
+
+      it('getStreamingUrl DENIES orgless subscribers content with a tier (no subscription possible)', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const { tierId } = await seedOrgAndTier('subs');
+        const [viewerId] = await seedTestUsers(db, 1);
+
+        const item = await seedOrglessTierGatedContent({
+          slugPrefix: 'orgless-subs',
+          creator: userId,
+          accessType: 'subscribers',
+          priceCents: 0,
+          minimumTierId: tierId,
+        });
+
+        await expect(
+          accessService.getStreamingUrl(viewerId, {
+            contentId: item.id,
+            expirySeconds: 3600,
+          })
+        ).rejects.toThrow(AccessDeniedError);
+      });
+
+      it('hasContentAccess returns false for orgless tier-gated content', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(true);
+
+        const { tierId } = await seedOrgAndTier('has-access');
+        const [viewerId] = await seedTestUsers(db, 1);
+
+        const item = await seedOrglessTierGatedContent({
+          slugPrefix: 'orgless-has-access',
+          creator: userId,
+          accessType: 'paid',
+          priceCents: 1500,
+          minimumTierId: tierId,
+        });
+
+        const allowed = await accessService.hasContentAccess(viewerId, item.id);
+        expect(allowed).toBe(false);
+      });
+
+      it('POSITIVE regression: orgless paid content WITHOUT a tier still grants to a purchaser', async () => {
+        // Same shape minus the tier — the guard must NOT fire, and the normal
+        // purchase path should grant access. Proves the guard is scoped to the
+        // (orgless ∧ tier) case only.
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(true);
+
+        const [viewerId] = await seedTestUsers(db, 1);
+
+        const media = await mediaService.create(
+          {
+            title: 'Orgless No-Tier Video',
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: getOriginalKey(
+              userId,
+              crypto.randomUUID(),
+              'orgless-no-tier.mp4'
+            ),
+            fileSizeBytes: 1024,
+          },
+          userId
+        );
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: 'hls/orgless-no-tier/master.m3u8',
+            thumbnailKey: 'thumbnails/orgless-no-tier.jpg',
+            durationSeconds: 120,
+          },
+          userId
+        );
+        const item = await contentService.create(
+          {
+            title: 'Orgless No-Tier Content',
+            slug: createUniqueSlug('orgless-no-tier'),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'public',
+            priceCents: 0,
+            tags: [],
+          },
+          userId
+        );
+        await contentService.publish(item.id, userId);
+        // Orgless PAID, NO tier.
+        await db
+          .update(content)
+          .set({ accessType: 'paid', priceCents: 1500, minimumTierId: null })
+          .where(eq(content.id, item.id));
+
+        const result = await accessService.getStreamingUrl(viewerId, {
+          contentId: item.id,
+          expirySeconds: 3600,
+        });
+        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+        expect(mockPurchaseService.verifyPurchase).toHaveBeenCalled();
+      });
+
+      it('POSITIVE regression: org-scoped tier-gated content still grants to an at-tier subscriber', async () => {
+        // The legitimate counterpart: org-scoped subscribers content with a
+        // tier, accessed by an active subscriber at that tier, is unaffected.
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const { tierOrgId, tierId } = await seedOrgAndTier('org-scoped-ok');
+        const [subUserId] = await seedTestUsers(db, 1);
+
+        const media = await mediaService.create(
+          {
+            title: 'Org Scoped Tier Video',
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            r2Key: getOriginalKey(
+              userId,
+              crypto.randomUUID(),
+              'org-scoped-tier.mp4'
+            ),
+            fileSizeBytes: 1024,
+          },
+          userId
+        );
+        await mediaService.markAsReady(
+          media.id,
+          {
+            hlsMasterPlaylistKey: 'hls/org-scoped-tier/master.m3u8',
+            thumbnailKey: 'thumbnails/org-scoped-tier.jpg',
+            durationSeconds: 120,
+          },
+          userId
+        );
+        const item = await contentService.create(
+          {
+            organizationId: tierOrgId,
+            title: 'Org Scoped Tier Content',
+            slug: createUniqueSlug('org-scoped-tier'),
+            contentType: 'video',
+            mediaItemId: media.id,
+            visibility: 'public',
+            priceCents: 0,
+            tags: [],
+          },
+          userId
+        );
+        await contentService.publish(item.id, userId);
+        await db
+          .update(content)
+          .set({ accessType: 'subscribers', minimumTierId: tierId })
+          .where(eq(content.id, item.id));
+
+        // Active subscription at the required tier.
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(subUserId, tierOrgId, tierId, {
+            status: 'active',
+          })
+        );
+
+        const result = await accessService.getStreamingUrl(subUserId, {
+          contentId: item.id,
+          expirySeconds: 3600,
+        });
+        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+      });
+    });
   });
 });

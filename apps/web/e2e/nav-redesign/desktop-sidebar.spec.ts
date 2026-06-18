@@ -28,45 +28,62 @@ test.describe('Desktop sidebar rail (platform)', () => {
     expect(collapsedWidth).toBe(64);
   });
 
-  test('rail expand state can be toggled programmatically (jsdriven)', async ({
+  test('rail expands on hover and collapses on mouse-leave', async ({
     page,
   }) => {
-    // The hover-driven 200ms delay is verified manually (T-01) — Svelte 5's
-    // onmouseenter binding does not reliably react to Playwright-synthesised
-    // pointer events in headless Chromium even though the OS-level event
-    // fires. Instead, verify the contract: when expanded is true, width
-    // matches the expanded token; when false, width matches the collapsed
-    // token. This protects the token wiring (Codex-onjxy) without depending
-    // on the hover trigger.
+    // Drive the REAL component state via trusted CDP pointer movements.
+    // SidebarRail.svelte owns `data-expanded` through a Svelte 5 $state
+    // rune (flipped by onmouseenter → 200ms timer → expanded=true), so we
+    // must NOT setAttribute on the bound node — under the production build
+    // Svelte reconciles the attribute back to its $state value and the
+    // .sidebar-rail[data-expanded='true'] width rule never sticks (it
+    // measures the collapsed 64px). Real `page.mouse.move` events fire the
+    // genuine onmouseenter/onmouseleave handlers, exercising the
+    // expand→width token contract (Codex-onjxy) end-to-end.
     await page.goto('/');
 
     const rail = page.getByRole('navigation', { name: 'Main navigation' });
+    await expect(rail).toBeVisible();
 
-    // Force-expand by setting the data-expanded attribute directly. The
-    // CSS selector .sidebar-rail[data-expanded='true'] drives the width
-    // change — this exercises the styling contract end-to-end. Poll until
-    // the spring-easing width transition (var(--duration-slow)) settles.
-    await rail.evaluate((el) => el.setAttribute('data-expanded', 'true'));
-    await expect
-      .poll(
-        async () =>
-          await rail.evaluate((el) =>
-            Math.round((el as HTMLElement).getBoundingClientRect().width)
-          ),
-        { timeout: 3000 }
-      )
-      .toBeGreaterThanOrEqual(230);
+    const railWidth = async () =>
+      await rail.evaluate((el) =>
+        Math.round((el as HTMLElement).getBoundingClientRect().width)
+      );
 
-    await rail.evaluate((el) => el.setAttribute('data-expanded', 'false'));
-    await expect
-      .poll(
-        async () =>
-          await rail.evaluate((el) =>
-            Math.round((el as HTMLElement).getBoundingClientRect().width)
-          ),
-        { timeout: 3000 }
-      )
-      .toBe(64);
+    // Explicit off-rail → onto-rail moves (NOT `locator.hover()`) drive the
+    // real onmouseenter. Two reasons hover() / a single move are unreliable:
+    //   1. Playwright's default cursor is (0,0), which already sits inside
+    //      the collapsed rail's box (the rail is fixed at x:0, width 64,
+    //      full height). Moving deeper into an element the cursor is already
+    //      inside fires no `mouseenter`, so the 200ms expand timer never
+    //      starts and the width stays 64. Parking off-rail first guarantees
+    //      the enter is genuine.
+    //   2. Under load the page may not have finished hydrating when the
+    //      first enter fires, so the Svelte handler isn't attached yet. We
+    //      therefore RETRY the whole off→on enter, waiting past the 200ms
+    //      expand timer + width transition between attempts. Crucially we do
+    //      NOT poll-retry faster than the timer — re-entering before it fires
+    //      cancels it (onmouseleave clears the pending timeout), which would
+    //      wedge the rail collapsed forever.
+    await page.mouse.move(1300, 450); // park clear of the rail
+    expect(await railWidth()).toBe(64);
+
+    let expandedWidth = 64;
+    for (let attempt = 0; attempt < 8 && expandedWidth < 230; attempt++) {
+      await page.mouse.move(1300, 450); // ensure a clean mouseleave…
+      await page.mouse.move(32, 450); // …then a genuine mouseenter (x=32 ∈ 0..64)
+      // Wait longer than the 200ms expand delay + transition before checking.
+      await page.waitForTimeout(350);
+      expandedWidth = await railWidth();
+    }
+    // expanded=true → width animates to --app-sidebar-width-expanded
+    // (15rem = 240px). The collapsed token is 64px, so >=230 proves expansion.
+    expect(expandedWidth).toBeGreaterThanOrEqual(230);
+
+    // Move the pointer well clear of the rail → onmouseleave → expanded=false
+    // → width returns to the collapsed token (--app-sidebar-width = 64px).
+    await page.mouse.move(1300, 450);
+    await expect.poll(railWidth, { timeout: 3000 }).toBe(64);
   });
 
   test('clicking a nav item navigates and aria-current marks active page', async ({

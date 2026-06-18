@@ -26,21 +26,22 @@
   ],
 
   // Environment configurations
+  //
+  // URL env-var declarations (AUTH_WORKER_URL, API_URL, ORG_API_URL etc) were
+  // removed in WP-7 (Codex-10hr1). They were redundant with the @codex/urls
+  // ENV_HOSTS defaults — `buildServiceUrl` now derives every worker URL from
+  // the `ENVIRONMENT` binding alone. Adding a new env or service is a one-row
+  // change in `packages/urls/src/env-hosts.ts`, not 9 wrangler lines × 4 envs.
+  //
+  // Override mechanism preserved: setting `AUTH_WORKER_URL` (etc) here would
+  // still override the ENV_HOSTS default. We just don't need the overrides
+  // when the value matches what ENV_HOSTS would compute.
   "env": {
     // Test environment (E2E tests)
     "test": {
       "name": "codex-web-test",
       "vars": {
-        "ENVIRONMENT": "test",
-        "AUTH_WORKER_URL": "http://localhost:42069",
-        "API_URL": "http://localhost:4001",
-        "CONTENT_API_URL": "http://localhost:4001",
-        "ORG_API_URL": "http://localhost:42071",
-        "ECOM_API_URL": "http://localhost:42072",
-        "MEDIA_API_URL": "http://localhost:4002",
-        "IDENTITY_API_URL": "http://localhost:42074",
-        "ADMIN_API_URL": "http://localhost:42073",
-        "NOTIFICATIONS_API_URL": "http://localhost:42075"
+        "ENVIRONMENT": "test"
       },
       "kv_namespaces": [
         {
@@ -54,17 +55,14 @@
     "production": {
       "name": "codex-web-production",
       "vars": {
-        "ENVIRONMENT": "production",
-        "AUTH_WORKER_URL": "https://auth.revelations.studio",
-        "API_URL": "https://content-api.revelations.studio",
-        "CONTENT_API_URL": "https://content-api.revelations.studio",
-        "ORG_API_URL": "https://organization-api.revelations.studio",
-        "ECOM_API_URL": "https://ecom-api.revelations.studio",
-        "MEDIA_API_URL": "https://media-api.revelations.studio",
-        "IDENTITY_API_URL": "https://identity-api.revelations.studio",
-        "ADMIN_API_URL": "https://admin-api.revelations.studio",
-        "NOTIFICATIONS_API_URL": "https://notifications-api.revelations.studio"
+        "ENVIRONMENT": "production"
       },
+      "kv_namespaces": [
+        {
+          "binding": "CACHE_KV",
+          "id": "499d67770dc2405ab80cba5629b16511"
+        }
+      ],
       "routes": [
         // Specific routes first (for priority)
         {
@@ -97,16 +95,7 @@
     "staging": {
       "name": "codex-web-staging",
       "vars": {
-        "ENVIRONMENT": "staging",
-        "AUTH_WORKER_URL": "https://auth-staging.revelations.studio",
-        "API_URL": "https://content-api-staging.revelations.studio",
-        "CONTENT_API_URL": "https://content-api-staging.revelations.studio",
-        "ORG_API_URL": "https://organization-api-staging.revelations.studio",
-        "ECOM_API_URL": "https://ecom-api-staging.revelations.studio",
-        "MEDIA_API_URL": "https://media-api-staging.revelations.studio",
-        "IDENTITY_API_URL": "https://identity-api-staging.revelations.studio",
-        "ADMIN_API_URL": "https://admin-api-staging.revelations.studio",
-        "NOTIFICATIONS_API_URL": "https://notifications-api-staging.revelations.studio"
+        "ENVIRONMENT": "staging"
       },
       "routes": [
         // Specific routes first (for priority)
@@ -135,16 +124,7 @@
     "dev": {
       "name": "codex-web-dev",
       "vars": {
-        "ENVIRONMENT": "dev",
-        "AUTH_WORKER_URL": "https://auth.dev.revelations.studio",
-        "API_URL": "https://content-api.dev.revelations.studio",
-        "CONTENT_API_URL": "https://content-api.dev.revelations.studio",
-        "ORG_API_URL": "https://organization-api.dev.revelations.studio",
-        "ECOM_API_URL": "https://ecom-api.dev.revelations.studio",
-        "MEDIA_API_URL": "https://media-api.dev.revelations.studio",
-        "IDENTITY_API_URL": "https://identity-api.dev.revelations.studio",
-        "ADMIN_API_URL": "https://admin-api.dev.revelations.studio",
-        "NOTIFICATIONS_API_URL": "https://notifications-api.dev.revelations.studio"
+        "ENVIRONMENT": "dev"
       },
       "kv_namespaces": [
         {
@@ -169,8 +149,8 @@
     // Note: Preview configs are generated dynamically
   }
 
-  // Note: Secrets to be set via wrangler CLI or CI/CD:
-  // - DATABASE_URL
-  // - SESSION_SECRET
-  // - PUBLIC_APP_URL
+  // Note: Runtime secret set via wrangler CLI / CI-CD:
+  // - DATABASE_URL — SSR reads platform.env.DATABASE_URL
+  // PUBLIC_APP_URL is a build-time var (set in the deploy workflow build step).
+  // No SESSION_SECRET: the web app validates sessions via the auth worker, not locally.
 }

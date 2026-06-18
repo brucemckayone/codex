@@ -62,6 +62,8 @@
       "!**/pnpm-lock.yaml",
       "!**/package-lock.json",
       "!**/.turbo",
+      "!**/.beads",
+      "!**/.dolt",
       "!**/migrations/meta",
       "!**/.venv*",
       "!**/test-media",

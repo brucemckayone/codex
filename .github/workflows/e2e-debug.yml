@@ -17,14 +17,13 @@ on:
   workflow_dispatch:
     inputs:
       test_file:
-        description: 'Specific test file to run (e.g., account/profile.spec.ts)'
+        description: 'Specific test file to run (e.g., account/notifications.spec.ts). Leave empty for full suite.'
         required: false
         type: string
       test_pattern:
-        description: 'Test pattern (grep filter)'
+        description: 'Grep filter (e.g., "account|profile"). Leave empty for full suite.'
         required: false
         type: string
-        default: 'account'
   push:
     branches:
       - '**'
@@ -82,6 +81,17 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Cache Turborepo
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-e2e-debug-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-e2e-debug-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', '**/package.json') }}-
+            ${{ runner.os }}-turbo-e2e-debug-
+            ${{ runner.os }}-turbo-e2e-
+            ${{ runner.os }}-turbo-
 
       - name: Build constants package
         run: pnpm --filter @codex/constants build
@@ -168,9 +178,9 @@ jobs:
         run: |
           echo "::add-mask::$DATABASE_URL"
           cd apps/web
-          pnpm wrangler dev --env test --port 8787 --local &
+          pnpm wrangler dev --env test --port 5173 --local &
           echo $! > wrangler.pid
-          timeout 60 bash -c 'until curl -f http://localhost:8787 > /dev/null 2>&1; do sleep 1; done'
+          timeout 60 bash -c 'until curl -f http://localhost:5173 > /dev/null 2>&1; do sleep 1; done'
           echo "Web server ready"
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
@@ -182,7 +192,7 @@ jobs:
           curl -f http://localhost:42069/health && echo "✓ Auth Worker"
           curl -f http://localhost:42074/health && echo "✓ Identity API Worker"
           curl -f http://localhost:42072/health && echo "✓ Ecom API Worker"
-          curl -f http://localhost:8787 && echo "✓ Web App"
+          curl -f http://localhost:5173 && echo "✓ Web App"
           echo "All services ready"
 
       - name: Run E2E tests (DEBUG MODE)
@@ -197,7 +207,7 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET_MEDIA: ${{ vars.R2_BUCKET_MEDIA }}
-          PLAYWRIGHT_BASE_URL: http://localhost:8787
+          PLAYWRIGHT_BASE_URL: http://localhost:5173
           DEBUG: pw:api  # Enable Playwright debug output
         run: |
           echo "::add-mask::$DATABASE_URL"
@@ -217,8 +227,8 @@ jobs:
               --reporter=html \
               --workers=1
           else
-            echo "Running all account E2E tests"
-            pnpm exec playwright test e2e/account --project=e2e \
+            echo "Running full e2e suite (mirrors main CI scope)"
+            pnpm exec playwright test e2e --project=e2e \
               --reporter=list \
               --reporter=html \
               --workers=1

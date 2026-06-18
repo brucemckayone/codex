@@ -16,11 +16,11 @@
  * ```
  */
 
-import { COOKIES } from '@codex/constants';
 import {
   authFixture,
+  buildPlaywrightCookies,
   orgFixture,
-  parseCookieString,
+  type PlaywrightCookie,
 } from '@codex/test-utils/e2e';
 import { test as base, type Page } from '@playwright/test';
 
@@ -73,49 +73,8 @@ export const test = base.extend<AuthFixtures>({
       });
       userCookie = user.cookie;
 
-      // Parse cookies from the header string using shared helper
-      const parsedCookies = parseCookieString(user.cookie);
-      const browserCookies: {
-        name: string;
-        value: string;
-        domain: string;
-        path: string;
-        httpOnly: boolean;
-        secure: boolean;
-        sameSite: 'Lax' | 'Strict' | 'None';
-        expires: number;
-      }[] = [];
-
-      for (const { name, value } of parsedCookies) {
-        // Add cookie using domain/path
-        browserCookies.push({
-          name,
-          value,
-          domain: 'lvh.me',
-          path: '/',
-          httpOnly: true,
-          secure: false,
-          sameSite: 'Lax',
-          expires: -1,
-        });
-
-        // If this is the session token, add the codex-session alias
-        if (name === 'better-auth.session_token') {
-          browserCookies.push({
-            name: COOKIES.SESSION_NAME,
-            value,
-            domain: 'lvh.me',
-            path: '/',
-            httpOnly: true,
-            secure: false,
-            sameSite: 'Lax',
-            expires: -1,
-          });
-        }
-      }
-
       await page.context().clearCookies();
-      await page.context().addCookies(browserCookies);
+      await page.context().addCookies(buildPlaywrightCookies(user.cookie));
     };
 
     await use(authenticate);
@@ -161,16 +120,7 @@ export { expect } from '@playwright/test';
  * ```
  */
 export interface SharedAuthCookies {
-  cookies: {
-    name: string;
-    value: string;
-    domain: string;
-    path: string;
-    httpOnly: boolean;
-    secure: boolean;
-    sameSite: 'Lax' | 'Strict' | 'None';
-    expires: number;
-  }[];
+  cookies: PlaywrightCookie[];
   rawCookie: string;
 }
 
@@ -189,36 +139,10 @@ export async function registerSharedUser(): Promise<SharedAuthCookies> {
     name: 'E2E Shared User',
   });
 
-  const parsedCookies = parseCookieString(user.cookie);
-  const browserCookies: SharedAuthCookies['cookies'] = [];
-
-  for (const { name, value } of parsedCookies) {
-    browserCookies.push({
-      name,
-      value,
-      domain: 'localhost',
-      path: '/',
-      httpOnly: true,
-      secure: false,
-      sameSite: 'Lax',
-      expires: -1,
-    });
-
-    if (name === 'better-auth.session_token') {
-      browserCookies.push({
-        name: COOKIES.SESSION_NAME,
-        value,
-        domain: 'localhost',
-        path: '/',
-        httpOnly: true,
-        secure: false,
-        sameSite: 'Lax',
-        expires: -1,
-      });
-    }
-  }
-
-  return { cookies: browserCookies, rawCookie: user.cookie };
+  return {
+    cookies: buildPlaywrightCookies(user.cookie),
+    rawCookie: user.cookie,
+  };
 }
 
 export async function injectSharedAuth(

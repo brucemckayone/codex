@@ -49,7 +49,7 @@ async function bootstrapActiveAgreement(
   await expect(dialog).toBeVisible({ timeout: 5000 });
   await dialog.getByRole('button', { name: /send proposal/i }).click();
   await expect(
-    ownerPage.locator('[role="status"]').filter({ hasText: /Proposal sent/i })
+    ownerPage.locator('[role="alert"]').filter({ hasText: /Proposal sent/i })
   ).toBeVisible({ timeout: 10_000 });
 
   await creatorPage.goto(creatorNegotiationsUrl(), { waitUntil: 'load' });
@@ -66,7 +66,7 @@ async function bootstrapActiveAgreement(
     .click();
   await expect(
     creatorPage
-      .locator('[role="status"]')
+      .locator('[role="alert"]')
       .filter({ hasText: /Agreement accepted/i })
   ).toBeVisible({ timeout: 10_000 });
 }
@@ -114,7 +114,7 @@ test.describe('Agreements — Terminate', () => {
 
       // Toast confirms termination.
       await expect(
-        ownerPage.locator('[role="status"]').filter({ hasText: /terminated/i })
+        ownerPage.locator('[role="alert"]').filter({ hasText: /terminated/i })
       ).toBeVisible({ timeout: 10_000 });
 
       // Active-agreements section is gone (last row gone → section
@@ -177,16 +177,20 @@ test.describe('Agreements — Terminate', () => {
         timeout: 15_000,
       });
 
-      // Detail page exposes a Terminate button.
+      // Detail page exposes a Terminate button — first click reveals the
+      // confirmation panel; the second click on "Confirm terminate" inside
+      // that panel actually submits. Two-step pattern matches the danger-
+      // mutation UX used elsewhere in the studio.
       await creatorPage
-        .getByRole('button', { name: /terminate/i })
+        .getByRole('button', { name: /^Terminate$/i })
         .first()
+        .click();
+      await creatorPage
+        .getByRole('button', { name: /confirm terminate/i })
         .click();
 
       await expect(
-        creatorPage
-          .locator('[role="status"]')
-          .filter({ hasText: /terminated/i })
+        creatorPage.locator('[role="alert"]').filter({ hasText: /terminated/i })
       ).toBeVisible({ timeout: 10_000 });
 
       // Owner side reflects: active-agreements section gone.

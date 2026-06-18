@@ -142,6 +142,9 @@ async function seedData() {
     '    Creator:      creator@test.com     (owner of Studio Alpha, Connect active)'
   );
   console.log('    Viewer:       viewer@test.com      (member/subscriber)');
+  console.log(
+    '    Viewer2:      viewer2@test.com     (parallel subscriber — used by cross-device E2E)'
+  );
   console.log('    Admin:        admin@test.com       (owner of Studio Beta)');
   console.log(
     '    Luzura:       luzura@test.com      (owner of Of Blood & Bones)'

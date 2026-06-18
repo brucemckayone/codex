@@ -295,6 +295,59 @@ export interface PayoutSummary {
 }
 
 /**
+ * A single creator-owned payout row for the creator earnings hub
+ * (Codex-69t7c.7 / WP7). Unlike {@link PayoutWithCreator} (the org-table view)
+ * this omits creator identity (it IS the caller) and subscriber denorm (a
+ * creator must not see who paid inside another org — cross-org privacy). It
+ * keeps `organizationId` so the hub can group "earned from each org".
+ */
+export interface CreatorPayoutRow {
+  id: string;
+  organizationId: string | null;
+  amountCents: number;
+  currency: string;
+  reason: string;
+  status: PayoutDisplayStatus;
+  payoutType: PayoutType;
+  sourceType: 'purchase' | 'subscription';
+  resolvedAt: string | null;
+  stripeTransferId: string | null;
+  transferGroup: string | null;
+  createdAt: string;
+  purchaseId: string | null;
+  subscriptionId: string | null;
+  stripeChargeId: string | null;
+}
+
+/**
+ * Creator earnings KPIs (Codex-69t7c.7 / WP7) — the userId-scoped counterpart
+ * of {@link PayoutSummary}. Same four numbers, INVERSE scoping invariant:
+ * where `PayoutSummary` must NEVER relax to user-only scope (an org's KPIs
+ * can't leak other orgs), this one is DELIBERATELY user-scoped ACROSS every
+ * org that paid the creator. Only `creator_payout` + `creator_payout_to_owner`
+ * count — `organization_fee`/`platform_fee` are never a creator's personal
+ * earnings (consistent with the WP6 / Codex-h3864 fix).
+ */
+export interface CreatorEarningsSummary {
+  earnedInPeriodCents: number;
+  totalEarnedCents: number;
+  inTransitCents: number;
+  needsAttentionCount: number;
+}
+
+/**
+ * Payout types that count as a creator's PERSONAL earnings (Codex-69t7c.7).
+ * Excludes `organization_fee` (the platform's per-charge org cut — attributed
+ * to the owner's userId but NOT personal earnings, see WP6) and `platform_fee`
+ * (no creator recipient). The single source of truth for the creator-scope
+ * payout filter, shared by the list query and the earnings-summary aggregates.
+ */
+const CREATOR_EARNING_PAYOUT_TYPES = [
+  'creator_payout',
+  'creator_payout_to_owner',
+] as const satisfies readonly PayoutType[];
+
+/**
  * Map the persisted `payouts.status` column to the UI display vocabulary.
  *
  * Storage column: `'paid' | 'pending' | 'failed'` (CHECK-enforced).
@@ -498,6 +551,14 @@ interface SubscriptionServiceConfig extends ServiceConfig {
    * back to the `FEES.*` constants — bit-for-bit pre-Codex-m644n behaviour.
    */
   feeConfig?: FeeConfigService;
+  /**
+   * Optional mailer thunk used by `resolvePendingPayouts` (WP-10 —
+   * Codex-69t7c.10) to fire a `payout-released` notification after pending
+   * payouts transition to paid. Same pattern as `mailer` — the service stays
+   * unaware of Bindings / ExecutionContext. When absent the notification is
+   * silently skipped; the payout still succeeds.
+   */
+  payoutMailer?: PayoutReleasedMailer;
 }
 
 /**
@@ -511,6 +572,22 @@ type TierPriceChangeMailer = (params: {
   to: string;
   toName?: string;
   templateName: 'subscription-tier-price-change';
+  category: 'transactional';
+  userId?: string;
+  organizationId?: string | null;
+  data: Record<string, string | number | boolean>;
+}) => void;
+
+/**
+ * Fire-and-forget email dispatch used by the payout-released notification
+ * (WP-10 — Codex-69t7c.10). Fires after pending payouts transition to paid
+ * in `resolvePendingPayouts`. Same pattern as `TierPriceChangeMailer` — the
+ * service stays unaware of Bindings / ExecutionContext.
+ */
+export type PayoutReleasedMailer = (params: {
+  to: string;
+  toName?: string;
+  templateName: 'payout-released';
   category: 'transactional';
   userId?: string;
   organizationId?: string | null;
@@ -539,6 +616,7 @@ export class SubscriptionService extends BaseService {
   private readonly cache: VersionedCache | undefined;
   private readonly waitUntil: WaitUntilFn | undefined;
   private readonly mailer: TierPriceChangeMailer | undefined;
+  private readonly payoutMailer: PayoutReleasedMailer | undefined;
   private readonly webAppUrl: string | undefined;
   private readonly feeConfig: FeeConfigService | undefined;
 
@@ -548,6 +626,7 @@ export class SubscriptionService extends BaseService {
     this.cache = config.cache;
     this.waitUntil = config.waitUntil;
     this.mailer = config.mailer;
+    this.payoutMailer = config.payoutMailer;
     this.webAppUrl = config.webAppUrl;
     this.feeConfig = config.feeConfig;
   }
@@ -568,20 +647,32 @@ export class SubscriptionService extends BaseService {
    *   min-transfer floor.
    */
   private async resolvePayoutFees(
-    orgId: string,
+    orgId: string | null,
     ctx: FeeContext,
     creatorId?: string
   ): Promise<FeeConfig> {
     if (!this.feeConfig) {
       return {
         platformFeePercent: FEES.PLATFORM_PERCENT,
+        // Codex-69t7c WP5: orgless (bi-party) payouts carry NO org fee leg —
+        // the creator keeps 100% of post-platform. Mirror that in the
+        // no-FeeConfigService fallback so unit tests on the orgless drain
+        // path see a zero org fee, not the org/subscription default.
         orgFeePercent:
-          ctx === 'subscription'
-            ? FEES.SUBSCRIPTION_ORG_PERCENT
-            : FEES.ORG_PERCENT,
+          orgId === null
+            ? 0
+            : ctx === 'subscription'
+              ? FEES.SUBSCRIPTION_ORG_PERCENT
+              : FEES.ORG_PERCENT,
         minPlatformFeeCents: 0,
         minTransferCents: 0,
       };
+    }
+    // Codex-69t7c WP5: orgless rows have no org to resolve per-creator or
+    // per-org overrides against — use the platform-level fee policy, which
+    // owns the same `minTransferCents` floor the org/creator configs carry.
+    if (orgId === null) {
+      return this.feeConfig.getFeesPlatform(ctx);
     }
     return creatorId
       ? this.feeConfig.getFeesForCreator(orgId, creatorId, ctx)
@@ -2844,9 +2935,18 @@ export class SubscriptionService extends BaseService {
    * Date conditions use the helper `dateWindow(createdAt, from, to)` so empty
    * args produce no SQL clauses (rather than `WHERE TRUE`).
    */
-  private buildPayoutConditions(orgId: string, options: PayoutFilterOptions) {
+  /**
+   * Status/source/date predicates shared by EVERY payout surface — the org
+   * table/rail (`buildPayoutConditions`) AND the creator earnings hub
+   * (`buildCreatorPayoutConditions`). Carries NO scope predicate, so chip
+   * semantics (a `needs_attention` chip means pending|failed everywhere) stay
+   * single-sourced regardless of whether the caller scopes by org or by user.
+   */
+  private buildPayoutFilterConditions(options: PayoutFilterOptions) {
     const { status = 'all', sourceType = 'all', fromDate, toDate } = options;
-    const conditions = [eq(payouts.organizationId, orgId)];
+    // Seed from dateWindow (SQL[], empty when no dates) into a fresh mutable
+    // array so the element type is inferred without importing the SQL type.
+    const conditions = [...dateWindow(payouts.createdAt, fromDate, toDate)];
 
     if (status === 'pending') {
       conditions.push(eq(payouts.status, 'pending'));
@@ -2866,9 +2966,36 @@ export class SubscriptionService extends BaseService {
       conditions.push(eq(payouts.sourceType, sourceType));
     }
 
-    conditions.push(...dateWindow(payouts.createdAt, fromDate, toDate));
-
     return conditions;
+  }
+
+  /**
+   * Org-scoped payout predicate set (the `/studio/payouts` table + rail).
+   * Scope predicate first, shared chip filters appended.
+   */
+  private buildPayoutConditions(orgId: string, options: PayoutFilterOptions) {
+    return [
+      eq(payouts.organizationId, orgId),
+      ...this.buildPayoutFilterConditions(options),
+    ];
+  }
+
+  /**
+   * Creator-scoped payout predicate set (Codex-69t7c.7 / WP7). Scopes by the
+   * acting user across ALL orgs and to their PERSONAL earning payout types
+   * only ({@link CREATOR_EARNING_PAYOUT_TYPES}) — the `eq(userId)` predicate is
+   * the security boundary that keeps one creator from reading another's
+   * payouts. Shares the chip filters with the org surfaces.
+   */
+  private buildCreatorPayoutConditions(
+    userId: string,
+    options: PayoutFilterOptions
+  ) {
+    return [
+      eq(payouts.userId, userId),
+      inArray(payouts.payoutType, [...CREATOR_EARNING_PAYOUT_TYPES]),
+      ...this.buildPayoutFilterConditions(options),
+    ];
   }
 
   async listPayoutsByOrg(
@@ -3057,6 +3184,141 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
+   * Creator earnings hub (Codex-69t7c.7 / WP7): the acting creator's OWN
+   * payout rows across every org that paid them, newest first. Scoped by
+   * `buildCreatorPayoutConditions` (userId + personal payout types) — the
+   * `eq(userId)` predicate is the cross-creator isolation boundary. Unlike
+   * `listPayoutsByOrg` this paginates per-row (not per-transferGroup): a
+   * creator sees their individual slices, not an org operator's charge groups.
+   */
+  async listPayoutsForCreator(
+    userId: string,
+    options: {
+      page: number;
+      limit: number;
+    } & PayoutFilterOptions
+  ): Promise<PaginatedListResponse<CreatorPayoutRow>> {
+    const { page, limit } = options;
+    const offset = (page - 1) * limit;
+
+    const conditions = this.buildCreatorPayoutConditions(userId, options);
+
+    const [rows, [totalResult]] = await Promise.all([
+      this.db
+        .select({
+          id: payouts.id,
+          organizationId: payouts.organizationId,
+          amountCents: payouts.amountCents,
+          currency: payouts.currency,
+          reason: payouts.reason,
+          status: payouts.status,
+          payoutType: payouts.payoutType,
+          sourceType: payouts.sourceType,
+          resolvedAt: payouts.resolvedAt,
+          stripeTransferId: payouts.stripeTransferId,
+          transferGroup: payouts.transferGroup,
+          createdAt: payouts.createdAt,
+          purchaseId: payouts.purchaseId,
+          subscriptionId: payouts.subscriptionId,
+          stripeChargeId: payouts.stripeChargeId,
+        })
+        .from(payouts)
+        .where(and(...conditions))
+        .orderBy(desc(payouts.createdAt), payouts.id)
+        .limit(limit)
+        .offset(offset),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(payouts)
+        .where(and(...conditions)),
+    ]);
+
+    const total = totalResult?.count ?? 0;
+
+    return {
+      items: rows.map((row) => ({
+        id: row.id,
+        organizationId: row.organizationId ?? null,
+        amountCents: row.amountCents,
+        currency: row.currency,
+        reason: row.reason ?? '',
+        status: derivePayoutStatus(row.status),
+        payoutType: row.payoutType as PayoutType,
+        sourceType: row.sourceType as 'purchase' | 'subscription',
+        resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
+        stripeTransferId: row.stripeTransferId,
+        transferGroup: row.transferGroup ?? null,
+        createdAt: row.createdAt.toISOString(),
+        purchaseId: row.purchaseId ?? null,
+        subscriptionId: row.subscriptionId ?? null,
+        stripeChargeId: row.stripeChargeId ?? null,
+      })),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /**
+   * Creator earnings KPIs (Codex-69t7c.7 / WP7) — the userId-scoped inverse of
+   * {@link getPayoutSummary}. Three parallel aggregates over the creator's
+   * personal payout rows (userId + `CREATOR_EARNING_PAYOUT_TYPES`) across all
+   * orgs. `earnedInPeriodCents` honours the date window; the rest are lifetime.
+   */
+  async getEarningsSummaryForCreator(
+    userId: string,
+    options: { fromDate?: string; toDate?: string } = {}
+  ): Promise<CreatorEarningsSummary> {
+    const { fromDate, toDate } = options;
+
+    // Reusable scope predicate (userId + personal payout types) shared by all
+    // three aggregates, so an org-fee or another user's row can never inflate
+    // a KPI.
+    const creatorScope = [
+      eq(payouts.userId, userId),
+      inArray(payouts.payoutType, [...CREATOR_EARNING_PAYOUT_TYPES]),
+    ];
+
+    const dateConditions = dateWindow(payouts.createdAt, fromDate, toDate);
+    const inPeriodSum =
+      dateConditions.length === 0
+        ? sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`
+        : sql<number>`COALESCE(SUM(CASE WHEN ${and(...dateConditions)} THEN ${payouts.amountCents} ELSE 0 END),0)::int`;
+
+    const [paid, inTransit, needsAttention] = await Promise.all([
+      this.db
+        .select({
+          inPeriod: inPeriodSum,
+          total: sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`,
+        })
+        .from(payouts)
+        .where(and(...creatorScope, eq(payouts.status, 'paid'))),
+      this.db
+        .select({
+          sum: sql<number>`COALESCE(SUM(${payouts.amountCents}),0)::int`,
+        })
+        .from(payouts)
+        .where(and(...creatorScope, eq(payouts.status, 'pending'))),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(payouts)
+        .where(
+          and(...creatorScope, inArray(payouts.status, ['pending', 'failed']))
+        ),
+    ]);
+
+    return {
+      earnedInPeriodCents: paid[0]?.inPeriod ?? 0,
+      totalEarnedCents: paid[0]?.total ?? 0,
+      inTransitCents: inTransit[0]?.sum ?? 0,
+      needsAttentionCount: needsAttention[0]?.count ?? 0,
+    };
+  }
+
+  /**
    * Codex-6nt4l: per-creator aggregate for the `/studio/payouts` right rail.
    *
    * Returns one row per user who has received a `creator_payout` or
@@ -3154,17 +3416,21 @@ export class SubscriptionService extends BaseService {
       }
 
       if (row.status === 'paid') {
-        acc.totalPaidCents += row.amountCents;
-        if (row.sourceType === 'purchase') {
-          acc.purchasePaidCents += row.amountCents;
-        } else if (row.sourceType === 'subscription') {
-          acc.subscriptionPaidCents += row.amountCents;
-        }
-        // Track the `organization_fee` slice separately so the owner
-        // card can disclose "of which £X org fee" — keeps the owner's
-        // headline comparable to non-owner creator cards.
+        // `organization_fee` is the org-admin slice, NOT the user's personal
+        // creator earnings — it is disclosed ONLY via `orgFeePaidCents` and must
+        // never be folded into the per-creator `totalPaidCents` headline
+        // (Codex-h3864). This keeps `totalPaidCents == purchasePaidCents +
+        // subscriptionPaidCents` a clean "personal earnings" invariant; the
+        // owner card surfaces the org slice separately as "of which £X org fee".
         if (row.payoutType === 'organization_fee') {
           acc.orgFeePaidCents += row.amountCents;
+        } else {
+          acc.totalPaidCents += row.amountCents;
+          if (row.sourceType === 'purchase') {
+            acc.purchasePaidCents += row.amountCents;
+          } else if (row.sourceType === 'subscription') {
+            acc.subscriptionPaidCents += row.amountCents;
+          }
         }
         if (row.resolvedAt) {
           // Drizzle hands back `Date` for timestamp columns; defensive cast
@@ -3244,10 +3510,17 @@ export class SubscriptionService extends BaseService {
    *   - On success: sets resolvedAt and stripeTransferId
    *   - On failure: logs and continues to the next payout (batch is best-effort)
    *
+   * Codex-69t7c WP5: `orgId` is `string | null`. Regardless of which value the
+   * caller passes, the recipient is identified by the Connect account's
+   * userId, and BOTH that user's org-scoped (organizationId = orgId) AND
+   * orgless (organizationId IS NULL) pending rows are drained in one pass —
+   * SQL `col = value` never matches NULL, so the orgless leg would otherwise
+   * be stranded. A `null` orgId resolves ONLY the orgless leg.
+   *
    * Returns the count of successfully resolved payouts.
    */
   async resolvePendingPayouts(
-    orgId: string,
+    orgId: string | null,
     stripeAccountId: string
   ): Promise<{ resolved: number; failed: number }> {
     let resolved = 0;
@@ -3255,15 +3528,12 @@ export class SubscriptionService extends BaseService {
 
     // Query all unresolved payouts for this org that belong to the user
     // whose Connect account just became active.
+    // stripeAccountId is globally unique, so it alone identifies the account
+    // (one account per user, Codex-69t7c — the org condition is dropped).
     const [connectAccount] = await this.db
       .select({ userId: stripeConnectAccounts.userId })
       .from(stripeConnectAccounts)
-      .where(
-        and(
-          eq(stripeConnectAccounts.stripeAccountId, stripeAccountId),
-          eq(stripeConnectAccounts.organizationId, orgId)
-        )
-      )
+      .where(eq(stripeConnectAccounts.stripeAccountId, stripeAccountId))
       .limit(1);
 
     if (!connectAccount) {
@@ -3274,14 +3544,31 @@ export class SubscriptionService extends BaseService {
       return { resolved: 0, failed: 0 };
     }
 
+    // Codex-69t7c WP5: a single Connect account belongs to ONE creator
+    // (routed by userId), but that creator can accrue BOTH org-scoped
+    // (tri-party) pending rows (organizationId = orgId) AND orgless
+    // (bi-party) pending rows (organizationId IS NULL). SQL `col = value`
+    // never matches NULL, so the original `eq(payouts.organizationId, orgId)`
+    // filter rendered every orgless `creator_payout` row invisible to this
+    // primary webhook drain — stranding the creator's money indefinitely.
+    // Match BOTH shapes for this user so both legs resolve in one pass.
     const unresolvedPayouts = await this.db
       .select()
       .from(payouts)
       .where(
         and(
           eq(payouts.userId, connectAccount.userId),
-          eq(payouts.organizationId, orgId),
-          eq(payouts.status, 'pending')
+          eq(payouts.status, 'pending'),
+          // A non-null orgId resolves BOTH that org's rows AND the creator's
+          // orgless rows in one pass; a null orgId (orgless-only caller, e.g.
+          // the sweep's orgless group) resolves ONLY the orgless rows. `eq`
+          // cannot take a null comparand, so branch on it.
+          orgId === null
+            ? isNull(payouts.organizationId)
+            : or(
+                eq(payouts.organizationId, orgId),
+                isNull(payouts.organizationId)
+              )
         )
       );
 
@@ -3296,30 +3583,46 @@ export class SubscriptionService extends BaseService {
       count: unresolvedPayouts.length,
     });
 
-    // Codex-iivne: group pending rows by sourceType so a creator with
-    // many sub-threshold pending rows (multi-creator split scenarios)
-    // gets resolved when the SUM clears the min-transfer floor —
-    // rather than every row failing the per-row floor check and piling
-    // up indefinitely. Fee policy depends on sourceType, so the group
-    // key reflects it. Two possible groups: 'purchase' + 'subscription'.
-    const groups: Record<
-      'purchase' | 'subscription',
-      typeof unresolvedPayouts
-    > = { purchase: [], subscription: [] };
+    // Codex-iivne + Codex-69t7c WP5: group pending rows by (orgScope,
+    // sourceType) so a creator with many sub-threshold pending rows
+    // (multi-creator split scenarios) gets resolved when the SUM clears the
+    // min-transfer floor — rather than every row failing the per-row floor
+    // check and piling up indefinitely. Fee policy depends on BOTH the
+    // org-scope (orgless → platform-only fees; org-scoped → per-creator
+    // fees) AND the sourceType, so the group key reflects both. The org
+    // attached to each group drives fee resolution in transferPendingGroup:
+    // orgless rows carry `null` and resolve fees via getFeesPlatform().
+    type PendingGroupKey =
+      `${'org' | 'orgless'}:${'purchase' | 'subscription'}`;
+    const groups = new Map<
+      PendingGroupKey,
+      { orgId: string | null; rows: typeof unresolvedPayouts }
+    >();
     for (const payout of unresolvedPayouts) {
-      const key =
+      const orgScope = payout.organizationId === null ? 'orgless' : 'org';
+      const source =
         payout.sourceType === 'purchase' ? 'purchase' : 'subscription';
-      groups[key].push(payout);
+      const key: PendingGroupKey = `${orgScope}:${source}`;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.rows.push(payout);
+      } else {
+        groups.set(key, {
+          orgId: payout.organizationId,
+          rows: [payout],
+        });
+      }
     }
 
-    for (const [sourceType, group] of Object.entries(groups) as Array<
-      ['purchase' | 'subscription', typeof unresolvedPayouts]
-    >) {
-      if (group.length === 0) continue;
+    for (const [key, { orgId: groupOrgId, rows }] of groups) {
+      if (rows.length === 0) continue;
+      const sourceType: 'purchase' | 'subscription' = key.endsWith('purchase')
+        ? 'purchase'
+        : 'subscription';
       const groupResult = await this.transferPendingGroup(
-        group,
+        rows,
         sourceType,
-        orgId,
+        groupOrgId,
         stripeAccountId,
         connectAccount.userId
       );
@@ -3335,15 +3638,84 @@ export class SubscriptionService extends BaseService {
       total: unresolvedPayouts.length,
     });
 
+    // WP-10 (Codex-69t7c.10): fire payout-released notification when at least
+    // one creator_payout transitioned pending→paid. Fires ONCE per
+    // resolvePendingPayouts invocation (one notification per activation event,
+    // not per-row). Fire-and-forget post-loop — notification failure MUST NOT
+    // roll back or block the already-committed transfers.
+    //
+    // Gate on creator_payout rows ONLY — organization_fee rows are the org
+    // admin's slice, not the creator's personal earnings. The `resolved`
+    // counter above covers all payout types; we accumulate a separate creator-
+    // only counter from the pre-loop snapshot so the email amount matches what
+    // was actually transferred to the creator.
+    const resolvedCreatorPayoutCents = unresolvedPayouts
+      .filter(
+        (p) =>
+          p.userId === connectAccount.userId &&
+          p.payoutType === 'creator_payout'
+      )
+      .reduce((sum, p) => sum + p.amountCents, 0);
+    const resolvedCreatorPayouts = unresolvedPayouts.filter(
+      (p) =>
+        p.userId === connectAccount.userId && p.payoutType === 'creator_payout'
+    ).length;
+
+    if (resolvedCreatorPayouts > 0 && this.payoutMailer) {
+      try {
+        const [creatorRow] = await this.db
+          .select({ email: users.email })
+          .from(users)
+          .where(eq(users.id, connectAccount.userId))
+          .limit(1);
+
+        if (creatorRow?.email) {
+          const amountFormatted = `£${(resolvedCreatorPayoutCents / 100).toFixed(2)}`;
+          const dashboardUrl = this.webAppUrl
+            ? `${this.webAppUrl}/studio/earnings`
+            : '/studio/earnings';
+
+          void this.payoutMailer({
+            to: creatorRow.email,
+            templateName: 'payout-released',
+            category: 'transactional',
+            userId: connectAccount.userId,
+            organizationId: orgId,
+            data: {
+              creatorName: creatorRow.email, // fallback; template can resolve display name
+              amountFormatted,
+              payoutCount: resolvedCreatorPayouts,
+              dashboardUrl,
+            },
+          });
+        }
+      } catch (err) {
+        // Swallow — notification failure must not surface after committed transfers.
+        this.obs.warn('payout-released notification dispatch failed', {
+          organizationId: orgId,
+          stripeAccountId,
+          resolvedCreatorPayouts,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     return { resolved, failed };
   }
 
   /**
-   * Codex-iivne: resolve one (userId, sourceType) group of pending
+   * Codex-iivne: resolve one (userId, orgScope, sourceType) group of pending
    * payouts. Caller has already filtered by Connect account userId, so
    * every row in `group` shares one recipient. Fee policy is looked up
    * once per call (was: per-row); floor evaluates against the SUM
    * (was: each row individually).
+   *
+   * Codex-69t7c WP5: `orgId` is `string | null`. A null org marks an orgless
+   * (bi-party) group — fee/floor resolution routes through the platform-level
+   * policy (getFeesPlatform) rather than per-org/per-creator config. The
+   * transfer itself is identical: per-row GBP-guarded `stripe.transfers.create`
+   * to the userId→single Connect account, verbatim `payout_${id}` idempotency
+   * key, per-row error isolation.
    *
    * The schema invariant `uq_payouts_stripe_transfer_id` forbids
    * shared stripeTransferId across rows, so per-row transfers fire
@@ -3352,7 +3724,7 @@ export class SubscriptionService extends BaseService {
   private async transferPendingGroup(
     group: (typeof payouts.$inferSelect)[],
     sourceType: 'purchase' | 'subscription',
-    orgId: string,
+    orgId: string | null,
     stripeAccountId: string,
     userId: string
   ): Promise<{ resolved: number; failed: number }> {
@@ -4378,17 +4750,14 @@ export class SubscriptionService extends BaseService {
       return;
     }
 
-    // Batch-fetch all creator Connect accounts to avoid N+1 queries
+    // Batch-fetch all creator Connect accounts to avoid N+1 queries. Each
+    // creator has one account keyed by userId (Codex-69t7c), independent of
+    // which org this subscription belongs to.
     const creatorIds = creatorAgreements.map((a) => a.creatorId);
     const creatorConnects = await this.db
       .select()
       .from(stripeConnectAccounts)
-      .where(
-        and(
-          inArray(stripeConnectAccounts.userId, creatorIds),
-          eq(stripeConnectAccounts.organizationId, orgId)
-        )
-      );
+      .where(inArray(stripeConnectAccounts.userId, creatorIds));
     const connectByCreator = new Map(creatorConnects.map((c) => [c.userId, c]));
 
     // Codex-ez3tl (C1): per-creator amount uses the POST-PLATFORM pool
@@ -4697,29 +5066,30 @@ export class SubscriptionService extends BaseService {
     }
 
     for (const group of groups) {
-      // Codex-h69cg: payouts.userId and .organizationId are nullable to admit
-      // platform_fee rows. Those are always status='paid' so they would never
-      // appear in this sweep, but defence-in-depth: skip any group missing
-      // either field — it can't be routed to a Connect account anyway.
-      if (!group.organizationId || !group.userId) {
+      // Codex-h69cg + Codex-69t7c WP5: payouts.userId and .organizationId are
+      // both nullable. A null `userId` is the genuinely UNROUTABLE case —
+      // platform_fee rows (always status='paid', so they shouldn't surface
+      // here) or any row with no recipient — skip those. A null
+      // `organizationId` is NOT unroutable: orgless (bi-party) creator_payout
+      // rows carry organizationId=NULL but a real userId, and MUST be drained.
+      // The original `!group.organizationId` guard skipped every orgless group,
+      // so the cron safety-net never resolved orgless rows — stranding money.
+      if (!group.userId) {
         groupsSkipped++;
         continue;
       }
       try {
-        // Find the Connect account row for this (orgId, userId) so we can
-        // look up the stripeAccountId. If the row is missing (rare — a
-        // Connect account was deleted but its payouts survived
-        // because of ON DELETE behaviour) skip this group; it will be
-        // re-attempted on the next sweep window.
+        // Find the user's single Connect account (by userId, Codex-69t7c) so
+        // we can look up the stripeAccountId. This resolves the recipient by
+        // userId ALONE — independent of org — which is exactly what lets an
+        // orgless group (organizationId=NULL) route to a Connect account. If
+        // the row is missing (rare — a Connect account was deleted but its
+        // payouts survived because of ON DELETE behaviour) skip this group; it
+        // will be re-attempted on the next sweep window.
         const [connect] = await this.db
           .select({ stripeAccountId: stripeConnectAccounts.stripeAccountId })
           .from(stripeConnectAccounts)
-          .where(
-            and(
-              eq(stripeConnectAccounts.organizationId, group.organizationId),
-              eq(stripeConnectAccounts.userId, group.userId)
-            )
-          )
+          .where(eq(stripeConnectAccounts.userId, group.userId))
           .limit(1);
 
         if (!connect) {

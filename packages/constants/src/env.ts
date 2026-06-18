@@ -1,21 +1,13 @@
 import { ERROR_CODES, UrlValidationError } from './errors';
-import { SERVICE_PORTS } from './urls';
-
-export type ServiceName =
-  | 'auth'
-  | 'content'
-  | 'access'
-  | 'org'
-  | 'ecom'
-  | 'admin'
-  | 'identity'
-  | 'notifications'
-  | 'media';
 
 export const ENV_NAMES = {
   PRODUCTION: 'production',
   STAGING: 'staging',
-  DEV: 'dev', // deployed long-lived dev branch (dev.revelations.studio)
+  // DEV_REMOTE is the deployed long-lived dev branch (dev.revelations.studio).
+  // Renamed from DEV to disambiguate from DEVELOPMENT (= local). The string
+  // value 'dev' is unchanged — this rename is identifier-only and does NOT
+  // require updating ENVIRONMENT bindings in any wrangler.jsonc.
+  DEV_REMOTE: 'dev',
   DEVELOPMENT: 'development',
   TEST: 'test',
 } as const;
@@ -88,7 +80,7 @@ export function isDev(env?: Env | boolean): boolean {
  */
 export function isDevRemote(env?: Env | boolean): boolean {
   if (typeof env !== 'object' || env === null) return false;
-  return env.ENVIRONMENT === ENV_NAMES.DEV;
+  return env.ENVIRONMENT === ENV_NAMES.DEV_REMOTE;
 }
 
 /**
@@ -104,6 +96,10 @@ export function isDevRemote(env?: Env | boolean): boolean {
  * - Rejects javascript:, data:, file:, ftp: and other dangerous protocols
  * - Enforces HTTPS in production when requireHttps is true
  * - Blocks private IP ranges and cloud metadata services
+ *
+ * Called by `@codex/urls.buildServiceUrl` for env-var override URLs. The
+ * URL-builder defaults (`ENV_HOSTS`) are NOT validated — they're
+ * code-controlled, not env-controlled, so no SSRF surface.
  */
 export function validateServiceUrl(
   url: string,
@@ -161,7 +157,7 @@ export function validateServiceUrl(
   //
   // NOTE: DNS rebinding attacks (where evil.com → 127.0.0.1) are mitigated because:
   // - Service URLs come from trusted env vars or hardcoded defaults
-  // - No user-controlled URLs are passed to getServiceUrl()
+  // - No user-controlled URLs are passed to buildServiceUrl()
   // - Cloudflare Workers restrict outbound requests to known origins
   //
   // We allow localhost/127.0.0.1 ONLY if requireHttps is false (dev mode implication).
@@ -184,149 +180,4 @@ export function validateServiceUrl(
   }
 
   return url;
-}
-
-const DEFAULT_URLS = {
-  auth: {
-    prod: 'https://auth.revelations.studio',
-    devRemote: 'https://auth.dev.revelations.studio',
-    dev: `http://localhost:${SERVICE_PORTS.AUTH}`,
-  },
-  content: {
-    prod: 'https://content-api.revelations.studio',
-    devRemote: 'https://content-api.dev.revelations.studio',
-    dev: `http://localhost:${SERVICE_PORTS.CONTENT}`,
-  },
-  access: {
-    prod: 'https://content-api.revelations.studio',
-    devRemote: 'https://content-api.dev.revelations.studio',
-    dev: `http://localhost:${SERVICE_PORTS.ACCESS}`,
-  },
-  org: {
-    prod: 'https://organization-api.revelations.studio',
-    devRemote: 'https://organization-api.dev.revelations.studio',
-    dev: `http://localhost:${SERVICE_PORTS.ORGANIZATION}`,
-  },
-  ecom: {
-    prod: 'https://ecom-api.revelations.studio',
-    devRemote: 'https://ecom-api.dev.revelations.studio',
-    dev: `http://localhost:${SERVICE_PORTS.ECOMMERCE}`,
-  },
-  admin: {
-    prod: 'https://admin-api.revelations.studio',
-    devRemote: 'https://admin-api.dev.revelations.studio',
-    dev: `http://localhost:${SERVICE_PORTS.ADMIN}`,
-  },
-  identity: {
-    prod: 'https://identity-api.revelations.studio',
-    devRemote: 'https://identity-api.dev.revelations.studio',
-    dev: `http://localhost:${SERVICE_PORTS.IDENTITY}`,
-  },
-  notifications: {
-    prod: 'https://notifications-api.revelations.studio',
-    devRemote: 'https://notifications-api.dev.revelations.studio',
-    dev: `http://localhost:${SERVICE_PORTS.NOTIFICATIONS}`,
-  },
-  media: {
-    prod: 'https://media-api.revelations.studio',
-    devRemote: 'https://media-api.dev.revelations.studio',
-    dev: `http://localhost:${SERVICE_PORTS.MEDIA}`,
-  },
-} as const;
-
-type ServiceUrls = (typeof DEFAULT_URLS)[keyof typeof DEFAULT_URLS];
-
-function pickDefaultUrl(urls: ServiceUrls, env?: Env | boolean): string {
-  if (isDevRemote(env)) return urls.devRemote;
-  return isDev(env) ? urls.dev : urls.prod;
-}
-
-export function getServiceUrl(
-  service: ServiceName,
-  env?: Env | boolean
-): string {
-  const devMode = isDev(env);
-  const bindings = typeof env === 'object' ? env : {};
-
-  /**
-   * Resolve an environment variable from bindings or process.env
-   */
-  const getEnvVar = (key: string): string | undefined => {
-    // 1. Check bindings (Cloudflare/SvelteKit platform.env)
-    if (bindings[key]) return bindings[key] as string;
-
-    // 2. Check Node.js process.env (for local development and E2E tests)
-    if (typeof process !== 'undefined' && process.env[key]) {
-      return process.env[key];
-    }
-
-    return undefined;
-  };
-
-  // Helper to validate and return URL from env or use default
-  const getValidatedUrl = (
-    envUrl: string | undefined,
-    defaultUrl: string
-  ): string => {
-    if (envUrl) {
-      return validateServiceUrl(envUrl, !devMode);
-    }
-    return defaultUrl;
-  };
-
-  switch (service) {
-    case 'auth':
-      return getValidatedUrl(
-        getEnvVar('AUTH_WORKER_URL'),
-        pickDefaultUrl(DEFAULT_URLS.auth, env)
-      );
-    case 'content':
-      return getValidatedUrl(
-        getEnvVar('API_URL'),
-        pickDefaultUrl(DEFAULT_URLS.content, env)
-      );
-    case 'access':
-      return getValidatedUrl(
-        getEnvVar('API_URL'),
-        pickDefaultUrl(DEFAULT_URLS.access, env)
-      );
-    case 'org':
-      return getValidatedUrl(
-        getEnvVar('ORG_API_URL'),
-        pickDefaultUrl(DEFAULT_URLS.org, env)
-      );
-    case 'ecom':
-      return getValidatedUrl(
-        getEnvVar('ECOM_API_URL'),
-        pickDefaultUrl(DEFAULT_URLS.ecom, env)
-      );
-    case 'admin':
-      return getValidatedUrl(
-        getEnvVar('ADMIN_API_URL'),
-        pickDefaultUrl(DEFAULT_URLS.admin, env)
-      );
-    case 'identity':
-      return getValidatedUrl(
-        getEnvVar('IDENTITY_API_URL'),
-        pickDefaultUrl(DEFAULT_URLS.identity, env)
-      );
-    case 'notifications':
-      return getValidatedUrl(
-        getEnvVar('NOTIFICATIONS_API_URL'),
-        pickDefaultUrl(DEFAULT_URLS.notifications, env)
-      );
-    case 'media':
-      return getValidatedUrl(
-        getEnvVar('MEDIA_API_URL'),
-        pickDefaultUrl(DEFAULT_URLS.media, env)
-      );
-    default: {
-      // Runtime fallback for unknown services
-      const defaults = DEFAULT_URLS[service as keyof typeof DEFAULT_URLS];
-      if (defaults) {
-        return pickDefaultUrl(defaults, env);
-      }
-      throw new Error(`Unknown service: ${service}`);
-    }
-  }
 }

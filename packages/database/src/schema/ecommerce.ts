@@ -31,9 +31,14 @@ export const contentAccess = pgTable(
     contentId: uuid('content_id')
       .notNull()
       .references(() => content.id, { onDelete: 'cascade' }),
-    organizationId: uuid('organization_id')
-      .notNull()
-      .references(() => organizations.id, { onDelete: 'cascade' }),
+    // Nullable (Codex-69t7c WP5): orgless creator-direct (bi-party) purchases
+    // grant access to content with no organization. Mirrors the WP1 change to
+    // `purchases.organization_id`. Org-scoped grants still populate it. Access
+    // verification for paid content reads `purchases` (verifyPurchase), not
+    // this column, so a null org here does not weaken any access check.
+    organizationId: uuid('organization_id').references(() => organizations.id, {
+      onDelete: 'cascade',
+    }),
 
     // Access type with CHECK constraint enforcement
     accessType: varchar('access_type', { length: 50 }).notNull(),
@@ -418,9 +423,12 @@ export const purchases = pgTable(
     contentId: uuid('content_id')
       .notNull()
       .references(() => content.id, { onDelete: 'restrict' }),
-    organizationId: uuid('organization_id')
-      .notNull()
-      .references(() => organizations.id, { onDelete: 'restrict' }),
+    // Nullable (Codex-69t7c WP1): orgless creator-direct purchases have no
+    // organization. Org-scoped purchases still populate it; the Phase-1 gate
+    // that required it is removed in WP5.
+    organizationId: uuid('organization_id').references(() => organizations.id, {
+      onDelete: 'restrict',
+    }),
 
     // Payment (stored as integer cents to avoid rounding errors)
     amountPaidCents: integer('amount_paid_cents').notNull(),

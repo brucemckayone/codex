@@ -61,12 +61,16 @@ test.describe('Studio Team Page', () => {
       '/team'
     );
 
+    // The team page renders a table-skeleton while the members query is in
+    // flight; once it resolves it swaps to <MemberTable>, which renders
+    // either a <table> (members exist, including the auto-added owner) or
+    // a `.empty-state` div. Wait for one of the terminal states.
     const table = page.locator('table');
     const emptyState = page.locator('.empty-state');
 
-    const hasTable = await table.isVisible().catch(() => false);
-    const hasEmpty = await emptyState.isVisible().catch(() => false);
-    expect(hasTable || hasEmpty).toBeTruthy();
+    await expect(table.or(emptyState).first()).toBeVisible({
+      timeout: 15000,
+    });
   });
 
   test('invite button opens dialog', async ({ page }) => {
@@ -92,8 +96,12 @@ test.describe('Studio Team Page', () => {
     await page.getByRole('button', { name: /Invite Member/i }).click();
     await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 });
 
+    // Email is a plain <input id="invite-email">; the role field is now a
+    // Melt UI Select rendering a <button role="combobox">. Melt UI's
+    // builder adds role="combobox" to the trigger (not button), so use
+    // getByRole('combobox') to locate it.
     await expect(page.locator('#invite-email')).toBeVisible();
-    await expect(page.locator('#invite-role')).toBeVisible();
+    await expect(page.getByRole('combobox').first()).toBeVisible();
   });
 
   test('invite dialog closes on cancel', async ({ page }) => {
@@ -146,12 +154,13 @@ test.describe('Studio Customers Page', () => {
       '/customers'
     );
 
-    // New org: empty state. Populated org: table.
+    // New org: empty state. Populated org: table. The customers page renders
+    // `<table-skeleton>` while `customersQuery` is in-flight; under shared-DB
+    // contention the raw `isVisible()` snapshot can race the skeleton →
+    // terminal state transition. Wait for the auto-retrying matcher to settle
+    // on either terminal element (mirrors the sibling test at line 71).
     const emptyState = page.locator('.empty-state');
     const table = page.locator('table');
-
-    const hasEmpty = await emptyState.isVisible().catch(() => false);
-    const hasTable = await table.isVisible().catch(() => false);
-    expect(hasEmpty || hasTable).toBeTruthy();
+    await expect(emptyState.or(table).first()).toBeVisible({ timeout: 15000 });
   });
 });

@@ -20,11 +20,17 @@
 
   let { data } = $props();
 
-  const orgId = $derived(data.org.id);
+  const orgId = $derived(data.org?.id);
 
-  // Role guard: admin/owner only
+  // Role guard: admin/owner only. Wait for data.userRole to populate —
+  // studio is ssr=false, so on first render data.userRole is undefined
+  // and a naive check redirects authorised users before the role is known.
   $effect(() => {
-    if (data.userRole !== 'admin' && data.userRole !== 'owner') {
+    if (
+      data.userRole !== undefined &&
+      data.userRole !== 'admin' &&
+      data.userRole !== 'owner'
+    ) {
       goto('/studio');
     }
   });

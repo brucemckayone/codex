@@ -1,7 +1,7 @@
 /**
  * WP-10 Scenario 1 — Propose → Accept happy path
  *
- * Owner @ `${orgSlug}.lvh.me/studio/settings/revenue-share` proposes a
+ * Owner @ `${orgSlug}.lvh.me/studio/monetisation/revenue-share` proposes a
  *   subscription agreement with the team creator (default 30%, term 6mo).
  * Creator @ `creators.lvh.me/studio/negotiations` sees the proposal in
  *   "Action required", clicks Accept.
@@ -70,9 +70,10 @@ test.describe('Agreements — Propose → Accept happy path', () => {
     // ProposeAgreementDialog opens — default share 30%, term 6 months.
     const dialog = ownerPage.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: 5000 });
-    // Term radio: pick 6 months.
+    // Term radio: pick 6 months. Use `exact` to disambiguate from
+    // "36 months" / "12 months" / etc. which also match a loose /6 months/i.
     await dialog
-      .getByRole('radio', { name: /6 months/i })
+      .getByRole('radio', { name: '6 months', exact: true })
       .check({ force: true });
 
     // Optional note for thread provenance.
@@ -80,9 +81,12 @@ test.describe('Agreements — Propose → Accept happy path', () => {
 
     await dialog.getByRole('button', { name: /send proposal/i }).click();
 
-    // Success toast confirmation.
+    // Success toast confirmation. Melt UI's Toast builder emits
+    // `role="alert"`, not `role="status"` (see `node_modules/@melt-ui/.../
+    // builders/toast/create.js`). The aria-live polite-vs-assertive split
+    // is on the same element.
     await expect(
-      ownerPage.locator('[role="status"]').filter({ hasText: /Proposal sent/i })
+      ownerPage.locator('[role="alert"]').filter({ hasText: /Proposal sent/i })
     ).toBeVisible({ timeout: 10_000 });
 
     // ─── Creator context ───────────────────────────────────────────────
@@ -109,10 +113,10 @@ test.describe('Agreements — Propose → Accept happy path', () => {
       .first()
       .click();
 
-    // Success toast.
+    // Success toast — Melt UI emits role="alert".
     await expect(
       creatorPage
-        .locator('[role="status"]')
+        .locator('[role="alert"]')
         .filter({ hasText: /Agreement accepted/i })
     ).toBeVisible({ timeout: 10_000 });
 

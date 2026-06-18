@@ -1,9 +1,5 @@
-import {
-  COOKIES,
-  getCookieConfig,
-  HEADERS,
-  MIME_TYPES,
-} from '@codex/constants';
+import { COOKIES, HEADERS, MIME_TYPES } from '@codex/constants';
+import { getCookieConfig } from '@codex/urls';
 import { authLoginSchema } from '@codex/validation';
 import { fail, isRedirect, redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
@@ -43,12 +39,21 @@ export const actions: Actions = {
 
     try {
       // 2. Call Auth Worker
-      // We use raw fetch here because we need access to the Set-Cookie header
+      // We use raw fetch here because we need access to the Set-Cookie header.
+      // Forward the browser Origin so BetterAuth's trustedOrigins check
+      // accepts the server-side fetch — without it BetterAuth rejects with
+      // "Missing or null Origin".
       const authUrl = serverApiUrl(platform, 'auth');
+      const incomingOrigin = request.headers.get('origin');
+      const incomingHost = request.headers.get('host');
+      const forwardedOrigin =
+        incomingOrigin ??
+        (incomingHost ? `http://${incomingHost}` : 'http://lvh.me:5173');
       const res = await fetch(`${authUrl}/api/auth/sign-in/email`, {
         method: 'POST',
         headers: {
           [HEADERS.CONTENT_TYPE]: MIME_TYPES.APPLICATION.JSON,
+          Origin: forwardedOrigin,
         },
         body: JSON.stringify({
           email: result.data.email,

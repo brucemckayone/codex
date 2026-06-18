@@ -104,16 +104,16 @@
       <h3 style="color: var(--color-text); margin: 0;">Contact Form</h3>
       <Stack gap="var(--space-4)">
         <Stack gap="var(--space-1)">
-          <label style="font-size: 0.875rem; font-weight: 500; color: var(--color-text);">Name</label>
-          <input style="padding: 0.5rem; border: 1px solid var(--color-border); border-radius: 6px;" placeholder="Your name" />
+          <label for="contact-form-name" style="font-size: 0.875rem; font-weight: 500; color: var(--color-text);">Name</label>
+          <input id="contact-form-name" style="padding: 0.5rem; border: 1px solid var(--color-border); border-radius: 6px;" placeholder="Your name" />
         </Stack>
         <Stack gap="var(--space-1)">
-          <label style="font-size: 0.875rem; font-weight: 500; color: var(--color-text);">Email</label>
-          <input type="email" style="padding: 0.5rem; border: 1px solid var(--color-border); border-radius: 6px;" placeholder="you@example.com" />
+          <label for="contact-form-email" style="font-size: 0.875rem; font-weight: 500; color: var(--color-text);">Email</label>
+          <input id="contact-form-email" type="email" style="padding: 0.5rem; border: 1px solid var(--color-border); border-radius: 6px;" placeholder="you@example.com" />
         </Stack>
         <Stack gap="var(--space-1)">
-          <label style="font-size: 0.875rem; font-weight: 500; color: var(--color-text);">Message</label>
-          <textarea style="padding: 0.5rem; border: 1px solid var(--color-border); border-radius: 6px; min-height: 100px;" placeholder="Your message"></textarea>
+          <label for="contact-form-message" style="font-size: 0.875rem; font-weight: 500; color: var(--color-text);">Message</label>
+          <textarea id="contact-form-message" style="padding: 0.5rem; border: 1px solid var(--color-border); border-radius: 6px; min-height: 100px;" placeholder="Your message"></textarea>
         </Stack>
       </Stack>
       <Cluster justify="flex-end" gap="var(--space-2)">

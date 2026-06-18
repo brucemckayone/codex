@@ -76,7 +76,9 @@ export {
   type WaitUntilFn,
 } from './services/subscription-invalidation';
 export type {
+  CreatorEarningsSummary,
   CreatorPayoutBreakdown,
+  CreatorPayoutRow,
   PayoutDisplayStatus,
   PayoutSummary,
   PayoutWithCreator,
@@ -87,7 +89,10 @@ export type {
   WebhookEmailPayload,
   WebhookHandlerResult,
 } from './services/subscription-service';
-export { SubscriptionService } from './services/subscription-service';
+export {
+  type PayoutReleasedMailer,
+  SubscriptionService,
+} from './services/subscription-service';
 export {
   type TierPricePropagator,
   TierService,

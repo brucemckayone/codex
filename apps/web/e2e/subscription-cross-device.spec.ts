@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { loginAsSeedViewer, SEED_VIEWER_2 } from './helpers/seed-auth';
 
 /**
  * Cross-Device Subscription Visibility-Change E2E Tests
@@ -20,9 +21,12 @@ import { expect, test } from '@playwright/test';
  *          card should flip from "Current plan" (active) to the "Cancelling" /
  *          "Reactivate plan" affordance.
  *
- * Fixture strategy (same as account-subscription-cancel.spec.ts):
- *   Use the seeded viewer@test.com user, who starts each `pnpm db:seed` run with
- *   an ACTIVE subscription to studio-alpha.
+ * Fixture strategy:
+ *   Use the seeded viewer2@test.com user, who starts each `pnpm db:seed` run
+ *   with an ACTIVE subscription to studio-alpha. viewer@test.com is owned by
+ *   account-subscription-cancel.spec.ts — routing this spec to viewer2 keeps
+ *   the two cancel-flow specs on independent DB rows so Playwright workers=2
+ *   doesn't race them on the same seeded subscription.
  *
  * Idempotency: afterEach reactivates if CANCELLING so the next run starts clean.
  *
@@ -31,21 +35,8 @@ import { expect, test } from '@playwright/test';
  *   - SvelteKit dev server on lvh.me:5173 (wildcard DNS → 127.0.0.1)
  */
 
-const SEED_USER = {
-  email: 'viewer@test.com',
-  password: 'Test1234!',
-};
-
 const SEEDED_ORG_SLUG = 'studio-alpha';
 const SEEDED_ORG_NAME = 'Studio Alpha';
-
-async function loginAsSeedViewer(page: import('@playwright/test').Page) {
-  await page.goto('/login');
-  await page.fill('input[name="email"]', SEED_USER.email);
-  await page.fill('input[name="password"]', SEED_USER.password);
-  await page.click('button[type="submit"]', { noWaitAfter: true });
-  await expect(page).toHaveURL(/\/library/, { timeout: 30_000 });
-}
 
 function subscriptionCard(
   page: import('@playwright/test').Page,
@@ -78,11 +69,13 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
     const cleanupCtx = await browser.newContext();
     const cleanupPage = await cleanupCtx.newPage();
     try {
-      await loginAsSeedViewer(cleanupPage);
+      await loginAsSeedViewer(cleanupPage, { user: SEED_VIEWER_2 });
       await cleanupPage.goto('/account/subscriptions');
       const card = subscriptionCard(cleanupPage);
       if ((await card.count()) > 0) {
-        const reactivateBtn = card.getByRole('button', { name: /reactivate/i });
+        const reactivateBtn = card.getByTestId(
+          'subscription-reactivate-button'
+        );
         if (
           (await reactivateBtn.count()) > 0 &&
           (await reactivateBtn.first().isVisible())
@@ -108,7 +101,7 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
     // ── Tab A: log in and cancel ───────────────────────────────────────────
     const ctxA = await browser.newContext();
     const pageA = await ctxA.newPage();
-    await loginAsSeedViewer(pageA);
+    await loginAsSeedViewer(pageA, { user: SEED_VIEWER_2 });
     await pageA.goto('/account/subscriptions');
     await pageA.waitForLoadState('networkidle', { timeout: 10_000 });
 
@@ -118,44 +111,52 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
     // If it's not active (e.g. the previous run left it cancelling and teardown
     // failed), reactivate first so the test starts from a known state.
     if (!(await badgeA.textContent())?.match(/Active/i)) {
-      const reactivateBtn = cardA.getByRole('button', { name: /reactivate/i });
+      const reactivateBtn = cardA.getByTestId('subscription-reactivate-button');
       await reactivateBtn.click();
       await expect(badgeA).toHaveText(/Active/i, { timeout: 5000 });
     }
 
     // ── Tab B: open BEFORE the cancel so it captures the initial ACTIVE state
+    //
+    // Copy auth cookies from Tab A's context instead of re-logging-in via the
+    // form. Two consecutive form-submit logins from the same source IP can
+    // hit the auth worker's 5/15min rate-limit (auth-rate-limiter middleware)
+    // when the suite is run in a tight loop. Cookie-copy is the equivalent
+    // user state — a second tab opened by the same user — and stays under
+    // the rate-limit ceiling. Both contexts share `.lvh.me` so the cookies
+    // propagate to subdomain navigations (per the cookie-domain fix in
+    // PR #261 commit 95a2194a).
     const ctxB = await browser.newContext();
     const pageB = await ctxB.newPage();
-    await loginAsSeedViewer(pageB);
+    const aCookies = await ctxA.cookies();
+    await ctxB.addCookies(aCookies);
 
     // Pricing page on the org subdomain — renders the user's effective tier
     // status via the layout's streamed subscriptionContext. Root-relative
     // path per CLAUDE.md rule (slug is in hostname, not path).
-    // Build URL from baseURL so we honour PLAYWRIGHT_BASE_URL in CI.
-    const baseURL = new URL(pageB.url());
+    //
+    // Derive orgBase from Tab A's URL (it's already navigated past
+    // /account/subscriptions). `pageB.url()` is `about:blank` until first
+    // goto — using that as a `new URL` source yields `about://...` and the
+    // subsequent goto silently lands on the wrong host (or about:blank).
+    const baseURL = new URL(pageA.url());
     const orgBase = `${baseURL.protocol}//${SEEDED_ORG_SLUG}.${baseURL.host}`;
     await pageB.goto(`${orgBase}/pricing`);
     await pageB.waitForLoadState('networkidle', { timeout: 15_000 });
 
-    // Wait for tiers + user's current-plan CTA to render. The "Current plan"
-    // button appears on the tier that the user is currently subscribed to.
-    // We bound loosely because subscriptionContext is streamed.
-    await expect(
-      pageB.getByRole('button', { name: /current plan/i }).first()
-    ).toBeVisible({ timeout: 15_000 });
-    // "Reactivate plan" must NOT be present yet — baseline.
-    await expect(
-      pageB.getByRole('button', { name: /reactivate plan/i })
-    ).toHaveCount(0);
+    // Wait for the user's current-plan CTA to render on the org pricing
+    // page (the disabled "Current Plan" button on the matched tier card).
+    await expect(pageB.getByTestId('tier-cta-current').first()).toBeVisible({
+      timeout: 15_000,
+    });
+    // "Reactivate" must NOT be present yet — that CTA only shows once the
+    // subscription is in the cancelling state.
+    await expect(pageB.getByTestId('tier-cta-reactivate')).toHaveCount(0);
 
     // ── Tab A: perform the cancel ──────────────────────────────────────────
-    const cancelBtn = cardA.getByRole('button', {
-      name: /^Cancel Subscription$/i,
-    });
+    const cancelBtn = cardA.getByTestId('subscription-cancel-button');
     await cancelBtn.click();
-    const confirmBtnA = pageA.getByRole('button', {
-      name: /^cancel at end of period$/i,
-    });
+    const confirmBtnA = pageA.getByTestId('cancel-dialog-confirm-button');
     await expect(confirmBtnA).toBeVisible({ timeout: 3000 });
     await confirmBtnA.click();
     await expect(badgeA).toHaveText(/Cancelling/i, { timeout: 10_000 });
@@ -174,11 +175,14 @@ test.describe('Cross-device subscription sync via visibilitychange', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
 
-    // Assert: the Reactivate plan button appears (Tab B has caught up).
-    // Within 2s per task constraint. The server load re-runs and the CTA flips.
-    await expect(
-      pageB.getByRole('button', { name: /reactivate plan/i }).first()
-    ).toBeVisible({ timeout: 2000 });
+    // Assert: the Reactivate button appears (Tab B has caught up).
+    // The 60s cooldown on cache:org-versions invalidates (apps/web org
+    // layout) means the dispatched visibilitychange will only trigger a
+    // server load re-run on first fire — give the round-trip a generous
+    // budget for KV propagation + Svelte effect resolution.
+    await expect(pageB.getByTestId('tier-cta-reactivate').first()).toBeVisible({
+      timeout: 15_000,
+    });
 
     await ctxA.close();
     await ctxB.close();

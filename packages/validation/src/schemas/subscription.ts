@@ -242,6 +242,36 @@ export const getPayoutsByCreatorBreakdownQuerySchema = z.object({
   toDate: z.string().datetime().optional(),
 });
 
+/**
+ * Creator-self-scoped payouts list (Codex-69t7c.7 / WP7).
+ *
+ * The creator-earnings counterpart of {@link listPayoutsQuerySchema}: carries
+ * NO `organizationId`. The caller is resolved from the session (`ctx.user.id`),
+ * never client-supplied (IDOR prevention, epic decision D8). A creator's
+ * payouts span every org that paid them, so org-scope is intentionally absent.
+ * Status/source/date chips share the enums with the org table for parity.
+ */
+export const listMyPayoutsQuerySchema = paginationSchema.extend({
+  status: payoutStatusFilterEnum.default('all'),
+  source: payoutSourceFilterEnum.default('all'),
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
+});
+
+/**
+ * Creator-self-scoped earnings summary (Codex-69t7c.7 / WP7). Dates only — no
+ * `organizationId` (session-scoped, spans all orgs).
+ */
+export const getMyEarningsSummaryQuerySchema = z.object({
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
+});
+
+export type ListMyPayoutsQueryInput = z.infer<typeof listMyPayoutsQuerySchema>;
+export type GetMyEarningsSummaryQueryInput = z.infer<
+  typeof getMyEarningsSummaryQuerySchema
+>;
+
 export const getCurrentSubscriptionQuerySchema = z.object({
   organizationId: uuidSchema,
 });
@@ -266,6 +296,24 @@ export const connectStatusQuerySchema = z.object({
 
 export const connectDashboardSchema = z.object({
   organizationId: uuidSchema,
+});
+
+/**
+ * Creator-scoped Connect onboarding (Codex-69t7c.3 / WP3).
+ *
+ * Unlike {@link connectOnboardSchema}, this carries NO `organizationId`: the
+ * acting creator is always the authenticated user (`ctx.user.id`), never a
+ * client-supplied id (IDOR prevention — see epic design decision D8). The
+ * return/refresh URLs reuse the same host-allowlisted redirect schema as
+ * checkout, so an attacker cannot smuggle an open redirect through onboarding.
+ *
+ * The sibling `/connect/me/{status,sync,dashboard}` routes take no input — the
+ * creator is resolved entirely from the session — so this is the only new
+ * creator-scoped Connect schema.
+ */
+export const connectMeOnboardSchema = z.object({
+  returnUrl: checkoutRedirectUrlSchema,
+  refreshUrl: checkoutRedirectUrlSchema,
 });
 
 // ============================================================================
@@ -304,3 +352,4 @@ export type ListSubscribersQueryInput = z.infer<
 >;
 
 export type ConnectOnboardInput = z.infer<typeof connectOnboardSchema>;
+export type ConnectMeOnboardInput = z.infer<typeof connectMeOnboardSchema>;

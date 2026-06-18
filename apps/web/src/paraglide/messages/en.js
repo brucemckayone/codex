@@ -7735,6 +7735,22 @@ export const discover_empty_search_description = () => `No content matched your 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const discover_result_count_one = () => `1 result`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const discover_result_count_other = (params) => `${params.count} results`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const discover_clear_search = () => `Clear search`
 
 
@@ -8803,8 +8819,424 @@ export const library_filter_group_progress = () => `Progress`
 
 
 /**
- * 
+ *
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const library_filter_group_type = () => `Type`
+
+
+/**
+
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_page_title = () => `Earnings & Payouts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_page_subtitle = () => `Your creator earnings across all organisations`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_not_started_title = () => `Set up payouts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_not_started_body = () => `Connect a Stripe account to receive your earnings.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_cta = () => `Connect Stripe`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_incomplete_title = () => `Finish connecting Stripe`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_incomplete_body = () => `Your onboarding is incomplete. Return to Stripe to finish setting up your account.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_resume_cta = () => `Resume onboarding`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_pending_title = () => `Payout account under review`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_pending_body = () => `Stripe is reviewing your account. Earnings will be held in transit until approval.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_enabled_title = () => `Payout account connected`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_dashboard_cta = () => `Open Stripe dashboard`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_sync_cta = () => `Refresh status`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_syncing = () => `Syncing…`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_return_success = () => `Stripe connected — refreshing your status.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_return_refresh = () => `Onboarding incomplete — please try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_kpi_earned_period = () => `Earned this period`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_kpi_total_earned = () => `Total earned`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_kpi_in_transit = () => `In transit`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_kpi_needs_attention = () => `Needs attention`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_kpi_needs_attention_suffix = (params) => `${params.count} payout`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_title = () => `Payout history`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_empty = () => `No payouts yet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_empty_description = () => `Your payouts will appear here once transfers have been processed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_col_date = () => `Date`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_col_amount = () => `Amount`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_col_status = () => `Status`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_col_source = () => `Source`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_col_org = () => `Organisation`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_filter_status_all = () => `All statuses`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_filter_status_paid = () => `Paid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_filter_status_pending = () => `Pending`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_filter_status_failed = () => `Failed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_filter_source_all = () => `All sources`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_filter_source_subscription = () => `Subscriptions`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_filter_source_content = () => `Content sales`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_status_paid = () => `Paid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_status_pending = () => `Pending`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_status_failed = () => `Failed`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_status_in_transit = () => `In transit`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_status_cancelled = () => `Cancelled`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_return_sync_failed = () => `Could not refresh your Stripe status — please use the Refresh status button.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_status_load_failed = () => `Could not load your payout status. Please refresh the page.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_connect_status_load_failed_retry = () => `Retry`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_kpi_load_error = () => `Could not load earnings data.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_kpi_retry = () => `Retry`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_load_error = () => `Could not load payout history.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const earnings_payouts_retry = () => `Retry`
+
+/**
+ *
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const email_creator_connect_needed_subject = () => `Action required: connect Stripe to receive your payout`
+
+
+/**
+ *
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const email_creator_connect_needed_body = () => `A payout is waiting for you. Connect your Stripe account to receive it.`
+
+
+/**
+ *
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const email_payout_released_subject = () => `Your payout is on its way`
+
+
+/**
+ *
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const email_payout_released_body = () => `Your pending earnings have been transferred to your Stripe account.`

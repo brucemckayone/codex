@@ -16,6 +16,7 @@
 
 import type { KVNamespace } from '@cloudflare/workers-types';
 import {
+  organizationMemberships,
   organizations,
   stripeConnectAccounts,
   subscriptions,
@@ -33,6 +34,7 @@ import {
   teardownTestDatabase,
   validateDatabaseConnection,
 } from '@codex/test-utils';
+import { eq, inArray } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import {
   afterAll,
@@ -74,7 +76,15 @@ describe('ConnectAccountService', () => {
     orgId = org.id;
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // One Connect account per user (Codex-69t7c uq_stripe_connect_user): this
+    // suite reuses the same two seed users across many tests, so clear their
+    // accounts between tests to avoid cross-test unique(userId) collisions.
+    await db
+      .delete(stripeConnectAccounts)
+      .where(
+        inArray(stripeConnectAccounts.userId, [creatorId, otherCreatorId])
+      );
     // Don't reset IDs — unique constraint on stripeAccountId means IDs must be globally unique
     stripe = createMockStripe();
     // createMockStripe() does not ship `accounts.retrieve` — install a spy
@@ -125,8 +135,9 @@ describe('ConnectAccountService', () => {
             card_payments: { requested: true },
             transfers: { requested: true },
           },
+          // Onboarding is userId-centric (Codex-69t7c.2) — no org metadata;
+          // the org→account link is materialised at activation via the pin.
           metadata: {
-            codex_organization_id: freshOrg.id,
             codex_user_id: creatorId,
           },
         })
@@ -228,8 +239,9 @@ describe('ConnectAccountService', () => {
 
       expect(stripe.accounts.create).toHaveBeenCalledWith(
         expect.objectContaining({
+          // userId-centric onboarding (Codex-69t7c.2): metadata carries only
+          // the user; there is no single owning org for a user account.
           metadata: {
-            codex_organization_id: metaOrg.id,
             codex_user_id: creatorId,
           },
         })
@@ -283,6 +295,10 @@ describe('ConnectAccountService', () => {
       await db
         .insert(stripeConnectAccounts)
         .values(createTestConnectAccountInput(getOrg.id, creatorId));
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: creatorId })
+        .where(eq(organizations.id, getOrg.id));
 
       const account = await service.getAccount(getOrg.id);
       expect(account).not.toBeNull();
@@ -847,6 +863,10 @@ describe('ConnectAccountService', () => {
       await db
         .insert(stripeConnectAccounts)
         .values(createTestConnectAccountInput(dashOrg.id, creatorId));
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: creatorId })
+        .where(eq(organizations.id, dashOrg.id));
 
       const result = await service.createDashboardLink(dashOrg.id);
       expect(result.url).toBeDefined();
@@ -891,6 +911,10 @@ describe('ConnectAccountService', () => {
           status: 'active',
         })
       );
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: creatorId })
+        .where(eq(organizations.id, readyOrg.id));
 
       const ready = await service.isReady(readyOrg.id);
       expect(ready).toBe(true);
@@ -983,6 +1007,10 @@ describe('ConnectAccountService', () => {
           })
         )
         .returning();
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: creatorId })
+        .where(eq(organizations.id, reqOrg.id));
 
       const deadline = 1_800_000_000;
       (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -1039,6 +1067,10 @@ describe('ConnectAccountService', () => {
         .insert(stripeConnectAccounts)
         .values(createTestConnectAccountInput(normOrg.id, creatorId))
         .returning();
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: creatorId })
+        .where(eq(organizations.id, normOrg.id));
 
       (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: inserted.stripeAccountId,
@@ -1088,6 +1120,10 @@ describe('ConnectAccountService', () => {
           })
         )
         .returning();
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: creatorId })
+        .where(eq(organizations.id, degOrg.id));
 
       (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockRejectedValue(
         new Error('Stripe API unreachable')
@@ -1149,7 +1185,9 @@ describe('ConnectAccountService', () => {
         requirements: { currently_due: [], disabled_reason: null },
       } as unknown as Stripe.Account);
 
-      expect(invalidateSpy).toHaveBeenCalledWith(invOrg.id);
+      // Keyed on the account's userId now, not the vestigial organizationId
+      // (Codex-69t7c.2). creatorId is the account's user.
+      expect(invalidateSpy).toHaveBeenCalledWith(creatorId);
       expect(invalidateSpy).toHaveBeenCalledTimes(1);
 
       // Duplicate Stripe webhook delivery — second invalidation must be a
@@ -1211,6 +1249,459 @@ describe('ConnectAccountService', () => {
           requirements: { currently_due: [], disabled_reason: null },
         } as unknown as Stripe.Account)
       ).resolves.toBeUndefined();
+    });
+
+    it('invalidates by userId even when organizationId is NULL (Codex-69t7c.2 regression)', async () => {
+      // The WP1 cache key was gated on the vestigial `organizationId`, so an
+      // orgless account (organizationId IS NULL) silently SKIPPED invalidation
+      // and served stale status until the 10-min TTL. Keying on userId fixes it.
+      const { VersionedCache } = await import('@codex/cache');
+      const { createMockKVNamespace, createMockObservability } = await import(
+        '@codex/test-utils'
+      );
+
+      const kv = createMockKVNamespace();
+      const { obs } = createMockObservability();
+      const cache = new VersionedCache({
+        kv: kv as unknown as KVNamespace,
+        prefix: 'cache',
+        obs,
+      });
+
+      const cachedService = new ConnectAccountService(
+        { db, environment: 'test', cache },
+        stripe
+      );
+
+      // Orgless account — organizationId deliberately NULL.
+      const [inserted] = await db
+        .insert(stripeConnectAccounts)
+        .values({
+          userId: creatorId,
+          organizationId: null,
+          stripeAccountId: `acct_orgless_inv_${createUniqueSlug('a')}`,
+          status: 'onboarding',
+          chargesEnabled: false,
+          payoutsEnabled: false,
+        })
+        .returning();
+
+      const invalidateSpy = vi.spyOn(cache, 'invalidate');
+
+      await cachedService.handleAccountUpdated({
+        id: inserted.stripeAccountId,
+        charges_enabled: true,
+        payouts_enabled: true,
+        requirements: { currently_due: [], disabled_reason: null },
+      } as unknown as Stripe.Account);
+
+      // Pre-WP2 this was NOT called (organizationId null → invalidation skipped).
+      expect(invalidateSpy).toHaveBeenCalledWith(creatorId);
+      expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ─── Schema invariants (Codex-69t7c WP1) ─────────────────────────────
+  describe('schema invariants (Codex-69t7c WP1)', () => {
+    it('enforces one Connect account per user (uq_stripe_connect_user)', async () => {
+      const [orgA] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('uq-a'),
+            creatorId,
+          })
+        )
+        .returning();
+      const [orgB] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('uq-b'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      await db
+        .insert(stripeConnectAccounts)
+        .values(createTestConnectAccountInput(orgA.id, creatorId));
+
+      // A second account for the same user — even under a DIFFERENT org —
+      // must violate the single-account-per-user unique constraint.
+      await expect(
+        db
+          .insert(stripeConnectAccounts)
+          .values(createTestConnectAccountInput(orgB.id, creatorId))
+      ).rejects.toThrow();
+    });
+
+    it('allows a Connect account with a null organizationId (orgless creator)', async () => {
+      const [row] = await db
+        .insert(stripeConnectAccounts)
+        .values({
+          userId: creatorId,
+          organizationId: null,
+          stripeAccountId: `acct_orgless_${createUniqueSlug('a')}`,
+          status: 'active',
+          chargesEnabled: true,
+          payoutsEnabled: true,
+        })
+        .returning();
+      expect(row.organizationId).toBeNull();
+      expect(row.userId).toBe(creatorId);
+    });
+  });
+
+  // ─── getAccountForUser (Codex-69t7c.2) ───────────────────────────────
+
+  describe('getAccountForUser', () => {
+    it('resolves the account for a userId (self-account resolution)', async () => {
+      const [selfOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('self-acct'),
+            creatorId,
+          })
+        )
+        .returning();
+      const [inserted] = await db
+        .insert(stripeConnectAccounts)
+        .values(createTestConnectAccountInput(selfOrg.id, creatorId))
+        .returning();
+
+      const account = await service.getAccountForUser(creatorId);
+      expect(account).not.toBeNull();
+      expect(account?.userId).toBe(creatorId);
+      expect(account?.stripeAccountId).toBe(inserted.stripeAccountId);
+    });
+
+    it('returns null when the user has no account', async () => {
+      const account = await service.getAccountForUser(otherCreatorId);
+      expect(account).toBeNull();
+    });
+  });
+
+  // ─── getAccount org → primary-user resolution (Codex-69t7c.2) ─────────
+
+  describe('getAccount org resolution', () => {
+    it('resolves org → owner account via fallback when the pin is unset', async () => {
+      const [fbOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('owner-fallback'),
+            creatorId,
+          })
+        )
+        .returning();
+      // Owner membership but NO pin — resolvePrimaryConnect falls back to owner.
+      await db.insert(organizationMemberships).values({
+        organizationId: fbOrg.id,
+        userId: creatorId,
+        role: 'owner',
+        status: 'active',
+      });
+      await db
+        .insert(stripeConnectAccounts)
+        .values(createTestConnectAccountInput(fbOrg.id, creatorId));
+
+      const account = await service.getAccount(fbOrg.id);
+      expect(account).not.toBeNull();
+      expect(account?.userId).toBe(creatorId);
+    });
+
+    it('returns null when the org has neither a pin nor an owner account', async () => {
+      const [noneOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('no-resolution'),
+            creatorId,
+          })
+        )
+        .returning();
+      const account = await service.getAccount(noneOrg.id);
+      expect(account).toBeNull();
+    });
+  });
+
+  // ─── getStatusForUser (Codex-69t7c.2) ────────────────────────────────
+
+  describe('getStatusForUser', () => {
+    it('returns the disconnected sentinel when the user has no account', async () => {
+      const result = await service.getStatusForUser(otherCreatorId);
+      expect(result).toEqual({
+        isConnected: false,
+        accountId: null,
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        status: null,
+        requirements: null,
+      });
+      expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
+    });
+
+    it('returns the status payload for a connected user', async () => {
+      const [inserted] = await db
+        .insert(stripeConnectAccounts)
+        .values(
+          createTestConnectAccountInput(orgId, creatorId, {
+            status: 'active',
+            chargesEnabled: true,
+            payoutsEnabled: true,
+          })
+        )
+        .returning();
+      (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: inserted.stripeAccountId,
+        charges_enabled: true,
+        payouts_enabled: true,
+        requirements: {
+          currently_due: [],
+          eventually_due: [],
+          past_due: [],
+          pending_verification: [],
+          current_deadline: null,
+          disabled_reason: null,
+          errors: [],
+        },
+      } as unknown as Stripe.Account);
+
+      const result = await service.getStatusForUser(creatorId);
+      expect(result.isConnected).toBe(true);
+      expect(result.accountId).toBe(inserted.stripeAccountId);
+      expect(result.status).toBe('active');
+    });
+  });
+
+  // ─── pin-write: organizations.primaryConnectAccountUserId (Codex-69t7c.2) ─
+  //
+  // The load-bearing WP1 finding: the pin is NEVER written in production, so
+  // resolvePrimaryConnect relies entirely on the owner fallback. WP2 materialises
+  // it at account activation — scoped to orgs the user OWNS, only when unset.
+  // These guard that materialisation (the SOLE production write of the pin).
+
+  describe('pin-write on account activation', () => {
+    const readPin = async (id: string) => {
+      const [row] = await db
+        .select({ pin: organizations.primaryConnectAccountUserId })
+        .from(organizations)
+        .where(eq(organizations.id, id));
+      return row?.pin ?? null;
+    };
+
+    const activate = (stripeAccountId: string) =>
+      service.handleAccountUpdated({
+        id: stripeAccountId,
+        charges_enabled: true,
+        payouts_enabled: true,
+        requirements: { currently_due: [], disabled_reason: null },
+      } as unknown as Stripe.Account);
+
+    it('pins owned orgs whose pin is unset to the activating user', async () => {
+      const [ownedOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('pin-owned'),
+            creatorId,
+          })
+        )
+        .returning();
+      await db.insert(organizationMemberships).values({
+        organizationId: ownedOrg.id,
+        userId: creatorId,
+        role: 'owner',
+        status: 'active',
+      });
+      const [acct] = await db
+        .insert(stripeConnectAccounts)
+        .values(
+          createTestConnectAccountInput(ownedOrg.id, creatorId, {
+            status: 'onboarding',
+            chargesEnabled: false,
+            payoutsEnabled: false,
+          })
+        )
+        .returning();
+
+      expect(await readPin(ownedOrg.id)).toBeNull();
+      await activate(acct.stripeAccountId);
+      expect(await readPin(ownedOrg.id)).toBe(creatorId);
+    });
+
+    it('does NOT overwrite an existing (non-null) pin', async () => {
+      const [pinnedOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('pin-existing'),
+            creatorId,
+          })
+        )
+        .returning();
+      // creatorId is the owner, but the org is already pinned to a DIFFERENT
+      // user (e.g. a future "designate payout account" feature).
+      await db.insert(organizationMemberships).values({
+        organizationId: pinnedOrg.id,
+        userId: creatorId,
+        role: 'owner',
+        status: 'active',
+      });
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: otherCreatorId })
+        .where(eq(organizations.id, pinnedOrg.id));
+      const [acct] = await db
+        .insert(stripeConnectAccounts)
+        .values(createTestConnectAccountInput(pinnedOrg.id, creatorId))
+        .returning();
+
+      await activate(acct.stripeAccountId);
+
+      // Pin untouched — an explicit assignment is never stolen.
+      expect(await readPin(pinnedOrg.id)).toBe(otherCreatorId);
+    });
+
+    it('pins nothing when the activating user owns no orgs', async () => {
+      // Org owned by otherCreatorId; the account belongs to creatorId, who is
+      // NOT an owner — a creator-slice account, not the org's payout owner.
+      const [foreignOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('pin-nonowner'),
+            creatorId: otherCreatorId,
+          })
+        )
+        .returning();
+      await db.insert(organizationMemberships).values({
+        organizationId: foreignOrg.id,
+        userId: otherCreatorId,
+        role: 'owner',
+        status: 'active',
+      });
+      const [acct] = await db
+        .insert(stripeConnectAccounts)
+        .values(createTestConnectAccountInput(foreignOrg.id, creatorId))
+        .returning();
+
+      await activate(acct.stripeAccountId);
+
+      expect(await readPin(foreignOrg.id)).toBeNull();
+    });
+
+    it('is idempotent across duplicate webhook deliveries', async () => {
+      const [idemOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('pin-idem'),
+            creatorId,
+          })
+        )
+        .returning();
+      await db.insert(organizationMemberships).values({
+        organizationId: idemOrg.id,
+        userId: creatorId,
+        role: 'owner',
+        status: 'active',
+      });
+      const [acct] = await db
+        .insert(stripeConnectAccounts)
+        .values(createTestConnectAccountInput(idemOrg.id, creatorId))
+        .returning();
+
+      await activate(acct.stripeAccountId);
+      await activate(acct.stripeAccountId);
+
+      expect(await readPin(idemOrg.id)).toBe(creatorId);
+    });
+
+    it('pins the org even on a non-active (onboarding) account.updated', async () => {
+      // The pin records the owner regardless of payability — payability is
+      // gated at transfer time, not by pin existence (Codex-69t7c.2).
+      const [obPinOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('pin-onboarding'),
+            creatorId,
+          })
+        )
+        .returning();
+      await db.insert(organizationMemberships).values({
+        organizationId: obPinOrg.id,
+        userId: creatorId,
+        role: 'owner',
+        status: 'active',
+      });
+      const [acct] = await db
+        .insert(stripeConnectAccounts)
+        .values(
+          createTestConnectAccountInput(obPinOrg.id, creatorId, {
+            status: 'onboarding',
+            chargesEnabled: false,
+            payoutsEnabled: false,
+          })
+        )
+        .returning();
+
+      // account.updated arrives still in onboarding (NOT active).
+      await service.handleAccountUpdated({
+        id: acct.stripeAccountId,
+        charges_enabled: false,
+        payouts_enabled: false,
+        requirements: {
+          currently_due: ['external_account'],
+          disabled_reason: null,
+        },
+      } as unknown as Stripe.Account);
+
+      expect(await readPin(obPinOrg.id)).toBe(creatorId);
+    });
+
+    it('retains the pin on deauthorization (account surfaces as disabled)', async () => {
+      // Deliberate: the pin stays so resolvePrimaryConnect surfaces the
+      // now-disabled account, which transfer-time active-checks block — rather
+      // than silently rerouting the org slice to a different owner.
+      const [deauthOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('pin-deauth'),
+            creatorId,
+          })
+        )
+        .returning();
+      await db.insert(organizationMemberships).values({
+        organizationId: deauthOrg.id,
+        userId: creatorId,
+        role: 'owner',
+        status: 'active',
+      });
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: creatorId })
+        .where(eq(organizations.id, deauthOrg.id));
+      const [acct] = await db
+        .insert(stripeConnectAccounts)
+        .values(
+          createTestConnectAccountInput(deauthOrg.id, creatorId, {
+            status: 'active',
+            chargesEnabled: true,
+            payoutsEnabled: true,
+          })
+        )
+        .returning();
+
+      await service.handleAccountDeauthorized(acct.stripeAccountId);
+
+      expect(await readPin(deauthOrg.id)).toBe(creatorId);
+      const after = await service.getAccountForUser(creatorId);
+      expect(after?.status).toBe('disabled');
     });
   });
 });
