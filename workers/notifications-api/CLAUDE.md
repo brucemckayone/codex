@@ -111,7 +111,7 @@ First match wins.
 
 - **Unsubscribe routes bypass `procedure()`** — token verification is HMAC-based, not session-based. Raw Hono handlers with `createDbClient` directly.
 - **`/internal/send` is the only email-sending entry point** — other workers should call it via `sendEmailToWorker()` from `@codex/worker-utils`, not hit the notifications-api directly with raw HTTP.
-- **Cron trigger**: `wrangler.toml` configures `crons = ["0 9 * * 1"]` (Monday 09:00 UTC) for weekly digest. The `scheduled()` handler is stubbed with a TODO — not yet implemented.
+- **Cron trigger**: `wrangler.jsonc` configures `crons = ["0 8 * * *"]` (daily 08:00 UTC) in the **`production` env block** — NOT top-level. Cloudflare's free-plan cap is 5 cron triggers **per account**, shared across prod + dev worker scripts; `triggers` is an inheritable wrangler key, so a top-level cron would inherit into every env (prod + dev + staging) and exhaust the cap. Crons therefore live only in `production`. Fires the agreement-expiring-soon sweep — handler `src/handlers/agreement-expiring-sweep.ts`, dispatched from `scheduled()` in `src/index.ts` (implemented, not a stub).
 - **`preferences.ts`** is an unmounted file — do not confuse it as an active route. Notification preferences live in identity-api.
 
 ## Reference Files

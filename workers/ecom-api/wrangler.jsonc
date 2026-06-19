@@ -10,16 +10,6 @@
     "enabled": true
   },
 
-  // Cron Triggers (scheduled handler)
-  // - Every 15 minutes — payouts sweep (Codex-vv77x): drains pending payouts
-  //   whose Connect account is now charges_enabled && payouts_enabled.
-  //   Hybrid event+sweep resolution per Stripe docs (account.updated webhook
-  //   + periodic reconciliation). Consolidated into ecom-api 2026-05-13 so
-  //   Stripe cron + Stripe webhooks colocate in one Worker.
-  "triggers": {
-    "crons": ["*/15 * * * *"]
-  },
-
   // KV Namespaces
   "kv_namespaces": [
     {
@@ -75,6 +65,9 @@
     // Production environment
     "production": {
       "name": "ecom-api-production",
+      // Payouts sweep every 15 min (Codex-vv77x). Defined per-env (NOT top-level)
+      // so it does NOT inherit into dev/staging — Cloudflare's free-plan cap is
+      // 5 cron triggers per ACCOUNT, shared across prod + dev worker scripts.
       "triggers": {
         "crons": ["*/15 * * * *"]
       },
@@ -109,9 +102,6 @@
     // Staging environment
     "staging": {
       "name": "ecom-api-staging",
-      "triggers": {
-        "crons": ["*/15 * * * *"]
-      },
       "vars": {
         "ENVIRONMENT": "staging",
         "WEB_APP_URL": "https://codex-staging.revelations.studio",
@@ -145,9 +135,6 @@
     // and the four STRIPE_WEBHOOK_SECRET_* secrets.
     "dev": {
       "name": "ecom-api-dev",
-      "triggers": {
-        "crons": ["*/15 * * * *"]
-      },
       "vars": {
         "ENVIRONMENT": "dev",
         "DB_METHOD": "PRODUCTION",
