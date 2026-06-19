@@ -20,12 +20,6 @@
     ]
   },
 
-  // Cron Triggers (scheduled handler)
-  // - 0 * * * * : every hour — recovers media stuck in 'transcoding' (no webhook received)
-  "triggers": {
-    "crons": ["0 * * * *"]
-  },
-
   // Migrations for Durable Objects (using new_sqlite_classes for free plan compatibility)
   "migrations": [
     {
@@ -122,6 +116,12 @@
           }
         ]
       },
+      // Hourly stuck-transcoding recovery. Defined per-env (NOT top-level) so it
+      // does NOT inherit into dev/staging — Cloudflare's free-plan cap is 5 cron
+      // triggers per ACCOUNT, shared across prod + dev worker scripts.
+      "triggers": {
+        "crons": ["0 * * * *"]
+      },
       "vars": {
         "ENVIRONMENT": "production",
         "DB_METHOD": "PRODUCTION",
@@ -206,9 +206,6 @@
             "class_name": "OrphanedFileCleanupDO"
           }
         ]
-      },
-      "triggers": {
-        "crons": ["0 * * * *"]
       },
       "vars": {
         "ENVIRONMENT": "dev",
