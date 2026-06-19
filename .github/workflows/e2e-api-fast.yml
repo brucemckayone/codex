@@ -54,10 +54,13 @@ jobs:
 
       - name: Generate Neon branch name
         id: branch-name
-        # Unique per run to avoid races with the omnibus workflow which also
-        # creates ephemeral branches. cleanup-stale-branches in the omnibus
-        # only deletes non-default branches once at start of its own run, so
-        # our branch is safe as long as our cleanup step fires reliably.
+        # Unique per run so this branch never collides with the omnibus
+        # (testing.yml) or e2e-debug branches. Safety against the omnibus's
+        # cleanup-stale-branches job relies on that job being AGE-BASED: it
+        # only deletes branches older than the longest run, so this freshly
+        # created branch is never deleted mid-run. (A previous blanket "delete
+        # everything except production/dev" cleanup deleted this branch
+        # mid-migration and took CI red on 2026-06-18 — do not reintroduce it.)
         run: echo "name=ci-e2e-api-fast-${{ github.run_id }}-${{ github.run_attempt }}" >> $GITHUB_OUTPUT
 
       - name: Create Neon branch
