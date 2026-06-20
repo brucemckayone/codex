@@ -11,28 +11,14 @@ name: E2E API Fast Feedback
 # Identical Neon branch + dev-vars setup as the omnibus to avoid drift.
 # Runs on the same `test` environment so the same secrets resolve.
 #
-# Path filters: only triggers when something that could affect e2e:api
-# actually changes (workers/, packages/, e2e/, the dev-vars script, or this
-# workflow itself).
-
+# Manual-only: this isolated fast-feedback variant no longer triggers on
+# push/PR. The omnibus `testing.yml` (PR and Push CI) is the single automatic
+# pipeline and already runs the e2e:api suite (its e2e-api-tests job). Run this
+# on demand for debugging: Actions → E2E API Fast Feedback → Run workflow.
+# Dropping the automatic triggers also removes the cross-workflow Neon-branch
+# deletion race — it forked its own ephemeral branch concurrently with the
+# omnibus cleanup-stale-branches job, which took CI red on 2026-06-18.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-    paths:
-      - 'e2e/**'
-      - 'workers/**'
-      - 'packages/**'
-      - '.github/scripts/generate-dev-vars.sh'
-      - '.github/workflows/e2e-api-fast.yml'
-  push:
-    branches-ignore:
-      - main
-    paths:
-      - 'e2e/**'
-      - 'workers/**'
-      - 'packages/**'
-      - '.github/scripts/generate-dev-vars.sh'
-      - '.github/workflows/e2e-api-fast.yml'
   workflow_dispatch:
 
 permissions:

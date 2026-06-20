@@ -6,13 +6,13 @@
 # - Better artifacts (screenshots, traces, logs)
 # - Can be triggered manually or on specific branches
 #
-# Usage:
-# 1. Manual trigger: Go to Actions → E2E Debug → Run workflow
-# 2. Push to branch with [debug-e2e] in commit message
-# 3. Comment '/debug-e2e' on a PR
+# Usage (manual-only — not part of automatic CI):
+# - Actions → E2E Debug → Run workflow (optionally scope to a file/pattern)
 
 name: E2E Debug
 
+# Manual-only (+ workflow_call). Automatic push/PR triggers removed so the
+# omnibus `testing.yml` is the only pipeline that runs on push/PR.
 on:
   workflow_dispatch:
     inputs:
@@ -24,15 +24,6 @@ on:
         description: 'Grep filter (e.g., "account|profile"). Leave empty for full suite.'
         required: false
         type: string
-  push:
-    branches:
-      - '**'
-    paths:
-      - 'apps/web/**'
-      - 'apps/web/e2e/**'
-      - '.github/workflows/e2e-debug.yml'
-  pull_request:
-    types: [labeled, synchronize, reopened]
   workflow_call:
 
 # Skip if this is a documentation-only change
