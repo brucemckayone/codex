@@ -188,7 +188,13 @@ test.describe('Studio Settings - Tabs', () => {
     await expectClickNavigates(
       page,
       page.getByRole('tab', { name: 'Branding' }),
-      /\/studio\/settings\/branding/
+      /\/studio\/settings\/branding/,
+      // Settings tabs are stable content-area elements, not rail items. Skip
+      // the hover: an expanded desktop rail (left over from a prior hover)
+      // overlays the tab strip and intercepts the hover, while the native JS
+      // click still bubbles to the SPA router. Per spa-nav.ts: hover:false for
+      // stable elements.
+      { hover: false }
     );
 
     const brandingTab = page.getByRole('tab', { name: 'Branding' });
