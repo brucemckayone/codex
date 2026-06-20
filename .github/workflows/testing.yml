@@ -19,44 +19,80 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Clean up ALL non-production Neon branches before creating new ones
-  # This prevents hitting the 9-branch limit on Neon free tier
+  # Reclaim ONLY stale (leaked) Neon branches before creating new ones, so we
+  # stay under the 9-branch free-tier limit WITHOUT deleting a branch that a
+  # concurrently-running workflow is still using.
+  #
+  # Why age-based and NOT "delete everything except production/dev":
+  # testing.yml, e2e-api-fast.yml and e2e-debug.yml are independent workflows
+  # that trigger on the SAME push and each fork their own ephemeral branch off
+  # `production`. They have no ordering relative to this job. A blanket delete
+  # therefore removed a sibling workflow's in-flight branch mid-migration —
+  # tearing down its Neon compute endpoint and surfacing as "terminating
+  # connection due to administrator command" / "password authentication failed
+  # for user 'neondb_owner'" / "endpoint could not be found". That race took
+  # the entire CI suite red on 2026-06-18: go-live churn meant every push fired
+  # several cleanup-bearing runs at once, so the race lost every time (the
+  # workflow files were byte-identical to the last green run — it was purely a
+  # timing regression). Deleting only branches OLDER than the longest possible
+  # run can never touch an in-flight branch. Each test job already deletes its
+  # own branch inline at completion (if: always()), so this job is purely a
+  # leaked-branch safety net for hard-cancelled runs.
   cleanup-stale-branches:
     runs-on: ubuntu-latest
     steps:
       - name: Install neonctl
         run: npm i -g neonctl@2
 
-      - name: Delete all CI branches (keep only production)
+      - name: Delete stale CI branches (preserve in-flight)
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         run: |
           echo "::add-mask::$NEON_API_KEY"
+
+          # A branch counts as "stale" only if it is older than the longest
+          # single-branch lifetime in CI. No one ephemeral branch outlives its
+          # own job (each job creates + deletes its branch); the omnibus run as
+          # a whole is ~1h. 2h gives comfortable margin, so any branch this old
+          # cannot belong to a still-running workflow — it leaked from a
+          # hard-cancelled run. Keep this ABOVE the max run duration: lowering
+          # it below an in-flight branch's lifetime reintroduces the
+          # cross-workflow deletion race documented on the job above.
+          STALE_THRESHOLD_SECONDS=7200
+
           echo "Listing all branches..."
           BRANCHES=$(neonctl branches list --project-id ${{ vars.NEON_PROJECT_ID }} --output json 2>/dev/null || echo "[]")
+          echo "Found $(echo "$BRANCHES" | jq 'length') branches total"
 
-          # Count branches before cleanup
-          BRANCH_COUNT=$(echo "$BRANCHES" | jq 'length')
-          echo "Found $BRANCH_COUNT branches total"
+          # Select ONLY stale ephemeral branches:
+          #   - not the default (production) branch
+          #   - not the long-lived "dev" branch (carries seeded org data +
+          #     webhook secrets; deleting it forces a full re-bootstrap — see
+          #     PR #243 Phase 7)
+          #   - created more than STALE_THRESHOLD_SECONDS ago
+          # try/catch on the timestamp parse fails safe: an unparseable
+          # created_at yields null and the branch is PRESERVED, never deleted.
+          STALE_IDS=$(echo "$BRANCHES" | jq -r --argjson maxage "$STALE_THRESHOLD_SECONDS" '
+            .[]
+            | select(.default != true and .name != "dev")
+            | select(
+                (try (.created_at | sub("\\.[0-9]+";"") | fromdateiso8601) catch null) as $c
+                | $c != null and ((now - $c) > $maxage)
+              )
+            | .id
+          ')
 
-          # Get the default/main branch name to protect it
-          DEFAULT_BRANCH=$(echo "$BRANCHES" | jq -r '.[] | select(.default == true) | .name' | head -1)
-          echo "Default branch: $DEFAULT_BRANCH"
-
-          # Delete ephemeral CI branches only — preserve the long-lived "dev"
-          # branch alongside the default (production) branch. The dev branch
-          # carries seeded org data and configured webhook secrets; deleting
-          # it forces a full re-bootstrap + re-seed for every CI cycle, which
-          # broke the dev environment after PR #243 merged (Phase 7 verify).
-          # Includes: ci-test-branch, ci-e2e-branch, pr-*, push-*, neon-testing.
-          # Excludes: default branch + "dev".
-          echo "$BRANCHES" | jq -r '.[] | select(.default != true and .name != "dev") | .id' | while read branch_id; do
-            if [ -n "$branch_id" ] && [ "$branch_id" != "null" ]; then
-              BRANCH_NAME=$(echo "$BRANCHES" | jq -r ".[] | select(.id == \"$branch_id\") | .name")
-              echo "Deleting branch: $BRANCH_NAME ($branch_id)"
-              neonctl branches delete "$branch_id" --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
-            fi
-          done
+          if [ -z "$STALE_IDS" ]; then
+            echo "No stale branches to delete — all ephemeral branches are recent (likely in-flight)."
+          else
+            echo "$STALE_IDS" | while read branch_id; do
+              if [ -n "$branch_id" ] && [ "$branch_id" != "null" ]; then
+                BRANCH_NAME=$(echo "$BRANCHES" | jq -r ".[] | select(.id == \"$branch_id\") | .name")
+                echo "Deleting stale branch: $BRANCH_NAME ($branch_id)"
+                neonctl branches delete "$branch_id" --project-id ${{ vars.NEON_PROJECT_ID }} --force || true
+              fi
+            done
+          fi
 
           echo "Cleanup complete"
 
