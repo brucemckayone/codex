@@ -148,8 +148,25 @@ export function createAuthInstance(options: AuthConfigOptions) {
           });
         }
 
-        // Send the actual verification email
-        await sendVerificationEmail(env, user, token);
+        // Send the verification email WITHOUT blocking the sign-up / sign-in
+        // HTTP response. BetterAuth awaits this callback, so awaiting the
+        // notifications-api → Resend round-trip here stalls the response:
+        // sendEmail retries 2× with exponential backoff, which can take ~20s
+        // when Resend is slow or rejecting. That exceeds Cloudflare's
+        // worker-subrequest budget, so the web app's fetch to /sign-up/email
+        // returns a 522 and the user sees "Registration failed" — even though
+        // the account was already created in the database.
+        //
+        // executionCtx.waitUntil keeps the worker alive until the send settles
+        // (up to 30s), so the email still goes out in the background while the
+        // response returns immediately. Same fire-and-forget pattern as the
+        // welcome email (see email.ts sendWelcomeEmail).
+        executionCtx.waitUntil(
+          sendVerificationEmail(env, user, token).catch(() => {
+            // Email delivery must never surface as an auth error. The
+            // notifications-api audit log captures delivery failures.
+          })
+        );
       },
       // Fires after BetterAuth flips emailVerified=true (api/routes/email-verification.mjs:265).
       // The dedupe query awaits — verification response is delayed by ~10-50ms.
@@ -184,7 +201,13 @@ export function createAuthInstance(options: AuthConfigOptions) {
       requireEmailVerification: true,
       autoSignIn: true,
       sendResetPassword: async ({ user, url }) => {
-        await sendPasswordResetEmail(env, user, url);
+        // Fire-and-forget for the same reason as sendVerificationEmail above:
+        // never block the auth HTTP response on external email delivery.
+        executionCtx.waitUntil(
+          sendPasswordResetEmail(env, user, url).catch(() => {
+            // Delivery failures are captured in the notifications audit log.
+          })
+        );
       },
     },
     user: {
