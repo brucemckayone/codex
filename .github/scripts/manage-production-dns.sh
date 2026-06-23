@@ -37,16 +37,19 @@ declare -A PRODUCTION_DOMAINS=(
   ["codex"]="codex-web-production"
   ["www"]="codex-web-production"
   ["creators"]="codex-web-production"
-  ["auth"]="auth-worker-production"
-  ["content-api"]="content-api-production"
-  ["ecom-api"]="ecom-api-production"
-  ["identity-api"]="identity-api-production"
-  ["media-api"]="media-api-production"
-  ["notifications-api"]="notifications-api-production"
-  ["organization-api"]="organization-api-production"
-  ["admin-api"]="admin-api-production"
   ["*"]="codex-web-production"
 )
+# NOTE: The 8 API workers (auth, content-api, ecom-api, identity-api, media-api,
+# notifications-api, organization-api, admin-api) are intentionally NOT listed
+# here. They use `custom_domain: true` in their wrangler.jsonc production blocks,
+# so Wrangler creates and manages their "Worker"-type DNS records on deploy.
+# Listing them here would create CNAME records that conflict with Wrangler AND
+# (the reason this was fixed) break worker-to-worker fetch: a bare zone Route +
+# manual CNAME does not route a same-zone Worker subrequest back to the target
+# Worker, so the call hangs until timeout. Custom Domains are addressable
+# worker-to-worker. See the deploy runbook before first deploy: any pre-existing
+# manual CNAME for these 8 hostnames MUST be deleted so Wrangler can attach the
+# custom domain.
 
 # Cloudflare API endpoint
 API_BASE="https://api.cloudflare.com/client/v4"
