@@ -93,71 +93,7 @@
       ],
       "routes": [
         {
-          "pattern": "ecom-api.revelations.studio/*",
-          "zone_name": "revelations.studio"
-        }
-      ]
-    },
-
-    // Staging environment
-    "staging": {
-      "name": "ecom-api-staging",
-      "vars": {
-        "ENVIRONMENT": "staging",
-        "WEB_APP_URL": "https://codex-staging.revelations.studio",
-        "AUTH_WORKER_URL": "https://auth-staging.revelations.studio"
-      },
-      "kv_namespaces": [
-        {
-          "binding": "RATE_LIMIT_KV",
-          "id": "cea7153364974737b16870df08f31083"
-        },
-        {
-          "binding": "AUTH_SESSION_KV",
-          "id": "82d04a4236df4aac8e9d87793344f0ed"
-        },
-        {
-          "binding": "CACHE_KV",
-          "id": "c5e85d4c8ecb46f9a3e5d4d96a14e9f1"
-        }
-      ],
-      "routes": [
-        {
-          "pattern": "ecom-api-staging.revelations.studio/*",
-          "custom_domain": true
-        }
-      ]
-    },
-
-    // Deployed dev environment (long-lived dev.revelations.studio)
-    // Stripe: dev should use Stripe test-mode keys + a dedicated webhook
-    // signing secret. Set via `wrangler secret put STRIPE_SECRET_KEY --env dev`
-    // and the four STRIPE_WEBHOOK_SECRET_* secrets.
-    "dev": {
-      "name": "ecom-api-dev",
-      "vars": {
-        "ENVIRONMENT": "dev",
-        "DB_METHOD": "PRODUCTION",
-        "WEB_APP_URL": "https://dev.revelations.studio",
-        "AUTH_WORKER_URL": "https://auth.dev.revelations.studio"
-      },
-      "kv_namespaces": [
-        {
-          "binding": "RATE_LIMIT_KV",
-          "id": "cea7153364974737b16870df08f31083"
-        },
-        {
-          "binding": "AUTH_SESSION_KV",
-          "id": "82d04a4236df4aac8e9d87793344f0ed"
-        },
-        {
-          "binding": "CACHE_KV",
-          "id": "8bde7d718cff4bfa99e29cd8e0aa7353"
-        }
-      ],
-      "routes": [
-        {
-          "pattern": "ecom-api.dev.revelations.studio",
+          "pattern": "ecom-api.revelations.studio",
           "custom_domain": true
         }
       ]

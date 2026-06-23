@@ -86,65 +86,7 @@
       ],
       "routes": [
         {
-          "pattern": "notifications-api.revelations.studio/*",
-          "zone_name": "revelations.studio"
-        }
-      ]
-    },
-
-    // Staging environment
-    "staging": {
-      "name": "notifications-api-staging",
-      "vars": {
-        "ENVIRONMENT": "staging",
-        "DB_METHOD": "PRODUCTION",
-        "WEB_APP_URL": "https://codex-staging.revelations.studio",
-        "API_URL": "https://api-staging.revelations.studio"
-      },
-      "kv_namespaces": [
-        {
-          "binding": "RATE_LIMIT_KV",
-          "id": "cea7153364974737b16870df08f31083"
-        },
-        {
-          "binding": "AUTH_SESSION_KV",
-          "id": "82d04a4236df4aac8e9d87793344f0ed"
-        }
-      ],
-      "routes": [
-        {
-          "pattern": "notifications-api-staging.revelations.studio/*",
-          "custom_domain": true
-        }
-      ]
-    },
-
-    // Deployed dev environment (long-lived dev.revelations.studio)
-    // RESEND_API_KEY and WORKER_SHARED_SECRET must be set via
-    // `wrangler secret put * --env dev` before first deploy.
-    "dev": {
-      "name": "notifications-api-dev",
-      "vars": {
-        "ENVIRONMENT": "dev",
-        "DB_METHOD": "PRODUCTION",
-        "WEB_APP_URL": "https://dev.revelations.studio",
-        "API_URL": "https://content-api.dev.revelations.studio",
-        "FROM_EMAIL": "noreply@dev.revelations.studio",
-        "FROM_NAME": "Codex (Dev)"
-      },
-      "kv_namespaces": [
-        {
-          "binding": "RATE_LIMIT_KV",
-          "id": "cea7153364974737b16870df08f31083"
-        },
-        {
-          "binding": "AUTH_SESSION_KV",
-          "id": "82d04a4236df4aac8e9d87793344f0ed"
-        }
-      ],
-      "routes": [
-        {
-          "pattern": "notifications-api.dev.revelations.studio",
+          "pattern": "notifications-api.revelations.studio",
           "custom_domain": true
         }
       ]
