@@ -129,6 +129,40 @@ export function serverApiUrl(
 }
 
 /**
+ * Build the `Cookie` header value for forwarding the session token to the
+ * AUTH worker's BetterAuth endpoints (`get-session`, `sign-out`).
+ *
+ * **The `__Secure-` prefix trap (production auth break, 2026-06-24):**
+ * BetterAuth prefixes EVERY cookie name with `__Secure-` when its `baseURL`
+ * is HTTPS — see `better-auth/dist/cookies/index.mjs`:
+ *   `secureCookiePrefix = baseURL.startsWith("https://") ? "__Secure-" : ""`
+ * The auth worker's `baseURL` is `WEB_APP_URL`, so in every deployed env
+ * (prod / staging / dev-remote) the session cookie is named
+ * `__Secure-better-auth.session_token`; only local dev (http://lvh.me) uses
+ * the unprefixed `better-auth.session_token`.
+ *
+ * BetterAuth's `get-session` reads ONLY `ctx.context.authCookies.sessionToken.name`
+ * (`api/routes/session.mjs`) with NO unprefixed fallback, so forwarding under
+ * the unprefixed name silently yields `null` → every login bounces back to
+ * /login. Forwarding BOTH names is robust across every env without env-sniffing
+ * at each call site. A `Cookie` request header carries no `__Secure-` browser
+ * restrictions (those only govern `Set-Cookie` storage), so this is safe.
+ *
+ * Non-auth workers (content/identity/...) validate via `@codex/security`,
+ * which reads `codex-session` (`COOKIES.SESSION_NAME`) — included first.
+ *
+ * IMPORTANT: the value is forwarded verbatim (no encoding) to avoid corrupting
+ * the `token.hmac` signature (URL-safe base64: A-Z a-z 0-9 - _ .).
+ */
+export function buildAuthForwardingCookie(sessionToken: string): string {
+  return (
+    `${COOKIES.SESSION_NAME}=${sessionToken}; ` +
+    `__Secure-better-auth.session_token=${sessionToken}; ` +
+    `better-auth.session_token=${sessionToken}`
+  );
+}
+
+/**
  * Create a server-side API client
  *
  * @param platform - The SvelteKit platform object with env bindings
@@ -172,16 +206,10 @@ export function createServerApi(
     };
 
     if (sessionCookie) {
-      // Send both our platform cookie name and BetterAuth's internal name.
-      // BetterAuth's get-session handler only looks for 'better-auth.session_token'
-      // regardless of cookie.name config, while other workers use COOKIES.SESSION_NAME.
-      //
-      // IMPORTANT: The cookie value from SvelteKit's cookies.get() is the raw value
-      // as stored by the browser. We pass it through without encoding to avoid
-      // corrupting JWT signatures (which use URL-safe base64: A-Z, a-z, 0-9, -, _).
-      // Calling encodeURIComponent() would corrupt tokens by encoding . - _ as %2E %2D %5F.
+      // Forward under every name the auth worker's BetterAuth might read.
+      // See buildAuthForwardingCookie for the `__Secure-` prefix rationale.
       (headers as Record<string, string>).Cookie =
-        `${COOKIES.SESSION_NAME}=${sessionCookie}; better-auth.session_token=${sessionCookie}`;
+        buildAuthForwardingCookie(sessionCookie);
     }
 
     // Abort fetch after 10 seconds to prevent indefinite hangs when a worker
@@ -302,9 +330,8 @@ export function createServerApi(
 
       const cookieToUse = customSessionCookie || sessionCookie;
       if (cookieToUse) {
-        // Pass cookie value through without encoding (see request() above for rationale)
         (headers as Record<string, string>).Cookie =
-          `${COOKIES.SESSION_NAME}=${cookieToUse}; better-auth.session_token=${cookieToUse}`;
+          buildAuthForwardingCookie(cookieToUse);
       }
 
       // AbortController timeout — matches request() to prevent indefinite hangs

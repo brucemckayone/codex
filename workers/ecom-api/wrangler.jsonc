@@ -74,7 +74,7 @@
       "vars": {
         "ENVIRONMENT": "production",
         "DB_METHOD": "PRODUCTION",
-        "WEB_APP_URL": "https://codex.revelations.studio",
+        "WEB_APP_URL": "https://revelations.studio",
         "AUTH_WORKER_URL": "https://auth.revelations.studio"
       },
       "kv_namespaces": [
