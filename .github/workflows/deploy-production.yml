@@ -101,6 +101,19 @@ jobs:
         if: steps.run-migrations.outcome == 'success'
         run: echo "✅ Migrations completed successfully"
 
+      # Seed global email templates (idempotent). Required for transactional
+      # email delivery: without these rows the notifications-api resolves to
+      # TemplateNotFoundError (404) and no email is ever sent (verification,
+      # password-reset, welcome, receipts, etc). The seed skips any template
+      # that already exists, so it is safe to run on every deploy and never
+      # overwrites org/creator-level customisations. See
+      # packages/database/scripts/seed-email-templates.ts.
+      - name: Seed global email templates
+        run: pnpm --filter @codex/database db:seed:templates
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DB_METHOD: ${{ vars.DB_METHOD }}
+
       # --- WORKER DEPLOYMENTS ---
 
       # 1. Media API
