@@ -1,6 +1,6 @@
-import { AUTH_COOKIES, COOKIES } from '@codex/constants';
+import { COOKIES } from '@codex/constants';
 import { logger } from '$lib/observability';
-import { serverApiUrl } from './api';
+import { buildAuthForwardingCookie, serverApiUrl } from './api';
 
 /**
  * Extract session token from Set-Cookie header on an auth worker response.
@@ -52,7 +52,7 @@ export async function invalidateAuthSession(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Cookie: `${COOKIES.SESSION_NAME}=${sessionCookie}; ${AUTH_COOKIES.BETTER_AUTH}=${sessionCookie}`,
+        Cookie: buildAuthForwardingCookie(sessionCookie),
       },
       body: '{}',
     });
