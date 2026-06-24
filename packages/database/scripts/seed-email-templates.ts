@@ -8,8 +8,13 @@ import { dbWs, schema } from '../src';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load environment variables from .env.dev
-config({ path: path.resolve(__dirname, '../../../.env.dev') });
+// Local-dev fallback only. In CI/production the deploy step sets DATABASE_URL
+// directly in the environment; dotenv does not override existing vars, but we
+// guard explicitly so the seed always uses the ambient DATABASE_URL and never
+// accidentally pulls a stale local .env.dev.
+if (!process.env.DATABASE_URL) {
+  config({ path: path.resolve(__dirname, '../../../.env.dev') });
+}
 
 const globalTemplates = [
   {
