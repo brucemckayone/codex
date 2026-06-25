@@ -70,7 +70,8 @@
         "ENVIRONMENT": "production",
         "DB_METHOD": "PRODUCTION",
         "WEB_APP_URL": "https://revelations.studio",
-        "API_URL": "https://api.revelations.studio",
+        // No API_URL: it was only a CORS trusted-origin entry for the dead host
+        // api.revelations.studio (no worker owns it), so it added nothing.
         "FROM_EMAIL": "noreply@revelations.studio",
         "FROM_NAME": "Codex"
       },

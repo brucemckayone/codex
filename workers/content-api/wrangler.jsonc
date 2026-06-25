@@ -100,9 +100,16 @@
         "ENVIRONMENT": "production",
         "DB_METHOD": "PRODUCTION",
         "WEB_APP_URL": "https://revelations.studio",
-        "API_URL": "https://api.revelations.studio",
+        // No API_URL override here: buildServiceUrl uses API_URL as the
+        // override key for the content/access services, and a stale
+        // api.revelations.studio (dead host) would beat the correct
+        // ENV_HOSTS default (content-api.revelations.studio).
         "MEDIA_API_URL": "https://media-api.revelations.studio",
-        "R2_PUBLIC_URL_BASE": "https://cdn.revelations.studio"
+        // Public R2 asset host (thumbnails, logos). MUST match the provisioned
+        // R2 custom domain in .github/config/r2-infrastructure.json (assets bucket
+        // → cdn-assets.revelations.studio). `cdn.revelations.studio` is unprovisioned,
+        // so every thumbnail/logo/public image 404'd.
+        "R2_PUBLIC_URL_BASE": "https://cdn-assets.revelations.studio"
       },
       "kv_namespaces": [
         {
