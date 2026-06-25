@@ -97,8 +97,13 @@
         "ENVIRONMENT": "production",
         "DB_METHOD": "PRODUCTION",
         "WEB_APP_URL": "https://revelations.studio",
-        "API_URL": "https://api.revelations.studio",
-        "R2_PUBLIC_URL_BASE": "https://cdn.revelations.studio"
+        // No API_URL override: api.revelations.studio is a dead host and the
+        // ENV_HOSTS defaults resolve content/access correctly without it.
+        // Public R2 asset host (org logos, branding). MUST match the provisioned
+        // R2 custom domain (assets bucket → cdn-assets.revelations.studio in
+        // .github/config/r2-infrastructure.json). `cdn.revelations.studio` is
+        // unprovisioned, so logos/branding images 404'd.
+        "R2_PUBLIC_URL_BASE": "https://cdn-assets.revelations.studio"
       },
       "kv_namespaces": [
         {

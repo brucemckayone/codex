@@ -126,7 +126,12 @@
         "ENVIRONMENT": "production",
         "DB_METHOD": "PRODUCTION",
         "WEB_APP_URL": "https://revelations.studio",
-        "API_URL": "https://api.revelations.studio"
+        // RunPod transcoding completion callbacks POST to `${API_URL}/api/transcoding/webhook`
+        // (service-registry.ts: webhookBaseUrl = env.API_URL). `api.revelations.studio` is
+        // owned by NO worker, so callbacks were black-holed and media never reached `ready`.
+        // media-api.revelations.studio has a custom_domain route + DNS (below) and owns the
+        // /api/transcoding/webhook handler.
+        "API_URL": "https://media-api.revelations.studio"
       },
       "kv_namespaces": [
         {
