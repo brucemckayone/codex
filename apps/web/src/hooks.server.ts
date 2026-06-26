@@ -15,6 +15,24 @@ import { nanoid } from 'nanoid';
 import { dev } from '$app/environment';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
+import { tryServeCdnAsset } from '$lib/server/cdn-proxy';
+
+/**
+ * Public CDN asset hook (WP-2 · Codex-fc5oh.2)
+ *
+ * The production `*.revelations.studio/*` worker route shadows the R2 custom
+ * domains cdn-assets / cdn-platform (worker routes win over R2 custom domains).
+ * This hook serves those public assets straight from the bound R2 bucket so
+ * thumbnails/logos/branding resolve instead of 500ing in SvelteKit.
+ *
+ * Runs FIRST in the sequence and short-circuits — a public asset must never
+ * trigger session validation or carry app security headers. See cdn-proxy.ts
+ * for why only the public buckets are handled here.
+ */
+const cdnAssetHook: Handle = async ({ event, resolve }) => {
+  const response = await tryServeCdnAsset(event);
+  return response ?? resolve(event);
+};
 
 /**
  * Session validation hook
@@ -138,7 +156,12 @@ const cdnRewriteHook: Handle = async ({ event, resolve }) => {
 /**
  * Combine hooks in sequence
  */
-export const handle = sequence(sessionHook, securityHook, cdnRewriteHook);
+export const handle = sequence(
+  cdnAssetHook,
+  sessionHook,
+  securityHook,
+  cdnRewriteHook
+);
 
 /**
  * Global error handler
