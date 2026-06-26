@@ -36,6 +36,14 @@ declare global {
         ASSETS?: any;
         /** Versioned cache KV namespace */
         CACHE_KV?: KVNamespace;
+        /**
+         * Public R2 buckets served by the CDN asset hook (WP-2). The production
+         * `*.revelations.studio/*` route shadows the cdn-assets / cdn-platform
+         * R2 custom domains, so the worker serves these public buckets itself.
+         * Only bound in environments where the shadowing wildcard exists.
+         */
+        ASSETS_BUCKET?: R2Bucket;
+        PLATFORM_BUCKET?: R2Bucket;
       };
       context: ExecutionContext;
       caches: CacheStorage;

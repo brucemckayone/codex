@@ -63,6 +63,22 @@
           "id": "499d67770dc2405ab80cba5629b16511"
         }
       ],
+      // Public R2 buckets served directly by the CDN asset hook (WP-2).
+      // The `*.revelations.studio/*` route below shadows the cdn-assets /
+      // cdn-platform R2 custom domains (worker routes win over R2 custom
+      // domains), so the worker serves these PUBLIC buckets itself. The gated
+      // media/resources buckets are intentionally NOT bound — they require
+      // presigned-URL access and must not be served via a raw binding.
+      "r2_buckets": [
+        {
+          "binding": "ASSETS_BUCKET",
+          "bucket_name": "codex-assets-production"
+        },
+        {
+          "binding": "PLATFORM_BUCKET",
+          "bucket_name": "codex-platform-production"
+        }
+      ],
       "routes": [
         // Specific routes first (for priority)
         {
