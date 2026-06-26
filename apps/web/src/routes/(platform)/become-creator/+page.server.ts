@@ -7,15 +7,18 @@
 
 import { redirect } from '@sveltejs/kit';
 
+import { buildCreatorsUrl } from '$lib/utils/subdomain';
 import type { PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async ({ locals }) => {
+export const load: PageServerLoad = async ({ locals, url }) => {
   if (!locals.user) {
     redirect(303, '/login?redirect=/become-creator');
   }
 
   if (locals.user.role !== 'customer') {
-    redirect(303, '/studio');
+    // Already a creator — their studio lives on the `creators` subdomain,
+    // not the platform apex (`/studio` here 404s).
+    redirect(303, buildCreatorsUrl(url, '/studio'));
   }
 
   return {
