@@ -1,0 +1,31 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d75232"/>
+      <stop offset="0.52" stop-color="#c24129"/>
+      <stop offset="1" stop-color="#942c1a"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="50%" cy="45.3%" r="58%">
+      <stop offset="0" stop-color="#ffddc9" stop-opacity="0.85"/>
+      <stop offset="0.55" stop-color="#ffd2a0" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="sun" cx="50%" cy="42%" r="62%">
+      <stop offset="0" stop-color="#fff7ec"/>
+      <stop offset="0.5" stop-color="#ffe6bf"/>
+      <stop offset="1" stop-color="#f6c879"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <circle cx="256" cy="232" r="210" fill="url(#halo)"/>
+
+  <g fill="#ffe9d2" opacity="0.95"><path d="M 256.0 62.0 L 244.9 134.6 L 267.1 134.6 Z"/><path d="M 326.0 110.8 L 298.2 143.5 L 311.5 151.2 Z"/><path d="M 403.2 147.0 L 334.8 173.7 L 345.9 192.9 Z"/><path d="M 396.0 232.0 L 353.7 224.3 L 353.7 239.7 Z"/><path d="M 403.2 317.0 L 345.9 271.1 L 334.8 290.3 Z"/><path d="M 108.8 317.0 L 177.2 290.3 L 166.1 271.1 Z"/><path d="M 116.0 232.0 L 158.3 239.7 L 158.3 224.3 Z"/><path d="M 108.8 147.0 L 166.1 192.9 L 177.2 173.7 Z"/><path d="M 186.0 110.8 L 200.5 151.2 L 213.8 143.5 Z"/></g>
+
+  <circle cx="256" cy="232" r="80" fill="url(#sun)"/>
+  <circle cx="256" cy="232" r="80" fill="none" stroke="#fff7ec" stroke-width="3" opacity="0.5"/>
+
+  <!-- horizon: a single calm arc grounds the rising sun; a fainter, shorter
+       line beneath reads as its reflection / the dawn light on the land -->
+  <path d="M98 366 Q256 334 414 366" fill="none" stroke="#fff1e2" stroke-width="17" stroke-linecap="round" opacity="0.95"/>
+  <path d="M168 404 Q256 388 344 404" fill="none" stroke="#ffe2cb" stroke-width="10" stroke-linecap="round" opacity="0.45"/>
+</svg>

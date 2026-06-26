@@ -43,7 +43,25 @@ const libraryQuerySchema = z
  * ```
  */
 export const getUserLibrary = query(libraryQuerySchema, async (params) => {
-  const { platform, cookies } = getRequestEvent();
+  const { platform, cookies, locals } = getRequestEvent();
+
+  // Short-circuit for unauthenticated requests. The client refreshes the
+  // library on version-bump / visibility events (see loadLibraryFromServer),
+  // which can fire for a guest mid-redirect to /login. Without this guard the
+  // access call 401s and surfaces as a "Failed to refresh library" error.
+  // A guest simply has an empty library.
+  if (!locals.user) {
+    return {
+      items: [],
+      pagination: {
+        page: 1,
+        limit: params?.limit ?? 20,
+        total: 0,
+        totalPages: 0,
+      },
+    };
+  }
+
   const api = createServerApi(platform, cookies);
 
   const searchParams = new URLSearchParams();

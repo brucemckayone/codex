@@ -21,6 +21,9 @@ node_modules
 
 # Image assets (if not part of the source)
 *.png
+# ...but PWA/favicon icons in the web app's static dir ARE source assets and
+# must be committed (SvelteKit serves them; otherwise /icon-192.png etc. 404).
+!apps/web/static/*.png
 
 # Act (GitHub Actions local testing)
 .secrets
