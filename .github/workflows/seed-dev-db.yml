@@ -99,7 +99,14 @@ jobs:
         run: pnpm --filter @codex/database db:seed
         env:
           DATABASE_URL: ${{ steps.neon.outputs.DATABASE_URL }}
-          DB_METHOD: PRODUCTION
+          # NEON_BRANCH (not PRODUCTION) for the seed: the seed wraps all
+          # inserts in a single dbWs.transaction(), and PRODUCTION sets
+          # poolQueryViaFetch=true which routes Pool.query() over HTTP and
+          # breaks WS transactions (content inserts roll back → seed validator
+          # fails with 0 published rows). NEON_BRANCH keeps poolQueryViaFetch
+          # =false + secure WS. The connection_uri above is already pooled=false
+          # (direct), so this matches the proven-good config in testing.yml.
+          DB_METHOD: NEON_BRANCH
           # The seed script also touches dev CDN / KV for cache-flushing.
           # In CI we don't have those bindings, so those operations
           # will be no-ops or warn — the DB seeding still completes.
