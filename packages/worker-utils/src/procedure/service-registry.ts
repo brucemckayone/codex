@@ -58,6 +58,44 @@ export interface ServiceRegistryResult {
   cleanup: () => Promise<void>;
 }
 
+/** The concrete Stripe client type, derived from the factory return. */
+type StripeClient = ReturnType<typeof createStripeClient>;
+
+/**
+ * Wrap a Stripe-client resolver in a Proxy that defers resolution until the
+ * first property access.
+ *
+ * WP-12 (Codex-fc5oh.12): the Stripe-backed service getters built their
+ * constructor argument by calling the resolver EAGERLY. The resolver throws
+ * 'STRIPE_SECRET_KEY not configured' when the key is falsy, so merely accessing
+ * `ctx.services.connect` (or subscription/tier/purchase) threw at construction —
+ * BEFORE the handler ran. That turned read-only zero-state endpoints (a brand
+ * new creator's empty Connect status returns DISCONNECTED without ever calling
+ * Stripe; earnings-summary and payouts are pure DB reads) into 500
+ * INTERNAL_ERROR responses whenever the key was missing or late-bound.
+ *
+ * The returned Proxy holds the constructor arg without resolving it. `resolve()`
+ * (and its missing-key throw) runs lazily on the FIRST property access — i.e.
+ * the first real Stripe API call. Services store the proxy as `this.stripe` and
+ * only touch it inside async methods, so read paths never trip the guard, while
+ * a genuine misconfiguration still surfaces (as the same thrown error) the
+ * moment a Stripe call is actually attempted.
+ */
+export function createLazyStripeProxy(
+  resolve: () => StripeClient
+): StripeClient {
+  return new Proxy({} as StripeClient, {
+    get(_target, prop) {
+      const client = resolve();
+      const value = Reflect.get(client as object, prop);
+      // Bind methods to the real client so `this` resolves correctly; Stripe
+      // resource namespaces (accounts, checkout, …) are objects and pass
+      // through untouched.
+      return typeof value === 'function' ? value.bind(client) : value;
+    },
+  });
+}
+
 /**
  * Creates lazy-loaded service registry
  *
@@ -148,6 +186,19 @@ export function createServiceRegistry(
       _stripeClient = createStripeClient(stripeKey);
     }
     return _stripeClient;
+  }
+
+  // WP-12 (Codex-fc5oh.12): inject a lazy Stripe proxy instead of resolving the
+  // client eagerly, so read-only zero-state endpoints never trip the missing-key
+  // guard. See createLazyStripeProxy() above for the full rationale. Memoised so
+  // all Stripe-backed services share one proxy (and one underlying client).
+  let _lazyStripeClient: StripeClient | undefined;
+
+  function getLazyStripeClient(): StripeClient {
+    if (!_lazyStripeClient) {
+      _lazyStripeClient = createLazyStripeProxy(getStripeClient);
+    }
+    return _lazyStripeClient;
   }
 
   const registry: ServiceRegistry = {
@@ -458,7 +509,7 @@ export function createServiceRegistry(
             mailer: purchaseMailer,
             webAppUrl: env.WEB_APP_URL,
           },
-          getStripeClient()
+          getLazyStripeClient()
         );
       }
       return _purchase;
@@ -634,7 +685,7 @@ export function createServiceRegistry(
             // receive different splits.
             feeConfig: registry.feeConfig,
           },
-          getStripeClient()
+          getLazyStripeClient()
         );
       }
       return _subscription;
@@ -694,7 +745,7 @@ export function createServiceRegistry(
             environment: getEnvironment(),
             propagator,
           },
-          getStripeClient()
+          getLazyStripeClient()
         );
       }
       return _tier;
@@ -707,7 +758,7 @@ export function createServiceRegistry(
             db: getSharedDb(),
             environment: getEnvironment(),
           },
-          getStripeClient()
+          getLazyStripeClient()
         );
 
         // Wire VersionedCache for `getStatus(orgId)` cache-aside. Mirrors the
