@@ -13,7 +13,6 @@
 import { redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
-import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({
@@ -21,17 +20,18 @@ export const load: PageServerLoad = async ({
   url,
   platform,
   cookies,
-  setHeaders,
 }) => {
   // Auth guard (layout.server.ts already handles this, but belt-and-suspenders)
   if (!locals.user) {
     redirect(302, `/login?redirect=${encodeURIComponent(url.pathname)}`);
   }
 
-  // CACHE_HEADERS.PRIVATE is safe to set early — no cache-poisoning risk
-  // (private, no-cache is exactly what we want for error responses too).
-  setHeaders(CACHE_HEADERS.PRIVATE);
-
+  // NOTE: do NOT call setHeaders('Cache-Control') here. The studio
+  // +layout.server.ts already sets CACHE_HEADERS.PRIVATE for the whole studio
+  // subtree. SvelteKit forbids setting the same response header twice across
+  // the load chain — on an invalidated __data.json re-run (where both the
+  // layout node and this page node re-run), a duplicate setHeaders throws
+  // '"Cache-Control" header is already set', surfacing as a studio INTERNAL_ERROR.
   const api = createServerApi(platform, cookies);
 
   // ── Connect-return handling ────────────────────────────────────────────────
