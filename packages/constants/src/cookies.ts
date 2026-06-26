@@ -2,6 +2,9 @@ export const COOKIES = {
   SESSION_NAME: 'codex-session',
   SESSION_MAX_AGE: 60 * 60 * 24 * 7, // 7 days
   TOKEN_MAX_AGE: 300, // 5 minutes
+  // Short-lived hint set at registration so /verify-email can pre-fill the
+  // "resend verification" form without putting the email in the URL.
+  PENDING_VERIFICATION_EMAIL: 'codex-pending-verification-email',
 } as const;
 
 export interface CookieConfig {

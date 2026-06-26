@@ -109,6 +109,66 @@ export const resetPasswordForm = form(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Resend Email Verification Form
+// ─────────────────────────────────────────────────────────────────────────────
+
+const resendVerificationFormSchema = z.object({
+  email: z.string().email('Please enter a valid email address'),
+});
+
+/**
+ * Resend the email-verification link.
+ *
+ * Post-registration, the user lands on /verify-email with no way to request a
+ * fresh link if the first never arrived (the old "try again" link pointed at
+ * /register, which 409s for an existing-but-unverified account). This wires the
+ * page to BetterAuth's `send-verification-email` endpoint.
+ *
+ * Always returns a neutral success message — never reveals whether the address
+ * exists or is already verified — to avoid account enumeration.
+ */
+export const resendVerificationEmailForm = form(
+  resendVerificationFormSchema,
+  async ({ email }) => {
+    const { platform, request } = getRequestEvent();
+    const authUrl = serverApiUrl(platform, 'auth');
+
+    // Forward the browser Origin so BetterAuth's trustedOrigins check accepts
+    // the server-side fetch (same reason as register/login sign-in).
+    const incomingOrigin = request.headers.get('origin');
+    const incomingHost = request.headers.get('host');
+    const forwardedOrigin =
+      incomingOrigin ??
+      (incomingHost ? `http://${incomingHost}` : 'http://lvh.me:5173');
+
+    const response = await fetch(
+      `${authUrl}/api/auth/send-verification-email`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: forwardedOrigin,
+        },
+        body: JSON.stringify({ email }),
+      }
+    );
+
+    if (!response.ok) {
+      // Log server-side for monitoring; never surface details (PII / enumeration).
+      logger.warn('Resend verification email failed', {
+        status: response.status,
+      });
+    }
+
+    return {
+      success: true as const,
+      message:
+        'If your account still needs verification, a new link is on its way. Check your inbox and spam folder.',
+    };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Session Query
 // ─────────────────────────────────────────────────────────────────────────────
 
