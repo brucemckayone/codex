@@ -36,4 +36,9 @@ describe('remote/auth.remote', () => {
     const { getSession } = await import('./auth.remote');
     expect(getSession).toBeDefined();
   });
+
+  it('exports resendVerificationEmailForm', async () => {
+    const { resendVerificationEmailForm } = await import('./auth.remote');
+    expect(resendVerificationEmailForm).toBeDefined();
+  });
 });
