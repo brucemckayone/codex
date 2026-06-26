@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
 import { ApiError } from '$lib/server/errors';
+import { buildCreatorsUrl } from '$lib/utils/subdomain';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Schemas for forms
@@ -204,7 +205,7 @@ const becomeCreatorFormSchema = z.object({
 export const becomeCreatorForm = form(
   becomeCreatorFormSchema,
   async ({ username, bio, website, twitter, youtube, instagram }, issue) => {
-    const { platform, cookies } = getRequestEvent();
+    const { platform, cookies, url } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
     const emptyToUndef = (v: string | undefined) => (v === '' ? undefined : v);
@@ -221,7 +222,12 @@ export const becomeCreatorForm = form(
         },
       });
 
-      redirect(303, '/studio');
+      // New creators have no org yet — send them to their personal creator
+      // studio on the `creators` subdomain. `/studio` on the platform apex
+      // has no route and 404s; studio surfaces only exist on the `creators`
+      // and `<org-slug>` subdomains. Org creation is a separate, optional
+      // step via the studio switcher's "Add Organisation" flow.
+      redirect(303, buildCreatorsUrl(url, '/studio'));
     } catch (error) {
       if (isRedirect(error)) throw error;
 

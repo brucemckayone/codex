@@ -831,4 +831,61 @@ describe('MediaItemService', () => {
       }
     });
   });
+
+  describe('recordTranscodingTriggerFailure', () => {
+    const makeMedia = () =>
+      service.create(
+        {
+          title: 'Trigger failure media',
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: getOriginalKey(creatorId, crypto.randomUUID(), 'tf.mp4'),
+          fileSizeBytes: 1024,
+        },
+        creatorId
+      );
+
+    it('persists the error WITHOUT changing status so re-trigger still works', async () => {
+      const created = await makeMedia();
+
+      await service.recordTranscodingTriggerFailure(
+        created.id,
+        creatorId,
+        'media-api returned 503'
+      );
+
+      const after = await service.get(created.id, creatorId);
+      expect(after?.transcodingError).toBe('media-api returned 503');
+      // Status stays 'uploaded'/'uploading' (not flipped to 'failed') so the
+      // idempotent /upload-complete re-POST remains a valid recovery path.
+      expect(after?.status).toBe('uploading');
+    });
+
+    it('truncates the error message to the 2KB column limit', async () => {
+      const created = await makeMedia();
+
+      await service.recordTranscodingTriggerFailure(
+        created.id,
+        creatorId,
+        'x'.repeat(5000)
+      );
+
+      const after = await service.get(created.id, creatorId);
+      expect(after?.transcodingError?.length).toBe(2000);
+    });
+
+    it('is creator-scoped — never touches another creator’s media', async () => {
+      const created = await makeMedia();
+
+      // Wrong creator → matches no rows → silent no-op (no throw, no write).
+      await service.recordTranscodingTriggerFailure(
+        created.id,
+        otherCreatorId,
+        'should not be written'
+      );
+
+      const after = await service.get(created.id, creatorId);
+      expect(after?.transcodingError).toBeNull();
+    });
+  });
 });

@@ -10,10 +10,15 @@ import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async ({ url, platform, cookies }) => {
   const token = url.searchParams.get('token');
 
+  // Pre-fill the "resend verification" form (set at registration). Lets a user
+  // request a fresh link without re-typing their address. Absent → empty field.
+  const pendingEmail = cookies.get(COOKIES.PENDING_VERIFICATION_EMAIL) ?? null;
+
   if (!token) {
     // Post-registration landing — user needs to check their inbox
     return {
       status: 'pending' as const,
+      email: pendingEmail,
     };
   }
 
@@ -33,6 +38,7 @@ export const load: PageServerLoad = async ({ url, platform, cookies }) => {
       return {
         status: 'error' as const,
         error: 'Invalid or expired verification link.',
+        email: pendingEmail,
       };
     }
 
@@ -62,6 +68,7 @@ export const load: PageServerLoad = async ({ url, platform, cookies }) => {
     return {
       status: 'error' as const,
       error: 'An unexpected error occurred.',
+      email: pendingEmail,
     };
   }
 };

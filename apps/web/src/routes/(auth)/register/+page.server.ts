@@ -110,7 +110,23 @@ export const actions: Actions = {
         cookies.set(COOKIES.SESSION_NAME, sessionToken, cookieConfig);
       }
 
-      // 4. Redirect to verify email page (or library if no verification)
+      // 4. Stash the email (httpOnly, short-lived) so /verify-email can
+      // pre-fill the "resend verification" form without leaking the address
+      // into the URL/referer. Same cookie config as the session (correct
+      // cross-subdomain domain + secure flag), just a shorter lifetime.
+      cookies.set(
+        COOKIES.PENDING_VERIFICATION_EMAIL,
+        result.data.email,
+        getCookieConfig(
+          platform?.env,
+          request.headers.get('host') ?? undefined,
+          {
+            maxAge: 60 * 30,
+          }
+        )
+      );
+
+      // 5. Redirect to verify email page (or library if no verification)
       throw redirect(303, '/verify-email');
     } catch (err) {
       if (isRedirect(err)) throw err;
