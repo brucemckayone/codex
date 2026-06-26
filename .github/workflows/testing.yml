@@ -896,7 +896,14 @@ jobs:
       # any checkout test would fail with 422.
       - name: Seed test database
         env:
-          DATABASE_URL: ${{ steps.create-branch.outputs.db_url_with_pooler }}
+          # Use db_url (DIRECT), not db_url_with_pooler. The seed wraps all
+          # inserts in a single long-lived dbWs.transaction() (seed-data.ts
+          # step [3/5]); over the PgBouncer pooler that session connection is
+          # recycled mid-transaction, so the content inserts silently roll
+          # back — the validator then sees 0 published rows for every access
+          # mode and fails. Same reasoning as the "Apply migrations" step
+          # above (lines ~318-327).
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
           DB_METHOD: NEON_BRANCH
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
