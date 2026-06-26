@@ -26,10 +26,12 @@ import type {
 } from '@codex/content';
 import {
   createMediaItemSchema,
+  MediaItemService,
   MediaNotFoundError,
   mediaQuerySchema,
   updateMediaItemSchema,
 } from '@codex/content';
+import { createDbClient } from '@codex/database';
 import { workerFetch } from '@codex/security';
 import { ConflictError, InternalServiceError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
@@ -42,6 +44,35 @@ import {
 import { Hono } from 'hono';
 
 const app = new Hono<HonoEnv>();
+
+/**
+ * Persist a transcoding-dispatch failure so it's diagnosable + recoverable.
+ *
+ * Runs inside `waitUntil`, after the request's own db lifecycle has ended, so
+ * it builds a fresh stateless HTTP db client (same pattern as the cache-bump
+ * helpers in content.ts). Never throws — failing to record a failure must not
+ * crash the background task; it's logged instead.
+ */
+async function recordTranscodingTriggerFailure(
+  env: HonoEnv['Bindings'],
+  mediaId: string,
+  creatorId: string,
+  reason: string,
+  obs?: { error: (message: string, metadata?: Record<string, unknown>) => void }
+): Promise<void> {
+  try {
+    const media = new MediaItemService({
+      db: createDbClient(env),
+      environment: env.ENVIRONMENT,
+    });
+    await media.recordTranscodingTriggerFailure(mediaId, creatorId, reason);
+  } catch (error) {
+    obs?.error('Failed to persist transcoding-trigger failure', {
+      mediaId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 
 /**
  * POST /api/media
@@ -282,13 +313,29 @@ app.post(
               statusCode: response.status,
               error: errorText,
             });
+            await recordTranscodingTriggerFailure(
+              ctx.env,
+              mediaId,
+              creatorId,
+              `Transcoding dispatch returned ${response.status}: ${errorText}`,
+              ctx.obs
+            );
           }
         })
-        .catch((error) => {
+        .catch(async (error) => {
+          const message =
+            error instanceof Error ? error.message : String(error);
           ctx.obs?.error('Transcoding trigger failed', {
             mediaId,
-            error: error instanceof Error ? error.message : String(error),
+            error: message,
           });
+          await recordTranscodingTriggerFailure(
+            ctx.env,
+            mediaId,
+            creatorId,
+            `Transcoding dispatch failed: ${message}`,
+            ctx.obs
+          );
         });
 
       ctx.executionCtx.waitUntil(triggerPromise);

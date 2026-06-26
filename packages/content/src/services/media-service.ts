@@ -582,4 +582,38 @@ export class MediaItemService extends BaseService {
       creatorId
     );
   }
+
+  /**
+   * Record that triggering transcoding failed.
+   *
+   * The upload-complete handler dispatches the media-api transcode call in the
+   * background (waitUntil) and returns immediately, so a dispatch failure
+   * (media-api unreachable, HMAC rejected, RunPod endpoint dead) would
+   * otherwise be invisible — the media row sits in 'uploaded' forever with no
+   * signal. Persisting the error makes it diagnosable: the transcoding-status
+   * endpoint surfaces `transcodingError`, and the row stays in 'uploaded' so
+   * re-POSTing /upload-complete re-dispatches (the existing idempotent recovery
+   * path). On a successful (re)trigger the transcoding service flips status →
+   * 'transcoding' and clears this field.
+   *
+   * Deliberately a single scoped UPDATE (no transaction) so it can run on a
+   * stateless HTTP db client created inside `waitUntil`, after the request's
+   * own db lifecycle has ended.
+   */
+  async recordTranscodingTriggerFailure(
+    id: string,
+    creatorId: string,
+    error: string
+  ): Promise<void> {
+    await this.db
+      .update(mediaItems)
+      .set({
+        // Cap at the column limit (2KB) to prevent oversized error payloads.
+        transcodingError: error.slice(0, 2000),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(eq(mediaItems.id, id), scopedNotDeleted(mediaItems, creatorId))
+      );
+  }
 }
