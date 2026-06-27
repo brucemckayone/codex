@@ -17,11 +17,8 @@ Fixtures are checked in at tests/fixtures/ — see tests/fixtures/README.md.
 
 from __future__ import annotations
 
-import os
 import shutil
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -245,8 +242,6 @@ class TestPermanentFailures:
 
         # Override create_mezzanine to produce an empty file — simulates
         # the "ffmpeg exited 0 but something went wrong" scenario.
-        original_create = handler_module.create_mezzanine
-
         def broken_create_mezzanine(
             input_path: str, output_path: str, use_gpu: bool
         ) -> None:
