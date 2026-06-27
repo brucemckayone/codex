@@ -111,6 +111,14 @@ def mock_upload_directory():
 
 
 @pytest.fixture
+def mock_upload_directory_tracked():
+    # The handler uploads HLS output via upload_directory_tracked (returns the
+    # list of (client, bucket, key) tuples used for failure cleanup).
+    with patch("handler.main.upload_directory_tracked", return_value=[]) as mock:
+        yield mock
+
+
+@pytest.fixture
 def mock_download_file():
     with patch("handler.main.download_file") as mock:
         yield mock
@@ -140,10 +148,12 @@ def mock_check_gpu():
 
 @pytest.fixture
 def mock_storage_env():
-    """Set storage environment variables required by handler (B2, R2, ASSETS)."""
+    """Set environment variables required by handler (B2, R2, ASSETS, webhook)."""
     with patch.dict(
         os.environ,
         {
+            # Webhook HMAC signing secret (read from env, not job payload)
+            "WEBHOOK_SECRET": "secret-123",
             # B2 (Backblaze) for mezzanine archival
             "B2_ENDPOINT": "https://b2.example.com",
             "B2_ACCESS_KEY_ID": "test-key",
@@ -168,7 +178,7 @@ def basic_job_input():
         "mediaId": "test-media-123",
         "creatorId": "user-123",
         "type": "video",
-        "inputKey": "originals/test/video.mp4",
+        "inputKey": "user-123/originals/test-media-123/video.mp4",
         "webhookUrl": "https://api.example.com/webhook",
         "webhookSecret": "secret-123",
     }
@@ -178,7 +188,7 @@ def test_handler_video_flow_cpu(
     mock_s3_client,
     mock_download_file,
     mock_upload_file,
-    mock_upload_directory,
+    mock_upload_directory_tracked,
     mock_subprocess,
     mock_requests,
     mock_check_gpu,
@@ -234,10 +244,11 @@ def test_handler_video_flow_cpu(
         # 2. Transcode Mezzanine (uploaded to B2)
         # 3. Transcode HLS (uploaded to R2)
         # 4. Upload HLS directory
-        mock_upload_directory.assert_called()
+        mock_upload_directory_tracked.assert_called()
 
-        # 5. Webhook sent
-        mock_requests.assert_called_once()
+        # 5. Webhook sent — progress webhooks fire during the run, so the final
+        # POST is the completion webhook.
+        assert mock_requests.called
         call_args = mock_requests.call_args
         assert call_args[0][0] == basic_job_input["webhookUrl"]
 
@@ -259,7 +270,7 @@ def test_handler_audio_flow(
 ):
     """Test full audio transcoding flow."""
     basic_job_input["type"] = "audio"
-    basic_job_input["inputKey"] = "originals/test/audio.mp3"
+    basic_job_input["inputKey"] = "user-123/originals/test-media-123/audio.mp3"
 
     # Mock probe response (audio only)
     probe_data = json.dumps(
@@ -313,8 +324,9 @@ def test_handler_failure_reporting(
     assert result["status"] == "error"
     assert "S3 Download Error" in result["error"]
 
-    # Verify error webhook sent
-    mock_requests.assert_called_once()
+    # Verify error webhook sent. A progress webhook fires before the download,
+    # so the final POST is the failure report.
+    assert mock_requests.called
     payload = json.loads(mock_requests.call_args[1]["data"])
     assert payload["status"] == "failed"
     assert payload["error"] == "S3 Download Error"
@@ -331,8 +343,14 @@ def test_handler_timeout_protection(
     """Test that handler catches subprocess timeouts and reports failure."""
     import subprocess
 
-    # Mock probe success first
-    probe_data = json.dumps({"format": {"duration": "100.0"}})
+    # Mock probe success first. Must include a video stream so the handler's
+    # stream validation passes and we reach the (timing-out) transcode step.
+    probe_data = json.dumps(
+        {
+            "format": {"duration": "100.0"},
+            "streams": [{"codec_type": "video", "width": 1920, "height": 1080}],
+        }
+    )
 
     def side_effect(cmd, **kwargs):
         if "ffprobe" in cmd:
