@@ -10,8 +10,9 @@
   @prop {string | null} [logoUrl] - Current logo URL for preview
   @prop {boolean} [loading] - Whether an upload/delete is in progress
   @prop {string} orgId - Organization ID (sent as hidden field)
-  @prop {object} uploadFormAttrs - Spread attrs from uploadLogoForm
-  @prop {object} deleteFormAttrs - Spread attrs from deleteLogoForm
+  @prop {uploadLogoForm} uploadLogoForm - The uploadLogoForm remote form object (spread onto <form>)
+  @prop {function} ondelete - Called when the user clicks delete
+  @prop {function} [onupload] - Called with the new logo URL after a successful upload
 -->
 <script lang="ts">
   import { UploadIcon } from '$lib/components/ui/Icon';
@@ -19,25 +20,49 @@
   import { useDropZone } from '$lib/utils/use-drop-zone.svelte';
   import * as m from '$paraglide/messages';
 
+  // The remote form() object — spreading it onto a <form> provides the
+  // `action`/`method`/enhanced-`onsubmit` that actually sends the request.
+  type UploadLogoForm = typeof import('$lib/remote/branding.remote').uploadLogoForm;
+
   interface Props {
     logoUrl?: string | null;
-    loading?: boolean;
     orgId: string;
-    uploadFormAttrs: Record<string, unknown>;
-    onDelete: () => void;
+    uploadLogoForm: UploadLogoForm;
+    ondelete: () => void;
+    onupload?: (url: string | null) => void;
   }
 
   const {
     logoUrl = null,
-    loading = false,
     orgId,
-    uploadFormAttrs,
-    onDelete,
+    uploadLogoForm,
+    ondelete,
+    onupload,
   }: Props = $props();
 
   let validationError = $state<string | null>(null);
   let fileInput: HTMLInputElement | undefined = $state();
   let uploadFormEl: HTMLFormElement | undefined = $state();
+
+  // The form is uploading while there are pending submissions.
+  const loading = $derived(uploadLogoForm.pending > 0);
+
+  // Surface a server-side error returned by the upload, if any.
+  const uploadError = $derived(
+    uploadLogoForm.result && !uploadLogoForm.result.success
+      ? uploadLogoForm.result.error
+      : null
+  );
+
+  // On successful upload, notify the parent with the new URL and reset the
+  // file input so the same file can be re-selected.
+  $effect(() => {
+    if (uploadLogoForm.result?.success && uploadLogoForm.pending === 0) {
+      onupload?.(uploadLogoForm.result.data?.logoUrl ?? null);
+      validationError = null;
+      if (fileInput) fileInput.value = '';
+    }
+  });
 
   const dropZone = useDropZone({
     onDrop: (files) => {
@@ -124,7 +149,7 @@
         type="button"
         variant="destructive"
         size="sm"
-        onclick={onDelete}
+        onclick={ondelete}
         disabled={loading}
       >
         {m.branding_logo_delete()}
@@ -162,15 +187,14 @@
   <!-- Hidden upload form (native FormData for File serialization) -->
   <form
     bind:this={uploadFormEl}
-    {...uploadFormAttrs}
+    {...uploadLogoForm}
     enctype="multipart/form-data"
     class="hidden-form"
   >
     <input type="hidden" name="orgId" value={orgId} />
     <input
       bind:this={fileInput}
-      type="file"
-      name="logo"
+      {...uploadLogoForm.fields.logo.as('file')}
       accept={ALLOWED_TYPES.join(',')}
       onchange={handleFileSelect}
       tabindex="-1"
@@ -183,9 +207,9 @@
     <p class="status-text">{m.common_loading()}</p>
   {/if}
 
-  <!-- Validation error -->
-  {#if validationError}
-    <p class="error-text" role="alert">{validationError}</p>
+  <!-- Validation / upload error -->
+  {#if validationError || uploadError}
+    <p class="error-text" role="alert">{validationError ?? uploadError}</p>
   {/if}
 </div>
 
