@@ -104,6 +104,7 @@ function buildService(stub: StubDb) {
 
   const signer = {
     generateSignedUrl: vi.fn(async () => 'https://signed.example/stub'),
+    getObjectText: vi.fn(async () => null),
   };
 
   const verifyPurchase = vi.fn(async () => false);
@@ -116,6 +117,9 @@ function buildService(stub: StubDb) {
     environment: 'test',
     r2: signer,
     purchaseService,
+    // WP-14: stream path mints a master-proxy URL signed with the HLS secret.
+    contentApiBaseUrl: 'https://api.revelations.studio',
+    hlsTokenSecret: 'test-worker-shared-secret',
   });
 
   // BaseService instantiates its own ObservabilityClient in the constructor;
@@ -151,6 +155,7 @@ const followersContentRow = {
   minimumTierId: null,
   mediaItem: {
     id: 'media_123',
+    creatorId: 'creator_abc',
     status: 'ready',
     mediaType: 'video',
     hlsMasterPlaylistKey: 'hls/abc/master.m3u8',
@@ -213,7 +218,7 @@ describe('ContentAccessService.getStreamingUrl — followers-only content (Codex
 
       const result = await service.getStreamingUrl(userId, streamingInput);
 
-      expect(result.streamingUrl).toBe('https://signed.example/stub');
+      expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
       expect(result.contentType).toBe('video');
       // The follower lookup should NEVER have run — the subscriber branch
       // wins and short-circuits the chain.
@@ -235,7 +240,7 @@ describe('ContentAccessService.getStreamingUrl — followers-only content (Codex
       await expect(
         service.getStreamingUrl(userId, streamingInput)
       ).resolves.toMatchObject({
-        streamingUrl: 'https://signed.example/stub',
+        streamingUrl: expect.stringContaining('/hls/master.m3u8?token='),
       });
     });
 
@@ -254,7 +259,7 @@ describe('ContentAccessService.getStreamingUrl — followers-only content (Codex
       await expect(
         service.getStreamingUrl(userId, streamingInput)
       ).resolves.toMatchObject({
-        streamingUrl: 'https://signed.example/stub',
+        streamingUrl: expect.stringContaining('/hls/master.m3u8?token='),
       });
 
       // Subscription check runs first — proves the ordering is
@@ -275,7 +280,7 @@ describe('ContentAccessService.getStreamingUrl — followers-only content (Codex
       await expect(
         service.getStreamingUrl(userId, streamingInput)
       ).resolves.toMatchObject({
-        streamingUrl: 'https://signed.example/stub',
+        streamingUrl: expect.stringContaining('/hls/master.m3u8?token='),
       });
     });
 
@@ -294,7 +299,7 @@ describe('ContentAccessService.getStreamingUrl — followers-only content (Codex
       await expect(
         service.getStreamingUrl(userId, streamingInput)
       ).resolves.toMatchObject({
-        streamingUrl: 'https://signed.example/stub',
+        streamingUrl: expect.stringContaining('/hls/master.m3u8?token='),
       });
     });
   });
@@ -453,7 +458,7 @@ describe('ContentAccessService.getStreamingUrl — followers-only content (Codex
       await expect(
         service.getStreamingUrl(userId, streamingInput)
       ).resolves.toMatchObject({
-        streamingUrl: 'https://signed.example/stub',
+        streamingUrl: expect.stringContaining('/hls/master.m3u8?token='),
       });
     });
 

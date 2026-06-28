@@ -117,6 +117,17 @@ export class R2Service {
     return this.withRetries(() => this.bucket.get(key));
   }
 
+  /**
+   * Retrieve an object's body decoded as UTF-8 text, or `null` when the object
+   * is absent. Used by the HLS playlist proxy to read `.m3u8` files for
+   * rewriting. Uses the R2 binding directly (no signing config needed).
+   */
+  async getObjectText(key: string): Promise<string | null> {
+    const object = await this.withRetries(() => this.bucket.get(key));
+    if (!object) return null;
+    return object.text();
+  }
+
   async delete(key: string) {
     return this.withRetries(() => this.bucket.delete(key));
   }

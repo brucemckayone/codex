@@ -3,6 +3,8 @@ import { ZodError } from 'zod';
 import {
   getPlaybackProgressSchema,
   getStreamingUrlSchema,
+  hlsProxyQuerySchema,
+  hlsVariantParamsSchema,
   listUserLibrarySchema,
   savePlaybackProgressSchema,
 } from './access';
@@ -204,6 +206,44 @@ describe('Content Access Validation Schemas', () => {
       expect(() => listUserLibrarySchema.parse({ accessType: 'team' })).toThrow(
         ZodError
       );
+    });
+  });
+
+  describe('hlsProxyQuerySchema', () => {
+    it('accepts a non-empty token', () => {
+      expect(hlsProxyQuerySchema.parse({ token: 'abc.def' })).toEqual({
+        token: 'abc.def',
+      });
+    });
+
+    it('rejects an empty token', () => {
+      expect(() => hlsProxyQuerySchema.parse({ token: '' })).toThrow(ZodError);
+    });
+
+    it('rejects a missing token', () => {
+      expect(() => hlsProxyQuerySchema.parse({})).toThrow(ZodError);
+    });
+  });
+
+  describe('hlsVariantParamsSchema', () => {
+    it('accepts a UUID id with a valid variant', () => {
+      const result = hlsVariantParamsSchema.parse({
+        id: validUUID,
+        variant: '1080p',
+      });
+      expect(result).toEqual({ id: validUUID, variant: '1080p' });
+    });
+
+    it('rejects an unknown variant', () => {
+      expect(() =>
+        hlsVariantParamsSchema.parse({ id: validUUID, variant: '4320p' })
+      ).toThrow(ZodError);
+    });
+
+    it('rejects a non-UUID id', () => {
+      expect(() =>
+        hlsVariantParamsSchema.parse({ id: 'not-a-uuid', variant: '720p' })
+      ).toThrow(ZodError);
     });
   });
 });

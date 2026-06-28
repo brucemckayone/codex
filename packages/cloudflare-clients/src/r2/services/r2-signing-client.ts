@@ -82,6 +82,32 @@ export class R2SigningClient {
   }
 
   /**
+   * Retrieve an object's body decoded as UTF-8 text, or `null` when the object
+   * is absent. Standalone (no R2 binding) sibling of `R2Service.getObjectText`
+   * — used by the HLS playlist proxy in tests/scripts to read `.m3u8` files.
+   *
+   * @param r2Key - The object key to fetch
+   */
+  async getObjectText(r2Key: string): Promise<string | null> {
+    try {
+      const command = new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: r2Key,
+      });
+      const response = await this.s3Client.send(command);
+      const body = response.Body;
+      if (!body) return null;
+      return await body.transformToString();
+    } catch (err) {
+      const error = err as { name?: string };
+      if (error.name === AWS_ERRORS.NOT_FOUND) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Check if an object exists in the bucket.
    * Useful for testing that objects are accessible.
    *

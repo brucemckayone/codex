@@ -374,6 +374,12 @@ importers:
       '@codex/shared-types':
         specifier: workspace:*
         version: link:../shared-types
+      '@codex/transcoding':
+        specifier: workspace:*
+        version: link:../transcoding
+      '@codex/urls':
+        specifier: workspace:*
+        version: link:../urls
       '@codex/validation':
         specifier: workspace:*
         version: link:../validation
@@ -387,9 +393,6 @@ importers:
       '@codex/test-utils':
         specifier: workspace:*
         version: link:../test-utils
-      '@codex/transcoding':
-        specifier: workspace:*
-        version: link:../transcoding
       '@types/node':
         specifier: ^22.0.0
         version: 22.13.0
@@ -1098,7 +1101,7 @@ importers:
         version: 0.44.7(@cloudflare/workers-types@4.20251121.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@prisma/client@5.22.0(prisma@5.22.0))(@types/pg@8.15.6)(better-sqlite3@12.4.6)(kysely@0.28.8)(mysql2@3.15.3)(pg@8.16.3)(prisma@5.22.0)
       vite-plugin-dts:
         specifier: ^4.5.4
-        version: 4.5.4(@types/node@22.13.0)(rollup@4.53.3)(typescript@5.9.3)(vite@7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
+        version: 4.5.4(@types/node@22.13.0)(rollup@4.53.3)(typescript@5.9.3)(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))
       ws:
         specifier: ^8.18.3
         version: 8.18.3
@@ -1111,7 +1114,7 @@ importers:
         version: 8.18.1
       neon-testing:
         specifier: ^2.2.0
-        version: 2.2.0(vite@7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)
+        version: 2.2.0(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)
       stripe:
         specifier: ^19.2.0
         version: 19.3.1(@types/node@22.13.0)
@@ -8348,6 +8351,7 @@ packages:
   prebuild-install@7.1.3:
     resolution: {integrity: sha512-8Mf2cbV7x1cXPUILADGI3wuhfqWvtiLA1iclTDbFRZkgRQS0NqsPZphna9V+HyTEadheuPmjaJMsbzKQFOzLug==}
     engines: {node: '>=10'}
+    deprecated: No longer maintained. Please contact the author of the relevant native addon; alternatives are available.
     hasBin: true
 
   prelude-ls@1.2.1:
@@ -9265,14 +9269,17 @@ packages:
 
   uuid@10.0.0:
     resolution: {integrity: sha512-8XkAphELsDnEGrDxUOHB3RGvXz6TeuYSGEZBOjtTtPm2lwhGBjLgOzLHB63IUWfBpNucQjND6d3AOudO+H3RWQ==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
   uuid@8.3.2:
     resolution: {integrity: sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
   uuid@9.0.1:
     resolution: {integrity: sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
   v8-compile-cache@2.4.0:
@@ -16692,10 +16699,10 @@ snapshots:
 
   natural-compare@1.4.0: {}
 
-  neon-testing@2.2.0(vite@7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13):
+  neon-testing@2.2.0(vite@6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13):
     dependencies:
       '@neondatabase/api-client': 2.7.1
-      vite: 7.2.4(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
+      vite: 6.4.1(@types/node@22.13.0)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.1)
       vitest: 4.0.13(@opentelemetry/api@1.9.0)(@types/node@22.13.0)(@vitest/ui@4.0.13)(happy-dom@20.8.9)(jiti@2.6.1)(jsdom@27.4.0)(tsx@4.20.6)(yaml@2.8.1)
     transitivePeerDependencies:
       - debug

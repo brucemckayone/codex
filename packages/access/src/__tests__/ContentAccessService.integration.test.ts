@@ -95,6 +95,11 @@ describe('ContentAccessService Integration', () => {
       r2: r2Client,
       obs,
       purchaseService: mockPurchaseService as unknown as PurchaseService,
+      // WP-14: getStreamingUrl now returns a master-playlist PROXY URL on this
+      // origin (signed with hlsTokenSecret) rather than a direct presigned
+      // master URL.
+      contentApiBaseUrl: 'https://api.revelations.studio',
+      hlsTokenSecret: 'test-worker-shared-secret',
     });
 
     const userIds = await seedTestUsers(db, 2);
@@ -170,8 +175,8 @@ describe('ContentAccessService Integration', () => {
       });
 
       // Verify real presigned URL structure
-      expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
-      expect(result.streamingUrl).toContain('X-Amz-Signature');
+      expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
+      expect(result.streamingUrl).toContain('token=');
       expect(result.contentType).toBe('video');
       expect(result.expiresAt).toBeInstanceOf(Date);
 
@@ -235,7 +240,7 @@ describe('ContentAccessService Integration', () => {
         expirySeconds: 3600,
       });
 
-      expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+      expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
       expect(result.contentType).toBe('video');
 
       // Verify PurchaseService was called
@@ -375,7 +380,7 @@ describe('ContentAccessService Integration', () => {
         expirySeconds: 3600,
       });
 
-      expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+      expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
       expect(result.contentType).toBe('video');
 
       // Verify PurchaseService was called first (then fallback to org membership)
@@ -430,6 +435,92 @@ describe('ContentAccessService Integration', () => {
           expirySeconds: 3600,
         })
       ).rejects.toThrow('Content not found');
+    });
+  });
+
+  describe('getHlsMasterPlaylist / getHlsVariantPlaylist (WP-14)', () => {
+    // These exercise the read+rewrite path with a STUBBED R2 signer — they do
+    // not touch the DB (auth is token-verified at the route, not re-checked
+    // here) so we inject canned playlist bytes via getObjectText.
+    const CREATOR = 'creator_wp14';
+    const MEDIA = '33333333-3333-4333-8333-333333333333';
+    const CONTENT = '44444444-4444-4444-8444-444444444444';
+
+    const makeService = (objects: Record<string, string | null>) =>
+      new ContentAccessService({
+        db,
+        environment: 'test',
+        obs: new ObservabilityClient('content-access-test', 'test'),
+        purchaseService: mockPurchaseService as unknown as PurchaseService,
+        contentApiBaseUrl: 'https://api.revelations.studio',
+        hlsTokenSecret: 'test-worker-shared-secret',
+        r2: {
+          async generateSignedUrl(key: string) {
+            return `https://r2.cloudflarestorage.com/${key}?X-Amz-Signature=stub`;
+          },
+          async getObjectText(key: string) {
+            return key in objects ? objects[key] : null;
+          },
+        },
+      });
+
+    it('rewrites master variant URIs to proxy URLs carrying the token', async () => {
+      const masterKey = `${CREATOR}/hls/${MEDIA}/master.m3u8`;
+      const svc = makeService({
+        [masterKey]:
+          '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=5000000\n1080p/index.m3u8\n',
+      });
+
+      const out = await svc.getHlsMasterPlaylist({
+        contentId: CONTENT,
+        creatorId: CREATOR,
+        mediaId: MEDIA,
+        token: 'abc.def',
+      });
+
+      expect(out).toContain(
+        `https://api.revelations.studio/api/access/content/${CONTENT}/hls/1080p/index.m3u8?token=abc.def`
+      );
+    });
+
+    it('returns null when the master object is absent', async () => {
+      const svc = makeService({});
+      const out = await svc.getHlsMasterPlaylist({
+        contentId: CONTENT,
+        creatorId: CREATOR,
+        mediaId: MEDIA,
+        token: 'abc.def',
+      });
+      expect(out).toBeNull();
+    });
+
+    it('rewrites variant segment URIs to presigned R2 URLs', async () => {
+      const variantKey = `${CREATOR}/hls/${MEDIA}/1080p/index.m3u8`;
+      const svc = makeService({
+        [variantKey]: '#EXTM3U\n#EXTINF:6.0,\nsegment_000.ts\n#EXT-X-ENDLIST\n',
+      });
+
+      const out = await svc.getHlsVariantPlaylist({
+        creatorId: CREATOR,
+        mediaId: MEDIA,
+        variant: '1080p',
+        expirySeconds: 600,
+      });
+
+      expect(out).toContain(
+        `https://r2.cloudflarestorage.com/${CREATOR}/hls/${MEDIA}/1080p/segment_000.ts?X-Amz-Signature=stub`
+      );
+    });
+
+    it('returns null when the variant object is absent', async () => {
+      const svc = makeService({});
+      const out = await svc.getHlsVariantPlaylist({
+        creatorId: CREATOR,
+        mediaId: MEDIA,
+        variant: '720p',
+        expirySeconds: 600,
+      });
+      expect(out).toBeNull();
     });
   });
 
@@ -1440,8 +1531,8 @@ describe('ContentAccessService Integration', () => {
         });
 
         // URL should be properly encoded
-        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
-        expect(result.streamingUrl).toContain('X-Amz-Signature');
+        expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
+        expect(result.streamingUrl).toContain('token=');
       });
 
       it('should handle R2 keys with underscores and hyphens', async () => {
@@ -1494,7 +1585,7 @@ describe('ContentAccessService Integration', () => {
 
         // URL should be properly URL-encoded
         expect(result.streamingUrl).toBeDefined();
-        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+        expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
       });
 
       it('should handle R2 keys with deep directory paths', async () => {
@@ -1546,7 +1637,7 @@ describe('ContentAccessService Integration', () => {
 
         // URL should handle unicode characters
         expect(result.streamingUrl).toBeDefined();
-        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+        expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
       });
     });
 
@@ -1972,7 +2063,7 @@ describe('ContentAccessService Integration', () => {
           expirySeconds: 3600,
         });
 
-        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+        expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
         expect(result.contentType).toBe('video');
       });
 
@@ -2003,7 +2094,7 @@ describe('ContentAccessService Integration', () => {
           expirySeconds: 3600,
         });
 
-        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+        expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
       });
 
       it('should deny hybrid content to subscriber below minimum tier (no purchase)', async () => {
@@ -2058,7 +2149,7 @@ describe('ContentAccessService Integration', () => {
           expirySeconds: 3600,
         });
 
-        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+        expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
         expect(result.contentType).toBe('video');
         expect(mockPurchaseService.verifyPurchase).toHaveBeenCalledWith(
           item.id,
@@ -2145,7 +2236,7 @@ describe('ContentAccessService Integration', () => {
           expirySeconds: 3600,
         });
 
-        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+        expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
       });
 
       it('should grant team content access to admin', async () => {
@@ -2167,7 +2258,7 @@ describe('ContentAccessService Integration', () => {
           expirySeconds: 3600,
         });
 
-        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+        expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
       });
 
       it('should deny team content to subscriber', async () => {
@@ -2288,7 +2379,7 @@ describe('ContentAccessService Integration', () => {
           expirySeconds: 3600,
         });
 
-        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+        expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
       });
 
       it('should deny follower content to non-follower', async () => {
@@ -2332,7 +2423,7 @@ describe('ContentAccessService Integration', () => {
           expirySeconds: 3600,
         });
 
-        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+        expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
       });
     });
 
@@ -2398,7 +2489,7 @@ describe('ContentAccessService Integration', () => {
           expirySeconds: 3600,
         });
 
-        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+        expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
       });
 
       it('should deny paid content for subscriber without purchase', async () => {
@@ -2777,8 +2868,8 @@ describe('ContentAccessService Integration', () => {
 
         // All requests should succeed with valid URLs
         for (const result of results) {
-          expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
-          expect(result.streamingUrl).toContain('X-Amz-Signature');
+          expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
+          expect(result.streamingUrl).toContain('token=');
         }
       });
     });
@@ -3016,7 +3107,7 @@ describe('ContentAccessService Integration', () => {
           contentId: item.id,
           expirySeconds: 3600,
         });
-        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+        expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
         expect(mockPurchaseService.verifyPurchase).toHaveBeenCalled();
       });
 
@@ -3082,7 +3173,7 @@ describe('ContentAccessService Integration', () => {
           contentId: item.id,
           expirySeconds: 3600,
         });
-        expect(result.streamingUrl).toContain('r2.cloudflarestorage.com');
+        expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
       });
     });
   });
