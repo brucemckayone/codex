@@ -64,6 +64,7 @@ export {
   getHlsPrefix,
   getHlsPreviewKey,
   getHlsVariantKey,
+  getHlsVariantSegmentKey,
   getMediaThumbnailKey,
   getMediaThumbnailUrl,
   getMezzanineKey,

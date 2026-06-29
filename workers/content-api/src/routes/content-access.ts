@@ -1,19 +1,48 @@
-import type {
-  PlaybackProgressResponse,
-  StreamingUrlResponse,
-  UpdatePlaybackProgressResponse,
+import {
+  createContentAccessService,
+  type PlaybackProgressResponse,
+  type StreamingUrlResponse,
+  type UpdatePlaybackProgressResponse,
+  verifyHlsToken,
 } from '@codex/access';
+import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
 import {
   createIdParamsSchema,
   getStreamingUrlSchema,
+  hlsProxyQuerySchema,
+  hlsVariantParamsSchema,
   listUserLibrarySchema,
   savePlaybackProgressSchema,
 } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
+import { createMiddleware } from 'hono/factory';
 
 const app = new Hono<HonoEnv>();
+
+/**
+ * Headers for every proxied playlist response (RFC 8216 §4 content type).
+ * `private, no-store` because the body embeds short-lived presigned URLs / a
+ * per-user token — it must never be cached by shared caches.
+ */
+const HLS_PLAYLIST_HEADERS = {
+  'Content-Type': 'application/vnd.apple.mpegurl',
+  'Cache-Control': 'private, no-store',
+} as const;
+
+/**
+ * Streaming rate-limit middleware for the raw HLS proxy routes. Built inline
+ * (rather than at module load) so it can read `RATE_LIMIT_KV` from the
+ * per-request env — mirrors the `streaming` preset the `procedure()`-based
+ * `/stream` route uses.
+ */
+const hlsStreamingRateLimit = createMiddleware<HonoEnv>((c, next) =>
+  rateLimit({
+    kv: c.env.RATE_LIMIT_KV,
+    ...RATE_LIMIT_PRESETS.streaming,
+  })(c, next)
+);
 
 /**
  * GET /api/access/content/:id/stream
@@ -57,6 +86,114 @@ app.get(
       };
     },
   })
+);
+
+/**
+ * GET /api/access/content/:id/hls/master.m3u8?token=...
+ *
+ * Token-authenticated HLS MASTER playlist proxy (WP-14 / Codex-fc5oh.14).
+ *
+ * The short-lived HMAC token (minted by `getStreamingUrl`) IS the auth — no
+ * session cookie, no CORS, no per-request DB access check. This route does NOT
+ * use `procedure()` because it returns a RAW text body (the rewritten playlist)
+ * with custom HLS headers, not the JSON envelope. It applies the same
+ * `streaming` rate-limit preset as `/stream` so segment/manifest refreshes
+ * stay bounded.
+ *
+ * The token payload carries `{ creatorId, mediaId, exp }`, so the R2 master
+ * key is built without a DB round-trip. The service reads + rewrites the
+ * playlist (all R2/rewrite logic stays in the service layer).
+ *
+ * On invalid/expired token → 403; on missing playlist object → 404.
+ */
+app.get('/content/:id/hls/master.m3u8', hlsStreamingRateLimit, async (c) => {
+  const contentId = c.req.param('id');
+  const queryResult = hlsProxyQuerySchema.safeParse({
+    token: c.req.query('token'),
+  });
+  if (!queryResult.success) {
+    return c.text('Missing streaming token', 403);
+  }
+  const { token } = queryResult.data;
+
+  const payload = await verifyHlsToken(token, c.env.WORKER_SHARED_SECRET);
+  if (!payload) {
+    return c.text('Invalid or expired streaming token', 403);
+  }
+
+  const { service, cleanup } = createContentAccessService(c.env);
+  try {
+    const playlist = await service.getHlsMasterPlaylist({
+      contentId,
+      creatorId: payload.creatorId,
+      mediaId: payload.mediaId,
+      token,
+    });
+    if (playlist === null) {
+      return c.text('Playlist not found', 404);
+    }
+    return c.body(playlist, 200, HLS_PLAYLIST_HEADERS);
+  } finally {
+    c.executionCtx.waitUntil(cleanup());
+  }
+});
+
+/**
+ * GET /api/access/content/:id/hls/:variant/index.m3u8?token=...
+ *
+ * Token-authenticated HLS VARIANT playlist proxy (WP-14). Reads the variant
+ * playlist from R2 and rewrites each relative `segment_NNN.ts` URI to an
+ * absolute SigV4-presigned R2 URL — segments then load direct R2 → client.
+ *
+ * `:variant` is validated against the canonical HLS rung enum so the proxy can
+ * never build an arbitrary R2 key. Token TTL drives the presigned-segment
+ * expiry, deriving the remaining lifetime from the token's `exp`.
+ *
+ * On invalid/expired token or bad variant → 403; on missing playlist → 404.
+ */
+app.get(
+  '/content/:id/hls/:variant/index.m3u8',
+  hlsStreamingRateLimit,
+  async (c) => {
+    const paramsResult = hlsVariantParamsSchema.safeParse({
+      id: c.req.param('id'),
+      variant: c.req.param('variant'),
+    });
+    const queryResult = hlsProxyQuerySchema.safeParse({
+      token: c.req.query('token'),
+    });
+    if (!paramsResult.success || !queryResult.success) {
+      return c.text('Invalid request', 403);
+    }
+    const { variant } = paramsResult.data;
+    const { token } = queryResult.data;
+
+    const payload = await verifyHlsToken(token, c.env.WORKER_SHARED_SECRET);
+    if (!payload) {
+      return c.text('Invalid or expired streaming token', 403);
+    }
+
+    // Presign segments for the remaining token lifetime (bounded to a minimum
+    // floor so a near-expiry refresh still yields usable segment URLs).
+    const remaining = payload.exp - Math.floor(Date.now() / 1000);
+    const expirySeconds = Math.max(remaining, 60);
+
+    const { service, cleanup } = createContentAccessService(c.env);
+    try {
+      const playlist = await service.getHlsVariantPlaylist({
+        creatorId: payload.creatorId,
+        mediaId: payload.mediaId,
+        variant,
+        expirySeconds,
+      });
+      if (playlist === null) {
+        return c.text('Playlist not found', 404);
+      }
+      return c.body(playlist, 200, HLS_PLAYLIST_HEADERS);
+    } finally {
+      c.executionCtx.waitUntil(cleanup());
+    }
+  }
 );
 
 /**

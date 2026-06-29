@@ -23,10 +23,13 @@ type StubDb = ServiceConfig['db'];
 
 interface StubbedSigner {
   generateSignedUrl: ReturnType<typeof vi.fn>;
+  getObjectText: ReturnType<typeof vi.fn>;
 }
 
 interface TxReturn {
   r2Key: string | null;
+  creatorId: string | null;
+  mediaId: string | null;
   mediaType: 'video' | 'audio' | 'written';
   waveformKey: string | null;
 }
@@ -47,6 +50,7 @@ function buildService(tx: TxReturn) {
     generateSignedUrl: vi.fn(async (_key: string, _expiry: number) => {
       return 'https://signed.example/stub';
     }),
+    getObjectText: vi.fn(async () => null),
   };
 
   const stubDb = {
@@ -64,6 +68,10 @@ function buildService(tx: TxReturn) {
     environment: 'test',
     r2: signer,
     purchaseService: stubPurchase,
+    // WP-14: getStreamingUrl now returns a master-proxy URL signed with the
+    // HLS token secret; both must be wired for the stream path to run.
+    contentApiBaseUrl: 'https://api.revelations.studio',
+    hlsTokenSecret: 'test-worker-shared-secret',
   });
 
   return { service, signer };
@@ -72,6 +80,8 @@ function buildService(tx: TxReturn) {
 const contentId = 'a1b2c3d4-e5f6-4a90-b234-567890abcdef';
 const videoTx: TxReturn = {
   r2Key: 'hls/abc/master.m3u8',
+  creatorId: 'creator-1',
+  mediaId: '550e8400-e29b-41d4-a716-446655440000',
   mediaType: 'video',
   waveformKey: null,
 };
@@ -84,7 +94,7 @@ describe('ContentAccessService — default streaming URL TTL', () => {
     expect(DEFAULT_STREAMING_URL_TTL_SECONDS).toBe(600);
   });
 
-  it('forwards 600s (not 3600s) to the R2 signer when expirySeconds is omitted', async () => {
+  it('reflects 600s (not 3600s) in expiresAt when expirySeconds is omitted (WP-14: master is proxied, not presigned)', async () => {
     const { service, signer } = buildService(videoTx);
 
     // expirySeconds intentionally omitted — simulates a programmatic
@@ -102,13 +112,10 @@ describe('ContentAccessService — default streaming URL TTL', () => {
       inputWithoutTtl as InputArg
     );
 
-    expect(signer.generateSignedUrl).toHaveBeenCalledTimes(1);
-    const [, passedExpiry] = signer.generateSignedUrl.mock.calls[0] as [
-      string,
-      number,
-    ];
-    expect(passedExpiry).toBe(600);
-    expect(passedExpiry).not.toBe(3600);
+    // Video master is now a token-bearing proxy URL — NOT a presigned R2 URL.
+    // The signer is never invoked for video (no waveform either).
+    expect(signer.generateSignedUrl).not.toHaveBeenCalled();
+    expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
 
     // expiresAt should reflect the TTL actually used, not a stale default.
     const windowMs = result.expiresAt.getTime() - Date.now();
@@ -118,42 +125,46 @@ describe('ContentAccessService — default streaming URL TTL', () => {
     expect(windowMs).toBeLessThan(650_000);
   });
 
-  it('honours an explicit expirySeconds override (1800 → signer receives 1800)', async () => {
-    const { service, signer } = buildService(videoTx);
+  it('honours an explicit expirySeconds override (1800 → expiresAt window ≈ 1800s)', async () => {
+    const { service } = buildService(videoTx);
 
-    await service.getStreamingUrl('user-1', {
+    const result = await service.getStreamingUrl('user-1', {
       contentId,
       expirySeconds: 1800,
     });
 
-    expect(signer.generateSignedUrl).toHaveBeenCalledTimes(1);
-    const [, passedExpiry] = signer.generateSignedUrl.mock.calls[0] as [
-      string,
-      number,
-    ];
-    expect(passedExpiry).toBe(1800);
+    const windowMs = result.expiresAt.getTime() - Date.now();
+    expect(windowMs).toBeGreaterThan(1_700_000);
+    expect(windowMs).toBeLessThan(1_850_000);
   });
 
-  it('signs both stream and waveform with the same resolved TTL for audio content', async () => {
-    // Audio branch issues two signing calls; both must use the same TTL —
-    // a divergence would cause the waveform to expire at a different time
-    // from the player and break mid-playback rendering.
+  it('signs the waveform with the resolved TTL for audio content (master stays proxied)', async () => {
+    // Audio: the master playlist is still proxied (no presign), but the
+    // waveform is a single static file presigned directly with the same TTL.
     const audioTx: TxReturn = {
       r2Key: 'hls/aud/master.m3u8',
+      creatorId: 'creator-1',
+      mediaId: '550e8400-e29b-41d4-a716-446655440000',
       mediaType: 'audio',
       waveformKey: 'waveforms/aud.json',
     };
     const { service, signer } = buildService(audioTx);
 
-    await service.getStreamingUrl('user-1', {
+    const result = await service.getStreamingUrl('user-1', {
       contentId,
       expirySeconds: 900,
     });
 
-    expect(signer.generateSignedUrl).toHaveBeenCalledTimes(2);
-    const callOneExpiry = signer.generateSignedUrl.mock.calls[0][1];
-    const callTwoExpiry = signer.generateSignedUrl.mock.calls[1][1];
-    expect(callOneExpiry).toBe(900);
-    expect(callTwoExpiry).toBe(900);
+    // Exactly one signing call — the waveform. The master is the proxy URL.
+    expect(signer.generateSignedUrl).toHaveBeenCalledTimes(1);
+    const [waveformKey, waveformExpiry] = signer.generateSignedUrl.mock
+      .calls[0] as [string, number];
+    expect(waveformKey).toBe('waveforms/aud.json');
+    expect(waveformExpiry).toBe(900);
+    expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
+
+    const windowMs = result.expiresAt.getTime() - Date.now();
+    expect(windowMs).toBeGreaterThan(800_000);
+    expect(windowMs).toBeLessThan(950_000);
   });
 });

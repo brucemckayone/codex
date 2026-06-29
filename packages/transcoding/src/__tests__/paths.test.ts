@@ -4,6 +4,8 @@ import {
   getContentThumbnailKey,
   getHlsMasterKey,
   getHlsPreviewKey,
+  getHlsVariantKey,
+  getHlsVariantSegmentKey,
   getMediaThumbnailKey,
   getMediaThumbnailUrl,
   getMezzanineKey,
@@ -35,6 +37,21 @@ describe('Path Helpers', () => {
     it('getHlsPreviewKey should return correct format', () => {
       const key = getHlsPreviewKey(creatorId, mediaId);
       expect(key).toBe(`${creatorId}/hls/${mediaId}/preview/preview.m3u8`);
+    });
+
+    it('getHlsVariantKey should return correct format', () => {
+      const key = getHlsVariantKey(creatorId, mediaId, '1080p');
+      expect(key).toBe(`${creatorId}/hls/${mediaId}/1080p/index.m3u8`);
+    });
+
+    it('getHlsVariantSegmentKey should return correct format', () => {
+      const key = getHlsVariantSegmentKey(
+        creatorId,
+        mediaId,
+        '1080p',
+        'segment_000.ts'
+      );
+      expect(key).toBe(`${creatorId}/hls/${mediaId}/1080p/segment_000.ts`);
     });
 
     it('getThumbnailKey should return correct format', () => {
