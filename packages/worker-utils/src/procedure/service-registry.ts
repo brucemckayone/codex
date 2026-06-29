@@ -45,6 +45,7 @@ import {
   TierService,
 } from '@codex/subscription';
 import { TranscodingService } from '@codex/transcoding';
+import { buildServiceUrl } from '@codex/urls';
 import { sendEmailToWorker } from '../email/send-email';
 import type { ServiceRegistry } from './types';
 
@@ -290,6 +291,7 @@ export function createServiceRegistry(
             r2Key: string,
             expirySeconds: number
           ): Promise<string>;
+          getObjectText(r2Key: string): Promise<string | null>;
         };
         const isDev = getEnvironment() === 'development';
 
@@ -299,6 +301,12 @@ export function createServiceRegistry(
           r2Signer = {
             async generateSignedUrl(r2Key: string, _expirySeconds: number) {
               return `${baseUrl}/${r2Key}`;
+            },
+            // HLS playlist proxy reads `.m3u8` bytes via dev-cdn (Miniflare R2).
+            async getObjectText(r2Key: string) {
+              const response = await fetch(`${baseUrl}/${r2Key}`);
+              if (!response.ok) return null;
+              return response.text();
             },
           };
         } else if (env.MEDIA_BUCKET) {
@@ -349,6 +357,11 @@ export function createServiceRegistry(
           r2: r2Signer,
           purchaseService: registry.purchase,
           revocation,
+          // HLS playlist-proxy wiring (WP-14): getStreamingUrl returns a
+          // master-proxy URL on the content-api origin, and the proxy routes
+          // verify the short-lived token signed with WORKER_SHARED_SECRET.
+          contentApiBaseUrl: buildServiceUrl('content', env),
+          hlsTokenSecret: env.WORKER_SHARED_SECRET,
         });
       }
       return _access;

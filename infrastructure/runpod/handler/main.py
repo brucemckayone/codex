@@ -111,12 +111,13 @@ class WebhookOutput(TypedDict):
 # FFmpeg Configuration
 # =============================================================================
 
-# HLS variant settings (resolution → bitrate)
+# HLS variant settings (resolution → bitrate).
+# v1 ladder (Codex-bpjg5, decided 2026-06-29): 720p + 480p only — 1080p and 360p
+# are dropped to cut R2 storage / Class-B ops while keeping two adaptive rungs.
+# Re-adding rungs later is a config-only change affecting future uploads.
 HLS_VARIANTS = {
-    "1080p": {"height": 1080, "video_bitrate": "5000k", "audio_bitrate": "192k"},
     "720p": {"height": 720, "video_bitrate": "3000k", "audio_bitrate": "128k"},
     "480p": {"height": 480, "video_bitrate": "1500k", "audio_bitrate": "96k"},
-    "360p": {"height": 360, "video_bitrate": "800k", "audio_bitrate": "64k"},
 }
 
 # Audio-only HLS variants
@@ -550,8 +551,14 @@ def _build_hls_variant_cmd(
     settings: dict,
     use_gpu: bool,
 ) -> list[str]:
-    """Build ffmpeg command for a single HLS variant."""
-    segment_path = os.path.join(variant_dir, "segment_%03d.ts")
+    """Build ffmpeg command for a single HLS variant.
+
+    Uses `-hls_flags single_file`: all segments are stored in ONE MPEG-TS file
+    (`stream.ts`) addressed by #EXT-X-BYTERANGE in the playlist. The streaming
+    proxy then presigns ONE R2 URL per variant regardless of duration, keeping
+    it under the Workers Free 10ms CPU budget (Codex-bpjg5).
+    """
+    segment_path = os.path.join(variant_dir, "stream.ts")
 
     if use_gpu:
         return [
@@ -587,6 +594,8 @@ def _build_hls_variant_cmd(
             str(HLS_SEGMENT_DURATION),
             "-hls_playlist_type",
             "vod",
+            "-hls_flags",
+            "single_file",
             "-hls_segment_filename",
             segment_path,
             playlist_path,
@@ -622,6 +631,8 @@ def _build_hls_variant_cmd(
         str(HLS_SEGMENT_DURATION),
         "-hls_playlist_type",
         "vod",
+        "-hls_flags",
+        "single_file",
         "-hls_segment_filename",
         segment_path,
         playlist_path,
@@ -760,8 +771,10 @@ def transcode_audio_hls(input_path: str, output_dir: str) -> list[str]:
             str(HLS_SEGMENT_DURATION),
             "-hls_playlist_type",
             "vod",
+            "-hls_flags",
+            "single_file",
             "-hls_segment_filename",
-            os.path.join(variant_dir, "segment_%03d.ts"),
+            os.path.join(variant_dir, "stream.ts"),
             playlist_path,
         ]
 
@@ -790,8 +803,8 @@ def _build_preview_cmd(
     preview_duration: int,
     use_gpu: bool,
 ) -> list[str]:
-    """Build ffmpeg command for preview clip."""
-    segment_path = os.path.join(preview_dir, "segment_%03d.ts")
+    """Build ffmpeg command for preview clip (single-file HLS, see variant cmd)."""
+    segment_path = os.path.join(preview_dir, "stream.ts")
     playlist_path = os.path.join(preview_dir, "preview.m3u8")
 
     if use_gpu:
@@ -824,6 +837,8 @@ def _build_preview_cmd(
             str(HLS_SEGMENT_DURATION),
             "-hls_playlist_type",
             "vod",
+            "-hls_flags",
+            "single_file",
             "-hls_segment_filename",
             segment_path,
             playlist_path,
@@ -855,6 +870,8 @@ def _build_preview_cmd(
         str(HLS_SEGMENT_DURATION),
         "-hls_playlist_type",
         "vod",
+        "-hls_flags",
+        "single_file",
         "-hls_segment_filename",
         segment_path,
         playlist_path,

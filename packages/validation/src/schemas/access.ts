@@ -44,6 +44,32 @@ export const getPlaybackProgressSchema = z.object({
 });
 
 /**
+ * Query schema for the token-authenticated HLS playlist proxy routes
+ * (`GET /content/:id/hls/master.m3u8` and `.../:variant/index.m3u8`).
+ *
+ * The short-lived HMAC token IS the auth (no session cookie / CORS), so it is
+ * required. Kept loose (non-empty string) — structural + signature + expiry
+ * validation happens in `verifyHlsToken` (@codex/access), which fails closed
+ * to 403, not 400.
+ */
+export const hlsProxyQuerySchema = z.object({
+  token: z.string().min(1, 'Must provide a streaming token'),
+});
+
+/**
+ * Route-params schema for the HLS variant playlist proxy. `variant` is bounded
+ * to the canonical HLS quality rungs (reuses `hlsVariantSchema`) so the proxy
+ * can never be coerced into building an arbitrary R2 key path.
+ */
+export const hlsVariantParamsSchema = z.object({
+  id: uuidSchema,
+  variant: hlsVariantSchema,
+});
+
+export type HlsProxyQuery = z.infer<typeof hlsProxyQuerySchema>;
+export type HlsVariantParams = z.infer<typeof hlsVariantParamsSchema>;
+
+/**
  * Response schema for GET /api/access/content/:id/stream.
  *
  * Mirrors `StreamingUrlResponse` in `@codex/access/types.ts`. Kept here as a

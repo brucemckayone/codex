@@ -13,13 +13,12 @@
 import {
   GetObjectCommand,
   HeadObjectCommand,
-  PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { AWS_ERRORS, INFRA_KEYS } from '@codex/constants';
 import { ValidationError } from '@codex/service-errors';
 import { R2_REGIONS } from '../constants';
+import { R2Presigner } from './r2-presigner';
 
 // Import from r2-service (exported via index.ts)
 import type { R2SigningConfig } from './r2-service';
@@ -27,6 +26,10 @@ import type { R2SigningConfig } from './r2-service';
 export class R2SigningClient {
   private s3Client: S3Client;
   private bucketName: string;
+  // Presigning goes through aws4fetch (lean SigV4, cached signing key); the
+  // S3Client is retained only for object I/O (getObjectText / objectExists)
+  // which has no Workers-runtime equivalent without an R2 binding.
+  private presigner: R2Presigner;
 
   constructor(config: R2SigningConfig) {
     this.bucketName = config.bucketName;
@@ -38,6 +41,7 @@ export class R2SigningClient {
         secretAccessKey: config.secretAccessKey,
       },
     });
+    this.presigner = new R2Presigner(config);
   }
 
   /**
@@ -51,12 +55,7 @@ export class R2SigningClient {
     r2Key: string,
     expirySeconds: number
   ): Promise<string> {
-    const command = new GetObjectCommand({
-      Bucket: this.bucketName,
-      Key: r2Key,
-    });
-
-    return getSignedUrl(this.s3Client, command, { expiresIn: expirySeconds });
+    return this.presigner.presignGet(r2Key, expirySeconds);
   }
 
   /**
@@ -72,13 +71,33 @@ export class R2SigningClient {
     contentType: string,
     expirySeconds = 3600
   ): Promise<string> {
-    const command = new PutObjectCommand({
-      Bucket: this.bucketName,
-      Key: r2Key,
-      ContentType: contentType,
-    });
+    return this.presigner.presignPut(r2Key, contentType, expirySeconds);
+  }
 
-    return getSignedUrl(this.s3Client, command, { expiresIn: expirySeconds });
+  /**
+   * Retrieve an object's body decoded as UTF-8 text, or `null` when the object
+   * is absent. Standalone (no R2 binding) sibling of `R2Service.getObjectText`
+   * — used by the HLS playlist proxy in tests/scripts to read `.m3u8` files.
+   *
+   * @param r2Key - The object key to fetch
+   */
+  async getObjectText(r2Key: string): Promise<string | null> {
+    try {
+      const command = new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: r2Key,
+      });
+      const response = await this.s3Client.send(command);
+      const body = response.Body;
+      if (!body) return null;
+      return await body.transformToString();
+    } catch (err) {
+      const error = err as { name?: string };
+      if (error.name === AWS_ERRORS.NOT_FOUND) {
+        return null;
+      }
+      throw err;
+    }
   }
 
   /**

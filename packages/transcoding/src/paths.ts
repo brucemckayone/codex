@@ -172,6 +172,32 @@ export function getHlsVariantKey(
 }
 
 /**
+ * Generate R2 key for a single HLS segment within a variant.
+ *
+ * Variant playlists reference segments by bare relative filename (e.g.
+ * `segment_000.ts`); this rebuilds the absolute R2 key so the segment can be
+ * presigned for direct client download (see ContentAccessService HLS proxy).
+ *
+ * @param creatorId - Creator's user ID
+ * @param mediaId - Media item UUID
+ * @param variant - Quality variant (1080p, 720p, 480p, 360p, audio)
+ * @param filename - Segment filename from the variant playlist (e.g. 'segment_000.ts')
+ * @returns R2 key path to the segment
+ *
+ * @example
+ * getHlsVariantSegmentKey('user-123', 'media-456', '1080p', 'segment_000.ts')
+ * // Returns: 'user-123/hls/media-456/1080p/segment_000.ts'
+ */
+export function getHlsVariantSegmentKey(
+  creatorId: string,
+  mediaId: string,
+  variant: string,
+  filename: string
+): string {
+  return `${creatorId}/${PATH_CONFIG.HLS_FOLDER}/${mediaId}/${variant}/${filename}`;
+}
+
+/**
  * Generate R2 key for auto-generated thumbnail
  *
  * @param creatorId - Creator's user ID

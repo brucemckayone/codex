@@ -40,6 +40,19 @@ export {
   OrganizationMismatchError,
   R2SigningError,
 } from './errors';
+// HLS playlist-proxy helpers (WP-14)
+export {
+  collectVariantSegments,
+  type RewriteMasterOptions,
+  type RewriteVariantOptions,
+  rewriteMasterPlaylist,
+  rewriteVariantPlaylist,
+} from './hls-rewrite';
+export {
+  type HlsTokenPayload,
+  signHlsToken,
+  verifyHlsToken,
+} from './hls-token';
 export type {
   Revocation,
   RevocationReason,

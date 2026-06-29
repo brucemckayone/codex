@@ -70,6 +70,8 @@ function createStubDb(): StubDb {
     // ignored by getStreamingUrl's post-transaction code.
     return {
       r2Key: 'hls/abc/master.m3u8',
+      creatorId: 'creator_abc',
+      mediaId: '550e8400-e29b-41d4-a716-446655440000',
       mediaType: 'video' as const,
       waveformKey: null,
     };
@@ -90,6 +92,7 @@ function buildService(stub: StubDb, revocation?: AccessRevocation) {
 
   const signer = {
     generateSignedUrl: vi.fn(async () => 'https://signed.example/stub'),
+    getObjectText: vi.fn(async () => null),
   };
 
   const purchaseService = {
@@ -102,6 +105,9 @@ function buildService(stub: StubDb, revocation?: AccessRevocation) {
     r2: signer,
     purchaseService,
     revocation,
+    // WP-14: stream path now mints a master-proxy URL.
+    contentApiBaseUrl: 'https://api.revelations.studio',
+    hlsTokenSecret: 'test-worker-shared-secret',
   });
 
   return { service, signer };
@@ -194,8 +200,10 @@ describe('ContentAccessService.getStreamingUrl — revocation short-circuit', ()
     // probed and cleared.
     expect(stub.contentFindFirst).toHaveBeenCalledTimes(1);
     expect(stub.transaction).toHaveBeenCalledTimes(1);
-    expect(signer.generateSignedUrl).toHaveBeenCalledTimes(1);
-    expect(result.streamingUrl).toBe('https://signed.example/stub');
+    // WP-14: video master is a token-bearing proxy URL, not a presigned R2
+    // URL — the signer is not invoked for video content.
+    expect(signer.generateSignedUrl).not.toHaveBeenCalled();
+    expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
   });
 
   it('runs the orgId lookup BEFORE the transaction (ordering)', async () => {
@@ -225,8 +233,8 @@ describe('ContentAccessService.getStreamingUrl — revocation short-circuit', ()
 
     // Transaction still runs — the DB path is the only gate now.
     expect(stub.transaction).toHaveBeenCalledTimes(1);
-    expect(signer.generateSignedUrl).toHaveBeenCalledTimes(1);
-    expect(result.streamingUrl).toBe('https://signed.example/stub');
+    expect(signer.generateSignedUrl).not.toHaveBeenCalled();
+    expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
   });
 
   it('does not run the pre-transaction lookup when content has no org (personal content)', async () => {
@@ -245,11 +253,8 @@ describe('ContentAccessService.getStreamingUrl — revocation short-circuit', ()
 
     const { service } = buildService(stub, revocation);
 
-    await expect(
-      service.getStreamingUrl(userId, streamingInput)
-    ).resolves.toMatchObject({
-      streamingUrl: 'https://signed.example/stub',
-    });
+    const result = await service.getStreamingUrl(userId, streamingInput);
+    expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
 
     // Transaction still ran because no revocation blocked it.
     expect(stub.transaction).toHaveBeenCalledTimes(1);
