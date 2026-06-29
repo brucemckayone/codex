@@ -57,6 +57,80 @@ const CORS_HEADERS: Record<string, string> = {
   'access-control-allow-headers': '*',
 };
 
+// ───────────────────────────────────────────────────────────────────────────
+// HTTP Range support — required so single-file (EXT-X-BYTERANGE) HLS plays back
+// locally: hls.js fetches ONE stream.ts with `Range: bytes=...` per segment, so
+// dev-cdn must honour Range and return 206 like real R2 does (Codex-bpjg5).
+// ───────────────────────────────────────────────────────────────────────────
+
+type RangeIntent =
+  | { kind: 'range'; start: number; end: number | null }
+  | { kind: 'suffix'; suffix: number };
+
+/** Parse a single HTTP Range header (`bytes=start-end` / `bytes=start-` / `bytes=-suffix`). */
+export function parseRangeHeader(header: string | null): RangeIntent | null {
+  if (!header) return null;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match) return null;
+  const [, startStr, endStr] = match;
+  if (startStr === '' && endStr === '') return null;
+  if (startStr === '') {
+    const suffix = Number(endStr);
+    return suffix > 0 ? { kind: 'suffix', suffix } : null;
+  }
+  const start = Number(startStr);
+  const end = endStr === '' ? null : Number(endStr);
+  if (end !== null && end < start) return null;
+  return { kind: 'range', start, end };
+}
+
+/** Translate a parsed Range intent into R2's native range option. */
+function toR2Range(intent: RangeIntent): R2Range {
+  if (intent.kind === 'suffix') return { suffix: intent.suffix };
+  return intent.end === null
+    ? { offset: intent.start }
+    : { offset: intent.start, length: intent.end - intent.start + 1 };
+}
+
+/** Resolve the actual served [start,end] byte bounds clamped to the object size. */
+export function servedBounds(
+  intent: RangeIntent,
+  size: number
+): { start: number; end: number } {
+  if (intent.kind === 'suffix') {
+    return { start: Math.max(0, size - intent.suffix), end: size - 1 };
+  }
+  const end = intent.end === null ? size - 1 : Math.min(intent.end, size - 1);
+  return { start: intent.start, end };
+}
+
+/** Build a GET/HEAD response, emitting 206 + Content-Range when a range was requested. */
+function objectResponse(
+  object: R2ObjectBody,
+  intent: RangeIntent | null,
+  method: string,
+  cacheControl?: string
+): Response {
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set('etag', object.httpEtag);
+  headers.set('accept-ranges', 'bytes');
+  headers.set('access-control-allow-origin', '*');
+  if (cacheControl) headers.set('cache-control', cacheControl);
+
+  const body = method === 'HEAD' ? null : object.body;
+
+  if (intent) {
+    const { start, end } = servedBounds(intent, object.size);
+    headers.set('content-range', `bytes ${start}-${end}/${object.size}`);
+    headers.set('content-length', String(end - start + 1));
+    return new Response(body, { status: 206, headers });
+  }
+
+  headers.set('content-length', String(object.size));
+  return new Response(body, { status: 200, headers });
+}
+
 /**
  * Try to resolve the first path segment as a known bucket name.
  * Returns the bucket binding and the remaining key, or null if not a bucket path.
@@ -118,16 +192,21 @@ export default {
     const key = url.pathname.slice(1); // strip leading /
     if (!key) return new Response('Not Found', { status: 404 });
 
+    const intent = parseRangeHeader(request.headers.get('range'));
+
     // Try ASSETS_BUCKET first (avatars, logos, thumbnails), then MEDIA_BUCKET
     for (const bucket of [env.ASSETS_BUCKET, env.MEDIA_BUCKET]) {
-      const object = await bucket.get(key);
+      const object = await bucket.get(
+        key,
+        intent ? { range: toR2Range(intent) } : undefined
+      );
       if (object) {
-        const headers = new Headers();
-        object.writeHttpMetadata(headers);
-        headers.set('etag', object.httpEtag);
-        headers.set('cache-control', 'public, max-age=3600');
-        headers.set('access-control-allow-origin', '*');
-        return new Response(object.body, { headers });
+        return objectResponse(
+          object,
+          intent,
+          request.method,
+          'public, max-age=3600'
+        );
       }
     }
 
@@ -146,7 +225,7 @@ async function handleS3Request(
 ): Promise<Response> {
   switch (request.method) {
     case 'GET':
-      return handleS3Get(bucket, key);
+      return handleS3Get(request, bucket, key);
     case 'HEAD':
       return handleS3Head(bucket, key);
     case 'PUT':
@@ -158,9 +237,17 @@ async function handleS3Request(
   }
 }
 
-/** S3 GetObject — returns the object body with metadata headers */
-async function handleS3Get(bucket: R2Bucket, key: string): Promise<Response> {
-  const object = await bucket.get(key);
+/** S3 GetObject — returns the object body, honouring Range with a 206 when present */
+async function handleS3Get(
+  request: Request,
+  bucket: R2Bucket,
+  key: string
+): Promise<Response> {
+  const intent = parseRangeHeader(request.headers.get('range'));
+  const object = await bucket.get(
+    key,
+    intent ? { range: toR2Range(intent) } : undefined
+  );
   if (!object) {
     return s3Error(
       'NoSuchKey',
@@ -169,14 +256,7 @@ async function handleS3Get(bucket: R2Bucket, key: string): Promise<Response> {
     );
   }
 
-  const headers = new Headers();
-  object.writeHttpMetadata(headers);
-  headers.set('etag', object.httpEtag);
-  headers.set('content-length', String(object.size));
-  headers.set('accept-ranges', 'bytes');
-  headers.set('access-control-allow-origin', '*');
-
-  return new Response(object.body, { status: 200, headers });
+  return objectResponse(object, intent, 'GET');
 }
 
 /** S3 HeadObject — returns metadata without body */

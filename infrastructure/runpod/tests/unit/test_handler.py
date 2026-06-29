@@ -184,6 +184,45 @@ def basic_job_input():
     }
 
 
+class TestHlsSingleFileCommands:
+    """v1 ladder + single-file HLS command construction (Codex-bpjg5).
+
+    Single-file HLS means each variant is ONE `stream.ts` addressed by
+    #EXT-X-BYTERANGE, so the streaming proxy presigns ONE R2 URL per variant
+    (O(1) CPU) instead of one-per-segment.
+    """
+
+    def test_v1_ladder_is_720_and_480_only(self):
+        # 1080p and 360p dropped for v1 to cut R2 storage; two adaptive rungs kept.
+        assert set(handler_module.HLS_VARIANTS.keys()) == {"720p", "480p"}
+
+    @pytest.mark.parametrize("use_gpu", [True, False])
+    def test_variant_cmd_is_single_file(self, use_gpu):
+        cmd = handler_module._build_hls_variant_cmd(
+            "in.mp4",
+            "/out/720p",
+            "/out/720p/index.m3u8",
+            handler_module.HLS_VARIANTS["720p"],
+            use_gpu=use_gpu,
+        )
+        # single_file flag present and immediately follows it with the value
+        assert cmd[cmd.index("-hls_flags") + 1] == "single_file"
+        # exactly one .ts file (no %03d sequence template)
+        seg = cmd[cmd.index("-hls_segment_filename") + 1]
+        assert seg.endswith("stream.ts")
+        assert "%03d" not in seg
+
+    @pytest.mark.parametrize("use_gpu", [True, False])
+    def test_preview_cmd_is_single_file(self, use_gpu):
+        cmd = handler_module._build_preview_cmd(
+            "in.mp4", "/out/preview", 0, 30, use_gpu=use_gpu
+        )
+        assert cmd[cmd.index("-hls_flags") + 1] == "single_file"
+        seg = cmd[cmd.index("-hls_segment_filename") + 1]
+        assert seg.endswith("stream.ts")
+        assert "%03d" not in seg
+
+
 def test_handler_video_flow_cpu(
     mock_s3_client,
     mock_download_file,

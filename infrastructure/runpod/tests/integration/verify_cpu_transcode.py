@@ -93,6 +93,22 @@ def test_transcode_function():
         if not os.path.exists(os.path.join(hls_dir, "master.m3u8")):
             raise Exception("Master playlist not created")
 
+        # Single-file HLS (Codex-bpjg5): each variant must be ONE stream.ts
+        # addressed by #EXT-X-BYTERANGE, so the proxy presigns one URL per variant.
+        import glob
+
+        for variant in ("720p", "480p"):
+            vdir = os.path.join(hls_dir, variant)
+            ts_files = glob.glob(os.path.join(vdir, "*.ts"))
+            if len(ts_files) != 1 or not ts_files[0].endswith("stream.ts"):
+                names = [os.path.basename(t) for t in ts_files]
+                raise Exception(f"{variant}: expected one stream.ts, got {names}")
+            with open(os.path.join(vdir, "index.m3u8")) as pl:
+                playlist = pl.read()
+            if "#EXT-X-BYTERANGE" not in playlist:
+                raise Exception(f"{variant}: playlist missing #EXT-X-BYTERANGE")
+
+        print("✅ Single-file HLS verified (one stream.ts + byte-range per variant)")
         print("✅ CPU Transcode successful")
 
     except Exception as e:

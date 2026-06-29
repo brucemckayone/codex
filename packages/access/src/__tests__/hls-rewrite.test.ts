@@ -146,6 +146,66 @@ describe('rewriteVariantPlaylist', () => {
   });
 });
 
+describe('single-file HLS (EXT-X-BYTERANGE) — Approach B / Codex-bpjg5', () => {
+  // Real `ffmpeg -hls_flags single_file` output shape (verified via spike S3):
+  // every segment line references the SAME .ts file, with a preceding byte range.
+  const singleFile = [
+    '#EXTM3U',
+    '#EXT-X-VERSION:4',
+    '#EXT-X-TARGETDURATION:7',
+    '#EXT-X-MEDIA-SEQUENCE:0',
+    '#EXT-X-PLAYLIST-TYPE:VOD',
+    '#EXTINF:6.000000,',
+    '#EXT-X-BYTERANGE:299108@0',
+    'stream.ts',
+    '#EXTINF:6.000000,',
+    '#EXT-X-BYTERANGE:300048@299108',
+    'stream.ts',
+    '#EXTINF:6.000000,',
+    '#EXT-X-BYTERANGE:300424@599156',
+    'stream.ts',
+    '#EXT-X-ENDLIST',
+    '',
+  ].join('\n');
+
+  it('collects exactly ONE segment regardless of byte-range count (O(1) presign)', () => {
+    // The whole point: N byte-range entries → 1 unique file → 1 presign.
+    expect(collectVariantSegments(singleFile)).toEqual(['stream.ts']);
+  });
+
+  it('presigns the single file exactly once when driven by collectVariantSegments', () => {
+    // Mirrors the proxy flow: presign the collected set, then rewrite via a map.
+    let presignCalls = 0;
+    const map = new Map<string, string>();
+    for (const seg of collectVariantSegments(singleFile)) {
+      presignCalls++;
+      map.set(
+        seg,
+        `https://r2.cloudflarestorage.com/${seg}?X-Amz-Signature=sig`
+      );
+    }
+    expect(presignCalls).toBe(1);
+
+    const out = rewriteVariantPlaylist(singleFile, {
+      presignSegment: (f) => map.get(f) ?? 'MISSING',
+    });
+
+    // Every `stream.ts` line becomes the one presigned URL...
+    const presignedUrl =
+      'https://r2.cloudflarestorage.com/stream.ts?X-Amz-Signature=sig';
+    expect(out.match(/stream\.ts\?X-Amz-Signature=sig/g)?.length).toBe(3);
+    expect(out).toContain(presignedUrl);
+    expect(out).not.toContain('MISSING');
+
+    // ...and every byte-range / tag line is preserved untouched.
+    expect(out).toContain('#EXT-X-VERSION:4');
+    expect(out).toContain('#EXT-X-BYTERANGE:299108@0');
+    expect(out).toContain('#EXT-X-BYTERANGE:300048@299108');
+    expect(out).toContain('#EXT-X-BYTERANGE:300424@599156');
+    expect(out).toContain('#EXT-X-ENDLIST');
+  });
+});
+
 describe('hls-token sign/verify', () => {
   const SECRET = 'test-worker-shared-secret';
   const payload = {

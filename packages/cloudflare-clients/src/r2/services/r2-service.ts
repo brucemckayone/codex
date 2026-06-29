@@ -1,11 +1,5 @@
 // r2-single-bucket.ts
 
-import {
-  GetObjectCommand,
-  PutObjectCommand,
-  S3Client,
-} from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type {
   R2Bucket,
   R2HTTPMetadata,
@@ -14,7 +8,8 @@ import type {
 } from '@cloudflare/workers-types';
 import { MIME_TYPES, R2_DEFAULTS } from '@codex/constants';
 import { ValidationError } from '@codex/service-errors';
-import { R2_REGIONS, RETRYABLE_STATUS_CODES } from '../constants';
+import { RETRYABLE_STATUS_CODES } from '../constants';
+import { R2Presigner } from './r2-presigner';
 
 export type R2Opts = {
   maxRetries?: number;
@@ -36,8 +31,7 @@ export type R2SigningConfig = {
 };
 
 export class R2Service {
-  private s3Client: S3Client | null = null;
-  private bucketName: string | null = null;
+  private presigner: R2Presigner | null = null;
 
   constructor(
     private bucket: R2Bucket,
@@ -49,17 +43,10 @@ export class R2Service {
     this.opts.maxDelayMs = this.opts.maxDelayMs ?? R2_DEFAULTS.MAX_DELAY_MS;
     this.opts.jitter = this.opts.jitter ?? true;
 
-    // Initialize S3 client for presigned URLs if config provided
+    // Initialize the lean aws4fetch presigner if signing config provided. One
+    // instance, reused across calls, so the SigV4 signing key is derived once.
     if (signingConfig) {
-      this.bucketName = signingConfig.bucketName;
-      this.s3Client = new S3Client({
-        region: R2_REGIONS.AUTO,
-        endpoint: `https://${signingConfig.accountId}.r2.cloudflarestorage.com`,
-        credentials: {
-          accessKeyId: signingConfig.accessKeyId,
-          secretAccessKey: signingConfig.secretAccessKey,
-        },
-      });
+      this.presigner = new R2Presigner(signingConfig);
     }
   }
 
@@ -165,7 +152,7 @@ export class R2Service {
     r2Key: string,
     expirySeconds: number
   ): Promise<string> {
-    if (!this.s3Client || !this.bucketName) {
+    if (!this.presigner) {
       throw new ValidationError(
         'R2 signing config required for presigned URLs. ' +
           'Provide R2SigningConfig (accountId, accessKeyId, secretAccessKey, bucketName) in constructor.',
@@ -173,12 +160,7 @@ export class R2Service {
       );
     }
 
-    const command = new GetObjectCommand({
-      Bucket: this.bucketName,
-      Key: r2Key,
-    });
-
-    return getSignedUrl(this.s3Client, command, { expiresIn: expirySeconds });
+    return this.presigner.presignGet(r2Key, expirySeconds);
   }
 
   /**
@@ -195,7 +177,7 @@ export class R2Service {
     contentType: string,
     expirySeconds = 3600
   ): Promise<string> {
-    if (!this.s3Client || !this.bucketName) {
+    if (!this.presigner) {
       throw new ValidationError(
         'R2 signing config required for presigned URLs. ' +
           'Provide R2SigningConfig (accountId, accessKeyId, secretAccessKey, bucketName) in constructor.',
@@ -203,12 +185,6 @@ export class R2Service {
       );
     }
 
-    const command = new PutObjectCommand({
-      Bucket: this.bucketName,
-      Key: r2Key,
-      ContentType: contentType,
-    });
-
-    return getSignedUrl(this.s3Client, command, { expiresIn: expirySeconds });
+    return this.presigner.presignPut(r2Key, contentType, expirySeconds);
   }
 }
