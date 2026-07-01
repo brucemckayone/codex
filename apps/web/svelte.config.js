@@ -161,6 +161,12 @@ const config = {
           'self',
           'data:',
           'blob:',
+          // Platform CDN — thumbnails / avatars / org logos are served from
+          // cdn-assets.revelations.studio & cdn-platform.revelations.studio
+          // (worker/CDN custom domains). 'self' does not cover sibling
+          // subdomains, so the platform wildcard is required.
+          'https://*.revelations.studio',
+          'https://*.dev.revelations.studio',
           'https://*.r2.cloudflarestorage.com',
           'https://*.r2.dev',
           // Dev-only origins — dev-cdn (Miniflare R2) serves all media in
@@ -174,6 +180,13 @@ const config = {
         'font-src': ['self', 'data:', 'https://fonts.gstatic.com'],
         'connect-src': [
           'self',
+          // Platform workers/CDN — hls.js fetch()es HLS master + variant
+          // playlists from content-api.revelations.studio (WP-14 token-in-URL
+          // proxy), and the AudioPlayer fetches the waveform.json sidecar.
+          // Browser fetch/XHR is governed by connect-src; 'self' excludes
+          // sibling subdomains.
+          'https://*.revelations.studio',
+          'https://*.dev.revelations.studio',
           // Direct-to-R2 media upload: the browser PUTs the file straight to
           // the presigned R2 URL. Governed by connect-src (not media-src).
           // Mirrors the R2 origins already trusted on img-src / media-src.
@@ -187,6 +200,12 @@ const config = {
         'media-src': [
           'self',
           'blob:',
+          // Platform HLS proxy — native <video>/<audio> load master.m3u8 +
+          // variant playlists from content-api.revelations.studio (WP-14
+          // token-in-URL proxy). Segments themselves are presigned R2 URLs
+          // (the *.r2 origins below).
+          'https://*.revelations.studio',
+          'https://*.dev.revelations.studio',
           'https://*.r2.cloudflarestorage.com',
           'https://*.r2.dev',
           // Dev-only — HLS playback (master.m3u8 + segments) served from
