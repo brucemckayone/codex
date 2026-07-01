@@ -57,6 +57,34 @@ export function createStripeClient(apiKey: string): Stripe {
 }
 
 /**
+ * Create a lazily-failing Stripe client for contexts that hold a
+ * `PurchaseService` only for its DB-backed methods (e.g. `@codex/access`
+ * `verifyPurchase`) and never call the Stripe API.
+ *
+ * content-api is intentionally NOT provisioned with a `STRIPE_SECRET_KEY`
+ * (see `.github/scripts/upload-worker-secrets.sh` — Stripe secrets are
+ * ecom-api only). Eagerly constructing a real client there throws
+ * "Stripe API key is required" and 500s every streaming request, even for
+ * free content whose access check is purely a DB read.
+ *
+ * This returns a `Stripe`-typed proxy that constructs freely (so
+ * `new PurchaseService(config, stripe)` and `verifyPurchase()` work) but
+ * throws the moment ANY Stripe operation is actually attempted — a genuine
+ * misuse still fails loudly, just at call time instead of construction time.
+ *
+ * @returns A Stripe-typed proxy that throws on any property access
+ */
+export function createLazyStripeClient(): Stripe {
+  return new Proxy(Object.create(null) as Stripe, {
+    get(_target, prop) {
+      throw new Error(
+        `Stripe API key is required (attempted to use stripe.${String(prop)})`
+      );
+    },
+  });
+}
+
+/**
  * Verify Stripe webhook signature and construct event
  *
  * Validates webhook authenticity using HMAC-SHA256 signature verification.
