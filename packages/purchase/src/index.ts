@@ -106,7 +106,11 @@ export {
   type UserCustomerMatch,
 } from './services/stripe-customer-integrity';
 // Stripe client factory
-export { createStripeClient, verifyWebhookSignature } from './stripe-client';
+export {
+  createLazyStripeClient,
+  createStripeClient,
+  verifyWebhookSignature,
+} from './stripe-client';
 // Types
 export type {
   CheckoutSessionResult,
