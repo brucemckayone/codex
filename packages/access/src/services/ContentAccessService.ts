@@ -24,7 +24,11 @@ import {
   subscriptionTiers,
   videoPlayback,
 } from '@codex/database/schema';
-import { createStripeClient, PurchaseService } from '@codex/purchase';
+import {
+  createLazyStripeClient,
+  createStripeClient,
+  PurchaseService,
+} from '@codex/purchase';
 import {
   BaseService,
   ForbiddenError,
@@ -2358,9 +2362,18 @@ export function createContentAccessService(env: ContentAccessEnv): {
   // Create per-request database client with WebSocket support for transactions
   const { db, cleanup } = createPerRequestDbClient(env);
 
-  // Create Stripe client and PurchaseService
+  // Create Stripe client and PurchaseService.
+  //
+  // The streaming access path only calls PurchaseService.verifyPurchase (a DB
+  // read) and never touches the Stripe API. content-api is intentionally NOT
+  // provisioned with a STRIPE_SECRET_KEY (Stripe secrets are ecom-api only),
+  // so when the key is absent we build a lazy client that constructs freely
+  // but throws only if a Stripe call is ever attempted — otherwise every
+  // stream request would 500 with "Stripe API key is required" (Codex-eys81).
   const environment = env.ENVIRONMENT ?? 'development';
-  const stripe = createStripeClient(env.STRIPE_SECRET_KEY || '');
+  const stripe = env.STRIPE_SECRET_KEY
+    ? createStripeClient(env.STRIPE_SECRET_KEY)
+    : createLazyStripeClient();
   const purchaseService = new PurchaseService({ db, environment }, stripe);
   const revocation = env.CACHE_KV
     ? new AccessRevocation(env.CACHE_KV)
