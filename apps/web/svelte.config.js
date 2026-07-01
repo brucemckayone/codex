@@ -40,10 +40,15 @@ const config = {
     // already covered by `font-src 'https://fonts.gstatic.com'`. Other
     // external stylesheet origins remain disallowed.
     //
-    // `connect-src` is `self` in production because all worker traffic is
-    // server-to-server (apps/web -> workers via createServerApi). The
-    // browser only ever fetches from its own origin (SvelteKit endpoints,
-    // remote functions, /__data.json).
+    // `connect-src`: worker API traffic is server-to-server (apps/web ->
+    // workers via createServerApi), so those calls never reach the browser's
+    // connect-src at all. The browser DOES make one cross-origin fetch
+    // directly, though: media upload PUTs the file straight to the presigned
+    // R2 URL (https://<account>.r2.cloudflarestorage.com). Browser fetch/XHR
+    // is governed by connect-src, so the R2 host MUST be allow-listed here —
+    // mirroring the R2 origins already trusted on img-src / media-src. It was
+    // previously omitted, which silently blocked all direct-to-R2 uploads in
+    // production (Codex-xjdz7).
     //
     // The dev-only `localhost:4100` / `*.nip.io:4100` entries on
     // `connect-src` cover the AudioPlayer's `fetch(waveform.json)` sidecar.
@@ -169,6 +174,11 @@ const config = {
         'font-src': ['self', 'data:', 'https://fonts.gstatic.com'],
         'connect-src': [
           'self',
+          // Direct-to-R2 media upload: the browser PUTs the file straight to
+          // the presigned R2 URL. Governed by connect-src (not media-src).
+          // Mirrors the R2 origins already trusted on img-src / media-src.
+          'https://*.r2.cloudflarestorage.com',
+          'https://*.r2.dev',
           // Dev-only — AudioPlayer fetches waveform.json from dev-cdn.
           // See header comment above on `connect-src`. Inert in production.
           'http://localhost:4100',
