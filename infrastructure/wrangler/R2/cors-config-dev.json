@@ -1,0 +1,22 @@
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": [
+          "https://*.dev.revelations.studio",
+          "https://dev.revelations.studio"
+        ],
+        "methods": ["GET", "HEAD", "PUT"],
+        "headers": ["*"]
+      },
+      "exposeHeaders": [
+        "Content-Range",
+        "Content-Length",
+        "Accept-Ranges",
+        "ETag",
+        "Content-Type"
+      ],
+      "maxAgeSeconds": 3600
+    }
+  ]
+}
