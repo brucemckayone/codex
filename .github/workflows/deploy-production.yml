@@ -72,6 +72,32 @@ jobs:
 
           echo "✅ Production DNS verified"
 
+      # Apply the R2 media-bucket CORS policy so browser HLS byte-range segment
+      # fetches AND direct-to-R2 uploads work cross-origin from
+      # *.revelations.studio. Codifies Codex-fc5oh.16: the policy previously
+      # drifted (stale apex/pages.dev origins) because it was only ever set by
+      # hand, which silently broke streaming for all long content in prod.
+      # continue-on-error: a CORS-push failure must NEVER break the app deploy —
+      # if CLOUDFLARE_API_TOKEN lacks "Workers R2 Storage: Edit" we surface a
+      # loud ::error:: annotation instead. Remove continue-on-error once the
+      # token is confirmed to carry R2 edit scope.
+      - name: Configure R2 media bucket CORS
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BUCKET: ${{ vars.R2_BUCKET_MEDIA }}
+        run: |
+          echo "🔧 Applying CORS policy to R2 bucket '$BUCKET'..."
+          if npx wrangler r2 bucket cors set "$BUCKET" \
+               --file infrastructure/wrangler/R2/cors-config-production.json -y; then
+            echo "✅ R2 CORS policy applied to $BUCKET"
+            npx wrangler r2 bucket cors list "$BUCKET" || true
+          else
+            echo "::error title=R2 CORS not applied::Could not set CORS on '$BUCKET'. The CLOUDFLARE_API_TOKEN likely needs 'Workers R2 Storage: Edit'. HLS streaming + direct-to-R2 uploads will break cross-origin until fixed (Codex-fc5oh.16)."
+            exit 1
+          fi
+
       # Build all workers BEFORE touching database
       - name: Build all workers with Turborepo
         run: |
