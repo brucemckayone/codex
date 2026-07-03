@@ -2479,6 +2479,166 @@ export const studio_action_view_site = () => `View Public Site`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_title = () => `Get set up`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_subtitle = () => `A few steps to your first sale.`
+
+
+/**
+ * @param {{ completed: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_progress = (params) => `${params.completed} of ${params.total}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_dismiss = () => `Dismiss checklist`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_step_done = () => `Done`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_profile_title = () => `Creator profile complete`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_profile_description = () => `Your public creator profile is live.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_payouts_title = () => `Connect payouts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_payouts_description = () => `Add a Stripe account so you can get paid.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_payouts_cta = () => `Set up`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_media_title = () => `Upload your first media`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_media_description = () => `Add a video or audio file — we transcode it for streaming.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_media_cta = () => `Upload`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_publish_title = () => `Publish your first content`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_publish_description = () => `Wrap your media in a page and share it with your audience.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_publish_cta = () => `Create`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_optional_label = () => `Optional`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_studio_title = () => `Open a studio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_studio_description = () => `Add branding, a team, and subscription tiers with your own studio.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_onboarding_studio_cta = () => `Create studio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_revenue_chart_title = () => `Revenue (Last 14 Days)`
 
 
@@ -4047,7 +4207,15 @@ export const media_empty = () => `No media files yet`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const media_empty_description = () => `Upload your first media file to get started.`
+export const media_empty_description = () => `Upload a video or audio file — we transcode it for streaming, then you attach it to content and publish.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const media_empty_cta = () => `Upload media`
 
 
 /**
@@ -4248,6 +4416,22 @@ export const studio_content_empty = () => `No content yet. Create your first pie
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_empty_description = () => `Create your first piece of content to get started.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_empty_title = () => `No content yet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_empty_how = () => `Create a content page, attach your media, then publish it to your audience.`
 
 
 /**
@@ -8819,7 +9003,7 @@ export const library_filter_group_progress = () => `Progress`
 
 
 /**
- *
+ * 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
@@ -8827,7 +9011,6 @@ export const library_filter_group_type = () => `Type`
 
 
 /**
-
  * 
  * @returns {string}
  */
@@ -9210,8 +9393,9 @@ export const earnings_payouts_load_error = () => `Could not load payout history.
 /* @__NO_SIDE_EFFECTS__ */
 export const earnings_payouts_retry = () => `Retry`
 
+
 /**
- *
+ * 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
@@ -9219,7 +9403,7 @@ export const email_creator_connect_needed_subject = () => `Action required: conn
 
 
 /**
- *
+ * 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
@@ -9227,7 +9411,7 @@ export const email_creator_connect_needed_body = () => `A payout is waiting for 
 
 
 /**
- *
+ * 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
@@ -9235,7 +9419,7 @@ export const email_payout_released_subject = () => `Your payout is on its way`
 
 
 /**
- *
+ * 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
