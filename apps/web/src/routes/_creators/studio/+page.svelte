@@ -13,6 +13,9 @@
   import FocusRail from '$lib/components/studio/dashboard/FocusRail.svelte';
   import type { FocusItem } from '$lib/components/studio/dashboard/FocusRail.svelte';
   import { buildCreatorAgreementFocusItems } from '$lib/components/studio/dashboard/agreement-focus-items';
+  import OnboardingChecklist from '$lib/components/studio/dashboard/OnboardingChecklist.svelte';
+  import { buildCreatorOnboardingChecklist } from '$lib/components/studio/dashboard/onboarding-checklist';
+  import CreateOrganizationDialog from '$lib/components/studio/CreateOrganizationDialog.svelte';
   import {
     PlusIcon,
     UploadIcon,
@@ -24,6 +27,7 @@
   import { listMedia } from '$lib/remote/media.remote';
   import { getActivityFeed } from '$lib/remote/admin.remote';
   import { getMyAgreementPortfolio } from '$lib/remote/agreements.remote';
+  import { getMyConnectStatus } from '$lib/remote/subscription.remote';
   import type { Component } from 'svelte';
   import * as m from '$paraglide/messages';
 
@@ -75,6 +79,60 @@
     }).filter((item) => !item.dismissable || !isDismissed(item.id));
   });
 
+  // ── First-run onboarding checklist (WP-9 — Codex-fc5oh.9) ─────────────────
+  // Drives a dismissible "Get set up" card from real per-user state. Connect
+  // is per-USER (one account across all orgs → /connect/me/status); media +
+  // published-content are creator-scoped counts; org creation is optional.
+  const ONBOARDING_DISMISS_KEY = 'creator-onboarding-checklist';
+  // Long expiry — a first-run aid, not a recurring nag. Once dismissed it
+  // stays gone; it also auto-hides the moment all core steps complete.
+  const ONBOARDING_DISMISS_EXPIRY_DAYS = 365;
+
+  const connectQuery = $derived(getMyConnectStatus());
+  const publishedContentQuery = $derived(
+    listContent({ status: 'published', limit: 1 })
+  );
+
+  let onboardingDismissTick = $state(0);
+  function handleOnboardingDismiss() {
+    dismiss(ONBOARDING_DISMISS_KEY);
+    onboardingDismissTick += 1;
+  }
+
+  let createStudioOpen = $state(false);
+
+  // Gate rendering until every signal has resolved, so the card never
+  // flashes a misleading "0 of 4" before jumping to its real state.
+  const onboardingReady = $derived(
+    !!connectQuery?.current &&
+      !!mediaQuery?.current &&
+      !!publishedContentQuery?.current
+  );
+
+  const onboardingState = $derived.by(() => {
+    const connect = connectQuery?.current;
+    const payoutsEnabled =
+      !!connect &&
+      !('fetchFailed' in connect && connect.fetchFailed) &&
+      !!connect.chargesEnabled &&
+      !!connect.payoutsEnabled;
+    return buildCreatorOnboardingChecklist({
+      profileComplete: !!data.creator?.username,
+      payoutsEnabled,
+      hasMedia: (mediaQuery?.current?.pagination?.total ?? 0) > 0,
+      hasPublishedContent:
+        (publishedContentQuery?.current?.pagination?.total ?? 0) > 0,
+      hasOrg: (data.orgs?.length ?? 0) > 0,
+    });
+  });
+
+  const showOnboarding = $derived.by(() => {
+    void onboardingDismissTick;
+    if (!onboardingReady) return false;
+    if (onboardingState.complete) return false;
+    return !isDismissed(ONBOARDING_DISMISS_KEY, ONBOARDING_DISMISS_EXPIRY_DAYS);
+  });
+
   // ── Quick Actions ──────────────────────────────────────────────────────────
 
   interface QuickAction {
@@ -101,6 +159,14 @@
     <h1 class="dashboard-title">{m.studio_dashboard_title()}</h1>
     <p class="dashboard-subtitle">{m.studio_creator_dashboard_subtitle()}</p>
   </header>
+
+  {#if showOnboarding}
+    <OnboardingChecklist
+      state={onboardingState}
+      onDismiss={handleOnboardingDismiss}
+      onCreateStudio={() => (createStudioOpen = true)}
+    />
+  {/if}
 
   {#if statsLoading}
     <section class="stats-grid" aria-label="Dashboard statistics">
@@ -162,6 +228,10 @@
     {/if}
   </section>
 </div>
+
+<!-- Optional "open a studio" step opens the same org-creation flow as the
+     StudioSwitcher; on success it navigates to the new org studio. -->
+<CreateOrganizationDialog bind:open={createStudioOpen} />
 
 <style>
   .dashboard {

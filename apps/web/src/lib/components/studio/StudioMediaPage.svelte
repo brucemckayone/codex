@@ -18,7 +18,7 @@
   import { Pagination } from '$lib/components/ui/Pagination';
   import * as Dialog from '$lib/components/ui/Dialog';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
-  import { FilmIcon, SearchXIcon } from '$lib/components/ui/Icon';
+  import { FilmIcon, SearchXIcon, UploadIcon } from '$lib/components/ui/Icon';
   import { deleteMedia, updateMedia } from '$lib/remote/media.remote';
   import { logger } from '$lib/observability';
   import type { MediaItemWithRelations } from '$lib/types';
@@ -264,7 +264,14 @@
         title={m.media_empty()}
         description={m.media_empty_description()}
         icon={FilmIcon}
-      />
+      >
+        {#snippet action()}
+          <Button onclick={openPicker}>
+            <UploadIcon size={16} />
+            {m.media_empty_cta()}
+          </Button>
+        {/snippet}
+      </EmptyState>
     {:else if filteredItems.length === 0 && ghostItems.length === 0}
       <EmptyState
         title={searchEmptyTitle}
