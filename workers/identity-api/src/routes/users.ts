@@ -14,6 +14,7 @@ import {
 } from '@codex/image-processing';
 import type { HonoEnv } from '@codex/shared-types';
 import {
+  updateCreatorOnboardingSchema,
   updateNotificationPreferencesSchema,
   updateProfileSchema,
   upgradeToCreatorSchema,
@@ -189,6 +190,44 @@ app.put(
     input: { body: updateNotificationPreferencesSchema },
     handler: async (ctx) => {
       return await ctx.services.identity.updateNotificationPreferences(
+        ctx.user.id,
+        ctx.input.body
+      );
+    },
+  })
+);
+
+/**
+ * GET /api/user/creator-onboarding
+ * Get the authenticated creator's first-run onboarding state
+ * Upserts defaults on first access
+ *
+ * Security: Authenticated user only
+ */
+app.get(
+  '/creator-onboarding',
+  procedure({
+    policy: { auth: 'required' },
+    handler: async (ctx) => {
+      return await ctx.services.identity.getCreatorOnboarding(ctx.user.id);
+    },
+  })
+);
+
+/**
+ * PATCH /api/user/creator-onboarding
+ * Patch the authenticated creator's onboarding state (step pointer +
+ * welcomeSeen/dismissed/completed intents → server-set timestamps)
+ *
+ * Security: Authenticated user only
+ */
+app.patch(
+  '/creator-onboarding',
+  procedure({
+    policy: { auth: 'required' },
+    input: { body: updateCreatorOnboardingSchema },
+    handler: async (ctx) => {
+      return await ctx.services.identity.updateCreatorOnboarding(
         ctx.user.id,
         ctx.input.body
       );

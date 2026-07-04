@@ -14,7 +14,6 @@ import { z } from 'zod';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
 import { ApiError } from '$lib/server/errors';
-import { buildCreatorsUrl } from '$lib/utils/subdomain';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Schemas for forms
@@ -197,15 +196,20 @@ const becomeCreatorFormSchema = z.object({
 });
 
 /**
- * Upgrade account from customer to creator
+ * Step 1 (Essentials) of the guided onboarding wizard: upgrade the account
+ * from customer to creator, then advance to the profile step.
  *
- * On success, redirects to the creator studio.
+ * The role upgrade is the single one-time customer→creator transition and
+ * awaits session-KV eviction, so the redirected GET sees `role='creator'` and
+ * the wizard renders `?step=profile`. We do NOT leave to the studio here — the
+ * wizard owns the whole identity-setup arc; the studio is only reached from the
+ * finish step. Server `redirect(303)` keeps this working with JS disabled.
  * Username is required — it becomes the creator's profile URL.
  */
 export const becomeCreatorForm = form(
   becomeCreatorFormSchema,
   async ({ username, bio, website, twitter, youtube, instagram }, issue) => {
-    const { platform, cookies, url } = getRequestEvent();
+    const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
 
     const emptyToUndef = (v: string | undefined) => (v === '' ? undefined : v);
@@ -222,12 +226,14 @@ export const becomeCreatorForm = form(
         },
       });
 
-      // New creators have no org yet — send them to their personal creator
-      // studio on the `creators` subdomain. `/studio` on the platform apex
-      // has no route and 404s; studio surfaces only exist on the `creators`
-      // and `<org-slug>` subdomains. Org creation is a separate, optional
-      // step via the studio switcher's "Add Organisation" flow.
-      redirect(303, buildCreatorsUrl(url, '/studio'));
+      // Move the resume pointer forward so cross-device/return resume lands on
+      // the profile step. Best-effort: the effective step also derives from
+      // data (username present, no avatar → profile) if this bump fails.
+      await api.account
+        .updateCreatorOnboarding({ currentStep: 'profile' })
+        .catch(() => {});
+
+      redirect(303, '/become-creator?step=profile');
     } catch (error) {
       if (isRedirect(error)) throw error;
 
@@ -284,6 +290,48 @@ export const getProfile = query(async () => {
     throw error;
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Onboarding Profile Save (wizard profile step — bio + social links)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const onboardingProfileSchema = z.object({
+  bio: z.string().max(500).optional(),
+  website: z.string().url('Invalid website URL').or(z.literal('')).optional(),
+  twitter: z.string().url('Invalid Twitter URL').or(z.literal('')).optional(),
+  youtube: z.string().url('Invalid YouTube URL').or(z.literal('')).optional(),
+  instagram: z
+    .string()
+    .url('Invalid Instagram URL')
+    .or(z.literal(''))
+    .optional(),
+});
+
+/**
+ * Save the profile step of the onboarding wizard — bio + social links together
+ * so the single `updateProfile` call carries the full social set and never
+ * partially clobbers existing links. Command (not form): the wizard is
+ * client-driven between steps, so progressive enhancement isn't needed here.
+ */
+export const saveOnboardingProfile = command(
+  onboardingProfileSchema,
+  async ({ bio, website, twitter, youtube, instagram }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+    const emptyToUndef = (v: string | undefined) => (v === '' ? undefined : v);
+    const result = await api.account.updateProfile({
+      bio: emptyToUndef(bio),
+      socialLinks: {
+        website: emptyToUndef(website),
+        twitter: emptyToUndef(twitter),
+        youtube: emptyToUndef(youtube),
+        instagram: emptyToUndef(instagram),
+      },
+    });
+    await getProfile().refresh();
+    return result;
+  }
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Notification Preferences Query

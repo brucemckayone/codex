@@ -168,3 +168,33 @@ export class CreatorConnectRequiredError extends BusinessLogicError {
     );
   }
 }
+
+/**
+ * The PLATFORM's own Stripe account has not been enabled for Connect, so no
+ * connected accounts can be created for ANY creator — `stripe.accounts.create`
+ * throws a `StripeInvalidRequestError` ("You can only create new accounts if
+ * you've signed up for Connect…").
+ *
+ * This is an operator/platform misconfiguration, NOT a creator error. It keeps
+ * the honest 500 (the failure is genuinely server-side), but because it is a
+ * typed `ServiceError` — not a raw Stripe throw — `mapErrorToResponse` surfaces
+ * this specific `code` + `message` to the client verbatim instead of the
+ * generic "An unexpected error occurred" masking (safe: we authored the
+ * message, it leaks no Stripe internals). That distinct code is what lets the
+ * studio show an actionable message and lets operators grep this failure apart
+ * from ordinary 500s.
+ *
+ * Fix: enable Connect for the platform account at
+ * https://dashboard.stripe.com/connect. Connect enablement is per-mode — test
+ * and live must each be switched on separately.
+ */
+export class ConnectPlatformNotConfiguredError extends ServiceError {
+  constructor(context?: Record<string, unknown>) {
+    super(
+      'Payments are not fully set up on this platform yet. Please try again later or contact support.',
+      'CONNECT_PLATFORM_NOT_CONFIGURED',
+      500,
+      context
+    );
+  }
+}

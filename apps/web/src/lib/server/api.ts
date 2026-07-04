@@ -77,6 +77,7 @@ import type {
   ResumeSubscriptionInput,
   UpdateBrandingInput,
   UpdateContactInput,
+  UpdateCreatorOnboardingInput,
   UpdateFeaturesInput,
   UpdateNotificationPreferencesInput,
   UpdateProfileInput,
@@ -179,6 +180,19 @@ export function buildAuthForwardingCookie(sessionToken: string): string {
  * }
  * ```
  */
+/**
+ * Creator first-run onboarding state as returned over the wire (timestamps
+ * are ISO strings after JSON serialization of the service's Date fields).
+ */
+export interface CreatorOnboardingResponse {
+  currentStep: string;
+  welcomeSeenAt: string | null;
+  dismissedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export function createServerApi(
   platform: App.Platform | undefined,
   cookies?: Cookies
@@ -466,6 +480,28 @@ export function createServerApi(
           '/api/user/notification-preferences',
           {
             method: 'PUT',
+            body: JSON.stringify(data),
+          }
+        ),
+
+      /**
+       * Get creator first-run onboarding state (upserts defaults on first access)
+       */
+      getCreatorOnboarding: () =>
+        request<CreatorOnboardingResponse>(
+          'identity',
+          '/api/user/creator-onboarding'
+        ),
+
+      /**
+       * Patch creator onboarding state (step pointer + boolean intents)
+       */
+      updateCreatorOnboarding: (data: UpdateCreatorOnboardingInput) =>
+        request<CreatorOnboardingResponse>(
+          'identity',
+          '/api/user/creator-onboarding',
+          {
+            method: 'PATCH',
             body: JSON.stringify(data),
           }
         ),

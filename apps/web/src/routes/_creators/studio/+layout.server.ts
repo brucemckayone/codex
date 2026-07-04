@@ -7,10 +7,13 @@
  */
 import { AUTH_ROLES } from '@codex/constants';
 import { redirect } from '@sveltejs/kit';
+import { shouldResumeInWizard } from '$lib/onboarding/onboarding-flow';
 import { getProfile } from '$lib/remote/account.remote';
+import { getCreatorOnboarding } from '$lib/remote/onboarding.remote';
 import { getMyOrganizations } from '$lib/remote/org.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { buildPlatformUrl } from '$lib/utils/subdomain';
 import type { LayoutServerLoad } from './$types';
 
 /** Roles permitted to access the creator studio */
@@ -37,6 +40,19 @@ export const load: LayoutServerLoad = async ({
   // Role gate: must be a creator, admin, or platform_owner
   if (!(STUDIO_ROLES as Set<string>).has(locals.user.role)) {
     redirect(302, '/?error=access_denied');
+  }
+
+  // Safety net: a creator who started the guided onboarding wizard and then
+  // navigated straight to the studio is bounced back to finish it. Gated on the
+  // stored pointer (not a data-derived "incomplete"), so a legacy creator whose
+  // record is a fresh `essentials` upsert is never trapped, and finished /
+  // dismissed creators are left alone. See shouldResumeInWizard.
+  const onboarding = await getCreatorOnboarding().catch(() => null);
+  if (onboarding && shouldResumeInWizard(onboarding)) {
+    redirect(
+      302,
+      buildPlatformUrl(url, `/become-creator?step=${onboarding.currentStep}`)
+    );
   }
 
   // Studio is always user-specific — prevent public caching

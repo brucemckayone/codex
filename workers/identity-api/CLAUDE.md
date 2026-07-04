@@ -15,6 +15,8 @@ User identity, profiles, avatar management, role upgrades, notification preferen
 | POST | `/api/user/upgrade-to-creator` | `required`, `rateLimit: 'strict'` | body: `upgradeToCreatorSchema` | 200 | Upgrade customer → creator role; invalidates session KV immediately |
 | GET | `/api/user/notification-preferences` | `required` | — | 200 | Get preferences; upserts defaults on first access |
 | PUT | `/api/user/notification-preferences` | `required` | body: `updateNotificationPreferencesSchema` | 200 | Update preferences |
+| GET | `/api/user/creator-onboarding` | `required` | — | 200 | Get creator first-run onboarding state; upserts defaults on first access |
+| PATCH | `/api/user/creator-onboarding` | `required` | body: `updateCreatorOnboardingSchema` | 200 | Patch onboarding state (`currentStep` + `welcomeSeen`/`dismissed`/`completed` boolean intents → server-set timestamps) |
 
 ### Membership Routes (`/api/organizations/*`)
 
