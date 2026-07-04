@@ -6,6 +6,7 @@
 
 export * from './auth';
 export * from './content';
+export * from './creator-onboarding';
 export * from './ecommerce';
 export * from './fee-config';
 export * from './followers';

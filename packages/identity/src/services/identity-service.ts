@@ -3,6 +3,7 @@ import { CacheType } from '@codex/cache';
 import type { R2Service } from '@codex/cloudflare-clients';
 import { toIso, whereNotDeleted } from '@codex/database';
 import {
+  creatorOnboarding,
   notificationPreferences,
   organizationMemberships,
   users,
@@ -17,6 +18,7 @@ import {
   type ServiceConfig,
 } from '@codex/service-errors';
 import type { UserProfile } from '@codex/shared-types';
+import type { UpdateCreatorOnboardingInput } from '@codex/validation';
 import { and, eq, ne } from 'drizzle-orm';
 
 import { UserNotFoundError, UsernameTakenError } from '../errors';
@@ -543,6 +545,112 @@ export class IdentityService extends BaseService {
         error,
         'IdentityService.updateNotificationPreferences'
       );
+    }
+  }
+
+  /**
+   * Get the creator's first-run onboarding state (upserts defaults on first
+   * access, mirroring getNotificationPreferences).
+   *
+   * Deliberately uncached: the wizard patches this record several times per
+   * flow, and it is read by a PK lookup (`user_id`) on the studio critical
+   * path — a cheap indexed hit not worth the invalidation churn a cache would
+   * add. Payouts completion is NOT tracked here; it stays derived from the
+   * live Stripe Connect status.
+   *
+   * @param userId - User ID
+   * @returns Creator onboarding state
+   */
+  async getCreatorOnboarding(userId: string): Promise<{
+    currentStep: string;
+    welcomeSeenAt: Date | null;
+    dismissedAt: Date | null;
+    completedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }> {
+    try {
+      // Upsert: insert defaults if not exists, return existing if present.
+      const [row] = await this.db
+        .insert(creatorOnboarding)
+        .values({ userId })
+        .onConflictDoUpdate({
+          target: creatorOnboarding.userId,
+          set: { userId }, // no-op update to return the row
+        })
+        .returning();
+
+      return {
+        currentStep: row.currentStep,
+        welcomeSeenAt: row.welcomeSeenAt,
+        dismissedAt: row.dismissedAt,
+        completedAt: row.completedAt,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
+    } catch (error) {
+      throw this.handleError(error, 'IdentityService.getCreatorOnboarding');
+    }
+  }
+
+  /**
+   * Patch the creator's onboarding state.
+   *
+   * Boolean *intents* from the client map to server-set timestamps (never a
+   * client clock): `welcomeSeen` → `welcomeSeenAt`, `dismissed` →
+   * `dismissedAt`, `completed` → `completedAt`. `currentStep` moves the resume
+   * pointer. Upserts so it works before the row exists.
+   *
+   * @param userId - User ID
+   * @param input - Already-validated patch (see updateCreatorOnboardingSchema)
+   * @returns Updated creator onboarding state
+   */
+  async updateCreatorOnboarding(
+    userId: string,
+    input: UpdateCreatorOnboardingInput
+  ): Promise<{
+    currentStep: string;
+    welcomeSeenAt: Date | null;
+    dismissedAt: Date | null;
+    completedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }> {
+    try {
+      const now = new Date();
+      const patch = {
+        ...(input.currentStep !== undefined && {
+          currentStep: input.currentStep,
+        }),
+        ...(input.welcomeSeen === true && { welcomeSeenAt: now }),
+        ...(input.dismissed === true && { dismissedAt: now }),
+        ...(input.completed === true && { completedAt: now }),
+      };
+
+      const [row] = await this.db
+        .insert(creatorOnboarding)
+        .values({ userId, ...patch })
+        .onConflictDoUpdate({
+          target: creatorOnboarding.userId,
+          set: { ...patch, updatedAt: now },
+        })
+        .returning();
+
+      this.obs.debug('updateCreatorOnboarding', {
+        userId,
+        currentStep: row.currentStep,
+      });
+
+      return {
+        currentStep: row.currentStep,
+        welcomeSeenAt: row.welcomeSeenAt,
+        dismissedAt: row.dismissedAt,
+        completedAt: row.completedAt,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
+    } catch (error) {
+      throw this.handleError(error, 'IdentityService.updateCreatorOnboarding');
     }
   }
 
