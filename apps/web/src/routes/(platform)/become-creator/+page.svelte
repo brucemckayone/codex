@@ -1,182 +1,110 @@
+<!--
+  @component Become Creator — onboarding wizard shell
+
+  Renders the progress stepper + the active step (driven by ?step= via the
+  server load). Owns step navigation: goToStep patches the server `currentStep`
+  pointer, then navigates the query param so the load re-resolves. Step 1
+  (essentials) self-redirects via its form; later steps advance through here.
+-->
 <script lang="ts">
-	import { becomeCreatorForm } from '$lib/remote/account.remote';
-	import Button from '$lib/components/ui/Button/Button.svelte';
-	import Input from '$lib/components/ui/Input/Input.svelte';
-	import Label from '$lib/components/ui/Label/Label.svelte';
-	import TextArea from '$lib/components/ui/TextArea/TextArea.svelte';
-	import { Alert } from '$lib/components/ui';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/state';
+  import { Button } from '$lib/components/ui';
+  import { updateCreatorOnboarding } from '$lib/remote/onboarding.remote';
+  import { buildCreatorsUrl } from '$lib/utils/subdomain';
+  import * as m from '$paraglide/messages';
+  import OnboardingProgress from './OnboardingProgress.svelte';
+  import StepEssentials from './steps/StepEssentials.svelte';
+  import StepFinish from './steps/StepFinish.svelte';
+  import StepPayouts from './steps/StepPayouts.svelte';
+  import StepProfile from './steps/StepProfile.svelte';
 
-	let { data } = $props();
+  let { data } = $props();
 
-	const { username, bio, website, twitter, youtube, instagram } =
-		becomeCreatorForm.fields;
+  const steps = $derived([
+    { id: 'essentials', label: m.onboarding_step_essentials_label() },
+    { id: 'profile', label: m.onboarding_step_profile_label() },
+    { id: 'payouts', label: m.onboarding_step_payouts_label() },
+    { id: 'finish', label: m.onboarding_step_finish_label() },
+  ]);
+
+  // Show the top-level "skip setup" affordance only mid-flow (post-upgrade,
+  // pre-finish) — a customer at essentials isn't a creator yet, and finish is
+  // already the end.
+  const canSkipAll = $derived(
+    data.step === 'profile' || data.step === 'payouts'
+  );
+
+  async function goToStep(step: string) {
+    await updateCreatorOnboarding({ currentStep: step }).catch(() => {});
+    await goto(`/become-creator?step=${step}`, { keepFocus: true });
+  }
+
+  async function skipAll() {
+    await updateCreatorOnboarding({ dismissed: true }).catch(() => {});
+    // Cross-origin (apex → creators subdomain) — full navigation, not goto.
+    window.location.href = buildCreatorsUrl(page.url, '/studio');
+  }
 </script>
 
 <svelte:head>
-	<title>Become a Creator - Codex</title>
-	<meta name="robots" content="noindex" />
+  <title>Set up your creator profile · Codex</title>
+  <meta name="robots" content="noindex" />
 </svelte:head>
 
-<div class="become-creator">
-	<div class="hero">
-		<h1>Become a Creator</h1>
-		<p class="description">
-			Start sharing your content on Codex. As a creator, you can upload videos and audio,
-			build your own catalogue, and sell to your audience.
-		</p>
-	</div>
+<div class="wizard">
+  {#if data.step !== 'finish'}
+    <OnboardingProgress {steps} currentStep={data.step} />
+  {/if}
 
-	{#if becomeCreatorForm.result && !becomeCreatorForm.result.success && becomeCreatorForm.result.error}
-		<Alert variant="error" style="margin-bottom: var(--space-4)">{becomeCreatorForm.result.error}</Alert>
-	{/if}
+  <div class="wizard__body">
+    {#if data.step === 'essentials'}
+      <StepEssentials />
+    {:else if data.step === 'profile'}
+      <StepProfile
+        profile={data.profile}
+        onNext={() => goToStep('payouts')}
+        onSkip={() => goToStep('payouts')}
+      />
+    {:else if data.step === 'payouts'}
+      <StepPayouts
+        payoutsEnabled={data.payoutsEnabled}
+        connectReturnBanner={data.connectReturnBanner}
+        onContinue={() => goToStep('finish')}
+        onSkip={() => goToStep('finish')}
+        onBack={() => goToStep('profile')}
+      />
+    {:else if data.step === 'finish'}
+      <StepFinish payoutsEnabled={data.payoutsEnabled} />
+    {/if}
+  </div>
 
-	<form {...becomeCreatorForm} class="settings-card" novalidate>
-		<h2>Creator Profile</h2>
-
-		<div class="form-group">
-			<Label for="username">Username</Label>
-			<Input
-				id="username"
-				{...username.as('text')}
-				placeholder="my-creator-name"
-				required
-			/>
-			<p class="form-help">
-				This will be your public profile URL: creators.revelations.studio/<strong>{username.value() || '...'}</strong>
-			</p>
-			{#each username.issues() as issue}
-				<p class="field-error">{issue.message}</p>
-			{/each}
-		</div>
-
-		<div class="form-group">
-			<Label for="bio">Bio</Label>
-			<TextArea
-				id="bio"
-				{...bio.as('text')}
-				placeholder="Tell your audience about yourself..."
-				rows={4}
-			/>
-			{#each bio.issues() as issue}
-				<p class="field-error">{issue.message}</p>
-			{/each}
-		</div>
-
-		<h3>Social Links</h3>
-		<p class="form-help section-help">Optional — add links to your other platforms.</p>
-
-		<div class="form-group">
-			<Label for="website">Website</Label>
-			<Input id="website" {...website.as('url')} placeholder="https://example.com" />
-			{#each website.issues() as issue}
-				<p class="field-error">{issue.message}</p>
-			{/each}
-		</div>
-
-		<div class="form-group">
-			<Label for="twitter">Twitter</Label>
-			<Input id="twitter" {...twitter.as('url')} placeholder="https://twitter.com/username" />
-			{#each twitter.issues() as issue}
-				<p class="field-error">{issue.message}</p>
-			{/each}
-		</div>
-
-		<div class="form-group">
-			<Label for="youtube">YouTube</Label>
-			<Input id="youtube" {...youtube.as('url')} placeholder="https://youtube.com/channel/..." />
-			{#each youtube.issues() as issue}
-				<p class="field-error">{issue.message}</p>
-			{/each}
-		</div>
-
-		<div class="form-group">
-			<Label for="instagram">Instagram</Label>
-			<Input id="instagram" {...instagram.as('url')} placeholder="https://instagram.com/username" />
-			{#each instagram.issues() as issue}
-				<p class="field-error">{issue.message}</p>
-			{/each}
-		</div>
-
-		<div class="form-actions">
-			<Button type="submit" variant="primary" loading={becomeCreatorForm.pending > 0}>
-				{becomeCreatorForm.pending > 0 ? 'Setting up...' : 'Become a Creator'}
-			</Button>
-		</div>
-	</form>
+  {#if canSkipAll}
+    <div class="wizard__skip">
+      <Button type="button" variant="ghost" size="sm" onclick={skipAll}>
+        {m.onboarding_skip_all()}
+      </Button>
+    </div>
+  {/if}
 </div>
 
 <style>
-	.become-creator {
-		max-width: 40rem;
-		margin: 0 auto;
-	}
+  .wizard {
+    max-width: 40rem;
+    margin: 0 auto;
+    padding: var(--space-6) 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+  }
 
-	.hero {
-		margin-bottom: var(--space-8);
-	}
+  .wizard__body {
+    display: flex;
+    flex-direction: column;
+  }
 
-	.hero h1 {
-		font-family: var(--font-heading);
-		font-size: var(--text-2xl);
-		font-weight: var(--font-bold);
-		color: var(--color-text);
-		margin-bottom: var(--space-2);
-	}
-
-	.description {
-		font-size: var(--text-sm);
-		color: var(--color-text-secondary);
-		line-height: var(--leading-relaxed);
-	}
-
-	.settings-card {
-		background-color: var(--color-surface);
-		border: var(--border-width) var(--border-style) var(--color-border);
-		border-radius: var(--radius-lg);
-		padding: var(--space-6);
-		margin-bottom: var(--space-6);
-	}
-
-	.settings-card h2 {
-		font-family: var(--font-heading);
-		font-size: var(--text-lg);
-		font-weight: var(--font-semibold);
-		color: var(--color-text);
-		margin-bottom: var(--space-4);
-	}
-
-	.settings-card h3 {
-		font-family: var(--font-heading);
-		font-size: var(--text-base);
-		font-weight: var(--font-semibold);
-		color: var(--color-text);
-		margin-top: var(--space-6);
-		margin-bottom: var(--space-1);
-	}
-
-	.form-group {
-		margin-bottom: var(--space-4);
-	}
-
-	.form-help {
-		font-size: var(--text-xs);
-		color: var(--color-text-tertiary);
-		margin-top: var(--space-1);
-	}
-
-	.section-help {
-		margin-bottom: var(--space-4);
-	}
-
-	.field-error {
-		font-size: var(--text-xs);
-		color: var(--color-error-600);
-		margin-top: var(--space-1);
-	}
-
-	.form-actions {
-		margin-top: var(--space-6);
-		display: flex;
-		justify-content: flex-end;
-	}
+  .wizard__skip {
+    display: flex;
+    justify-content: center;
+  }
 </style>

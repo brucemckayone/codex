@@ -15,6 +15,7 @@
   import { buildCreatorAgreementFocusItems } from '$lib/components/studio/dashboard/agreement-focus-items';
   import OnboardingChecklist from '$lib/components/studio/dashboard/OnboardingChecklist.svelte';
   import { buildCreatorOnboardingChecklist } from '$lib/components/studio/dashboard/onboarding-checklist';
+  import WelcomeTour from '$lib/components/studio/dashboard/WelcomeTour.svelte';
   import CreateOrganizationDialog from '$lib/components/studio/CreateOrganizationDialog.svelte';
   import {
     PlusIcon,
@@ -170,7 +171,7 @@
 
   {#if statsLoading}
     <section class="stats-grid" aria-label="Dashboard statistics">
-      {#each Array(2) as _}
+      {#each Array(2) as _, i (i)}
         <div class="stat-card-skeleton">
           <div class="skeleton" style="width: 80px; height: var(--text-sm); margin-bottom: var(--space-2);"></div>
           <div class="skeleton" style="width: 120px; height: var(--text-3xl);"></div>
@@ -216,7 +217,7 @@
   <section class="activity-section">
     {#if activitiesQuery?.loading}
       <div class="activity-skeleton">
-        {#each Array(5) as _}
+        {#each Array(5) as _, i (i)}
           <div class="skeleton" style="width: 100%; height: var(--space-10); margin-bottom: var(--space-2);"></div>
         {/each}
       </div>
@@ -228,6 +229,9 @@
     {/if}
   </section>
 </div>
+
+<!-- First-run welcome modal — shows once per creator (welcomeSeenAt-gated). -->
+<WelcomeTour />
 
 <!-- Optional "open a studio" step opens the same org-creation flow as the
      StudioSwitcher; on success it navigates to the new org studio. -->

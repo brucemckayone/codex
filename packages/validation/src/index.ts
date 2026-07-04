@@ -10,6 +10,8 @@ export * from './admin/admin-schemas';
 export * from './auth';
 // Content management schemas
 export * from './content/content-schemas';
+// Creator onboarding schemas
+export * from './identity/onboarding-schema';
 // User schemas
 export * from './identity/user-schema';
 // Image validation utilities
