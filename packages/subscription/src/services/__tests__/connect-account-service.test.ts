@@ -48,6 +48,7 @@ import {
 import {
   ConnectAccountNotFoundError,
   ConnectAccountNotReadyError,
+  ConnectPlatformNotConfiguredError,
 } from '../../errors';
 import { ConnectAccountService } from '../connect-account-service';
 import { SubscriptionService } from '../subscription-service';
@@ -140,6 +141,10 @@ describe('ConnectAccountService', () => {
           metadata: {
             codex_user_id: creatorId,
           },
+        }),
+        // Replay-safe: keyed on the user so a retry reuses the same account.
+        expect.objectContaining({
+          idempotencyKey: `connect_acct_${creatorId}`,
         })
       );
 
@@ -244,6 +249,9 @@ describe('ConnectAccountService', () => {
           metadata: {
             codex_user_id: creatorId,
           },
+        }),
+        expect.objectContaining({
+          idempotencyKey: `connect_acct_${creatorId}`,
         })
       );
     });
@@ -273,8 +281,178 @@ describe('ConnectAccountService', () => {
             card_payments: { requested: true },
             transfers: { requested: true },
           },
+        }),
+        expect.objectContaining({
+          idempotencyKey: `connect_acct_${creatorId}`,
         })
       );
+    });
+
+    // ─── hardening: orphan prevention + platform-config error mapping ───
+
+    it('persists the account row BEFORE the onboarding link, so a link failure is recoverable without a duplicate account', async () => {
+      const [org] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('orphan'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      // Attempt 1: Stripe account + DB row are created, then link generation
+      // fails. The account row must survive the throw.
+      stripe.accountLinks.create = vi
+        .fn()
+        .mockRejectedValue(new Error('stripe down'));
+
+      await expect(
+        service.createAccount(
+          org.id,
+          creatorId,
+          'https://example.com/return',
+          'https://example.com/refresh'
+        )
+      ).rejects.toThrow();
+
+      const afterFailure = await service.getAccount(org.id, creatorId);
+      expect(afterFailure).not.toBeNull();
+      expect(afterFailure?.status).toBe('onboarding');
+
+      // Attempt 2 (link now succeeds): resumes the SAME account via the
+      // existing-row branch — no second Stripe account is minted.
+      stripe.accountLinks.create = vi
+        .fn()
+        .mockResolvedValue({ url: 'https://connect.stripe.com/setup/retry' });
+
+      const resumed = await service.createAccount(
+        org.id,
+        creatorId,
+        'https://example.com/return',
+        'https://example.com/refresh'
+      );
+
+      expect(resumed.accountId).toBe(afterFailure?.stripeAccountId);
+      expect(resumed.onboardingUrl).toBe(
+        'https://connect.stripe.com/setup/retry'
+      );
+      expect(stripe.accounts.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('resolves a concurrent race to a single row via onConflictDoNothing', async () => {
+      const [org] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('race'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      // The winner of a concurrent race: a row already committed for this user
+      // by the time our insert runs.
+      const [winner] = await db
+        .insert(stripeConnectAccounts)
+        .values(
+          createTestConnectAccountInput(org.id, creatorId, {
+            status: 'onboarding',
+            chargesEnabled: false,
+            payoutsEnabled: false,
+          })
+        )
+        .returning();
+
+      // Force our call PAST the existing-check (as if the winner committed
+      // after we looked) so it reaches the insert and hits uq_stripe_connect_user.
+      vi.spyOn(service, 'getAccountForUser')
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue(winner);
+
+      const result = await service.createAccount(
+        org.id,
+        creatorId,
+        'https://example.com/return',
+        'https://example.com/refresh'
+      );
+
+      // Resolves to the WINNER's account, not the row our racing insert tried.
+      expect(result.accountId).toBe(winner.stripeAccountId);
+
+      // Exactly one row for the user — no duplicate leaked into our DB.
+      const rows = await db
+        .select()
+        .from(stripeConnectAccounts)
+        .where(eq(stripeConnectAccounts.userId, creatorId));
+      expect(rows).toHaveLength(1);
+    });
+
+    it('maps Stripe "not signed up for Connect" to ConnectPlatformNotConfiguredError', async () => {
+      const [org] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('noconnect'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      const stripeErr = Object.assign(
+        new Error(
+          "You can only create new accounts if you've signed up for Connect, which you can do at https://dashboard.stripe.com/connect."
+        ),
+        { type: 'StripeInvalidRequestError' }
+      );
+      stripe.accounts.create = vi.fn().mockRejectedValue(stripeErr);
+
+      const err = await service
+        .createAccount(
+          org.id,
+          creatorId,
+          'https://example.com/return',
+          'https://example.com/refresh'
+        )
+        .catch((e) => e);
+
+      expect(err).toBeInstanceOf(ConnectPlatformNotConfiguredError);
+      expect(err.code).toBe('CONNECT_PLATFORM_NOT_CONFIGURED');
+      expect(err.statusCode).toBe(500);
+
+      // Account creation failed before any DB write — nothing persisted.
+      const account = await service.getAccount(org.id, creatorId);
+      expect(account).toBeNull();
+    });
+
+    it('does NOT map unrelated invalid-request errors to the platform-not-configured error', async () => {
+      const [org] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('otherinvalid'),
+            creatorId,
+          })
+        )
+        .returning();
+
+      // A different StripeInvalidRequestError (bad param) must NOT be swallowed
+      // as "platform not configured" — the discriminator is deliberately narrow.
+      const stripeErr = Object.assign(new Error('Invalid country: XX'), {
+        type: 'StripeInvalidRequestError',
+      });
+      stripe.accounts.create = vi.fn().mockRejectedValue(stripeErr);
+
+      const err = await service
+        .createAccount(
+          org.id,
+          creatorId,
+          'https://example.com/return',
+          'https://example.com/refresh'
+        )
+        .catch((e) => e);
+
+      expect(err).not.toBeInstanceOf(ConnectPlatformNotConfiguredError);
     });
   });
 
