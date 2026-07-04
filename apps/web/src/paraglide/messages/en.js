@@ -2999,6 +2999,30 @@ export const onboarding_finish_payouts_reminder = () => `You can set up payouts 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const welcome_tour_title = () => `Welcome to your studio`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const welcome_tour_body = () => `This is your home base — create content, upload media, and track what you earn. The setup checklist below walks you through your first steps.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const welcome_tour_cta = () => `Let's go`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_revenue_chart_title = () => `Revenue (Last 14 Days)`
 
 
