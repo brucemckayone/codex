@@ -100,12 +100,14 @@
     </div>
     <form {...avatarUploadForm} class="avatar__form">
       <Label for="avatar">{m.onboarding_profile_avatar_label()}</Label>
+<!-- Explicit types (not image/*) so the OS picker prefers supported
+           formats and iOS transcodes HEIC → JPEG on selection. -->
       <input
         id="avatar"
         class="avatar__input"
         type="file"
         name="avatar"
-        accept="image/*"
+        accept="image/png,image/jpeg,image/webp,image/gif"
       />
       {#if avatarUploadForm.result && !avatarUploadForm.result.success}
         <p class="field__error">{avatarUploadForm.result.error}</p>

@@ -5,22 +5,40 @@
  * Validates file type and size before uploading.
  */
 
-import { z } from 'zod';
+import {
+  MAX_IMAGE_SIZE_BYTES,
+  SUPPORTED_IMAGE_MIME_TYPES,
+  z,
+} from '@codex/validation';
 import { form, getRequestEvent } from '$app/server';
 import { createServerApi } from '$lib/server/api';
 import { invalidateCache } from '$lib/server/cache';
 import { getProfile } from './account.remote';
 
+const MAX_IMAGE_SIZE_MB = Math.round(MAX_IMAGE_SIZE_BYTES / 1024 / 1024);
+
 /**
- * Avatar upload schema
+ * Avatar upload schema.
+ *
+ * Mirrors the server's `SUPPORTED_IMAGE_MIME_TYPES` / `MAX_IMAGE_SIZE_BYTES`
+ * (from `@codex/validation`) so the client rejects unsupported files with a
+ * clear, actionable message BEFORE the round-trip. The previous
+ * `type.startsWith('image/')` check let iPhone HEIC/HEIF photos through — the
+ * server then rejected them, surfacing as a confusing "failed upload".
+ *
+ * An empty `file.type` is allowed through: the browser occasionally omits it,
+ * and the server re-validates by magic bytes regardless.
  */
 const avatarUploadSchema = z.object({
   avatar: z
     .instanceof(File)
-    .refine((file) => file.type.startsWith('image/'), 'Must be an image file')
     .refine(
-      (file) => file.size <= 5 * 1024 * 1024,
-      'File must be less than 5MB'
+      (file) => !file.type || SUPPORTED_IMAGE_MIME_TYPES.has(file.type),
+      'Use a JPG, PNG, WebP, or GIF image — HEIC and other formats are not supported.'
+    )
+    .refine(
+      (file) => file.size <= MAX_IMAGE_SIZE_BYTES,
+      `Image must be ${MAX_IMAGE_SIZE_MB}MB or smaller.`
     ),
 });
 
