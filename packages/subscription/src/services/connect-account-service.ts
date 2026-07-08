@@ -808,16 +808,31 @@ export class ConnectAccountService extends BaseService {
     returnUrl: string,
     refreshUrl: string
   ): Promise<string> {
-    const accountLink = await this.stripe.accountLinks.create({
-      account: stripeAccountId,
-      return_url: returnUrl,
-      refresh_url: refreshUrl,
-      type: 'account_onboarding',
-      collection_options: {
-        fields: 'eventually_due',
-      },
-    });
+    try {
+      const accountLink = await this.stripe.accountLinks.create({
+        account: stripeAccountId,
+        return_url: returnUrl,
+        refresh_url: refreshUrl,
+        type: 'account_onboarding',
+        collection_options: {
+          fields: 'eventually_due',
+        },
+      });
 
-    return accountLink.url;
+      return accountLink.url;
+    } catch (error) {
+      // A rejected return_url/refresh_url is the most common failure here and is
+      // only visible at this call site — otherwise it bubbles to a generic 500
+      // with no trace of which URL Stripe refused. Log both URLs (not PII) and
+      // the raw Stripe reason, then rethrow UNCHANGED so the caller's mapping
+      // (ConnectPlatformNotConfiguredError / handleError) still applies.
+      this.obs.error('Stripe account link creation failed', {
+        stripeAccountId,
+        returnUrl,
+        refreshUrl,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 }
