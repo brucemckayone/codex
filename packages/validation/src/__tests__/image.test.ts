@@ -1,5 +1,9 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { validateImageSignature, validateImageUpload } from '../image';
+import {
+  detectImageMimeType,
+  validateImageSignature,
+  validateImageUpload,
+} from '../image';
 
 describe('Image Validation', () => {
   // Pre-warm isomorphic-dompurify (jsdom init is slow on first import)
@@ -84,6 +88,46 @@ describe('Image Validation', () => {
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
       ]);
       expect(validateImageSignature(pngSignature, 'image/jpeg')).toBe(false);
+    });
+  });
+
+  describe('detectImageMimeType', () => {
+    it('detects PNG from magic bytes', () => {
+      const png = new Uint8Array([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ]);
+      expect(detectImageMimeType(png)).toBe('image/png');
+    });
+
+    it('detects JPEG from magic bytes', () => {
+      const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+      expect(detectImageMimeType(jpeg)).toBe('image/jpeg');
+    });
+
+    it('detects WebP from RIFF + WEBP marker', () => {
+      const webp = new Uint8Array([
+        0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+      ]);
+      expect(detectImageMimeType(webp)).toBe('image/webp');
+    });
+
+    it('detects GIF from magic bytes', () => {
+      const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
+      expect(detectImageMimeType(gif)).toBe('image/gif');
+    });
+
+    it('returns null for non-image / unknown bytes', () => {
+      const exe = new Uint8Array([0x4d, 0x5a, 0x90, 0x00]); // MZ (.exe)
+      expect(detectImageMimeType(exe)).toBeNull();
+    });
+
+    it('does NOT sniff SVG — text formats must be declared explicitly', () => {
+      const svg = new TextEncoder().encode(
+        '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"></svg>'
+      );
+      // detectImageMimeType only covers binary raster formats; SVG must arrive
+      // with an explicit image/svg+xml type so sanitisation is chosen on purpose.
+      expect(detectImageMimeType(svg)).toBeNull();
     });
   });
 

@@ -89,6 +89,46 @@ export function validateImageSignature(
   return expectedMagicNumbers.every((byte, i) => buffer[i] === byte);
 }
 
+/**
+ * Raster image types that can be reliably detected from their binary
+ * signature. SVG is intentionally excluded — it is text (`<?xml`/`<svg`) and
+ * must be declared explicitly so the SVG-sanitisation path is chosen
+ * deliberately, never inferred from sniffed bytes.
+ */
+const SNIFFABLE_IMAGE_MIME_TYPES: readonly AllowedMimeType[] = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+];
+
+/**
+ * Detects an image's MIME type from its magic bytes (content sniffing).
+ *
+ * Where {@link validateImageSignature} verifies a *claimed* type, this *infers*
+ * the type when none is reliably declared — e.g. a cross-worker multipart
+ * re-forward where the part's `Content-Type` was stripped and the runtime
+ * substituted `application/octet-stream`. workerd emits that generic type
+ * whenever a `File` whose `.type` was empty is (re)serialised onto a multipart
+ * body, so a valid image can arrive at a receiving worker with no usable type.
+ *
+ * Only the binary raster formats are sniffed (see {@link SNIFFABLE_IMAGE_MIME_TYPES});
+ * their signatures are unambiguous and non-overlapping in the leading bytes.
+ *
+ * @param buffer - File content as a byte array (only the header is inspected)
+ * @returns the detected MIME type, or `null` if it matches no sniffable format
+ */
+export function detectImageMimeType(
+  buffer: Uint8Array
+): AllowedMimeType | null {
+  for (const mimeType of SNIFFABLE_IMAGE_MIME_TYPES) {
+    if (validateImageSignature(buffer, mimeType)) {
+      return mimeType;
+    }
+  }
+  return null;
+}
+
 export interface ImageValidationConfig {
   maxSizeBytes?: number;
   allowedMimeTypes: AllowedMimeType[];

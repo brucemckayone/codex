@@ -11,5 +11,6 @@ export default packageVitestConfig({
     '@codex/observability': '../observability/src',
     '@codex/identity': '../identity/src',
     '@codex/image-processing': '../image-processing/src',
+    '@codex/validation': '../validation/src',
   },
 });
