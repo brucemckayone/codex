@@ -521,7 +521,23 @@ export function createServerApi(
             : {},
           body: formData,
         }).then(async (res) => {
-          if (!res.ok) throw new ApiError(res.status, 'Upload failed');
+          if (!res.ok) {
+            // Surface identity-api's real error message (e.g. an invalid MIME
+            // type or oversize file) instead of masking every failure as a
+            // generic "Upload failed" — that opacity is exactly what hid the
+            // prod avatar 400 (Codex-sxm74). The error envelope is already
+            // sanitised by mapErrorToResponse(), so no internal detail leaks.
+            let message = 'Upload failed';
+            try {
+              const body = (await res.json()) as {
+                error?: { message?: string };
+              };
+              if (body?.error?.message) message = body.error.message;
+            } catch {
+              // Non-JSON body — keep the generic message.
+            }
+            throw new ApiError(res.status, message);
+          }
           const json = await res.json();
           // Unwrap single-item envelope: { data: T } → T
           const record = json as Record<string, unknown>;
