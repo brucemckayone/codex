@@ -38,6 +38,7 @@
 import type { ObservabilityClient } from '@codex/observability';
 import { mapErrorToResponse, ValidationError } from '@codex/service-errors';
 import type { HonoEnv } from '@codex/shared-types';
+import { detectImageMimeType } from '@codex/validation';
 import type { Context } from 'hono';
 import { validateInput } from './helpers';
 import type {
@@ -254,7 +255,7 @@ export function multipartProcedure<
 // File Validation Helper
 // ============================================================================
 
-async function validateFiles<T extends FileSchema | undefined>(
+export async function validateFiles<T extends FileSchema | undefined>(
   formData: FormData,
   schema: T
 ): Promise<InferFiles<T>> {
@@ -278,29 +279,54 @@ async function validateFiles<T extends FileSchema | undefined>(
 
     const validFile = file as unknown as File;
 
-    // Validate MIME type
+    // Validate file size FIRST — `File.size` is known from the multipart
+    // headers, so we reject oversized uploads before reading the body into
+    // memory (a full read of a near-limit file would otherwise risk OOM).
+    if (config.maxSize && validFile.size > config.maxSize) {
+      throw new FileTooLargeError(fieldName, validFile.size, config.maxSize);
+    }
+
+    // Read file content (size is now bounded by the check above).
+    const buffer = await validFile.arrayBuffer();
+
+    // Resolve the effective MIME type against the allowlist. We trust the
+    // declared `File.type`, but when it is missing or the generic multipart
+    // default — `application/octet-stream`, which workerd emits when a File
+    // whose `.type` was empty is serialised across a worker→worker fetch — we
+    // fall back to sniffing the magic bytes. Without this, a valid image whose
+    // Content-Type was stripped upstream (e.g. the SvelteKit→identity avatar
+    // re-forward) is wrongly rejected as an invalid type. Sniffing only
+    // *accepts* a type the caller already allows, so it cannot be used to
+    // smuggle a non-image past the allowlist.
+    let effectiveType = validFile.type;
     if (
       config.allowedMimeTypes &&
-      !config.allowedMimeTypes.includes(validFile.type)
+      !config.allowedMimeTypes.includes(effectiveType) &&
+      (effectiveType === '' || effectiveType === 'application/octet-stream')
+    ) {
+      const sniffedType = detectImageMimeType(new Uint8Array(buffer));
+      if (sniffedType && config.allowedMimeTypes.includes(sniffedType)) {
+        effectiveType = sniffedType;
+      }
+    }
+
+    // Validate the resolved MIME type against the allowlist.
+    if (
+      config.allowedMimeTypes &&
+      !config.allowedMimeTypes.includes(effectiveType)
     ) {
       throw new InvalidFileTypeError(
         fieldName,
+        // Report what actually arrived on the wire (pre-sniff) so logs reflect
+        // the real cause, e.g. an empty or `application/octet-stream` type.
         validFile.type,
         config.allowedMimeTypes
       );
     }
 
-    // Validate file size
-    if (config.maxSize && validFile.size > config.maxSize) {
-      throw new FileTooLargeError(fieldName, validFile.size, config.maxSize);
-    }
-
-    // Read file content
-    const buffer = await validFile.arrayBuffer();
-
     result[fieldName] = {
       name: validFile.name,
-      type: validFile.type,
+      type: effectiveType,
       size: validFile.size,
       buffer,
     };
