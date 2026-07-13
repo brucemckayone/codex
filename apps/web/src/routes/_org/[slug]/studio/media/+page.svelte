@@ -60,7 +60,11 @@
     </div>
   </div>
 {:else}
-  <StudioMediaPage data={mediaData} studioName={data.org.name} />
+  <StudioMediaPage
+    data={mediaData}
+    studioName={data.org.name}
+    onRefresh={() => mediaQuery.refresh()}
+  />
 {/if}
 
 <style>
