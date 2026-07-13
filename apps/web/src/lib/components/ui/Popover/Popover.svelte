@@ -15,7 +15,10 @@
 		disableFocusTrap,
 		arrowSize,
 		escapeBehavior,
-		closeOnOutsideClick,
+		// Default to Melt's own default (true). Without it this is `undefined`
+		// and the $effect below `.set(undefined)`s it, disabling the
+		// interact-outside listener so the popover never closes on outside click.
+		closeOnOutsideClick = true,
 		preventScroll,
 		preventTextSelectionOverflow,
 		portal = true, // Portal to body required for Storybook iframe rendering

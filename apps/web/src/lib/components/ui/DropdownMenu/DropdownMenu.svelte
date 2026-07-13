@@ -16,7 +16,12 @@
 		preventScroll,
 		loop,
 		closeOnItemClick,
-		closeOnOutsideClick,
+		// Default to Melt's own default (true). Destructuring with no default
+		// leaves this `undefined`, and the $effect below then does
+		// `.set(undefined)` — which disables Melt's interact-outside listener
+		// (`enabled: closeOnInteractOutside`), so the menu never closes on an
+		// outside click (avatar / studio-switcher popovers).
+		closeOnOutsideClick = true,
 		// Melt UI's portal option accepts `string | HTMLElement | null` — boolean
 		// `true` is a no-op (usePortal returns early). Default to `'body'` so the
 		// menu escapes overflow/transform ancestors (e.g. studio sidebar's
