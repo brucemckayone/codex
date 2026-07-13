@@ -120,7 +120,7 @@ describe('Auth Worker Middleware - Unit Tests', () => {
       const canonical = [
         '/api/auth/sign-up/email',
         '/api/auth/sign-in/email',
-        '/api/auth/forget-password',
+        '/api/auth/request-password-reset',
         '/api/auth/reset-password',
       ];
       for (const path of canonical) {

@@ -11,12 +11,12 @@ Authentication and session management via BetterAuth. The only worker that doesn
 | GET | `/api/auth/session` | Cookie | — | Returns `{ user, session }` or `null` |
 | POST | `/api/auth/sign-out` | Cookie | — | Clears session cookie |
 | POST | `/api/auth/verify-email` | Token | — | Verifies email, auto-signs-in |
-| POST | `/api/auth/send-reset-password-email` | None | `auth` (5/15min) | Sends password reset link (1h expiry) |
+| POST | `/api/auth/request-password-reset` | None | `auth` (5/15min) | Sends password reset link (1h expiry). BetterAuth core endpoint — NOT `/forget-password` (that only exists in the unused email-otp plugin) |
 | POST | `/api/auth/reset-password` | Token | — | Resets password |
 | GET | `/api/test/verification-token/:email` | None | — | DEV/TEST ONLY — returns KV-stored token |
 | POST | `/api/test/fast-register` | None | — | DEV/TEST ONLY — register + verify in one call |
 
-Rate-limited paths are: sign-up/email, sign-in/email, send-reset-password-email, reset-password.
+Rate-limited paths are: sign-up/email, sign-in/email, request-password-reset, reset-password.
 
 ## Architecture
 
