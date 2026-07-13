@@ -164,6 +164,80 @@ export function buildAuthForwardingCookie(sessionToken: string): string {
 }
 
 /**
+ * Re-forward a browser-uploaded file to a worker as a fresh multipart body.
+ *
+ * A File reconstructed off the inbound SvelteKit request does NOT reliably
+ * survive re-serialisation into a new outbound multipart body over a real
+ * cross-worker fetch in workerd: the part reaches the worker WITHOUT a
+ * `filename`, so it is parsed as a string form field rather than a File and
+ * rejected with MissingFileError (a 400) before any type/size logic runs.
+ * This is invisible locally — Node/undici preserves the part — and only
+ * reproduces in production. It bit the avatar path first, then the logo path
+ * (both Codex-sxm74); this helper is the single home for the fix so a third
+ * upload path cannot silently reintroduce it.
+ *
+ * The fix: read `file.arrayBuffer()` into a brand-new in-memory File and append
+ * it with an explicit filename, making the re-forward deterministic across
+ * runtimes.
+ *
+ * On failure, surfaces the worker's real (already `mapErrorToResponse`-
+ * sanitised) error message instead of masking every failure behind
+ * `failureMessage` — that opacity is exactly what hid the original prod 400.
+ * On success, unwraps the single-item procedure envelope (`{ data: T }` → `T`).
+ */
+async function forwardMultipartUpload<T>(options: {
+  url: string;
+  fieldName: string;
+  file: File;
+  fallbackFilename: string;
+  sessionCookie: string | undefined;
+  failureMessage: string;
+}): Promise<T> {
+  const {
+    url,
+    fieldName,
+    file,
+    fallbackFilename,
+    sessionCookie,
+    failureMessage,
+  } = options;
+
+  const bytes = await file.arrayBuffer();
+  const forwardFile = new File([bytes], file.name || fallbackFilename, {
+    type: file.type || 'application/octet-stream',
+  });
+  const formData = new FormData();
+  formData.append(fieldName, forwardFile, forwardFile.name);
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: sessionCookie
+      ? { Cookie: `${COOKIES.SESSION_NAME}=${sessionCookie}` }
+      : {},
+    body: formData,
+  });
+
+  if (!res.ok) {
+    let message = failureMessage;
+    try {
+      const body = (await res.json()) as { error?: { message?: string } };
+      if (body?.error?.message) message = body.error.message;
+    } catch {
+      // Non-JSON body — keep the generic message.
+    }
+    throw new ApiError(res.status, message);
+  }
+
+  const json = await res.json();
+  // Unwrap single-item envelope: { data: T } → T
+  const record = json as Record<string, unknown>;
+  if ('data' in record && record.data != null) {
+    return record.data as T;
+  }
+  return json as T;
+}
+
+/**
  * Create a server-side API client
  *
  * @param platform - The SvelteKit platform object with env bindings
@@ -509,60 +583,15 @@ export function createServerApi(
       /**
        * Upload avatar (multipart - uses raw fetch for FormData, then unwraps procedure envelope)
        */
-      uploadAvatar: async (file: File): Promise<AvatarUploadResponse> => {
-        const url = `${serverApiUrl(platform, 'identity')}/api/user/avatar`;
-
-        // Re-materialise the upload into a fresh in-memory File before
-        // forwarding. A File reconstructed off the inbound SvelteKit request
-        // does NOT reliably survive re-serialisation into a new outbound
-        // multipart body over a real cross-worker fetch in workerd: the part
-        // reaches identity-api without a `filename`, so it is parsed as a
-        // string form field rather than a File and rejected with
-        // MissingFileError (a 400). This was invisible locally — Node/undici
-        // preserves the part — and only reproduced in production (Codex-sxm74).
-        // Reading the bytes and appending a fresh File with an explicit
-        // filename makes the re-forward deterministic across runtimes.
-        const bytes = await file.arrayBuffer();
-        const forwardFile = new File([bytes], file.name || 'avatar', {
-          type: file.type || 'application/octet-stream',
-        });
-        const formData = new FormData();
-        formData.append('avatar', forwardFile, forwardFile.name);
-
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: sessionCookie
-            ? { Cookie: `${COOKIES.SESSION_NAME}=${sessionCookie}` }
-            : {},
-          body: formData,
-        });
-
-        if (!res.ok) {
-          // Surface identity-api's real error message (e.g. an invalid MIME
-          // type or oversize file) instead of masking every failure as a
-          // generic "Upload failed" — that opacity is exactly what hid the
-          // prod avatar 400 (Codex-sxm74). The error envelope is already
-          // sanitised by mapErrorToResponse(), so no internal detail leaks.
-          let message = 'Upload failed';
-          try {
-            const body = (await res.json()) as {
-              error?: { message?: string };
-            };
-            if (body?.error?.message) message = body.error.message;
-          } catch {
-            // Non-JSON body — keep the generic message.
-          }
-          throw new ApiError(res.status, message);
-        }
-
-        const json = await res.json();
-        // Unwrap single-item envelope: { data: T } → T
-        const record = json as Record<string, unknown>;
-        if ('data' in record && record.data != null) {
-          return record.data as AvatarUploadResponse;
-        }
-        return json as AvatarUploadResponse;
-      },
+      uploadAvatar: (file: File): Promise<AvatarUploadResponse> =>
+        forwardMultipartUpload<AvatarUploadResponse>({
+          url: `${serverApiUrl(platform, 'identity')}/api/user/avatar`,
+          fieldName: 'avatar',
+          file,
+          fallbackFilename: 'avatar',
+          sessionCookie,
+          failureMessage: 'Upload failed',
+        }),
 
       /**
        * Delete avatar
@@ -923,31 +952,15 @@ export function createServerApi(
       /**
        * Upload organization logo (multipart - uses raw fetch for FormData, then unwraps procedure envelope)
        */
-      uploadLogo: (
-        id: string,
-        file: File
-      ): Promise<BrandingSettingsResponse> => {
-        const url = `${serverApiUrl(platform, 'org')}/api/organizations/${id}/settings/branding/logo`;
-        const formData = new FormData();
-        formData.append('logo', file);
-
-        return fetch(url, {
-          method: 'POST',
-          headers: sessionCookie
-            ? { Cookie: `${COOKIES.SESSION_NAME}=${sessionCookie}` }
-            : {},
-          body: formData,
-        }).then(async (res) => {
-          if (!res.ok) throw new ApiError(res.status, 'Logo upload failed');
-          const json = await res.json();
-          // Unwrap single-item envelope: { data: T } → T
-          const record = json as Record<string, unknown>;
-          if ('data' in record && record.data != null) {
-            return record.data as BrandingSettingsResponse;
-          }
-          return json as BrandingSettingsResponse;
-        });
-      },
+      uploadLogo: (id: string, file: File): Promise<BrandingSettingsResponse> =>
+        forwardMultipartUpload<BrandingSettingsResponse>({
+          url: `${serverApiUrl(platform, 'org')}/api/organizations/${id}/settings/branding/logo`,
+          fieldName: 'logo',
+          file,
+          fallbackFilename: 'logo',
+          sessionCookie,
+          failureMessage: 'Logo upload failed',
+        }),
 
       /**
        * Delete organization logo
