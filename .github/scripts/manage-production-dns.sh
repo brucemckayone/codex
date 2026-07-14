@@ -249,7 +249,7 @@ elif [ "$ACTION" = "create" ]; then
   echo "   1. Deploy workers with 'wrangler deploy --env production'"
   echo "   2. Custom domains will be automatically attached by Cloudflare"
   echo "   3. SSL certificates will be provisioned automatically (may take 1-2 minutes)"
-  echo "   4. Verify with: curl https://codex.revelations.studio"
+  echo "   4. Verify with: curl https://revelations.studio"
 
 else
   echo "Invalid action: $ACTION"
