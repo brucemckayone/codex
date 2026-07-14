@@ -467,8 +467,8 @@
   style:--brand-bg-dark={brandBackgroundDark}
   style:--brand-density={brandDensity}
   style:--brand-radius={brandRadius}
-  style:--brand-font-body={brandFontBody ? `'${brandFontBody}', var(--font-sans)` : undefined}
-  style:--brand-font-heading={brandFontHeading ? `'${brandFontHeading}', var(--font-sans)` : undefined}
+  style:--brand-font-body={brandFontBody ? `'${brandFontBody}'` : undefined}
+  style:--brand-font-heading={brandFontHeading ? `'${brandFontHeading}'` : undefined}
   style:--brand-shader-logo-url={brandLogoUrl}
   style={serverTokenOverrideStyle}
 >
