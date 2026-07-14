@@ -3,7 +3,8 @@
 
   Content thumbnail with drag-and-drop file upload, media auto-extract, or URL fallback.
   File upload uses native FormData via form() remote function (edit mode only — needs content ID).
-  In create mode, only URL input is available.
+  In create mode, only URL / media-thumbnail are available; saving the draft
+  redirects to edit mode (Codex-ko8ko) where file upload unlocks.
 
   @prop {ContentForm} form - The active form instance
   @prop {string | null} [mediaThumbnailUrl] - Auto-extracted thumbnail URL from media
@@ -183,6 +184,7 @@
       <div class="thumbnail-placeholder">
         <ImageIcon size={32} />
         <span class="placeholder-text">No thumbnail set</span>
+        <span class="placeholder-hint">Save this draft to upload an image file — or set one now:</span>
         <div class="placeholder-actions">
           {#if mediaThumbnailUrl}
             <Button type="button" variant="primary" size="sm" onclick={useMediaThumbnail}>
@@ -405,6 +407,13 @@
 
   .placeholder-text {
     font-size: var(--text-sm);
+  }
+
+  .placeholder-hint {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    text-align: center;
+    max-width: 40ch;
   }
 
   .placeholder-actions {

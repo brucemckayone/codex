@@ -229,9 +229,11 @@ test.describe('Studio Content - Create Submission', () => {
     // Submit
     await page.getByRole('button', { name: 'Create Content' }).click();
 
-    // Should redirect to content list or show success/error toast
+    // Codex-ko8ko: create now redirects into EDIT mode (/studio/content/:id/edit)
+    // so the creator can upload a thumbnail file, which needs the new content id.
+    // Kept tolerant of a toast-only outcome for env robustness.
     await page
-      .waitForURL(/\/studio\/content(?!\/new)/, { timeout: 30000 })
+      .waitForURL(/\/studio\/content\/[^/]+\/edit/, { timeout: 30000 })
       .catch(() => {});
 
     const url = page.url();
