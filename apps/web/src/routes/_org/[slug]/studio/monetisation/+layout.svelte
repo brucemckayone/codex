@@ -6,8 +6,9 @@
   layout pattern. Active tab is derived from the current URL pathname.
 
   Tabs:
-  - Subscriptions  → /studio/monetisation            (Stripe Connect, tiers)
+  - Subscriptions  → /studio/monetisation              (Stripe Connect, tiers)
   - Revenue share  → /studio/monetisation/revenue-share (creator agreements)
+  - Pricing FAQ    → /studio/monetisation/pricing-faq   (public pricing-page FAQ)
 
   @prop {Snippet} children - Child route content
 -->
@@ -19,15 +20,21 @@
   const { children }: { children: Snippet } = $props();
 
   const activeTab = $derived(
-    page.url.pathname.endsWith('/revenue-share') ? 'revenue-share' : 'subscriptions'
+    page.url.pathname.endsWith('/revenue-share')
+      ? 'revenue-share'
+      : page.url.pathname.endsWith('/pricing-faq')
+        ? 'pricing-faq'
+        : 'subscriptions'
   );
 
   const loadingTab = $derived(
     navigating?.to?.url.pathname?.endsWith('/revenue-share')
       ? 'revenue-share'
-      : navigating?.to?.url.pathname?.endsWith('/monetisation')
-        ? 'subscriptions'
-        : null
+      : navigating?.to?.url.pathname?.endsWith('/pricing-faq')
+        ? 'pricing-faq'
+        : navigating?.to?.url.pathname?.endsWith('/monetisation')
+          ? 'subscriptions'
+          : null
   );
 
   const tabs = [
@@ -40,6 +47,11 @@
       value: 'revenue-share',
       href: '/studio/monetisation/revenue-share',
       label: 'Revenue share',
+    },
+    {
+      value: 'pricing-faq',
+      href: '/studio/monetisation/pricing-faq',
+      label: 'Pricing FAQ',
     },
   ];
 </script>
