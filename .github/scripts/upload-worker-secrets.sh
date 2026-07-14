@@ -164,13 +164,20 @@ EOF
     ;;
 
   media-api)
+    # Fail-fast on unset/empty RunPod secrets. `set -e` does NOT catch unset vars
+    # (no `set -u`), so a missing GitHub secret would otherwise expand to "" and
+    # silently upload an EMPTY secret — the transcoding getter then throws inside
+    # waitUntil, invisibly (passes /health, fails only when a transcode dispatches).
+    # ${VAR:?msg} aborts the deploy with a clear message. media-api secrets are
+    # uploaded ONLY for production (deploy-production.yml), where all are required,
+    # so this guard never runs in preview/test. (Codex-fc5oh.6)
     SECRETS_JSON=$(cat <<EOF
 {
-  "DATABASE_URL":"${DATABASE_URL}",
-  "RUNPOD_API_KEY":"${RUNPOD_API_KEY}",
-  "RUNPOD_ENDPOINT_ID":"${RUNPOD_ENDPOINT_ID}",
-  "RUNPOD_WEBHOOK_SECRET":"${RUNPOD_WEBHOOK_SECRET}",
-  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET}"
+  "DATABASE_URL":"${DATABASE_URL:?DATABASE_URL is required for media-api}",
+  "RUNPOD_API_KEY":"${RUNPOD_API_KEY:?RUNPOD_API_KEY is required for media-api transcoding}",
+  "RUNPOD_ENDPOINT_ID":"${RUNPOD_ENDPOINT_ID:?RUNPOD_ENDPOINT_ID is required for media-api transcoding}",
+  "RUNPOD_WEBHOOK_SECRET":"${RUNPOD_WEBHOOK_SECRET:?RUNPOD_WEBHOOK_SECRET is required for media-api transcoding}",
+  "WORKER_SHARED_SECRET":"${WORKER_SHARED_SECRET:?WORKER_SHARED_SECRET is required for media-api}"
 }
 EOF
 )
