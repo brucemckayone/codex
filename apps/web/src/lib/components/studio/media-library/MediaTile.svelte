@@ -12,7 +12,7 @@
   (lifted from MediaCard.svelte) — behaviour preserved verbatim.
 -->
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy } from 'svelte';
   import { browser } from '$app/environment';
   import { getTranscodingStatus } from '$lib/remote/media.remote';
   import { logger } from '$lib/observability';
@@ -95,12 +95,23 @@
     if (visible) pollProgress();
   }
 
-  onMount(() => {
-    if (media.status === 'transcoding') {
-      pollProgress();
-      pollInterval = setInterval(pollProgress, 5000);
-      document.addEventListener('visibilitychange', onVisibilityChange);
-    }
+  // Poll while the item is still processing. The backend sets status to
+  // 'uploaded' synchronously and only flips to 'transcoding' a few seconds
+  // later (async, after onMount would have run), so gate on BOTH states —
+  // otherwise a tile that mounts at 'uploaded' never starts polling and its
+  // status is frozen until a hard reload. Using a reactive $effect (not
+  // onMount) means it also starts when a freshly-uploaded row transitions into
+  // a processing state after mount, and tears down once it reaches ready/failed.
+  $effect(() => {
+    const s = effectiveStatus;
+    if (s !== 'uploaded' && s !== 'transcoding') return;
+    pollProgress();
+    pollInterval = setInterval(pollProgress, 5000);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   });
 
   onDestroy(() => stopPolling());
