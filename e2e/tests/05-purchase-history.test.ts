@@ -51,12 +51,13 @@ describe('Purchase History API', () => {
     const creatorEmail = `creator-history-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     console.log('[Setup] 1/12 Registering creator...');
 
-    const { cookie: _creatorCookie } = await authFixture.registerUser({
-      email: creatorEmail,
-      password: 'SecurePassword123!',
-      name: 'History Test Creator',
-      role: 'creator',
-    });
+    const { cookie: _creatorCookie, user: creator } =
+      await authFixture.registerUser({
+        email: creatorEmail,
+        password: 'SecurePassword123!',
+        name: 'History Test Creator',
+        role: 'creator',
+      });
     creatorCookie = _creatorCookie;
     console.log('[Setup] 1/12 Creator registered');
 
@@ -214,6 +215,19 @@ describe('Purchase History API', () => {
       contentId,
       content2Id
     );
+
+    // Seed a payout-ready Stripe Connect account for the creator so publishing
+    // MONETISED content passes the CREATOR_CONNECT_REQUIRED (422) gate. One
+    // creator publishes both paid items, so a single account is sufficient.
+    await dbHttp.insert(schema.stripeConnectAccounts).values({
+      userId: creator.id,
+      organizationId: organizationId,
+      stripeAccountId: `acct_test_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      status: 'active',
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      onboardingCompletedAt: new Date(),
+    });
 
     // Publish both content items in parallel
     console.log('[Setup] 6/12 Publishing both content items in parallel...');

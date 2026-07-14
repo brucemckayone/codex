@@ -759,6 +759,8 @@
   "studio_content_form_access_followers_desc": "Must follow your organisation (free)",
   "studio_content_form_access_team": "Team only",
   "studio_content_form_access_team_desc": "Only team members (owners, admins, creators)",
+  "studio_content_form_access_payouts_hint": "Set up payouts before you can sell content or gate it behind a subscription.",
+  "studio_content_form_access_payouts_link": "Set up payouts",
   "studio_content_form_access_members": "Members only",
   "studio_content_form_access_members_desc": "Only your organisation team members can access",
   "studio_content_form_access_also_purchasable": "Also available for one-time purchase",

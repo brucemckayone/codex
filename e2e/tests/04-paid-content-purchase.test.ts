@@ -46,12 +46,13 @@ describe('Paid Content Purchase Flow', () => {
     const creatorEmail = `creator-paid-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
     const creatorPassword = 'SecurePassword123!';
 
-    const { cookie: creatorCookie } = await authFixture.registerUser({
-      email: creatorEmail,
-      password: creatorPassword,
-      name: 'Paid Content Creator',
-      role: 'creator',
-    });
+    const { cookie: creatorCookie, user: creator } =
+      await authFixture.registerUser({
+        email: creatorEmail,
+        password: creatorPassword,
+        name: 'Paid Content Creator',
+        role: 'creator',
+      });
 
     // Create organization (required for paid content in Phase 1)
     const orgResponse = await httpClient.post(
@@ -142,6 +143,18 @@ describe('Paid Content Purchase Flow', () => {
     );
     await expectSuccessResponse(contentResponse, 201);
     const content = unwrapApiResponse(await contentResponse.json());
+
+    // Seed a payout-ready Stripe Connect account for the creator so publishing
+    // MONETISED content passes the CREATOR_CONNECT_REQUIRED (422) gate.
+    await dbHttp.insert(schema.stripeConnectAccounts).values({
+      userId: creator.id,
+      organizationId: organization.id,
+      stripeAccountId: `acct_test_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      status: 'active',
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      onboardingCompletedAt: new Date(),
+    });
 
     // Publish the content
     const publishResponse = await httpClient.post(
@@ -301,11 +314,12 @@ describe('Paid Content Purchase Flow', () => {
     // This test performs full setup + purchase + duplicate webhook test
     // Create creator and paid content
     const creatorEmail = `creator-idem-${Date.now()}@example.com`;
-    const { cookie: creatorCookie } = await authFixture.registerUser({
-      email: creatorEmail,
-      password: 'SecurePassword123!',
-      role: 'creator',
-    });
+    const { cookie: creatorCookie, user: creator } =
+      await authFixture.registerUser({
+        email: creatorEmail,
+        password: 'SecurePassword123!',
+        role: 'creator',
+      });
 
     // Create organization (required for paid content)
     const orgResponse = await httpClient.post(
@@ -379,6 +393,18 @@ describe('Paid Content Purchase Flow', () => {
       }
     );
     const content = unwrapApiResponse(await contentResponse.json());
+
+    // Seed a payout-ready Stripe Connect account for the creator so publishing
+    // MONETISED content passes the CREATOR_CONNECT_REQUIRED (422) gate.
+    await dbHttp.insert(schema.stripeConnectAccounts).values({
+      userId: creator.id,
+      organizationId: organization.id,
+      stripeAccountId: `acct_test_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      status: 'active',
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      onboardingCompletedAt: new Date(),
+    });
 
     await httpClient.post(
       `${WORKER_URLS.content}/api/content/${content.id}/publish`,
@@ -491,11 +517,12 @@ describe('Paid Content Purchase Flow', () => {
   test('should return 409 when attempting to purchase already-owned content', async () => {
     // This test performs full setup + purchase + second checkout attempt
     // Setup: Create and publish paid content
-    const { cookie: creatorCookie } = await authFixture.registerUser({
-      email: `creator-409-${Date.now()}@example.com`,
-      password: 'SecurePassword123!',
-      role: 'creator',
-    });
+    const { cookie: creatorCookie, user: creator } =
+      await authFixture.registerUser({
+        email: `creator-409-${Date.now()}@example.com`,
+        password: 'SecurePassword123!',
+        role: 'creator',
+      });
 
     // Create organization (required for paid content)
     const orgResponse = await httpClient.post(
@@ -568,6 +595,18 @@ describe('Paid Content Purchase Flow', () => {
       }
     );
     const content = unwrapApiResponse(await contentResponse.json());
+
+    // Seed a payout-ready Stripe Connect account for the creator so publishing
+    // MONETISED content passes the CREATOR_CONNECT_REQUIRED (422) gate.
+    await dbHttp.insert(schema.stripeConnectAccounts).values({
+      userId: creator.id,
+      organizationId: organization.id,
+      stripeAccountId: `acct_test_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      status: 'active',
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      onboardingCompletedAt: new Date(),
+    });
 
     await httpClient.post(
       `${WORKER_URLS.content}/api/content/${content.id}/publish`,

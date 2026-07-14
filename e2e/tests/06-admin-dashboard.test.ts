@@ -152,11 +152,12 @@ describe('Admin Dashboard', () => {
 
         // 2. Create creator and content under this org
         const creatorEmail = `creator-revenue-${Date.now()}@example.com`;
-        const { cookie: creatorCookie } = await authFixture.registerUser({
-          email: creatorEmail,
-          password: 'SecurePassword123!',
-          role: 'creator',
-        });
+        const { cookie: creatorCookie, user: creator } =
+          await authFixture.registerUser({
+            email: creatorEmail,
+            password: 'SecurePassword123!',
+            role: 'creator',
+          });
 
         // Create media item
         const testMediaId = `e2e-revenue-${Date.now()}`;
@@ -211,6 +212,19 @@ describe('Admin Dashboard', () => {
           }
         );
         const content = unwrapApiResponse(await contentResponse.json());
+
+        // Seed a payout-ready Stripe Connect account for the creator so
+        // publishing MONETISED content passes the CREATOR_CONNECT_REQUIRED
+        // (422) gate.
+        await dbHttp.insert(schema.stripeConnectAccounts).values({
+          userId: creator.id,
+          organizationId: admin.organization.id,
+          stripeAccountId: `acct_test_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          status: 'active',
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          onboardingCompletedAt: new Date(),
+        });
 
         // Publish content
         await httpClient.post(
@@ -302,11 +316,12 @@ describe('Admin Dashboard', () => {
         });
 
         // Create purchase in admin1's org
-        const { cookie: creatorCookie } = await authFixture.registerUser({
-          email: `creator-scope-${Date.now()}@example.com`,
-          password: 'SecurePassword123!',
-          role: 'creator',
-        });
+        const { cookie: creatorCookie, user: creator } =
+          await authFixture.registerUser({
+            email: `creator-scope-${Date.now()}@example.com`,
+            password: 'SecurePassword123!',
+            role: 'creator',
+          });
 
         const testMediaId = `e2e-scope-${Date.now()}`;
         const mediaResponse = await httpClient.post(
@@ -359,6 +374,19 @@ describe('Admin Dashboard', () => {
           }
         );
         const content = unwrapApiResponse(await contentResponse.json());
+
+        // Seed a payout-ready Stripe Connect account for the creator so
+        // publishing MONETISED content passes the CREATOR_CONNECT_REQUIRED
+        // (422) gate.
+        await dbHttp.insert(schema.stripeConnectAccounts).values({
+          userId: creator.id,
+          organizationId: admin1.organization.id,
+          stripeAccountId: `acct_test_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          status: 'active',
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          onboardingCompletedAt: new Date(),
+        });
 
         await httpClient.post(
           `${WORKER_URLS.content}/api/content/${content.id}/publish`,
@@ -438,11 +466,12 @@ describe('Admin Dashboard', () => {
         });
 
         // Create content
-        const { cookie: creatorCookie } = await authFixture.registerUser({
-          email: `creator-distinct-${Date.now()}@example.com`,
-          password: 'SecurePassword123!',
-          role: 'creator',
-        });
+        const { cookie: creatorCookie, user: creator } =
+          await authFixture.registerUser({
+            email: `creator-distinct-${Date.now()}@example.com`,
+            password: 'SecurePassword123!',
+            role: 'creator',
+          });
 
         const testMediaId = `e2e-distinct-${Date.now()}`;
         const mediaResponse = await httpClient.post(
@@ -549,6 +578,20 @@ describe('Admin Dashboard', () => {
           }
         );
         const content2 = unwrapApiResponse(await content2Response.json());
+
+        // Seed a payout-ready Stripe Connect account for the creator so
+        // publishing MONETISED content passes the CREATOR_CONNECT_REQUIRED
+        // (422) gate. One creator publishes both paid items, so a single
+        // account is sufficient.
+        await dbHttp.insert(schema.stripeConnectAccounts).values({
+          userId: creator.id,
+          organizationId: admin.organization.id,
+          stripeAccountId: `acct_test_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          status: 'active',
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          onboardingCompletedAt: new Date(),
+        });
 
         // Publish both
         await httpClient.post(
@@ -1058,11 +1101,12 @@ describe('Admin Dashboard', () => {
         });
 
         // Create content and buyer
-        const { cookie: creatorCookie } = await authFixture.registerUser({
-          email: `creator-customers-${Date.now()}@example.com`,
-          password: 'SecurePassword123!',
-          role: 'creator',
-        });
+        const { cookie: creatorCookie, user: creator } =
+          await authFixture.registerUser({
+            email: `creator-customers-${Date.now()}@example.com`,
+            password: 'SecurePassword123!',
+            role: 'creator',
+          });
 
         const testMediaId = `e2e-customers-${Date.now()}`;
         const mediaResponse = await httpClient.post(
@@ -1114,6 +1158,19 @@ describe('Admin Dashboard', () => {
           }
         );
         const content = unwrapApiResponse(await contentResponse.json());
+
+        // Seed a payout-ready Stripe Connect account for the creator so
+        // publishing MONETISED content passes the CREATOR_CONNECT_REQUIRED
+        // (422) gate.
+        await dbHttp.insert(schema.stripeConnectAccounts).values({
+          userId: creator.id,
+          organizationId: admin.organization.id,
+          stripeAccountId: `acct_test_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          status: 'active',
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          onboardingCompletedAt: new Date(),
+        });
 
         await httpClient.post(
           `${WORKER_URLS.content}/api/content/${content.id}/publish`,
@@ -1183,11 +1240,12 @@ describe('Admin Dashboard', () => {
         });
 
         // Setup content and purchase (abbreviated)
-        const { cookie: creatorCookie } = await authFixture.registerUser({
-          email: `creator-details-${Date.now()}@example.com`,
-          password: 'SecurePassword123!',
-          role: 'creator',
-        });
+        const { cookie: creatorCookie, user: creator } =
+          await authFixture.registerUser({
+            email: `creator-details-${Date.now()}@example.com`,
+            password: 'SecurePassword123!',
+            role: 'creator',
+          });
 
         const testMediaId = `e2e-details-${Date.now()}`;
         const mediaResponse = await httpClient.post(
@@ -1239,6 +1297,19 @@ describe('Admin Dashboard', () => {
           }
         );
         const content = unwrapApiResponse(await contentResponse.json());
+
+        // Seed a payout-ready Stripe Connect account for the creator so
+        // publishing MONETISED content passes the CREATOR_CONNECT_REQUIRED
+        // (422) gate.
+        await dbHttp.insert(schema.stripeConnectAccounts).values({
+          userId: creator.id,
+          organizationId: admin.organization.id,
+          stripeAccountId: `acct_test_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          status: 'active',
+          chargesEnabled: true,
+          payoutsEnabled: true,
+          onboardingCompletedAt: new Date(),
+        });
 
         await httpClient.post(
           `${WORKER_URLS.content}/api/content/${content.id}/publish`,
@@ -1307,11 +1378,12 @@ describe('Admin Dashboard', () => {
       });
 
       // Create initial purchase to establish customer relationship
-      const { cookie: creatorCookie } = await authFixture.registerUser({
-        email: `creator-grant-${Date.now()}@example.com`,
-        password: 'SecurePassword123!',
-        role: 'creator',
-      });
+      const { cookie: creatorCookie, user: creator } =
+        await authFixture.registerUser({
+          email: `creator-grant-${Date.now()}@example.com`,
+          password: 'SecurePassword123!',
+          role: 'creator',
+        });
 
       // First content (for initial purchase)
       const testMediaId1 = `e2e-grant-1-${Date.now()}`;
@@ -1364,6 +1436,20 @@ describe('Admin Dashboard', () => {
         }
       );
       const content1 = unwrapApiResponse(await content1Response.json());
+
+      // Seed a payout-ready Stripe Connect account for the creator so
+      // publishing MONETISED content passes the CREATOR_CONNECT_REQUIRED
+      // (422) gate. This creator publishes both paid items, so a single
+      // account is sufficient.
+      await dbHttp.insert(schema.stripeConnectAccounts).values({
+        userId: creator.id,
+        organizationId: admin.organization.id,
+        stripeAccountId: `acct_test_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        status: 'active',
+        chargesEnabled: true,
+        payoutsEnabled: true,
+        onboardingCompletedAt: new Date(),
+      });
 
       await httpClient.post(
         `${WORKER_URLS.content}/api/content/${content1.id}/publish`,
@@ -1505,11 +1591,12 @@ describe('Admin Dashboard', () => {
       });
 
       // Setup (abbreviated)
-      const { cookie: creatorCookie } = await authFixture.registerUser({
-        email: `creator-idem-${Date.now()}@example.com`,
-        password: 'SecurePassword123!',
-        role: 'creator',
-      });
+      const { cookie: creatorCookie, user: creator } =
+        await authFixture.registerUser({
+          email: `creator-idem-${Date.now()}@example.com`,
+          password: 'SecurePassword123!',
+          role: 'creator',
+        });
 
       const testMediaId = `e2e-idem-${Date.now()}`;
       const mediaResponse = await httpClient.post(
@@ -1561,6 +1648,19 @@ describe('Admin Dashboard', () => {
         }
       );
       const content = unwrapApiResponse(await contentResponse.json());
+
+      // Seed a payout-ready Stripe Connect account for the creator so
+      // publishing MONETISED content passes the CREATOR_CONNECT_REQUIRED
+      // (422) gate.
+      await dbHttp.insert(schema.stripeConnectAccounts).values({
+        userId: creator.id,
+        organizationId: admin.organization.id,
+        stripeAccountId: `acct_test_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        status: 'active',
+        chargesEnabled: true,
+        payoutsEnabled: true,
+        onboardingCompletedAt: new Date(),
+      });
 
       await httpClient.post(
         `${WORKER_URLS.content}/api/content/${content.id}/publish`,

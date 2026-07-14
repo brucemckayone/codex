@@ -16,8 +16,9 @@
  */
 
 import { ContentService, MediaItemService } from '@codex/content';
-import { organizations } from '@codex/database/schema';
+import { organizations, stripeConnectAccounts } from '@codex/database/schema';
 import {
+  createTestConnectAccountInput,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -69,6 +70,15 @@ describe('PurchaseService × FeeConfigService integration', () => {
 
     const userIds = await seedTestUsers(db, 2);
     [creatorId, customerId] = userIds;
+
+    // ContentService.publish now gates monetised content behind a payout-ready
+    // Stripe Connect account for the publishing creator. `creatorId` publishes
+    // every paid content in this suite — seed one READY account (keyed by
+    // userId; uq_stripe_connect_user allows at most one per user).
+    await db
+      .insert(stripeConnectAccounts)
+      .values(createTestConnectAccountInput(null, creatorId))
+      .onConflictDoNothing();
 
     const [org] = await db
       .insert(organizations)

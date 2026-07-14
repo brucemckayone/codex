@@ -6095,6 +6095,22 @@ export const studio_content_form_access_team_desc = () => `Only team members (ow
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_access_payouts_hint = () => `Set up payouts before you can sell content or gate it behind a subscription.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_access_payouts_link = () => `Set up payouts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_access_members = () => `Members only`
 
 

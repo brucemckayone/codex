@@ -32,6 +32,15 @@
     derivedVisibility: string;
     onAccessChange: (value: string) => void;
     onTierChange: (value: string | undefined) => void;
+    /**
+     * Whether the creator's Stripe Connect account can receive money. When
+     * false, the monetised access options (paid / subscribers) are disabled
+     * with a "set up payouts" prompt — mirroring the authoritative backend
+     * gate (ContentService.publish throws for monetised content without a
+     * payout-ready account). Defaults true so the form never blocks before
+     * status resolves.
+     */
+    connectReady?: boolean;
   }
 
   const {
@@ -43,16 +52,25 @@
     derivedVisibility,
     onAccessChange,
     onTierChange,
+    connectReady = true,
   }: Props = $props();
 
   const hasOrg = $derived(!!form.fields.organizationId?.value());
   const hasTiers = $derived(tiers.length > 0);
+
+  // Org content routes payout setup to the monetisation hub; personal creator
+  // content routes to the creator earnings page. Both are root-relative studio
+  // paths (slug is in the subdomain).
+  const payoutSetupHref = $derived(
+    hasOrg ? '/studio/monetisation' : '/studio/earnings'
+  );
 
   interface AccessOption {
     value: string;
     label: string;
     description: string;
     icon: typeof GlobeIcon;
+    disabled?: boolean;
   }
 
   const options = $derived.by((): AccessOption[] => {
@@ -68,6 +86,8 @@
         label: m.studio_content_form_access_paid(),
         description: m.studio_content_form_access_paid_desc(),
         icon: CreditCardIcon,
+        // Monetised — requires a payout-ready Connect account.
+        disabled: !connectReady,
       },
     ];
     if (hasOrg) {
@@ -84,6 +104,8 @@
         label: m.studio_content_form_access_subscribers(),
         description: m.studio_content_form_access_subscribers_desc(),
         icon: CoinsIcon,
+        // Monetised — requires a payout-ready Connect account.
+        disabled: !connectReady,
       });
     }
     if (hasOrg) {
@@ -96,6 +118,9 @@
     }
     return out;
   });
+
+  // Show the payouts prompt when a monetised option is present but blocked.
+  const showPayoutsHint = $derived(!connectReady);
 
   const showPrice = $derived(accessTypeVal === 'paid' || accessTypeVal === 'subscribers');
   // Tier applies to two access modes:
@@ -132,12 +157,17 @@
   >
     {#each options as option (option.value)}
       {@const Icon = option.icon}
-      <label class="access-card" data-selected={accessTypeVal === option.value || undefined}>
+      <label
+        class="access-card"
+        data-selected={accessTypeVal === option.value || undefined}
+        data-disabled={option.disabled || undefined}
+      >
         <input
           type="radio"
           name="_accessTypeRadio"
           value={option.value}
           checked={accessTypeVal === option.value}
+          disabled={option.disabled}
           onchange={() => onAccessChange(option.value)}
           class="sr-only"
         />
@@ -152,6 +182,15 @@
       </label>
     {/each}
   </div>
+
+  {#if showPayoutsHint}
+    <p class="payouts-hint">
+      {m.studio_content_form_access_payouts_hint()}
+      <a href={payoutSetupHref} class="payouts-link">
+        {m.studio_content_form_access_payouts_link()}
+      </a>
+    </p>
+  {/if}
 
   {#if showPrice}
     <div class="conditional-row">
@@ -254,6 +293,29 @@
   .access-card[data-selected] {
     border-color: var(--color-interactive);
     background-color: color-mix(in srgb, var(--color-interactive) 5%, var(--color-surface));
+  }
+
+  /* Monetised option blocked until payouts are set up. */
+  .access-card[data-disabled] {
+    cursor: not-allowed;
+    opacity: var(--opacity-disabled, 0.5);
+  }
+
+  .access-card[data-disabled]:hover {
+    border-color: var(--color-border);
+    transform: none;
+  }
+
+  .payouts-hint {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    margin: 0;
+  }
+
+  .payouts-link {
+    color: var(--color-interactive);
+    font-weight: var(--font-medium);
+    text-decoration: underline;
   }
 
   .access-icon {
