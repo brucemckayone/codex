@@ -52,6 +52,7 @@ import {
   sendEmailToWorker,
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
+import { cleanupContentThumbnailOnDelete } from './content-cleanup';
 
 /**
  * Bump the org content version in KV after publish/unpublish/delete.
@@ -432,6 +433,16 @@ app.delete(
         // Pre-fetch for cache invalidation is non-critical
       }
       await ctx.services.content.delete(contentId, ctx.user.id);
+      // Codex-ko8ko: content soft-delete must not strand the thumbnail's R2
+      // objects. Best-effort — records orphans for the hourly sweep on R2
+      // failure and never throws; awaited so the request-scoped DB stays open
+      // for its orphan-record / thumbnailUrl-clear writes.
+      await cleanupContentThumbnailOnDelete(
+        ctx.services.imageProcessing,
+        contentId,
+        ctx.user.id,
+        ctx.obs
+      );
       bumpOrgContentVersion(ctx.env, ctx.executionCtx, organizationId, ctx.obs);
       // Fan per-user library invalidation (Codex-c01do). Soft-delete must
       // remove the item from everyone's library UI immediately.

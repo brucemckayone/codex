@@ -251,12 +251,19 @@
   });
 
   // ── Result handlers ────────────────────────────────────────────────────
-  function handleCreateSuccess() {
+  // Codex-ko8ko: after creating the draft, land the creator in EDIT mode
+  // (where the new content id exists) so they can upload a thumbnail FILE and
+  // finish setting up the piece — file upload is gated on `contentId`, which
+  // only exists once the row is persisted. Falls back to the content list if
+  // the id is somehow missing from the create result.
+  function handleCreateSuccess(contentId?: string) {
     tick().then(() => {
       confirmLeave = true;
       toast.success(m.studio_content_form_create_success());
       onSuccess?.();
-      goto('/studio/content');
+      goto(
+        contentId ? `/studio/content/${contentId}/edit` : '/studio/content'
+      );
     });
   }
 
@@ -287,8 +294,17 @@
     if (!result?.success) return;
     if (result === lastHandledResult) return;
     lastHandledResult = result;
-    if (isEdit) handleUpdateSuccess();
-    else handleCreateSuccess();
+    if (isEdit) {
+      handleUpdateSuccess();
+    } else {
+      // `result` here is the createContentForm result — read it directly so
+      // `contentId` narrows cleanly (the update-success variant has no such
+      // field, so the shared `form.result` union wouldn't type-narrow).
+      const created = createContentForm.result;
+      handleCreateSuccess(
+        created && created.success ? created.contentId : undefined
+      );
+    }
   });
 
   // ── Publish / Unpublish ───────────────────────────────────────────────

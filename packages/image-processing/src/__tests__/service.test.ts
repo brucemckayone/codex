@@ -207,6 +207,40 @@ describe('ImageProcessingService', () => {
 
       expect(testMockDb.update).toHaveBeenCalled();
     });
+
+    it('re-upload overwrites the SAME R2 keys — no orphan on replace [Codex-ko8ko]', async () => {
+      // Thumbnails live at deterministic keys derived from (creatorId,
+      // contentId), so replacing one OVERWRITES in place: the second upload
+      // must hit the exact same three keys as the first, leaving no stale
+      // object behind. This locks the invariant the service's own comment
+      // warns future devs not to break (do NOT switch to timestamped/hashed
+      // keys without adding an explicit delete-previous step).
+      const put = vi.mocked(testMockR2Service.put);
+      vi.mocked(processor.processImageVariants).mockReturnValue({
+        sm: new Uint8Array([1]),
+        md: new Uint8Array([2]),
+        lg: new Uint8Array([3]),
+      });
+
+      await service.processContentThumbnail(
+        'content-1',
+        'user-1',
+        createTestImageFile('image/png', 'first.png')
+      );
+      const firstKeys = put.mock.calls.map((call) => call[0]);
+
+      put.mockClear();
+
+      await service.processContentThumbnail(
+        'content-1',
+        'user-1',
+        createTestImageFile('image/webp', 'second.webp')
+      );
+      const secondKeys = put.mock.calls.map((call) => call[0]);
+
+      expect(firstKeys).toHaveLength(3);
+      expect(secondKeys).toEqual(firstKeys);
+    });
   });
 
   describe('processUserAvatar', () => {
