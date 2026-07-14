@@ -2,7 +2,7 @@
  * Auth Rate Limiter Middleware
  *
  * Applies rate limiting specifically to the four user-facing
- * authentication surfaces (sign-up, sign-in, forget-password,
+ * authentication surfaces (sign-up, sign-in, request-password-reset,
  * reset-password) to prevent brute-force / credential-stuffing.
  *
  * The path Set is sourced from `@codex/constants`

@@ -51,15 +51,21 @@ export const forgotPasswordForm = form(
     const { platform } = getRequestEvent();
 
     const authUrl = serverApiUrl(platform, 'auth');
-    const response = await fetch(`${authUrl}/api/auth/forget-password`, {
+    // BetterAuth's email/password reset endpoint is `/request-password-reset`.
+    // There is NO `/forget-password` in core (only the email-otp plugin's
+    // `/forget-password/email-otp`, which is not enabled), so the old path 404'd
+    // and no reset email was ever sent. Verified against better-auth@1.4.11.
+    const response = await fetch(`${authUrl}/api/auth/request-password-reset`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, redirectTo: '/reset-password' }),
     });
 
-    // Log failures server-side for monitoring (but don't expose to user)
+    // A non-2xx here is a genuine transport/config failure (unknown emails
+    // still return 200 by design), so log at error level — a silent success on
+    // a broken endpoint is exactly what hid this bug for months.
     if (!response.ok) {
-      logger.warn('Forgot password request failed', {
+      logger.error('Password reset request failed', {
         status: response.status,
         // Don't log email to avoid PII in logs
       });

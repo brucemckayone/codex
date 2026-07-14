@@ -79,7 +79,8 @@ export const BRAND_COLORS = {
 export const BETTERAUTH_RATE_LIMITED_PATHS = [
   '/api/auth/sign-up/email',
   '/api/auth/sign-in/email',
-  '/api/auth/forget-password',
+  // BetterAuth core exposes `/request-password-reset` (NOT `/forget-password`).
+  '/api/auth/request-password-reset',
   '/api/auth/reset-password',
 ] as const;
 
