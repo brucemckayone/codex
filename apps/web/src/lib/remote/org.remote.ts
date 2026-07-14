@@ -7,7 +7,7 @@
 
 import type { OrganizationWithRole } from '@codex/shared-types';
 import { z } from 'zod';
-import { command, getRequestEvent, query } from '$app/server';
+import { command, form, getRequestEvent, query } from '$app/server';
 import { createServerApi } from '$lib/server/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -267,6 +267,69 @@ export const createOrganization = command(
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
     return api.org.create(input);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Update Organization Identity (Hero Title + Subheading)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const updateOrganizationFormSchema = z.object({
+  orgId: z.string().uuid(),
+  // Hero <h1> title. Required (min 1) when present; omit to leave unchanged.
+  name: z
+    .string()
+    .trim()
+    .min(1, 'Organization name is required')
+    .max(255, 'Organization name must be 255 characters or less')
+    .optional(),
+  // Hero subheading (org.description). Empty string clears it (→ null).
+  description: z
+    .string()
+    .trim()
+    .max(5000, 'Subheading must be 5000 characters or less'),
+});
+
+/**
+ * Update organization hero text (title + subheading) via progressive-enhancement form.
+ *
+ * Sends PATCH to /api/organizations/:id with only { name, description } —
+ * never slug — so the subdomain can never change from a hero-text edit.
+ * Mirrors the updateContactForm pattern in settings.remote.ts.
+ *
+ * Usage:
+ * ```svelte
+ * <form {...updateOrganizationForm}>
+ *   <input type="hidden" name="orgId" value={orgId} />
+ *   <input name="name" value={org.name} />
+ *   <textarea name="description">{org.description}</textarea>
+ *   <button disabled={updateOrganizationForm.pending > 0}>Save</button>
+ * </form>
+ * ```
+ */
+export const updateOrganizationForm = form(
+  updateOrganizationFormSchema,
+  async ({ orgId, name, description }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    try {
+      const result = await api.org.update(orgId, {
+        name,
+        // Trim already applied by the schema; treat an empty subheading as a
+        // deliberate clear (null) rather than storing an empty string.
+        description: description === '' ? null : description,
+      });
+      return { success: true as const, data: result };
+    } catch (error) {
+      return {
+        success: false as const,
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Failed to update organization',
+      };
+    }
   }
 );
 
