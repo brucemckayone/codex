@@ -1808,13 +1808,22 @@ export class SubscriptionService extends BaseService {
   ): Promise<WebhookHandlerResult | void> {
     const stripeSubId = stripeSubscription.id;
 
-    const [sub] = await this.db
-      .select()
-      .from(subscriptions)
-      .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
-      .limit(1);
-
-    if (!sub) return;
+    // Ordering race #3 (Codex-1hvda): customer.subscription.updated can arrive
+    // BEFORE customer.subscription.created. The old code dropped the event
+    // (`if (!sub) return`), so the tier/status change AND its cache invalidation
+    // were silently lost until the next version bump — stale library/badge for
+    // minutes. Self-heal instead: ensureSubscriptionDataPresent inserts the row
+    // from the Stripe payload we already hold; the UPDATE below then applies the
+    // new tier/status/period on top (a semantic upsert). Passing knownStripeSub
+    // avoids a redundant Stripe retrieve.
+    const presence = await this.ensureSubscriptionDataPresent(stripeSubId, {
+      eventType: 'customer.subscription.updated',
+      knownStripeSub: stripeSubscription,
+    });
+    // null = permanent failure (Stripe 404 / missing metadata). Exit cleanly
+    // with 200 exactly as the previous drop branch did.
+    if (!presence) return;
+    const sub = presence.subscription;
 
     // Shared mapper prevents field drift (V1/V2/V5 in the audit). Passing
     // `sub.status` as the fallback preserves DB state if Stripe reports a

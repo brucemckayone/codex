@@ -1181,6 +1181,132 @@ describe('SubscriptionService', () => {
       // wiring, so `invalidateIfConfigured` is a documented no-op — there
       // is no extra cache side effect to assert against here.
     });
+
+    // ─── Ordering race #3 self-heal (Codex-1hvda) ─────────────────────
+    // Stripe does not guarantee delivery order: customer.subscription.updated
+    // can arrive BEFORE customer.subscription.created. The handler previously
+    // dropped that event (`if (!sub) return`), silently losing the tier/status
+    // change AND its cache invalidation until the next version bump. It now
+    // self-heals via ensureSubscriptionDataPresent, then applies the UPDATE on
+    // top (a semantic upsert). The updated payload is passed as knownStripeSub,
+    // so the insert reads it directly — NO stripe.subscriptions.retrieve fires
+    // (unlike the invoice-handler self-heal paths).
+
+    it('self-heal: absent row + metadata present → inserts from the updated payload and returns the tuple (Codex-1hvda)', async () => {
+      const { org, tier1 } = await createFullOrg('wh-updated-selfheal');
+      const stripeSubId = `sub_updated_heal_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
+
+      const result = await service.handleSubscriptionUpdated({
+        id: stripeSubId,
+        customer: `cus_${stripeSubId}`,
+        status: 'active',
+        cancel_at_period_end: false,
+        metadata: {
+          codex_user_id: otherCreatorId,
+          codex_organization_id: org.id,
+          codex_tier_id: tier1.id,
+        },
+        items: {
+          data: [
+            {
+              price: { recurring: { interval: 'month' } },
+              current_period_start: Math.floor(Date.now() / 1000),
+              current_period_end: Math.floor(Date.now() / 1000) + 86400,
+            },
+          ],
+        },
+      } as unknown as Stripe.Subscription);
+
+      // Handler heals the missing row and returns the canonical envelope.
+      expect(result).toEqual({ userId: otherCreatorId, orgId: org.id });
+
+      const { eq } = await import('drizzle-orm');
+      const [row] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId))
+        .limit(1);
+      expect(row).toBeDefined();
+      expect(row.userId).toBe(otherCreatorId);
+      expect(row.organizationId).toBe(org.id);
+      expect(row.tierId).toBe(tier1.id);
+      expect(row.status).toBe('active');
+    });
+
+    it('self-heal: absent row + missing codex metadata → no insert, returns undefined (Codex-1hvda)', async () => {
+      // knownStripeSub is used, so the retrieve-404 path is unreachable here;
+      // the clean-exit is the missing-metadata guard returning null. The
+      // handler must exit exactly as the old drop branch did — no phantom row.
+      const stripeSubId = `sub_updated_nometa_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
+
+      const result = await service.handleSubscriptionUpdated({
+        id: stripeSubId,
+        customer: `cus_${stripeSubId}`,
+        status: 'active',
+        cancel_at_period_end: false,
+        metadata: {},
+        items: {
+          data: [{ current_period_start: 0, current_period_end: 0 }],
+        },
+      } as unknown as Stripe.Subscription);
+
+      expect(result).toBeUndefined();
+
+      const { eq } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
+      expect(rows).toHaveLength(0);
+    });
+
+    it('self-heal: concurrent updated events for an absent row → exactly one row, both return the tuple (Codex-1hvda)', async () => {
+      const { org, tier1 } = await createFullOrg('wh-updated-heal-concurrent');
+      const stripeSubId = `sub_updated_heal_conc_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
+      const event = {
+        id: stripeSubId,
+        customer: `cus_${stripeSubId}`,
+        status: 'active',
+        cancel_at_period_end: false,
+        metadata: {
+          codex_user_id: otherCreatorId,
+          codex_organization_id: org.id,
+          codex_tier_id: tier1.id,
+        },
+        items: {
+          data: [
+            {
+              price: { recurring: { interval: 'month' } },
+              current_period_start: Math.floor(Date.now() / 1000),
+              current_period_end: Math.floor(Date.now() / 1000) + 86400,
+            },
+          ],
+        },
+      } as unknown as Stripe.Subscription;
+
+      // Both invocations SELECT-miss then race to INSERT; the unique constraint
+      // on stripe_subscription_id makes the loser re-SELECT (justInserted=false).
+      const [first, second] = await Promise.all([
+        service.handleSubscriptionUpdated(event),
+        service.handleSubscriptionUpdated(event),
+      ]);
+
+      expect(first).toEqual({ userId: otherCreatorId, orgId: org.id });
+      expect(second).toEqual({ userId: otherCreatorId, orgId: org.id });
+
+      const { eq } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.stripeSubscriptionId, stripeSubId));
+      expect(rows).toHaveLength(1);
+    });
   });
 
   // ─── handleSubscriptionDeleted ────────────────────────────────────
