@@ -535,6 +535,17 @@ export function createServerApi(
         ),
 
       /**
+       * Soft-delete the authenticated user's own account.
+       * Server requires the typed confirmation and blocks (422) if the user
+       * still owns an organization.
+       */
+      deleteAccount: () =>
+        request<null>('identity', '/api/user/account', {
+          method: 'DELETE',
+          body: JSON.stringify({ confirmation: 'DELETE' }),
+        }),
+
+      /**
        * Get notification preferences
        */
       getNotificationPreferences: () =>

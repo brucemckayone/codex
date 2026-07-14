@@ -2,7 +2,12 @@ import type { R2Service } from '@codex/cloudflare-clients';
 import type { Database } from '@codex/database';
 import type { ImageProcessingResult } from '@codex/image-processing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { UserNotFoundError, UsernameTakenError } from '../errors';
+import {
+  AccountHasContentError,
+  AccountOwnsOrganizationError,
+  UserNotFoundError,
+  UsernameTakenError,
+} from '../errors';
 import { IdentityService } from '../services/identity-service';
 
 /**
@@ -26,6 +31,7 @@ const mockDb = {
   },
   update: vi.fn(),
   insert: vi.fn(),
+  select: vi.fn(),
 } as unknown as Database;
 
 // Mock returning function for the update chain
@@ -934,6 +940,94 @@ describe('IdentityService', () => {
       expect(result.emailMarketing).toBe(false);
       expect(result.emailTransactional).toBe(true); // Unchanged
       expect(result.emailDigest).toBe(true); // Unchanged
+    });
+  });
+
+  describe('deleteAccount (Codex-eb00a.11)', () => {
+    const userId = 'user-123';
+    // Two select shapes are used:
+    //   org check:     select().from().innerJoin().where()  → rows
+    //   content check: select().from().where().limit()      → rows
+    const mockOwnedOrgsWhere = vi.fn();
+    const mockExistsLimit = vi.fn();
+    const mockInnerJoin = vi.fn(() => ({ where: mockOwnedOrgsWhere }));
+    const mockExistsWhere = vi.fn(() => ({ limit: mockExistsLimit }));
+    const mockSelectFrom = vi.fn(() => ({
+      innerJoin: mockInnerJoin,
+      where: mockExistsWhere,
+    }));
+
+    beforeEach(() => {
+      (mockDb.select as ReturnType<typeof vi.fn>).mockReturnValue({
+        from: mockSelectFrom,
+      });
+      mockSelectFrom.mockClear();
+      mockInnerJoin.mockClear();
+      mockOwnedOrgsWhere.mockClear();
+      mockExistsWhere.mockClear();
+      mockExistsLimit.mockClear();
+      // Defaults: owns no organizations, has no content/uploads.
+      mockOwnedOrgsWhere.mockResolvedValue([]);
+      mockExistsLimit.mockResolvedValue([]);
+    });
+
+    it('soft-deletes and scrubs PII when the user owns no organizations', async () => {
+      mockReturning.mockResolvedValue([{ id: userId }]);
+
+      await service.deleteAccount(userId);
+
+      expect(mockDb.update).toHaveBeenCalledTimes(1);
+      const setArg = mockUpdateSet.mock.calls[0][0] as Record<string, unknown>;
+      expect(setArg.deletedAt).toBeInstanceOf(Date);
+      // Per-user tombstone keeps the globally-unique email column collision-free
+      // across deletions and frees the real address for re-registration.
+      expect(setArg.email).toBe(`deleted-${userId}@deleted.invalid`);
+      expect(setArg.name).toBe('Deleted User');
+      expect(setArg.username).toBeNull();
+      expect(setArg.bio).toBeNull();
+      expect(setArg.avatarUrl).toBeNull();
+      expect(setArg.image).toBeNull();
+      expect(setArg.socialLinks).toBeNull();
+    });
+
+    it('blocks deletion and does NOT soft-delete when the user owns an organization', async () => {
+      mockOwnedOrgsWhere.mockResolvedValue([
+        { name: 'Studio Alpha' },
+        { name: 'Studio Beta' },
+      ]);
+
+      await expect(service.deleteAccount(userId)).rejects.toThrow(
+        AccountOwnsOrganizationError
+      );
+      // The block must happen BEFORE any write — the account survives.
+      expect(mockDb.update).not.toHaveBeenCalled();
+    });
+
+    it('surfaces the owned organization names in the block error', async () => {
+      mockOwnedOrgsWhere.mockResolvedValue([{ name: 'Studio Alpha' }]);
+
+      await expect(service.deleteAccount(userId)).rejects.toThrow(
+        /Studio Alpha/
+      );
+    });
+
+    it('blocks deletion and does NOT soft-delete when the user has content or uploads', async () => {
+      // Owns no org, but authored content exists → blocked until the full
+      // creator-deletion lifecycle is designed (Codex-v1io7).
+      mockExistsLimit.mockResolvedValue([{ id: 'content-1' }]);
+
+      await expect(service.deleteAccount(userId)).rejects.toThrow(
+        AccountHasContentError
+      );
+      expect(mockDb.update).not.toHaveBeenCalled();
+    });
+
+    it('throws UserNotFoundError when no active user row is updated', async () => {
+      mockReturning.mockResolvedValue([]); // already deleted / nonexistent
+
+      await expect(service.deleteAccount('ghost')).rejects.toThrow(
+        UserNotFoundError
+      );
     });
   });
 });

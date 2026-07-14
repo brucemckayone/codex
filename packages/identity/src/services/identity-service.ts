@@ -3,9 +3,12 @@ import { CacheType } from '@codex/cache';
 import type { R2Service } from '@codex/cloudflare-clients';
 import { toIso, whereNotDeleted } from '@codex/database';
 import {
+  content,
   creatorOnboarding,
+  mediaItems,
   notificationPreferences,
   organizationMemberships,
+  organizations,
   users,
 } from '@codex/database/schema';
 import {
@@ -21,7 +24,12 @@ import type { UserProfile } from '@codex/shared-types';
 import type { UpdateCreatorOnboardingInput } from '@codex/validation';
 import { and, eq, ne } from 'drizzle-orm';
 
-import { UserNotFoundError, UsernameTakenError } from '../errors';
+import {
+  AccountHasContentError,
+  AccountOwnsOrganizationError,
+  UserNotFoundError,
+  UsernameTakenError,
+} from '../errors';
 
 export interface IdentityServiceConfig extends ServiceConfig {
   r2Service: R2Service;
@@ -392,6 +400,109 @@ export class IdentityService extends BaseService {
     } catch (error) {
       throw this.handleError(error, 'IdentityService.upgradeToCreator');
     }
+  }
+
+  /**
+   * Soft-delete the authenticated user's own account.
+   *
+   * Blocks deletion if the user still owns any organization — org
+   * teardown/transfer is a separate, larger flow (Codex-904q0). Otherwise it
+   * tombstones the row (deletedAt) and scrubs PII in a single atomic UPDATE:
+   * email becomes a per-user tombstone (the email column has a global UNIQUE
+   * constraint, so it must stay distinct across deletions, and this frees the
+   * real address for future re-registration), and name/username/bio/avatar/
+   * socialLinks are cleared.
+   *
+   * The caller (identity-api route) invalidates the current session's KV
+   * entry; the session-validation `deletedAt` gate in @codex/security closes
+   * the DB-fallback path for every other session.
+   *
+   * @param userId - Authenticated user ID (never a client-supplied value)
+   */
+  async deleteAccount(userId: string): Promise<void> {
+    try {
+      // Block if the user owns any active organization. Membership lifecycle
+      // uses `status` (organization_memberships has no deletedAt column); the
+      // organization itself is soft-deleted, so filter deleted orgs out.
+      const ownedOrgs = await this.db
+        .select({ name: organizations.name })
+        .from(organizationMemberships)
+        .innerJoin(
+          organizations,
+          eq(organizationMemberships.organizationId, organizations.id)
+        )
+        .where(
+          and(
+            eq(organizationMemberships.userId, userId),
+            eq(organizationMemberships.role, 'owner'),
+            eq(organizationMemberships.status, 'active'),
+            whereNotDeleted(organizations)
+          )
+        );
+
+      if (ownedOrgs.length > 0) {
+        throw new AccountOwnsOrganizationError(ownedOrgs.map((o) => o.name));
+      }
+
+      // Block accounts that have published content or uploads. Deleting a
+      // creator's account has unresolved downstream implications (buyer
+      // permanence, subscriber handling, R2 purge, grace window) — until that
+      // lifecycle is designed (Codex-v1io7) we only allow pure consumers to
+      // self-delete, so no orphaned/undesigned state reaches production.
+      if (await this.hasAuthoredContent(userId)) {
+        throw new AccountHasContentError();
+      }
+
+      // Soft-delete + PII scrub in one atomic statement.
+      const [deleted] = await this.db
+        .update(users)
+        .set({
+          deletedAt: new Date(),
+          email: `deleted-${userId}@deleted.invalid`,
+          name: 'Deleted User',
+          username: null,
+          bio: null,
+          avatarUrl: null,
+          image: null,
+          socialLinks: null,
+        })
+        .where(and(eq(users.id, userId), whereNotDeleted(users)))
+        .returning();
+
+      if (!deleted) {
+        throw new UserNotFoundError(userId);
+      }
+
+      this.obs.info('User account soft-deleted', { userId });
+
+      if (this.cache) {
+        await this.cache.invalidate(userId);
+      }
+    } catch (error) {
+      throw this.handleError(error, 'IdentityService.deleteAccount');
+    }
+  }
+
+  /**
+   * Returns true if the user authored any non-deleted content or media.
+   * Used to gate account self-deletion (see deleteAccount / Codex-v1io7).
+   */
+  private async hasAuthoredContent(userId: string): Promise<boolean> {
+    const [contentRow] = await this.db
+      .select({ id: content.id })
+      .from(content)
+      .where(and(eq(content.creatorId, userId), whereNotDeleted(content)))
+      .limit(1);
+    if (contentRow) {
+      return true;
+    }
+
+    const [mediaRow] = await this.db
+      .select({ id: mediaItems.id })
+      .from(mediaItems)
+      .where(and(eq(mediaItems.creatorId, userId), whereNotDeleted(mediaItems)))
+      .limit(1);
+    return !!mediaRow;
   }
 
   /**

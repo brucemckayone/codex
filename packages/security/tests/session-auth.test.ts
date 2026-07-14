@@ -234,6 +234,45 @@ describe('Session Authentication Middleware', () => {
         expect(body.userId).toBe('user_1');
         expect(mockDb.query.sessions.findFirst).toHaveBeenCalled();
       });
+
+      it('should reject a soft-deleted user even with a valid session row (Codex-eb00a.11)', async () => {
+        // Cache miss → DB fallback returns a valid, unexpired session whose
+        // user has been soft-deleted (account deletion). The deletedAt gate
+        // must treat this as no session so a residual cookie cannot act.
+        mockKV.get.mockResolvedValue(null);
+        mockDb.query.sessions.findFirst.mockResolvedValue({
+          ...mockSession,
+          expiresAt: new Date(mockSession.expiresAt),
+          createdAt: new Date(mockSession.createdAt),
+          updatedAt: new Date(mockSession.updatedAt),
+          user: {
+            ...mockUser,
+            createdAt: new Date(mockUser.createdAt),
+            updatedAt: new Date(mockUser.updatedAt),
+            deletedAt: new Date(),
+          },
+        });
+
+        app.use('*', optionalAuth({ kv: mockKV as unknown as KVNamespace }));
+        app.get('/test', (c) => {
+          const user = c.get('user');
+          return c.json({ userId: user?.id ?? null });
+        });
+
+        const res = await app.request('/test', {
+          headers: {
+            cookie: `${COOKIES.SESSION_NAME}=${mockSessionToken}`,
+          },
+        });
+
+        // optionalAuth is fail-open (200), but there must be NO authed user.
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { userId: string | null };
+        expect(body.userId).toBeNull();
+        expect(mockDb.query.sessions.findFirst).toHaveBeenCalled();
+        // A rejected (null) session must never be written to the KV cache.
+        expect(mockKV.put).not.toHaveBeenCalled();
+      });
     });
 
     describe('Expired Session Handling', () => {
