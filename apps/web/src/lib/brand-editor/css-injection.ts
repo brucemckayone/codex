@@ -346,14 +346,17 @@ const CSS_VAR_MAPPINGS: CssVarMapping[] = [
     getValue: (s) => String(s.density),
   },
   {
+    // NOTE: value is the bare family name — do NOT append `, var(--font-sans)`.
+    // org-brand.css redeclares `--font-sans` as
+    // `var(--brand-font-body, 'Inter'), 'Inter-fallback', …`, so appending
+    // var(--font-sans) here creates a --brand-font-body ↔ --font-sans cycle
+    // that invalidates both and drops the brand font entirely (Codex-eb00a.7).
     property: '--brand-font-body',
-    getValue: (s) =>
-      s.fontBody ? `'${s.fontBody}', var(--font-sans)` : undefined,
+    getValue: (s) => (s.fontBody ? `'${s.fontBody}'` : undefined),
   },
   {
     property: '--brand-font-heading',
-    getValue: (s) =>
-      s.fontHeading ? `'${s.fontHeading}', var(--font-sans)` : undefined,
+    getValue: (s) => (s.fontHeading ? `'${s.fontHeading}'` : undefined),
   },
 ];
 
@@ -391,7 +394,9 @@ export function previewFont(mode: 'body' | 'heading', family: string): void {
   if (!el) return;
   const prop =
     mode === 'heading' ? '--brand-font-heading' : '--brand-font-body';
-  el.style.setProperty(prop, `'${family}', var(--font-sans)`);
+  // Bare family name only — appending var(--font-sans) creates a cycle with
+  // org-brand.css's --font-sans redeclaration and drops the font (Codex-eb00a.7).
+  el.style.setProperty(prop, `'${family}'`);
   loadGoogleFont(family);
 }
 
@@ -408,7 +413,8 @@ export function revertFontPreview(
   const prop =
     mode === 'heading' ? '--brand-font-heading' : '--brand-font-body';
   if (currentValue) {
-    el.style.setProperty(prop, `'${currentValue}', var(--font-sans)`);
+    // Bare family name only (see previewFont) — no var(--font-sans) cycle.
+    el.style.setProperty(prop, `'${currentValue}'`);
   } else {
     el.style.removeProperty(prop);
   }

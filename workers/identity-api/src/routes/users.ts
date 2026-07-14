@@ -14,6 +14,7 @@ import {
 } from '@codex/image-processing';
 import type { HonoEnv } from '@codex/shared-types';
 import {
+  deleteAccountSchema,
   updateCreatorOnboardingSchema,
   updateNotificationPreferencesSchema,
   updateProfileSchema,
@@ -154,6 +155,51 @@ app.post(
       }
 
       return result;
+    },
+  })
+);
+
+/**
+ * DELETE /api/user/account
+ * Self-service soft-delete of the authenticated user's own account.
+ *
+ * Security: Authenticated user only; rate limit strict (20/min).
+ * Requires an explicit typed confirmation ({ confirmation: 'DELETE' }) so a
+ * stray request can never delete an account by accident.
+ * Blocks (422) if the user still owns an organization.
+ */
+app.delete(
+  '/account',
+  procedure({
+    policy: { auth: 'required', rateLimit: 'strict' },
+    input: { body: deleteAccountSchema },
+    successStatus: 204,
+    handler: async (ctx) => {
+      await ctx.services.identity.deleteAccount(ctx.user.id);
+
+      // Invalidate the current session's KV entry so the very next request
+      // fails auth. Await (not waitUntil) — the client clears its cookie and
+      // redirects immediately after, and must not race a still-cached session.
+      // Delete both key formats (session-auth "session:{token}" + BetterAuth
+      // raw token), matching upgrade-to-creator. The DB-fallback deletedAt
+      // gate in @codex/security covers this user's other-device sessions.
+      const kv = ctx.env.AUTH_SESSION_KV;
+      if (kv && ctx.session?.token) {
+        await Promise.all([
+          kv.delete(`session:${ctx.session.token}`),
+          kv.delete(ctx.session.token),
+        ]).catch((err: unknown) => {
+          ctx.obs?.error(
+            'Failed to invalidate session KV after account deletion',
+            {
+              error: err instanceof Error ? err.message : String(err),
+              userId: ctx.user.id,
+            }
+          );
+        });
+      }
+
+      return null;
     },
   })
 );

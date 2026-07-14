@@ -95,5 +95,20 @@ export const upgradeToCreatorSchema = z.object({
 
 export type UpgradeToCreatorInput = z.infer<typeof upgradeToCreatorSchema>;
 
+/**
+ * Delete account schema
+ *
+ * Self-service account deletion (soft-delete). Requires an explicit typed
+ * confirmation so a stray/programmatic DELETE can never nuke an account by
+ * accident — the client danger-zone dialog makes the user type "DELETE", and
+ * the server enforces the same literal. Auth-method-agnostic (works for
+ * email/password and future OAuth accounts, which have no password to re-enter).
+ */
+export const deleteAccountSchema = z.object({
+  confirmation: z.literal('DELETE'),
+});
+
+export type DeleteAccountInput = z.infer<typeof deleteAccountSchema>;
+
 // Notification preferences schema is exported from './schemas/notifications.ts
 // to avoid duplicate exports

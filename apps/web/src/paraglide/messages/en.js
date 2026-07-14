@@ -327,6 +327,54 @@ export const account_profile_description = () => `Manage your account profile an
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const account_danger_zone_title = () => `Danger zone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const account_delete_title = () => `Delete account`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const account_delete_description = () => `Permanently delete your account. This cannot be undone — your profile and personal information will be removed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const account_delete_subscriptions_note = () => `Cancel any active subscriptions first — deleting your account does not stop future billing.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const account_delete_confirm_label = () => `Type DELETE to confirm`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const account_delete_button = () => `Delete my account`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const account_personal_information = () => `Personal Information`
 
 
@@ -3559,6 +3607,14 @@ export const monetisation_feature_requires_connect = () => `Connect a Stripe acc
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tiers_requires_connect = () => `Complete Stripe Connect setup to create subscription tiers. Tiers stay dormant until charges and payouts are enabled.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const monetisation_tier_name = () => `Tier Name`
 
 
@@ -5199,6 +5255,46 @@ export const branding_description = () => `Customize your organization's visual 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_title = () => `Hero text`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_description = () => `The title and subheading shown on your organization's home page hero.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_name_label = () => `Organization name`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_subheading_label = () => `Hero subheading`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_subheading_placeholder = () => `A short tagline shown beneath your organization name`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const branding_logo_title = () => `Logo`
 
 
@@ -6088,6 +6184,22 @@ export const studio_content_form_access_team = () => `Team only`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_form_access_team_desc = () => `Only team members (owners, admins, creators)`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_access_payouts_hint = () => `Set up payouts before you can sell content or gate it behind a subscription.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_form_access_payouts_link = () => `Set up payouts`
 
 
 /**

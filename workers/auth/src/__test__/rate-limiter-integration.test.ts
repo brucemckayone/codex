@@ -147,7 +147,7 @@ describe('createAuthRateLimiter — integration (Codex-ttavz.7)', () => {
     it('keeps separate budgets per path on the same IP', async () => {
       const ip = '198.51.100.60';
       const exhausted = '/api/auth/sign-up/email';
-      const fresh = '/api/auth/forget-password';
+      const fresh = '/api/auth/request-password-reset';
 
       // Drain exhausted path on this IP.
       for (let i = 0; i < BUDGET; i++) {

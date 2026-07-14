@@ -15,9 +15,9 @@
  * contained `/api/auth/email/login`, `/api/auth/email/register`, etc.,
  * but the actual BetterAuth POST endpoints are
  * `/api/auth/sign-in/email`, `/api/auth/sign-up/email`,
- * `/api/auth/forget-password`, `/api/auth/reset-password`. Result:
- * every auth endpoint was unrate-limited in production — brute-force
- * vulnerability.
+ * `/api/auth/request-password-reset`, `/api/auth/reset-password`.
+ * Result: every auth endpoint was unrate-limited in production —
+ * brute-force vulnerability.
  *
  * Fix: paths now live in `@codex/constants` as
  * `BETTERAUTH_RATE_LIMITED_PATHS_SET` and are imported by the auth
@@ -27,8 +27,8 @@
  * Source-of-truth grep evidence (apps/web/src):
  *   apps/web/src/routes/(auth)/login/+page.server.ts:48 → /api/auth/sign-in/email
  *   apps/web/src/routes/(auth)/register/+page.server.ts:57 → /api/auth/sign-up/email
- *   apps/web/src/routes/(auth)/forgot-password/+page.server.ts:29 → /api/auth/forget-password
- *   apps/web/src/lib/remote/auth.remote.ts:106 → /api/auth/sign-up/email
+ *   apps/web/src/lib/remote/auth.remote.ts (forgotPasswordForm) → /api/auth/request-password-reset
+ *   apps/web/src/lib/remote/auth.remote.ts (registerForm) → /api/auth/sign-up/email
  */
 import {
   BETTERAUTH_RATE_LIMITED_PATHS,
@@ -45,7 +45,10 @@ import { describe, expect, it } from 'vitest';
 const BETTERAUTH_RATE_LIMITED_POST_PATHS = [
   '/api/auth/sign-up/email',
   '/api/auth/sign-in/email',
-  '/api/auth/forget-password',
+  // BetterAuth core's reset-request endpoint is `/request-password-reset`
+  // (NOT `/forget-password`, which only exists in the unused email-otp plugin).
+  // Verified against better-auth@1.4.11. See Codex-eb00a.3.
+  '/api/auth/request-password-reset',
   '/api/auth/reset-password',
 ] as const;
 

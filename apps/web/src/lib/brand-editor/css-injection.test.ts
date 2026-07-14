@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   darkTokenOverridesToCssVars,
+  injectBrandVars,
+  previewFont,
+  revertFontPreview,
   tokenOverridesToCssVars,
 } from './css-injection';
+import type { BrandEditorState } from './types';
 
 /**
  * Unit tests for the token-overrides → CSS-vars mapping used by both
@@ -136,5 +140,78 @@ describe('darkTokenOverridesToCssVars', () => {
     // and the dark CSS gate uses the dark variant.
     expect(light['--brand-shader-preset']).toBe('ether');
     expect(dark['--brand-shader-preset-dark']).toBe('ink');
+  });
+});
+
+/**
+ * Codex-eb00a.7: the emitted --brand-font-body/-heading value must be the BARE
+ * family name. org-brand.css redeclares `--font-sans` as
+ * `var(--brand-font-body, 'Inter'), 'Inter-fallback', …`, so appending
+ * `var(--font-sans)` here forms a --brand-font-body ↔ --font-sans cycle that
+ * invalidates both → `font-family: var(--font-sans)` falls back to the inherited
+ * font and the brand font never applies. These guard every emitter that could
+ * reintroduce the cycle (save injection + live preview).
+ */
+describe('brand fonts do not self-reference --font-sans (no CSS var cycle)', () => {
+  const baseState: BrandEditorState = {
+    primaryColor: '#3355ff',
+    secondaryColor: null,
+    accentColor: null,
+    backgroundColor: null,
+    fontBody: null,
+    fontHeading: null,
+    radius: 0.5,
+    density: 1,
+    logoUrl: null,
+    tokenOverrides: {},
+    darkOverrides: null,
+    darkTokenOverrides: null,
+    heroLayout: 'default',
+  };
+
+  function makeOrgLayout(): HTMLElement {
+    const el = document.createElement('div');
+    el.className = 'org-layout';
+    document.body.appendChild(el);
+    return el;
+  }
+
+  afterEach(() => {
+    for (const el of document.querySelectorAll('.org-layout')) el.remove();
+  });
+
+  it('injectBrandVars emits bare family names (save path)', () => {
+    const el = makeOrgLayout();
+    injectBrandVars({ ...baseState, fontBody: 'Lora', fontHeading: 'Poppins' });
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toBe("'Lora'");
+    expect(el.style.getPropertyValue('--brand-font-heading')).toBe("'Poppins'");
+    expect(el.style.getPropertyValue('--brand-font-body')).not.toContain(
+      'var(--font-sans)'
+    );
+  });
+
+  it('previewFont emits a bare family name (hover-preview path)', () => {
+    const el = makeOrgLayout();
+    previewFont('body', 'Playfair Display');
+
+    expect(el.style.getPropertyValue('--brand-font-body')).toBe(
+      "'Playfair Display'"
+    );
+    expect(el.style.getPropertyValue('--brand-font-body')).not.toContain(
+      'var(--font-sans)'
+    );
+  });
+
+  it('revertFontPreview restores a bare family name', () => {
+    const el = makeOrgLayout();
+    revertFontPreview('heading', 'Space Grotesk');
+
+    expect(el.style.getPropertyValue('--brand-font-heading')).toBe(
+      "'Space Grotesk'"
+    );
+    expect(el.style.getPropertyValue('--brand-font-heading')).not.toContain(
+      'var(--font-sans)'
+    );
   });
 });

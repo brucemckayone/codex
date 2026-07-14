@@ -8,7 +8,7 @@
   MediaUpload.svelte).
 -->
 <script lang="ts">
-  import { goto, invalidateAll } from '$app/navigation';
+  import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import MediaUpload, { type UploadItem } from '$lib/components/studio/MediaUpload.svelte';
   import MediaLibraryCommandBar from '$lib/components/studio/media-library/MediaLibraryCommandBar.svelte';
@@ -39,9 +39,16 @@
     studioName: string;
     /** Optional class forwarded to the root for layout composition (R13) */
     class?: string;
+    /**
+     * Refresh the media list after a mutation. The media route has no
+     * +page.server.ts, so `invalidateAll()` does NOT re-run the `listMedia`
+     * remote query — the parent passes `() => mediaQuery.refresh()` here so
+     * upload/edit/delete actually update the grid without a hard reload.
+     */
+    onRefresh?: () => void | Promise<void>;
   }
 
-  const { data, studioName, class: className }: Props = $props();
+  const { data, studioName, class: className, onRefresh }: Props = $props();
 
   // ── Upload surface wiring ─────────────────────────────────────────────
   let uploadQueue: UploadItem[] = $state([]);
@@ -185,7 +192,7 @@
 
   // ── Event handlers ────────────────────────────────────────────────────
   function handleUploadComplete() {
-    void invalidateAll();
+    void onRefresh?.();
   }
 
   function handleEdit(id: string) {
@@ -197,7 +204,7 @@
 
   async function handleSave(id: string, updateData: { title?: string; description?: string | null }) {
     await updateMedia({ id, data: updateData });
-    void invalidateAll();
+    void onRefresh?.();
   }
 
   function handleDelete(id: string) {
@@ -212,7 +219,7 @@
       await deleteMedia(deleteTargetId);
       showDeleteConfirm = false;
       deleteTargetId = null;
-      void invalidateAll();
+      void onRefresh?.();
     } catch (error) {
       logger.error('Failed to delete media', {
         error: error instanceof Error ? error.message : String(error),

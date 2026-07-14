@@ -27,6 +27,7 @@
     updateContentForm,
     deleteContent,
   } from '$lib/remote/content.remote';
+  import { getMyConnectStatus } from '$lib/remote/subscription.remote';
   import { togglePublishStatus, type ContentStatus } from './publish-toggle';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import type { ContentWithRelations, SubscriptionTier } from '$lib/types';
@@ -79,6 +80,19 @@
 
   const isEdit = $derived(!!content);
   const form = $derived(isEdit ? updateContentForm : createContentForm);
+
+  // Stripe Connect payout readiness gates the paid/subscriber access options
+  // (Codex-eb00a.10). The backend authoritatively blocks publishing monetised
+  // content without a payout-ready account; this drives the proactive prompt in
+  // AccessSection. Assume ready until the status resolves so connected creators
+  // never see a flash of disabled options.
+  const connectStatusQuery = getMyConnectStatus();
+  const connectReady = $derived(
+    connectStatusQuery.current
+      ? connectStatusQuery.current.chargesEnabled &&
+          connectStatusQuery.current.payoutsEnabled
+      : true
+  );
 
   // ── Local UI state ──────────────────────────────────────────────────────
   let showDeleteConfirm = $state(false);
@@ -259,7 +273,15 @@
   // re-render re-runs the handler → duplicate toast + duplicate goto.
   // A *new* result object (second submission) has a different identity,
   // so the handler fires again as expected.
-  let lastHandledResult: unknown = null;
+  //
+  // SEED with the singleton's CURRENT result (not null): form() is a
+  // module-level singleton whose `result` persists across navigation/unmount,
+  // so a fresh mount of /studio/content/new can still hold a PRIOR successful
+  // create. Seeding to `null` made the mount $effect below treat that stale
+  // result as new and immediately replay the create (toast + goto) with no
+  // user action. Seeding to the current result marks it already-handled, so
+  // only a result produced by an actual submission in THIS mount fires.
+  let lastHandledResult: unknown = untrack(() => form.result);
   $effect(() => {
     const result = form.result;
     if (!result?.success) return;
@@ -555,6 +577,7 @@
           {priceVal}
           {selectedMinimumTierId}
           {derivedVisibility}
+          {connectReady}
           onAccessChange={handleAccessChange}
           onTierChange={handleTierChange}
         />

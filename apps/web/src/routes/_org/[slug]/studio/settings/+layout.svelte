@@ -20,25 +20,20 @@
 
   // Derive active tab from pathname
   const activeTab = $derived(
-    page.url.pathname.endsWith('/branding')
-      ? 'branding'
-      : page.url.pathname.endsWith('/pricing-faq')
-        ? 'pricing-faq'
-        : 'general'
+    page.url.pathname.endsWith('/branding') ? 'branding' : 'general'
   );
 
   // Derive loading tab from pending navigation
   const loadingTab = $derived(
     navigating?.to?.url.pathname?.endsWith('/branding')
       ? 'branding'
-      : navigating?.to?.url.pathname?.endsWith('/pricing-faq')
-        ? 'pricing-faq'
-        : navigating?.to?.url.pathname?.endsWith('/settings')
-          ? 'general'
-          : null
+      : navigating?.to?.url.pathname?.endsWith('/settings')
+        ? 'general'
+        : null
   );
 
-  // Map nav items to tab config with i18n labels
+  // Map nav items to tab config with i18n labels.
+  // Pricing FAQ moved to the Monetisation hub (Codex-eb00a.17).
   const tabs = $derived([
     {
       value: 'general',
@@ -49,11 +44,6 @@
       value: 'branding',
       href: '/studio/settings/branding',
       label: m.settings_branding(),
-    },
-    {
-      value: 'pricing-faq',
-      href: '/studio/settings/pricing-faq',
-      label: 'Pricing FAQ',
     },
   ]);
 </script>
