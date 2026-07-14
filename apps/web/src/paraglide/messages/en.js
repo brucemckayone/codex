@@ -327,6 +327,54 @@ export const account_profile_description = () => `Manage your account profile an
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const account_danger_zone_title = () => `Danger zone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const account_delete_title = () => `Delete account`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const account_delete_description = () => `Permanently delete your account. This cannot be undone — your profile and personal information will be removed.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const account_delete_subscriptions_note = () => `Cancel any active subscriptions first — deleting your account does not stop future billing.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const account_delete_confirm_label = () => `Type DELETE to confirm`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const account_delete_button = () => `Delete my account`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const account_personal_information = () => `Personal Information`
 
 

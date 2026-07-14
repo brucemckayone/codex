@@ -185,6 +185,15 @@ async function querySessionFromDatabase(
     // TypeScript type assertion - we've validated user exists above
     const user = result.user as typeof schema.users.$inferSelect;
 
+    // SECURITY: A soft-deleted account must never authenticate, even with a
+    // session row that is otherwise valid and unexpired. Account deletion
+    // (Codex-eb00a.11) sets users.deletedAt and invalidates the current
+    // session's KV entry; this gate closes the DB-fallback path for that
+    // session and for any other still-cached sessions once their KV lapses.
+    if (user.deletedAt) {
+      return null;
+    }
+
     // Transform database result to cached data structure
     const sessionData: CachedSessionData = {
       session: {
