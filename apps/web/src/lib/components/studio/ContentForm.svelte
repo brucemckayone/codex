@@ -27,6 +27,7 @@
     updateContentForm,
     deleteContent,
   } from '$lib/remote/content.remote';
+  import { getMyConnectStatus } from '$lib/remote/subscription.remote';
   import { togglePublishStatus, type ContentStatus } from './publish-toggle';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import type { ContentWithRelations, SubscriptionTier } from '$lib/types';
@@ -79,6 +80,19 @@
 
   const isEdit = $derived(!!content);
   const form = $derived(isEdit ? updateContentForm : createContentForm);
+
+  // Stripe Connect payout readiness gates the paid/subscriber access options
+  // (Codex-eb00a.10). The backend authoritatively blocks publishing monetised
+  // content without a payout-ready account; this drives the proactive prompt in
+  // AccessSection. Assume ready until the status resolves so connected creators
+  // never see a flash of disabled options.
+  const connectStatusQuery = getMyConnectStatus();
+  const connectReady = $derived(
+    connectStatusQuery.current
+      ? connectStatusQuery.current.chargesEnabled &&
+          connectStatusQuery.current.payoutsEnabled
+      : true
+  );
 
   // ── Local UI state ──────────────────────────────────────────────────────
   let showDeleteConfirm = $state(false);
@@ -563,6 +577,7 @@
           {priceVal}
           {selectedMinimumTierId}
           {derivedVisibility}
+          {connectReady}
           onAccessChange={handleAccessChange}
           onTierChange={handleTierChange}
         />

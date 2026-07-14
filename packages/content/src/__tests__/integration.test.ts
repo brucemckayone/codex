@@ -16,8 +16,10 @@
  */
 
 import { CONTENT_STATUS, MEDIA_STATUS } from '@codex/constants';
+import { stripeConnectAccounts } from '@codex/database/schema';
 import { OrganizationService } from '@codex/organization';
 import {
+  createTestConnectAccountInput,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -46,6 +48,16 @@ describe('Integration Tests', () => {
 
     const userIds = await seedTestUsers(db, 2);
     [creatorId, otherCreatorId] = userIds;
+
+    // Publishing monetised content now requires a payout-ready Connect account
+    // (Codex-eb00a.10). Seed one for each creator so the paid-content publish
+    // workflows below reach 'published' rather than hitting the new gate.
+    await db
+      .insert(stripeConnectAccounts)
+      .values([
+        createTestConnectAccountInput(null, creatorId),
+        createTestConnectAccountInput(null, otherCreatorId),
+      ]);
   });
 
   afterAll(async () => {

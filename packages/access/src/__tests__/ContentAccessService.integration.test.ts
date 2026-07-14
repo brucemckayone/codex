@@ -28,12 +28,14 @@ import {
   organizationMemberships,
   organizations,
   purchases,
+  stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
 } from '@codex/database/schema';
 import { ObservabilityClient } from '@codex/observability';
 import type { PurchaseService } from '@codex/purchase';
 import {
+  createTestConnectAccountInput,
   createTestSubscriptionInput,
   createTestTierInput,
   createUniqueSlug,
@@ -104,6 +106,16 @@ describe('ContentAccessService Integration', () => {
 
     const userIds = await seedTestUsers(db, 2);
     [userId, otherUserId] = userIds;
+
+    // ContentService.publish now gates monetised content (paid w/ price>0 or
+    // subscribers) behind a payout-ready Stripe Connect account for the
+    // publishing creator. `userId` is the creator for every monetised publish
+    // in this suite, so seed one READY account here (keyed by userId; the
+    // uq_stripe_connect_user unique constraint means at most one per user).
+    await db
+      .insert(stripeConnectAccounts)
+      .values(createTestConnectAccountInput(null, userId))
+      .onConflictDoNothing();
 
     // Create test organization
     const [org] = await db

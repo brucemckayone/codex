@@ -29,7 +29,11 @@ import {
   scopedNotDeleted,
   withCreatorScope,
 } from '@codex/database';
-import { content, mediaItems } from '@codex/database/schema';
+import {
+  content,
+  mediaItems,
+  stripeConnectAccounts,
+} from '@codex/database/schema';
 import {
   type ImageProcessingResult,
   ImageProcessingService,
@@ -43,6 +47,7 @@ import {
   BusinessLogicError,
   ContentNotFoundError,
   ContentTypeMismatchError,
+  CreatorPayoutsRequiredError,
   InternalServiceError,
   MediaNotFoundError,
   MediaNotReadyError,
@@ -93,6 +98,32 @@ export class ContentService extends BaseService {
       }
     }
     return { contentBody: raw, contentBodyJson: null };
+  }
+
+  /**
+   * Whether the creator's Stripe Connect account can receive money.
+   *
+   * DB-only readiness check: `charges_enabled` + `payouts_enabled` on
+   * `stripe_connect_accounts` are kept in sync by Stripe's `account.updated`
+   * webhook, so this needs no live Stripe call (content-api has no
+   * STRIPE_SECRET_KEY binding) and mirrors the backend gate the subscription
+   * domain uses (`chargesEnabled && payoutsEnabled`). One account per user is
+   * enforced by a unique(userId) constraint, so `.limit(1)` is exact.
+   */
+  private async isCreatorConnectReady(
+    tx: DatabaseTransaction,
+    creatorId: string
+  ): Promise<boolean> {
+    const [account] = await tx
+      .select({
+        chargesEnabled: stripeConnectAccounts.chargesEnabled,
+        payoutsEnabled: stripeConnectAccounts.payoutsEnabled,
+      })
+      .from(stripeConnectAccounts)
+      .where(eq(stripeConnectAccounts.userId, creatorId))
+      .limit(1);
+
+    return !!account && account.chargesEnabled && account.payoutsEnabled;
   }
 
   /**
@@ -492,6 +523,28 @@ export class ContentService extends BaseService {
           }
           if (existing.mediaItem.status !== MEDIA_STATUS.READY) {
             throw new MediaNotReadyError(existing.mediaItem.id);
+          }
+        }
+
+        // Monetised content requires a payout-ready Connect account before it
+        // can go live. Paid (with a price) and subscriber-gated content both
+        // collect money; publishing without a payout destination strands buyer
+        // funds in a pending payout indefinitely. Free / followers / team
+        // content is unaffected.
+        const isMonetised =
+          (existing.accessType === CONTENT_ACCESS_TYPE.PAID &&
+            (existing.priceCents ?? 0) > 0) ||
+          existing.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS;
+        if (isMonetised) {
+          const connectReady = await this.isCreatorConnectReady(
+            tx as DatabaseTransaction,
+            creatorId
+          );
+          if (!connectReady) {
+            throw new CreatorPayoutsRequiredError(
+              creatorId,
+              existing.accessType
+            );
           }
         }
 

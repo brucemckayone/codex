@@ -91,3 +91,29 @@ export class MediaOwnershipError extends ForbiddenError {
     super('User does not own this media item', { mediaItemId, userId });
   }
 }
+
+/**
+ * Thrown when a creator tries to publish monetised content (paid with a price,
+ * or subscriber-gated) before their Stripe Connect account can receive money.
+ *
+ * Without this gate, a buyer can pay for content whose creator has no payout
+ * destination — funds are collected and the creator payout is parked pending
+ * indefinitely (see PurchaseService). Publishing is the last point at which the
+ * content becomes purchasable, so it is the authoritative backend gate.
+ *
+ * `code: 'CREATOR_CONNECT_REQUIRED'` is shared with the subscription domain's
+ * equivalent so the frontend can recognise the "set up payouts" condition
+ * uniformly. Maps to HTTP 422 via BusinessLogicError.
+ */
+export class CreatorPayoutsRequiredError extends BusinessLogicError {
+  constructor(creatorId: string, accessType: string) {
+    super(
+      'Set up payouts before publishing paid or subscriber content. Complete Stripe Connect onboarding to receive payments.',
+      {
+        creatorId,
+        accessType,
+        code: 'CREATOR_CONNECT_REQUIRED',
+      }
+    );
+  }
+}

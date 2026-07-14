@@ -119,6 +119,7 @@ export {
   ContentNotFoundError,
   ContentServiceError,
   ContentTypeMismatchError,
+  CreatorPayoutsRequiredError,
   ForbiddenError,
   InternalServiceError,
   isContentServiceError,

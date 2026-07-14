@@ -23,9 +23,11 @@ import {
   content,
   mediaItems,
   organizations,
+  stripeConnectAccounts,
   subscriptionTiers,
 } from '@codex/database/schema';
 import {
+  createTestConnectAccountInput,
   createTestMediaItemInput,
   createTestOrganizationInput,
   createTestTierInput,
@@ -41,6 +43,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   ContentNotFoundError,
   ContentTypeMismatchError,
+  CreatorPayoutsRequiredError,
   MediaNotFoundError,
   MediaNotReadyError,
   SlugConflictError,
@@ -1119,6 +1122,135 @@ describe('ContentService', () => {
       // Assert
       expect(published.status).toBe('published');
       expect(published.publishedAt).not.toBeNull();
+    });
+  });
+
+  describe('publish — Stripe Connect payout gate (Codex-eb00a.10)', () => {
+    // Each test controls its own Connect precondition; reset between tests so a
+    // seeded ready-account from one test can't leak into the "no account" cases
+    // (uq_stripe_connect_user makes double-inserts fail otherwise).
+    afterEach(async () => {
+      await db.delete(stripeConnectAccounts);
+    });
+
+    async function createPaidWritten(slugPrefix: string): Promise<string> {
+      const created = await service.create(
+        {
+          title: 'Paid Article',
+          slug: createUniqueSlug(slugPrefix),
+          contentType: 'written',
+          contentBody: 'Paid body',
+          visibility: 'public',
+          accessType: 'paid',
+          priceCents: 500,
+          tags: [],
+        } as unknown as CreateContentInput,
+        creatorId
+      );
+      return created.id;
+    }
+
+    it('blocks publishing PAID content when the creator has no Connect account', async () => {
+      const id = await createPaidWritten('paid-no-connect');
+
+      await expect(service.publish(id, creatorId)).rejects.toBeInstanceOf(
+        CreatorPayoutsRequiredError
+      );
+
+      // Content must remain a draft — the block is a hard gate, not a warning.
+      const stillDraft = await service.get(id, creatorId);
+      expect(stillDraft.status).toBe('draft');
+    });
+
+    it('blocks publishing PAID content when Connect exists but is not payout-ready', async () => {
+      // Onboarding-in-progress account: charges/payouts still disabled.
+      await db.insert(stripeConnectAccounts).values(
+        createTestConnectAccountInput(null, creatorId, {
+          status: 'onboarding',
+          chargesEnabled: false,
+          payoutsEnabled: false,
+          onboardingCompletedAt: null,
+        })
+      );
+      const id = await createPaidWritten('paid-not-ready');
+
+      await expect(service.publish(id, creatorId)).rejects.toBeInstanceOf(
+        CreatorPayoutsRequiredError
+      );
+    });
+
+    it('blocks when charges enabled but payouts disabled (mirrors backend requireActiveConnect)', async () => {
+      await db.insert(stripeConnectAccounts).values(
+        createTestConnectAccountInput(null, creatorId, {
+          status: 'restricted',
+          chargesEnabled: true,
+          payoutsEnabled: false,
+        })
+      );
+      const id = await createPaidWritten('paid-payouts-off');
+
+      await expect(service.publish(id, creatorId)).rejects.toBeInstanceOf(
+        CreatorPayoutsRequiredError
+      );
+    });
+
+    it('publishes PAID content when the creator Connect account is charges + payouts ready', async () => {
+      // createTestConnectAccountInput defaults to a ready account
+      // (status 'active', chargesEnabled + payoutsEnabled true).
+      await db
+        .insert(stripeConnectAccounts)
+        .values(createTestConnectAccountInput(null, creatorId));
+      const id = await createPaidWritten('paid-ready');
+
+      const published = await service.publish(id, creatorId);
+
+      expect(published.status).toBe('published');
+      expect(published.publishedAt).not.toBeNull();
+    });
+
+    it('blocks publishing SUBSCRIBER-gated content without a ready Connect account', async () => {
+      // Subscriber content must be org-scoped; seed the draft row directly
+      // (service.create rejects orgless tier-gated content).
+      const [org] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+      const [seeded] = await db
+        .insert(content)
+        .values({
+          creatorId,
+          organizationId: org.id,
+          title: 'Subscriber Article',
+          slug: createUniqueSlug('sub-no-connect'),
+          contentType: 'written',
+          contentBody: 'Members only',
+          accessType: 'subscribers',
+          status: 'draft',
+        })
+        .returning();
+
+      await expect(
+        service.publish(seeded.id, creatorId)
+      ).rejects.toBeInstanceOf(CreatorPayoutsRequiredError);
+    });
+
+    it('does NOT gate FREE content — publishes with no Connect account at all', async () => {
+      const created = await service.create(
+        {
+          title: 'Free Article',
+          slug: createUniqueSlug('free-no-connect'),
+          contentType: 'written',
+          contentBody: 'Free body',
+          visibility: 'public',
+          priceCents: 0,
+          tags: [],
+        },
+        creatorId
+      );
+
+      const published = await service.publish(created.id, creatorId);
+
+      expect(published.status).toBe('published');
     });
   });
 

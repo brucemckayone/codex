@@ -20,6 +20,7 @@ import { ContentService, MediaItemService } from '@codex/content';
 import * as schema from '@codex/database/schema';
 import { organizations } from '@codex/database/schema';
 import {
+  createTestConnectAccountInput,
   createTestMembershipInput,
   createUniqueSlug,
   type Database,
@@ -170,6 +171,20 @@ describe('PurchaseService Integration', () => {
       .where(eq(schema.stripeConnectAccounts.userId, otherUserId));
   });
 
+  // ContentService.publish now gates monetised content (paid w/ price>0 or
+  // subscribers) behind a payout-ready Stripe Connect account for the
+  // publishing creator. These behaviour tests were written before that gate
+  // and publish first, wiring Connect (or asserting its absence) afterwards.
+  // Seed a READY account for the creator right before each monetised publish;
+  // onConflictDoNothing keeps it idempotent with any per-test Connect seed
+  // (uq_stripe_connect_user — at most one account per user).
+  async function seedReadyConnect(creatorId: string) {
+    await db
+      .insert(schema.stripeConnectAccounts)
+      .values(createTestConnectAccountInput(null, creatorId))
+      .onConflictDoNothing();
+  }
+
   describe('createCheckoutSession', () => {
     it('creates checkout session for valid paid content', async () => {
       // Create media and content
@@ -207,6 +222,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       // Mock Stripe response
@@ -293,6 +309,7 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
+      await seedReadyConnect(userId);
       await contentService.publish(paidContent.id, userId);
 
       // Clear any cached Customer id from a prior test, then mock Stripe
@@ -387,6 +404,7 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
+      await seedReadyConnect(userId);
       await contentService.publish(paidContent.id, userId);
 
       // Pre-stamp a cached Customer id so resolveOrCreateCustomer takes the
@@ -462,6 +480,7 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
+      await seedReadyConnect(userId);
       await contentService.publish(paidContent.id, userId);
 
       // Force NULL stripe_customer_id so resolveOrCreateCustomer calls list.
@@ -525,6 +544,7 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
+      await seedReadyConnect(userId);
       await contentService.publish(paidContent.id, userId);
 
       const { NotFoundError } = await import('../errors');
@@ -680,6 +700,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       // Complete a purchase first
@@ -745,6 +766,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       const paymentIntentId = `pi_revenue_${Date.now()}`;
@@ -816,6 +838,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       const paymentIntentId = `pi_idempotent_${Date.now()}`;
@@ -884,6 +907,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       const paymentIntentId = `pi_access_${Date.now()}`;
@@ -948,9 +972,10 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
-      await contentService.publish(content.id, userId);
-
       // Seed org's Connect account row. The userId is the org owner.
+      // Seeded BEFORE publish so ContentService.publish's payout-ready gate is
+      // satisfied by THIS account (its stripeAccountId is what the test asserts
+      // as the transfer destination).
       // Idempotent: tests in this describe block share the same userId so
       // subsequent calls reuse the existing row instead of conflicting on
       // uq_stripe_connect_user (one account per user, Codex-69t7c).
@@ -968,11 +993,14 @@ describe('PurchaseService Integration', () => {
         .onConflictDoUpdate({
           target: [schema.stripeConnectAccounts.userId],
           set: {
+            stripeAccountId,
             chargesEnabled: opts.chargesEnabled ?? true,
             payoutsEnabled: true,
             status: 'active',
           },
         });
+
+      await contentService.publish(content.id, userId);
 
       // Pin the org's canonical Connect account so resolvePrimaryConnect routes
       // the org slice (Codex-69t7c: org→account via primaryConnectAccountUserId).
@@ -1185,11 +1213,10 @@ describe('PurchaseService Integration', () => {
         userId: otherUserId,
         organizationId: org2.id,
         stripeAccountId,
-        // Status enum: 'onboarding' | 'active' | 'restricted' | 'disabled'
-        // Use 'onboarding' to model "Connect created but not chargesEnabled yet".
-        status: 'onboarding',
-        chargesEnabled: false,
-        payoutsEnabled: false,
+        // Ready for publish; the runtime offline state is applied post-publish.
+        status: 'active',
+        chargesEnabled: true,
+        payoutsEnabled: true,
       });
 
       // Build a feeConfig stub that returns a non-zero org_fee_pct so the
@@ -1246,6 +1273,16 @@ describe('PurchaseService Integration', () => {
         otherUserId
       );
       await contentService.publish(content.id, otherUserId);
+      // Gate satisfied at publish time with a READY account; now model the
+      // offline Connect the runtime purchase path is meant to exercise.
+      await db
+        .update(schema.stripeConnectAccounts)
+        .set({
+          chargesEnabled: false,
+          payoutsEnabled: false,
+          status: 'onboarding',
+        })
+        .where(eq(schema.stripeConnectAccounts.userId, otherUserId));
 
       const chargeId = `ch_offline_${Date.now()}`;
       const purchase = await service.completePurchase(
@@ -1431,7 +1468,14 @@ describe('PurchaseService Integration', () => {
         },
         ownerUserId
       );
+      // Satisfy the publish gate with a temporary READY account, then delete
+      // it to restore this test's premise: the org owner has NO Connect
+      // account at all at purchase time (distinct from the offline case).
+      await seedReadyConnect(ownerUserId);
       await contentService.publish(content.id, ownerUserId);
+      await db
+        .delete(schema.stripeConnectAccounts)
+        .where(eq(schema.stripeConnectAccounts.userId, ownerUserId));
 
       const chargeId = `ch_no_connect_${Date.now()}`;
       const purchase = await service.completePurchase(
@@ -1491,9 +1535,9 @@ describe('PurchaseService Integration', () => {
           userId: otherUserId,
           organizationId: localOrg.id,
           stripeAccountId: `acct_wp10_${titleSuffix}_${Date.now()}`,
-          status: 'onboarding',
-          chargesEnabled: false,
-          payoutsEnabled: false,
+          status: 'active',
+          chargesEnabled: true,
+          payoutsEnabled: true,
         });
 
         const media = await mediaService.create(
@@ -1528,6 +1572,16 @@ describe('PurchaseService Integration', () => {
           otherUserId
         );
         await contentService.publish(testContent.id, otherUserId);
+        // Gate satisfied at publish time with a READY account; now model the
+        // offline Connect the runtime purchase path is meant to exercise.
+        await db
+          .update(schema.stripeConnectAccounts)
+          .set({
+            chargesEnabled: false,
+            payoutsEnabled: false,
+            status: 'onboarding',
+          })
+          .where(eq(schema.stripeConnectAccounts.userId, otherUserId));
 
         const localStubStripe = {
           ...mockStripe,
@@ -1990,6 +2044,7 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
       return { content };
     }
@@ -2383,6 +2438,7 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       const chargeId = `ch_idem_${Date.now()}`;
@@ -2733,9 +2789,9 @@ describe('PurchaseService Integration', () => {
         userId,
         organizationId: pendingOrg.id,
         stripeAccountId: `acct_pending_${Date.now()}`,
-        status: 'onboarding',
-        chargesEnabled: false, // ← key: not ready
-        payoutsEnabled: false,
+        status: 'active',
+        chargesEnabled: true, // ready for publish; downgraded to offline after publish
+        payoutsEnabled: true,
       });
 
       const reversalCalls: string[] = [];
@@ -2788,6 +2844,16 @@ describe('PurchaseService Integration', () => {
         userId
       );
       await contentService.publish(content.id, userId);
+      // Gate satisfied at publish time with a READY account; now model the
+      // offline Connect the runtime purchase path is meant to exercise.
+      await db
+        .update(schema.stripeConnectAccounts)
+        .set({
+          chargesEnabled: false,
+          payoutsEnabled: false,
+          status: 'onboarding',
+        })
+        .where(eq(schema.stripeConnectAccounts.userId, userId));
 
       const chargeId = `ch_pending_${Date.now()}`;
       const paymentIntentId = `pi_pending_${Date.now()}`;
@@ -2882,6 +2948,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       // Complete purchase
@@ -2936,6 +3003,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       // No purchase made
@@ -2982,6 +3050,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       // userId purchases (creator buying their own content for test purposes)
@@ -3044,6 +3113,7 @@ describe('PurchaseService Integration', () => {
           userId
         );
 
+        await seedReadyConnect(userId);
         await contentService.publish(content.id, userId);
 
         const purchase = await purchaseService.completePurchase(
@@ -3165,6 +3235,7 @@ describe('PurchaseService Integration', () => {
           },
           userId
         );
+        await seedReadyConnect(userId);
         await contentService.publish(c.id, userId);
         return c.id;
       }
@@ -3397,6 +3468,7 @@ describe('PurchaseService Integration', () => {
         },
         userId
       );
+      await seedReadyConnect(userId);
       await contentService.publish(c.id, userId);
       statsContentId = c.id;
 
@@ -3510,6 +3582,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       const purchase = await purchaseService.completePurchase(
@@ -3569,6 +3642,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       const purchase = await purchaseService.completePurchase(
@@ -3770,6 +3844,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       const paymentIntentId = `pi_refund_full_${Date.now()}`;
@@ -3832,6 +3907,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       const paymentIntentId = `pi_refund_idem_${Date.now()}`;
@@ -3891,6 +3967,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       const paymentIntentId = `pi_refund_meta_${Date.now()}`;
@@ -3976,6 +4053,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       const paymentIntentId = `pi_rollback_${Date.now()}`;
@@ -4102,6 +4180,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       const paymentIntentId = `pi_revoke_${Date.now()}`;
@@ -4170,6 +4249,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       const paymentIntentId = `pi_atomic_${Date.now()}`;
@@ -4251,6 +4331,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       const paymentIntentId = `pi_dispute_${Date.now()}`;
@@ -4331,6 +4412,7 @@ describe('PurchaseService Integration', () => {
         userId
       );
 
+      await seedReadyConnect(userId);
       await contentService.publish(content.id, userId);
 
       const paymentIntentId = `pi_dispute_idem_${Date.now()}`;
@@ -4782,6 +4864,7 @@ describe('PurchaseService Integration', () => {
         },
         creatorUserId
       );
+      await seedReadyConnect(creatorUserId);
       await contentService.publish(content.id, creatorUserId);
 
       if (seedConnect) {
