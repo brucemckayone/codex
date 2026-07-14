@@ -425,12 +425,31 @@
     border-right: var(--border-width) var(--border-style) var(--color-border);
     overflow-y: auto;
     overflow-x: hidden;
+
+    /* Thin token-driven scrollbar (mirrors Carousel). Without this a raw
+       native scrollbar paints a grey gutter over the rounded glass rail on
+       hover-expand (Codex-eb00a.14). */
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
     transition:
       width var(--duration-slow) var(--ease-spring),
       background-color var(--duration-normal) var(--ease-default),
       box-shadow var(--duration-normal) var(--ease-default),
       border-radius var(--duration-normal) var(--ease-default);
     view-transition-name: sidebar-nav;
+  }
+
+  .studio-rail::-webkit-scrollbar {
+    width: var(--space-1);
+  }
+
+  .studio-rail::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .studio-rail::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: var(--radius-full);
   }
 
   .studio-rail[data-expanded='true'] {
