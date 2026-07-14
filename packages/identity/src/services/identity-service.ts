@@ -3,7 +3,9 @@ import { CacheType } from '@codex/cache';
 import type { R2Service } from '@codex/cloudflare-clients';
 import { toIso, whereNotDeleted } from '@codex/database';
 import {
+  content,
   creatorOnboarding,
+  mediaItems,
   notificationPreferences,
   organizationMemberships,
   organizations,
@@ -23,6 +25,7 @@ import type { UpdateCreatorOnboardingInput } from '@codex/validation';
 import { and, eq, ne } from 'drizzle-orm';
 
 import {
+  AccountHasContentError,
   AccountOwnsOrganizationError,
   UserNotFoundError,
   UsernameTakenError,
@@ -441,6 +444,15 @@ export class IdentityService extends BaseService {
         throw new AccountOwnsOrganizationError(ownedOrgs.map((o) => o.name));
       }
 
+      // Block accounts that have published content or uploads. Deleting a
+      // creator's account has unresolved downstream implications (buyer
+      // permanence, subscriber handling, R2 purge, grace window) — until that
+      // lifecycle is designed (Codex-v1io7) we only allow pure consumers to
+      // self-delete, so no orphaned/undesigned state reaches production.
+      if (await this.hasAuthoredContent(userId)) {
+        throw new AccountHasContentError();
+      }
+
       // Soft-delete + PII scrub in one atomic statement.
       const [deleted] = await this.db
         .update(users)
@@ -469,6 +481,28 @@ export class IdentityService extends BaseService {
     } catch (error) {
       throw this.handleError(error, 'IdentityService.deleteAccount');
     }
+  }
+
+  /**
+   * Returns true if the user authored any non-deleted content or media.
+   * Used to gate account self-deletion (see deleteAccount / Codex-v1io7).
+   */
+  private async hasAuthoredContent(userId: string): Promise<boolean> {
+    const [contentRow] = await this.db
+      .select({ id: content.id })
+      .from(content)
+      .where(and(eq(content.creatorId, userId), whereNotDeleted(content)))
+      .limit(1);
+    if (contentRow) {
+      return true;
+    }
+
+    const [mediaRow] = await this.db
+      .select({ id: mediaItems.id })
+      .from(mediaItems)
+      .where(and(eq(mediaItems.creatorId, userId), whereNotDeleted(mediaItems)))
+      .limit(1);
+    return !!mediaRow;
   }
 
   /**

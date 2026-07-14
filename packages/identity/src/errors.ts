@@ -44,3 +44,22 @@ export class AccountOwnsOrganizationError extends BusinessLogicError {
     );
   }
 }
+
+/**
+ * Thrown when a user with published content or uploads tries to self-delete.
+ *
+ * Deleting a creator's account has unresolved downstream implications — buyers
+ * of one-time purchases must retain access, subscribers must be handled, media
+ * must be purged from R2, and a grace/removal window is desired. Until that
+ * lifecycle is designed (tracked as a deep-investigation bead), we block
+ * self-deletion for content owners so no orphaned/undesigned state reaches
+ * production. Maps to HTTP 422.
+ */
+export class AccountHasContentError extends BusinessLogicError {
+  constructor() {
+    super(
+      "Account deletion isn't available yet for accounts with content or uploads — buyers and subscribers of your content need a proper handoff first. Please contact support to close your account.",
+      {}
+    );
+  }
+}

@@ -3,6 +3,7 @@ import type { Database } from '@codex/database';
 import type { ImageProcessingResult } from '@codex/image-processing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  AccountHasContentError,
   AccountOwnsOrganizationError,
   UserNotFoundError,
   UsernameTakenError,
@@ -944,20 +945,30 @@ describe('IdentityService', () => {
 
   describe('deleteAccount (Codex-eb00a.11)', () => {
     const userId = 'user-123';
-    // Ownership query: this.db.select().from().innerJoin().where() → rows.
-    const mockSelectWhere = vi.fn();
-    const mockSelectInnerJoin = vi.fn(() => ({ where: mockSelectWhere }));
-    const mockSelectFrom = vi.fn(() => ({ innerJoin: mockSelectInnerJoin }));
+    // Two select shapes are used:
+    //   org check:     select().from().innerJoin().where()  → rows
+    //   content check: select().from().where().limit()      → rows
+    const mockOwnedOrgsWhere = vi.fn();
+    const mockExistsLimit = vi.fn();
+    const mockInnerJoin = vi.fn(() => ({ where: mockOwnedOrgsWhere }));
+    const mockExistsWhere = vi.fn(() => ({ limit: mockExistsLimit }));
+    const mockSelectFrom = vi.fn(() => ({
+      innerJoin: mockInnerJoin,
+      where: mockExistsWhere,
+    }));
 
     beforeEach(() => {
       (mockDb.select as ReturnType<typeof vi.fn>).mockReturnValue({
         from: mockSelectFrom,
       });
       mockSelectFrom.mockClear();
-      mockSelectInnerJoin.mockClear();
-      mockSelectWhere.mockClear();
-      // Default: user owns no organizations.
-      mockSelectWhere.mockResolvedValue([]);
+      mockInnerJoin.mockClear();
+      mockOwnedOrgsWhere.mockClear();
+      mockExistsWhere.mockClear();
+      mockExistsLimit.mockClear();
+      // Defaults: owns no organizations, has no content/uploads.
+      mockOwnedOrgsWhere.mockResolvedValue([]);
+      mockExistsLimit.mockResolvedValue([]);
     });
 
     it('soft-deletes and scrubs PII when the user owns no organizations', async () => {
@@ -980,7 +991,7 @@ describe('IdentityService', () => {
     });
 
     it('blocks deletion and does NOT soft-delete when the user owns an organization', async () => {
-      mockSelectWhere.mockResolvedValue([
+      mockOwnedOrgsWhere.mockResolvedValue([
         { name: 'Studio Alpha' },
         { name: 'Studio Beta' },
       ]);
@@ -993,15 +1004,25 @@ describe('IdentityService', () => {
     });
 
     it('surfaces the owned organization names in the block error', async () => {
-      mockSelectWhere.mockResolvedValue([{ name: 'Studio Alpha' }]);
+      mockOwnedOrgsWhere.mockResolvedValue([{ name: 'Studio Alpha' }]);
 
       await expect(service.deleteAccount(userId)).rejects.toThrow(
         /Studio Alpha/
       );
     });
 
+    it('blocks deletion and does NOT soft-delete when the user has content or uploads', async () => {
+      // Owns no org, but authored content exists → blocked until the full
+      // creator-deletion lifecycle is designed (Codex-v1io7).
+      mockExistsLimit.mockResolvedValue([{ id: 'content-1' }]);
+
+      await expect(service.deleteAccount(userId)).rejects.toThrow(
+        AccountHasContentError
+      );
+      expect(mockDb.update).not.toHaveBeenCalled();
+    });
+
     it('throws UserNotFoundError when no active user row is updated', async () => {
-      mockSelectWhere.mockResolvedValue([]);
       mockReturning.mockResolvedValue([]); // already deleted / nonexistent
 
       await expect(service.deleteAccount('ghost')).rejects.toThrow(
