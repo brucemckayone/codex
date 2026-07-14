@@ -18,11 +18,17 @@
   } from '$lib/components/ui';
   import * as Card from '$lib/components/ui/Card';
   import * as Table from '$lib/components/ui/Table';
-  import { HeartIcon, DownloadIcon } from '$lib/components/ui/Icon';
+  import {
+    HeartIcon,
+    DownloadIcon,
+    CreditCardIcon,
+    TagIcon,
+  } from '$lib/components/ui/Icon';
   import Avatar from '$lib/components/ui/Avatar/Avatar.svelte';
   import AvatarImage from '$lib/components/ui/Avatar/AvatarImage.svelte';
   import AvatarFallback from '$lib/components/ui/Avatar/AvatarFallback.svelte';
   import {
+    getConnectStatus,
     listSubscribers,
     listTiers,
   } from '$lib/remote/subscription.remote';
@@ -30,6 +36,10 @@
   import { downloadCsv } from '$lib/utils/csv-export';
   import type { SubscriberListItem } from '@codex/subscription';
   import type { QueryResult } from '$lib/remote/query-result';
+  import {
+    isConnectReady,
+    type ConnectReadinessStatus,
+  } from '$lib/utils/connect-readiness';
 
   type SubscribersPage = {
     items: SubscriberListItem[];
@@ -81,6 +91,25 @@
     ((tiersQuery as QueryResult<TierRow[]> | null)?.current ?? []) as TierRow[]
   );
 
+  // Connect readiness via the shared money-readiness signal — the same helper
+  // the monetisation page and the backend TierService.requireActiveConnect use,
+  // so the empty state can't claim "you're set up, add tiers" for an account
+  // the backend would reject. Drives the Connect → tiers → subscribers
+  // prerequisite chain in the empty state.
+  const connectQuery = $derived(
+    isOwner && orgId ? getConnectStatus(orgId) : null
+  );
+  const connectStatus = $derived<ConnectReadinessStatus>(
+    (connectQuery as QueryResult<ConnectReadinessStatus> | null)?.current ?? {
+      isConnected: false,
+      chargesEnabled: false,
+      payoutsEnabled: false,
+      status: null,
+    }
+  );
+  const connectReady = $derived(isConnectReady(connectStatus));
+  const hasTiers = $derived(tierRows.length > 0);
+
   const subscribersQuery = $derived(
     isOwner && orgId
       ? listSubscribers({
@@ -96,8 +125,15 @@
   const subsData = $derived(
     (subscribersQuery as QueryResult<SubscribersPage> | null)?.current
   );
+  // Fold Connect + tiers loading into the gate so the empty state resolves to
+  // the correct prerequisite message once, rather than flashing "set up
+  // payments" before Connect status and tier count have landed.
   const loading = $derived(
-    (subscribersQuery as QueryResult<SubscribersPage> | null)?.loading ?? true
+    ((subscribersQuery as QueryResult<SubscribersPage> | null)?.loading ??
+      true) ||
+      ((connectQuery as QueryResult<ConnectReadinessStatus> | null)?.loading ??
+        false) ||
+      ((tiersQuery as QueryResult<TierRow[]> | null)?.loading ?? false)
   );
   const queryError = $derived(
     (subscribersQuery as QueryResult<SubscribersPage> | null)?.error?.message ??
@@ -107,6 +143,7 @@
   const items = $derived(subsData?.items ?? []);
   const pagination = $derived(subsData?.pagination);
   const isEmpty = $derived(!loading && items.length === 0);
+  const isFiltered = $derived(!!tierIdFilter || includeCancelled);
 
   // ── Handlers ─────────────────────────────────────────────────────────
   function setUrlParam(key: string, value: string | null) {
@@ -264,21 +301,55 @@
             {/each}
           </div>
         {:else if isEmpty}
-          <EmptyState
-            title={includeCancelled || tierIdFilter
-              ? 'No subscribers match'
-              : 'No subscribers yet'}
-            description={includeCancelled || tierIdFilter
-              ? 'Try clearing the filters to see all current subscribers.'
-              : 'Once people subscribe to one of your tiers they will appear here.'}
-            icon={HeartIcon}
-          >
-            {#snippet action()}
-              <a href="/studio/monetisation" class="empty-link">
-                <Button variant="secondary">Manage tiers</Button>
-              </a>
-            {/snippet}
-          </EmptyState>
+          {#if isFiltered}
+            <EmptyState
+              title="No subscribers match"
+              description="Try clearing the filters to see all current subscribers."
+              icon={HeartIcon}
+            >
+              {#snippet action()}
+                <a href="/studio/monetisation" class="empty-link">
+                  <Button variant="secondary">Manage tiers</Button>
+                </a>
+              {/snippet}
+            </EmptyState>
+          {:else if !connectReady}
+            <EmptyState
+              title="Set up payments to get subscribers"
+              description="Connect your Stripe account so people can subscribe to your tiers. You can set this up on the Monetisation page."
+              icon={CreditCardIcon}
+            >
+              {#snippet action()}
+                <a href="/studio/monetisation" class="empty-link">
+                  <Button variant="primary">Set up Stripe Connect</Button>
+                </a>
+              {/snippet}
+            </EmptyState>
+          {:else if !hasTiers}
+            <EmptyState
+              title="Create a subscription tier"
+              description="You're set up to take payments — now add at least one subscription tier so people have something to subscribe to."
+              icon={TagIcon}
+            >
+              {#snippet action()}
+                <a href="/studio/monetisation" class="empty-link">
+                  <Button variant="primary">Create a tier</Button>
+                </a>
+              {/snippet}
+            </EmptyState>
+          {:else}
+            <EmptyState
+              title="No subscribers yet"
+              description="Once people subscribe to one of your tiers they will appear here."
+              icon={HeartIcon}
+            >
+              {#snippet action()}
+                <a href="/studio/monetisation" class="empty-link">
+                  <Button variant="secondary">Manage tiers</Button>
+                </a>
+              {/snippet}
+            </EmptyState>
+          {/if}
         {:else}
           <div class="table-wrapper">
             <Table.Root>
