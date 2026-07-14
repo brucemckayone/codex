@@ -492,13 +492,21 @@
         {:else if isEmpty}
           <EmptyState
             title="No payouts yet"
-            description="Payouts will appear here once subscription invoices land and Stripe transfers the org and creator shares."
+            description="Payouts appear here once subscription invoices land and Stripe transfers each share. Every sale splits into a platform fee, an org fee, and a creator share — as the sole creator you're your own beneficiary, so 100% of the creator share is yours today. Invite other creators via revenue-share and they'll appear in the By-creator breakdown."
             icon={BanknoteIcon}
           >
             {#snippet action()}
-              <a href="/studio/monetisation" class="empty-link">
-                <Button variant="secondary">Go to Monetisation</Button>
-              </a>
+              <div class="empty-actions">
+                <a href="/studio/monetisation" class="empty-link">
+                  <Button variant="secondary">Go to Monetisation</Button>
+                </a>
+                <a
+                  href="/studio/monetisation/revenue-share"
+                  class="empty-link"
+                >
+                  <Button variant="secondary">Revenue share</Button>
+                </a>
+              </div>
             {/snippet}
           </EmptyState>
         {:else}
@@ -706,7 +714,11 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    max-width: 1280px;
+    width: 100%;
+    /* --container-studio is intentionally unset in tokens → resolves to
+       max-width:none = full studio width, matching the dashboard/content
+       pages. Replaces a hardcoded 1280px cap (design-token violation). */
+    max-width: var(--container-studio);
   }
 
   /* Two-column shell: main content on the left (KPIs + filters +
@@ -933,6 +945,13 @@
 
   .pagination-total {
     color: var(--color-text-muted);
+  }
+
+  .empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-3);
   }
 
   .empty-link {
