@@ -336,15 +336,30 @@
             {/each}
           </div>
         {:else if isEmpty}
-          <EmptyState
-            title={statusFilter !== 'all' || rangeFilter !== '30'
-              ? 'No sales match'
-              : 'No sales yet'}
-            description={statusFilter !== 'all' || rangeFilter !== '30'
-              ? 'Try widening the date range or clearing the status filter.'
-              : 'Sales will appear here once customers buy your content.'}
-            icon={ReceiptIcon}
-          />
+          {#if statusFilter !== 'all' || rangeFilter !== '30'}
+            <EmptyState
+              title="No sales match"
+              description="Try widening the date range or clearing the status filter."
+              icon={ReceiptIcon}
+            />
+          {:else}
+            <EmptyState
+              title="No sales yet"
+              description="Sales appear here once customers buy your content. Set up pricing and tiers on the Monetisation page, then publish something to sell."
+              icon={ReceiptIcon}
+            >
+              {#snippet action()}
+                <div class="empty-actions">
+                  <a href="/studio/monetisation" class="empty-link">
+                    <Button variant="primary">Set up pricing &amp; tiers</Button>
+                  </a>
+                  <a href="/studio/content" class="empty-link">
+                    <Button variant="secondary">Manage content</Button>
+                  </a>
+                </div>
+              {/snippet}
+            </EmptyState>
+          {/if}
         {:else}
           <div class="table-wrapper">
             <Table.Root>
@@ -452,7 +467,23 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    max-width: 1200px;
+    width: 100%;
+    /* --container-studio is intentionally unset in tokens → resolves to
+       max-width:none = full studio width, matching the dashboard/content
+       pages. Replaces a hardcoded 1200px cap (design-token violation). */
+    max-width: var(--container-studio);
+  }
+
+  .empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-3);
+  }
+
+  .empty-link {
+    text-decoration: none;
+    color: inherit;
   }
 
   .sales-header {

@@ -71,7 +71,10 @@
     </div>
   {:else if breakdown.length === 0}
     <p class="rail__empty">
-      No creators have been paid under these filters yet.
+      This breaks payouts down by creator. No creators have been paid under
+      these filters yet — as the sole creator you're your own beneficiary, so
+      your share lands here once your first invoice is paid. Invite other
+      creators via revenue-share to see the split across the team.
     </p>
   {:else}
     <div class="rail__list">
