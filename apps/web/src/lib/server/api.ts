@@ -901,6 +901,23 @@ export function createServerApi(
         }),
 
       /**
+       * Update organization identity fields (hero title + subheading).
+       *
+       * Wires the existing PATCH /api/organizations/:id endpoint
+       * (requireOrgManagement). `slug` is intentionally NOT exposed here —
+       * changing it swaps the org's subdomain (and triggers a dev-domain
+       * rename), which must never happen from a hero-text edit form.
+       */
+      update: (
+        id: string,
+        data: { name?: string; description?: string | null }
+      ) =>
+        request<OrganizationData>('org', `/api/organizations/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(data),
+        }),
+
+      /**
        * Check if an organization slug is available
        */
       checkSlug: (slug: string) =>
