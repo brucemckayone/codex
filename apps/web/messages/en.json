@@ -442,6 +442,7 @@
   "monetisation_tiers_delete": "Delete Tier",
   "monetisation_tiers_delete_confirm": "Are you sure you want to delete this tier? This cannot be undone.",
   "monetisation_feature_requires_connect": "Connect a Stripe account to enable subscriptions.",
+  "monetisation_tiers_requires_connect": "Complete Stripe Connect setup to create subscription tiers. Tiers stay dormant until charges and payouts are enabled.",
   "monetisation_tier_name": "Tier Name",
   "monetisation_tier_description": "Description",
   "monetisation_tier_price_monthly": "Monthly Price (pence)",

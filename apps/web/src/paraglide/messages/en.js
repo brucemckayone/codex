@@ -3559,6 +3559,14 @@ export const monetisation_feature_requires_connect = () => `Connect a Stripe acc
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const monetisation_tiers_requires_connect = () => `Complete Stripe Connect setup to create subscription tiers. Tiers stay dormant until charges and payouts are enabled.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const monetisation_tier_name = () => `Tier Name`
 
 

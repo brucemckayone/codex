@@ -43,6 +43,7 @@
   import { getOrgSettings } from '$lib/remote/org.remote';
   import { formatDate, formatPrice } from '$lib/utils/format';
   import { humanizeRequirement } from '$lib/utils/connect-requirement-humanization';
+  import { isConnectReady } from '$lib/utils/connect-readiness';
   import type { ConnectRequirements, SubscriptionTier } from '$lib/types';
 
   /** Shape returned by SvelteKit's query() when called client-side */
@@ -85,6 +86,16 @@
       isConnected: false, accountId: null, chargesEnabled: false, payoutsEnabled: false, status: null, requirements: null,
     }
   );
+
+  /**
+   * Connect readiness gate for tier creation. Mirrors the backend guard
+   * TierService.requireActiveConnect (chargesEnabled && payoutsEnabled), so the
+   * UI blocks tier creation proactively instead of letting the creator fill in
+   * the dialog and hit an opaque "Stripe Connect account is not fully onboarded"
+   * (HTTP 422) error only on submit. Tiers cannot be created — and are dormant —
+   * until Connect is fully active.
+   */
+  const connectReady = $derived(isConnectReady(connectStatus));
 
   /**
    * Show the requirements warning when:
@@ -206,6 +217,10 @@
   // ─── Tier Dialog ────────────────────────────────────────────────────────
 
   function openCreateTier() {
+    // Defense-in-depth: the button is disabled when !connectReady, but guard
+    // the handler too so a stray programmatic call can't open a dialog that
+    // would only fail on submit.
+    if (!connectReady) return;
     editingTier = null;
     tierName = '';
     tierDescription = '';
@@ -514,13 +529,18 @@
           <Card.Title level={2}>{m.monetisation_tiers_title()}</Card.Title>
           <Card.Description>{m.monetisation_tiers_description()}</Card.Description>
         </div>
-        <Button onclick={openCreateTier} size="sm">
+        <Button onclick={openCreateTier} size="sm" disabled={dataLoading || !connectReady}>
           <PlusIcon size={14} />
           {m.monetisation_tiers_create()}
         </Button>
       </div>
     </Card.Header>
     <Card.Content>
+      {#if !dataLoading && !connectReady}
+        <Alert variant="info" style="margin-bottom: var(--space-4)">
+          {m.monetisation_tiers_requires_connect()}
+        </Alert>
+      {/if}
       {#if dataLoading}
         <div class="tier-list">
           {#each Array(2) as _}
