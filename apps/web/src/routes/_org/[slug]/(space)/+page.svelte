@@ -41,6 +41,7 @@
     unfollowOrganization,
   } from '$lib/remote/org.remote';
   import { useAccessContext } from '$lib/utils/access-context.svelte';
+  import { shouldShowSubscribeCta } from '$lib/utils/subscribe-cta';
   import { StructuredData } from '$lib/components/seo';
   import type { PageData } from './$types';
 
@@ -227,8 +228,24 @@
       (hasActiveMembership || hasActiveSubscription)
   );
 
+  // Only surface the Subscribe CTA when the org actually has something to
+  // subscribe to. Gating on active tiers + the enableSubscriptions flag (in
+  // addition to the existing "visitor lacks access" checks) stops orgs with
+  // zero tiers / no Stripe account from advertising a dead /pricing page.
+  // access.tiers defaults to [] and resolves async, so hasActiveTiers starts
+  // false and the CTA simply defers until tiers are known — matching the
+  // accessChecked-defers-render philosophy.
+  const subscriptionsEnabled = $derived(data.enableSubscriptions ?? true);
+  const hasActiveTiers = $derived(access.tiers.length > 0);
+
   const shouldShowSubscribeCTA = $derived(
-    !!data.org?.id && accessChecked && !hasOrgAccess
+    shouldShowSubscribeCta({
+      hasOrgId: !!data.org?.id,
+      subscriptionsEnabled,
+      hasActiveTiers,
+      accessChecked,
+      hasOrgAccess,
+    })
   );
 
   $effect(() => {
