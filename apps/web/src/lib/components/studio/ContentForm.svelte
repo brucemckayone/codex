@@ -259,7 +259,15 @@
   // re-render re-runs the handler → duplicate toast + duplicate goto.
   // A *new* result object (second submission) has a different identity,
   // so the handler fires again as expected.
-  let lastHandledResult: unknown = null;
+  //
+  // SEED with the singleton's CURRENT result (not null): form() is a
+  // module-level singleton whose `result` persists across navigation/unmount,
+  // so a fresh mount of /studio/content/new can still hold a PRIOR successful
+  // create. Seeding to `null` made the mount $effect below treat that stale
+  // result as new and immediately replay the create (toast + goto) with no
+  // user action. Seeding to the current result marks it already-handled, so
+  // only a result produced by an actual submission in THIS mount fires.
+  let lastHandledResult: unknown = untrack(() => form.result);
   $effect(() => {
     const result = form.result;
     if (!result?.success) return;
