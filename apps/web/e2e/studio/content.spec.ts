@@ -182,22 +182,35 @@ test.describe('Studio Content - Create Form', () => {
     await expect(page.locator('[role="radiogroup"]')).toBeAttached();
   });
 
-  test('price input defaults to 0', async ({ page }) => {
+  test('monetised access is gated until payouts are set up', async ({
+    page,
+  }) => {
     await navigateToStudioPage(
       page,
       sharedAuth.member.organization.slug,
       '/content/new'
     );
 
-    // Price is conditionally rendered behind `showPrice` (only true for paid
-    // or subscribers access). Default access is 'free' — pick 'One-time
-    // purchase' to surface the input before asserting its default value.
-    // The input is `step="0.01"`, so the rendered default is "0.00".
-    await page
-      .getByRole('radio', { name: /one-time purchase/i })
-      .check({ force: true });
-    const priceField = page.locator('input#price');
-    await expect(priceField).toHaveValue(/^0(\.0+)?$/);
+    // Codex-eb00a.10: monetised access options (one-time purchase /
+    // subscribers) are disabled until the creator has a payout-ready Stripe
+    // Connect account, mirroring the backend publish gate. A fresh studio user
+    // has no Connect account, so `getMyConnectStatus()` resolves not-ready and
+    // the paid option renders disabled with a "set up payouts" prompt.
+    //
+    // `connectReady` is optimistically true until the status query resolves, so
+    // poll on the disabled state (expect() retries) rather than asserting once.
+    const paidRadio = page.getByRole('radio', {
+      name: /one-time purchase/i,
+    });
+    await expect(paidRadio).toBeDisabled();
+
+    // The payouts prompt is shown alongside the gated options.
+    await expect(page.locator('.payouts-hint')).toBeVisible();
+
+    // The gate holds — the price input stays hidden because 'paid' can't be
+    // selected, so access remains the default 'free' (price is only rendered
+    // for paid/subscribers). Absent from the DOM, not merely hidden.
+    await expect(page.locator('input#price')).toHaveCount(0);
   });
 });
 
