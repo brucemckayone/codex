@@ -11,9 +11,11 @@
  * org → primary-or-owner user id → that user's single account.
  *
  * The account's own `organization_id` is NOT consulted — it is a nullable,
- * vestigial onboarding-origin field (WP1). The owner fallback is DETERMINISTIC
- * (role='owner'), unlike the prior arbitrary `.limit(1)` over that org column
- * which Codex-sec7i set out to eliminate. The pin still wins when present, so
+ * vestigial onboarding-origin field (WP1). The owner fallback is DETERMINISTIC:
+ * `role='owner'` ordered by `created_at ASC` (the earliest-joined owner wins),
+ * so a multi-owner org still resolves to a single stable account rather than an
+ * arbitrary one — unlike the prior bare `.limit(1)` which Codex-rjwdm flagged as
+ * non-deterministic across multi-owner orgs. The pin still wins when present, so
  * an org can route to a non-owner once onboarding/admin sets it.
  *
  * Returns undefined when the org has no resolvable primary/owner user, or that
@@ -26,7 +28,7 @@ import {
   organizations,
   stripeConnectAccounts,
 } from '@codex/database/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 
 type StripeConnectAccount = typeof stripeConnectAccounts.$inferSelect;
 
@@ -55,6 +57,10 @@ export async function resolvePrimaryConnect(
           eq(organizationMemberships.role, 'owner')
         )
       )
+      // Deterministic tiebreak across multi-owner orgs (Codex-rjwdm): the
+      // earliest-joined owner always wins, so org-fee money routing can't flap
+      // between owners on the pin-null path.
+      .orderBy(asc(organizationMemberships.createdAt))
       .limit(1);
     targetUserId = owner?.userId ?? null;
   }
