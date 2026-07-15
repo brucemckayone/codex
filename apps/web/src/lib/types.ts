@@ -254,6 +254,14 @@ export interface ConnectAccountStatusResponse {
    * the UI shows status only, no requirements list).
    */
   requirements: ConnectRequirements | null;
+  /**
+   * True when the live Stripe requirements fetch FAILED (Codex-y2htq). Lets the
+   * UI distinguish "no outstanding requirements" (`requirements: null` +
+   * `false`/absent) from "we couldn't check right now" (`requirements: null` +
+   * `true`) and show a retry affordance instead of a false "all clear".
+   * Optional for backward-compat with older payloads.
+   */
+  requirementsFetchFailed?: boolean;
 }
 
 /**

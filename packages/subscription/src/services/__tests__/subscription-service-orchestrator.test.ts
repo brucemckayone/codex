@@ -107,8 +107,20 @@ function makeDb(overrides: Record<string, unknown> = {}): DbSpy {
       // We return an object whose `where()` result is both a promise-like
       // (thenable → resolves to the array) AND carries a `.limit()` that
       // resolves to the same array. Drizzle's query builder works this way.
-      const makeWhereReturn = () => ({
+      const makeWhereReturn = (): {
+        limit: ReturnType<typeof vi.fn>;
+        orderBy: ReturnType<typeof vi.fn>;
+        then: (
+          r: (v: unknown) => void,
+          j?: (e: unknown) => void
+        ) => Promise<void>;
+        catch: (j: (e: unknown) => void) => Promise<unknown>;
+      } => ({
         limit: vi.fn(() => Promise.resolve(result)),
+        // resolvePrimaryConnect's owner fallback (Codex-rjwdm) chains
+        // `.where().orderBy().limit()`; return the same shape so the deterministic
+        // ordering passes through the mock (still resolves to the same array).
+        orderBy: vi.fn(() => makeWhereReturn()),
         // biome-ignore lint/suspicious/noThenProperty: mocking Drizzle's thenable query builder (awaited directly or chained with .limit())
         then: (resolve: (v: unknown) => void, reject?: (e: unknown) => void) =>
           Promise.resolve(result).then(resolve, reject),

@@ -35,7 +35,14 @@
   const { breakdown }: Props = $props();
 
   const displayName = $derived(
-    breakdown.name ?? breakdown.email ?? 'Unknown creator'
+    breakdown.name ??
+      breakdown.email ??
+      // Soft-deleted user: the LEFT JOIN in getPayoutsByCreatorBreakdown
+      // returns name=null + email=null. Show a userId fragment instead of a
+      // bare "Unknown creator" so two deleted recipients are distinguishable
+      // and an operator can pivot to the DB row for audit/compliance
+      // ("who is this payout going to?") — Codex-biiqd.
+      `Deleted user (…${breakdown.userId.slice(-6)})`
   );
 
   // Show the source split row only when at least one half is non-zero.

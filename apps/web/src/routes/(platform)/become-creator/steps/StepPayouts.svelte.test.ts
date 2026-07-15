@@ -15,7 +15,15 @@
  * navigating away and polluting sibling tests.
  */
 
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  type Mock,
+  test,
+  vi,
+} from 'vitest';
 import {
   mount,
   screen,
@@ -44,14 +52,14 @@ function baseProps() {
 describe('StepPayouts — connect redirect', () => {
   let component: ReturnType<typeof mount> | null = null;
   let originalLocation: Location;
-  let hrefSetter: ReturnType<typeof vi.fn>;
+  let hrefSetter: Mock<(value: string) => void>;
 
   beforeEach(() => {
     mockOnboard.mockReset();
 
     // Intercept assignment to window.location.href without navigating.
     originalLocation = window.location;
-    hrefSetter = vi.fn();
+    hrefSetter = vi.fn<(value: string) => void>();
     Object.defineProperty(window, 'location', {
       configurable: true,
       value: new Proxy(originalLocation, {

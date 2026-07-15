@@ -38,7 +38,7 @@ async function navigateToAccountPage(page: import('@playwright/test').Page) {
  * Helper: Wait for form submission to complete
  */
 async function waitForFormSave(page: import('@playwright/test').Page) {
-  const submitButton = page.locator('button[type="submit"]');
+  const submitButton = page.locator('[data-testid="profile-save"]');
   await page.waitForTimeout(500);
   await expect(submitButton).toBeVisible({ timeout: 5000 });
 }
@@ -110,7 +110,7 @@ test.describe('Account Profile Page - Read-Only', () => {
     await expect(page.locator('input[name="instagram"]')).toBeVisible();
 
     // Check save button
-    await expect(page.locator('button[type="submit"]')).toContainText(
+    await expect(page.locator('[data-testid="profile-save"]')).toContainText(
       'Save Changes'
     );
   });
@@ -187,7 +187,7 @@ test.describe('Account Profile Page - Validation', () => {
     await navigateToAccountPage(page);
 
     await page.fill('input[name="username"]', 'InvalidUser');
-    await page.click('button[type="submit"]', { noWaitAfter: true });
+    await page.click('[data-testid="profile-save"]', { noWaitAfter: true });
 
     const usernameInput = page.locator('input[name="username"]');
     await expect(usernameInput).toHaveAttribute('aria-invalid', 'true');
@@ -199,7 +199,7 @@ test.describe('Account Profile Page - Validation', () => {
     await navigateToAccountPage(page);
 
     await page.fill('input[name="username"]', 'user@name');
-    await page.click('button[type="submit"]', { noWaitAfter: true });
+    await page.click('[data-testid="profile-save"]', { noWaitAfter: true });
 
     const usernameInput = page.locator('input[name="username"]');
     await expect(usernameInput).toHaveAttribute('aria-invalid', 'true');
@@ -209,7 +209,7 @@ test.describe('Account Profile Page - Validation', () => {
     await navigateToAccountPage(page);
 
     await page.fill('input[name="username"]', 'a');
-    await page.click('button[type="submit"]', { noWaitAfter: true });
+    await page.click('[data-testid="profile-save"]', { noWaitAfter: true });
 
     const usernameInput = page.locator('input[name="username"]');
     await expect(usernameInput).toHaveAttribute('aria-invalid', 'true');
@@ -219,7 +219,7 @@ test.describe('Account Profile Page - Validation', () => {
     await navigateToAccountPage(page);
 
     await page.fill('input[name="username"]', 'a'.repeat(51));
-    await page.click('button[type="submit"]', { noWaitAfter: true });
+    await page.click('[data-testid="profile-save"]', { noWaitAfter: true });
 
     const usernameInput = page.locator('input[name="username"]');
     await expect(usernameInput).toHaveAttribute('aria-invalid', 'true', {
@@ -239,7 +239,7 @@ test.describe('Account Profile Page - Validation', () => {
     // user code. Either way the page MUST refuse to navigate away on an
     // invalid value, so submit and assert we're still on /account.
     await page.fill('input[name="website"]', 'not-a-valid-url');
-    await page.click('button[type="submit"]', { noWaitAfter: true });
+    await page.click('[data-testid="profile-save"]', { noWaitAfter: true });
 
     // Form should not have navigated AWAY from /account. SvelteKit Remote
     // Functions append a `?/remote=...` query param on form submission, so
@@ -259,7 +259,7 @@ test.describe('Account Profile Page - Validation', () => {
     // is that the page stays on /account — assert that instead. Same fix
     // pattern as the website-URL test (:230).
     await page.fill('input[name="twitter"]', 'twitter.com/user');
-    await page.click('button[type="submit"]', { noWaitAfter: true });
+    await page.click('[data-testid="profile-save"]', { noWaitAfter: true });
 
     await page.waitForTimeout(1_000);
     await expect(page).toHaveURL(/\/account(\?|$)/);
@@ -278,10 +278,10 @@ test.describe('Account Profile Page - Mutations', () => {
 
     const newDisplayName = 'Updated Name';
     await page.fill('input[name="displayName"]', newDisplayName);
-    await page.click('button[type="submit"]', { noWaitAfter: true });
+    await page.click('[data-testid="profile-save"]', { noWaitAfter: true });
     await waitForFormSave(page);
 
-    const submitButton = page.locator('button[type="submit"]');
+    const submitButton = page.locator('[data-testid="profile-save"]');
     await expect(submitButton).toBeVisible();
   });
 
@@ -293,7 +293,7 @@ test.describe('Account Profile Page - Mutations', () => {
     await navigateToAccountPage(page);
 
     await page.fill('input[name="displayName"]', 'New Name');
-    const submitButton = page.locator('button[type="submit"]');
+    const submitButton = page.locator('[data-testid="profile-save"]');
     await submitButton.click();
     await expect(submitButton).toBeVisible();
   });
@@ -307,9 +307,9 @@ test.describe('Account Profile Page - Mutations', () => {
 
     const newUsername = `newuser-${Date.now()}`;
     await page.fill('input[name="username"]', newUsername);
-    await page.click('button[type="submit"]', { noWaitAfter: true });
+    await page.click('[data-testid="profile-save"]', { noWaitAfter: true });
     await waitForFormSave(page);
-    await expect(page.locator('button[type="submit"]')).toBeVisible();
+    await expect(page.locator('[data-testid="profile-save"]')).toBeVisible();
   });
 
   test('can update bio with multiline text', async ({
@@ -321,9 +321,9 @@ test.describe('Account Profile Page - Mutations', () => {
 
     const newBio = 'Line 1\nLine 2\nLine 3';
     await page.fill('textarea[name="bio"]', newBio);
-    await page.click('button[type="submit"]', { noWaitAfter: true });
+    await page.click('[data-testid="profile-save"]', { noWaitAfter: true });
     await waitForFormSave(page);
-    await expect(page.locator('button[type="submit"]')).toBeVisible();
+    await expect(page.locator('[data-testid="profile-save"]')).toBeVisible();
   });
 
   test('can update social links', async ({ page, authenticateAsUser }) => {
@@ -340,9 +340,9 @@ test.describe('Account Profile Page - Mutations', () => {
       'input[name="instagram"]',
       'https://instagram.com/myhandle'
     );
-    await page.click('button[type="submit"]', { noWaitAfter: true });
+    await page.click('[data-testid="profile-save"]', { noWaitAfter: true });
     await waitForFormSave(page);
-    await expect(page.locator('button[type="submit"]')).toBeVisible();
+    await expect(page.locator('[data-testid="profile-save"]')).toBeVisible();
   });
 
   test('avatar preview shows when file is selected', async ({

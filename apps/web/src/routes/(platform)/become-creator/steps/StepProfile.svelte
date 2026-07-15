@@ -98,17 +98,23 @@
         <span class="avatar__placeholder"></span>
       {/if}
     </div>
-    <form {...avatarUploadForm} class="avatar__form">
+    <form {...avatarUploadForm} enctype="multipart/form-data" class="avatar__form">
       <Label for="avatar">{m.onboarding_profile_avatar_label()}</Label>
 <!-- Explicit types (not image/*) so the OS picker prefers supported
            formats and iOS transcodes HEIC → JPEG on selection. -->
       <input
         id="avatar"
         class="avatar__input"
-        type="file"
-        name="avatar"
+        {...avatarUploadForm.fields.avatar.as('file')}
         accept="image/png,image/jpeg,image/webp,image/gif"
       />
+      <!-- Schema validation (HEIC/oversize) surfaces on the field's issues(),
+           NOT on .result — the handler never runs when validation fails. The
+           previous code only rendered .result.error, so those rejections were
+           silently swallowed (Codex-sf7zy). Render both channels. -->
+      {#each avatarUploadForm.fields.avatar.issues() as issue}
+        <p class="field__error">{issue.message}</p>
+      {/each}
       {#if avatarUploadForm.result && !avatarUploadForm.result.success}
         <p class="field__error">{avatarUploadForm.result.error}</p>
       {/if}
