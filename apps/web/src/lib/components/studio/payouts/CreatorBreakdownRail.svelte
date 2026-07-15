@@ -16,6 +16,8 @@
   @prop activeFilters - Optional filter-state hint (display only)
 -->
 <script lang="ts">
+  import { browser } from '$app/environment';
+  import { page } from '$app/state';
   import { Skeleton } from '$lib/components/ui';
   import type {
     CreatorPayoutBreakdown,
@@ -49,6 +51,39 @@
       parts.push(activeFilters.range === 'all' ? 'all time' : `${activeFilters.range}d`);
     return parts.length > 0 ? parts.join(' · ') : null;
   });
+
+  // Skeleton count: default to the LAST-KNOWN creator count for this org's
+  // studio so the loading placeholder matches the resolved list and doesn't
+  // cause a layout shift when data arrives (Codex-0sz4j). Keyed by the studio
+  // hostname (org subdomain) so multi-org operators don't cross-contaminate;
+  // clamped to a sane ceiling and falls back to 3 on first visit.
+  const SKELETON_FALLBACK = 3;
+  const SKELETON_MAX = 10;
+
+  function skeletonStorageKey(): string {
+    return `codex-payout-rail-count:${page.url.hostname}`;
+  }
+
+  function readStoredSkeletonCount(): number {
+    if (!browser) return SKELETON_FALLBACK;
+    const n = Number.parseInt(localStorage.getItem(skeletonStorageKey()) ?? '', 10);
+    return Number.isFinite(n) && n > 0
+      ? Math.min(n, SKELETON_MAX)
+      : SKELETON_FALLBACK;
+  }
+
+  // Read once at init (browser-guarded → SSR-safe) so there's no flash of the
+  // fallback count before the stored value applies.
+  let skeletonCount = $state(readStoredSkeletonCount());
+
+  // Persist the actual creator count once the rail has loaded real rows.
+  $effect(() => {
+    if (!browser || loading || breakdown.length === 0) return;
+    localStorage.setItem(
+      skeletonStorageKey(),
+      String(Math.min(breakdown.length, SKELETON_MAX))
+    );
+  });
 </script>
 
 <aside class="rail" aria-label="Payouts by creator">
@@ -61,7 +96,7 @@
 
   {#if loading}
     <div class="rail__list" aria-busy="true">
-      {#each Array.from({ length: 3 }) as _, i (i)}
+      {#each Array.from({ length: skeletonCount }) as _, i (i)}
         <div class="rail__skeleton">
           <Skeleton width="60%" height="var(--space-5)" />
           <Skeleton width="40%" height="var(--space-7)" />
