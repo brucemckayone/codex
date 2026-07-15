@@ -9358,6 +9358,166 @@ describe('SubscriptionService', () => {
       }
     });
   });
+
+  // ─── reverseSubscriptionPayoutsForCharge (Codex-13v21) ────────────────
+  // Subscription-invoice refund clawback — the mirror of the purchase-side
+  // reversePayoutsForPurchase. Reverses creator/org transfers for a refunded
+  // subscription charge and flips the ledger rows; scoped to
+  // sourceType='subscription' so it can NEVER touch one-time-purchase rows
+  // (which processRefund already handles) — no double-clawback.
+  describe('reverseSubscriptionPayoutsForCharge (Codex-13v21)', () => {
+    async function seedSubPayouts(
+      chargeId: string,
+      opts: {
+        sourceType?: 'subscription' | 'purchase';
+        status?: string;
+      } = {}
+    ) {
+      const { org, tier1 } = await createFullOrg(
+        `sub-clawback-${Math.random().toString(36).slice(2, 8)}`
+      );
+      const [sub] = await db
+        .insert(subscriptions)
+        .values(
+          createTestSubscriptionInput(otherCreatorId, org.id, tier1.id, {
+            status: 'active',
+          })
+        )
+        .returning();
+      const sourceType = opts.sourceType ?? 'subscription';
+      const status = opts.status ?? 'paid';
+      // platform_fee (no transfer) + organization_fee + creator (transfers).
+      // Gross = 100 + 135 + 765 = 1000.
+      await db.insert(payoutsTable).values([
+        {
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 100,
+          payoutType: 'platform_fee',
+          status,
+          stripeChargeId: chargeId,
+          sourceType,
+          resolvedAt: new Date(),
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 135,
+          payoutType: 'organization_fee',
+          status,
+          stripeTransferId: `tr_org_${chargeId}`,
+          stripeChargeId: chargeId,
+          sourceType,
+          resolvedAt: new Date(),
+        },
+        {
+          userId: otherCreatorId,
+          organizationId: org.id,
+          subscriptionId: sub.id,
+          amountCents: 765,
+          payoutType: 'creator_payout_to_owner',
+          status,
+          stripeTransferId: `tr_creator_${chargeId}`,
+          stripeChargeId: chargeId,
+          sourceType,
+          resolvedAt: new Date(),
+        },
+      ]);
+      return { org, sub };
+    }
+
+    function stubCreateReversal() {
+      const createReversal = vi.fn().mockResolvedValue({ id: 'trr_test' });
+      (
+        stripe.transfers as unknown as { createReversal: typeof createReversal }
+      ).createReversal = createReversal;
+      return createReversal;
+    }
+
+    it('reverses each transfer-bearing slice and flips all rows to reversed', async () => {
+      const chargeId = `ch_clawback_${Date.now()}`;
+      await seedSubPayouts(chargeId);
+      const createReversal = stubCreateReversal();
+
+      await service.reverseSubscriptionPayoutsForCharge(chargeId, {
+        refundAmountCents: 1000,
+        stripeRefundId: 're_full',
+      });
+
+      // Two transfers reversed (org + creator); platform_fee has no transfer.
+      expect(createReversal).toHaveBeenCalledTimes(2);
+      const reversedIds = createReversal.mock.calls.map((c) => c[0]).sort();
+      expect(reversedIds).toEqual(
+        [`tr_creator_${chargeId}`, `tr_org_${chargeId}`].sort()
+      );
+      const amounts = createReversal.mock.calls
+        .map((c) => (c[1] as { amount: number }).amount)
+        .sort((a, b) => a - b);
+      expect(amounts).toEqual([135, 765]);
+
+      const { eq } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.stripeChargeId, chargeId));
+      expect(rows).toHaveLength(3);
+      expect(rows.every((r) => r.status === 'reversed')).toBe(true);
+    });
+
+    it('no-ops when no subscription payouts exist for the charge', async () => {
+      const createReversal = stubCreateReversal();
+      await service.reverseSubscriptionPayoutsForCharge(
+        `ch_absent_${Date.now()}`,
+        { refundAmountCents: 500, stripeRefundId: 're_x' }
+      );
+      expect(createReversal).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent — already-reversed rows are skipped', async () => {
+      const chargeId = `ch_idem_${Date.now()}`;
+      await seedSubPayouts(chargeId, { status: 'reversed' });
+      const createReversal = stubCreateReversal();
+      await service.reverseSubscriptionPayoutsForCharge(chargeId, {
+        refundAmountCents: 1000,
+        stripeRefundId: 're_again',
+      });
+      expect(createReversal).not.toHaveBeenCalled();
+    });
+
+    it('reverses proportionally on a partial refund', async () => {
+      const chargeId = `ch_partial_${Date.now()}`;
+      await seedSubPayouts(chargeId);
+      const createReversal = stubCreateReversal();
+      // Half of gross 1000 = 500 → floor(135*500/1000)=67, floor(765*500/1000)=382.
+      await service.reverseSubscriptionPayoutsForCharge(chargeId, {
+        refundAmountCents: 500,
+        stripeRefundId: 're_partial',
+      });
+      const amounts = createReversal.mock.calls
+        .map((c) => (c[1] as { amount: number }).amount)
+        .sort((a, b) => a - b);
+      expect(amounts).toEqual([67, 382]);
+    });
+
+    it('does NOT touch one-time-purchase payout rows for the same charge (no double-clawback)', async () => {
+      const chargeId = `ch_purchase_src_${Date.now()}`;
+      await seedSubPayouts(chargeId, { sourceType: 'purchase' });
+      const createReversal = stubCreateReversal();
+      await service.reverseSubscriptionPayoutsForCharge(chargeId, {
+        refundAmountCents: 1000,
+        stripeRefundId: 're_purchase',
+      });
+      // sourceType='purchase' → excluded → no reversal, rows untouched.
+      expect(createReversal).not.toHaveBeenCalled();
+      const { eq } = await import('drizzle-orm');
+      const rows = await db
+        .select()
+        .from(payoutsTable)
+        .where(eq(payoutsTable.stripeChargeId, chargeId));
+      expect(rows.every((r) => r.status === 'paid')).toBe(true);
+    });
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────

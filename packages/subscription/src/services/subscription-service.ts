@@ -4391,6 +4391,183 @@ export class SubscriptionService extends BaseService {
   }
 
   /**
+   * Reverse the subscription payout transfers for a refunded invoice charge
+   * (Codex-13v21). Mirror of `PurchaseService.reversePayoutsForPurchase` for the
+   * subscription pipeline: when a subscription invoice charge is refunded, the
+   * creator/org transfers made at invoice.payment_succeeded must be clawed back —
+   * Stripe does NOT auto-reverse separate `transfers.create` calls, so without
+   * this the platform absorbs the full gross while creators keep their slice.
+   *
+   * Scopes to `sourceType='subscription'` rows for the charge. One-time purchase
+   * rows carry `sourceType='purchase'` (handled by PurchaseService.processRefund),
+   * so calling BOTH on every `charge.refunded` never double-reverses the same
+   * transfer.
+   *
+   * Partial refunds reverse each slice proportionally
+   * (`floor(row.amountCents * refundAmountCents / grossCents)`); residual rounding
+   * stays on the platform balance. Idempotency key `${transferId}_reversal_<suffix>`
+   * makes webhook replays and repeated partial refunds safe.
+   *
+   * Idempotent: rows already `reversed`/`cancelled_by_refund` are skipped.
+   *
+   * insufficient_funds (creator already withdrew their slice): logged loudly with
+   * a correlatable errorId, leaving the row `paid` (the original transfer really
+   * succeeded). NOTE: the purchase path records a `refund_reviews` ops-queue row
+   * here, but `refund_reviews.purchaseId` is NOT NULL and cannot yet represent a
+   * subscription obligation — generalising that table is a tracked follow-up
+   * (Codex-13v21 design). Until then the obligation is visible in logs only.
+   */
+  async reverseSubscriptionPayoutsForCharge(
+    chargeId: string,
+    refund: { refundAmountCents: number | null; stripeRefundId: string | null }
+  ): Promise<void> {
+    const rows = await this.db
+      .select()
+      .from(payouts)
+      .where(
+        and(
+          eq(payouts.stripeChargeId, chargeId),
+          eq(payouts.sourceType, 'subscription')
+        )
+      );
+
+    // Common case for a one-time-purchase charge (or an already-swept charge):
+    // no subscription rows → no-op.
+    if (rows.length === 0) return;
+
+    // Gross = the charged amount, reconstructed as the sum of the recorded
+    // slices (platform + org + creator). Denominator for a proportional refund.
+    const grossCents = rows.reduce((sum, r) => sum + r.amountCents, 0);
+
+    const { refundAmountCents, stripeRefundId } = refund;
+    const isPartial =
+      refundAmountCents !== null &&
+      refundAmountCents > 0 &&
+      grossCents > 0 &&
+      refundAmountCents < grossCents;
+    const partialRatioNumerator = isPartial ? refundAmountCents : null;
+    const reversalAmount = (rowAmountCents: number): number =>
+      partialRatioNumerator !== null
+        ? Math.floor((rowAmountCents * partialRatioNumerator) / grossCents)
+        : rowAmountCents;
+    const idempotencySuffix = stripeRefundId
+      ? `_${stripeRefundId}`
+      : refundAmountCents !== null
+        ? `_${refundAmountCents}`
+        : '';
+
+    for (const row of rows) {
+      if (row.status === 'reversed' || row.status === 'cancelled_by_refund') {
+        continue;
+      }
+
+      let skipStatusFlip = false;
+      if (row.stripeTransferId) {
+        const amount = reversalAmount(row.amountCents);
+        if (amount === 0) {
+          skipStatusFlip = true;
+          this.obs.info(
+            'Subscription reversal amount floored to zero, platform absorbs',
+            {
+              chargeId,
+              payoutId: row.id,
+              rowAmountCents: row.amountCents,
+              refundAmountCents,
+            }
+          );
+        } else {
+          try {
+            await this.stripe.transfers.createReversal(
+              row.stripeTransferId,
+              {
+                amount,
+                metadata: {
+                  subscription_id: row.subscriptionId ?? '',
+                  charge_id: chargeId,
+                  payout_id: row.id,
+                  type: 'refund_reversal',
+                },
+              },
+              {
+                idempotencyKey: `${row.stripeTransferId}_reversal${idempotencySuffix}`,
+              }
+            );
+          } catch (reverseErr) {
+            const code = (reverseErr as { code?: string } | null)?.code;
+            const errorId = crypto.randomUUID();
+            this.obs.error(
+              'Failed to reverse subscription transfer for refund',
+              {
+                errorId,
+                chargeId,
+                payoutId: row.id,
+                stripeTransferId: row.stripeTransferId,
+                attemptedReversalCents: amount,
+                code: code ?? null,
+                error:
+                  reverseErr instanceof Error
+                    ? reverseErr.message
+                    : String(reverseErr),
+              }
+            );
+            if (code === 'insufficient_funds') {
+              // Creator already withdrew their slice; the customer refund still
+              // completed from the platform balance, so the platform now holds
+              // an unresolved clawback obligation. Leave the row 'paid'.
+              // NOTE (Codex-13v21): no refund_reviews row yet — that table's
+              // purchaseId is NOT NULL; subscription support is a tracked
+              // schema follow-up. Surfaced loudly meanwhile.
+              this.obs.error(
+                'Subscription clawback obligation unresolved (insufficient_funds) — NOT yet queued in refund_reviews',
+                {
+                  errorId,
+                  chargeId,
+                  payoutId: row.id,
+                  creatorUserId: row.userId,
+                  attemptedReversalCents: amount,
+                }
+              );
+              skipStatusFlip = true;
+            }
+            // Per-row error isolation — continue with remaining slices.
+          }
+        }
+      }
+
+      if (skipStatusFlip) continue;
+
+      const nextStatus =
+        row.status === 'pending' || row.status === 'failed'
+          ? ('cancelled_by_refund' as const)
+          : ('reversed' as const);
+
+      try {
+        await this.db
+          .update(payouts)
+          .set({
+            status: nextStatus,
+            resolvedAt: row.resolvedAt ?? new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(payouts.id, row.id));
+      } catch (updateErr) {
+        this.obs.error(
+          'Failed to update subscription payouts row after refund',
+          {
+            chargeId,
+            payoutId: row.id,
+            nextStatus,
+            error:
+              updateErr instanceof Error
+                ? updateErr.message
+                : String(updateErr),
+          }
+        );
+      }
+    }
+  }
+
+  /**
    * Execute revenue transfers to org and creator(s) after invoice payment.
    * Uses source_transaction to link transfers to the charge.
    * Creators without active Connect accounts have their share accumulated.
