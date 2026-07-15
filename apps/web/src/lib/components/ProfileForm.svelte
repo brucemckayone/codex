@@ -402,7 +402,12 @@
         </div>
       </Card.Content>
       <Card.Footer>
-        <Button type="submit" variant="primary" loading={updateProfileForm.pending > 0}>
+        <Button
+          type="submit"
+          variant="primary"
+          data-testid="profile-save"
+          loading={updateProfileForm.pending > 0}
+        >
           {updateProfileForm.pending > 0 ? m.account_saving() : m.account_save_button()}
         </Button>
       </Card.Footer>
