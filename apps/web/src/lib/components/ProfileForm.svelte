@@ -265,6 +265,12 @@
 
       <p class="avatar-help">{m.account_avatar_help()}</p>
 
+      <!-- Schema validation (HEIC/oversize) surfaces on the field's issues(),
+           not on .result — render it so the rejection message isn't swallowed
+           (Codex-sf7zy). -->
+      {#each avatarUploadForm.fields.avatar.issues() as issue}
+        <Alert variant="error">{issue.message}</Alert>
+      {/each}
       {#if avatarUploadForm.result?.error}
         <Alert variant="error">{avatarUploadForm.result.error}</Alert>
       {/if}
