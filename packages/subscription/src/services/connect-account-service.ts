@@ -271,10 +271,12 @@ export class ConnectAccountService extends BaseService {
 
       return { accountId: stripeAccountId, onboardingUrl };
     } catch (error) {
-      // Translate the platform-not-enabled misconfiguration into a typed,
-      // operator-facing 503 so the studio shows an actionable message rather
-      // than a bare 500. Everything else falls through to handleError, which
-      // logs the full Stripe diagnostic surface and wraps as
+      // Translate the platform-not-enabled misconfiguration into a typed
+      // ServiceError. It keeps the honest HTTP 500 (the failure is genuinely
+      // server-side), but its distinct `code` + authored `message` let the
+      // studio show an actionable message and let operators grep this failure
+      // apart from ordinary 500s. Everything else falls through to handleError,
+      // which logs the full Stripe diagnostic surface and wraps as
       // InternalServiceError.
       if (this.isConnectPlatformNotEnabled(error)) {
         this.obs.error('Stripe Connect not enabled for the platform account', {
