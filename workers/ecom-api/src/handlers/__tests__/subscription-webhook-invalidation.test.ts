@@ -193,6 +193,8 @@ describe('handleSubscriptionWebhook — cache invalidation', () => {
       handleSubscriptionDeleted: mockHandleDeleted,
       handleInvoicePaymentSucceeded: mockHandleInvoiceSuccess,
       handleInvoicePaymentFailed: mockHandleInvoiceFailed,
+      // charge.refunded clawback (Codex-13v21) — handlePaymentWebhook calls this.
+      reverseSubscriptionPayoutsForCharge: vi.fn(),
     }));
   });
 

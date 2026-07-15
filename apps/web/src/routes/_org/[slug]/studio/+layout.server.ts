@@ -8,9 +8,10 @@
  */
 import { redirect } from '@sveltejs/kit';
 import { logger } from '$lib/observability';
-import { getMyMembership, getMyOrganizations } from '$lib/remote/org.remote';
+import { getMyOrganizations } from '$lib/remote/org.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { resolveMembershipWithRetry } from '$lib/server/membership-retry';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({
@@ -51,14 +52,25 @@ export const load: LayoutServerLoad = async ({
     threshold: 2000,
   });
 
+  // Raw API client (uncached) — reused for the membership retry below AND the
+  // draft-count call further down.
+  const api = createServerApi(platform, cookies);
+
   const [membershipResult, orgsResult] = await Promise.all([
-    getMyMembership(org.id).catch((err: unknown) => {
-      logger.error('studio-layout:getMyMembership failed', {
-        orgId: org.id,
-        error: String(err),
-      });
-      return { role: null, joinedAt: null };
-    }),
+    // Read-after-write retry (Codex-jko8i): a freshly-created owner's membership
+    // row can be momentarily invisible on the follow-up read right after org
+    // creation, which would otherwise bounce them to access_denied. We call the
+    // RAW api client (NOT the cached remote getMyMembership query(), which would
+    // dedupe repeat reads) so each retry attempt is a fresh DB read.
+    resolveMembershipWithRetry(() => api.org.getMyMembership(org.id)).catch(
+      (err: unknown) => {
+        logger.error('studio-layout:getMyMembership failed', {
+          orgId: org.id,
+          error: String(err),
+        });
+        return { role: null, joinedAt: null };
+      }
+    ),
     getMyOrganizations().catch((err: unknown) => {
       logger.error('studio-layout:getMyOrganizations failed', {
         orgId: org.id,
@@ -79,7 +91,6 @@ export const load: LayoutServerLoad = async ({
   // Draft count: lightweight call after auth check — limit=1 just to get pagination.total
   let draftCount = 0;
   try {
-    const api = createServerApi(platform, cookies);
     const draftParams = new URLSearchParams();
     draftParams.set('organizationId', org.id);
     draftParams.set('status', 'draft');

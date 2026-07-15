@@ -30,7 +30,7 @@ jobs:
        github.event.workflow_run.head_branch == 'main')
     environment:
       name: production
-      url: https://codex.revelations.studio
+      url: https://revelations.studio
       # IMPORTANT: Configure required reviewers in GitHub Settings → Environments → production
       # This requires manual approval before any production deployment
 
@@ -370,7 +370,7 @@ jobs:
         run: pnpm build:web
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          PUBLIC_APP_URL: https://codex.revelations.studio
+          PUBLIC_APP_URL: https://revelations.studio
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_LOG_VERBOSITY: info

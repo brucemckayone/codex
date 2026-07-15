@@ -24,9 +24,15 @@
 
 <AuthLayout title={data.status === 'success' ? 'Email Verified' : data.status === 'pending' ? 'Check Your Email' : 'Verification Failed'}>
   {#if data.status === 'success'}
-    <div class="auth-success">
-      <p>Your email has been verified. Redirecting to your library...</p>
+    <div class="auth-success" role="status">
+      <p>Your email has been verified.</p>
     </div>
+    <!-- Explicit link is the primary, JS-independent path forward. The
+         onMount setTimeout below is a progressive enhancement that auto-
+         advances JS users; without it (no/slow JS) this link still works. -->
+    <p class="auth-footer" style="margin-top: var(--space-4);">
+      <a href="/library" class="auth-link">Continue to your library</a>
+    </p>
   {:else}
     {#if data.status === 'pending'}
       <p class="auth-footer" style="margin-bottom: var(--space-4);">

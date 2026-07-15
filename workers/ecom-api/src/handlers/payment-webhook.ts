@@ -21,7 +21,7 @@ import { AccessRevocation } from '@codex/access';
 import { VersionedCache } from '@codex/cache';
 import { STRIPE_EVENTS } from '@codex/constants';
 import { PurchaseService } from '@codex/purchase';
-import { invalidateForUser } from '@codex/subscription';
+import { invalidateForUser, SubscriptionService } from '@codex/subscription';
 import { createWebhookDbClient, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
@@ -138,18 +138,30 @@ function extractPaymentIntentId(
 async function handleChargeRefunded(
   event: Stripe.Event,
   service: PurchaseService,
+  subscriptionService: SubscriptionService,
   c: Context<StripeWebhookEnv>
 ): Promise<void> {
   const obs = c.get('obs');
   const charge = event.data.object as Stripe.Charge;
   const paymentIntentId = extractPaymentIntentId(charge.payment_intent);
+  const latestRefund = charge.refunds?.data?.[0];
+
+  // Subscription-invoice clawback (Codex-13v21): reverse the creator/org
+  // transfers made at invoice.payment_succeeded for this charge. Keyed by
+  // charge.id + sourceType='subscription', so it no-ops for one-time-purchase
+  // charges (those are handled by processRefund below) — calling both never
+  // double-reverses. Runs regardless of payment_intent presence because
+  // subscription payouts are keyed by charge, not payment_intent.
+  await subscriptionService.reverseSubscriptionPayoutsForCharge(charge.id, {
+    refundAmountCents: charge.amount_refunded,
+    stripeRefundId: latestRefund?.id ?? null,
+  });
 
   if (!paymentIntentId) {
     obs?.warn('Refund event missing payment_intent', { chargeId: charge.id });
     return;
   }
 
-  const latestRefund = charge.refunds?.data?.[0];
   const refundResult = await service.processRefund(paymentIntentId, {
     stripeRefundId: latestRefund?.id,
     refundAmountCents: charge.amount_refunded,
@@ -249,10 +261,14 @@ export async function handlePaymentWebhook(
       { db, environment: c.env.ENVIRONMENT || 'development' },
       stripe
     );
+    const subscriptionService = new SubscriptionService(
+      { db, environment: c.env.ENVIRONMENT || 'development' },
+      stripe
+    );
 
     switch (event.type) {
       case STRIPE_EVENTS.CHARGE_REFUNDED:
-        await handleChargeRefunded(event, service, c);
+        await handleChargeRefunded(event, service, subscriptionService, c);
         break;
 
       case STRIPE_EVENTS.CHARGE_DISPUTE_CREATED:

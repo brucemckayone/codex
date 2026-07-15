@@ -48,6 +48,7 @@ import type {
   SalesStatsQueryInput,
 } from '@codex/validation';
 import {
+  checkoutSessionMetadataSchema,
   createCheckoutSchema,
   createPortalSessionSchema,
   extractPlainText,
@@ -1496,10 +1497,122 @@ export class PurchaseService extends BaseService {
   }
 
   /**
+   * Ensure a purchase row exists for a payment_intent, self-healing the
+   * ordering race #4 (Codex-aa08z) where `charge.refunded` arrives BEFORE
+   * `checkout.session.completed` (the event that normally INSERTs the row).
+   *
+   * Without this, `processRefund` found no row, logged WARN + returned 200, so
+   * the refund was never recorded — refund tracking lost, access left granted.
+   *
+   * Fast path: row already present (normal ordering / replay) → return it.
+   *
+   * Slow path: rebuild from the Stripe checkout session. The PaymentIntent does
+   * not carry our metadata, so we list sessions by `payment_intent`; the session
+   * carries { customerId, contentId, organizationId } (validated against the
+   * SAME `checkoutSessionMetadataSchema` the booking webhook uses) + amount_total.
+   *
+   * MINIMAL by design (Codex-aa08z decision): we INSERT only the purchase row —
+   * we deliberately do NOT run `writePurchasePayouts`. A refund arriving before
+   * completion means NO funds were ever transferred to Connect accounts, so there
+   * is nothing to pay out and nothing to claw back. The fee columns carry a
+   * default split purely to satisfy the `amount = platform + org + creator` CHECK
+   * (bookkeeping — no payout executes). The later `checkout.session.completed`
+   * no-ops via `completePurchase`'s idempotency check, so no transfer ever fires
+   * for this refunded sale. The after-transfer clawback case (refund AFTER
+   * transfers settled) is the separate, still-open policy decision Codex-13v21 —
+   * intentionally NOT touched here.
+   *
+   * Returns the purchase, or `null` when the session/metadata cannot be resolved
+   * (caller then exits cleanly with 200, exactly as the old drop branch did).
+   * Bubbles transient Stripe/DB errors so the webhook 5xx's and Stripe retries.
+   */
+  async ensurePurchaseDataPresent(
+    paymentIntentId: string
+  ): Promise<Purchase | null> {
+    // Fast path: row already exists (normal delivery order, or a replay).
+    const existing = await this.db.query.purchases.findFirst({
+      where: eq(purchases.stripePaymentIntentId, paymentIntentId),
+    });
+    if (existing) return existing;
+
+    // Slow path: reconstruct from the checkout session that created this PI.
+    const sessions = await this.stripe.checkout.sessions.list({
+      payment_intent: paymentIntentId,
+      limit: 1,
+    });
+    // Optional-chain the response shape: a malformed/empty Stripe reply should
+    // clean-exit (return null → caller 200s), never throw.
+    const session = sessions?.data?.[0];
+    if (!session) {
+      this.obs.warn(
+        'Purchase self-heal: no checkout session found for payment_intent',
+        { paymentIntentId }
+      );
+      return null;
+    }
+
+    const parsed = checkoutSessionMetadataSchema.safeParse(
+      session.metadata ?? {}
+    );
+    const amountPaidCents = session.amount_total;
+    if (!parsed.success || amountPaidCents === null) {
+      this.obs.warn(
+        'Purchase self-heal: checkout session missing/invalid metadata or amount',
+        { paymentIntentId, sessionId: session.id }
+      );
+      return null;
+    }
+    const { customerId, contentId, organizationId } = parsed.data;
+
+    // The purchases CHECK constraint requires
+    // amount = platformFee + organizationFee + creatorPayout, so we cannot leave
+    // the fee columns at 0. Compute a split with DEFAULT percentages (org leg 0
+    // for orgless content). This is bookkeeping only: the row is refunded
+    // immediately and writePurchasePayouts is NEVER called, so no funds move and
+    // the exact per-org fee config is immaterial — the split just has to balance.
+    const split = calculateRevenueSplit(
+      amountPaidCents,
+      DEFAULT_PLATFORM_FEE_PERCENTAGE,
+      organizationId ? DEFAULT_ORG_FEE_PERCENTAGE : 0
+    );
+
+    try {
+      const [inserted] = await this.db
+        .insert(purchases)
+        .values({
+          customerId,
+          contentId,
+          organizationId,
+          amountPaidCents,
+          currency: CURRENCY.GBP,
+          stripePaymentIntentId: paymentIntentId,
+          status: PURCHASE_STATUS.COMPLETED,
+          purchasedAt: new Date(),
+          platformFeeCents: split.platformFeeCents,
+          organizationFeeCents: split.organizationFeeCents,
+          creatorPayoutCents: split.creatorPayoutCents,
+        })
+        .returning();
+      // `.returning()` always yields the inserted row here; `?? null` only
+      // satisfies the array-index `| undefined` that TS infers.
+      return inserted ?? null;
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        // Concurrent completePurchase / self-heal raced us to insert — re-select.
+        const raced = await this.db.query.purchases.findFirst({
+          where: eq(purchases.stripePaymentIntentId, paymentIntentId),
+        });
+        if (raced) return raced;
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Process a refund from a charge.refunded webhook event.
    *
    * Flow:
-   * 1. Look up purchase by stripePaymentIntentId
+   * 1. Ensure the purchase row exists (self-heal ordering race #4, Codex-aa08z)
    * 2. Update purchase status to 'refunded'
    * 3. Revoke content access (soft delete)
    *
@@ -1514,9 +1627,10 @@ export class PurchaseService extends BaseService {
     }
   ): Promise<{ userId: string } | void> {
     try {
-      const purchase = await this.db.query.purchases.findFirst({
-        where: eq(purchases.stripePaymentIntentId, paymentIntentId),
-      });
+      // Self-heal ordering race #4 (Codex-aa08z): if charge.refunded beat
+      // checkout.session.completed, the row won't exist yet — rebuild it from
+      // the Stripe checkout session so the refund is recorded (no transfers).
+      const purchase = await this.ensurePurchaseDataPresent(paymentIntentId);
 
       if (!purchase) {
         this.obs.warn('Refund for unknown purchase', { paymentIntentId });

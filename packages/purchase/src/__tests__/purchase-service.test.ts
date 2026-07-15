@@ -89,6 +89,7 @@ describe('PurchaseService Integration', () => {
         sessions: {
           create: vi.fn(),
           retrieve: vi.fn(), // For verifyCheckoutSession
+          list: vi.fn(), // For ensurePurchaseDataPresent refund self-heal (Codex-aa08z)
         },
       },
       paymentIntents: {
@@ -5629,6 +5630,165 @@ describe('PurchaseService Integration', () => {
       expect(orgFeeRow).toBeDefined();
       expect(orgFeeRow?.amountCents).toBe(900); // 10% of post-platform 9000
       expect(orgFeeRow?.organizationId).toBe(mixedOrg.id);
+    });
+  });
+
+  // ─── Ordering race #4: refund before completion (Codex-aa08z) ───────
+  // charge.refunded can arrive BEFORE checkout.session.completed. processRefund
+  // used to find no row, WARN + return 200 → refund lost. It now self-heals via
+  // ensurePurchaseDataPresent, which rebuilds the row from the Stripe checkout
+  // session. MINIMAL by design: no transfers/payouts fire (no funds ever moved),
+  // so this is independent of the after-transfer clawback policy (Codex-13v21).
+  describe('processRefund — self-heal ordering race #4 (Codex-aa08z)', () => {
+    // The self-heal validates session metadata against the SAME
+    // checkoutSessionMetadataSchema the production webhook uses, whose
+    // userIdSchema is alphanumeric-only (real BetterAuth ids). seedTestUsers
+    // mints hyphenated `test-user-…` ids that the schema rejects, so the
+    // positive path needs a customer whose id matches production shape.
+    async function seedAlnumCustomer(): Promise<string> {
+      const id = `custaa08z${Date.now()}${Math.random()
+        .toString(36)
+        .slice(2, 7)}`.replace(/[^a-zA-Z0-9]/g, '');
+      await db.insert(schema.users).values({
+        id,
+        name: 'Refund Race Customer',
+        email: `refund-race-${id}@example.com`,
+        emailVerified: true,
+        image: null,
+        avatarUrl: null,
+        role: 'customer',
+        stripeCustomerId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      return id;
+    }
+
+    async function makePaidArticle(slugPrefix: string) {
+      return contentService.create(
+        {
+          organizationId,
+          title: 'Refund Race Article',
+          slug: createUniqueSlug(slugPrefix),
+          contentType: 'written',
+          contentBody: 'Refund-race test body.',
+          visibility: 'purchased_only',
+          accessType: 'paid',
+          priceCents: 2999,
+        },
+        userId
+      );
+    }
+
+    it('rebuilds the purchase from the checkout session, records the refund, and fires NO transfers', async () => {
+      const content = await makePaidArticle('refund-race-heal');
+      const customerId = await seedAlnumCustomer();
+      const paymentIntentId = `pi_refund_race_${Date.now()}`;
+
+      // No purchase row yet — checkout.session.completed hasn't arrived. The
+      // session exists in Stripe carrying the metadata + amount.
+      (
+        mockStripe.checkout.sessions.list as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce({
+        data: [
+          {
+            id: `cs_${paymentIntentId}`,
+            amount_total: 2999,
+            metadata: {
+              customerId,
+              contentId: content.id,
+              organizationId,
+            },
+          },
+        ],
+      });
+      const transferCreate = vi.fn();
+      (mockStripe as unknown as { transfers: unknown }).transfers = {
+        create: transferCreate,
+      };
+
+      const result = await purchaseService.processRefund(paymentIntentId, {
+        stripeRefundId: 're_race_1',
+        refundAmountCents: 2999,
+        refundReason: 'requested_by_customer',
+      });
+
+      const [row] = await db
+        .select()
+        .from(schema.purchases)
+        .where(eq(schema.purchases.stripePaymentIntentId, paymentIntentId));
+      expect(row).toBeDefined();
+      expect(row.customerId).toBe(customerId);
+      expect(row.contentId).toBe(content.id);
+      expect(row.status).toBe('refunded');
+      expect(row.refundAmountCents).toBe(2999);
+      expect(row.stripeRefundId).toBe('re_race_1');
+      // Fee columns carry a balancing default split (satisfies the CHECK
+      // amount = platform + org + creator), but crucially NO transfer executed
+      // and NO payouts ledger rows were written — the money never moved.
+      expect(
+        row.platformFeeCents + row.organizationFeeCents + row.creatorPayoutCents
+      ).toBe(2999);
+      expect(transferCreate).not.toHaveBeenCalled();
+      const payoutRows = await db
+        .select()
+        .from(schema.payouts)
+        .where(eq(schema.payouts.purchaseId, row.id));
+      expect(payoutRows).toHaveLength(0);
+      // Library-cache bump signal returned for the purchaser.
+      expect(result?.userId).toBe(customerId);
+    });
+
+    it('returns void without inserting when no checkout session exists for the payment_intent', async () => {
+      const paymentIntentId = `pi_no_session_${Date.now()}`;
+      (
+        mockStripe.checkout.sessions.list as ReturnType<typeof vi.fn>
+      ).mockResolvedValueOnce({ data: [] });
+
+      const result = await purchaseService.processRefund(paymentIntentId, {
+        refundAmountCents: 500,
+      });
+
+      expect(result).toBeUndefined();
+      const rows = await db
+        .select()
+        .from(schema.purchases)
+        .where(eq(schema.purchases.stripePaymentIntentId, paymentIntentId));
+      expect(rows).toHaveLength(0);
+    });
+
+    it('fast-path: an existing purchase is refunded without listing Stripe sessions', async () => {
+      const content = await makePaidArticle('refund-race-fastpath');
+      const paymentIntentId = `pi_refund_exists_${Date.now()}`;
+
+      // Insert via completePurchase WITHOUT stripeChargeId → skips payouts, so no
+      // transfer mocks are needed. Row exists before the refund arrives.
+      await purchaseService.completePurchase(paymentIntentId, {
+        customerId: otherUserId,
+        contentId: content.id,
+        organizationId,
+        amountPaidCents: 1000,
+        currency: 'gbp',
+      });
+
+      const listSpy = mockStripe.checkout.sessions.list as ReturnType<
+        typeof vi.fn
+      >;
+      listSpy.mockClear();
+
+      const result = await purchaseService.processRefund(paymentIntentId, {
+        refundAmountCents: 1000,
+        stripeRefundId: 're_exists',
+      });
+
+      // Fast path: row already present → NO Stripe session lookup.
+      expect(listSpy).not.toHaveBeenCalled();
+      const [row] = await db
+        .select()
+        .from(schema.purchases)
+        .where(eq(schema.purchases.stripePaymentIntentId, paymentIntentId));
+      expect(row.status).toBe('refunded');
+      expect(result?.userId).toBe(otherUserId);
     });
   });
 });
