@@ -88,9 +88,9 @@ describe('CreatorBreakdownCard', () => {
   // Expected: render an identifying fragment (e.g. last 6 chars of userId, or
   //           a "Deleted user (usr_…xyz)" pattern) so the operator can pivot.
   //
-  // Marked `it.fails` so CI tracks the bug; when fixed, vitest flips this red
-  // and the fixer removes `.fails`.
-  test.fails('F-19: shows identifying fragment for soft-deleted creator (currently shows only "Unknown creator")', () => {
+  // FIXED (Codex-biiqd): the card now renders `Deleted user (…{last6})` when
+  // both name and email are null. Flipped from `test.fails` to `test`.
+  test('F-19: shows identifying fragment for soft-deleted creator', () => {
     const result = mount(CreatorBreakdownCard, {
       target: document.body,
       props: {
