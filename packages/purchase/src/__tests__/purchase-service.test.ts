@@ -4794,6 +4794,58 @@ describe('PurchaseService Integration', () => {
       expect(account?.stripeAccountId).toBe(stripeAccountId);
     });
 
+    it('picks the earliest-joined owner deterministically for a multi-owner org (Codex-rjwdm)', async () => {
+      const [olderOwnerId, newerOwnerId] = await seedTestUsers(db, 2);
+      const [org] = await db
+        .insert(organizations)
+        .values({
+          name: 'RPC Multi-Owner Org',
+          slug: createUniqueSlug('rpc-multi-owner'),
+        })
+        .returning();
+      // Two owners with distinct join times. Insert the NEWER one FIRST so a
+      // resolver without a deterministic ORDER BY would tend to return it
+      // (insertion order) — the test then proves the `.orderBy(asc(createdAt))`
+      // tiebreak actually picks the earliest-joined owner, so org-fee routing
+      // can't flap between owners on the pin-null path.
+      await db.insert(schema.organizationMemberships).values([
+        {
+          ...createTestMembershipInput(org.id, newerOwnerId, { role: 'owner' }),
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        },
+        {
+          ...createTestMembershipInput(org.id, olderOwnerId, { role: 'owner' }),
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ]);
+      // Both owners have their OWN Connect account, so a wrong pick returns the
+      // wrong account (not undefined) — makes the assertion non-vacuous.
+      const olderAcct = `acct_rpc_older_${createUniqueSlug('a')}`;
+      const newerAcct = `acct_rpc_newer_${createUniqueSlug('a')}`;
+      await db.insert(schema.stripeConnectAccounts).values([
+        {
+          userId: olderOwnerId,
+          organizationId: org.id,
+          stripeAccountId: olderAcct,
+          status: 'active',
+          chargesEnabled: true,
+          payoutsEnabled: true,
+        },
+        {
+          userId: newerOwnerId,
+          organizationId: org.id,
+          stripeAccountId: newerAcct,
+          status: 'active',
+          chargesEnabled: true,
+          payoutsEnabled: true,
+        },
+      ]);
+
+      const account = await resolvePrimaryConnect(db, org.id);
+      expect(account?.userId).toBe(olderOwnerId);
+      expect(account?.stripeAccountId).toBe(olderAcct);
+    });
+
     it('returns undefined when the org has neither a primary pin nor an owner', async () => {
       const [org] = await db
         .insert(organizations)
