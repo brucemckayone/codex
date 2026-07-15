@@ -77,6 +77,15 @@ export interface ConnectStatusPayload {
   payoutsEnabled: boolean;
   status: 'onboarding' | 'active' | 'restricted' | 'disabled' | null;
   requirements: ConnectRequirements | null;
+  /**
+   * True when the live Stripe `accounts.retrieve` call FAILED, so
+   * `requirements` reflects only what we know (nothing) rather than a
+   * confirmed "no outstanding requirements". Lets the UI distinguish
+   * "account is clean" (`requirements: null` + `false`) from "we couldn't
+   * check right now" (`requirements: null` + `true`) instead of collapsing
+   * both into an identical healthy-looking payload (Codex-y2htq).
+   */
+  requirementsFetchFailed: boolean;
 }
 
 /**
@@ -101,6 +110,7 @@ const DISCONNECTED_STATUS: ConnectStatusPayload = {
   payoutsEnabled: false,
   status: null,
   requirements: null,
+  requirementsFetchFailed: false,
 };
 
 /**
@@ -774,6 +784,7 @@ export class ConnectAccountService extends BaseService {
     // Read live requirements from Stripe. Stripe's `account.updated` webhook
     // is the canonical signal for change; we read on cache-miss only.
     let requirements: ConnectRequirements | null = null;
+    let requirementsFetchFailed = false;
     try {
       const stripeAccount = await this.stripe.accounts.retrieve(
         account.stripeAccountId
@@ -782,7 +793,10 @@ export class ConnectAccountService extends BaseService {
     } catch (error) {
       // Graceful degradation: surface what we know from the DB row even if
       // Stripe is unreachable. The UI degrades to "status only" rather than
-      // failing the page load.
+      // failing the page load. Flag the failure so the UI can distinguish
+      // "no outstanding requirements" from "couldn't check" (Codex-y2htq)
+      // instead of both looking like a clean `requirements: null`.
+      requirementsFetchFailed = true;
       this.obs.warn('Failed to fetch Stripe Connect requirements', {
         userId,
         stripeAccountId: account.stripeAccountId,
@@ -800,6 +814,7 @@ export class ConnectAccountService extends BaseService {
       // `handleAccountUpdated` — anything else is a data corruption bug.
       status: account.status as ConnectStatusPayload['status'],
       requirements,
+      requirementsFetchFailed,
     };
   }
 

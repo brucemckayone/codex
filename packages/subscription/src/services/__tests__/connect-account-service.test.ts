@@ -1159,6 +1159,7 @@ describe('ConnectAccountService', () => {
         payoutsEnabled: false,
         status: null,
         requirements: null,
+        requirementsFetchFailed: false,
       });
       // No Stripe call when there's no DB account
       expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
@@ -1228,6 +1229,47 @@ describe('ConnectAccountService', () => {
       expect(result.requirements?.errors[0].requirement).toBe(
         'business_profile.url'
       );
+      // Successful Stripe retrieve → not a fetch failure (Codex-y2htq).
+      expect(result.requirementsFetchFailed).toBe(false);
+    });
+
+    it('flags requirementsFetchFailed=true when the Stripe retrieve fails (Codex-y2htq)', async () => {
+      const [failOrg] = await db
+        .insert(organizations)
+        .values(
+          createTestOrganizationInput({
+            slug: createUniqueSlug('status-fail'),
+            creatorId,
+          })
+        )
+        .returning();
+      await db.insert(stripeConnectAccounts).values(
+        createTestConnectAccountInput(failOrg.id, creatorId, {
+          status: 'active',
+          chargesEnabled: true,
+          payoutsEnabled: true,
+        })
+      );
+      await db
+        .update(organizations)
+        .set({ primaryConnectAccountUserId: creatorId })
+        .where(eq(organizations.id, failOrg.id));
+
+      // Stripe unreachable on the cache-miss path.
+      (stripe.accounts.retrieve as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('Stripe API unavailable')
+      );
+
+      const result = await service.getStatus(failOrg.id);
+
+      // DB-derived fields still surface (graceful degradation)...
+      expect(result.isConnected).toBe(true);
+      expect(result.status).toBe('active');
+      // ...but the failure is DISTINGUISHABLE from a clean account: requirements
+      // is null AND the flag is true, so the UI can show "couldn't refresh"
+      // rather than a false "all clear".
+      expect(result.requirements).toBeNull();
+      expect(result.requirementsFetchFailed).toBe(true);
     });
 
     it('normalises null arrays to [] so the UI can iterate without guards', async () => {
@@ -1617,6 +1659,7 @@ describe('ConnectAccountService', () => {
         payoutsEnabled: false,
         status: null,
         requirements: null,
+        requirementsFetchFailed: false,
       });
       expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
     });

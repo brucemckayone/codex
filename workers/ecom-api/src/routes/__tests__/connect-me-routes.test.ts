@@ -71,6 +71,7 @@ const STATUS_PAYLOAD = {
   payoutsEnabled: true,
   status: 'active' as const,
   requirements: null,
+  requirementsFetchFailed: false,
 };
 
 const VALID_ONBOARD = {
