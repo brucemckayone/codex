@@ -49,6 +49,11 @@ vi.mock('@codex/database', () => ({
 
 vi.mock('@codex/subscription', () => ({
   invalidateForUser: vi.fn(),
+  // handlePaymentWebhook constructs a SubscriptionService to reverse
+  // subscription payouts on charge.refunded (Codex-13v21).
+  SubscriptionService: vi.fn(() => ({
+    reverseSubscriptionPayoutsForCharge: vi.fn(),
+  })),
 }));
 
 vi.mock('@codex/purchase', () => ({
