@@ -14,6 +14,7 @@
 <script lang="ts">
   import { Alert, Button } from '$lib/components/ui';
   import { connectMeOnboard } from '$lib/remote/subscription.remote';
+  import type { ConnectOnboardResponse } from '$lib/types';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -35,12 +36,16 @@
     connectError = null;
     try {
       const origin = window.location.origin;
-      const result = await connectMeOnboard({
+      // Annotate the result: the remote command() boundary widens the return
+      // type, so without this a wrong field name (e.g. the historical
+      // `result.url`) would not fail tsc. The server returns
+      // ConnectOnboardResponse = { accountId, onboardingUrl }. (Codex-et1tx)
+      const result: ConnectOnboardResponse = await connectMeOnboard({
         returnUrl: `${origin}/become-creator?step=payouts&connect=success`,
         refreshUrl: `${origin}/become-creator?step=payouts&connect=refresh`,
       });
       // Full external navigation to Stripe-hosted onboarding.
-      window.location.href = result.url;
+      window.location.href = result.onboardingUrl;
     } catch {
       connectError = m.onboarding_payouts_error();
       connecting = false;
@@ -86,7 +91,13 @@
         <Button type="button" variant="ghost" onclick={onSkip} disabled={connecting}>
           {m.onboarding_payouts_skip()}
         </Button>
-        <Button type="button" variant="primary" onclick={connect} loading={connecting}>
+        <Button
+          type="button"
+          variant="primary"
+          onclick={connect}
+          loading={connecting}
+          data-testid="payouts-connect"
+        >
           {connecting
             ? m.onboarding_payouts_connecting()
             : m.onboarding_payouts_connect_cta()}
