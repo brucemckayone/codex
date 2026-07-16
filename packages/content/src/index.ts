@@ -61,6 +61,7 @@
 // ============================================================================
 
 export type {
+  CategorySpace,
   ContentInvalidationReason,
   InvalidateContentAccessArgs,
   InvalidateOrgMembershipArgs,
@@ -68,6 +69,7 @@ export type {
   WaitUntilFn,
 } from './services';
 export {
+  CategoriesService,
   ContentService,
   DEFAULT_MAX_LIBRARY_FANOUT,
   invalidateContentAccess,
@@ -115,6 +117,8 @@ export type {
 
 export {
   BusinessLogicError,
+  CategoryNotFoundError,
+  CategorySlugConflictError,
   ConflictError,
   ContentNotFoundError,
   ContentServiceError,
@@ -148,23 +152,28 @@ export {
 // ============================================================================
 
 export type {
+  CategoryQueryInput,
   CheckContentSlugInput,
   ContentQueryInput,
+  CreateCategoryInput,
   CreateContentInput,
   CreateMediaItemInput,
   DiscoverContentQueryInput,
   MediaQueryInput,
   PublicContentQueryInput,
+  UpdateCategoryInput,
   UpdateContentInput,
   UpdateMediaItemInput,
 } from '@codex/validation';
 
 export {
+  categoryQuerySchema,
   checkContentSlugSchema,
   contentBrowseQuerySchema,
   contentQuerySchema,
   contentStatusEnum,
   contentTypeEnum,
+  createCategorySchema,
   createContentSchema,
   createMediaItemSchema,
   discoverContentQuerySchema,
@@ -172,6 +181,8 @@ export {
   mediaStatusEnum,
   mediaTypeEnum,
   publicContentQuerySchema,
+  slugify,
+  updateCategorySchema,
   updateContentSchema,
   updateMediaItemSchema,
   visibilityEnum,

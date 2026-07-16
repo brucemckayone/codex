@@ -37,9 +37,15 @@ CREATE INDEX "idx_content_categories_content_id" ON "content_categories" USING b
 -- INSERT idempotent via untargeted ON CONFLICT DO NOTHING (which covers both
 -- partial unique indexes). `content.category` is left untouched as a
 -- read-only legacy column (dropped in a later cleanup).
--- Slug rule (backfill-only, identical on both sides so the join matches):
--- lower(non-alphanumeric runs -> '-'). The service layer owns the canonical
--- slug rule going forward.
+-- Slug rule (identical on both sides so the join matches): mirrors the
+-- canonical `slugify()` in @codex/validation — lowercase, collapse runs of
+-- non-alphanumeric chars to a single '-', trim leading/trailing '-'. Caveat:
+-- POSIX `[:alnum:]` only treats non-ASCII letters as alphanumeric under a
+-- Unicode-aware collation (ICU / a UTF-8 lc_ctype); under the C collation it is
+-- ASCII-only and non-Latin names lose their accented letters. This matters only
+-- for perceived duplicates against later service-created rows — the INSERT and
+-- the join below use the SAME expression, so the backfill is byte-identical to
+-- itself and never misses a row regardless of collation.
 -- ---------------------------------------------------------------------------
 INSERT INTO "categories" (
 	"id", "organization_id", "creator_id", "name", "slug", "sort_order", "created_at", "updated_at"
@@ -49,7 +55,7 @@ SELECT
 	c."organization_id",
 	c."creator_id",
 	c."category",
-	lower(regexp_replace(trim(c."category"), '[^a-zA-Z0-9]+', '-', 'g')),
+	trim(both '-' from regexp_replace(lower(trim(c."category")), '[^[:alnum:]]+', '-', 'g')),
 	0,
 	now(),
 	now()
@@ -67,7 +73,7 @@ FROM "content" ct
 JOIN "categories" cat
 	ON cat."creator_id" = ct."creator_id"
 	AND cat."organization_id" IS NOT DISTINCT FROM ct."organization_id"
-	AND cat."slug" = lower(regexp_replace(trim(ct."category"), '[^a-zA-Z0-9]+', '-', 'g'))
+	AND cat."slug" = trim(both '-' from regexp_replace(lower(trim(ct."category")), '[^[:alnum:]]+', '-', 'g'))
 	AND cat."deleted_at" IS NULL
 WHERE ct."category" IS NOT NULL
 	AND trim(ct."category") <> ''

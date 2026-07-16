@@ -93,6 +93,28 @@ export class MediaOwnershipError extends ForbiddenError {
 }
 
 /**
+ * Category-specific errors (org landing "Browse by topic" taxonomy).
+ */
+
+export class CategoryNotFoundError extends NotFoundError {
+  constructor(categoryId: string, context?: Record<string, unknown>) {
+    super('Category not found', { categoryId, ...context });
+  }
+}
+
+/**
+ * Thrown as a race backstop when a category slug collides within its resolved
+ * space at INSERT time. `CategoriesService.create` proactively suffixes
+ * (`-2`, `-3`, …) to avoid collisions, so this only surfaces if a concurrent
+ * insert claims the same suffix between the availability read and the write.
+ */
+export class CategorySlugConflictError extends ConflictError {
+  constructor(slug: string) {
+    super('Category with this slug already exists', { slug });
+  }
+}
+
+/**
  * Thrown when a creator tries to publish monetised content (paid with a price,
  * or subscriber-gated) before their Stripe Connect account can receive money.
  *

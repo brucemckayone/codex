@@ -5,6 +5,8 @@
  * Provides both service classes and factory functions.
  */
 
+// Categories Service (org landing "Browse by topic" taxonomy)
+export { CategoriesService, type CategorySpace } from './categories-service';
 // Content Cache Invalidation Helpers (Codex-c01do — content mutation sibling
 // of subscription-invalidation)
 export {
