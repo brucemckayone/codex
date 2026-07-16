@@ -197,10 +197,12 @@ export const load: PageServerLoad = async ({
       creatorId: creator?.id,
       featured,
     });
-    // Set the public cache header only after the fetch succeeds. If
-    // getPublicContent throws (4xx/5xx), the error response inherits the
-    // default no-cache headers instead of poisoning the CDN.
-    setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
+    // Auth-varying HTML (the org layout injects `user`), so this must not be
+    // shared-cached: shared caches key by URL, NOT by Cookie, and would serve
+    // the anonymous copy to signed-in users. The list DATA is still KV-cached
+    // in content-api (and above), so PRIVATE costs an SSR render, not a query.
+    // See docs/caching-strategy.md §HTTP/CDN caching.
+    setHeaders(CACHE_HEADERS.PRIVATE);
   }
 
   return {

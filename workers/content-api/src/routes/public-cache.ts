@@ -52,26 +52,38 @@ interface PublicContentCacheQuery {
 export function buildPublicContentCacheType(
   query: Pick<
     PublicContentCacheQuery,
-    'sort' | 'limit' | 'page' | 'contentType'
+    'sort' | 'limit' | 'page' | 'contentType' | 'slug'
   >
 ): string {
-  return `content:public:${query.sort ?? 'newest'}:${query.limit ?? 20}:${query.page ?? 1}:${query.contentType ?? 'all'}`;
+  const base = `content:public:${query.sort ?? 'newest'}:${query.limit ?? 20}:${query.page ?? 1}:${query.contentType ?? 'all'}`;
+  // Slug is an exact-lookup dimension (content-detail pages). Include it in
+  // the type suffix so distinct slugs occupy distinct data slots under the
+  // shared org version key — without this they would collide. All slots
+  // still share `COLLECTION_ORG_CONTENT(orgId)`, so one publish/update-side
+  // invalidate stales every combo (list AND detail) atomically.
+  return query.slug ? `${base}:slug:${query.slug}` : base;
 }
 
 /**
  * Returns true when the query is eligible for KV caching.
  *
- * Search, slug, and creatorId are bypassed:
+ * Search and creatorId are bypassed:
  * - search: unbounded variant space, would pollute KV
- * - slug: exact-lookup path; cache key doesn't include slug so different
- *   slugs would collide
  * - creatorId: lower-volume per-creator filter; skipping avoids key
  *   explosion
+ *
+ * Slug lookups (content-detail pages) ARE cached now that
+ * `buildPublicContentCacheType` folds the slug into the data-slot key
+ * (previously excluded only because the key omitted it → collisions). This
+ * shields the DB for content-detail SSR — the slug path never used the
+ * catalogue list cache — and is invalidated by the same org version bump as
+ * every other combo. See the auth-caching decision record in
+ * docs/caching-strategy.md.
  */
 export function shouldCachePublicContentQuery(
   query: PublicContentCacheQuery
 ): boolean {
-  return !query.search && !query.slug && !query.creatorId;
+  return !query.search && !query.creatorId;
 }
 
 /**

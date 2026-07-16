@@ -1,15 +1,86 @@
 # Caching Strategy
 
-## The Four Layers
+## The Layers
 
 ```
-Browser HTTP Cache         → static assets only, not API data
-SvelteKit query()          → request-scoped dedup within one SSR render
-@codex/cache (KV)          → server-side, cross-request, cross-worker
-TanStack DB (localStorage) → client-side local-first, persists across tabs
+HTTP / CDN cache (Cache-Control) → SSR HTML + public API JSON, at browser AND Cloudflare edge
+SvelteKit query()                → request-scoped dedup within one SSR render
+@codex/cache (KV)                → server-side, cross-request, cross-worker
+TanStack DB (localStorage)       → client-side local-first, persists across tabs
 ```
 
-These are complementary, not overlapping. Each solves a different problem.
+These are complementary, not overlapping. Each solves a different problem. The
+HTTP/CDN layer is the one most easily misused — it is the only layer that can
+serve one user's render to another user — so it has its own section below.
+
+---
+
+## HTTP / CDN Cache (Cache-Control)
+
+Set via `setHeaders(CACHE_HEADERS.*)` in `+page.server.ts` loads
+(`apps/web/src/lib/server/cache.ts`). Governs the **browser cache** and the
+**Cloudflare edge cache** for the rendered HTML document (and, on content-api,
+the public JSON). It does NOT touch `@codex/cache` (KV) or the client
+collections — those are the separate layers below.
+
+### Presets
+
+| Preset | `Cache-Control` | Use for |
+|---|---|---|
+| `STATIC_PUBLIC` | `public, max-age=3600, s-maxage=3600, swr=86400` | Truly static, auth-agnostic responses (sitemaps) |
+| `DYNAMIC_PUBLIC` | `public, max-age=300, s-maxage=300, swr=3600` | Public, auth-agnostic API JSON |
+| `DYNAMIC_PUBLIC_REVALIDATE` | `public, max-age=0, s-maxage=300, swr=3600` | Deprecated — see the rule below |
+| `PRIVATE` | `private, no-cache` | **Anything whose SSR output varies by auth** |
+
+### The golden rule (MANDATORY)
+
+**If a page's SSR output varies by auth state, it MUST be `PRIVATE`.**
+
+Every page under the `(platform)`, `_org/[slug]`, and `_creators` layouts is
+auth-varying, because those layouts inject the auth-aware `user` (the sidebar
+user section). A page need not branch on `locals.user` itself — inheriting the
+layout's `user` is enough.
+
+**Why `public` is unsafe here:** shared caches (Cloudflare edge, miniflare's CF
+emulation in CI, any intermediate proxy) key entries by **URL — NOT by Cookie**.
+A `public` response cached during an anonymous visit is then served to
+*authenticated* visitors of the same URL, who get the logged-out render — the
+"You need to sign in" bug for content owners. Verified in production 2026-07-16:
+an anonymous content page returned `cf-cache-status: HIT` with anon HTML, and
+Cloudflare had rewritten origin `max-age=0` → `max-age=14400` (its default
+Browser Cache TTL), defeating the browser-revalidate half of
+`DYNAMIC_PUBLIC_REVALIDATE`. That preset fixes only the private browser cache,
+never the shared edge — do not use it for auth-varying pages.
+
+### Shield the DB at the data layer, not the HTML layer
+
+Making an auth-varying page `PRIVATE` removes its edge cache — but that must NOT
+translate into per-request DB load. The **public data** underneath is auth-safe
+and belongs in the KV layer; cache the data (version-invalidated), never the
+auth-varying HTML. Example: content-detail SSR fetches the content list by slug;
+that query is KV-cached in content-api (`getCachedPublicContent`, keyed by
+`COLLECTION_ORG_CONTENT(orgId)` with the slug folded into the data-slot key), so
+the `PRIVATE` page costs an SSR render, not a Neon query — for anonymous AND
+authenticated viewers.
+
+### Decision record — auth-caching fix (2026-07-16)
+
+- **Chosen (A):** auth-varying loads → `PRIVATE`; shield the DB via the KV data
+  cache (slug lookups now cached). In code, testable, version-invalidated.
+- **Rejected (B):** a Cloudflare "bypass cache on session cookie" rule. Correct,
+  but relocates a correctness invariant into un-versioned dashboard config CI
+  can't see, which fails silently on a cookie-name change (BetterAuth's
+  `__Secure-` prefix has broken prod before).
+- **Deferred (C):** make the SSR shell auth-agnostic and hydrate auth
+  client-side so pages become genuinely public + edge-cacheable. Best long-term
+  perf, but a cross-cutting refactor plus a first-paint flash. Revisit only if
+  measurement shows the lost anonymous edge cache actually hurts.
+
+### Poisoning guard
+
+The `public` presets must be set only AFTER every `await` that can throw — a
+thrown `error()` otherwise inherits the `public` header and the CDN caches the
+*error page* for every visitor. `PRIVATE` is safe to set anywhere.
 
 ---
 
@@ -183,6 +254,15 @@ A safety cap (`DEFAULT_MAX_LIBRARY_FANOUT = 500`) skips the per-user fanout
 for unbounded audiences (popular follower-gated content) and logs a warning
 — the platform layout's `visibilitychange → invalidate('cache:versions')`
 loop catches up on the user's next focus event.
+
+**Catalogue bump on edit + thumbnail (2026-07-16):** `PATCH /content/:id`
+(update) and the thumbnail upload/delete endpoints now also call
+`bumpOrgContentVersion` → invalidate `COLLECTION_ORG_CONTENT(orgId)`.
+Previously only publish/unpublish/delete did, so an edit or thumbnail swap left
+the cached public list — and, once slug lookups became KV-cached, the
+content-detail page — stale until the 5-min TTL. This keeps the `PRIVATE`-page
+DB-shield (see §HTTP/CDN Cache) coherent: the slug-keyed detail slot shares the
+org version key, so any content mutation stales it atomically.
 
 Membership (`inviteMember`, `updateMemberRole`, `removeMember`) and follower
 (`followOrganization`, `unfollowOrganization`) mutations bump the single

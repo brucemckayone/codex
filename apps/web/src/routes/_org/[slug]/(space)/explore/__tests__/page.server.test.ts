@@ -263,7 +263,7 @@ describe('explore +page.server.ts — cache wiring', () => {
   });
 
   describe('cache-header poisoning regression (Codex-vn49p)', () => {
-    it('sets DYNAMIC_PUBLIC only AFTER getPublicContent resolves on the unauthenticated path', async () => {
+    it('sets a PRIVATE (non-shared) cache header AFTER getPublicContent resolves on the unauthenticated path', async () => {
       const callOrder: string[] = [];
       getPublicContentMock.mockImplementationOnce(async () => {
         callOrder.push('getPublicContent');
@@ -282,12 +282,14 @@ describe('explore +page.server.ts — cache wiring', () => {
       const { load } = await import('../+page.server');
       await load(input);
 
-      // Ordering matters: a thrown error from getPublicContent must NOT
-      // leave DYNAMIC_PUBLIC headers on the wire (CDN poisoning bug).
+      // This page is auth-varying (the org layout injects `user`), so it now
+      // emits a PRIVATE (non-shared-cacheable) header instead of a `public`
+      // one — shared caches key by URL not Cookie and would serve the anon
+      // copy to signed-in users. setHeaders still runs after the fetch.
       expect(callOrder).toEqual(['getPublicContent', 'setHeaders']);
       expect(setHeadersSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          'cache-control': expect.stringContaining('public'),
+          'cache-control': expect.stringContaining('private'),
         })
       );
     });

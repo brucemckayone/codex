@@ -4,7 +4,8 @@
  * Fetches a creator's published content with search, type filtering, and pagination.
  * Reuses the creator profile lookup from the parent page, then queries content
  * scoped by creatorId with URL-driven filters.
- * Sets DYNAMIC_PUBLIC cache headers for edge caching.
+ * Sets PRIVATE cache headers — the page is auth-varying (creator layout
+ * injects `user`), so it must not be shared-cached.
  */
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
@@ -102,10 +103,12 @@ export const load: PageServerLoad = async ({
     }
   }
 
-  // Set the public cache header only on the success path. If any await above
-  // throws an unhandled error, SvelteKit's default no-cache headers apply to
-  // the error response instead of poisoning the CDN with a publicly-cached 4xx/5xx.
-  setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
+  // Auth-varying HTML — the creator layout injects the auth-aware `user`
+  // section, so the response differs by auth state. Shared caches key by URL,
+  // NOT by Cookie, so a `public` copy cached for an anonymous visitor is served
+  // to signed-in users too. PRIVATE keeps it out of shared caches.
+  // See docs/caching-strategy.md §HTTP/CDN caching.
+  setHeaders(CACHE_HEADERS.PRIVATE);
 
   return {
     username,

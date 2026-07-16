@@ -49,7 +49,6 @@ import {
   multipartProcedure,
   PaginatedResult,
   procedure,
-  sendEmailToWorker,
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { cleanupContentThumbnailOnDelete } from './content-cleanup';
@@ -251,6 +250,18 @@ app.patch(
         result.id,
         result.organizationId,
         'content_updated',
+        ctx.obs
+      );
+      // Bump the org content collection version too. An edit changes the
+      // public payload (title, description, price, thumbnail, accessType), and
+      // the KV-cached public list AND slug-keyed detail page live under
+      // COLLECTION_ORG_CONTENT(orgId). Without this bump they serve stale copy
+      // until the 5-min TTL. Previously only publish/unpublish/delete bumped
+      // it, so edits went stale on the catalogue until the next lifecycle event.
+      bumpOrgContentVersion(
+        ctx.env,
+        ctx.executionCtx,
+        result.organizationId,
         ctx.obs
       );
       return result;
@@ -498,6 +509,15 @@ app.post(
         })
       );
 
+      // Thumbnail is part of the public content payload, so cached list/detail
+      // pages must pick up the new image. Bump the org content version.
+      bumpOrgContentVersion(
+        ctx.env,
+        ctx.executionCtx,
+        content.organizationId,
+        ctx.obs
+      );
+
       return {
         thumbnailUrl: result.url,
         size: result.size,
@@ -535,6 +555,15 @@ app.delete(
       await ctx.services.imageProcessing.deleteContentThumbnail(
         contentId,
         content.creatorId
+      );
+
+      // Reverting to the auto-generated thumbnail changes the public payload —
+      // bump the org content version so cached list/detail pages refresh.
+      bumpOrgContentVersion(
+        ctx.env,
+        ctx.executionCtx,
+        content.organizationId,
+        ctx.obs
       );
 
       return null;

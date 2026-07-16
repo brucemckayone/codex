@@ -223,7 +223,6 @@ function buildSections(all: ContentItem[]): FeedSection[] {
 
 export const load: PageServerLoad = async ({
   params: routeParams,
-  locals,
   setHeaders,
   parent,
 }) => {
@@ -251,15 +250,12 @@ export const load: PageServerLoad = async ({
   // Set cache headers only after the critical awaits. If `parent()` throws
   // (e.g. an auth/branding load failure), the resulting error response
   // inherits SvelteKit's default no-cache headers instead of poisoning the
-  // CDN with the public-cache policy. REVALIDATE variant forces browsers to
-  // revalidate on every request so a user who signs in (or buys/subscribes)
-  // doesn't get served the anonymous response cached during an earlier
-  // logged-out visit to the same URL.
-  setHeaders(
-    locals.user
-      ? CACHE_HEADERS.PRIVATE
-      : CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE
-  );
+  // CDN with the public-cache policy. This page is auth-varying (the layout
+  // injects `user`), and shared caches key by URL, NOT by Cookie — so a
+  // `public` response cached for an anonymous visitor is served to signed-in
+  // users too. PRIVATE keeps it out of shared caches.
+  // See docs/caching-strategy.md §HTTP/CDN caching.
+  setHeaders(CACHE_HEADERS.PRIVATE);
 
   // Categories for the hero pill row + sticky pill bar. Derived from
   // `allContent` (already on this request) rather than `stats.categories`

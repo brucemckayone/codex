@@ -19,15 +19,12 @@ export const load: PageServerLoad = async ({
 }) => {
   const { org } = await parent();
 
-  // REVALIDATE variant forces browsers to revalidate on every request so a
-  // user who signs in (or subscribes) doesn't see the anonymous tier list
-  // cached from an earlier logged-out visit (which would hide their current
-  // subscription state in the payload).
-  setHeaders(
-    locals.user
-      ? CACHE_HEADERS.PRIVATE
-      : CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE
-  );
+  // Auth-varying HTML: the payload carries the viewer's subscription state and
+  // the layout injects `user`. Shared caches key by URL, NOT by Cookie, so a
+  // `public` copy cached for an anonymous visitor is served to signed-in users
+  // — hiding their real subscription state. PRIVATE keeps it out of shared
+  // caches. See docs/caching-strategy.md §HTTP/CDN caching.
+  setHeaders(CACHE_HEADERS.PRIVATE);
 
   const api = createServerApi(platform, cookies);
 
