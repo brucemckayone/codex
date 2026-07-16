@@ -24,6 +24,13 @@
   @prop {{ amount; currency } | null} price - Price info (null = hidden, 0 = Free)
   @prop {boolean} purchased - Whether user has purchased this content
   @prop {boolean} included - Whether user's subscription/membership covers this content
+  @prop {'16:9' | '1:1' | '3:4' | '3:2'} shape - Explicit media aspect ratio
+        (drives `data-shape`); overrides the per-content-type default
+  @prop {'auto' | 'transparent' | 'solid'} chrome - Card chrome mode;
+        'transparent' = no background/border until hover
+  @prop {boolean} titleInCover - Render article eyebrow+title inside the media
+        tile over a scrim; defaults to AUTO (article + shape 1:1/3:4)
+  @prop {boolean} normalizeRatio - @deprecated alias for shape="16:9"
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
@@ -135,11 +142,40 @@
     /** Destination for the reactivate/update-payment affordance. Defaults to /account/subscriptions. */
     accessStateActionHref?: string;
     /**
-     * Forces the thumbnail to a single uniform aspect ratio, overriding the
-     * per-content-type defaults (audio 1:1, article 3:2, video 16:9). Set
-     * true on mixed-type carousels (Free samples, per-category) so a row of
-     * cards reads as one rhythm instead of a jagged mix of tile shapes.
-     * Pure-type sections leave this undefined and keep natural ratios.
+     * Explicit media aspect-ratio, driving a `data-shape` attribute + CSS
+     * `aspect-ratio` on the thumbnail. Overrides the per-content-type
+     * defaults (audio 1:1, article 3:2, video 16:9). Set per-section so a
+     * row of cards reads as one rhythm:
+     *   '16:9' — video / normalized mixed rows
+     *   '1:1'  — audio square, square editorial
+     *   '3:4'  — portrait (creators, new-this-week rail)
+     *   '3:2'  — wide editorial crop
+     * Leave undefined to keep the natural per-type ratio.
+     */
+    shape?: '16:9' | '1:1' | '3:4' | '3:2';
+    /**
+     * Card chrome mode:
+     *   'auto'        — default; base cards are filled, article/audio-row
+     *                   carry their own transparent-until-hover treatment.
+     *   'transparent' — no background/border until hover (catalogue grids +
+     *                   carousel tracks that sit on a section background).
+     *   'solid'       — force the filled surface even for types that would
+     *                   otherwise render transparent.
+     */
+    chrome?: 'auto' | 'transparent' | 'solid';
+    /**
+     * Article "title-in-cover" overlay — renders the eyebrow + title INSIDE
+     * the media tile, bottom-aligned over a scrim gradient, with the image
+     * as an optional underlay (brand-tinted gradient cover when no image).
+     * Leave undefined for AUTO: on when `contentType==='article'` and the
+     * resolved shape is `1:1` or `3:4`. Pass an explicit boolean to force it
+     * on/off regardless of shape.
+     */
+    titleInCover?: boolean;
+    /**
+     * @deprecated Use `shape="16:9"` instead. Kept as a backward-compatible
+     * alias — `normalizeRatio={true}` resolves to `shape='16:9'`. Live
+     * consumers still pass this; WP-11 migrates them to `shape`.
      */
     normalizeRatio?: boolean;
   }
@@ -170,6 +206,9 @@
     accessState = 'active',
     accessStatePeriodEnd = null,
     accessStateActionHref = '/account/subscriptions',
+    shape,
+    chrome = 'auto',
+    titleInCover,
     normalizeRatio = false,
     class: className,
     ...rest
@@ -220,6 +259,25 @@
 
   const isArticle = $derived(contentType === 'article');
 
+  // Resolved media shape. `normalizeRatio` is a deprecated alias for
+  // `shape='16:9'`; an explicit `shape` always wins.
+  const resolvedShape = $derived<'16:9' | '1:1' | '3:4' | '3:2' | undefined>(
+    shape ?? (normalizeRatio ? '16:9' : undefined),
+  );
+
+  // Article title-in-cover overlay. Explicit `titleInCover` wins; otherwise
+  // AUTO — on for article cards in a portrait/square shape (matches the
+  // approved mockup, where shaped article sections render title-in-cover).
+  const showTitleInCover = $derived(
+    titleInCover ??
+      (isArticle && (resolvedShape === '1:1' || resolvedShape === '3:4')),
+  );
+
+  // 'auto' chrome emits no attribute, so legacy callers keep the default
+  // cascade. `resolvedShape` is already undefined when unset, so it binds to
+  // `data-shape` directly (no separate derived needed).
+  const chromeAttr = $derived(chrome !== 'auto' ? chrome : undefined);
+
   // Audio-row renders a compact creator · duration meta inline, so the
   // stacked creator row/avatar is suppressed to avoid duplication. Articles
   // render a compact text byline in the meta row, so we suppress the avatar
@@ -232,7 +290,8 @@
   // always carry an excerpt regardless of variant so readers can judge
   // each card before clicking.
   const showDescription = $derived(
-    !!description && !isAudioRow && (variant === 'featured' || variant === 'grid' || isArticle)
+    !!description && !isAudioRow && !showTitleInCover &&
+    (variant === 'featured' || variant === 'grid' || isArticle)
   );
   const showPriceBadge = $derived(
     variant !== 'compact' && variant !== 'resume' &&
@@ -340,10 +399,12 @@
   class:cc--loading={loading}
   class:cc--access-dimmed={isDimmed}
   class:cc--audio-row={isAudioRow}
+  class:cc--title-in-cover={showTitleInCover}
   data-variant={variant}
   data-layout={resolvedLayout !== 'default' ? resolvedLayout : undefined}
   data-content-type={contentType || undefined}
-  data-normalize-ratio={normalizeRatio || undefined}
+  data-shape={resolvedShape}
+  data-chrome={chromeAttr}
   data-access-state={accessState !== 'active' ? accessState : undefined}
   aria-labelledby={!loading ? titleId : undefined}
   {...rest}
@@ -392,6 +453,11 @@
             <FileTextIcon size={32} />
           {/if}
         </div>
+      {:else if showTitleInCover}
+        <!-- Title-in-cover with no image: a brand-tinted gradient cover
+             stands in for the photograph. The eyebrow + title render over
+             it via the scrimmed overlay body — no placeholder icon needed. -->
+        <div class="cc__cover cc__cover--article"></div>
       {:else}
         <div class="cc__placeholder">
           {#if contentType === 'video'}
@@ -1281,22 +1347,33 @@
     display: block;
   }
 
-  /* ── NORMALIZE RATIO: mixed-type carousel override ──────────
-     When a carousel contains items of mixed content types (Free samples,
-     per-category), the per-type thumb ratios (audio 1:1, article 3:2,
-     video 16:9) create a jagged row. Callers set `normalizeRatio={true}`
-     to force every card in the row to 16:9. Wins over per-type rules
-     because it uses a more specific selector (includes data-normalize).
-     Only applies to the grid variant — list/featured/compact have their
-     own aspect handling and shouldn't need to be normalized. */
-  .cc[data-normalize-ratio][data-variant='grid'] .cc__thumb {
+  /* ── SHAPE SYSTEM: explicit per-card aspect ratio ──────────
+     The `shape` prop drives `data-shape`; these rules win over the
+     per-content-type defaults above by source order (equal specificity,
+     declared later). NOTE: this selector is UNSCOPED — by source order it
+     also overrides the list / featured / compact aspect-ratio rules
+     declared earlier (only audio-row, declared later, still wins). That is
+     currently harmless because `shape` has no consumers yet; WP-11 owns
+     broad `shape` application and will scope these against the structural
+     variants when it wires real callers. `normalizeRatio` (deprecated)
+     resolves to shape='16:9' upstream, so the old mixed-row normalisation
+     lands here too. */
+  .cc[data-shape='16:9'] .cc__thumb {
     aspect-ratio: 16 / 9;
   }
+  .cc[data-shape='1:1'] .cc__thumb {
+    aspect-ratio: 1 / 1;
+  }
+  .cc[data-shape='3:4'] .cc__thumb {
+    aspect-ratio: 3 / 4;
+  }
+  .cc[data-shape='3:2'] .cc__thumb {
+    aspect-ratio: 3 / 2;
+  }
 
-  /* Article thumbs normally disappear when there's no real image; but in
-     a normalized mixed row we keep the frame so the rhythm holds. Fill
-     with the surface token + the article icon sits centered. */
-  .cc[data-normalize-ratio][data-content-type='article'] .cc__thumb:has(.cc__placeholder:not(.hidden)) {
+  /* A shaped article keeps its thumb frame even without an image (mixed
+     normalized rows), matching the previous normalizeRatio behaviour. */
+  .cc[data-shape][data-content-type='article'] .cc__thumb:has(.cc__placeholder:not(.hidden)) {
     display: block;
   }
 
@@ -1538,6 +1615,131 @@
     .cc--audio-row:hover,
     .cc--audio-row:focus-within:has(:focus-visible) {
       transform: none;
+    }
+  }
+
+  /* ═══════════════════════════════════════════
+     CHROME MODE (transparent-until-hover / solid)
+     `chrome` prop → data-chrome. Lifts the landing page's per-page
+     `:global(.cc)` flatten-then-lift override into the component so any
+     catalogue grid / carousel track can opt in. `auto` (default) emits no
+     attribute and keeps the base treatment.
+     ═══════════════════════════════════════════ */
+
+  .cc[data-chrome='transparent'] {
+    background: transparent;
+    border-color: transparent;
+  }
+
+  .cc[data-chrome='transparent']:hover,
+  .cc[data-chrome='transparent']:focus-within:has(:focus-visible) {
+    background: color-mix(in srgb, var(--color-surface-card) 70%, transparent);
+    border-color: color-mix(in srgb, var(--color-border) 50%, transparent);
+  }
+
+  /* Force the filled surface even for types that render transparent by
+     default (articles, audio-row). The extra [data-content-type] attribute
+     brings this to specificity PARITY (0,3,0) with the article transparency
+     rule above, so it wins on source order (declared later). */
+  .cc[data-content-type][data-chrome='solid'] {
+    background: color-mix(in srgb, var(--color-surface-card) 96%, transparent);
+    border-color: color-mix(in srgb, var(--color-border) 50%, transparent);
+  }
+
+  /* ═══════════════════════════════════════════
+     TITLE-IN-COVER (article editorial overlay)
+     Eyebrow + title render INSIDE the media tile, bottom-aligned over a
+     scrim gradient. Reuses the featured variant's grid-overlay technique:
+     thumb + body share one grid cell (body `align-self: end`), and the body
+     stays statically positioned so the single full-card title anchor
+     (`.cc__title a::after`) resolves against `.cc` and keeps covering the
+     whole card.
+     ═══════════════════════════════════════════ */
+
+  .cc--title-in-cover {
+    display: grid;
+    grid-template-rows: 1fr;
+    padding: 0;
+  }
+
+  .cc--title-in-cover .cc__thumb {
+    grid-row: 1 / -1;
+    grid-column: 1;
+    /* Match the card radius so the media fills to the rounded card edge. */
+    border-radius: var(--radius-xl);
+  }
+
+  .cc--title-in-cover .cc__body {
+    grid-row: 1 / -1;
+    grid-column: 1;
+    align-self: end;
+    z-index: 2;
+    padding: var(--space-4);
+    /* Scrim gradient — darkens the media bottom so overlaid text is legible
+       over any photograph, on either theme. The mid-stops stay deep through
+       the text block (≈70% at 45%, ≈35% at 75%) so the near-white
+       --media-glyph title/kind line keeps AA contrast even over a light
+       photo; only the very top edge fades out so the image still breathes. */
+    background: linear-gradient(
+      to top,
+      var(--media-scrim),
+      color-mix(in srgb, var(--media-scrim) 70%, transparent) 45%,
+      color-mix(in srgb, var(--media-scrim) 35%, transparent) 75%,
+      transparent 100%
+    );
+    border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+  }
+
+  .cc--title-in-cover .cc__title a::after {
+    z-index: 3;
+  }
+
+  /* Overlaid text uses --media-glyph (near-white) rather than the theme's
+     --color-text so it never renders dark-on-dark over the scrim on a
+     light org. Title also picks up the heading face for editorial weight. */
+  .cc--title-in-cover .cc__title,
+  .cc--title-in-cover .cc__title a {
+    color: var(--media-glyph);
+    font-family: var(--font-heading);
+  }
+
+  .cc--title-in-cover .cc__title a:hover {
+    color: color-mix(in srgb, var(--media-glyph) 80%, var(--color-brand-accent));
+  }
+
+  /* Eyebrow kind-line — accent-tinted, lightened toward the glyph so it
+     stays readable on the scrim while carrying the brand accent. */
+  .cc--title-in-cover .cc__kind {
+    color: color-mix(in srgb, var(--color-brand-accent) 55%, var(--media-glyph));
+  }
+
+  .cc--title-in-cover .cc__article-meta,
+  .cc--title-in-cover .cc__article-byline,
+  .cc--title-in-cover .cc__article-read-time {
+    color: color-mix(in srgb, var(--media-glyph) 78%, transparent);
+  }
+
+  /* Brand-tinted gradient cover — stands in for the photograph on a
+     title-in-cover card with no image. */
+  .cc__cover {
+    position: absolute;
+    inset: 0;
+  }
+
+  .cc__cover--article {
+    background: linear-gradient(
+      155deg,
+      color-mix(in oklab, var(--color-brand-primary) 20%, var(--color-surface-card)),
+      var(--color-surface-card)
+    );
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cc[data-chrome='transparent'],
+    .cc--title-in-cover {
+      transition:
+        background var(--duration-fast) var(--ease-default),
+        border-color var(--duration-fast) var(--ease-default);
     }
   }
 </style>
