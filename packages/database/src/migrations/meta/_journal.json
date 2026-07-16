@@ -540,6 +540,13 @@
       "when": 1783097278012,
       "tag": "0076_sad_amazoness",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1784240157228,
+      "tag": "0077_chief_storm",
+      "breakpoints": true
     }
   ]
 }
