@@ -335,10 +335,21 @@
   /* Shadow color — consumer reads --shadow-color. */
   --shadow-color: var(--brand-shadow-color-dark, var(--brand-shadow-color, 220 3% 15%));
 
-  /* Shader preset + intensity — ShaderHero reads --brand-shader-preset and
-     --brand-shader-intensity directly via getPropertyValue (shader-config.ts).
-     Rebind the raw vars under the dark gate so a dark-only shader (e.g. ink)
-     activates without touching ShaderHero. */
-  --brand-shader-preset: var(--brand-shader-preset-dark, var(--brand-shader-preset));
-  --brand-shader-intensity: var(--brand-shader-intensity-dark, var(--brand-shader-intensity));
+  /* Fonts — consumer reads --font-body / --font-heading. Light lives on
+     --brand-font-body/-heading (inline, from the fontBody/fontHeading fields);
+     a dark-mode font rides darkTokenOverrides and emits as
+     --brand-font-body-dark/-heading-dark. Prefer the dark value, fall back to
+     the light font, then the system stack — so light and dark fonts are
+     independent and an unset dark font transparently inherits light. */
+  --font-body: var(--brand-font-body-dark, var(--brand-font-body, var(--font-sans)));
+  --font-heading: var(--brand-font-heading-dark, var(--brand-font-heading, var(--font-sans)));
+
+  /* Shader (hero effect) — ShaderHero reads the --brand-shader-* vars directly
+     via getComputedStyle (shader-config.ts). We can NOT rebind them here: the
+     light values are injected INLINE on .org-layout (inline beats a stylesheet
+     rule), and `var(--x-dark, var(--x))` self-references into a cycle. Instead
+     expose a stylesheet-only sentinel; the reader sees it under the dark gate
+     and prefers each key's `--brand-*-dark` value (falling back to light). This
+     covers every shader-* key, not just preset/intensity. */
+  --brand-shader-is-dark: 1;
 }

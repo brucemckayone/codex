@@ -57,6 +57,12 @@ const BRAND_PREFIX_KEYS = new Set([
   'card-image-hover-scale',
   // Typography style
   'text-transform-label',
+  // Per-theme fonts — light lives in the fontBody/fontHeading fields
+  // (--brand-font-body/-heading); the DARK variant rides darkTokenOverrides
+  // under these keys and emits as --brand-font-body-dark / -heading-dark so a
+  // dark-mode font choice no longer clobbers the light one.
+  'font-body',
+  'font-heading',
   // Shader hero configuration — consumed by ShaderHero component via getComputedStyle
   'shader-preset',
   'shader-intensity',
