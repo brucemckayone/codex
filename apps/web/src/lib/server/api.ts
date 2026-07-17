@@ -111,6 +111,30 @@ import type {
 import { ApiError } from './errors';
 
 /**
+ * One item from `GET /api/content/public`, typed to match what the endpoint
+ * ACTUALLY returns — not the raw DB row. The worker resolves R2 keys to CDN
+ * URLs (`resolveR2Urls` adds `thumbnailUrl` + `hlsPreviewUrl` to `mediaItem`)
+ * and `listPublic` attaches `categorySlugs`; `content_type` / `access_type`
+ * are `varchar` columns (so `ContentWithRelations` widens them to `string`)
+ * but are constrained to their enums, so we narrow them here. This is the
+ * single source of truth for the landing/explore `ContentItem` shape.
+ */
+export type PublicContentListItem = Omit<
+  ContentWithRelations,
+  'mediaItem' | 'contentType' | 'accessType'
+> & {
+  mediaItem:
+    | (MediaItem & {
+        thumbnailUrl: string | null;
+        hlsPreviewUrl: string | null;
+      })
+    | null;
+  contentType: 'video' | 'audio' | 'written';
+  accessType: 'free' | 'paid' | 'followers' | 'subscribers' | 'team';
+  categorySlugs: string[];
+};
+
+/**
  * Resolve API URL for a worker
  *
  * @param platform - Platform interface containing env bindings
@@ -815,9 +839,31 @@ export function createServerApi(
        * ```
        */
       getPublicContent: (params?: URLSearchParams) =>
-        request<PaginatedListResponse<ContentWithRelations>>(
+        request<PaginatedListResponse<PublicContentListItem>>(
           'content',
           `/api/content/public${params ? `?${params}` : ''}`
+        ),
+
+      /**
+       * List an organization's published topic categories for the landing
+       * "Browse by topic" section (public, no auth). Rows arrive ordered by
+       * the curator's `sortOrder`; cover keys are already resolved to
+       * md-variant CDN URLs server-side (raw R2 keys are never exposed).
+       */
+      getPublicCategories: (orgId: string) =>
+        request<
+          Array<{
+            id: string;
+            name: string;
+            slug: string;
+            description: string | null;
+            icon: string | null;
+            sortOrder: number;
+            coverImageUrl: string | null;
+          }>
+        >(
+          'content',
+          `/api/content/public/categories?orgId=${encodeURIComponent(orgId)}`
         ),
 
       /**

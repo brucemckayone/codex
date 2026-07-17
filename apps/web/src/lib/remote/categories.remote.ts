@@ -26,6 +26,7 @@ import {
   z,
 } from '@codex/validation';
 import { command, form, getRequestEvent, query } from '$app/server';
+import type { TopicItem } from '$lib/components/topic/topic-card.types';
 import { createServerApi } from '$lib/server/api';
 import { type StudioCategory, toStudioCategory } from './categories.types';
 
@@ -54,6 +55,37 @@ export const getCategories = query(
 
     const result = await api.categories.list(params);
     return (result?.items ?? []).map(toStudioCategory);
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public Topic List Query (landing "Browse by topic")
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * List an org's published topic categories for the public landing page.
+ *
+ * Unauthenticated + org-scoped (by id) — powers the "Browse by topic" grid and
+ * resolves the active-topic chip name in the browse module. Maps the public
+ * endpoint rows straight to the `TopicItem` card contract (dropping `sortOrder`,
+ * which the endpoint already applied as the array order). Distinct from
+ * {@link getCategories}, which is the authenticated studio-management list.
+ */
+export const getPublicCategories = query(
+  z.string().uuid(),
+  async (orgId): Promise<TopicItem[]> => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    const rows = await api.content.getPublicCategories(orgId);
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      description: row.description,
+      icon: row.icon,
+      coverImageUrl: row.coverImageUrl,
+    }));
   }
 );
 

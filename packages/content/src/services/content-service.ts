@@ -508,7 +508,10 @@ export class ContentService extends BaseService {
         // no TTL) must refresh. The content-api PATCH route also bumps this via
         // bumpOrgContentVersion; wiring it here keeps the service correct for
         // any caller that bypasses that route (tests, future workers).
-        if (_categoryIds !== undefined) {
+        // `validated` (not the tx-scoped `_categoryIds`) is the in-scope
+        // source here — the destructured alias only lives inside the
+        // transaction callback above.
+        if (validated.categoryIds !== undefined) {
           void this.cache?.invalidate(
             CacheType.CATEGORIES(result.organizationId)
           );
@@ -1005,7 +1008,9 @@ export class ContentService extends BaseService {
     creatorId?: string;
     featured?: boolean;
     category?: string;
-  }): Promise<PaginatedListResponse<ContentWithRelations>> {
+  }): Promise<
+    PaginatedListResponse<ContentWithRelations & { categorySlugs: string[] }>
+  > {
     try {
       // Build WHERE conditions — published, not deleted, optionally scoped to org
       const whereConditions = [
@@ -1102,7 +1107,7 @@ export class ContentService extends BaseService {
             : sql`${content.publishedAt} DESC NULLS LAST`;
 
       const where = and(...whereConditions);
-      return await paginatedQuery({
+      const result = await paginatedQuery({
         page: params.page,
         limit: params.limit,
         fetchItems: (limit, offset) =>
@@ -1136,6 +1141,56 @@ export class ContentService extends BaseService {
             ? item
             : { ...item, contentBody: null, contentBodyJson: null },
       });
+
+      // Enrich each item with its category (topic) slugs so the landing
+      // "Browse by topic" filter can match items to the active topic without a
+      // second round-trip. One extra query keyed on the returned content ids;
+      // space-scoped (org listing → org categories; personal → the creator's
+      // own) and excluding soft-deleted categories — mirrors the category
+      // FILTER scope above. Items with no membership get an empty array.
+      const itemIds = result.items.map((item) => item.id);
+      const categorySpaceScope = params.orgId
+        ? eq(categories.organizationId, params.orgId)
+        : params.creatorId
+          ? and(
+              isNull(categories.organizationId),
+              eq(categories.creatorId, params.creatorId)
+            )
+          : undefined;
+
+      const slugsByContentId = new Map<string, string[]>();
+      if (itemIds.length > 0 && categorySpaceScope) {
+        const slugRows = await this.db
+          .select({
+            contentId: contentCategories.contentId,
+            slug: categories.slug,
+          })
+          .from(contentCategories)
+          .innerJoin(
+            categories,
+            eq(contentCategories.categoryId, categories.id)
+          )
+          .where(
+            and(
+              inArray(contentCategories.contentId, itemIds),
+              isNull(categories.deletedAt),
+              categorySpaceScope
+            )
+          );
+        for (const row of slugRows) {
+          const existing = slugsByContentId.get(row.contentId);
+          if (existing) existing.push(row.slug);
+          else slugsByContentId.set(row.contentId, [row.slug]);
+        }
+      }
+
+      return {
+        items: result.items.map((item) => ({
+          ...item,
+          categorySlugs: slugsByContentId.get(item.id) ?? [],
+        })),
+        pagination: result.pagination,
+      };
     } catch (error) {
       this.handleError(error, 'listPublic');
     }
