@@ -18,6 +18,7 @@ import type { HonoEnv } from '@codex/shared-types';
 import { uuidSchema, z } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
+import { resolveCategoryCoverUrl } from './category-cover-url';
 import {
   getCachedPublicContent,
   shouldCachePublicContentQuery,
@@ -147,10 +148,7 @@ app.get(
           icon: row.icon,
           sortOrder: row.sortOrder,
           // Never expose the raw R2 key — resolve the md variant to a CDN URL.
-          coverImageUrl:
-            row.coverImageKey && r2Base
-              ? `${r2Base}/${row.coverImageKey}/md.webp`
-              : null,
+          coverImageUrl: resolveCategoryCoverUrl(row.coverImageKey, r2Base),
         }));
       };
 

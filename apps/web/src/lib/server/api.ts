@@ -31,7 +31,7 @@ import type {
   CreatorOrganizationAgreement,
 } from '@codex/agreements';
 import { COOKIES, HEADERS, MIME_TYPES } from '@codex/constants';
-import type { MediaItem } from '@codex/database/schema';
+import type { Category, MediaItem } from '@codex/database/schema';
 import type { AvatarUploadResponse } from '@codex/identity';
 import type { NotificationPreferencesResponse } from '@codex/notifications';
 import type {
@@ -69,6 +69,7 @@ import type {
   ChangeTierInput,
   ConnectMeOnboardInput,
   ConnectOnboardInput,
+  CreateCategoryInput,
   CreateCheckoutInput,
   CreatePortalSessionInput,
   CreateSubscriptionCheckoutInput,
@@ -76,6 +77,7 @@ import type {
   ReactivateSubscriptionInput,
   ResumeSubscriptionInput,
   UpdateBrandingInput,
+  UpdateCategoryInput,
   UpdateContactInput,
   UpdateCreatorOnboardingInput,
   UpdateFeaturesInput,
@@ -845,6 +847,94 @@ export function createServerApi(
           `/api/content/check-slug/${encodeURIComponent(slug)}${qs ? `?${qs}` : ''}`
         );
       },
+    },
+
+    /**
+     * Category (topic taxonomy) endpoints — co-deployed on content-api at
+     * `/api/categories`. Every call carries `?organizationId=` to target the
+     * ORG space; omitting it would silently operate on the caller's PERSONAL
+     * creator space (the backend's `organizationId` query param is optional).
+     * The studio management surface always curates an org, so `organizationId`
+     * is a required argument here.
+     */
+    categories: {
+      /**
+       * List categories in the caller's resolved space (paginated).
+       * `params` MUST include `organizationId` for the org space. Each row
+       * carries a resolved `coverImageUrl` (md variant) or null — the raw R2
+       * key is never the display source.
+       */
+      list: (params: URLSearchParams) =>
+        request<
+          PaginatedListResponse<Category & { coverImageUrl: string | null }>
+        >('content', `/api/categories?${params}`),
+
+      /**
+       * Create a category in the given org space. 201 → the new row.
+       */
+      create: (organizationId: string, data: CreateCategoryInput) =>
+        request<Category>(
+          'content',
+          `/api/categories?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'POST', body: JSON.stringify(data) }
+        ),
+
+      /**
+       * Update a category's editable fields (slug stays stable across renames).
+       */
+      update: (
+        categoryId: string,
+        organizationId: string,
+        data: UpdateCategoryInput
+      ) =>
+        request<Category>(
+          'content',
+          `/api/categories/${categoryId}?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'PATCH', body: JSON.stringify(data) }
+        ),
+
+      /**
+       * Soft-delete a category. 204 → null.
+       */
+      remove: (categoryId: string, organizationId: string) =>
+        request<void>(
+          'content',
+          `/api/categories/${categoryId}?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'DELETE' }
+        ),
+
+      /**
+       * Reorder categories — assigns sortOrder = array index. 204 → null.
+       */
+      reorder: (organizationId: string, orderedIds: string[]) =>
+        request<void>(
+          'content',
+          `/api/categories/reorder?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'POST', body: JSON.stringify({ orderedIds }) }
+        ),
+
+      /**
+       * Upload (or replace) a category cover image (multipart). Mirrors
+       * `org.uploadLogo` — re-forwards the File via `forwardMultipartUpload`
+       * with a deterministic filename so workerd never drops it, then unwraps
+       * the single-item envelope. Returns the persisted key + resolved md URL.
+       */
+      uploadCover: (
+        categoryId: string,
+        organizationId: string,
+        file: File
+      ): Promise<{ coverImageKey: string | null; coverImageUrl: string }> =>
+        forwardMultipartUpload<{
+          coverImageKey: string | null;
+          coverImageUrl: string;
+        }>({
+          url: `${serverApiUrl(platform, 'content')}/api/categories/${categoryId}/cover?organizationId=${encodeURIComponent(organizationId)}`,
+          fieldName: 'cover',
+          file,
+          fallbackFilename: 'cover',
+          sessionCookie,
+          failureMessage: 'Cover upload failed',
+        }),
     },
 
     /**

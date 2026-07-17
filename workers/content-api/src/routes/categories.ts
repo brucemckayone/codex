@@ -44,6 +44,7 @@ import {
   procedure,
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
+import { resolveCategoryCoverUrl } from './category-cover-url';
 import {
   type CategoryManagementSpace,
   type MembershipChecker,
@@ -157,7 +158,15 @@ app.get(
         limit: ctx.input.query.limit,
         search: ctx.input.query.search,
       });
-      return new PaginatedResult(result.items, result.pagination);
+      // Resolve each raw R2 cover key to a CDN URL (same convention as the
+      // public topic list) so studio covers render on cold load — never expose
+      // the raw key to the client.
+      const r2Base = ctx.env.R2_PUBLIC_URL_BASE;
+      const items = result.items.map((row) => ({
+        ...row,
+        coverImageUrl: resolveCategoryCoverUrl(row.coverImageKey, r2Base),
+      }));
+      return new PaginatedResult(items, result.pagination);
     },
   })
 );
