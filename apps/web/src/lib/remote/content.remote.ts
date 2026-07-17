@@ -363,6 +363,30 @@ const contentBaseFormSchema = z.object({
     return Number.isNaN(parsed) ? 0 : Math.round(parsed * 100);
   }),
   category: optionalString,
+  // Category taxonomy membership (WP-5). Serialized as a JSON array of category
+  // UUIDs in a hidden input (rendered by CategorySelect). The new source of
+  // truth for classification; the legacy free-text `category` is no longer
+  // edited via the form.
+  //
+  // ABSENT (undefined) vs PRESENT-BUT-EMPTY are deliberately distinct — and NOT
+  // collapsed to a default. The picker only renders (so the field is only
+  // present) for ORG content; personal content submits no `categoryIds` at all.
+  //   - field absent          → `undefined` → ContentService leaves tags untouched
+  //   - field present (org)    → parsed array (possibly `[]` = clear the set)
+  //   - malformed / non-array → `undefined` (degrade to the safe "untouched")
+  categoryIds: z
+    .string()
+    .optional()
+    .transform((v) => {
+      if (v === undefined) return undefined;
+      try {
+        const parsed = JSON.parse(v);
+        return Array.isArray(parsed) ? (parsed as string[]) : undefined;
+      } catch {
+        return undefined;
+      }
+    })
+    .pipe(z.array(z.string().uuid()).max(20).optional()),
   tags: z
     .string()
     .optional()
@@ -402,6 +426,7 @@ export const createContentForm = form(
     accessType,
     price,
     category,
+    categoryIds,
     tags,
     thumbnailUrl,
     minimumTierId,
@@ -423,6 +448,7 @@ export const createContentForm = form(
         organizationId,
         priceCents: price,
         category,
+        categoryIds,
         tags,
         thumbnailUrl,
         minimumTierId,
@@ -540,6 +566,7 @@ export const updateContentForm = form(
     accessType,
     price,
     category,
+    categoryIds,
     tags,
     thumbnailUrl,
     minimumTierId,
@@ -561,6 +588,7 @@ export const updateContentForm = form(
         organizationId,
         priceCents: price,
         category,
+        categoryIds,
         tags,
         thumbnailUrl,
         minimumTierId,

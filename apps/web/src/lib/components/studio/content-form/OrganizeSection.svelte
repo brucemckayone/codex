@@ -1,52 +1,124 @@
 <!--
   @component OrganizeSection
 
-  Category + tags + homepage feature flag. Laid out in a single card with
-  a two-column grid on wide screens (category | tags), then the feature
-  row spans full width beneath.
+  Category multiselect + tags + homepage feature flag. Laid out in a single card
+  with a two-column grid on wide screens (categories | tags), then the feature
+  row spans full width beneath. When there is no org space (personal creators
+  studio) the category taxonomy — an org-curation feature — is hidden and tags
+  span the row.
 
-  @prop form       Active form instance
-  @prop tags       Tag array (uplifted to parent so it survives in hidden input)
-  @prop featured   Feature flag (uplifted)
+  This is the container half: it owns the remote fetch of the org's categories
+  and the create-on-the-fly mutation, and delegates the pure picker UI to
+  CategorySelect (which also renders the hidden `categoryIds` form field).
+
+  @prop form                 Active form instance
+  @prop organizationId       Org space UUID, or null for personal content
+  @prop tags                 Tag array (uplifted so it survives in hidden input)
+  @prop featured             Feature flag (uplifted)
+  @prop selectedCategoryIds  Selected category ids (uplifted)
   @prop onTagsChange
   @prop onFeaturedChange
+  @prop onCategoryChange
 -->
 <script lang="ts">
   import TagsInput from './TagsInput.svelte';
+  import CategorySelect from './CategorySelect.svelte';
   import Switch from '$lib/components/ui/Switch/Switch.svelte';
-  import type { createContentForm, updateContentForm } from '$lib/remote/content.remote';
+  import { toast } from '$lib/components/ui/Toast/toast-store';
+  import {
+    getCategories,
+    createCategoryInline,
+  } from '$lib/remote/categories.remote';
+  import type {
+    createContentForm,
+    updateContentForm,
+  } from '$lib/remote/content.remote';
 
   type ContentForm = typeof createContentForm | typeof updateContentForm;
 
   interface Props {
     form: ContentForm;
+    organizationId: string | null;
     tags: string[];
     featured: boolean;
+    selectedCategoryIds: string[];
     onTagsChange: (tags: string[]) => void;
     onFeaturedChange: (featured: boolean) => void;
+    onCategoryChange: (ids: string[]) => void;
   }
 
-  const { form, tags, featured, onTagsChange, onFeaturedChange }: Props = $props();
+  const {
+    form,
+    organizationId,
+    tags,
+    featured,
+    selectedCategoryIds,
+    onTagsChange,
+    onFeaturedChange,
+    onCategoryChange,
+  }: Props = $props();
+
+  // Category taxonomy is org-scoped (WP-4 management + api client are org-only),
+  // so only fetch/render the multiselect when there is an org space.
+  const categoriesQuery = $derived(
+    organizationId ? getCategories(organizationId) : null
+  );
+  const categoryOptions = $derived(
+    (categoriesQuery?.current ?? []).map((c) => ({ id: c.id, name: c.name }))
+  );
+
+  let creatingCategory = $state(false);
+
+  function toggleCategory(id: string) {
+    onCategoryChange(
+      selectedCategoryIds.includes(id)
+        ? selectedCategoryIds.filter((x) => x !== id)
+        : [...selectedCategoryIds, id]
+    );
+  }
+
+  async function createCategory(name: string) {
+    if (!organizationId) return;
+    creatingCategory = true;
+    try {
+      const result = await createCategoryInline({ organizationId, name });
+      if (result.success) {
+        // Add the freshly-minted topic to the selection; getCategories has been
+        // refreshed by the command so it also appears as a selectable option.
+        onCategoryChange([...selectedCategoryIds, result.category.id]);
+      } else {
+        toast.error(result.error);
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Failed to create topic'
+      );
+    } finally {
+      creatingCategory = false;
+    }
+  }
 </script>
 
-<!-- Hidden inputs -->
+<!-- Hidden inputs (tags + featured). The `categoryIds` hidden field is rendered
+     by CategorySelect; `category` is legacy — echoed back unchanged so existing
+     values round-trip while the taxonomy (categoryIds) becomes the source of
+     truth. -->
 <input type="hidden" name="tags" value={JSON.stringify(tags)} />
 <input type="hidden" name="featured" value={featured ? 'true' : ''} />
+<input type="hidden" name="category" value={form.fields.category?.value() ?? ''} />
 
-<div class="organize-grid">
-  <div class="organize-field">
-    <label class="field-label" for="category">
-      Category <span class="optional-hint">Optional</span>
-    </label>
-    <input
-      {...form.fields.category.as('text')}
-      id="category"
-      class="field-input"
-      placeholder="Tutorial, Review, Guide…"
-      maxlength="100"
-    />
-    <span class="field-hint">A single-word genre or format. Used in filters.</span>
-  </div>
+<div class="organize-grid" class:single={!organizationId}>
+  {#if organizationId}
+    <div class="organize-field">
+      <CategorySelect
+        options={categoryOptions}
+        selected={selectedCategoryIds}
+        onToggle={toggleCategory}
+        onCreate={createCategory}
+        creating={creatingCategory}
+      />
+    </div>
+  {/if}
 
   <div class="organize-field">
     <TagsInput {tags} onchange={onTagsChange} />
@@ -78,6 +150,7 @@
 
   @media (--breakpoint-lg) {
     .organize-grid { grid-template-columns: minmax(0, 22rem) minmax(0, 1fr); }
+    .organize-grid.single { grid-template-columns: 1fr; }
   }
 
   .organize-field {
@@ -87,47 +160,10 @@
     min-width: 0;
   }
 
-  .field-label {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--color-text);
-  }
-
-  .field-hint {
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    line-height: var(--leading-relaxed);
-  }
-
-  .optional-hint {
-    font-size: var(--text-xs);
-    font-weight: var(--font-normal);
-    color: var(--color-text-muted);
-    margin-left: var(--space-1);
-  }
-
-  .field-input {
-    padding: var(--space-2) var(--space-3);
-    font-size: var(--text-sm);
-    border-radius: var(--radius-md);
-    border: var(--border-width) var(--border-style) var(--color-border);
-    background-color: var(--color-background);
-    color: var(--color-text);
-    transition: var(--transition-colors);
-    width: 100%;
-    font-family: inherit;
-  }
-
-  .field-input:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--focus-offset-inset);
-    border-color: var(--color-border-focus, var(--color-focus));
-  }
-
   .organize-rule {
-    margin: var(--space-5) 0 var(--space-4) 0;
-    border: 0;
-    border-top: var(--border-width) dashed var(--color-border);
+    border: none;
+    border-top: var(--border-width) var(--border-style) var(--color-border);
+    margin: var(--space-5) 0 0;
   }
 
   .feature-row {
@@ -135,6 +171,7 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: var(--space-4);
+    margin-top: var(--space-5);
   }
 
   .feature-label {
@@ -146,7 +183,7 @@
 
   .feature-title {
     font-size: var(--text-sm);
-    font-weight: var(--font-semibold);
+    font-weight: var(--font-medium);
     color: var(--color-text);
   }
 

@@ -140,6 +140,77 @@ export class ContentService extends BaseService {
   }
 
   /**
+   * Replace a content item's category (topic) memberships inside a transaction.
+   *
+   * REPLACE semantics: existing `content_categories` join rows for this content
+   * are cleared first, then the provided set is inserted. Called from both
+   * `create` (no existing rows) and `update` (true replace) with the SAME `tx`
+   * as the content write, so a rejected category rolls back the content change
+   * too — never a half-applied tag set.
+   *
+   * IDOR guard: every `categoryId` MUST resolve to a live category in the
+   * CONTENT'S OWN SPACE — same `organizationId` for org content, or the
+   * creator's own personal space (`organizationId IS NULL AND creatorId` match)
+   * for orgless content — mirroring the `listPublic` space scoping. A foreign
+   * or unknown id fails loudly with a `ValidationError`; ids are never silently
+   * dropped.
+   *
+   * @throws {ValidationError} If any id is out-of-space, unknown, or soft-deleted
+   */
+  private async syncContentCategories(
+    tx: DatabaseTransaction,
+    contentId: string,
+    organizationId: string | null,
+    creatorId: string,
+    categoryIds: string[]
+  ): Promise<void> {
+    // Clear current membership first — this is a replace, not an append.
+    await tx
+      .delete(contentCategories)
+      .where(eq(contentCategories.contentId, contentId));
+
+    // De-dupe incoming ids so a repeated id can't collide on the
+    // (contentId, categoryId) primary key.
+    const uniqueIds = [...new Set(categoryIds)];
+    if (uniqueIds.length === 0) return;
+
+    // Space scope: org content matches org categories (any curator in the org);
+    // personal content matches the creator's OWN personal categories — scoping
+    // by creatorId, NOT merely `organizationId IS NULL`, which would leak
+    // personal categories across creators.
+    const spaceScope = organizationId
+      ? eq(categories.organizationId, organizationId)
+      : and(
+          isNull(categories.organizationId),
+          eq(categories.creatorId, creatorId)
+        );
+
+    const inSpace = await tx
+      .select({ id: categories.id })
+      .from(categories)
+      .where(
+        and(
+          inArray(categories.id, uniqueIds),
+          isNull(categories.deletedAt),
+          spaceScope
+        )
+      );
+
+    if (inSpace.length !== uniqueIds.length) {
+      const found = new Set(inSpace.map((row) => row.id));
+      const invalid = uniqueIds.filter((id) => !found.has(id));
+      throw new ValidationError(
+        'One or more categories do not exist in this space',
+        { invalidCategoryIds: invalid }
+      );
+    }
+
+    await tx
+      .insert(contentCategories)
+      .values(uniqueIds.map((categoryId) => ({ contentId, categoryId })));
+  }
+
+  /**
    * Create new content
    *
    * Security:
@@ -224,6 +295,20 @@ export class ContentService extends BaseService {
           });
         }
 
+        // Attach category memberships in the SAME transaction — a bad id (out
+        // of space / unknown) throws and rolls the content insert back too.
+        // Undefined means "no categories provided"; an array (incl. []) is a
+        // definitive set.
+        if (validated.categoryIds !== undefined) {
+          await this.syncContentCategories(
+            tx as DatabaseTransaction,
+            newContent.id,
+            newContent.organizationId,
+            newContent.creatorId,
+            validated.categoryIds
+          );
+        }
+
         return newContent;
       });
 
@@ -279,7 +364,25 @@ export class ContentService extends BaseService {
         },
       });
 
-      return result || null;
+      if (!result) return null;
+
+      // Surface current category memberships (WP-5) so the studio edit form can
+      // pre-select them — critical because update REPLACES the set, so a form
+      // that submitted an empty selection would otherwise wipe every tag.
+      // Joins to `categories` + filters soft-deleted so a dead category (its
+      // join row lingers until hard delete) never shows as a live selection.
+      const membershipRows = await this.db
+        .select({ categoryId: contentCategories.categoryId })
+        .from(contentCategories)
+        .innerJoin(categories, eq(contentCategories.categoryId, categories.id))
+        .where(
+          and(eq(contentCategories.contentId, id), isNull(categories.deletedAt))
+        );
+
+      return {
+        ...result,
+        categoryIds: membershipRows.map((row) => row.categoryId),
+      };
     } catch (error) {
       this.handleError(error, 'get');
     }
@@ -319,8 +422,15 @@ export class ContentService extends BaseService {
           throw new ContentNotFoundError(id);
         }
 
-        // Route contentBody to the appropriate column (JSON vs legacy text)
-        const { contentBody: _rawBody, ...restValidated } = validated;
+        // Route contentBody to the appropriate column (JSON vs legacy text).
+        // `categoryIds` is pulled OUT here so it never reaches the `.set()`
+        // spread below — it is not a `content` column; it drives the
+        // `content_categories` join write instead (see syncContentCategories).
+        const {
+          contentBody: _rawBody,
+          categoryIds: _categoryIds,
+          ...restValidated
+        } = validated;
         const bodyFields =
           _rawBody !== undefined ? this.parseContentBody(_rawBody) : {};
 
@@ -366,6 +476,20 @@ export class ContentService extends BaseService {
           throw new ContentNotFoundError(id);
         }
 
+        // Replace category memberships in the SAME transaction when the caller
+        // sent a categoryIds set. Absent (undefined) leaves existing tags
+        // untouched — a partial update that never mentions categories must not
+        // wipe them.
+        if (_categoryIds !== undefined) {
+          await this.syncContentCategories(
+            tx as DatabaseTransaction,
+            updated.id,
+            updated.organizationId,
+            updated.creatorId,
+            _categoryIds
+          );
+        }
+
         return updated;
       });
 
@@ -379,6 +503,16 @@ export class ContentService extends BaseService {
         void this.cache?.invalidate(
           CacheType.COLLECTION_ORG_CONTENT(result.organizationId)
         );
+        // A changed tag set changes which categories have >=1 item, so the
+        // public "Browse by topic" list (CATEGORIES version key, bump-only /
+        // no TTL) must refresh. The content-api PATCH route also bumps this via
+        // bumpOrgContentVersion; wiring it here keeps the service correct for
+        // any caller that bypasses that route (tests, future workers).
+        if (_categoryIds !== undefined) {
+          void this.cache?.invalidate(
+            CacheType.CATEGORIES(result.organizationId)
+          );
+        }
       }
 
       return result;

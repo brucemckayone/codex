@@ -135,6 +135,40 @@ export const createCategoryForm = form(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Inline Create Command (content-form "create on the fly")
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Mint a category inline from the studio content-form multiselect, then return
+ * it so the caller can add it to the content's selection. A thin command over
+ * `api.categories.create` (org-scoped, member-gated at the route) that reuses
+ * the same create path + list refresh as the management page — no duplicate
+ * create logic. Slug is derived server-side from `name`.
+ */
+export const createCategoryInline = command(
+  z.object({
+    organizationId: z.string().uuid(),
+    name: z.string().trim().min(1, 'Name is required').max(100),
+  }),
+  async ({ organizationId, name }) => {
+    const { platform, cookies } = getRequestEvent();
+    const api = createServerApi(platform, cookies);
+
+    try {
+      const category = await api.categories.create(organizationId, { name });
+      refreshCategories(organizationId);
+      return { success: true as const, category: toStudioCategory(category) };
+    } catch (error) {
+      return {
+        success: false as const,
+        error:
+          error instanceof Error ? error.message : 'Failed to create category',
+      };
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Update Category Form
 // ─────────────────────────────────────────────────────────────────────────────
 
