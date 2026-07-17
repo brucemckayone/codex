@@ -276,7 +276,9 @@ const baseContentSchema = z.object({
   // Organization (nullable = personal content)
   organizationId: uuidSchema.optional().nullable(),
 
-  // Category (simple string, Phase 1)
+  // Category (simple string, Phase 1) — LEGACY. Superseded by `categoryIds`
+  // (the `content_categories` taxonomy) as the source of truth. Left readable
+  // this epic; dropped in a later cleanup once nothing writes it.
   category: z
     .string()
     .trim()
@@ -284,6 +286,14 @@ const baseContentSchema = z.object({
     .max(100, 'Category must be 100 characters or less')
     .optional()
     .nullable(),
+
+  // Category taxonomy membership (WP-5) — the ids of `categories` this content
+  // belongs to. Optional so it inherits into both create and update; absent on
+  // update means "leave existing memberships untouched", an explicit array
+  // (including []) REPLACES the set. ContentService verifies every id lives in
+  // the content's OWN space (IDOR guard). Capped so a payload can't fan out an
+  // unbounded join write.
+  categoryIds: z.array(uuidSchema).max(20).optional(),
 
   // Tags (JSONB array)
   tags: tagsSchema,
@@ -609,6 +619,19 @@ export const publicContentQuerySchema = paginationSchema
     orgId: uuidSchema.optional(),
     slug: z.string().max(500).optional(),
     contentType: contentTypeEnum.optional(),
+    // Topic-category filter — matches a category slug in the same space (org).
+    // Powers the landing "Browse by topic" and the /explore ?category= deep
+    // link. Constrained to the slug charset (unicode letters/numbers + hyphen,
+    // matching `slugify`) — this is a SECURITY control, not just validation: it
+    // forbids the public-cache-key delimiter ':' so a value like `x:feat:true`
+    // can't forge a different filter combo's cache slot (within-org cache
+    // poisoning). ASCII-only would wrongly reject legit unicode slugs like
+    // `café-del-mar`. Max 120 mirrors the `categories.slug` column width.
+    category: z
+      .string()
+      .max(120)
+      .regex(/^[\p{L}\p{N}-]+$/u, 'Invalid category slug')
+      .optional(),
     search: z.string().max(255).optional(),
     sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
     creatorId: uuidSchema.optional(),

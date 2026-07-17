@@ -52,6 +52,13 @@
   --color-brand-accent-hover: oklch(from var(--brand-accent, var(--color-warning)) calc(l - 0.08) c h);
   --color-brand-accent-subtle: oklch(from var(--brand-accent, var(--color-warning)) 0.96 calc(c * 0.2) h);
 
+  /* ─── MEDIA COVER TREATMENTS (ContentCard shape system) ─────────────── */
+  /* Scrim darkens the media bottom for legible overlaid text; glyph is a
+     near-white brand-tinted ink. Derived from the org's background + accent
+     so they re-theme with the brand (see themes/{light,dark}.css). */
+  --media-scrim: color-mix(in oklab, black 64%, var(--color-background));
+  --media-glyph: oklch(from var(--color-brand-accent) 0.97 calc(c * 0.06) h);
+
   /* ─── RADIUS (re-declare full scale at this DOM level) ──────────────── */
   --brand-radius-base: var(--brand-radius, 0.5rem);
   --radius-base: var(--brand-radius-base);
@@ -244,6 +251,11 @@
   /* Dark secondary/accent overrides */
   --color-brand-secondary: var(--brand-secondary-dark, var(--brand-secondary, var(--color-neutral-400)));
   --color-brand-accent: var(--brand-accent-dark, var(--brand-accent, var(--color-warning)));
+
+  /* Media cover treatments re-derive under the dark accent (scrim uses the
+     dark --color-background from the [data-org-bg] rule below). */
+  --media-scrim: color-mix(in oklab, black 64%, var(--color-background));
+  --media-glyph: oklch(from var(--color-brand-accent) 0.97 calc(c * 0.06) h);
 
   /* ─── BLIND SPOT FIXES (DARK) ──────────────────────────────────── */
   --color-text-tertiary: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l * 0.5 + 0.3) calc(c * 0.1) h);

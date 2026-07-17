@@ -112,6 +112,23 @@ export const CacheType = {
    */
   COLLECTION_USER_SUBSCRIPTION: (userId: string, orgId: string): string =>
     `user:${userId}:subscription:${orgId}`,
+
+  /**
+   * Server KV only — per-space category taxonomy (org landing "Browse by
+   * topic"). ORG space keys by `organizationId`; PERSONAL creator space keys by
+   * `creatorId`. Bumped when a category is created/updated/deleted/reordered,
+   * AND when content is published/unpublished/deleted (that changes the set of
+   * topics with ≥1 published item on the public list). Not tracked in the
+   * client manifest — public topic cards SSR from the server-authoritative KV
+   * slot.
+   */
+  CATEGORIES: (
+    organizationId: string | null | undefined,
+    creatorId?: string
+  ): string =>
+    organizationId
+      ? `categories:org:${organizationId}`
+      : `categories:creator:${creatorId ?? ''}`,
 } as const;
 
 /**

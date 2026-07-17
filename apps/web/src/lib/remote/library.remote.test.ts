@@ -38,6 +38,11 @@ describe('remote/library.remote', () => {
     expect(getPlaybackProgressBatch).toBeDefined();
   });
 
+  it('exports getContinueWatching query', async () => {
+    const { getContinueWatching } = await import('./library.remote');
+    expect(getContinueWatching).toBeDefined();
+  });
+
   it('exports NormalizedProgress type', async () => {
     // Type-only export, just verify the module loads
     const module = await import('./library.remote');

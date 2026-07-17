@@ -51,4 +51,14 @@
   --color-brand-accent: var(--color-warning);
   --color-brand-accent-hover: var(--color-warning-600);
   --color-brand-accent-subtle: var(--color-warning-100);
+
+  /* Media cover treatments (ContentCard shape system).
+     --media-scrim darkens the bottom of a media tile so overlaid text
+     (article title-in-cover, badges) stays legible over any thumbnail on
+     either theme. --media-glyph is a near-white, brand-tinted ink for that
+     overlaid text/glyphs. Both are DERIVED from --color-background /
+     --color-brand-accent so they re-theme per org brand (var() resolves
+     lazily at the card, so org overrides flow through automatically). */
+  --media-scrim: color-mix(in oklab, black 64%, var(--color-background));
+  --media-glyph: oklch(from var(--color-brand-accent) 0.97 calc(c * 0.06) h);
 }

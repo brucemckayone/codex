@@ -33,6 +33,7 @@ import {
   standardDatabaseCheck,
 } from '@codex/worker-utils';
 // Import route modules
+import categoriesRoutes from './routes/categories';
 import contentRoutes from './routes/content';
 import contentAccessRoutes from './routes/content-access';
 import mediaRoutes from './routes/media';
@@ -93,6 +94,7 @@ app.use(
  */
 app.route('/api/content/public', publicRoutes);
 app.route('/api/content', contentRoutes);
+app.route('/api/categories', categoriesRoutes);
 app.route('/api/media', mediaRoutes);
 app.route('/api/access', contentAccessRoutes);
 

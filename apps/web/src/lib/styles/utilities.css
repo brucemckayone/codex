@@ -43,9 +43,9 @@
 }
 
 /* ── Masonry Modifier ──
-   Opt-in heterogeneous packing for catalog surfaces (Discover, Explore,
-   org-landing All-content) where short audio rows sit alongside taller
-   video/article tiles. Curated grids stay uniform by leaving it off.
+   Opt-in heterogeneous packing for catalog surfaces (Discover, Explore)
+   where short audio rows sit alongside taller video/article tiles. Curated
+   grids stay uniform by leaving it off.
 
    CSS Columns over Grid row-span: row-span Grid leaves dead space when
    tile heights don't divide evenly into the row-track unit, or needs

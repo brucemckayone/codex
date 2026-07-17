@@ -198,6 +198,54 @@ export const createOptionalTextSchema = (
     .optional()
     .nullable();
 
+/**
+ * Canonical slug derivation (the platform-wide slugify rule).
+ *
+ * Turns a human display name into a URL-safe slug:
+ * - lowercases,
+ * - collapses every run of non-alphanumeric characters into a single hyphen,
+ * - trims leading/trailing hyphens.
+ *
+ * Unicode-aware: "alphanumeric" means Unicode letters + numbers (`\p{L}\p{N}`
+ * via the `u` flag), so accented and non-Latin names keep their letters
+ * (e.g. "Café del Mar" → "café-del-mar", "🎧 Audio" → "audio").
+ *
+ * This is the single source of truth for slug generation across the platform
+ * (categories today; reusable anywhere a name → slug is needed). It is the
+ * derivation counterpart to `createSlugSchema`, which *validates* an existing
+ * slug. The SQL backfill in migration `0077_chief_storm.sql`
+ * (`trim(both '-' from regexp_replace(lower(trim(name)), '[^[:alnum:]]+', '-', 'g'))`)
+ * mirrors this rule. Caveat: POSIX `[:alnum:]` only matches non-ASCII letters
+ * under a Unicode-aware collation (ICU / a UTF-8 lc_ctype); under the C
+ * collation it degrades to ASCII-only, so a non-ASCII name (e.g. "Café")
+ * slugifies differently there than JS `\p{L}\p{N}`. The backfill applies the
+ * SAME expression on both the INSERT and the join, so it stays byte-identical
+ * to itself and never misses a backfilled row regardless of collation — the
+ * only consequence of divergence is that a later *service-created* category
+ * with a non-ASCII name could look like a duplicate of a C-collation-backfilled
+ * one. Keep the two rules aligned to avoid that edge.
+ *
+ * NOTE: the result can be empty (e.g. a name of only punctuation/emoji).
+ * Callers that require a non-empty slug MUST guard against `''`.
+ *
+ * @param name - Human-readable display name
+ * @returns URL-safe slug (possibly empty)
+ *
+ * @example
+ * ```typescript
+ * slugify('Deep Sea Diving'); // 'deep-sea-diving'
+ * slugify('  Hello,  World! '); // 'hello-world'
+ * slugify('Café del Mar'); // 'café-del-mar'
+ * slugify('!!!'); // '' — caller must handle
+ * ```
+ */
+export function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 // ============================================================================
 // Email
 // ============================================================================

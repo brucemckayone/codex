@@ -75,6 +75,10 @@ function bumpOrgContentVersion(
       // Invalidate slug-keyed cache (stats, creators, public info) — shared
       // helper resolves orgId → slug and swallows transient failures.
       invalidateOrgSlugCache({ db, cache, orgId: organizationId, logger: obs }),
+      // Invalidate the public topic list: publish/unpublish/delete changes the
+      // set of categories with ≥1 published item, so a cached "Browse by topic"
+      // list could otherwise show empty or missing topics until TTL.
+      cache.invalidate(CacheType.CATEGORIES(organizationId)),
     ]).catch((err: unknown) => {
       obs?.warn('Cache invalidation failed', {
         error: err instanceof Error ? err.message : String(err),

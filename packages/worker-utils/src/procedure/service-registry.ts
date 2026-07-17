@@ -16,7 +16,11 @@ import { AgreementService } from '@codex/agreements';
 import { VersionedCache } from '@codex/cache';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
 // Service imports
-import { ContentService, MediaItemService } from '@codex/content';
+import {
+  CategoriesService,
+  ContentService,
+  MediaItemService,
+} from '@codex/content';
 import { createDbClient, createPerRequestDbClient } from '@codex/database';
 import { IdentityService } from '@codex/identity';
 import { ImageProcessingService } from '@codex/image-processing';
@@ -129,6 +133,7 @@ export function createServiceRegistry(
 
   // Service instances (created on demand)
   let _content: ContentService | undefined;
+  let _categories: CategoriesService | undefined;
   let _media: MediaItemService | undefined;
   let _access: ContentAccessService | undefined;
   let _imageProcessing: ImageProcessingService | undefined;
@@ -221,6 +226,16 @@ export function createServiceRegistry(
         }
       }
       return _content;
+    },
+
+    get categories() {
+      if (!_categories) {
+        _categories = new CategoriesService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+        });
+      }
+      return _categories;
     },
 
     get media() {

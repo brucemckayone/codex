@@ -16,7 +16,11 @@ import type {
 } from '@codex/admin';
 import type { AgreementService } from '@codex/agreements';
 // Service type imports (for typing only)
-import type { ContentService, MediaItemService } from '@codex/content';
+import type {
+  CategoriesService,
+  ContentService,
+  MediaItemService,
+} from '@codex/content';
 import type { IdentityService } from '@codex/identity';
 import type { ImageProcessingService } from '@codex/image-processing';
 import type {
@@ -122,6 +126,12 @@ export interface ServiceRegistry {
   // Content domain
   content: ContentService;
   media: MediaItemService;
+  /**
+   * Per-space topic taxonomy (org landing "Browse by topic"). Scoped CRUD +
+   * reorder, mirroring `content` scoping (org space shared across creators;
+   * personal space per-creator).
+   */
+  categories: CategoriesService;
   access: ContentAccessService;
   imageProcessing: ImageProcessingService;
 

@@ -41,6 +41,8 @@ interface PublicContentCacheQuery {
   search?: string | null;
   slug?: string | null;
   creatorId?: string | null;
+  category?: string | null;
+  featured?: boolean | null;
 }
 
 /**
@@ -52,16 +54,34 @@ interface PublicContentCacheQuery {
 export function buildPublicContentCacheType(
   query: Pick<
     PublicContentCacheQuery,
-    'sort' | 'limit' | 'page' | 'contentType' | 'slug'
+    'sort' | 'limit' | 'page' | 'contentType' | 'slug' | 'category' | 'featured'
   >
 ): string {
   const base = `content:public:${query.sort ?? 'newest'}:${query.limit ?? 20}:${query.page ?? 1}:${query.contentType ?? 'all'}`;
-  // Slug is an exact-lookup dimension (content-detail pages). Include it in
-  // the type suffix so distinct slugs occupy distinct data slots under the
-  // shared org version key — without this they would collide. All slots
-  // still share `COLLECTION_ORG_CONTENT(orgId)`, so one publish/update-side
-  // invalidate stales every combo (list AND detail) atomically.
-  return query.slug ? `${base}:slug:${query.slug}` : base;
+  let type = base;
+  // Category (topic slug) and featured are LIVE filter dimensions that select a
+  // strict subset of the catalogue. Each distinct value MUST occupy its own
+  // data slot or a filtered read collides with a broader one under the shared
+  // org version key. `featured` in particular was the latent bug: it is already
+  // a live query param, but the prior key omitted it — so `?featured=true`
+  // (Editor's picks) and the unfiltered list shared one slot and served each
+  // other's content. Both are appended ONLY when present so existing
+  // (category/featured-free) keys keep their exact shape and stay hit-compatible.
+  if (query.category) {
+    type += `:cat:${query.category}`;
+  }
+  if (query.featured !== undefined && query.featured !== null) {
+    type += `:feat:${query.featured}`;
+  }
+  // Slug is an exact-lookup dimension (content-detail pages). Kept last so
+  // distinct slugs occupy distinct data slots under the shared org version key
+  // — without this they would collide. All slots still share
+  // `COLLECTION_ORG_CONTENT(orgId)`, so one publish/update-side invalidate
+  // stales every combo (list AND detail) atomically.
+  if (query.slug) {
+    type += `:slug:${query.slug}`;
+  }
+  return type;
 }
 
 /**
@@ -79,6 +99,11 @@ export function buildPublicContentCacheType(
  * catalogue list cache — and is invalidated by the same org version bump as
  * every other combo. See the auth-caching decision record in
  * docs/caching-strategy.md.
+ *
+ * `category` (topic slug) and `featured` are bounded-cardinality filters that
+ * the key now folds in, so they stay cache-eligible (no bypass) — the landing
+ * "Browse by topic" and Editor's-picks reads share the org version key and hit
+ * the same one-write invalidation as every other combo.
  */
 export function shouldCachePublicContentQuery(
   query: PublicContentCacheQuery
