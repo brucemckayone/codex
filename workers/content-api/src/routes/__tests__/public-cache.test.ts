@@ -117,6 +117,62 @@ describe('buildPublicContentCacheType', () => {
     expect(withSlug).not.toBe(otherSlug);
     expect(withSlug).not.toBe(noSlug);
   });
+
+  it('folds category into the key so distinct topics get distinct data slots', () => {
+    const fiction = buildPublicContentCacheType({
+      sort: 'newest',
+      category: 'fiction',
+    });
+    const poetry = buildPublicContentCacheType({
+      sort: 'newest',
+      category: 'poetry',
+    });
+    const noCategory = buildPublicContentCacheType({ sort: 'newest' });
+    expect(fiction).toContain(':cat:fiction');
+    // Two different topics MUST NOT share a slot (would serve wrong content).
+    expect(fiction).not.toBe(poetry);
+    // A filtered read MUST NOT collide with the unfiltered list.
+    expect(fiction).not.toBe(noCategory);
+  });
+
+  it('folds featured into the key so featured/unfiltered do not collide (regression: featured was omitted)', () => {
+    const onlyFeatured = buildPublicContentCacheType({
+      sort: 'newest',
+      featured: true,
+    });
+    const excludeFeatured = buildPublicContentCacheType({
+      sort: 'newest',
+      featured: false,
+    });
+    const unset = buildPublicContentCacheType({ sort: 'newest' });
+    expect(onlyFeatured).toContain(':feat:true');
+    // The latent bug: `featured` was a live query param but absent from the
+    // key, so Editor's-picks and the all-content list shared one slot.
+    expect(onlyFeatured).not.toBe(unset);
+    expect(excludeFeatured).not.toBe(unset);
+    expect(onlyFeatured).not.toBe(excludeFeatured);
+  });
+
+  it('composes category + featured deterministically without disturbing unrelated queries', () => {
+    // Full compose is stable + distinct...
+    expect(
+      buildPublicContentCacheType({
+        sort: 'newest',
+        category: 'fiction',
+        featured: true,
+      })
+    ).toBe('content:public:newest:20:1:all:cat:fiction:feat:true');
+    // ...and a query with neither new dimension keeps its exact prior shape,
+    // so existing cache entries stay hit-compatible.
+    expect(
+      buildPublicContentCacheType({
+        sort: 'newest',
+        limit: 20,
+        page: 1,
+        contentType: 'video',
+      })
+    ).toBe('content:public:newest:20:1:video');
+  });
 });
 
 describe('shouldCachePublicContentQuery', () => {

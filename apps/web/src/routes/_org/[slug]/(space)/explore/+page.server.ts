@@ -191,6 +191,7 @@ export const load: PageServerLoad = async ({
       orgId: org.id,
       search: q,
       contentType,
+      category,
       sort: sort as 'newest' | 'oldest' | 'title',
       page,
       limit: PAGE_LIMIT,

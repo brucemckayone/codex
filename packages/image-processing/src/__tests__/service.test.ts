@@ -243,6 +243,83 @@ describe('ImageProcessingService', () => {
     });
   });
 
+  describe('processCategoryCover', () => {
+    it('uploads three variants under the category-namespaced base key and returns it', async () => {
+      const file = createTestImageFile('image/png', 'cover.png');
+
+      vi.mocked(processor.processImageVariants).mockReturnValueOnce({
+        sm: new Uint8Array([1]),
+        md: new Uint8Array([2]),
+        lg: new Uint8Array([3, 4, 5]),
+      });
+
+      const result = await service.processCategoryCover('cat-1', file);
+
+      expect(processor.processImageVariants).toHaveBeenCalled();
+      // Returns the BASE key (no variant suffix) for the caller to persist.
+      expect(result.coverImageKey).toBe('categories/cat-1/cover');
+      // md variant drives the returned URL + size (matches the public list,
+      // which serves `${coverImageKey}/md.webp`). md = Uint8Array([2]) → len 1.
+      expect(result.url).toBe(
+        'https://test.r2.dev/categories/cat-1/cover/md.webp'
+      );
+      expect(result.size).toBe(1);
+      expect(result.mimeType).toBe('image/webp');
+      expect(testMockR2Service.put).toHaveBeenCalledTimes(3);
+      expect(testMockR2Service.put).toHaveBeenCalledWith(
+        'categories/cat-1/cover/sm.webp',
+        expect.any(Uint8Array),
+        {},
+        {
+          contentType: 'image/webp',
+          cacheControl: 'public, max-age=31536000, immutable',
+        }
+      );
+    });
+
+    it('does NOT write to the database — the caller persists the key via the service', async () => {
+      const file = createTestImageFile('image/jpeg', 'cover.jpg');
+
+      vi.mocked(processor.processImageVariants).mockReturnValueOnce({
+        sm: new Uint8Array([1]),
+        md: new Uint8Array([2]),
+        lg: new Uint8Array([3]),
+      });
+
+      await service.processCategoryCover('cat-1', file);
+
+      // Category ownership (space) lives in CategoriesService, so this method
+      // must stay DB-free — a stray write here would bypass space scoping.
+      expect(testMockDb.update).not.toHaveBeenCalled();
+    });
+
+    it('re-upload overwrites the SAME keys — deterministic per categoryId, no orphan', async () => {
+      const put = vi.mocked(testMockR2Service.put);
+      vi.mocked(processor.processImageVariants).mockReturnValue({
+        sm: new Uint8Array([1]),
+        md: new Uint8Array([2]),
+        lg: new Uint8Array([3]),
+      });
+
+      await service.processCategoryCover(
+        'cat-1',
+        createTestImageFile('image/png', 'first.png')
+      );
+      const firstKeys = put.mock.calls.map((call) => call[0]);
+
+      put.mockClear();
+
+      await service.processCategoryCover(
+        'cat-1',
+        createTestImageFile('image/webp', 'second.webp')
+      );
+      const secondKeys = put.mock.calls.map((call) => call[0]);
+
+      expect(firstKeys).toHaveLength(3);
+      expect(secondKeys).toEqual(firstKeys);
+    });
+  });
+
   describe('processUserAvatar', () => {
     it('should process raster avatar and upload three variants', async () => {
       const file = createTestImageFile('image/jpeg', 'avatar.jpg');

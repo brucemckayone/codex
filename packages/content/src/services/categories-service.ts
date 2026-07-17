@@ -25,6 +25,7 @@
  * re-derive it, so existing `?category=<slug>` deep links keep working.
  */
 
+import { CONTENT_STATUS } from '@codex/constants';
 import {
   isUniqueViolation,
   paginatedQuery,
@@ -33,7 +34,7 @@ import {
   withOrgScope,
 } from '@codex/database';
 import type { Category, NewCategory } from '@codex/database/schema';
-import { categories } from '@codex/database/schema';
+import { categories, content, contentCategories } from '@codex/database/schema';
 import { BaseService, ValidationError } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import type {
@@ -45,7 +46,17 @@ import {
   slugify,
   updateCategorySchema,
 } from '@codex/validation';
-import { and, asc, eq, ilike, isNull, like, or, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  like,
+  or,
+  type SQL,
+} from 'drizzle-orm';
 import {
   CategoryNotFoundError,
   CategorySlugConflictError,
@@ -198,6 +209,49 @@ export class CategoriesService extends BaseService {
       });
     } catch (error) {
       this.handleError(error, 'list');
+    }
+  }
+
+  /**
+   * List an org's categories for PUBLIC (unauthenticated) topic cards.
+   *
+   * Unlike {@link list} (studio/management, per-space, paginated), this is the
+   * landing "Browse by topic" feed: ORG-space only, unpaginated (the curated
+   * topic set is small), and filtered to categories that have AT LEAST ONE
+   * published, non-deleted content item — so an empty topic never renders as a
+   * dead-end card. Ordered by `sortOrder` then `name` (the curator's explicit
+   * landing order).
+   *
+   * @param organizationId - Owning organization
+   * @returns Live, non-empty org categories (no pagination envelope)
+   */
+  async listPublicForOrg(organizationId: string): Promise<Category[]> {
+    try {
+      // Category ids that have ≥1 published, non-deleted content item in this
+      // org. DISTINCT keeps the IN-list bounded by the topic count, not the
+      // membership-row count.
+      const activeCategoryIds = this.db
+        .selectDistinct({ categoryId: contentCategories.categoryId })
+        .from(contentCategories)
+        .innerJoin(content, eq(contentCategories.contentId, content.id))
+        .where(
+          and(
+            eq(content.organizationId, organizationId),
+            eq(content.status, CONTENT_STATUS.PUBLISHED),
+            isNull(content.deletedAt)
+          )
+        );
+
+      return await this.db.query.categories.findMany({
+        where: and(
+          eq(categories.organizationId, organizationId),
+          whereNotDeleted(categories),
+          inArray(categories.id, activeCategoryIds)
+        ),
+        orderBy: [asc(categories.sortOrder), asc(categories.name)],
+      });
+    } catch (error) {
+      this.handleError(error, 'listPublicForOrg');
     }
   }
 

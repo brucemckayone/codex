@@ -3,7 +3,6 @@ import {
   createOptionalTextSchema,
   createSanitizedStringSchema,
   nonNegativeIntSchema,
-  userIdSchema,
   uuidSchema,
 } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
@@ -92,16 +91,14 @@ export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;
 
 /**
  * Category query/filter schema
- * Extends pagination with optional space filters and a name search. Listing is
- * resolved-space-scoped at the service layer; these params let callers narrow
- * further (e.g. an org-scoped route passing its resolved `organizationId`).
- *
- * `organizationId` is a UUID (org PK); `creatorId` is a BetterAuth user id
- * (TEXT), so it uses `userIdSchema`, not `uuidSchema`.
+ * Extends pagination with an optional org filter and a name search. Listing is
+ * resolved-space-scoped at the service layer from the AUTH context (the route
+ * forces `creatorId = ctx.user.id`), so `creatorId` is intentionally NOT a
+ * query param — accepting it would falsely imply cross-creator listing.
+ * `organizationId` is a UUID (org PK) the org-scoped route passes through.
  */
 export const categoryQuerySchema = paginationSchema.extend({
   organizationId: uuidSchema.optional(),
-  creatorId: userIdSchema.optional(),
   search: z.string().max(255).optional(),
 });
 

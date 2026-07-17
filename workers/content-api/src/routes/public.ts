@@ -8,19 +8,26 @@
  * - GET /api/content/public/discover - Browse all published content platform-wide (discover page)
  */
 
-import { VersionedCache } from '@codex/cache';
+import { CacheType, VersionedCache } from '@codex/cache';
 import type { ContentWithRelations } from '@codex/content';
 import {
   discoverContentQuerySchema,
   publicContentQuerySchema,
 } from '@codex/content';
 import type { HonoEnv } from '@codex/shared-types';
+import { uuidSchema, z } from '@codex/validation';
 import { PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import {
   getCachedPublicContent,
   shouldCachePublicContentQuery,
 } from './public-cache';
+
+/** TTL for the public topic-categories list (seconds). Invalidated on category
+ * mutation AND content publish/unpublish/delete, so this is a safety net. */
+const PUBLIC_CATEGORIES_CACHE_TTL = 300;
+
+const publicCategoriesQuerySchema = z.object({ orgId: uuidSchema });
 
 const app = new Hono<HonoEnv>();
 
@@ -104,6 +111,60 @@ app.get(
       }
 
       return fetchContent();
+    },
+  })
+);
+
+/**
+ * GET /api/content/public/categories
+ * List an org's published topic categories for the landing "Browse by topic".
+ *
+ * Returns ORG-space categories that have ≥1 published content item, ordered by
+ * the curator's `sortOrder`. Raw R2 cover keys are never exposed — the md
+ * variant is resolved to a CDN URL.
+ *
+ * Security: Public endpoint, API rate limit. Requires orgId.
+ * Cache: KV cache-aside under CATEGORIES(orgId) — invalidated on category
+ * mutation AND on content publish/unpublish/delete (which changes the
+ * ≥1-published set). CDN Cache-Control from the shared middleware above.
+ */
+app.get(
+  '/categories',
+  procedure({
+    policy: { auth: 'none', rateLimit: 'api' },
+    input: { query: publicCategoriesQuerySchema },
+    handler: async (ctx) => {
+      const { orgId } = ctx.input.query;
+      const r2Base = ctx.env.R2_PUBLIC_URL_BASE;
+
+      const fetchCategories = async () => {
+        const rows = await ctx.services.categories.listPublicForOrg(orgId);
+        return rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          slug: row.slug,
+          description: row.description,
+          icon: row.icon,
+          sortOrder: row.sortOrder,
+          // Never expose the raw R2 key — resolve the md variant to a CDN URL.
+          coverImageUrl:
+            row.coverImageKey && r2Base
+              ? `${r2Base}/${row.coverImageKey}/md.webp`
+              : null,
+        }));
+      };
+
+      if (ctx.env.CACHE_KV) {
+        const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+        return cache.get(
+          CacheType.CATEGORIES(orgId),
+          'public:topics',
+          fetchCategories,
+          { ttl: PUBLIC_CATEGORIES_CACHE_TTL }
+        );
+      }
+
+      return fetchCategories();
     },
   })
 );

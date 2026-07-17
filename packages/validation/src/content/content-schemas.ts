@@ -609,6 +609,19 @@ export const publicContentQuerySchema = paginationSchema
     orgId: uuidSchema.optional(),
     slug: z.string().max(500).optional(),
     contentType: contentTypeEnum.optional(),
+    // Topic-category filter — matches a category slug in the same space (org).
+    // Powers the landing "Browse by topic" and the /explore ?category= deep
+    // link. Constrained to the slug charset (unicode letters/numbers + hyphen,
+    // matching `slugify`) — this is a SECURITY control, not just validation: it
+    // forbids the public-cache-key delimiter ':' so a value like `x:feat:true`
+    // can't forge a different filter combo's cache slot (within-org cache
+    // poisoning). ASCII-only would wrongly reject legit unicode slugs like
+    // `café-del-mar`. Max 120 mirrors the `categories.slug` column width.
+    category: z
+      .string()
+      .max(120)
+      .regex(/^[\p{L}\p{N}-]+$/u, 'Invalid category slug')
+      .optional(),
     search: z.string().max(255).optional(),
     sort: z.enum(['newest', 'oldest', 'title']).default('newest'),
     creatorId: uuidSchema.optional(),

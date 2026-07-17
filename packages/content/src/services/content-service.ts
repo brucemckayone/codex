@@ -30,7 +30,9 @@ import {
   withCreatorScope,
 } from '@codex/database';
 import {
+  categories,
   content,
+  contentCategories,
   mediaItems,
   stripeConnectAccounts,
 } from '@codex/database/schema';
@@ -42,7 +44,18 @@ import { BaseService, ValidationError } from '@codex/service-errors';
 import type { PaginatedListResponse } from '@codex/shared-types';
 import type { CreateContentInput, UpdateContentInput } from '@codex/validation';
 import { createContentSchema, updateContentSchema } from '@codex/validation';
-import { and, asc, desc, eq, ilike, isNull, ne, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  ne,
+  or,
+  sql,
+} from 'drizzle-orm';
 import {
   BusinessLogicError,
   ContentNotFoundError,
@@ -857,6 +870,7 @@ export class ContentService extends BaseService {
     sort: string;
     creatorId?: string;
     featured?: boolean;
+    category?: string;
   }): Promise<PaginatedListResponse<ContentWithRelations>> {
     try {
       // Build WHERE conditions — published, not deleted, optionally scoped to org
@@ -888,6 +902,47 @@ export class ContentService extends BaseService {
       // Undefined returns everything (backward-compatible).
       if (params.featured !== undefined) {
         whereConditions.push(eq(content.featured, params.featured));
+      }
+
+      // Optional category (topic) filter — restrict to content tagged with the
+      // given category slug within the SAME space as the listing. A membership
+      // subquery (content_categories ⋈ categories) yields the matching content
+      // ids and we match via `IN`, so the relational `findMany` below (with its
+      // media/creator/org relations) stays intact — no join reshaping needed.
+      //
+      // Space scoping: org listing → org categories; personal listing → the
+      // creator's OWN personal categories (scope by creatorId, NOT merely
+      // `organizationId IS NULL`, which would match personal categories across
+      // ALL creators). A bare category slug with neither orgId nor creatorId
+      // can't be space-scoped, so we SKIP the filter rather than perform a
+      // cross-creator personal match. Soft-deleted categories are excluded.
+      if (params.category) {
+        const categorySpaceScope = params.orgId
+          ? eq(categories.organizationId, params.orgId)
+          : params.creatorId
+            ? and(
+                isNull(categories.organizationId),
+                eq(categories.creatorId, params.creatorId)
+              )
+            : undefined;
+
+        if (categorySpaceScope) {
+          const categoryContentIds = this.db
+            .select({ contentId: contentCategories.contentId })
+            .from(contentCategories)
+            .innerJoin(
+              categories,
+              eq(contentCategories.categoryId, categories.id)
+            )
+            .where(
+              and(
+                eq(categories.slug, params.category),
+                isNull(categories.deletedAt),
+                categorySpaceScope
+              )
+            );
+          whereConditions.push(inArray(content.id, categoryContentIds));
+        }
       }
 
       // Optional search on title/description

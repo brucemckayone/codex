@@ -154,6 +154,14 @@ const publicContentQueryParamsSchema = z.object({
   page: z.number().min(1).default(1).optional(),
   limit: z.number().min(1).max(50).default(20).optional(),
   contentType: z.enum(['video', 'audio', 'written']).optional(),
+  // Mirror the worker's slug-charset guard: forbids the public-cache-key
+  // delimiter ':' so a crafted value can't poison the public content cache.
+  // Unicode-aware to match `slugify` (accented slugs like `café-del-mar`).
+  category: z
+    .string()
+    .max(120)
+    .regex(/^[\p{L}\p{N}-]+$/u)
+    .optional(),
   search: z.string().max(255).optional(),
   sort: z.enum(['newest', 'oldest', 'title']).default('newest').optional(),
   creatorId: z.string().uuid().optional(),
@@ -184,6 +192,7 @@ export const getPublicContent = query(
     if (params.page) searchParams.set('page', String(params.page));
     if (params.limit) searchParams.set('limit', String(params.limit));
     if (params.contentType) searchParams.set('contentType', params.contentType);
+    if (params.category) searchParams.set('category', params.category);
     if (params.search) searchParams.set('search', params.search);
     if (params.sort) searchParams.set('sort', params.sort);
     if (params.creatorId) searchParams.set('creatorId', params.creatorId);
