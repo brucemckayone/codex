@@ -34,8 +34,14 @@ export const categories = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     // NULL organizationId = personal creator space (mirrors `content`).
+    // Org rows cascade-delete with their organization (ON DELETE CASCADE,
+    // matching `content`): an org-scoped category has no life outside its org.
+    // A `set null` here would orphan the row into the creator's personal space
+    // and collide with `idx_unique_category_slug_personal` whenever a same-slug
+    // personal row already exists (Postgres 23505). Directly-created personal
+    // categories still use the NULL-org model.
     organizationId: uuid('organization_id').references(() => organizations.id, {
-      onDelete: 'set null',
+      onDelete: 'cascade',
     }),
     creatorId: text('creator_id')
       .notNull()

@@ -547,6 +547,13 @@
       "when": 1784240157228,
       "tag": "0077_chief_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1784315958922,
+      "tag": "0078_romantic_power_man",
+      "breakpoints": true
     }
   ]
 }

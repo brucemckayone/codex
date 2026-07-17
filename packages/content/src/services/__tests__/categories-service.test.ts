@@ -424,6 +424,57 @@ describe('CategoriesService', () => {
       await service.softDelete(b.id, yScope);
       expect(await service.get(b.id, yScope)).toBeNull();
     });
+
+    it('cascade-deletes org categories on org delete without a personal-slug collision', async () => {
+      // Regression (Codex-dr57r.21): categories.organizationId is ON DELETE
+      // CASCADE (mirrors `content`), NOT set null. A same-slug personal
+      // category exists for the SAME creator, so a set-null FK would orphan the
+      // org row into the personal space and violate
+      // idx_unique_category_slug_personal (Postgres 23505). This assertion is
+      // unconditional and fails without the cascade fix.
+      const [org] = await db
+        .insert(organizations)
+        .values(createTestOrganizationInput())
+        .returning();
+
+      const token = uniqueToken();
+      const name = `Topic ${token}`;
+
+      // Personal + org-scoped categories share slug + creator, differing only
+      // by organizationId (distinct spaces → both keep the base slug).
+      const personal = await service.create({ name }, { creatorId });
+      const orgScoped = await service.create(
+        { name },
+        { creatorId, organizationId: org.id }
+      );
+      expect(personal.slug).toBe(orgScoped.slug);
+      expect(personal.organizationId).toBeNull();
+      expect(orgScoped.organizationId).toBe(org.id);
+
+      // Deleting the org must NOT throw: the org category cascade-deletes
+      // rather than being set-null'd into the colliding personal slug.
+      await db.delete(organizations).where(eq(organizations.id, org.id));
+
+      // (a) the org category row is gone (cascaded with its org).
+      const orgRows = await db
+        .select({ id: categories.id })
+        .from(categories)
+        .where(eq(categories.id, orgScoped.id));
+      expect(orgRows).toHaveLength(0);
+
+      // (c) the personal same-slug category survives, still personal + live.
+      const personalRows = await db
+        .select({
+          id: categories.id,
+          organizationId: categories.organizationId,
+          deletedAt: categories.deletedAt,
+        })
+        .from(categories)
+        .where(eq(categories.id, personal.id));
+      expect(personalRows).toHaveLength(1);
+      expect(personalRows[0].organizationId).toBeNull();
+      expect(personalRows[0].deletedAt).toBeNull();
+    });
   });
 
   describe('reorder', () => {
