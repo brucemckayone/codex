@@ -5,7 +5,11 @@
   touch/swipe support, keyboard accessibility, and responsive item sizing.
 
   @prop {T[]} items - Array of items to render
-  @prop {Snippet<[T, number]>} renderItem - Snippet that renders a single item
+  @prop {Snippet<[T, number]>} renderItem - Snippet that renders a single item.
+    MUST render exactly ONE root element: the `.carousel__item > :global(*)`
+    fill rule below applies `flex: 1 1 auto` to every element child, so a
+    snippet with sibling roots would split the stretched column height across
+    them and break the layout.
   @prop {string} title - Optional section title
   @prop {string} viewAllHref - URL for "View All" link
   @prop {string} viewAllLabel - Label for "View All" link
@@ -241,7 +245,11 @@
     flex-direction: column;
   }
 
-  /* The single card inside each item fills the (possibly stretched) slot. */
+  /* The single card inside each item fills the (possibly stretched) slot.
+     CONTRACT: each `renderItem` snippet MUST render exactly one root element.
+     This rule applies `flex: 1 1 auto` to EVERY element child of the item, so a
+     snippet with sibling roots would distribute the column height across all of
+     them instead of handing the full slot to a single card — breaking the fill. */
   .carousel__item > :global(*) {
     flex: 1 1 auto;
     min-height: 0;

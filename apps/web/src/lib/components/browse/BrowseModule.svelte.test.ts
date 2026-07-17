@@ -16,8 +16,9 @@ import type {
  * BrowseModule unit tests (WP-10).
  *
  * Run under jsdom, which does NOT apply `<style>` rules — so we assert the DOM
- * CONTRACT (rails-vs-grid structure, tab `aria-selected`, the chip label, the
- * `data-shape`/`data-chrome` a real `ContentCard` emits) rather than geometry.
+ * CONTRACT (the single uniform grid — no rails, tab `aria-selected`, the chip
+ * label, the `data-shape`/`data-chrome` a real `ContentCard` emits) rather than
+ * geometry.
  * Because the module is CONTROLLED, interactions are verified by the callback
  * they fire, not by a re-render — the owner (WP-11) feeds new props back in.
  *
@@ -228,7 +229,7 @@ describe('BrowseModule — type tabs', () => {
 });
 
 describe('BrowseModule — filtered (grid)', () => {
-  test('setting a type switches from rails to a 1:1 grid', () => {
+  test('setting a type renders the 1:1 catalogue grid', () => {
     render({ type: 'audio' });
     expect(document.querySelector('.browse__rails')).toBeNull();
     expect(document.querySelector('.content-grid')).not.toBeNull();

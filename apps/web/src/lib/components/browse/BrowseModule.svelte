@@ -195,8 +195,7 @@
 
   <!-- The panel is intentionally NOT `tabindex="0"`: per the WAI-ARIA APG a
        tabpanel is only made focusable when it has no focusable content, and
-       this one always holds focusable children (card links, rail "View all",
-       carousel arrows). -->
+       this one always holds focusable children (the grid's card links). -->
   <div
     class="browse__body"
     role="tabpanel"
