@@ -78,9 +78,14 @@ function initEffects() {
       if (!browser || !state.pending) return;
       injectBrandVars(state.pending);
 
-      // Load fonts if specified
+      // Load fonts if specified — light (fields) AND the per-theme dark
+      // variants (darkTokenOverrides) so previewing dark loads its font file.
       if (state.pending.fontBody) loadGoogleFont(state.pending.fontBody);
       if (state.pending.fontHeading) loadGoogleFont(state.pending.fontHeading);
+      const darkBody = state.pending.darkTokenOverrides?.['font-body'];
+      const darkHeading = state.pending.darkTokenOverrides?.['font-heading'];
+      if (darkBody) loadGoogleFont(darkBody);
+      if (darkHeading) loadGoogleFont(darkHeading);
     });
 
     // sessionStorage persistence — crash recovery
@@ -352,6 +357,54 @@ function setThemeTokenOverride(key: string, value: string | null): void {
   }
 }
 
+/**
+ * Per-theme FONT accessor. Fonts are single-valued for light (the
+ * `fontBody`/`fontHeading` fields) but gain an optional DARK variant stored in
+ * `darkTokenOverrides['font-body'|'font-heading']` — mirroring the color/token
+ * dark model so a font chosen in one theme no longer overwrites the other.
+ * Dark falls back to the light font when unset (matches the CSS fallback).
+ */
+function getThemeFont(which: 'body' | 'heading'): string | null {
+  if (!state.pending) return null;
+  const lightValue =
+    (which === 'body' ? state.pending.fontBody : state.pending.fontHeading) ??
+    null;
+  if (state.editingTheme === 'dark') {
+    const key = which === 'body' ? 'font-body' : 'font-heading';
+    const dark = state.pending.darkTokenOverrides?.[key];
+    if (dark != null) return dark;
+  }
+  return lightValue;
+}
+
+/**
+ * Set a font, routing to `darkTokenOverrides` when editing dark. A dark value
+ * equal to the light font (or null) clears the dark override so dark inherits
+ * light via the CSS fallback chain. Editing light writes the base field.
+ */
+function setThemeFont(which: 'body' | 'heading', value: string | null): void {
+  if (!state.pending) return;
+  if (state.editingTheme === 'dark') {
+    const key = which === 'body' ? 'font-body' : 'font-heading';
+    const lightValue =
+      (which === 'body' ? state.pending.fontBody : state.pending.fontHeading) ??
+      null;
+    const overrides = { ...(state.pending.darkTokenOverrides ?? {}) };
+    if (value === null || value === lightValue) {
+      delete overrides[key];
+    } else {
+      overrides[key] = value;
+    }
+    state.pending.darkTokenOverrides =
+      Object.keys(overrides).length > 0 ? overrides : null;
+  } else if (which === 'body') {
+    state.pending.fontBody = value;
+  } else {
+    state.pending.fontHeading = value;
+  }
+  if (value && browser) loadGoogleFont(value);
+}
+
 function discard(): void {
   if (!state.saved) return;
   state.pending = $state.snapshot(state.saved) as BrandEditorState;
@@ -436,6 +489,9 @@ export const brandEditor = {
   // Codex-wwedk: per-theme tokenOverride routing (parallel to setThemeColor).
   getThemeTokenOverride,
   setThemeTokenOverride,
+  // Per-theme fonts (dark variant via darkTokenOverrides).
+  getThemeFont,
+  setThemeFont,
   discard,
   getSavePayload,
   markSaved,
