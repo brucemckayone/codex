@@ -427,11 +427,13 @@ describe('CategoriesService', () => {
 
     it('cascade-deletes org categories on org delete without a personal-slug collision', async () => {
       // Regression (Codex-dr57r.21): categories.organizationId is ON DELETE
-      // CASCADE (mirrors `content`), NOT set null. A same-slug personal
-      // category exists for the SAME creator, so a set-null FK would orphan the
-      // org row into the personal space and violate
-      // idx_unique_category_slug_personal (Postgres 23505). This assertion is
-      // unconditional and fails without the cascade fix.
+      // CASCADE, NOT set null. This INTENTIONALLY DIVERGES from
+      // `content.organizationId` (which is set null) — an org-scoped curated
+      // category has no life outside its org. A same-slug personal category
+      // exists for the SAME creator, so a set-null FK would orphan the org row
+      // into the personal space and violate idx_unique_category_slug_personal
+      // (Postgres 23505). This assertion is unconditional and fails without the
+      // cascade fix.
       const [org] = await db
         .insert(organizations)
         .values(createTestOrganizationInput())
@@ -453,6 +455,7 @@ describe('CategoriesService', () => {
 
       // Deleting the org must NOT throw: the org category cascade-deletes
       // rather than being set-null'd into the colliding personal slug.
+      // (b) the delete throws no 23505.
       await db.delete(organizations).where(eq(organizations.id, org.id));
 
       // (a) the org category row is gone (cascaded with its org).

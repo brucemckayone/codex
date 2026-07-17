@@ -18,11 +18,13 @@ import { users } from './users';
  * Categories (per-space topic taxonomy)
  *
  * Curated topics that power the org landing "Browse by topic" module.
- * Scoping mirrors `content` EXACTLY: an org-owned row sets `organizationId`
+ * Scoping mirrors `content`: an org-owned row sets `organizationId`
  * (personal creator spaces leave it NULL) and every row is owned by a
- * `creatorId`. This supersedes the legacy free-text `content.category`
- * string, which is backfilled into this table and left read-only until a
- * later cleanup drops it.
+ * `creatorId`. The DELETE semantics deliberately differ, though — see the
+ * `organizationId` FK below: categories cascade on org delete, whereas
+ * `content` is `set null`. This supersedes the legacy free-text
+ * `content.category` string, which is backfilled into this table and left
+ * read-only until a later cleanup drops it.
  *
  * Unlike `content.category`, categories are first-class curated entities:
  * they carry a display icon, a dedicated R2 cover image, and an explicit
@@ -33,13 +35,17 @@ export const categories = pgTable(
   'categories',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    // NULL organizationId = personal creator space (mirrors `content`).
-    // Org rows cascade-delete with their organization (ON DELETE CASCADE,
-    // matching `content`): an org-scoped category has no life outside its org.
-    // A `set null` here would orphan the row into the creator's personal space
-    // and collide with `idx_unique_category_slug_personal` whenever a same-slug
-    // personal row already exists (Postgres 23505). Directly-created personal
-    // categories still use the NULL-org model.
+    // NULL organizationId = personal creator space (mirrors `content`'s
+    // scoping). Org rows cascade-delete with their organization (ON DELETE
+    // CASCADE): an org-scoped curated category has no life outside its org, so
+    // it dies with the org. This INTENTIONALLY DIVERGES from
+    // `content.organizationId`, which is `set null` — uploaded content survives
+    // org deletion as the creator's personal content, but a curated category
+    // does not. A `set null` here would instead orphan the row into the
+    // creator's personal space and collide with
+    // `idx_unique_category_slug_personal` whenever a same-slug personal row
+    // already exists (Postgres 23505). Directly-created personal categories
+    // still use the NULL-org model.
     organizationId: uuid('organization_id').references(() => organizations.id, {
       onDelete: 'cascade',
     }),
