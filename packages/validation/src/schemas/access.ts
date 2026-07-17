@@ -5,7 +5,7 @@ import {
   uuidSchema,
 } from '../primitives';
 import { paginationSchema } from '../shared/pagination-schema';
-import { hlsVariantSchema } from './transcoding';
+import { hlsVariantPathSchema, hlsVariantSchema } from './transcoding';
 
 /**
  * Validation schemas for content access endpoints
@@ -58,12 +58,18 @@ export const hlsProxyQuerySchema = z.object({
 
 /**
  * Route-params schema for the HLS variant playlist proxy. `variant` is bounded
- * to the canonical HLS quality rungs (reuses `hlsVariantSchema`) so the proxy
- * can never be coerced into building an arbitrary R2 key path.
+ * to the PHYSICAL HLS directory names the transcoder emits into the master
+ * playlist (`hlsVariantPathSchema`) so the proxy can never be coerced into
+ * building an arbitrary R2 key path.
+ *
+ * Uses `hlsVariantPathSchema`, NOT the logical `hlsVariantSchema`: audio media
+ * has no physical `audio/` directory — the master references bitrate rungs
+ * (`128k` / `64k`) directly, so validating against the logical set 403'd all
+ * audio playback (the client follows master → `<rung>/index.m3u8`).
  */
 export const hlsVariantParamsSchema = z.object({
   id: uuidSchema,
-  variant: hlsVariantSchema,
+  variant: hlsVariantPathSchema,
 });
 
 export type HlsProxyQuery = z.infer<typeof hlsProxyQuerySchema>;

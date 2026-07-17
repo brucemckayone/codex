@@ -2,15 +2,19 @@
   import { brandEditor } from '$lib/brand-editor';
   import FontPicker from '../FontPicker.svelte';
 
-  const bodyFont = $derived(brandEditor.pending?.fontBody ?? '');
-  const headingFont = $derived(brandEditor.pending?.fontHeading ?? '');
+  // Theme-aware: reads/writes the active editing theme's font. Dark values
+  // live in darkTokenOverrides (falling back to light) so light and dark font
+  // choices no longer overwrite each other. `getThemeFont` reads `editingTheme`
+  // internally, so these re-derive when the light/dark preview toggles.
+  const bodyFont = $derived(brandEditor.getThemeFont('body') ?? '');
+  const headingFont = $derived(brandEditor.getThemeFont('heading') ?? '');
 
   function updateBody(val: string) {
-    brandEditor.updateField('fontBody', val || null);
+    brandEditor.setThemeFont('body', val || null);
   }
 
   function updateHeading(val: string) {
-    brandEditor.updateField('fontHeading', val || null);
+    brandEditor.setThemeFont('heading', val || null);
   }
 </script>
 

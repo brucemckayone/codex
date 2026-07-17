@@ -782,8 +782,26 @@ function parseCssColor(str: string): [number, number, number] | null {
   return null;
 }
 
-/** Read a --brand-shader-* CSS property from a cached CSSStyleDeclaration. */
-function readBrandVar(style: CSSStyleDeclaration, key: string): string | null {
+/**
+ * Read a `--brand-shader-*` CSS property from a cached CSSStyleDeclaration.
+ *
+ * When `isDark` is set, the `--brand-{key}-dark` value wins if present, falling
+ * back to the light `--brand-{key}`. This is how a dark-only hero effect
+ * reaches ShaderHero: the dark values are injected inline as `--brand-*-dark`,
+ * and the light values are injected inline as `--brand-*` — so a plain CSS
+ * rebind can't promote dark over light (inline beats stylesheet, and a
+ * self-referential `var(--x-dark, var(--x))` is a cycle). Resolving the
+ * `-dark` suffix here, keyed off a stylesheet sentinel, covers every key.
+ */
+function readBrandVar(
+  style: CSSStyleDeclaration,
+  key: string,
+  isDark = false
+): string | null {
+  if (isDark) {
+    const darkVal = style.getPropertyValue(`--brand-${key}-dark`).trim();
+    if (darkVal) return darkVal;
+  }
   const val = style.getPropertyValue(`--brand-${key}`).trim();
   return val || null;
 }
@@ -817,10 +835,16 @@ export function getShaderConfig(
   // Cache getComputedStyle once — avoids forced reflow on each property read
   const style = el ? getComputedStyle(el) : null;
 
+  // Dark mode is signalled by a stylesheet-only sentinel set under the org
+  // brand's dark gate (org-brand.css). When dark, every shader read prefers
+  // the key's `--brand-*-dark` value so a dark-only hero effect activates.
+  const isDark =
+    !!style && style.getPropertyValue('--brand-shader-is-dark').trim() === '1';
+
   const preset =
     presetOverride ??
     ((style
-      ? readBrandVar(style, 'shader-preset')
+      ? readBrandVar(style, 'shader-preset', isDark)
       : null) as ShaderPresetId | null);
   const resolvedPreset = preset ?? DEFAULTS.preset;
 
@@ -839,20 +863,20 @@ export function getShaderConfig(
   ];
 
   // Read logo URL for SDF-based shader integration
-  const logoUrl = style ? readBrandVar(style, 'shader-logo-url') : null;
+  const logoUrl = style ? readBrandVar(style, 'shader-logo-url', isDark) : null;
 
   const base: ShaderConfigBase = {
     preset: resolvedPreset,
     intensity: num(
-      style ? readBrandVar(style, 'shader-intensity') : null,
+      style ? readBrandVar(style, 'shader-intensity', isDark) : null,
       DEFAULTS.intensity
     ),
     grain: num(
-      style ? readBrandVar(style, 'shader-grain') : null,
+      style ? readBrandVar(style, 'shader-grain', isDark) : null,
       DEFAULTS.grain
     ),
     vignette: num(
-      style ? readBrandVar(style, 'shader-vignette') : null,
+      style ? readBrandVar(style, 'shader-vignette', isDark) : null,
       DEFAULTS.vignette
     ),
     logoUrl: logoUrl ?? undefined,
@@ -865,10 +889,12 @@ export function getShaderConfig(
   };
 
   const rv = (key: string, def: number) =>
-    num(style ? readBrandVar(style, key) : null, def);
+    num(style ? readBrandVar(style, key, isDark) : null, def);
 
   const builder = PRESET_BUILDERS[resolvedPreset];
-  return builder ? builder(base, rv, style) : { ...base, preset: 'none' };
+  return builder
+    ? builder(base, rv, style, isDark)
+    : { ...base, preset: 'none' };
 }
 
 /**
@@ -881,7 +907,8 @@ export function getShaderConfig(
 type PresetBuilder = (
   base: ShaderConfigBase,
   rv: (key: string, def: number) => number,
-  style: CSSStyleDeclaration | null
+  style: CSSStyleDeclaration | null,
+  isDark: boolean
 ) => ShaderConfig;
 
 const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
@@ -903,8 +930,10 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
     scale: rv('shader-scale', DEFAULTS.scale),
     aberration: rv('shader-aberration', DEFAULTS.aberration),
   }),
-  warp: (base, rv, style) => {
-    const invertRaw = style ? readBrandVar(style, 'shader-invert') : null;
+  warp: (base, rv, style, isDark) => {
+    const invertRaw = style
+      ? readBrandVar(style, 'shader-invert', isDark)
+      : null;
     return {
       ...base,
       preset: 'warp',
@@ -927,9 +956,9 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
     rippleSize: rv('shader-ripple-size', DEFAULTS.rippleSize),
     refraction: rv('shader-refraction', DEFAULTS.refraction),
   }),
-  pulse: (base, rv, style) => {
+  pulse: (base, rv, style, isDark) => {
     const pulseColorRaw = style
-      ? readBrandVar(style, 'shader-pulse-color')
+      ? readBrandVar(style, 'shader-pulse-color', isDark)
       : null;
     return {
       ...base,

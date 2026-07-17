@@ -118,6 +118,11 @@
   let tags = $state<string[]>(content?.tags ?? []);
   // svelte-ignore state_referenced_locally — user edits must survive until submit
   let featured = $state<boolean>(content?.featured ?? false);
+  // Category (topic) memberships — seeded from the content's current categories
+  // (surfaced by ContentService.get) so an edit-mode save doesn't wipe them via
+  // the update REPLACE path. Serialized to the hidden `categoryIds` input.
+  // svelte-ignore state_referenced_locally — form field: user edits must survive until submit
+  let selectedCategoryIds = $state<string[]>(content?.categoryIds ?? []);
   // svelte-ignore state_referenced_locally — form field: user edits must survive until submit
   let selectedMinimumTierId = $state<string>(content?.minimumTierId ?? '');
 
@@ -188,6 +193,7 @@
           visibility: content!.visibility ?? 'public',
           price: content!.priceCents ? (content!.priceCents / 100).toFixed(2) : '0.00',
           category: content!.category ?? '',
+          categoryIds: JSON.stringify(content!.categoryIds ?? []),
           tags: JSON.stringify(content!.tags ?? []),
           thumbnailUrl: content!.thumbnailUrl ?? '',
           shaderPreset: content!.shaderPreset ?? '',
@@ -207,6 +213,7 @@
         visibility: 'public',
         price: '0.00',
         category: '',
+        categoryIds: '[]',
         tags: '[]',
         thumbnailUrl: '',
         shaderPreset: '',
@@ -607,10 +614,13 @@
       >
         <OrganizeSection
           {form}
+          {organizationId}
           {tags}
           {featured}
+          {selectedCategoryIds}
           onTagsChange={(next) => (tags = next)}
           onFeaturedChange={(next) => (featured = next)}
+          onCategoryChange={(next) => (selectedCategoryIds = next)}
         />
       </FormSection>
 

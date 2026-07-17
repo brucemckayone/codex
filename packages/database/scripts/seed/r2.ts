@@ -14,7 +14,14 @@ import {
   getWaveformImageKey,
   getWaveformKey,
 } from '../../../transcoding/src/paths';
-import { CONTENT, MEDIA, ORGS, THUMBNAIL_SEEDS, USERS } from './constants';
+import {
+  CATEGORIES,
+  CONTENT,
+  MEDIA,
+  ORGS,
+  THUMBNAIL_SEEDS,
+  USERS,
+} from './constants';
 import {
   fetchPortraitImage,
   fetchRealImage,
@@ -33,6 +40,17 @@ import {
 const PROJECT_ROOT = path.resolve(import.meta.dirname, '../../../../');
 const PERSIST_PATH = path.join(PROJECT_ROOT, '.wrangler/state');
 const DEV_CDN_DIR = path.join(PROJECT_ROOT, 'workers/dev-cdn');
+
+// Committed offline source images (img1.jpg…img6.jpg) used for category
+// covers and expanded-catalogue content thumbnails — no external fetch.
+const MOCKUP_ASSETS_DIR = path.join(PROJECT_ROOT, 'docs/design/mockup-assets');
+
+/** Load the six committed mockup images as buffers, cycled by callers. */
+function loadMockupImages(): Buffer[] {
+  return Array.from({ length: 6 }, (_, i) =>
+    fs.readFileSync(path.join(MOCKUP_ASSETS_DIR, `img${i + 1}.jpg`))
+  );
+}
 
 // Bucket names must match wrangler.jsonc preview_bucket_name (used in local dev)
 const MEDIA_BUCKET_NAME = 'codex-media-test';
@@ -419,6 +437,46 @@ async function collectAssetFiles(): Promise<R2File[]> {
       });
     } catch {
       // Skip if fetch fails — content card will show without thumbnail
+    }
+  }
+
+  // Expanded-catalogue thumbnails + category covers use the committed offline
+  // mockup pool (no external fetch). Cycled deterministically through the six
+  // source images so re-seeds overwrite the same keys.
+  const mockupImages = loadMockupImages();
+  const pickMockup = (idx: number): Buffer => {
+    const img = mockupImages[idx % mockupImages.length];
+    if (!img) throw new Error('No mockup images available for seeding');
+    return img;
+  };
+
+  // Any bones item NOT in OFFERING_IMAGE_URLS is an expanded-catalogue item;
+  // its (media-less) thumbnailUrl resolves to the offering key, so upload a
+  // mockup thumbnail there.
+  let thumbIdx = 0;
+  for (const item of bonesContent) {
+    if (OFFERING_IMAGE_URLS[item.slug]) continue;
+    files.push({
+      bucket: ASSETS_BUCKET_NAME,
+      key: `${item.creatorId}/thumbnails/offering-${item.slug}/thumb.jpg`,
+      data: pickMockup(thumbIdx++),
+      contentType: 'image/jpeg',
+    });
+  }
+
+  // Category cover images for the landing "Browse by topic" module. Resolver
+  // reads `categories/{id}/cover/{sm,md,lg}.webp` from the assets bucket and
+  // only needs the keys to exist, so JPEG bytes under a .webp key are fine.
+  let coverIdx = 0;
+  for (const cat of Object.values(CATEGORIES)) {
+    const data = pickMockup(coverIdx++);
+    for (const size of ['sm', 'md', 'lg'] as const) {
+      files.push({
+        bucket: ASSETS_BUCKET_NAME,
+        key: `categories/${cat.id}/cover/${size}.webp`,
+        data,
+        contentType: 'image/jpeg',
+      });
     }
   }
 

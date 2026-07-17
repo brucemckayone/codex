@@ -220,10 +220,31 @@
   }
 
   .carousel__item {
-    flex: 0 0 auto;
-    min-width: var(--carousel-item-min-width, 280px);
-    max-width: 400px;
+    /* DEFINITE width — not content-driven. `flex: 0 0 auto` sized each item to
+       its max-content width, which leaks the thumbnail image's INTRINSIC
+       resolution: a low-res cover produced a narrow card while a high-res one
+       hit the cap, so cards in the same rail rendered at wildly different
+       widths (204–400px). A fixed flex-basis pins every tile to one width so a
+       row of 3:4 / 1:1 cards reads as a single rhythm. Viewport-capped (`82vw`)
+       so a phone shows one card plus a peek of the next; the cap wins only
+       below a ~488px viewport, leaving tablet/desktop at the intended size. */
+    flex: 0 0 min(var(--carousel-item-min-width, 280px), 82vw);
+    max-width: min(400px, 82vw);
     scroll-snap-align: start;
+    /* Pass the stretched track height down to the card. The flex track
+       stretches every item to the tallest card; without this the `.cc` inside
+       keeps its natural height, so a shorter card (a title-in-cover article
+       beside a taller video/audio tile) floats at the top of an over-tall slot
+       with blank space beneath. Column-flex + the child rule below make the
+       card fill its slot, so heights match and bottoms align. */
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* The single card inside each item fills the (possibly stretched) slot. */
+  .carousel__item > :global(*) {
+    flex: 1 1 auto;
+    min-height: 0;
   }
 
   /* Hero variant — first tile in the carousel is ~2× width. Used by the

@@ -791,8 +791,14 @@ def transcode_audio_hls(input_path: str, output_dir: str) -> list[str]:
             f.write(f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth}\n")
             f.write(f"{variant_name}/index.m3u8\n")
 
-    # Report 'audio' as the ready variant (matches hlsVariantSchema enum).
-    # Individual bitrate levels (128k/64k) are internal to the master playlist.
+    # Report 'audio' as the LOGICAL ready variant (matches hlsVariantSchema —
+    # the readyVariants label set surfaced to the client quality picker).
+    #
+    # The PHYSICAL rungs (128k/64k) are the directory names written into the
+    # master playlist above, so the client fetches them back through the
+    # variant-playlist proxy as `/hls/<rung>/index.m3u8`. Those names MUST stay
+    # in `hlsVariantPathSchema` (packages/validation/src/schemas/transcoding.ts)
+    # or the proxy 403s ("Invalid request") and audio playback breaks.
     return ["audio"] if variant_playlists else []
 
 

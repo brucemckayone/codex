@@ -8,6 +8,20 @@ const now = new Date();
 const publishedAt = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // 7 days ago
 const archivedAt = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000); // 90 days ago
 
+/** Build a Date N days before now — used to spread seed publish dates. */
+const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+
+/**
+ * Of Blood & Bones items promoted to the landing "Editor's picks" carousel.
+ * One per medium (video / audio / article) so the FeatureCarousel exercises its
+ * type badge, audio-waveform treatment, and per-type CTA across all three.
+ */
+const FEATURED_SLUGS = new Set<string>([
+  'fire-ceremony-at-dusk', // video
+  'drum-journey-lower-world', // audio
+  'the-medicine-of-grief', // article
+]);
+
 /** Build the dev-cdn URL for a content thumbnail */
 function thumbnailUrl(
   creatorId: string,
@@ -74,6 +88,43 @@ const DESCRIPTIONS: Record<string, string> = {
     'Vibrational healing through singing bowls, tuning forks, and voice. A guided sonic journey for deep relaxation and energetic recalibration.',
   'eco-somatic-experiencing':
     'Nature-based somatic practices that reconnect you with the more-than-human world. Grounding, forest bathing, and earth-based ceremony.',
+  // ── Of Blood & Bones — expanded catalogue ──
+  'morning-somatic-flow':
+    'A gentle body-led movement practice to greet the day. Wake the nervous system, mobilise the spine, and arrive fully in your body.',
+  'fire-ceremony-at-dusk':
+    'A guided evening fire ceremony for release and renewal. Offer what no longer serves to the flames and set intention for the turning of the day.',
+  'breath-of-the-ancestors':
+    'A breath-led journey honouring those who came before. Reconnect with lineage and let ancestral memory move through the body.',
+  'womb-awakening-movement':
+    'Slow, reverent movement to reconnect with the womb space and creative centre. Part of the Soul Path mentorship container.',
+  'copal-and-smoke-cleansing-rite':
+    'Learn the sacred protocols of copal and smoke cleansing. A hands-on rite for clearing energy from body, space, and objects.',
+  'grounding-practice-roots-and-earth':
+    'A grounding practice drawing on breath and earth connection. Settle a busy system and root down through body and soil.',
+  'ancestral-lullaby-sound-bath':
+    'A tender sound bath weaving voice and bowls into an ancestral lullaby. Deep rest for the weary and the grieving.',
+  'drum-journey-lower-world':
+    'A guided shamanic drum journey to the lower world. Meet your allies and retrieve what waits for you in the unseen.',
+  'ocean-breath-meditation':
+    'An audio breath meditation paced to the rhythm of the tide. Ujjayi breathing to calm the nervous system and clear the mind.',
+  'whispers-of-the-lineage':
+    'An intimate audio transmission on listening to ancestral guidance. Included in the Soul Path mentorship.',
+  'tuning-fork-reset':
+    'A short vibrational reset using weighted tuning forks. Recalibrate the body’s energetic field in minutes.',
+  'coyolxauhqui-moon-chant':
+    'A devotional moon chant honouring Coyolxauhqui. Free for followers of the space — sing along under the night sky.',
+  'the-medicine-of-grief':
+    'A written meditation on grief as sacred medicine. How loss cracks us open and what the body knows about mourning.',
+  'reading-the-bodys-stories':
+    'A somatic literacy guide to the stories held in tissue and posture. Learn to listen to what the body has been carrying.',
+  'working-with-copal-and-sacred-smoke':
+    'A written guide to sourcing, preparing, and working with copal and sacred smoke in your own practice. One-off purchase £4.99.',
+  'nervous-system-literacy':
+    'Understand the language of your nervous system — states, cues, and regulation. Practical tools for coming back to safety.',
+  'the-four-sacred-directions':
+    'A written teaching on the four directions and their medicine. Part of the Soul Path mentorship curriculum.',
+  'vibration-as-medicine':
+    'An essay on sound and vibration as healing modalities. The science and the sacred behind bowls, drums, and voice.',
 };
 
 export async function seedContent(db: typeof DbClient) {
@@ -98,6 +149,14 @@ export async function seedContent(db: typeof DbClient) {
         accessType === 'subscribers' || accessType === 'paid'
           ? (rawTierId ?? null)
           : null;
+
+      // Optional per-item publish offset (days ago). Items without it fall
+      // back to the shared 7-days-ago constant. Lets the expanded catalogue
+      // spread its publishedAt over recent dates for realistic ordering.
+      const publishedDaysAgo =
+        'publishedDaysAgo' in c
+          ? (c as { publishedDaysAgo?: number }).publishedDaysAgo
+          : undefined;
 
       return {
         id: c.id,
@@ -124,6 +183,7 @@ export async function seedContent(db: typeof DbClient) {
             : c.contentType === 'audio'
               ? 'podcasts'
               : 'tutorials',
+        featured: FEATURED_SLUGS.has(c.slug),
         tags: ['seed-data', c.contentType],
         accessType,
         priceCents: c.priceCents,
@@ -131,7 +191,9 @@ export async function seedContent(db: typeof DbClient) {
         status: c.status,
         publishedAt:
           c.status === 'published'
-            ? publishedAt
+            ? publishedDaysAgo != null
+              ? daysAgo(publishedDaysAgo)
+              : publishedAt
             : c.status === 'archived'
               ? archivedAt
               : null,

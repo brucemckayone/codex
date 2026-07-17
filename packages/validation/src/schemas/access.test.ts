@@ -234,6 +234,28 @@ describe('Content Access Validation Schemas', () => {
       expect(result).toEqual({ id: validUUID, variant: '1080p' });
     });
 
+    // Regression: audio media's master playlist references PHYSICAL bitrate
+    // rungs (`128k` / `64k`), not the logical `audio` label. Validating the
+    // proxy `:variant` param against the logical enum 403'd all audio playback
+    // ("Invalid request"). See infrastructure/runpod/handler/main.py
+    // AUDIO_VARIANTS + hlsVariantPathSchema.
+    it.each([
+      '720p',
+      '480p',
+      'source',
+      '128k',
+      '64k',
+    ] as const)("accepts physical variant directory '%s'", (variant) => {
+      const result = hlsVariantParamsSchema.parse({ id: validUUID, variant });
+      expect(result).toEqual({ id: validUUID, variant });
+    });
+
+    it("rejects the logical-only 'audio' label (no physical audio/ directory)", () => {
+      expect(() =>
+        hlsVariantParamsSchema.parse({ id: validUUID, variant: 'audio' })
+      ).toThrow(ZodError);
+    });
+
     it('rejects an unknown variant', () => {
       expect(() =>
         hlsVariantParamsSchema.parse({ id: validUUID, variant: '4320p' })

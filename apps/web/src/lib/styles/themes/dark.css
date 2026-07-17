@@ -51,4 +51,10 @@
   --color-brand-accent: var(--color-warning);
   --color-brand-accent-hover: var(--color-warning-600);
   --color-brand-accent-subtle: var(--color-warning-700);
+
+  /* Media cover treatments (ContentCard shape system) — see light.css for
+     the rationale. Same derivation; the dark --color-background makes the
+     scrim deeper, --media-glyph stays a near-white brand-tinted ink. */
+  --media-scrim: color-mix(in oklab, black 64%, var(--color-background));
+  --media-glyph: oklch(from var(--color-brand-accent) 0.97 calc(c * 0.06) h);
 }

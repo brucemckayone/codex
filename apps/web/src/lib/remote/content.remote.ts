@@ -154,6 +154,14 @@ const publicContentQueryParamsSchema = z.object({
   page: z.number().min(1).default(1).optional(),
   limit: z.number().min(1).max(50).default(20).optional(),
   contentType: z.enum(['video', 'audio', 'written']).optional(),
+  // Mirror the worker's slug-charset guard: forbids the public-cache-key
+  // delimiter ':' so a crafted value can't poison the public content cache.
+  // Unicode-aware to match `slugify` (accented slugs like `café-del-mar`).
+  category: z
+    .string()
+    .max(120)
+    .regex(/^[\p{L}\p{N}-]+$/u)
+    .optional(),
   search: z.string().max(255).optional(),
   sort: z.enum(['newest', 'oldest', 'title']).default('newest').optional(),
   creatorId: z.string().uuid().optional(),
@@ -184,6 +192,7 @@ export const getPublicContent = query(
     if (params.page) searchParams.set('page', String(params.page));
     if (params.limit) searchParams.set('limit', String(params.limit));
     if (params.contentType) searchParams.set('contentType', params.contentType);
+    if (params.category) searchParams.set('category', params.category);
     if (params.search) searchParams.set('search', params.search);
     if (params.sort) searchParams.set('sort', params.sort);
     if (params.creatorId) searchParams.set('creatorId', params.creatorId);
@@ -354,6 +363,30 @@ const contentBaseFormSchema = z.object({
     return Number.isNaN(parsed) ? 0 : Math.round(parsed * 100);
   }),
   category: optionalString,
+  // Category taxonomy membership (WP-5). Serialized as a JSON array of category
+  // UUIDs in a hidden input (rendered by CategorySelect). The new source of
+  // truth for classification; the legacy free-text `category` is no longer
+  // edited via the form.
+  //
+  // ABSENT (undefined) vs PRESENT-BUT-EMPTY are deliberately distinct — and NOT
+  // collapsed to a default. The picker only renders (so the field is only
+  // present) for ORG content; personal content submits no `categoryIds` at all.
+  //   - field absent          → `undefined` → ContentService leaves tags untouched
+  //   - field present (org)    → parsed array (possibly `[]` = clear the set)
+  //   - malformed / non-array → `undefined` (degrade to the safe "untouched")
+  categoryIds: z
+    .string()
+    .optional()
+    .transform((v) => {
+      if (v === undefined) return undefined;
+      try {
+        const parsed = JSON.parse(v);
+        return Array.isArray(parsed) ? (parsed as string[]) : undefined;
+      } catch {
+        return undefined;
+      }
+    })
+    .pipe(z.array(z.string().uuid()).max(20).optional()),
   tags: z
     .string()
     .optional()
@@ -393,6 +426,7 @@ export const createContentForm = form(
     accessType,
     price,
     category,
+    categoryIds,
     tags,
     thumbnailUrl,
     minimumTierId,
@@ -414,6 +448,7 @@ export const createContentForm = form(
         organizationId,
         priceCents: price,
         category,
+        categoryIds,
         tags,
         thumbnailUrl,
         minimumTierId,
@@ -531,6 +566,7 @@ export const updateContentForm = form(
     accessType,
     price,
     category,
+    categoryIds,
     tags,
     thumbnailUrl,
     minimumTierId,
@@ -552,6 +588,7 @@ export const updateContentForm = form(
         organizationId,
         priceCents: price,
         category,
+        categoryIds,
         tags,
         thumbnailUrl,
         minimumTierId,

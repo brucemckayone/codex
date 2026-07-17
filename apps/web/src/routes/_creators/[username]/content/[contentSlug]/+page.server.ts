@@ -81,15 +81,14 @@ export const load: PageServerLoad = async ({
   }
 
   // Cache header is applied ONLY on the success path right before each return.
-  // Setting it eagerly here would cause `error(404)` and unhandled rejections
-  // in awaits below (renderContentBody, loadAccessAndProgress) to inherit
-  // `Cache-Control: public, max-age=...`, poisoning the CDN with the error
-  // response. REVALIDATE variant forces browsers to revalidate on every
-  // request so a buyer returning from Stripe doesn't see the anonymous
-  // response cached earlier.
-  const successCacheHeaders = locals.user
-    ? CACHE_HEADERS.PRIVATE
-    : CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE;
+  // This page renders auth-aware HTML (the creator layout injects `user` and
+  // the CTA switches on isAuthenticated), so the SAME URL yields different
+  // markup per auth state. Shared caches (Cloudflare edge, miniflare) key by
+  // URL, NOT by Cookie, so any `public` response cached for an anonymous
+  // visitor is served to signed-in users too. PRIVATE keeps it out of shared
+  // caches; the public content list (incl. this slug lookup) is KV-cached in
+  // content-api so the DB stays shielded. See docs/caching-strategy.md.
+  const successCacheHeaders = CACHE_HEADERS.PRIVATE;
 
   // Body gating: only render the body once access is confirmed. Free content
   // renders immediately (SEO + first-paint). Everything else (followers /

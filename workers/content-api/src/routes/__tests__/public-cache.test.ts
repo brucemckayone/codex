@@ -102,6 +102,77 @@ describe('buildPublicContentCacheType', () => {
       buildPublicContentCacheType({ sort: 'newest', page: 2 })
     );
   });
+
+  it('folds slug into the key so distinct slugs get distinct data slots', () => {
+    const withSlug = buildPublicContentCacheType({
+      sort: 'newest',
+      slug: 'liberty',
+    });
+    const otherSlug = buildPublicContentCacheType({
+      sort: 'newest',
+      slug: 'freedom',
+    });
+    const noSlug = buildPublicContentCacheType({ sort: 'newest' });
+    expect(withSlug).toContain(':slug:liberty');
+    expect(withSlug).not.toBe(otherSlug);
+    expect(withSlug).not.toBe(noSlug);
+  });
+
+  it('folds category into the key so distinct topics get distinct data slots', () => {
+    const fiction = buildPublicContentCacheType({
+      sort: 'newest',
+      category: 'fiction',
+    });
+    const poetry = buildPublicContentCacheType({
+      sort: 'newest',
+      category: 'poetry',
+    });
+    const noCategory = buildPublicContentCacheType({ sort: 'newest' });
+    expect(fiction).toContain(':cat:fiction');
+    // Two different topics MUST NOT share a slot (would serve wrong content).
+    expect(fiction).not.toBe(poetry);
+    // A filtered read MUST NOT collide with the unfiltered list.
+    expect(fiction).not.toBe(noCategory);
+  });
+
+  it('folds featured into the key so featured/unfiltered do not collide (regression: featured was omitted)', () => {
+    const onlyFeatured = buildPublicContentCacheType({
+      sort: 'newest',
+      featured: true,
+    });
+    const excludeFeatured = buildPublicContentCacheType({
+      sort: 'newest',
+      featured: false,
+    });
+    const unset = buildPublicContentCacheType({ sort: 'newest' });
+    expect(onlyFeatured).toContain(':feat:true');
+    // The latent bug: `featured` was a live query param but absent from the
+    // key, so Editor's-picks and the all-content list shared one slot.
+    expect(onlyFeatured).not.toBe(unset);
+    expect(excludeFeatured).not.toBe(unset);
+    expect(onlyFeatured).not.toBe(excludeFeatured);
+  });
+
+  it('composes category + featured deterministically without disturbing unrelated queries', () => {
+    // Full compose is stable + distinct...
+    expect(
+      buildPublicContentCacheType({
+        sort: 'newest',
+        category: 'fiction',
+        featured: true,
+      })
+    ).toBe('content:public:newest:20:1:all:cat:fiction:feat:true');
+    // ...and a query with neither new dimension keeps its exact prior shape,
+    // so existing cache entries stay hit-compatible.
+    expect(
+      buildPublicContentCacheType({
+        sort: 'newest',
+        limit: 20,
+        page: 1,
+        contentType: 'video',
+      })
+    ).toBe('content:public:newest:20:1:video');
+  });
 });
 
 describe('shouldCachePublicContentQuery', () => {
@@ -117,10 +188,10 @@ describe('shouldCachePublicContentQuery', () => {
     ).toBe(false);
   });
 
-  it('bypasses cache when slug is present (exact-lookup path)', () => {
+  it('caches slug lookups (content-detail path; slug folds into the data-slot key)', () => {
     expect(
       shouldCachePublicContentQuery({ orgId: 'org-1', slug: 'my-content' })
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('bypasses cache when creatorId filter is present (lower-volume)', () => {
@@ -271,6 +342,27 @@ describe('getCachedPublicContent', () => {
     await getCachedPublicContent(cache, 'org-2', { orgId: 'org-2' }, fB);
     expect(fA).toHaveBeenCalledTimes(2);
     expect(fB).toHaveBeenCalledTimes(1);
+  });
+
+  it('SLUG PATH: caches a slug lookup and re-fetches after org invalidate', async () => {
+    // Content-detail SSR fetches by slug. This proves the slug slot both
+    // caches AND is invalidated by the same org version bump that
+    // publish/update/unpublish/delete/thumbnail fire — so a cached detail
+    // page never outlives a content mutation (the invalidation contract).
+    const orgId = 'org-1';
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue({ items: [{ id: '1' }], pagination: { total: 1 } });
+    const slugQuery = { orgId, slug: 'liberty', limit: 1 };
+
+    await getCachedPublicContent(cache, orgId, slugQuery, fetcher);
+    await getCachedPublicContent(cache, orgId, slugQuery, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(1); // second call served from cache
+
+    await cache.invalidate(CacheType.COLLECTION_ORG_CONTENT(orgId));
+
+    await getCachedPublicContent(cache, orgId, slugQuery, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(2); // org bump reached the slug slot
   });
 
   it('uses the 300s default TTL', async () => {

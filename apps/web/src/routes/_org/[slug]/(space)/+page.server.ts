@@ -1,31 +1,31 @@
 /**
- * Organization landing page - server load
+ * Organization landing page — server load.
  *
- * Single-fetch architecture: one `getPublicContent` call (limit 50) returns
- * the whole recent catalogue; we slice it in-memory into typed `sections`
- * (Spotlight / Editor's Picks / Videos / Audio / Articles / Free) plus a
- * flat `allContent` array that feeds the bottom full-catalogue grid.
+ * Single catalogue fetch (`getPublicContent`, limit 50, newest-first) feeds the
+ * whole page: the client derives every section from `allContent` — "Editor's
+ * picks" (featured), "New this week" (recent minus featured), and the "Browse
+ * everything" module (all types + topic filter). `allContent` items now carry
+ * `categorySlugs`, so the topic filter matches client-side with no extra fetch.
  *
- * Category discovery lives in the sticky pill bar at the top of the feed —
- * clicking any pill navigates to /explore?category=X for the dedicated
- * filtered view. No per-category carousels are rendered inline.
+ * Shell + Stream (apps/web CLAUDE.md): the catalogue + stats are awaited (first
+ * paint + SEO); the secondary rails — topic categories, cross-device continue
+ * watching, creators, subscription pricing — are streamed as bare promises,
+ * each `.catch()`-guarded so a failure degrades to an empty section rather than
+ * crashing the load.
  *
- * Each section carries an explicit `layout` tag (`spotlight | carousel |
- * mosaic | editorial | bento`) so the renderer dispatches on server-picked
- * layouts instead of reinventing the rule in the template.
- *
- * See feed-types.ts for the FeedSection / FeedLayout contract and
- * +page.svelte for render dispatch.
- *
- * Continue watching stays client-side via libraryCollection (localStorage).
+ * `feedCategories` (derived from `allContent`) still powers the hero pills;
+ * `categories` (the curated taxonomy) powers "Browse by topic" + the browse
+ * module's active-topic chip. See +page.svelte for render + URL sync.
  */
 
+import { getPublicCategories } from '$lib/remote/categories.remote';
 import { getPublicContent } from '$lib/remote/content.remote';
+import { getContinueWatching } from '$lib/remote/library.remote';
 import { getPublicCreators, getPublicStats } from '$lib/remote/org.remote';
 import { listTiers } from '$lib/remote/subscription.remote';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
-import type { ContentItem, FeedSection } from './feed-types';
+import type { ContentItem } from './feed-types';
 
 // publicContentQuerySchema caps limit at 50. For V1 this is acceptable —
 // the homepage surfaces recent items; exhaustive browsing happens via
@@ -33,197 +33,8 @@ import type { ContentItem, FeedSection } from './feed-types';
 // truncation at the bottom grid.
 const MAX_CATALOGUE_ITEMS = 50;
 
-// Bento "Discover Mix" section — optional second grid beat between
-// Audio wall and Articles. Off by default so the landing page ships
-// without the extra density; flip to true once the layout has been
-// evaluated against real org content.
-const DISCOVER_MIX_ENABLED = false;
-const DISCOVER_MIX_ITEMS = 6;
-
-/**
- * Moves the first creator-flagged item in `items` to index 0. If no item is
- * flagged, the array is returned unchanged (the server fetch is already
- * sorted newest-first, so the natural index-0 item is the auto-promote).
- */
-function promoteFeatured(items: ContentItem[]): ContentItem[] {
-  const idx = items.findIndex((i) => i.featured);
-  if (idx <= 0) return items;
-  return [items[idx], ...items.slice(0, idx), ...items.slice(idx + 1)];
-}
-
-function buildSections(all: ContentItem[]): FeedSection[] {
-  const sections: FeedSection[] = [];
-
-  // ── Spotlight — hero-sized anchor at top, carousel when multiple ─────
-  // All creator-flagged items become slides in the spotlight carousel
-  // (renderer wraps them in <Carousel> when count > 1, single <Spotlight>
-  // when count === 1). When nothing is featured, the newest item takes
-  // the slot. If the catalogue is empty, no Spotlight is rendered.
-  // Featured items live in exactly one place — the spotlight — so there
-  // is no separate "Featured" section downstream.
-  const featured = all.filter((i) => i.featured);
-  const spotlightItems =
-    featured.length > 0 ? featured : all[0] ? [all[0]] : [];
-  if (spotlightItems.length > 0) {
-    sections.push({
-      id: 'spotlight',
-      layout: 'spotlight',
-      eyebrow: spotlightItems.length === 1 ? "Editor's pick" : "Editor's picks",
-      title: spotlightItems[0].title,
-      items: spotlightItems,
-    });
-  }
-
-  // Exclude every spotlight item from downstream sections so they never
-  // appear twice on the page. `Set` lookup keeps the per-section filter
-  // O(1) regardless of featured count.
-  const spotlightIds = new Set(spotlightItems.map((i) => i.id));
-  const remaining = all.filter((i) => !spotlightIds.has(i.id));
-
-  // ── Recent releases — newest items across all types, mixed carousel ───
-  // `remaining` is already newest-first (server fetched with sort: 'newest').
-  // Cap at 8 items — enough to fill a carousel without overwhelming the
-  // page. Skip entirely below 3 items so low-content orgs don't get a
-  // visually sparse row — discovery happens elsewhere.
-  const NEW_RELEASE_MAX = 8;
-  const NEW_RELEASE_MIN = 3;
-  const newestSlice = remaining.slice(0, NEW_RELEASE_MAX);
-  if (newestSlice.length >= NEW_RELEASE_MIN) {
-    sections.push({
-      id: 'new-release',
-      layout: 'carousel',
-      eyebrow: 'New',
-      title: 'Recent releases',
-      // Mixed-type row — normalise thumb ratios so the carousel reads as
-      // one rhythm (same reasoning as Free samples / per-category rows).
-      mixedTypes: true,
-      items: newestSlice,
-    });
-  }
-
-  // ── Videos / Audio / Articles — each media type owns its layout ─────
-  // Audio always picks 'mosaic' (AudioWall) — AudioWall handles its own
-  // sparse/standard density. Articles need EDITORIAL_MIN because the 60/40
-  // editorial split looks unbalanced with one or two pieces.
-  const EDITORIAL_MIN = 3;
-  const byType = [
-    {
-      id: 'videos' as const,
-      preferredLayout: 'carousel' as const,
-      minForPreferred: 0,
-      eyebrow: 'Watch',
-      title: 'Videos',
-      match: 'video' as const,
-    },
-    {
-      id: 'audio' as const,
-      preferredLayout: 'mosaic' as const,
-      minForPreferred: 0,
-      eyebrow: 'Listen',
-      title: 'Audio',
-      match: 'audio' as const,
-    },
-    {
-      id: 'articles' as const,
-      preferredLayout: 'editorial' as const,
-      minForPreferred: EDITORIAL_MIN,
-      eyebrow: 'Read',
-      title: 'Articles',
-      match: 'written' as const,
-    },
-  ];
-  for (const {
-    id,
-    preferredLayout,
-    minForPreferred,
-    eyebrow,
-    title,
-    match,
-  } of byType) {
-    const items = remaining.filter((i) => i.contentType === match);
-    if (items.length === 0) continue;
-    const layout =
-      items.length >= minForPreferred ? preferredLayout : 'carousel';
-    sections.push({
-      id,
-      layout,
-      eyebrow,
-      title,
-      items: promoteFeatured(items),
-    });
-  }
-
-  // ── Discover Mix — optional cross-type bento grid ───────────────────
-  // Picks up to DISCOVER_MIX_ITEMS items from the catalogue and arranges
-  // them in a varied tile grid. Unlike the type-sections above, items may
-  // re-appear from Videos/Audio/Articles — the mix is a curated remix
-  // that emphasises BREADTH, not exclusivity. Skips the Spotlight item
-  // because surfacing the hero twice would feel redundant. Gated so V1
-  // can ship without the extra density — flip DISCOVER_MIX_ENABLED once
-  // the section's information density is validated in real orgs.
-  if (DISCOVER_MIX_ENABLED && remaining.length >= DISCOVER_MIX_ITEMS) {
-    // Bias towards type variety: walk the catalogue, preferring tiles
-    // whose type hasn't yet been placed (up to 2 per type) before filling
-    // remaining slots in natural order.
-    const picks: ContentItem[] = [];
-    const typeCount = { video: 0, audio: 0, written: 0 } as Record<
-      string,
-      number
-    >;
-    // First pass: take up to 2 of each type in newest-first order.
-    for (const item of remaining) {
-      if (picks.length >= DISCOVER_MIX_ITEMS) break;
-      const t = item.contentType ?? 'video';
-      if ((typeCount[t] ?? 0) >= 2) continue;
-      picks.push(item);
-      typeCount[t] = (typeCount[t] ?? 0) + 1;
-    }
-    // Second pass: fill any remaining slots without a type cap.
-    if (picks.length < DISCOVER_MIX_ITEMS) {
-      const pickedIds = new Set(picks.map((p) => p.id));
-      for (const item of remaining) {
-        if (picks.length >= DISCOVER_MIX_ITEMS) break;
-        if (pickedIds.has(item.id)) continue;
-        picks.push(item);
-      }
-    }
-
-    if (picks.length >= DISCOVER_MIX_ITEMS) {
-      sections.push({
-        id: 'discover-mix',
-        layout: 'bento',
-        eyebrow: 'A taste',
-        title: 'Discover',
-        items: picks,
-      });
-    }
-  }
-
-  // ── Free samples — only if org has both free and non-free content ───
-  const hasPaid = remaining.some((i) => i.accessType !== 'free');
-  if (hasPaid) {
-    const free = remaining.filter((i) => i.accessType === 'free');
-    if (free.length > 0) {
-      sections.push({
-        id: 'free',
-        layout: 'carousel',
-        eyebrow: 'Try',
-        title: 'Free samples',
-        // Free samples mix all content types — force uniform thumb ratio
-        // so the row reads as one rhythm instead of a jagged mix of
-        // 1:1 audio next to 16:9 video next to 3:2 article tiles.
-        mixedTypes: true,
-        items: promoteFeatured(free),
-      });
-    }
-  }
-
-  return sections;
-}
-
 export const load: PageServerLoad = async ({
   params: routeParams,
-  locals,
   setHeaders,
   parent,
 }) => {
@@ -236,7 +47,7 @@ export const load: PageServerLoad = async ({
 
   const { org } = await parent();
 
-  // Single catalogue fetch — slice in memory for every section below.
+  // Single catalogue fetch — the client slices it into every section below.
   const catalogueResult = await getPublicContent({
     orgId: org.id,
     limit: MAX_CATALOGUE_ITEMS,
@@ -244,28 +55,22 @@ export const load: PageServerLoad = async ({
   }).catch(() => null);
 
   const allContent: ContentItem[] = catalogueResult?.items ?? [];
-  const sections = buildSections(allContent);
 
   const statsResult = await statsPromise.catch(() => null);
 
   // Set cache headers only after the critical awaits. If `parent()` throws
   // (e.g. an auth/branding load failure), the resulting error response
   // inherits SvelteKit's default no-cache headers instead of poisoning the
-  // CDN with the public-cache policy. REVALIDATE variant forces browsers to
-  // revalidate on every request so a user who signs in (or buys/subscribes)
-  // doesn't get served the anonymous response cached during an earlier
-  // logged-out visit to the same URL.
-  setHeaders(
-    locals.user
-      ? CACHE_HEADERS.PRIVATE
-      : CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE
-  );
+  // CDN with the public-cache policy. This page is auth-varying (the layout
+  // injects `user`), and shared caches key by URL, NOT by Cookie — so a
+  // `public` response cached for an anonymous visitor is served to signed-in
+  // users too. PRIVATE keeps it out of shared caches.
+  // See docs/caching-strategy.md §HTTP/CDN caching.
+  setHeaders(CACHE_HEADERS.PRIVATE);
 
-  // Categories for the hero pill row + sticky pill bar. Derived from
-  // `allContent` (already on this request) rather than `stats.categories`
-  // so counts reflect exactly what's loaded on the page and the pill bar
-  // stays healthy regardless of whether the org-api worker has picked up
-  // the aggregated-count service contract. Sorted by count DESC so the
+  // Hero pills — content-type/category quick links derived from `allContent`
+  // (already on this request) rather than the taxonomy, so counts reflect
+  // exactly what's loaded on the page. Sorted by count DESC so the
   // most-stocked categories lead the row.
   const feedCategories = (() => {
     const counts = new Map<string, number>();
@@ -307,10 +112,14 @@ export const load: PageServerLoad = async ({
     .catch(() => null);
 
   return {
-    sections,
     allContent,
     stats: statsResult,
     feedCategories,
+    // Streamed: curated topic taxonomy for "Browse by topic" + browse chip.
+    categories: getPublicCategories(org.id).catch(() => []),
+    // Streamed: cross-device resume rail (server-backed via video_playback).
+    // Anonymous visitors and any transport error resolve to an empty rail.
+    continueWatching: getContinueWatching(undefined).catch(() => []),
     creators: creatorsPromise
       .then((r) => ({
         items: r?.items ?? [],

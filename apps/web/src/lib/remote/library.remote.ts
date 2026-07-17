@@ -13,7 +13,13 @@
 import { VIDEO_PROGRESS } from '@codex/constants';
 import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
+import { logger } from '$lib/observability';
 import { createServerApi } from '$lib/server/api';
+import {
+  CONTINUE_WATCHING_LIMIT,
+  type ContinueWatchingItem,
+  selectContinueWatching,
+} from '$lib/utils/continue-watching';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // User Library Query
@@ -303,5 +309,68 @@ export const getPlaybackProgressBatch = query.batch(
         durationSeconds: 0,
         completed: false,
       };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Continue Watching Query (server-backed resume rail)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const continueWatchingQuerySchema = z
+  .object({
+    limit: z.number().int().positive().max(50).optional(),
+  })
+  .optional();
+
+/**
+ * Get the authenticated user's cross-device "continue watching" items.
+ *
+ * Server-backed via the access library API + persisted `video_playback`
+ * progress — NOT localStorage — so a resume list started on one device shows
+ * up on another. Powers WP-11's compact SSR "Continue watching" rail on the
+ * platform landing page.
+ *
+ * Self-scoped: the underlying library query derives the user from the
+ * forwarded session cookie; there is no client-supplied userId. Anonymous
+ * visitors get an empty list (no throw) — mirrors {@link getUserLibrary}. On
+ * any transport/API error the rail degrades to empty rather than crashing the
+ * streamed load (see apps/web CLAUDE.md "Shell + Stream").
+ *
+ * The selection rule (filter in-progress → sort by recency → cap → map) lives
+ * in the pure {@link selectContinueWatching}, which is unit-tested without a
+ * DB. URL building is deferred to the caller: each item carries
+ * `slug` / `id` / `organizationSlug`, and WP-11 finishes the link with
+ * `buildContentUrl(page.url, item)` at render time (cross-org routing needs
+ * the request host).
+ */
+export const getContinueWatching = query(
+  continueWatchingQuerySchema,
+  async (params): Promise<ContinueWatchingItem[]> => {
+    const { platform, cookies, locals } = getRequestEvent();
+
+    // Anonymous visitors have no server-backed progress. Return an empty rail
+    // instead of 401-ing the streamed landing load.
+    if (!locals.user) return [];
+
+    try {
+      const api = createServerApi(platform, cookies);
+
+      // Pull a generous pool (max page) so scattered in-progress items are not
+      // stranded past page 1; the pure selector does the authoritative recency
+      // sort + cap. We omit `sortBy` deliberately — the frontend exposes
+      // 'lastPlayed' but the backend enum only accepts 'recent' | 'title' |
+      // 'duration', so its default ('recent') is used.
+      const searchParams = new URLSearchParams({ limit: '100' });
+      const library = await api.access.getUserLibrary(searchParams);
+
+      return selectContinueWatching(library?.items ?? [], {
+        limit: params?.limit ?? CONTINUE_WATCHING_LIMIT,
+      });
+    } catch (error) {
+      logger.error('Failed to load continue-watching items', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
   }
 );

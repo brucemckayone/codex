@@ -78,6 +78,12 @@ export interface ContentWithRelations extends Content {
   };
   organization?: Organization | null;
   mediaItem?: MediaItem | null;
+  /**
+   * Ids of the `categories` (topic taxonomy) this content belongs to (WP-5).
+   * Populated by `ContentService.get` so the studio edit form can pre-select
+   * current memberships; excludes soft-deleted categories.
+   */
+  categoryIds?: string[];
 }
 
 /**

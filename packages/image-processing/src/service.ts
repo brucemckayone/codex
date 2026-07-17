@@ -200,6 +200,64 @@ export class ImageProcessingService extends BaseService {
   }
 
   /**
+   * Process and store a category cover image (org landing "Browse by topic").
+   *
+   * Mirrors {@link processContentThumbnail}'s variant pipeline (sm/md/lg WebP →
+   * R2) with two deliberate differences:
+   *   • It does NOT touch the database. Category ownership (the resolved space)
+   *     lives in `CategoriesService`, not here, so the caller persists the
+   *     returned `coverImageKey` via `categories.update(id, { coverImageKey },
+   *     space)`. Keeping the DB write in the space-aware service avoids
+   *     duplicating scope logic in the image layer.
+   *   • Keys are namespaced by `categoryId` (`categories/{id}/cover/{size}.webp`)
+   *     and therefore deterministic, so a re-upload OVERWRITES the previous
+   *     cover in place — no orphaned objects on replace.
+   *
+   * @param categoryId - Owning category (keys are namespaced under it)
+   * @param file - Uploaded image (validated: MIME allowlist, size, magic bytes)
+   * @returns The base R2 key plus the lg CDN URL, size, and mime type. Append
+   *   `/{sm|md|lg}.webp` to `coverImageKey` to address a specific variant.
+   */
+  async processCategoryCover(
+    categoryId: string,
+    file: File
+  ): Promise<{
+    coverImageKey: string;
+    url: string;
+    size: number;
+    mimeType: string;
+  }> {
+    // Validate image (MIME type, size, magic bytes) — no SVG (raster only).
+    const { buffer } = await validateImageFile(file, false);
+
+    const inputBuffer = new Uint8Array(buffer);
+    const variants = processImageVariants(inputBuffer);
+
+    const coverImageKey = `categories/${categoryId}/cover`;
+    const keys: VariantKeys = {
+      sm: `${coverImageKey}/sm.webp`,
+      md: `${coverImageKey}/md.webp`,
+      lg: `${coverImageKey}/lg.webp`,
+    };
+
+    await uploadImageVariants({
+      keys,
+      variants,
+      r2: this.r2Service,
+      failureLabel: 'Category cover',
+    });
+
+    return {
+      coverImageKey,
+      // Return the md variant — the public topic list serves `${key}/md.webp`,
+      // so the immediately-usable URL stays consistent with what renders.
+      url: `${this.r2PublicUrlBase}/${keys.md}`,
+      size: variants.md.byteLength,
+      mimeType: 'image/webp',
+    };
+  }
+
+  /**
    * Process and store user avatar
    * Uploads to R2 and updates user record
    */

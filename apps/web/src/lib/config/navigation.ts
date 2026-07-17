@@ -14,6 +14,7 @@ export type SidebarIcon =
   | 'dashboard'
   | 'content'
   | 'media'
+  | 'categories'
   | 'analytics'
   | 'team'
   | 'customers'
@@ -64,6 +65,7 @@ export const SIDEBAR_BASE_LINKS: SidebarLink[] = [
 
 /** Studio sidebar — admin-only links */
 export const SIDEBAR_ADMIN_LINKS: SidebarLink[] = [
+  { href: '/studio/categories', label: 'Categories', icon: 'categories' },
   { href: '/studio/team', label: 'Team', icon: 'team' },
   { href: '/studio/customers', label: 'Customers', icon: 'customers' },
   { href: '/studio/settings', label: 'Settings', icon: 'settings' },

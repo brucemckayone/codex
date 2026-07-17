@@ -8,6 +8,8 @@ export { z } from 'zod';
 export * from './admin/admin-schemas';
 // Auth schemas
 export * from './auth';
+// Category taxonomy schemas
+export * from './content/category-schemas';
 // Content management schemas
 export * from './content/content-schemas';
 // Creator onboarding schemas
