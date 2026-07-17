@@ -462,6 +462,17 @@
     clearBuffering();
   }
 
+  /**
+   * Backstop for a missed `canplay`. `loadeddata` fires once the first frame
+   * is decoded (readyState ≥ HAVE_CURRENT_DATA). `canplay` is the primary
+   * signal that lifts the loading curtain, but it can be dropped on HLS.js/MSE
+   * source swaps and media-error recovery — without this fallback the branded
+   * gradient can sit over a ready (or playing) video indefinitely.
+   */
+  function handleLoadedData() {
+    loading = false;
+  }
+
   function clearBuffering() {
     if (bufferingTimer) {
       clearTimeout(bufferingTimer);
@@ -485,6 +496,11 @@
   }
 
   function handlePlaying() {
+    // Frames are actively rendering — initial load is definitively over.
+    // Clearing `loading` here (not just `buffering`) is the last-resort
+    // backstop against a missed `canplay`/`loadeddata` leaving the skeleton
+    // stranded over a playing video.
+    loading = false;
     clearBuffering();
   }
 
@@ -1019,6 +1035,7 @@
         preload="metadata"
         poster={poster}
         oncanplay={handleCanPlay}
+        onloadeddata={handleLoadedData}
         onerror={handleError}
         onplay={handlePlay}
         onpause={handlePause}

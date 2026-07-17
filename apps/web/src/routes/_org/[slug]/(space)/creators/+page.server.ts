@@ -3,7 +3,8 @@
  *
  * Fetches paginated list of public creators for the organization.
  * Uses the GET /api/organizations/public/:slug/creators endpoint.
- * Sets DYNAMIC_PUBLIC cache headers for edge caching.
+ * Sets PRIVATE cache headers — the page is auth-varying (org layout injects
+ * `user`), so it must not be shared-cached.
  */
 import { getPublicCreators } from '$lib/remote/org.remote';
 import { CACHE_HEADERS } from '$lib/server/cache';
@@ -24,11 +25,12 @@ export const load: PageServerLoad = async ({ url, setHeaders, parent }) => {
     limit: PAGE_LIMIT,
   });
 
-  // Set the public cache header only on the success path. If any await above
-  // throws, the resulting 4xx/5xx error response inherits SvelteKit's default
-  // (no-cache) headers instead of the public CDN policy — which would otherwise
-  // poison the CDN with the error page for every visitor for `max-age` seconds.
-  setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC);
+  // Auth-varying HTML — the org layout injects the auth-aware `user` section,
+  // so the SAME URL differs by auth state. Shared caches (Cloudflare edge,
+  // miniflare) key by URL, NOT by Cookie, so a `public` copy cached for an
+  // anonymous visitor is served to signed-in users too. PRIVATE keeps it out
+  // of shared caches. See docs/caching-strategy.md §HTTP/CDN caching.
+  setHeaders(CACHE_HEADERS.PRIVATE);
 
   return {
     creators: {

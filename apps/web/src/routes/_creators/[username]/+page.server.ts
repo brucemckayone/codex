@@ -123,12 +123,12 @@ export const load: PageServerLoad = async ({
   }
   const organizations = [...orgMap.values()];
 
-  // Set the public cache header only on the success path. Payload includes
-  // `user: locals.user`, so the response varies by auth — REVALIDATE lets the
-  // CDN serve the shared anonymous version while forcing the browser to
-  // revalidate once the user signs in. Setting AFTER the awaits prevents the
-  // CDN from caching a 4xx/5xx error response with these public-cache headers.
-  setHeaders(CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE);
+  // Payload includes `user: locals.user`, so the response varies by auth.
+  // Shared caches (Cloudflare edge, miniflare) key by URL, NOT by Cookie, so a
+  // `public` response cached for an anonymous visitor is served to signed-in
+  // users too — the stale "Sign in" render. PRIVATE keeps auth-varying pages
+  // out of shared caches. See docs/caching-strategy.md §HTTP/CDN caching.
+  setHeaders(CACHE_HEADERS.PRIVATE);
 
   return {
     username,

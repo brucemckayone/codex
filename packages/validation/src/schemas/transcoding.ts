@@ -72,7 +72,14 @@ export const thumbnailSizeSchema = z.enum(THUMBNAIL_SIZES);
 export type ThumbnailSize = z.infer<typeof thumbnailSizeSchema>;
 
 /**
- * HLS variant names (quality levels)
+ * HLS variant names (quality levels) — the LOGICAL variant labels reported in
+ * `readyVariants` (webhook payload, DB, streaming response, client quality
+ * picker). For audio the transcoder collapses its bitrate rungs to the single
+ * logical label `audio` (see infrastructure/runpod/handler/main.py
+ * `transcode_audio_hls` → `return ["audio"]`).
+ *
+ * NOTE: this is NOT the same set as the PHYSICAL R2 directory names the master
+ * playlist references — use `hlsVariantPathSchema` for that. See its docblock.
  */
 export const hlsVariantSchema = z.enum([
   '1080p',
@@ -81,6 +88,34 @@ export const hlsVariantSchema = z.enum([
   '360p',
   'source',
   'audio',
+]);
+
+/**
+ * PHYSICAL HLS variant directory names — the path segment the transcoder emits
+ * into `master.m3u8` (`<variant>/index.m3u8`) and creates as an R2 directory.
+ * These are what the token-authenticated variant-playlist proxy receives as its
+ * `:variant` route param, so this enum is the allowlist that stops the proxy
+ * being coerced into building an arbitrary R2 key path.
+ *
+ * This DIFFERS from `hlsVariantSchema` (the logical `readyVariants` set):
+ *   - video rungs coincide (`720p` label == `720p` directory), plus `source`;
+ *   - audio has NO physical `audio/` directory — it is split into bitrate rungs
+ *     `128k` / `64k` (RunPod `AUDIO_VARIANTS`), which the master references
+ *     directly. Reusing the logical enum here 403'd all audio playback.
+ *
+ * Python mirror: infrastructure/runpod/handler/main.py — `HLS_VARIANTS` keys
+ * (video) + the `source` fallback + `AUDIO_VARIANTS` keys (audio). `1080p` and
+ * `360p` are kept for forward-compat (the v1 ladder dropped them; re-adding is
+ * a config-only change and the proxy must not 403 if they return).
+ */
+export const hlsVariantPathSchema = z.enum([
+  '1080p',
+  '720p',
+  '480p',
+  '360p',
+  'source',
+  '128k',
+  '64k',
 ]);
 
 /**

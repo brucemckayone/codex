@@ -102,6 +102,21 @@ describe('buildPublicContentCacheType', () => {
       buildPublicContentCacheType({ sort: 'newest', page: 2 })
     );
   });
+
+  it('folds slug into the key so distinct slugs get distinct data slots', () => {
+    const withSlug = buildPublicContentCacheType({
+      sort: 'newest',
+      slug: 'liberty',
+    });
+    const otherSlug = buildPublicContentCacheType({
+      sort: 'newest',
+      slug: 'freedom',
+    });
+    const noSlug = buildPublicContentCacheType({ sort: 'newest' });
+    expect(withSlug).toContain(':slug:liberty');
+    expect(withSlug).not.toBe(otherSlug);
+    expect(withSlug).not.toBe(noSlug);
+  });
 });
 
 describe('shouldCachePublicContentQuery', () => {
@@ -117,10 +132,10 @@ describe('shouldCachePublicContentQuery', () => {
     ).toBe(false);
   });
 
-  it('bypasses cache when slug is present (exact-lookup path)', () => {
+  it('caches slug lookups (content-detail path; slug folds into the data-slot key)', () => {
     expect(
       shouldCachePublicContentQuery({ orgId: 'org-1', slug: 'my-content' })
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('bypasses cache when creatorId filter is present (lower-volume)', () => {
@@ -271,6 +286,27 @@ describe('getCachedPublicContent', () => {
     await getCachedPublicContent(cache, 'org-2', { orgId: 'org-2' }, fB);
     expect(fA).toHaveBeenCalledTimes(2);
     expect(fB).toHaveBeenCalledTimes(1);
+  });
+
+  it('SLUG PATH: caches a slug lookup and re-fetches after org invalidate', async () => {
+    // Content-detail SSR fetches by slug. This proves the slug slot both
+    // caches AND is invalidated by the same org version bump that
+    // publish/update/unpublish/delete/thumbnail fire — so a cached detail
+    // page never outlives a content mutation (the invalidation contract).
+    const orgId = 'org-1';
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue({ items: [{ id: '1' }], pagination: { total: 1 } });
+    const slugQuery = { orgId, slug: 'liberty', limit: 1 };
+
+    await getCachedPublicContent(cache, orgId, slugQuery, fetcher);
+    await getCachedPublicContent(cache, orgId, slugQuery, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(1); // second call served from cache
+
+    await cache.invalidate(CacheType.COLLECTION_ORG_CONTENT(orgId));
+
+    await getCachedPublicContent(cache, orgId, slugQuery, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(2); // org bump reached the slug slot
   });
 
   it('uses the 300s default TTL', async () => {

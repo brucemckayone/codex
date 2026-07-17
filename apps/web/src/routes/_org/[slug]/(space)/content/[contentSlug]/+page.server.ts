@@ -35,16 +35,16 @@ export const load: PageServerLoad = async ({
   const { org } = parentData;
   const { contentSlug } = params;
 
-  // Cache header is applied ONLY on the success path right before each return.
-  // Setting it eagerly here would cause `error(404)` and unhandled rejections
-  // in awaits below to inherit `Cache-Control: public, max-age=...`, poisoning
-  // the CDN with the error response. Public visitors get CDN caching;
-  // authenticated responses vary by access state. REVALIDATE variant forces
-  // browsers to revalidate on every request so a buyer returning from Stripe
-  // doesn't see the anonymous response cached earlier.
-  const successCacheHeaders = locals.user
-    ? CACHE_HEADERS.PRIVATE
-    : CACHE_HEADERS.DYNAMIC_PUBLIC_REVALIDATE;
+  // This page renders auth-aware HTML — the org layout injects `user`, and the
+  // CTA switches on isAuthenticated — so the SAME URL yields different markup
+  // per auth state. Shared caches (Cloudflare edge, miniflare in CI) key by
+  // URL, NOT by Cookie, so any `public` response cached for an anonymous
+  // visitor is served to signed-in users too — the "You need to sign in" bug
+  // for owners. PRIVATE keeps every auth-varying page out of shared caches. The
+  // DB stays shielded: the public content list (incl. this slug lookup) is
+  // KV-cached in content-api, so PRIVATE costs an SSR render, not a query.
+  // See docs/caching-strategy.md §HTTP/CDN caching.
+  const successCacheHeaders = CACHE_HEADERS.PRIVATE;
 
   // Fetch content via public endpoint with org.id + slug — 1 API call.
   // The old getContentBySlug() made 2 sequential HTTP calls:
