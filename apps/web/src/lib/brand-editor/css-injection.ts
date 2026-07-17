@@ -325,6 +325,25 @@ const BRAND_PREFIX_KEYS = new Set([
   'shader-logo-url',
 ]);
 
+/**
+ * Override keys whose EMITTED CSS-var value is a font-family name and so must
+ * be single-quoted — a bare family with a numeric/leading-digit token (e.g.
+ * "Source Sans 3") is an invalid unquoted CSS identifier and would drop the
+ * font. Colours/numbers MUST stay unquoted, so only these keys are wrapped.
+ * The bare name is preserved in state (see setThemeFont/getThemeFont) — only
+ * the CSS-var value is quoted.
+ */
+const FONT_OVERRIDE_KEYS = new Set(['font-body', 'font-heading']);
+
+/**
+ * Wrap a font-family name in single quotes for use as a CSS custom-property
+ * value. Single source of quoting shared by the light path (CSS_VAR_MAPPINGS)
+ * and the dark emit paths so the two can never drift apart.
+ */
+function quoteFamily(name: string): string {
+  return `'${name}'`;
+}
+
 /** The CSS variable mappings from editor state to --brand-* properties. */
 const CSS_VAR_MAPPINGS: CssVarMapping[] = [
   {
@@ -358,11 +377,11 @@ const CSS_VAR_MAPPINGS: CssVarMapping[] = [
     // var(--font-sans) here creates a --brand-font-body ↔ --font-sans cycle
     // that invalidates both and drops the brand font entirely (Codex-eb00a.7).
     property: '--brand-font-body',
-    getValue: (s) => (s.fontBody ? `'${s.fontBody}'` : undefined),
+    getValue: (s) => (s.fontBody ? quoteFamily(s.fontBody) : undefined),
   },
   {
     property: '--brand-font-heading',
-    getValue: (s) => (s.fontHeading ? `'${s.fontHeading}'` : undefined),
+    getValue: (s) => (s.fontHeading ? quoteFamily(s.fontHeading) : undefined),
   },
 ];
 
@@ -484,7 +503,12 @@ export function injectBrandVars(state: BrandEditorState): void {
   const preservedProps = new Set([...BASE_VAR_PROPS, ...DARK_VAR_PROPS]);
   removeOverrideVars(el, preservedProps);
 
-  // Inject token overrides from fine-tune panels
+  // Inject token overrides from fine-tune panels.
+  // NOTE: `font-body`/`font-heading` are DARK-only override keys — the LIGHT
+  // font is field-derived via CSS_VAR_MAPPINGS (fontBody/fontHeading). They
+  // must never appear in this LIGHT tokenOverrides map or the font would be
+  // double-emitted (once quoted by CSS_VAR_MAPPINGS, once raw here) now that
+  // those keys live in BRAND_PREFIX_KEYS.
   const overrides = state.tokenOverrides ?? {};
   for (const [key, value] of Object.entries(overrides)) {
     if (value == null) continue;
@@ -511,7 +535,9 @@ export function injectBrandVars(state: BrandEditorState): void {
     const baseProp = BRAND_PREFIX_KEYS.has(key)
       ? `--brand-${key}`
       : `--color-${key}`;
-    el.style.setProperty(`${baseProp}${DARK_TOKEN_SUFFIX}`, value);
+    // Font families must be quoted (see quoteFamily); everything else stays raw.
+    const emitted = FONT_OVERRIDE_KEYS.has(key) ? quoteFamily(value) : value;
+    el.style.setProperty(`${baseProp}${DARK_TOKEN_SUFFIX}`, emitted);
   }
 
   // Inject dark mode overrides (consumed by dark-mode rules in org-brand.css)
@@ -609,7 +635,9 @@ export function darkTokenOverridesToCssVars(
     const baseProp = BRAND_PREFIX_KEYS.has(key)
       ? `--brand-${key}`
       : `--color-${key}`;
-    out[`${baseProp}${DARK_TOKEN_SUFFIX}`] = value;
+    // Font families must be quoted (see quoteFamily); everything else stays raw.
+    const emitted = FONT_OVERRIDE_KEYS.has(key) ? quoteFamily(value) : value;
+    out[`${baseProp}${DARK_TOKEN_SUFFIX}`] = emitted;
   }
   return out;
 }

@@ -141,6 +141,40 @@ describe('darkTokenOverridesToCssVars', () => {
     expect(light['--brand-shader-preset']).toBe('ether');
     expect(dark['--brand-shader-preset-dark']).toBe('ink');
   });
+
+  // Codex-rsk0y: dark font-family values MUST be single-quoted. A bare name
+  // with a numeric token (e.g. "Source Sans 3") is an INVALID unquoted CSS
+  // identifier, so `font-family: Source Sans 3` is dropped and the browser
+  // silently falls back to the light font. The light path already quotes via
+  // CSS_VAR_MAPPINGS; the dark path must match.
+  it('quotes dark font-family emit (numeric family name)', () => {
+    const result = darkTokenOverridesToCssVars({
+      'font-body': 'Source Sans 3',
+    });
+
+    expect(result['--brand-font-body-dark']).toBe("'Source Sans 3'");
+  });
+
+  it('quotes both dark font override keys', () => {
+    const result = darkTokenOverridesToCssVars({
+      'font-body': 'Source Sans 3',
+      'font-heading': 'DM Sans',
+    });
+
+    expect(result['--brand-font-body-dark']).toBe("'Source Sans 3'");
+    expect(result['--brand-font-heading-dark']).toBe("'DM Sans'");
+  });
+
+  it('does NOT quote non-font dark overrides (guard against over-quoting)', () => {
+    const result = darkTokenOverridesToCssVars({
+      'shader-preset': 'ink',
+      'surface-secondary': '#0a0a0a',
+    });
+
+    // Presets and colours stay raw — only font families are quoted.
+    expect(result['--brand-shader-preset-dark']).toBe('ink');
+    expect(result['--color-surface-secondary-dark']).toBe('#0a0a0a');
+  });
 });
 
 /**
@@ -188,6 +222,16 @@ describe('brand fonts do not self-reference --font-sans (no CSS var cycle)', () 
     expect(el.style.getPropertyValue('--brand-font-heading')).toBe("'Poppins'");
     expect(el.style.getPropertyValue('--brand-font-body')).not.toContain(
       'var(--font-sans)'
+    );
+  });
+
+  it('injectBrandVars quotes a numeric light family name (Source Sans 3)', () => {
+    const el = makeOrgLayout();
+    injectBrandVars({ ...baseState, fontBody: 'Source Sans 3' });
+
+    // A numeric token is invalid unquoted; the single-quoted form is required.
+    expect(el.style.getPropertyValue('--brand-font-body')).toBe(
+      "'Source Sans 3'"
     );
   });
 
