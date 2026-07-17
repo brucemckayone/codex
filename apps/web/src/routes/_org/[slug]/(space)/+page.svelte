@@ -29,6 +29,7 @@
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
   import { buildContentUrl } from '$lib/utils/subdomain';
+  import { extractPlainText } from '@codex/validation';
   import {
     eq,
     hydrateIfNeeded,
@@ -54,55 +55,44 @@
   let videoActive = $state(false);
   let isDesktop = $state(false);
 
-  // Browse-everything filter state — the single source of truth is the URL
-  // (?type / ?category), so a deep-linked or shared filter renders correctly
-  // on SSR and BrowseModule stays a pure function of its props. Interaction
-  // updates the URL via shallow routing (replaceState) so NO load re-runs and
-  // the org layout's beforeNavigate progress-flush never fires on a filter tap.
-  const activeType = $derived.by<BrowseType>(() => {
-    const raw = page.url.searchParams.get('type');
+  // Browse-everything filter state. The active type/topic live in LOCAL $state
+  // so a tab/chip tap updates the grid SYNCHRONOUSLY — SvelteKit's shallow
+  // routing (replaceState) updates history but does NOT reliably re-fire a
+  // `$derived` reading `page.url.searchParams` without a load, so relying on
+  // URL-as-source-of-truth left taps only taking effect on refresh (R1 bug).
+  // We treat local state as authoritative and MIRROR it to the URL for
+  // deep-linking/SSR; the initial values are read from the URL once (covers a
+  // server render and a shared `?type`/`?category` link).
+  function readActiveType(url: URL): BrowseType {
+    const raw = url.searchParams.get('type');
     return raw === 'video' || raw === 'audio' || raw === 'article'
       ? raw
       : 'all';
-  });
-  const activeCategory = $derived(page.url.searchParams.get('category'));
+  }
+  let activeType = $state<BrowseType>(readActiveType(page.url));
+  let activeCategory = $state<string | null>(
+    page.url.searchParams.get('category')
+  );
 
-  // Ref to the browse section so a topic click can scroll it into view (the
-  // topic grid sits above the browse module in the section flow).
-  let browseSectionEl: HTMLElement | undefined = $state();
-
-  /** Write the browse filter into the URL without navigating/refetching. */
-  function setBrowseParams(next: {
-    type?: BrowseType;
-    category?: string | null;
-  }) {
+  /** Mirror the active filter into the URL without navigating/refetching. */
+  function syncBrowseUrl() {
     if (!browser) return;
     const url = new URL(page.url);
-    if ('type' in next) {
-      if (next.type && next.type !== 'all')
-        url.searchParams.set('type', next.type);
-      else url.searchParams.delete('type');
-    }
-    if ('category' in next) {
-      if (next.category) url.searchParams.set('category', next.category);
-      else url.searchParams.delete('category');
-    }
+    if (activeType !== 'all') url.searchParams.set('type', activeType);
+    else url.searchParams.delete('type');
+    if (activeCategory) url.searchParams.set('category', activeCategory);
+    else url.searchParams.delete('category');
     replaceState(url, {});
   }
 
-  const handleTypeChange = (type: BrowseType) => setBrowseParams({ type });
-  const handleCategoryChange = (slug: string | null) =>
-    setBrowseParams({ category: slug });
-
-  // Topic-grid click → filter the browse module inline (toggle off when the
-  // active topic is re-clicked) and scroll the catalogue into view.
-  function handleTopicSelect(slug: string) {
-    const next = activeCategory === slug ? null : slug;
-    setBrowseParams({ category: next });
-    if (next && browser) {
-      browseSectionEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }
+  const handleTypeChange = (type: BrowseType) => {
+    activeType = type;
+    syncBrowseUrl();
+  };
+  const handleCategoryChange = (slug: string | null) => {
+    activeCategory = slug;
+    syncBrowseUrl();
+  };
 
   onMount(() => {
     // Hydrate the org-scoped TanStack DB cache with whatever content we
@@ -145,7 +135,10 @@
         id: c.id,
         title: c.title,
         kind: "Editor's pick",
-        description: c.description ?? null,
+        contentType: c.contentType === 'written' ? 'article' : c.contentType,
+        // Flatten any stored ProseMirror/TipTap doc JSON to plain text so an
+        // article pick never shows raw `{"type":"doc",…}` in its summary (R3 ②).
+        description: extractPlainText(c.description),
         href: buildContentUrl(page.url, c),
         image: c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null,
       }))
@@ -568,6 +561,7 @@
           items={resume}
           itemMinWidth="18rem"
           gap="var(--space-4)"
+          showArrows={false}
           ariaLabel={m.org_continue_watching_title()}
         >
           {#snippet renderItem(item)}
@@ -601,7 +595,6 @@
       variant="grid"
       {shape}
       chrome="transparent"
-      autoPromoteAudio
       id={c.id}
       title={c.title}
       thumbnail={c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null}
@@ -627,9 +620,10 @@
     />
   {/snippet}
 
-  <!-- Editor's picks — full-bleed multi-feature carousel over content.featured. -->
+  <!-- Editor's picks — contained multi-feature carousel over content.featured
+       (R3 ⑥: sits within the page's content column, not edge-to-edge). -->
   {#if featureItems.length > 0}
-    <section class="section section--bleed">
+    <section class="section">
       <header class="lede">
         <p class="lede__eyebrow">Editor's picks</p>
       </header>
@@ -637,8 +631,10 @@
     </section>
   {/if}
 
-  <!-- Browse by topic — image-led curated-category grid (streamed). Clicking a
-       topic filters the browse module below inline (+ deep-link ?category). -->
+  <!-- Browse by topic — image-led curated-category grid (streamed). Each topic
+       is a curated on-ramp into the Explore page's dynamic filter: clicking one
+       navigates to /explore?category=<slug> (R4 ⑬), not an inline landing
+       filter. -->
   {#if resolvedCategories.length > 0}
     <section class="section section--tight">
       <header class="lede">
@@ -651,7 +647,10 @@
           </a>
         </div>
       </header>
-      <TopicGrid items={resolvedCategories} onselect={handleTopicSelect} />
+      <TopicGrid
+        items={resolvedCategories}
+        hrefFor={(slug) => `/explore?category=${encodeURIComponent(slug)}`}
+      />
     </section>
   {/if}
 
@@ -670,8 +669,9 @@
       </header>
       <Carousel
         items={newThisWeek}
-        itemMinWidth="12rem"
+        itemMinWidth="24rem"
         gap="var(--space-4)"
+        showArrows={false}
         ariaLabel="New this week"
       >
         {#snippet renderItem(c)}
@@ -681,49 +681,10 @@
     </section>
   {/if}
 
-  <!-- Subscribe CTA — one banner between the curated rails and the exhaustive
-       browse module. Pricing is streamed; the banner renders immediately and
-       swaps "From £X/mo" in on resolve (its absence is a valid state). -->
-  {#if shouldShowSubscribeCTA}
-    {@const orgId = data.org.id}
-    {@const orgDisplayName = data.org.name ?? 'us'}
-    {@const previewProp =
-      subscribePreview.length > 0 ? subscribePreview : undefined}
-    {#await data.subscriptionPricing}
-      <SubscribeCTA
-        organizationId={orgId}
-        orgName={orgDisplayName}
-        isAuthenticated={!!user}
-        previewContent={previewProp}
-        totalPreviewCount={subscribePreviewTotal}
-      />
-    {:then pricing}
-      <SubscribeCTA
-        organizationId={orgId}
-        orgName={orgDisplayName}
-        isAuthenticated={!!user}
-        startingPriceCents={pricing?.startingPriceCents}
-        monthlyPriceCents={pricing?.monthlyPriceCents}
-        annualPriceCents={pricing?.annualPriceCents}
-        currency={pricing?.currency}
-        previewContent={previewProp}
-        totalPreviewCount={subscribePreviewTotal}
-      />
-    {:catch}
-      <SubscribeCTA
-        organizationId={orgId}
-        orgName={orgDisplayName}
-        isAuthenticated={!!user}
-        previewContent={previewProp}
-        totalPreviewCount={subscribePreviewTotal}
-      />
-    {/await}
-  {/if}
-
-  <!-- Browse everything — hybrid module: type tabs + active-topic chip over
-       per-type rails (unfiltered) or a filtered grid. Controlled — it owns no
-       state; the landing threads {type, category} from the URL + handlers. -->
-  <section class="section" bind:this={browseSectionEl}>
+  <!-- Browse everything — hybrid module: type tabs + active-topic chip over a
+       single uniform grid (R1). Controlled — it owns no state; the landing
+       threads {type, category} from local state + handlers. -->
+  <section class="section">
     <header class="lede">
       <p class="lede__eyebrow">The catalogue</p>
       <hr class="lede__rule" aria-hidden="true" />
@@ -782,6 +743,7 @@
           items={creators.items}
           itemMinWidth="calc(var(--space-24) * 3)"
           gap="var(--space-6)"
+          showArrows={false}
           ariaLabel={m.org_creators_preview_title()}
         >
           {#snippet renderItem(creator: typeof creators.items[number])}
@@ -797,6 +759,47 @@
       {/if}
     {/await}
   </section>
+
+  <!-- Subscribe CTA — quiet closing banner at the very bottom of the feed
+       (R4 ⑤): moved here so it never interrupts the content flow. Pricing is
+       streamed; it renders immediately and swaps "From £X/mo" in on resolve.
+       The persistent SubscribeStickyBar below is intentionally kept as the
+       always-visible prompt. -->
+  {#if shouldShowSubscribeCTA}
+    {@const orgId = data.org.id}
+    {@const orgDisplayName = data.org.name ?? 'us'}
+    {@const previewProp =
+      subscribePreview.length > 0 ? subscribePreview : undefined}
+    {#await data.subscriptionPricing}
+      <SubscribeCTA
+        organizationId={orgId}
+        orgName={orgDisplayName}
+        isAuthenticated={!!user}
+        previewContent={previewProp}
+        totalPreviewCount={subscribePreviewTotal}
+      />
+    {:then pricing}
+      <SubscribeCTA
+        organizationId={orgId}
+        orgName={orgDisplayName}
+        isAuthenticated={!!user}
+        startingPriceCents={pricing?.startingPriceCents}
+        monthlyPriceCents={pricing?.monthlyPriceCents}
+        annualPriceCents={pricing?.annualPriceCents}
+        currency={pricing?.currency}
+        previewContent={previewProp}
+        totalPreviewCount={subscribePreviewTotal}
+      />
+    {:catch}
+      <SubscribeCTA
+        organizationId={orgId}
+        orgName={orgDisplayName}
+        isAuthenticated={!!user}
+        previewContent={previewProp}
+        totalPreviewCount={subscribePreviewTotal}
+      />
+    {/await}
+  {/if}
 
   </div>
 </div>
@@ -1209,12 +1212,6 @@
      continuous discovery flow. */
   .section--tight {
     padding-block: var(--space-8);
-  }
-
-  /* Editor's picks reads as a prominent full-width band — drop the section's
-     content cap so the feature carousel spans the content-area gutter. */
-  .section--bleed {
-    max-width: none;
   }
 
   /* Align sections with the site's 16px inline gutter on mobile so every

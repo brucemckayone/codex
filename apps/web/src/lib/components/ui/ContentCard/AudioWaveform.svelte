@@ -65,28 +65,38 @@
     }
   }
 
-  // Resolve bar count with per-variant defaults. Thumb renders fewer,
-  // chunkier bars so the 1:1 tile reads at a glance; strip keeps the
-  // denser 24-bar silhouette.
-  const barCount = $derived(bars ?? (variant === 'thumb' ? 18 : 24));
+  // Resolve bar count with per-variant defaults. Strip renders a dense, fine
+  // wave (matches the AudioPlayer scrubber's 20–40 bars); thumb renders
+  // fewer, chunkier bars so the square album-art fallback reads at a glance.
+  const barCount = $derived(bars ?? (variant === 'thumb' ? 24 : 40));
 
-  // Per-variant viewbox + bar width. Thumb uses a squared viewBox so the
-  // `preserveAspectRatio="none"` stretch maps cleanly into the 1:1 frame
-  // without distortion at the ends.
-  const VIEWBOX_W = $derived(variant === 'thumb' ? 120 : 240);
-  const VIEWBOX_H = $derived(variant === 'thumb' ? 120 : 24);
-  const BAR_WIDTH = $derived(variant === 'thumb' ? 4 : 6);
+  // ── Slot-based geometry ───────────────────────────────────────────
+  // Each bar owns a fixed-width horizontal SLOT and the viewBox WIDTH
+  // scales with the bar count, so the bar:gap ratio is CONSTANT no matter
+  // how many bars a caller asks for. This is the fix for the "blocky"
+  // editor's-pick wave: the old fixed 240-unit viewBox made `bars={64}`
+  // overflow into a NEGATIVE gap, so rectangles overlapped into solid
+  // slabs. With a scaled viewBox + `preserveAspectRatio="none"`, the clean
+  // strip simply stretches to fill whatever box it is handed.
+  const SLOT = 10;
+  // Skinny bars + wide gaps mirror the player scrubber (gap ≈ 34–42% of the
+  // slot). Thumb keeps slightly chunkier bars for the square fallback tile.
+  const GAP_RATIO = $derived(variant === 'thumb' ? 0.34 : 0.42);
+  const BAR_WIDTH = $derived(SLOT * (1 - GAP_RATIO));
+  const GAP = $derived(SLOT * GAP_RATIO);
+  const VIEWBOX_W = $derived(barCount * SLOT);
+  const VIEWBOX_H = $derived(variant === 'thumb' ? 120 : 48);
 
   // Derive bar heights once. `$derived` keeps this reactive if `id`/`bars`
   // changes (rare but cheap). Thumb variant clamps to a narrower band
-  // (0.45–1.0) so the silhouette stays full-looking even with the longer
-  // viewBox — avoids a spiky, sparse look.
+  // (0.45–1.0) so the silhouette stays full-looking; strip uses a wider
+  // band (0.28–1.0) for a livelier scrubber-like silhouette.
   const heights = $derived.by(() => {
     const seed = fnv1a(id);
     const rng = xorshiftStream(seed);
     const out: number[] = [];
-    const min = variant === 'thumb' ? 0.45 : 0.3;
-    const range = variant === 'thumb' ? 0.55 : 0.7;
+    const min = variant === 'thumb' ? 0.45 : 0.28;
+    const range = variant === 'thumb' ? 0.55 : 0.72;
     for (let i = 0; i < barCount; i++) {
       const n = rng.next().value ?? 0.5;
       out.push(min + n * range);
@@ -94,10 +104,10 @@
     return out;
   });
 
-  // Layout maths: evenly-distributed bars across the viewBox width.
-  const gap = $derived((VIEWBOX_W - barCount * BAR_WIDTH) / (barCount - 1));
   const centerY = $derived(VIEWBOX_H / 2);
-  const barRadius = $derived(variant === 'thumb' ? 2 : 1);
+  // Rounded (not full-pill) caps — echoes the player's `barRadius ≈ 0.4 ×
+  // bar width` so bars read as soft rounded strokes, not hard blocks.
+  const barRadius = $derived(BAR_WIDTH * 0.4);
 </script>
 
 <svg
@@ -113,7 +123,7 @@
     <rect
       class="waveform__bar"
       style="--_bar-index: {i}; --_bar-count: {barCount};"
-      x={i * (BAR_WIDTH + gap)}
+      x={i * SLOT + GAP / 2}
       y={centerY - barHeight / 2}
       width={BAR_WIDTH}
       height={barHeight}

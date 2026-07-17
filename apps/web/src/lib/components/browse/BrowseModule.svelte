@@ -1,25 +1,21 @@
 <!--
   @component BrowseModule
 
-  The hybrid "Browse everything" catalogue module (WP-10). A filter bar (type
-  tabs + a clearable active-topic chip) sits over a body that switches shape:
-
-    UNFILTERED (type='all' AND no category)  → per-TYPE RAILS
-      Videos (16:9), Audio (1:1), Articles (1:1); an empty rail is omitted.
-    FILTERED (type≠'all' OR a category set)  → a single 1:1 catalogue GRID
-      of the items matching BOTH the active type and the active topic.
+  The "Browse everything" catalogue module (WP-10, review-round R1). A filter
+  bar (type tabs + a clearable active-topic chip) sits over a single uniform
+  1:1 GRID, newest-first. The grid always shows every item matching BOTH the
+  active type ('all' = no narrowing) and the active topic; each card's own
+  design (video play glyph, audio waveform, article title-in-cover) makes its
+  type legible, so no per-type rails/sectioning is needed.
 
   CONTROLLED component — it owns no filter state. `type` and `category` are
   props; every interaction calls `onTypeChange` / `onCategoryChange` and the
-  owner (WP-11) feeds the new value back in. This makes the whole module a pure
-  function of its props: filtering and the rails↔grid decision are `$derived`,
-  so the same inputs always render the same output (and SSR renders the correct
+  owner (WP-11) feeds the new value back in. Filtering is `$derived`, so the
+  same inputs always render the same output (and SSR renders the correct
   initial view for a deep-linked `?type`/`?category`).
 
-  Reuses `ContentCard` (WP-7) with the per-section shape + `chrome='transparent'`
-  and `Carousel` (the arrow rail) for each type rail. No observers, no lifecycle:
-  the only browser-only behaviour lives inside those children, so this component
-  is SSR-safe by construction.
+  Reuses `ContentCard` (WP-7) at 1:1 with `chrome='transparent'`. No observers,
+  no lifecycle, so this component is SSR-safe by construction.
 
   @prop {BrowseItem[]} items - The full catalogue to browse (all types).
   @prop {BrowseCategory[]} categories - Curated topics; used to resolve the
@@ -30,7 +26,6 @@
   @prop {(slug: string | null) => void} onCategoryChange - Chip clear (null).
 -->
 <script lang="ts">
-  import Carousel from '$lib/components/carousel/Carousel.svelte';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import type {
     BrowseCategory,
@@ -67,35 +62,15 @@
     { value: 'article', label: 'Articles' },
   ];
 
-  // Rails show only in the fully-unfiltered state; any active filter → grid.
-  const showRails = $derived(type === 'all' && !category);
-
-  // Grid contents: items matching the active type AND the active topic.
+  // Grid contents: every item matching the active type AND the active topic,
+  // in the order the owner supplied them (newest-first). type='all' applies no
+  // type narrowing; a null category applies no topic narrowing.
   const filtered = $derived(
     items.filter(
       (i) =>
         (type === 'all' || i.contentType === type) &&
         (!category || (i.categorySlugs?.includes(category) ?? false))
     )
-  );
-
-  // Rails render from the full item set grouped by type. They are only visible
-  // when no filter is active, so no per-rail filtering is needed here. Each
-  // rail carries the shape its section reads in (video 16:9, audio/article 1:1)
-  // and an empty rail is dropped so the section never shows a bare heading.
-  const rails = $derived(
-    (
-      [
-        { type: 'video', label: 'Videos', shape: '16:9' },
-        { type: 'audio', label: 'Audio', shape: '1:1' },
-        { type: 'article', label: 'Articles', shape: '1:1' },
-      ] as const
-    )
-      .map((rail) => ({
-        ...rail,
-        items: items.filter((i) => i.contentType === rail.type),
-      }))
-      .filter((rail) => rail.items.length > 0)
   );
 
   // Resolve the active slug to its curator name for the chip; fall back to the
@@ -106,15 +81,15 @@
       : null
   );
 
-  // Body is empty either way when there's nothing to show — an empty catalogue
-  // (unfiltered, no rails) and a filter that matches nothing both surface a
-  // message rather than a silent blank div. The copy differs so the reason is
-  // clear: nothing published yet vs. nothing matching the current filter.
-  const isEmpty = $derived(showRails ? rails.length === 0 : filtered.length === 0);
+  // Empty state surfaces a message rather than a silent blank grid. The copy
+  // differs by cause: nothing published yet (no filter active) vs. nothing
+  // matching the current type/topic filter.
+  const isFiltering = $derived(type !== 'all' || !!category);
+  const isEmpty = $derived(filtered.length === 0);
   const emptyMessage = $derived(
-    showRails
-      ? 'No content yet.'
-      : 'No matching content. Try a different filter.'
+    isFiltering
+      ? 'No matching content. Try a different filter.'
+      : 'No content yet.'
   );
 
   let tablistEl = $state<HTMLDivElement | null>(null);
@@ -230,28 +205,6 @@
   >
     {#if isEmpty}
       <p class="browse__empty">{emptyMessage}</p>
-    {:else if showRails}
-      <div class="browse__rails">
-        {#each rails as rail (rail.type)}
-          <div class="browse__rail">
-            <div class="browse__rail-head">
-              <h3 class="browse__rail-title">{rail.label}</h3>
-              <button
-                type="button"
-                class="browse__rail-viewall"
-                onclick={() => onTypeChange(rail.type)}
-              >
-                View all &rarr;
-              </button>
-            </div>
-            <Carousel items={rail.items} ariaLabel={rail.label}>
-              {#snippet renderItem(item)}
-                {@render browseCard(item, rail.shape)}
-              {/snippet}
-            </Carousel>
-          </div>
-        {/each}
-      </div>
     {:else}
       <div class="content-grid">
         {#each filtered as item (item.id)}
@@ -349,58 +302,6 @@
   .browse__chip-x {
     font-size: var(--text-xs);
     line-height: 1;
-  }
-
-  .browse__rails {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-10);
-  }
-
-  .browse__rail {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  .browse__rail-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: var(--space-4);
-  }
-
-  .browse__rail-title {
-    margin: 0;
-    font-size: var(--text-2xl);
-    font-weight: var(--font-bold);
-    color: var(--color-text-primary);
-  }
-
-  /* Rendered as a button (not an anchor): it narrows the type filter via the
-     controlled `onTypeChange` contract — there is no URL to link to here (WP-11
-     owns URL sync). Styled to read as the mockup's `.lede__link`. */
-  .browse__rail-viewall {
-    padding: 0;
-    border: 0;
-    background: none;
-    font: inherit;
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--color-interactive);
-    white-space: nowrap;
-    cursor: pointer;
-    transition: var(--transition-colors);
-  }
-
-  .browse__rail-viewall:hover {
-    color: var(--color-interactive-hover);
-  }
-
-  .browse__rail-viewall:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--space-0-5);
-    border-radius: var(--radius-sm);
   }
 
   .browse__empty {

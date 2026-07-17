@@ -1,10 +1,10 @@
 <!--
   @component FeatureCarousel
 
-  A full-bleed "Editor's picks" carousel: one large editorial feature slide per
-  view (image underlay → scrim → eyebrow/kind → title → description → CTA), a row
-  of dots underneath, and an IntersectionObserver that keeps the active dot in
-  sync with whichever slide is in view.
+  A contained "Editor's picks" carousel: one large editorial feature slide per
+  view (image/waveform underlay → scrim → type badge → eyebrow → title →
+  description → per-type CTA), a row of dots underneath, and an
+  IntersectionObserver that keeps the active dot in sync with the visible slide.
 
   Distinct from `Carousel.svelte` (grid rail + arrows): slides are bespoke,
   full-width editorial panels and navigation is dot-driven, so this lives beside
@@ -15,27 +15,35 @@
   by `$app/environment`'s `browser`), so with JS disabled the component degrades
   to a plain horizontally scroll-snapping strip — no layout shift, no dead JS.
 
-  Full-bleed is a layout concern of the parent (WP-11 assembly gives it the
-  edge-to-edge width); the track fills 100% of whatever width it is handed.
+  Width is a layout concern of the parent; the track fills 100% of the width it
+  is handed (the parent keeps the picks within the page's content column, R3 ⑥).
 
   @prop {FeatureItem[]} items - Features to render. `< 2` shows a single static
     slide (or nothing when empty) with no dot row.
   @prop {string} ariaLabel - Accessible label for the carousel region.
-  @prop {string} ctaLabel - Decorative call-to-action shown on each slide. The
-    real click target is the whole-slide title anchor; the CTA is aria-hidden.
 -->
 <script lang="ts">
   import { browser } from '$app/environment';
+  import AudioWaveform from '$lib/components/ui/ContentCard/AudioWaveform.svelte';
+  import { FileTextIcon, MusicIcon, PlayIcon } from '$lib/components/ui/Icon';
   import type { FeatureItem } from './feature-carousel.types';
 
   interface Props {
     items: FeatureItem[];
     ariaLabel?: string;
-    ctaLabel?: string;
   }
 
-  const { items, ariaLabel = "Editor's picks", ctaLabel = 'Explore' }: Props =
-    $props();
+  const { items, ariaLabel = "Editor's picks" }: Props = $props();
+
+  // Per-type presentation: the top-left badge glyph/label + the CTA verb. The
+  // CTA replaces the old generic "Explore" so the pick reads as its medium
+  // ("Watch/Listen/Read"). Article picks are static; video/audio picks carry a
+  // play affordance (preview playback wired separately).
+  const TYPE_META = {
+    video: { label: 'Video', Icon: PlayIcon, cta: 'Watch now' },
+    audio: { label: 'Audio', Icon: MusicIcon, cta: 'Listen now' },
+    article: { label: 'Article', Icon: FileTextIcon, cta: 'Read' },
+  } as const;
 
   let trackEl = $state<HTMLDivElement | null>(null);
   let activeIndex = $state(0);
@@ -100,6 +108,8 @@
   >
     <div class="feature-carousel__track" bind:this={trackEl}>
       {#each items as item, index (item.id)}
+        {@const typeMeta = TYPE_META[item.contentType]}
+        {@const TypeIcon = typeMeta.Icon}
         <article
           class="feature-carousel__slide"
           role="group"
@@ -115,6 +125,27 @@
             {/if}
           </div>
           <div class="feature-carousel__scrim" aria-hidden="true"></div>
+          {#if item.contentType === 'audio'}
+            <!-- Audio picks read as audio at a glance: a waveform over the cover
+                 (or fallback gradient), above the scrim but under the body text
+                 — the design's audio signature (R3 ⑦). Decorative; the title
+                 anchor remains the action. -->
+            <div class="feature-carousel__waveform" aria-hidden="true">
+              <AudioWaveform
+                id={item.id}
+                bars={48}
+                class="feature-carousel__waveform-svg"
+              />
+            </div>
+          {/if}
+
+          <!-- Type badge — top-left, distinct from the "Editor's pick" eyebrow
+               in the body so the two never collide (R3 ③). -->
+          <div class="feature-carousel__badge">
+            <TypeIcon size={14} />
+            <span>{typeMeta.label}</span>
+          </div>
+
           <div class="feature-carousel__body">
             {#if item.kind}
               <p class="feature-carousel__eyebrow">{item.kind}</p>
@@ -125,11 +156,9 @@
             {#if item.description}
               <p class="feature-carousel__desc">{item.description}</p>
             {/if}
-            {#if ctaLabel}
-              <span class="feature-carousel__cta" aria-hidden="true">
-                {ctaLabel} &rarr;
-              </span>
-            {/if}
+            <span class="feature-carousel__cta" aria-hidden="true">
+              {typeMeta.cta} &rarr;
+            </span>
           </div>
         </article>
       {/each}
@@ -212,6 +241,53 @@
         var(--color-surface-elevated),
         var(--color-surface)
       );
+  }
+
+  /* Audio pick — waveform layer over the cover (or fallback gradient) so audio
+     reads at a glance. Above the scrim (z 1) but under the body text (z 2). */
+  .feature-carousel__waveform {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-8);
+    /* Brand-PRIMARY tinted (the org's core colour — same as the CTA + active
+       dot), lifted slightly toward --media-glyph so the wave stays legible
+       over a dark cover. Deliberately NOT --color-brand-accent, which reads
+       as an unrelated mustard against the brand (R6). The SVG bars inherit
+       this via currentColor. */
+    color: color-mix(in srgb, var(--color-brand-primary) 72%, var(--media-glyph));
+    /* Keep the cover visible through the wave — the pick is still a photo. */
+    opacity: var(--opacity-70, 0.7);
+  }
+
+  .feature-carousel__waveform :global(.feature-carousel__waveform-svg) {
+    /* A contained band, not a full-bleed slab: centred, capped width so it
+       reads as a scrubber echoing the player, not a wall of bars. */
+    width: min(100%, 60rem);
+    height: min(40%, 8.5rem);
+  }
+
+  /* Type badge — top-left pill above the scrim, distinct from the body eyebrow
+     so the medium and the "Editor's pick" label never collide (R3 ③). */
+  .feature-carousel__badge {
+    position: absolute;
+    top: var(--space-4);
+    left: var(--space-4);
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-full);
+    background: var(--color-player-overlay);
+    color: var(--media-glyph);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    letter-spacing: var(--tracking-wider);
+    text-transform: uppercase;
   }
 
   /* Legibility scrim built from --media-scrim so overlaid text keeps AA

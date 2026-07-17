@@ -10,8 +10,13 @@
 export interface FeatureItem {
   id: string;
   title: string;
-  /** Eyebrow / kind line, e.g. "Video", "Audio", "Editor's pick". */
+  /** Eyebrow / kind line, e.g. "Editor's pick". */
   kind: string;
+  /**
+   * Media type of the featured item. Drives the slide's type badge, the
+   * audio waveform treatment, and the "Watch / Listen / Read" CTA label.
+   */
+  contentType: 'video' | 'audio' | 'article';
   description?: string | null;
   href: string;
   image?: string | null;

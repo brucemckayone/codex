@@ -12,6 +12,7 @@ config({ path: path.resolve(__dirname, '../../../.env.dev') });
 
 import { dbWs } from '../src';
 import { flushDevKv } from './seed/cache-flush';
+import { seedCategories } from './seed/categories';
 import { seedCommerce } from './seed/commerce';
 import { SEED_PASSWORD } from './seed/constants';
 import { seedContent } from './seed/content';
@@ -35,6 +36,8 @@ const TABLES_TO_TRUNCATE = [
   'organizations',
   'organization_memberships',
   'content',
+  'categories',
+  'content_categories',
   'media_items',
   'purchases',
   'content_access',
@@ -116,6 +119,9 @@ async function seedData() {
     await seedTiers(db);
     await seedMedia(db);
     await seedContent(db);
+    // Categories + content⇄category joins for the org landing "Browse by
+    // topic" module. MUST run after seedContent — join rows FK content ids.
+    await seedCategories(db);
     await seedCommerce(db);
     await seedPlayback(db);
   });

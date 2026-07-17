@@ -92,11 +92,6 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-const railTitles = () =>
-  Array.from(document.querySelectorAll('.browse__rail-title')).map((el) =>
-    el.textContent?.trim()
-  );
-
 const tabByLabel = (label: string) =>
   Array.from(document.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find(
     (b) => b.textContent?.trim() === label
@@ -107,33 +102,35 @@ function pressKey(el: Element, key: string) {
   flushSync();
 }
 
-describe('BrowseModule — unfiltered (rails)', () => {
-  test('renders one rail per present type, grouped and in order', () => {
+describe('BrowseModule — unfiltered (grid)', () => {
+  test('unfiltered renders one grid of every item (no per-type rails)', () => {
     render();
-    expect(document.querySelectorAll('.browse__rail').length).toBe(3);
-    expect(railTitles()).toEqual(['Videos', 'Audio', 'Articles']);
-    // Grid body is not rendered while rails are showing.
-    expect(document.querySelector('.content-grid')).toBeNull();
+    // Review-round R1 replaced the per-type rails with a single uniform grid,
+    // so the rails container must be absent and the grid must hold every item.
+    expect(document.querySelector('.browse__rails')).toBeNull();
+    const grid = document.querySelector('.content-grid');
+    expect(grid).not.toBeNull();
+    expect(grid?.querySelectorAll('.cc').length).toBe(items.length);
   });
 
-  test('omits a rail whose type has no items', () => {
-    render({
-      items: items.filter((i) => i.contentType !== 'article'),
-    });
-    expect(document.querySelectorAll('.browse__rail').length).toBe(2);
-    expect(railTitles()).toEqual(['Videos', 'Audio']);
+  test('the unfiltered grid spans every type present in the catalogue', () => {
+    render();
+    const types = new Set(
+      Array.from(document.querySelectorAll('.content-grid .cc')).map((c) =>
+        c.getAttribute('data-content-type')
+      )
+    );
+    expect(types).toEqual(new Set(['video', 'audio', 'article']));
   });
 
-  test('each rail card carries its section shape (video 16:9, audio/article 1:1)', () => {
+  test('every unfiltered grid card carries the 1:1 catalogue shape', () => {
     render();
     const cards = Array.from(
-      document.querySelectorAll<HTMLElement>('.browse__rails .cc')
+      document.querySelectorAll<HTMLElement>('.content-grid .cc')
     );
     expect(cards.length).toBe(items.length);
     for (const card of cards) {
-      const expected =
-        card.getAttribute('data-content-type') === 'video' ? '16:9' : '1:1';
-      expect(card.getAttribute('data-shape')).toBe(expected);
+      expect(card.getAttribute('data-shape')).toBe('1:1');
     }
   });
 
@@ -227,20 +224,6 @@ describe('BrowseModule — type tabs', () => {
     expect(byIndex('All')).toBe('-1');
     expect(byIndex('Videos')).toBe('-1');
     expect(byIndex('Articles')).toBe('-1');
-  });
-
-  test('a "View all" rail link narrows to that rail\'s type', () => {
-    const onTypeChange: Mock<TypeFn> = vi.fn<TypeFn>();
-    render({ onTypeChange });
-
-    // Rails order is video, audio, article — the second "View all" is Audio.
-    const viewAlls = document.querySelectorAll<HTMLButtonElement>(
-      '.browse__rail-viewall'
-    );
-    viewAlls[1]?.click();
-    flushSync();
-
-    expect(onTypeChange).toHaveBeenCalledWith('audio');
   });
 });
 

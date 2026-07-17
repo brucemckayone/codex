@@ -120,7 +120,9 @@
     /**
      * Creator-flagged feature flag (DB `content.featured`). When true on a
      * browse-surface grid/list card, the thumbnail gains a soft brand-accent
-     * glow and a small star glyph bottom-left. Suppressed on
+     * glow, the card keeps a PERSISTENT brand-tinted surface (even under
+     * transparent chrome, so it pops instead of fading), and a small
+     * "Featured" pill (sparkle + label) sits bottom-left. Suppressed on
      * `featured`/`compact`/`resume` variants and audio-row layout — those
      * have their own promotional/structural treatment.
      */
@@ -273,6 +275,18 @@
       (isArticle && (resolvedShape === '1:1' || resolvedShape === '3:4')),
   );
 
+  // Audio grid/featured tiles ALWAYS read as audio: the cover image (or a
+  // brand-gradient fallback) sits BEHIND a decorative waveform + a centred
+  // play glyph, so a real thumbnail can't masquerade as a video tile. The
+  // compact `cc--audio-row` playlist layout keeps its own treatment, so
+  // this is gated to the vertical grid/featured tiles only. Decorative /
+  // navigational only — the whole card is already a link.
+  const showAudioMedia = $derived(
+    contentType === 'audio' &&
+      !isAudioRow &&
+      (variant === 'grid' || variant === 'featured'),
+  );
+
   // 'auto' chrome emits no attribute, so legacy callers keep the default
   // cascade. `resolvedShape` is already undefined when unset, so it binds to
   // `data-shape` directly (no separate derived needed).
@@ -337,7 +351,19 @@
   const articleByline = $derived(
     isArticle ? (creator?.displayName ?? creator?.username ?? '') : ''
   );
-  const showArticleMeta = $derived(isArticle && (!!articleByline || !!articleReadTime));
+  // Two homes for the article byline/read-time line:
+  //   • showArticleMeta   — inline in the body, for text-led (non
+  //                         title-in-cover) article cards.
+  //   • showArticleCaption — a below-media caption row for title-in-cover
+  //                         articles (title lives INSIDE the cover), so the
+  //                         card gains the same "media + caption" baseline
+  //                         as video/audio tiles and aligns in mixed rows.
+  const showArticleMeta = $derived(
+    isArticle && !showTitleInCover && (!!articleByline || !!articleReadTime)
+  );
+  const showArticleCaption = $derived(
+    isArticle && showTitleInCover && (!!articleByline || !!articleReadTime)
+  );
 
   // ── Media-type kind-line ─────────────────────────────────────────────
   // `TYPE · Category` small-caps head-line shown above the title on every
@@ -400,6 +426,8 @@
   class:cc--access-dimmed={isDimmed}
   class:cc--audio-row={isAudioRow}
   class:cc--title-in-cover={showTitleInCover}
+  class:cc--article-captioned={showArticleCaption}
+  class:cc--featured-item={showFeaturedTreatment}
   data-variant={variant}
   data-layout={resolvedLayout !== 'default' ? resolvedLayout : undefined}
   data-content-type={contentType || undefined}
@@ -420,8 +448,37 @@
     </div>
   {:else}
     <!-- Thumbnail -->
-    <div class="cc__thumb" class:cc__thumb--featured={showFeaturedTreatment}>
-      {#if thumbnail}
+    <div
+      class="cc__thumb"
+      class:cc__thumb--featured={showFeaturedTreatment}
+      class:cc__thumb--audio-media={showAudioMedia}
+    >
+      {#if showAudioMedia}
+        <!-- Audio grid/featured tile: cover image (or brand-gradient
+             fallback) BEHIND a decorative waveform + centred play glyph, so
+             audio never masquerades as a silent video tile. The waveform
+             reads over any cover thanks to the scrim on `.cc__audio-overlay`.
+             Purely navigational — the card itself is the link. -->
+        <div class="cc__cover cc__cover--audio"></div>
+        {#if thumbnail}
+          <img
+            src={thumbnail}
+            srcset={getThumbnailSrcset(thumbnail)}
+            sizes={DEFAULT_SIZES}
+            alt={m.content_thumbnail_alt({ title })}
+            loading="lazy"
+            decoding="async"
+            class="cc__image"
+            onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+          />
+        {/if}
+        <div class="cc__audio-overlay" aria-hidden="true">
+          <AudioWaveform {id} bars={32} class="cc__audio-overlay-waveform" />
+          <span class="cc__audio-play">
+            <PlayIcon size={32} />
+          </span>
+        </div>
+      {:else if thumbnail}
         <img
           src={thumbnail}
           srcset={getThumbnailSrcset(thumbnail)}
@@ -436,14 +493,14 @@
           {#if contentType === 'video'}
             <PlayIcon size={32} />
           {:else if contentType === 'audio'}
-            <!-- Audio fallback when the real thumbnail fails to load.
-                 On audio-row cards the inline waveform strip under the title
-                 already carries the audio signature, so a second waveform in
-                 the album-art tile is redundant — fall back to the neutral
-                 music-note icon instead (matches the pattern for other
-                 variants' audio cards without thumbs). Standalone grid/
-                 featured audio cards keep the prominent waveform tile as
-                 their identity signal. -->
+            <!-- Audio fallback when the real thumbnail fails to load, for
+                 the non-overlay audio variants (compact/list/resume — grid
+                 and featured use `.cc__audio-overlay` above). On audio-row
+                 cards the inline waveform strip under the title already
+                 carries the audio signature, so a second waveform in the
+                 album-art tile is redundant — fall back to the neutral
+                 music-note icon instead. The remaining variants keep the
+                 waveform tile as their identity signal. -->
             {#if isAudioRow}
               <MusicIcon size={32} />
             {:else}
@@ -498,8 +555,9 @@
       {/if}
 
       {#if showFeaturedTreatment}
-        <span class="cc__featured-star" aria-label={m.content_featured_label()}>
-          <SparkleIcon size={14} />
+        <span class="cc__featured-pill">
+          <SparkleIcon size={14} class="cc__featured-pill-icon" />
+          <span>{m.content_featured_label()}</span>
         </span>
       {/if}
 
@@ -565,6 +623,13 @@
       <h3 class="cc__title" id={titleId}>
         <a href={href}>{title}</a>
       </h3>
+
+      {#if showTitleInCover && articleExcerpt}
+        <!-- Cover excerpt — a short preview inside the scrim, under the title.
+             Only for title-in-cover articles; the regular excerpt (below) is
+             suppressed when the title lives in the cover. -->
+        <p class="cc__cover-excerpt">{articleExcerpt}</p>
+      {/if}
 
       {#if isAudioRow}
         <!-- Decorative waveform strip — signals "this is audio" at a glance.
@@ -642,6 +707,31 @@
         </div>
       {/if}
     </div>
+
+    {#if showArticleCaption}
+      <!-- Below-media caption for title-in-cover articles. The title lives
+           INSIDE the cover; this row carries the author avatar/name +
+           read-time UNDER the media, giving article cards the same
+           media-plus-caption baseline as video/audio tiles so mixed rows
+           align. Title is NOT repeated here. -->
+      <div class="cc__article-caption">
+        {#if articleByline}
+          <a href={profileHref} class="cc__creator-link">
+            <Avatar src={creator?.avatar} class="cc__creator-avatar">
+              <AvatarImage src={creator?.avatar} alt={articleByline} />
+              <AvatarFallback>{articleByline.charAt(0).toUpperCase()}</AvatarFallback>
+            </Avatar>
+            <span class="cc__creator-name">{articleByline}</span>
+          </a>
+        {/if}
+        {#if articleByline && articleReadTime}
+          <span class="cc__article-sep" aria-hidden="true">·</span>
+        {/if}
+        {#if articleReadTime}
+          <span class="cc__article-read-time">{articleReadTime}</span>
+        {/if}
+      </div>
+    {/if}
 
     {#if actions}
       <div class="cc__actions">{@render actions()}</div>
@@ -842,17 +932,34 @@
         color-mix(in srgb, var(--color-brand-accent) 35%, transparent);
   }
 
-  .cc__featured-star {
+  /* Featured callout — a compact branded pill (sparkle + "Featured") in the
+     bottom-left corner. Replaces the bare sparkle so the flag reads as a
+     deliberate label, not a stray glyph. Darkened-brand background keeps the
+     near-white glyph + label legible over any cover on either theme. */
+  .cc__featured-pill {
     position: absolute;
     bottom: var(--space-2);
     left: var(--space-2);
     z-index: 2;
     display: inline-flex;
-    color: var(--color-brand-accent);
-    /* Drop-shadow keeps the glyph legible over light photographs without
-       needing a filled background. */
-    filter: drop-shadow(0 var(--border-width) var(--border-width)
-      color-mix(in srgb, var(--color-neutral-900) 60%, transparent));
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-0-5) var(--space-2);
+    font-family: var(--font-body);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-wide);
+    color: var(--media-glyph);
+    background: color-mix(in oklab, var(--color-brand-primary) 78%, var(--color-neutral-900));
+    border-radius: var(--radius-full);
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(var(--blur-sm));
+    -webkit-backdrop-filter: blur(var(--blur-sm));
+  }
+
+  :global(.cc__featured-pill-icon) {
+    flex-shrink: 0;
     fill: currentColor;
   }
 
@@ -1292,6 +1399,90 @@
     height: 100%;
   }
 
+  /* ── AUDIO grid/featured media overlay ─────────────────────────
+     The cover image (or the brand-gradient `.cc__cover--audio` fallback)
+     sits BEHIND a decorative waveform + a centred play glyph, so an audio
+     tile always reads as audio — even with a real thumbnail. All layers are
+     absolutely stacked; the image is promoted to positioned so it paints
+     ON TOP of the cover fallback (and reveals it again on load error). The
+     overlay carries no z-index, so the corner chrome (price, duration,
+     progress, featured pill) — declared later in the DOM — still paints
+     above it. */
+  /* `position: relative` (NOT absolute) is deliberate. The cover image must
+     stay IN FLOW so its natural width contributes to the card's max-content
+     width — otherwise a content-sized carousel track (`.carousel__item`,
+     flex: 0 0 auto) measures only the title text and the audio tile shrinks
+     narrower than its video/article rail-mates (uneven row, "blank space").
+     Being positioned (z auto, later in DOM than `.cc__cover--audio`) still
+     paints it ABOVE the gradient fallback; the overlay + corner chrome are
+     later still, so they keep stacking on top. */
+  .cc__thumb--audio-media .cc__image {
+    position: relative;
+  }
+
+  .cc__audio-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* Scrim so the near-white waveform + play glyph read over any cover on
+       either theme. `--media-scrim` re-themes with the org brand (WP-7). */
+    background: color-mix(in srgb, var(--media-scrim) 42%, transparent);
+    /* Decorative only — clicks fall through to the full-card title link. */
+    pointer-events: none;
+  }
+
+  .cc__audio-overlay :global(.cc__audio-overlay-waveform) {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    /* A contained scrubber band — echoes the AudioPlayer slider proportions
+       instead of filling the whole tile (R6: "waveform too big"). */
+    width: 82%;
+    height: 34%;
+    /* Brand-PRIMARY tint (the org's core colour), lifted toward the near-white
+       --media-glyph for legibility over any cover behind the scrim. Replaces
+       the old near-white-only fill so the tile reads as branded audio, not a
+       plain white wave (R6: "it's all white … stylise towards the branding"). */
+    color: color-mix(in srgb, var(--color-brand-primary) 70%, var(--media-glyph));
+    opacity: var(--opacity-80, 0.8);
+  }
+
+  /* Centred play affordance — the same navigational glyph the video tiles
+     use, wrapped in a soft scrim disc so it stays legible over the
+     waveform + cover. `position: relative` lifts it above the absolutely
+     placed waveform within the overlay. */
+  .cc__audio-play {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-12);
+    height: var(--space-12);
+    border-radius: var(--radius-full);
+    color: var(--media-glyph);
+    background: color-mix(in srgb, var(--media-scrim) 55%, transparent);
+    backdrop-filter: blur(var(--blur-sm));
+    -webkit-backdrop-filter: blur(var(--blur-sm));
+  }
+
+  .cc__audio-play :global(svg) {
+    fill: currentColor;
+  }
+
+  /* Brand-tinted gradient cover — stands in for the album art on an audio
+     tile with no image (and shows through if the image fails to load). */
+  .cc__cover--audio {
+    background: linear-gradient(
+      155deg,
+      color-mix(in oklab, var(--color-brand-primary) 28%, var(--color-surface-card)),
+      var(--color-surface-card)
+    );
+  }
+
   /* ── ARTICLE: 3:2 editorial crop ──────────────────────────── */
 
   .cc[data-content-type='article'] .cc__thumb {
@@ -1338,6 +1529,21 @@
   /* Allow the headline to breathe — articles lead with their title */
   .cc[data-content-type='article'] .cc__title {
     -webkit-line-clamp: 3;
+  }
+
+  /* Articles are type-centric — the title carries the card, so lift it above
+     the neutral `--text-base` on the tiles that lead with it (grid + list,
+     including the title-in-cover overlay). Compact/resume strip type down,
+     and the featured variant already renders an `--text-xl` hero title, so
+     those are left untouched. */
+  .cc[data-content-type='article']:not([data-variant='compact']):not([data-variant='resume']):not([data-variant='featured']) .cc__title {
+    font-size: var(--text-lg);
+  }
+
+  @container (min-width: 400px) {
+    .cc[data-content-type='article']:not([data-variant='compact']):not([data-variant='resume']):not([data-variant='featured']) .cc__title {
+      font-size: var(--text-xl);
+    }
   }
 
   /* list/featured already override aspect-ratio; no article 3:2 bleed needed there */
@@ -1647,6 +1853,38 @@
   }
 
   /* ═══════════════════════════════════════════
+     FEATURED ITEM SURFACE (creator-flagged `featured` prop)
+     Featured tiles must POP, not fade — so they keep a PERSISTENT
+     brand-tinted surface even under transparent chrome (the path callers
+     use), where the rest of the grid flattens out. Every featured-item card
+     carries `data-content-type`, so these selectors reach specificity parity
+     with the article-transparent + solid-chrome rules and win on source
+     order (declared last). Works on dark AND light orgs — the brand tint is
+     `color-mix(... oklab ...)` against the theme surface tokens.
+     ═══════════════════════════════════════════ */
+  .cc[data-content-type].cc--featured-item,
+  .cc[data-content-type][data-chrome='transparent'].cc--featured-item {
+    background: linear-gradient(
+      155deg,
+      color-mix(in oklab, var(--color-brand-primary) 14%, var(--color-surface-card)) 0%,
+      var(--color-surface) 72%
+    );
+    border-color: color-mix(in oklab, var(--color-brand-primary) 30%, var(--color-border));
+  }
+
+  .cc[data-content-type].cc--featured-item:hover,
+  .cc[data-content-type].cc--featured-item:focus-within:has(:focus-visible),
+  .cc[data-content-type][data-chrome='transparent'].cc--featured-item:hover,
+  .cc[data-content-type][data-chrome='transparent'].cc--featured-item:focus-within:has(:focus-visible) {
+    background: linear-gradient(
+      155deg,
+      color-mix(in oklab, var(--color-brand-primary) 14%, var(--color-surface-card)) 0%,
+      var(--color-surface) 72%
+    );
+    border-color: color-mix(in oklab, var(--color-brand-primary) 45%, var(--color-border));
+  }
+
+  /* ═══════════════════════════════════════════
      TITLE-IN-COVER (article editorial overlay)
      Eyebrow + title render INSIDE the media tile, bottom-aligned over a
      scrim gradient. Reuses the featured variant's grid-overlay technique:
@@ -1658,19 +1896,28 @@
 
   .cc--title-in-cover {
     display: grid;
-    grid-template-rows: 1fr;
+    /* Media row (fills) + caption row (auto). The media row is `1fr`: its floor
+       is the thumb's aspect-ratio min-content, but it GROWS to fill when a
+       taller sibling stretches the card — so the scrimmed title always sits on
+       the image edge instead of floating over blank card in a mixed row that
+       is taller than the media's natural aspect. */
+    grid-template-rows: 1fr auto;
     padding: 0;
   }
 
   .cc--title-in-cover .cc__thumb {
-    grid-row: 1 / -1;
+    grid-row: 1;
     grid-column: 1;
+    /* Fill the media row even when the card is stretched past the media's
+       natural aspect (mixed rows). `stretch` grows the tile beyond its aspect
+       floor so the cover image + scrimmed title reach down to the caption. */
+    align-self: stretch;
     /* Match the card radius so the media fills to the rounded card edge. */
     border-radius: var(--radius-xl);
   }
 
   .cc--title-in-cover .cc__body {
-    grid-row: 1 / -1;
+    grid-row: 1;
     grid-column: 1;
     align-self: end;
     z-index: 2;
@@ -1707,6 +1954,55 @@
     color: color-mix(in srgb, var(--media-glyph) 80%, var(--color-brand-accent));
   }
 
+  /* Article title-in-cover is the card's hero — the headline carries the tile
+     (articles are type-centric). Render it markedly larger than the neutral
+     card title (R7: "article title could be bigger, ~1.5–1.8×"). --text-3xl
+     is fluid (clamp scales with the viewport): ≈31px on a phone (≈1.7× the old
+     --text-lg) up to ≈40px on desktop (≈1.7× the old --text-xl), so it stays
+     inside the requested range at every width without a container step. The
+     selector mirrors the article-title rule's specificity (0,6,0) and is
+     declared later so it wins; scoped to article so a non-article caller that
+     opts into title-in-cover keeps the neutral size. */
+  .cc--title-in-cover[data-content-type='article']:not([data-variant='compact']):not([data-variant='resume']):not([data-variant='featured']) .cc__title {
+    font-size: var(--text-3xl);
+    line-height: var(--leading-tight);
+  }
+
+  /* Two-line clamp for the overlaid headline — the excerpt below needs room,
+     and a 3xl title rarely needs three lines. Mirrors the article-title rule's
+     (0,3,0) specificity and is declared later so it wins over the 3-line clamp. */
+  .cc--title-in-cover[data-content-type='article'] .cc__title {
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+
+  /* Short excerpt inside the cover — gives article tiles "a little preview of
+     what's actually in the article" so a card stretched to match a taller
+     video/audio neighbour reads as content, not just a larger crop. Muted
+     glyph tone sits under the title without competing with it. */
+  .cc--title-in-cover .cc__cover-excerpt {
+    margin: 0;
+    font-family: var(--font-body);
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
+    color: color-mix(in srgb, var(--media-glyph) 78%, transparent);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Featured pill on a title-in-cover article: the scrimmed body is a z-index
+     stacking context anchored at the card bottom, and the pill lives inside the
+     thumb (a lower context), so bottom-left it painted BEHIND the title. Move
+     it to the TOP-left — clear of the bottom title block — and lift it. */
+  .cc--title-in-cover .cc__featured-pill {
+    top: var(--space-2);
+    bottom: auto;
+    z-index: 4;
+  }
+
   /* Eyebrow kind-line — accent-tinted, lightened toward the glyph so it
      stays readable on the scrim while carrying the brand accent. */
   .cc--title-in-cover .cc__kind {
@@ -1732,6 +2028,37 @@
       color-mix(in oklab, var(--color-brand-primary) 20%, var(--color-surface-card)),
       var(--color-surface-card)
     );
+  }
+
+  /* Below-media caption row for title-in-cover articles. Auto-placed into
+     the grid's implicit second row so it sits UNDER the media, giving the
+     card the same media-plus-caption baseline as video/audio tiles. Reuses
+     the shared `.cc__creator-*` avatar/name styles plus the read-time meta. */
+  .cc__article-caption {
+    grid-column: 1;
+    /* Second (auto) grid row — sits UNDER the media row, never overlapping it. */
+    grid-row: 2;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    min-width: 0;
+    padding: var(--space-3);
+    font-family: var(--font-body);
+    font-size: var(--text-xs);
+    line-height: var(--leading-tight);
+    color: var(--color-text-tertiary);
+  }
+
+  /* Square off the media's lower corners when a caption follows, so the tile
+     meets the caption flush; the card's own radius + overflow clip rounds the
+     outer bottom corners. */
+  .cc--article-captioned .cc__thumb {
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
+
+  .cc--article-captioned .cc__body {
+    border-radius: 0;
   }
 
   @media (prefers-reduced-motion: reduce) {

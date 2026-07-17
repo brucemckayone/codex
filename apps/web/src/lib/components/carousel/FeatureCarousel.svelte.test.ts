@@ -67,12 +67,27 @@ class MockIntersectionObserver {
 }
 
 const threeItems: FeatureItem[] = [
-  { id: 'a', title: 'Alpha', kind: 'Video', description: 'First', href: '/a' },
-  { id: 'b', title: 'Beta', kind: 'Audio', href: '/b', image: null },
+  {
+    id: 'a',
+    title: 'Alpha',
+    kind: 'Video',
+    contentType: 'video',
+    description: 'First',
+    href: '/a',
+  },
+  {
+    id: 'b',
+    title: 'Beta',
+    kind: 'Audio',
+    contentType: 'audio',
+    href: '/b',
+    image: null,
+  },
   {
     id: 'c',
     title: 'Gamma',
     kind: 'Article',
+    contentType: 'article',
     href: '/c',
     image: 'https://example.test/c.jpg',
   },
