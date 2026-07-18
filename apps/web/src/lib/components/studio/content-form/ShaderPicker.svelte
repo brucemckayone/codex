@@ -92,7 +92,7 @@
     gap: var(--space-3);
   }
 
-  @media (min-width: 640px) {
+  @media (--breakpoint-sm) {
     .shader-picker {
       grid-template-columns: repeat(4, 1fr);
     }

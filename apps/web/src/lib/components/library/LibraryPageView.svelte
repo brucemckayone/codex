@@ -222,6 +222,9 @@
         {#each items as item (item.content.id)}
           {@const access = stateForItem(item)}
           <ContentCard
+            variant={viewMode === 'list' ? 'list' : 'grid'}
+            shape={viewMode === 'list' ? undefined : '1:1'}
+            chrome="transparent"
             id={item.content.id}
             title={item.content.title}
             thumbnail={item.content.thumbnailUrl}
