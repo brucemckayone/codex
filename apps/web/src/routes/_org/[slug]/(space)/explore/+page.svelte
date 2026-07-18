@@ -473,10 +473,12 @@
 
   <!-- Content Grid -->
   {#if displayItems.length > 0}
-    <div class="content-grid content-grid--masonry explore__grid" data-view={viewMode}>
+    <div class="content-grid explore__grid" data-view={viewMode}>
       {#each displayItems as item (item.id)}
         <ContentCard
-          autoPromoteAudio
+          variant={viewMode === 'list' ? 'list' : 'grid'}
+          shape={viewMode === 'list' ? undefined : '1:1'}
+          chrome="transparent"
           id={item.id}
           title={item.title}
           thumbnail={item.mediaItem?.thumbnailUrl ?? item.thumbnailUrl ?? null}
@@ -642,34 +644,10 @@
     background: var(--color-surface-elevated);
   }
 
-  /* ── List View ── */
-
-  .explore__grid[data-view='list'] :global(.content-card) {
-    flex-direction: row;
-  }
-
-  .explore__grid[data-view='list'] :global(.content-card__thumbnail) {
-    aspect-ratio: 16 / 9;
-    width: 200px;
-    min-width: 200px;
-    flex-shrink: 0;
-  }
-
-  .explore__grid[data-view='list'] :global(.content-card__body) {
-    flex: 1;
-    min-width: 0;
-  }
-
-  @media (--below-sm) {
-    .explore__grid[data-view='list'] :global(.content-card) {
-      flex-direction: column;
-    }
-
-    .explore__grid[data-view='list'] :global(.content-card__thumbnail) {
-      width: 100%;
-      min-width: 0;
-    }
-  }
+  /* List view layout is handled by the ContentCard `variant="list"` treatment
+     (horizontal row) — see the viewMode-driven props above. The grid container
+     collapses to a single column via the shared `.content-grid[data-view='list']`
+     utility, so no page-level card overrides are needed here. */
 
   /* ── Pagination ── */
   .explore__pagination {
