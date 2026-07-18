@@ -273,7 +273,7 @@
     padding: var(--space-6);
   }
 
-  @media (max-width: 40rem) {
+  @media (--below-sm) {
     :global(.dialog-content.drawer-content) {
       max-width: 100%;
     }

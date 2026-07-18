@@ -915,6 +915,22 @@
     background-color: var(--color-surface-secondary);
   }
 
+  /* On phones the single row overflows: the fixed toggle + prices + actions
+     squeeze .tier-info to 0 width, so the tier name spills over the toggle.
+     Wrap the row — name/description take the full first line, and the toggle,
+     prices and actions flow onto a second line. */
+  @media (--below-sm) {
+    .tier-item {
+      flex-wrap: wrap;
+      row-gap: var(--space-3);
+    }
+    /* Descendant selector raises specificity above the base `.tier-info`
+       rule's `flex: 1` (flex-basis: 0%), which otherwise wins on source order. */
+    .tier-item .tier-info {
+      flex-basis: 100%;
+    }
+  }
+
   .tier-info {
     display: flex;
     align-items: center;
@@ -1056,6 +1072,13 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: var(--space-4);
+  }
+
+  /* Two price inputs side-by-side crush below ~155px each on phones; stack. */
+  @media (--below-sm) {
+    .form-row {
+      grid-template-columns: 1fr;
+    }
   }
 
   .form-hint {

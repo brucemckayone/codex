@@ -744,7 +744,7 @@
     top: var(--space-6);
   }
 
-  @media (max-width: 1024px) {
+  @media (--below-lg) {
     .payouts-grid {
       grid-template-columns: 1fr;
     }
@@ -782,7 +782,7 @@
     gap: var(--space-4);
   }
 
-  @media (max-width: 720px) {
+  @media (--below-md) {
     .kpi-row {
       grid-template-columns: 1fr;
     }
