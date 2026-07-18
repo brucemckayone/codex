@@ -423,18 +423,26 @@
             </div>
             {#each filtered as payout (payout.id)}
               <div class="payouts-table__row" role="row">
-                <span class="payouts-table__cell payouts-table__cell--date" role="cell">
+                <span
+                  class="payouts-table__cell payouts-table__cell--date"
+                  role="cell"
+                  data-label={m.earnings_payouts_col_date()}
+                >
                   {formatDate(payout.createdAt)}
                 </span>
-                <span class="payouts-table__cell payouts-table__cell--amount" role="cell">
+                <span
+                  class="payouts-table__cell payouts-table__cell--amount"
+                  role="cell"
+                  data-label={m.earnings_payouts_col_amount()}
+                >
                   {formatPence(payout.amountCents)}
                 </span>
-                <span class="payouts-table__cell" role="cell">
+                <span class="payouts-table__cell" role="cell" data-label={m.earnings_payouts_col_status()}>
                   <span class="status-badge {statusClass(payout.status)}" aria-label={statusLabel(payout.status)}>
                     {statusLabel(payout.status)}
                   </span>
                 </span>
-                <span class="payouts-table__cell" role="cell">
+                <span class="payouts-table__cell" role="cell" data-label={m.earnings_payouts_col_source()}>
                   {sourceLabel(payout.sourceType)}
                 </span>
               </div>
@@ -591,6 +599,19 @@
     display: flex;
     gap: var(--space-2);
     flex-shrink: 0;
+  }
+
+  /* The connect card is a body↔actions row on desktop; on phones the actions
+     (Stripe dashboard + refresh) overflow past the viewport, so stack the card
+     and let the buttons wrap full-width. */
+  @media (--below-sm) {
+    .connect-card {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .connect-card__actions {
+      flex-wrap: wrap;
+    }
   }
 
   /* ── KPI grid ───────────────────────────────────────────────────────────── */
@@ -778,6 +799,38 @@
   .payouts-table__cell--amount {
     font-variant-numeric: tabular-nums;
     font-weight: var(--font-medium);
+  }
+
+  /* On phones the four equal columns collapse to unreadable slivers, so each
+     row becomes a stacked label/value card. The header row is redundant once
+     each cell carries its own label via data-label, so it is hidden. ARIA
+     table semantics (role="table"/row/cell) are unaffected. */
+  @media (--below-sm) {
+    .payouts-table__head {
+      display: none;
+    }
+
+    .payouts-table__row {
+      grid-template-columns: 1fr;
+      gap: var(--space-2);
+      padding: var(--space-4);
+    }
+
+    .payouts-table__cell {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-3);
+    }
+
+    .payouts-table__cell::before {
+      content: attr(data-label);
+      font-size: var(--text-xs);
+      font-weight: var(--font-semibold);
+      color: var(--color-text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
   }
 
   /* ── Status badges ──────────────────────────────────────────────────────── */
