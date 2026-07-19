@@ -39,12 +39,21 @@
   .brand-studio {
     display: grid;
     grid-template-columns: var(--brand-studio-rail-width) 1fr;
+    /* ONE bounded row. Without an explicit rows track the single implicit row
+       is `auto` and grows to its tallest child — a rail with expanded
+       accordions — dragging the canvas (and the iframe) taller with it.
+       minmax(0,1fr) makes the row a definite height whose children may shrink
+       below content, so the rail scrolls INTERNALLY (its own overflow-y:auto)
+       and the canvas height stays decoupled from the rail's content. */
+    grid-template-rows: minmax(0, 1fr);
     gap: var(--space-4);
-    /* Fill the studio content area and guarantee a tall workspace floor even
-       when the parent doesn't establish a definite height. Mirrors the
+    /* A DEFINITE, non-growable height so the workspace always fills the
+       viewport (minus the studio chrome offset) and the row above can bound
+       its children. `min-height` was wrong here: it sets a floor but still lets
+       a tall rail grow the grid (and the iframe with it); `height:100%` is
+       indefinite unless every ancestor is definitely sized. Mirrors the
        org-layout's viewport-height convention. */
-    height: 100%;
-    min-height: calc(100vh - var(--space-24));
+    height: calc(100vh - var(--space-24));
   }
 
   .brand-studio__rail {
@@ -72,11 +81,16 @@
   }
 
   /* Stack the two panes on narrow viewports — a side-by-side workspace needs
-     width, so below md the rail sits above the canvas. */
+     width, so below md the rail sits above the canvas. Here the PAGE scrolls
+     (not the rail): drop the fixed height so the rail expands to its natural
+     height in the `auto` row above the canvas, and restore the growable
+     min-height floor so the canvas still gets a usable height. */
   @media (--below-md) {
     .brand-studio {
       grid-template-columns: 1fr;
       grid-template-rows: auto 1fr;
+      height: auto;
+      min-height: calc(100vh - var(--space-24));
     }
 
     .brand-studio__rail {
