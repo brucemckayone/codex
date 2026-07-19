@@ -35,6 +35,7 @@
     BrandStudioCanvas,
     BrandStudioGuided,
     type BrandStudioMode,
+    createPreviewWiring,
     isUnbrandedState,
     readStoredMode,
     resolveInitialMode,
@@ -86,6 +87,12 @@
     if (orgId) writeStoredMode(orgId, next);
   }
 
+  // Stored JSON fields that failed to PARSE on load (not merely absent), mapped
+  // to their raw string. Set once by the open effect; read by handleSave to
+  // round-trip the raw value instead of blanking it. Plain `let` — only read
+  // imperatively in the save handler, never in a reactive position.
+  let unreadableRaw: Record<string, string> = {};
+
   // Own the store: open once branding is available; close on destroy. A plain
   // guard flag keeps this to a single open() even as the query refreshes.
   let opened = false;
@@ -93,8 +100,20 @@
     const current = brandingQuery?.current;
     if (!orgId || !current || opened) return;
     opened = true;
-    const initialState = toBrandEditorState(current);
+    const unreadable: Record<string, string> = {};
+    const initialState = toBrandEditorState(current, unreadable);
+    unreadableRaw = unreadable;
     brandEditor.open(orgId, initialState);
+    // One non-blocking notice if any saved field couldn't be read — surfaced
+    // BEFORE the admin can overwrite it by saving. handleSave preserves the raw
+    // value, so this warns rather than signalling data loss.
+    const failedFields = Object.keys(unreadable);
+    if (failedFields.length > 0) {
+      toast.error(
+        `Some saved brand settings couldn't be read (${failedFields.join(', ')}). ` +
+          `They're preserved as-is — re-set them before saving to replace them.`
+      );
+    }
     mode = resolveInitialMode({
       storedMode: readStoredMode(orgId),
       isUnbranded: isUnbrandedState(initialState),
@@ -110,6 +129,9 @@
   // iframe(s) so edits reflect INSTANTLY, no reload. The applier lives inside
   // the framed public page (org layout → initBrandPreviewBridge).
   const previewSender = createBrandPreviewSender();
+  // The seam (register frame + push snapshot) lives in a pure, unit-tested
+  // helper so a dropped call can't ship green — see preview-wiring.ts.
+  const previewWiring = createPreviewWiring(previewSender);
 
   // Push pending on every change. $state.snapshot deep-reads pending, so this
   // $effect re-runs on any nested field change; the sender debounces the post
@@ -117,13 +139,13 @@
   $effect(() => {
     const pending = brandEditor.pending;
     if (!pending) return;
-    previewSender.send($state.snapshot(pending) as BrandEditorState);
+    previewWiring.pushSnapshot($state.snapshot(pending) as BrandEditorState);
   });
 
   // Register each (re)loaded frame + immediately sync it to current pending, so
   // a route change / reload in the canvas reflects in-progress edits at once.
   function handleFrameLoad(detail: PreviewFrameLoad): void {
-    previewSender.register(detail.element, detail.origin);
+    previewWiring.registerFrame(detail);
   }
 
   onDestroy(() => {
@@ -147,9 +169,17 @@
     });
   }
 
-  // Persist the current payload. Mirrors BrandEditorMount.handleSave exactly:
-  // map BrandEditorState → updateBrandingCommand, markSaved(), then invalidate
-  // the org layout load so public branding refreshes without a manual reload.
+  // Persist the current payload: map BrandEditorState → updateBrandingCommand,
+  // markSaved(), then invalidate the org layout load so public branding
+  // refreshes without a manual reload.
+  //
+  // Non-destructive guard (Codex-cijzb · WP-1.8): a JSON field that couldn't be
+  // read on load (see unreadableRaw / toBrandEditorState) coerces to empty in
+  // the editor. Without a guard the next Save would serialize that empty value
+  // and PERMANENTLY overwrite the stored fine-tunes. So when such a field is
+  // still empty (the admin hasn't replaced it), we write back its raw stored
+  // string unchanged — a failed READ can't blank good data. A real edit
+  // (non-empty) always wins.
   async function handleSave() {
     const payload = brandEditor.getSavePayload();
     if (!payload || !brandEditor.orgId) return;
@@ -172,11 +202,15 @@
         fontHeading: payload.fontHeading ?? '',
         radiusValue: payload.radius,
         densityValue: payload.density,
-        tokenOverrides: hasOverrides ? JSON.stringify(overrides) : '',
+        tokenOverrides: hasOverrides
+          ? JSON.stringify(overrides)
+          : (unreadableRaw.tokenOverrides ?? ''),
         darkModeOverrides: payload.darkOverrides
           ? JSON.stringify(payload.darkOverrides)
-          : '',
-        darkTokenOverrides: hasDarkOverrides ? JSON.stringify(darkOverrides) : '',
+          : (unreadableRaw.darkModeOverrides ?? ''),
+        darkTokenOverrides: hasDarkOverrides
+          ? JSON.stringify(darkOverrides)
+          : (unreadableRaw.darkTokenOverrides ?? ''),
         heroLayout: payload.heroLayout as HeroLayout,
       });
       brandEditor.markSaved();
@@ -201,7 +235,13 @@
   });
 
   // ── Branding response → editor state ─────────────────────────────────────
-  function toBrandEditorState(b: BrandingSettingsResponse): BrandEditorState {
+  // `unreadable` collects fields whose stored JSON failed to parse (field →
+  // raw string) so the caller can notify + preserve them; an absent/empty
+  // value is NOT a failure and is not recorded.
+  function toBrandEditorState(
+    b: BrandingSettingsResponse,
+    unreadable: Record<string, string>
+  ): BrandEditorState {
     return {
       primaryColor: b.primaryColorHex || '#C24129',
       secondaryColor: b.secondaryColorHex,
@@ -212,36 +252,65 @@
       radius: Number(b.radiusValue) || 0.5,
       density: Number(b.densityValue) || 1,
       logoUrl: b.logoUrl,
-      tokenOverrides: parseTokenRecord(b.tokenOverrides) ?? {},
-      darkOverrides: parseDarkOverrides(b.darkModeOverrides),
-      darkTokenOverrides: parseTokenRecord(b.darkTokenOverrides),
+      tokenOverrides:
+        parseTokenRecord(b.tokenOverrides, 'tokenOverrides', unreadable) ?? {},
+      darkOverrides: parseDarkOverrides(
+        b.darkModeOverrides,
+        'darkModeOverrides',
+        unreadable
+      ),
+      darkTokenOverrides: parseTokenRecord(
+        b.darkTokenOverrides,
+        'darkTokenOverrides',
+        unreadable
+      ),
       heroLayout: b.heroLayout || 'default',
     };
   }
 
   function parseTokenRecord(
-    json: string | null
+    json: string | null,
+    field: string,
+    unreadable: Record<string, string>
   ): Record<string, string | null> | null {
-    if (!json) return null;
+    if (!json) return null; // absent/empty — not an error
     try {
       const parsed = JSON.parse(json) as Record<string, string | null>;
       return parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0
         ? parsed
         : null;
     } catch {
+      recordUnreadable(field, json, unreadable);
       return null;
     }
   }
 
   function parseDarkOverrides(
-    json: string | null
+    json: string | null,
+    field: string,
+    unreadable: Record<string, string>
   ): BrandEditorState['darkOverrides'] {
-    if (!json) return null;
+    if (!json) return null; // absent/empty — not an error
     try {
       return (JSON.parse(json) as BrandEditorState['darkOverrides']) ?? null;
     } catch {
+      recordUnreadable(field, json, unreadable);
       return null;
     }
+  }
+
+  // A genuine parse failure (corrupt stored JSON) — warn and stash the raw
+  // string so it can be round-tripped on save rather than silently blanked.
+  function recordUnreadable(
+    field: string,
+    raw: string,
+    unreadable: Record<string, string>
+  ): void {
+    console.warn(
+      `[brand-studio] Stored branding field "${field}" is not valid JSON and ` +
+        `could not be read; preserving it as-is until re-set.`
+    );
+    unreadable[field] = raw;
   }
 </script>
 

@@ -30,3 +30,4 @@ export {
   type PreviewThemeMode,
   resolvePreviewPath,
 } from './preview-canvas';
+export { createPreviewWiring, type PreviewWiring } from './preview-wiring';
