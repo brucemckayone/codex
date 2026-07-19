@@ -14,7 +14,7 @@ import {
   injectBrandVars,
   loadGoogleFont,
 } from './css-injection';
-import { getBreadcrumb, LEVELS } from './levels';
+import { getBreadcrumb, isLevelId, LEVELS } from './levels';
 import type {
   BrandEditorState,
   BrandPreset,
@@ -164,7 +164,9 @@ function open(orgId: string, saved: BrandEditorState): void {
             restored.pending.darkTokenOverrides = saved.darkTokenOverrides;
           }
           state.pending = restored.pending;
-          state.level = restored.level ?? 'home';
+          // Guard against a stale/removed level id in persisted state — fall
+          // back to home rather than indexing LEVELS with an unknown key.
+          state.level = isLevelId(restored.level) ? restored.level : 'home';
           state.panel = 'open';
           return;
         }

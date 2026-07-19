@@ -74,8 +74,6 @@ export interface BrandPreviewSender {
   register(element: HTMLIFrameElement, targetOrigin: string): void;
   /** Debounced broadcast of the latest pending state to every tracked frame. */
   send(vars: BrandEditorState): void;
-  /** Flush a pending debounced broadcast immediately (no-op if none queued). */
-  flush(): void;
   /** Stop the debounce timer and forget all tracked frames. */
   destroy(): void;
 }
@@ -156,10 +154,6 @@ export function createBrandPreviewSender(
         timer = null;
         if (latest) broadcast(latest);
       }, debounceMs);
-    },
-    flush() {
-      clearTimer();
-      if (latest) broadcast(latest);
     },
     destroy() {
       clearTimer();

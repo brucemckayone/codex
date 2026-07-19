@@ -5,8 +5,8 @@
  * It sets the four base colour fields on `brandEditor.pending`; the store's
  * injection `$effect` re-emits the `--brand-*` vars and the route's WP-1.4
  * sender pushes the snapshot to the preview iframe — so applying a palette
- * live-previews with no reload. Mirrors `BrandEditorHome.applyFullPalette`
- * (the retired overlay's seed path), re-homed here rather than reimplemented.
+ * live-previews with no reload. Re-homed from the retired `?brandEditor`
+ * overlay's palette-seed path rather than reimplemented.
  *
  * NB presets deliberately do NOT go through here — they carry token overrides,
  * fonts, hero layout and dark maps, so they use the store's spread-merging
