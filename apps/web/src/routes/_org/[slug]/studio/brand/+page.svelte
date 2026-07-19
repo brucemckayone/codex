@@ -24,7 +24,7 @@
   import { page } from '$app/state';
   import type { HeroLayout } from '@codex/validation';
   import type { BrandingSettingsResponse } from '@codex/shared-types';
-  import { brandEditor } from '$lib/brand-editor';
+  import { brandEditor, createBrandPreviewSender } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
   import { getBrandingSettings, updateBrandingCommand } from '$lib/remote/branding.remote';
   import { getPublicContent } from '$lib/remote/content.remote';
@@ -33,6 +33,7 @@
     BrandStudioLayout,
     BrandStudioRail,
     BrandStudioCanvas,
+    type PreviewFrameLoad,
   } from '$lib/components/brand-studio';
   import * as m from '$paraglide/messages';
   import type { PageData } from './$types';
@@ -79,6 +80,31 @@
 
   onDestroy(() => {
     brandEditor.close();
+  });
+
+  // ── Live edit → preview bridge (WP-1.4) ──────────────────────────────────
+  // Broadcast the editor's pending brand state to the same-origin preview
+  // iframe(s) so edits reflect INSTANTLY, no reload. The applier lives inside
+  // the framed public page (org layout → initBrandPreviewBridge).
+  const previewSender = createBrandPreviewSender();
+
+  // Push pending on every change. $state.snapshot deep-reads pending, so this
+  // $effect re-runs on any nested field change; the sender debounces the post
+  // (~50ms) to coalesce rapid slider drags. Guarded on a non-null pending.
+  $effect(() => {
+    const pending = brandEditor.pending;
+    if (!pending) return;
+    previewSender.send($state.snapshot(pending) as BrandEditorState);
+  });
+
+  // Register each (re)loaded frame + immediately sync it to current pending, so
+  // a route change / reload in the canvas reflects in-progress edits at once.
+  function handleFrameLoad(detail: PreviewFrameLoad): void {
+    previewSender.register(detail.element, detail.origin);
+  }
+
+  onDestroy(() => {
+    previewSender.destroy();
   });
 
   let saving = $state(false);
@@ -191,13 +217,15 @@
   {/snippet}
   {#snippet canvas()}
     <!--
-      TODO(WP-1.4): attach the postMessage bridge here via `onframeload` —
-      capture `detail.window` and post brand `pending` state to `detail.origin`
-      for live, no-reload preview. WP-1.3 only loads the page + exposes the seam.
+      WP-1.4 live preview bridge: `onframeload` registers each (re)loaded frame
+      with the sender, which posts the editor's pending brand state to
+      `detail.origin` (explicit targetOrigin) for instant, no-reload preview. The
+      applier runs inside the framed page (org layout → initBrandPreviewBridge).
     -->
     <BrandStudioCanvas
       previewOrigin={page.url.origin}
       contentSlug={previewContentSlug}
+      onframeload={handleFrameLoad}
     />
   {/snippet}
 </BrandStudioLayout>

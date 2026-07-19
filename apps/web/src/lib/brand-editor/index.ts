@@ -1,5 +1,18 @@
 // Brand Editor - Store
 export { brandEditor } from './brand-editor-store.svelte';
+export type {
+  BrandPreviewMessage,
+  BrandPreviewSender,
+} from './brand-preview-bridge';
+// Brand Editor - Live preview bridge (Codex-cijzb · WP-1.4)
+// Sender (studio) + applier (public org layout, embedded-only). The applier is
+// imported by the PUBLIC org layout, so it MUST live under $lib/brand-editor
+// (not $lib/components/brand-editor) to stay inside the WP-0.2 bundle boundary.
+export {
+  BRAND_PREVIEW_MESSAGE_TYPE,
+  createBrandPreviewSender,
+  initBrandPreviewBridge,
+} from './brand-preview-bridge';
 // Brand Editor - CSS Injection
 export {
   clearTokenOverrides,

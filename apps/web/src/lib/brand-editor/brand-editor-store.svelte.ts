@@ -405,6 +405,28 @@ function setThemeFont(which: 'body' | 'heading', value: string | null): void {
   if (value && browser) loadGoogleFont(value);
 }
 
+/**
+ * Codex-cijzb · WP-1.4 — apply an inbound preview snapshot inside the framed
+ * public page (driven by the postMessage bridge, `brand-preview-bridge.ts`).
+ *
+ * Drives the WP-1.1 injection seam directly:
+ *   - sets `pending` so the injection $effect (initEffects) re-runs
+ *     `injectBrandVars(pending)`, emitting `--brand-*` onto `.org-layout`;
+ *   - opens the panel so the layout's `isOpen ? pending : server` bindings
+ *     (logo, hero-layout, hero-visibility toggles, shader gate) read `pending`.
+ * No reload is needed for any field.
+ *
+ * Deliberately does NOT set `orgId`: the sessionStorage crash-recovery $effect
+ * is guarded on `orgId`, so a preview frame never pollutes a real editor
+ * session's storage (both share this origin's sessionStorage). This is a pure
+ * applier — it never posts a message, so it cannot echo back to the sender.
+ */
+function applyPreviewVars(vars: BrandEditorState): void {
+  initEffects();
+  state.pending = vars;
+  state.panel = 'open';
+}
+
 function discard(): void {
   if (!state.saved) return;
   state.pending = $state.snapshot(state.saved) as BrandEditorState;
@@ -492,6 +514,8 @@ export const brandEditor = {
   // Per-theme fonts (dark variant via darkTokenOverrides).
   getThemeFont,
   setThemeFont,
+  // Codex-cijzb · WP-1.4: apply an inbound live-preview snapshot in the iframe.
+  applyPreviewVars,
   discard,
   getSavePayload,
   markSaved,

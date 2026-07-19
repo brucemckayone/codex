@@ -22,7 +22,7 @@
   import CommandPaletteSearch from '$lib/components/search/CommandPaletteSearch.svelte';
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
   import HealthBanner from '$lib/components/subscription/HealthBanner.svelte';
-  import { brandEditor, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars } from '$lib/brand-editor';
+  import { brandEditor, initBrandPreviewBridge, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars } from '$lib/brand-editor';
   import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection, loadSubscriptionFromServer, subscriptionCollection } from '$lib/collections';
   import { initProgressSync, cleanupProgressSync, forceSync } from '$lib/collections/progress-sync';
@@ -326,10 +326,18 @@
       initProgressSync(data.user.id);
     }
 
+    // Codex-cijzb · WP-1.4 — live edit → preview applier. When THIS page is the
+    // framed preview inside /studio/brand, brand edits pushed from the studio
+    // apply here instantly (no reload). Inert on a normal standalone visit — the
+    // embedded-only guard lives inside initBrandPreviewBridge, so a real visitor
+    // adds no listener.
+    const teardownBrandPreview = initBrandPreviewBridge();
+
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
       clearInterval(versionPollInterval);
       cleanupProgressSync();
+      teardownBrandPreview();
     };
   });
 
