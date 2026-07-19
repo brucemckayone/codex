@@ -433,6 +433,24 @@ function discard(): void {
   clearStorage();
 }
 
+/**
+ * Codex-cijzb · WP-1.5 — revert a SINGLE field to its saved value, leaving
+ * every other pending edit intact. Powers the control-rail change-ledger's
+ * per-field Reset. Reuses the same `saved`/`pending` spine as `discard`, but
+ * scoped to one key. `$state.snapshot` deep-clones object-valued fields
+ * (`tokenOverrides`, `darkOverrides`, `darkTokenOverrides`) so the restored
+ * value can never alias the saved reference and drift later.
+ *
+ * No-op when there is nothing to reset (closed editor) or the field already
+ * equals its saved value.
+ */
+function resetField<K extends keyof BrandEditorState>(field: K): void {
+  if (!state.pending || !state.saved) return;
+  state.pending[field] = $state.snapshot(
+    state.saved[field]
+  ) as BrandEditorState[K];
+}
+
 function getSavePayload(): BrandEditorState | null {
   return state.pending
     ? ($state.snapshot(state.pending) as BrandEditorState)
@@ -517,6 +535,8 @@ export const brandEditor = {
   // Codex-cijzb · WP-1.4: apply an inbound live-preview snapshot in the iframe.
   applyPreviewVars,
   discard,
+  // Codex-cijzb · WP-1.5: per-field revert for the control-rail change-ledger.
+  resetField,
   getSavePayload,
   markSaved,
 };
