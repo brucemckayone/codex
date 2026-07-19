@@ -1,11 +1,13 @@
 /**
- * BrandStudioRail behaviour tests (Codex-cijzb · WP-1.5).
+ * BrandStudioRail behaviour tests (Codex-cijzb · WP-1.5 + rail-UX overhaul).
  *
- * Proves the rail's OWN navigation surface — grouped collapsible sections,
- * search filter + jump, breadcrumb, and the "Affects:" chips. The REUSED
- * brand-editor leaf components are mocked to an inert stub (they have their own
- * suites, and their real deps — Melt, the logo remote form, OKLCH canvas —
- * don't need to load to test the rail's grouping logic).
+ * Proves the rail's OWN navigation surface — the master/detail model: a BROWSE
+ * list of grouped control rows + search, and a FOCUS view where a chosen control
+ * owns the full height with a Back affordance and (for colours) the contextual
+ * editing-theme + contrast bar. The REUSED brand-editor leaf components are
+ * mocked to an inert stub (they have their own suites, and their real deps —
+ * Melt, the logo remote form, OKLCH canvas — don't need to load to test the
+ * rail's navigation logic).
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { BrandEditorState } from '$lib/brand-editor';
@@ -106,6 +108,25 @@ function typeSearch(value: string) {
   return input;
 }
 
+/** Labels of the currently-visible browse control rows, in order. */
+function visibleRowLabels(): string[] {
+  return Array.from(document.querySelectorAll('.rail-row__label')).map(
+    (el) => el.textContent?.trim() ?? ''
+  );
+}
+
+/** Open a control's focus view by its row label. */
+function openRow(label: string) {
+  const row = Array.from(
+    document.querySelectorAll<HTMLButtonElement>('.rail-row')
+  ).find(
+    (r) => r.querySelector('.rail-row__label')?.textContent?.trim() === label
+  );
+  if (!row) throw new Error(`control row not found: ${label}`);
+  row.click();
+  flushSync();
+}
+
 describe('BrandStudioRail', () => {
   let component: ReturnType<typeof mount> | null = null;
 
@@ -123,120 +144,100 @@ describe('BrandStudioRail', () => {
     document.body.innerHTML = '';
   });
 
-  test('renders exactly the three difficulty-dial groups', () => {
+  test('browse renders the three difficulty-dial groups', () => {
     component = mountRail();
-    const groups = document.querySelectorAll('[data-rail-group]');
+    const groups = document.querySelectorAll('.brand-rail__group');
     expect(groups).toHaveLength(3);
-    const ids = Array.from(groups).map((g) =>
-      g.getAttribute('data-rail-group')
-    );
-    expect(ids).toEqual(['foundations', 'identity', 'hero']);
+    const labels = Array.from(
+      document.querySelectorAll('.brand-rail__group-label')
+    ).map((g) => g.textContent?.replace(/\s+/g, ' ').trim() ?? '');
+    expect(labels.some((l) => l.includes('Foundations'))).toBe(true);
+    expect(labels.some((l) => l.includes('Identity'))).toBe(true);
+    expect(labels.some((l) => l.includes('Hero'))).toBe(true);
   });
 
-  test('Foundations starts expanded; other groups start collapsed', () => {
+  test('browse lists all seven control rows in order', () => {
     component = mountRail();
-    expect(
-      document.getElementById('rail-group-foundations')?.hasAttribute('hidden')
-    ).toBe(false);
-    expect(
-      document.getElementById('rail-group-identity')?.hasAttribute('hidden')
-    ).toBe(true);
+    expect(visibleRowLabels()).toEqual([
+      'Colours',
+      'Shape & density',
+      'Typography',
+      'Logo',
+      'Hero text',
+      'Layout & visibility',
+      'Effects',
+    ]);
   });
 
-  test('clicking a group header toggles its region open', () => {
+  test('clicking a control row opens its full-height focus', () => {
     component = mountRail();
-    const header = document.querySelector<HTMLButtonElement>(
-      '[data-rail-group-header="identity"]'
-    );
-    expect(header?.getAttribute('aria-expanded')).toBe('false');
+    openRow('Typography');
 
-    header?.click();
+    expect(document.querySelector('.brand-rail__focus-body')).toBeTruthy();
+    expect(
+      document.querySelector('.brand-rail__focus-h')?.textContent?.trim()
+    ).toBe('Typography');
+    // The browse list is unmounted — only one view is present at a time.
+    expect(document.querySelector('.brand-rail__browse')).toBeNull();
+  });
+
+  test('Back returns from a focus to the browse list', () => {
+    component = mountRail();
+    openRow('Logo');
+    expect(document.querySelector('.brand-rail__focus-body')).toBeTruthy();
+
+    document.querySelector<HTMLButtonElement>('.brand-rail__back')?.click();
     flushSync();
 
-    expect(header?.getAttribute('aria-expanded')).toBe('true');
-    expect(
-      document.getElementById('rail-group-identity')?.hasAttribute('hidden')
-    ).toBe(false);
+    expect(document.querySelector('.brand-rail__browse')).toBeTruthy();
+    expect(document.querySelector('.brand-rail__focus-body')).toBeNull();
   });
 
-  test('renders "Affects:" chips for the colours control', () => {
+  test('the colour focus shows its Affects chips + the editing-theme/contrast context bar', () => {
     component = mountRail();
-    const colours = document.getElementById('rail-control-colours');
-    const chips = colours?.querySelectorAll('.rail-control__chip') ?? [];
-    expect(chips.length).toBeGreaterThan(0);
-    const chipText = Array.from(chips).map((c) => c.textContent?.trim());
-    expect(chipText).toContain('Buttons');
-    expect(chipText).toContain('Hero');
+    openRow('Colours');
+
+    const chips = Array.from(
+      document.querySelectorAll('.brand-rail__chip')
+    ).map((c) => c.textContent?.trim());
+    expect(chips).toContain('Buttons');
+    expect(chips).toContain('Hero');
+
+    // The editing-theme + contrast bar is CONTEXTUAL — colour focus only.
+    expect(
+      document.querySelector('.brand-rail__context .contrast')
+    ).toBeTruthy();
   });
 
-  test('search hides non-matching groups and controls', () => {
+  test('a non-colour focus does NOT render the contrast context bar', () => {
+    component = mountRail();
+    openRow('Shape & density');
+    expect(document.querySelector('.brand-rail__context')).toBeNull();
+  });
+
+  test('search filters the browse rows to matches', () => {
     component = mountRail();
     typeSearch('shader');
-
-    // Hero contains the matching "Effects" control → group visible.
-    expect(
-      document
-        .querySelector('[data-rail-group="hero"]')
-        ?.classList.contains('rail-group--hidden')
-    ).toBe(false);
-    // Foundations + Identity have no match → hidden.
-    expect(
-      document
-        .querySelector('[data-rail-group="foundations"]')
-        ?.classList.contains('rail-group--hidden')
-    ).toBe(true);
-    // Within Hero: effects matches, layout does not.
-    expect(
-      document
-        .querySelector('[data-rail-control="hero-effects"]')
-        ?.classList.contains('rail-control--hidden')
-    ).toBe(false);
-    expect(
-      document
-        .querySelector('[data-rail-control="hero-layout"]')
-        ?.classList.contains('rail-control--hidden')
-    ).toBe(true);
+    // Only hero-effects ("Effects") carries the "shader" keyword.
+    expect(visibleRowLabels()).toEqual(['Effects']);
   });
 
   test('a non-matching query shows the empty state', () => {
     component = mountRail();
     typeSearch('zzzznope');
     expect(document.querySelector('.brand-rail__no-results')).toBeTruthy();
+    expect(visibleRowLabels()).toEqual([]);
   });
 
-  test('renders the WP-1.6 hero-text control in the Identity group', () => {
-    component = mountRail();
-    const heroText = document.querySelector('[data-rail-control="hero-text"]');
-    expect(heroText).toBeTruthy();
-    // It lives inside the Identity group's region.
-    const identityRegion = document.getElementById('rail-group-identity');
-    expect(identityRegion?.contains(heroText)).toBe(true);
-  });
-
-  test('search "hero text" reveals the hero-text control, hides hero-layout', () => {
+  test('search "hero text" narrows to the hero-text row, excluding hero-layout', () => {
     component = mountRail();
     typeSearch('hero text');
-
-    // Identity (owns hero-text) is visible; its hero-text control is shown.
-    expect(
-      document
-        .querySelector('[data-rail-group="identity"]')
-        ?.classList.contains('rail-group--hidden')
-    ).toBe(false);
-    expect(
-      document
-        .querySelector('[data-rail-control="hero-text"]')
-        ?.classList.contains('rail-control--hidden')
-    ).toBe(false);
-    // "hero text" is specific enough to exclude the hero LAYOUT control.
-    expect(
-      document
-        .querySelector('[data-rail-control="hero-layout"]')
-        ?.classList.contains('rail-control--hidden')
-    ).toBe(true);
+    const rows = visibleRowLabels();
+    expect(rows).toContain('Hero text');
+    expect(rows).not.toContain('Layout & visibility');
   });
 
-  test('Enter in search jumps to the first match and updates the breadcrumb', () => {
+  test('Enter in search opens the first match’s focus', () => {
     component = mountRail();
     const input = typeSearch('logo');
     input.dispatchEvent(
@@ -244,11 +245,10 @@ describe('BrandStudioRail', () => {
     );
     flushSync();
 
-    // "logo" lives in Identity → it becomes the active breadcrumb group.
-    const current = document.querySelector('.brand-rail__crumb--current');
-    expect(current?.textContent?.trim()).toBe('Identity');
+    // "logo" resolves to the Logo control → its focus opens directly.
+    expect(document.querySelector('.brand-rail__focus-body')).toBeTruthy();
     expect(
-      document.getElementById('rail-group-identity')?.hasAttribute('hidden')
-    ).toBe(false);
+      document.querySelector('.brand-rail__focus-h')?.textContent?.trim()
+    ).toBe('Logo');
   });
 });

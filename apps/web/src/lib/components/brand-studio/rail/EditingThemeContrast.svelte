@@ -90,18 +90,14 @@
       {contrast.passesAA ? 'AA' : '!'}
     </span>
   </div>
-  <p class="editing-ctx__hint">
-    Auto-contrast picks black or white text at OKLCH <span class="mono">l &lt; 0.62</span>.
-    Dark values auto-derive from light until you override them.
-  </p>
 </div>
 
 <style>
   .editing-ctx {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
-    padding: var(--space-4);
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
     border-bottom: var(--border-width) var(--border-style) var(--color-border-subtle);
   }
 
@@ -226,16 +222,5 @@
 
   .contrast__badge--warn {
     background: var(--color-warning);
-  }
-
-  .editing-ctx__hint {
-    margin: 0;
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    line-height: var(--leading-snug);
-  }
-
-  .mono {
-    font-family: var(--font-mono);
   }
 </style>
