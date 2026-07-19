@@ -33,6 +33,12 @@
     BrandStudioLayout,
     BrandStudioRail,
     BrandStudioCanvas,
+    BrandStudioGuided,
+    type BrandStudioMode,
+    isUnbrandedState,
+    readStoredMode,
+    resolveInitialMode,
+    writeStoredMode,
     type PreviewFrameLoad,
   } from '$lib/components/brand-studio';
   import * as m from '$paraglide/messages';
@@ -68,6 +74,18 @@
     return undefined;
   });
 
+  // ── Workspace mode (WP-1.7) ──────────────────────────────────────────────
+  // Guided (shallow) vs Advanced (the full rail). Both drive the SAME store, so
+  // toggling is a pure content swap — no edit is transferred or lost. Default:
+  // Guided for an org that hasn't branded yet, Advanced otherwise; an explicit
+  // choice is remembered per-org and wins over that default. Resolved once, when
+  // the store first opens (below), so it reflects the loaded branding.
+  let mode = $state<BrandStudioMode>('advanced');
+  function setMode(next: BrandStudioMode): void {
+    mode = next;
+    if (orgId) writeStoredMode(orgId, next);
+  }
+
   // Own the store: open once branding is available; close on destroy. A plain
   // guard flag keeps this to a single open() even as the query refreshes.
   let opened = false;
@@ -75,7 +93,12 @@
     const current = brandingQuery?.current;
     if (!orgId || !current || opened) return;
     opened = true;
-    brandEditor.open(orgId, toBrandEditorState(current));
+    const initialState = toBrandEditorState(current);
+    brandEditor.open(orgId, initialState);
+    mode = resolveInitialMode({
+      storedMode: readStoredMode(orgId),
+      isUnbranded: isUnbrandedState(initialState),
+    });
   });
 
   onDestroy(() => {
@@ -228,14 +251,49 @@
 
 <BrandStudioLayout>
   {#snippet rail()}
-    <BrandStudioRail
-      {saving}
-      isDirty={brandEditor.isDirty}
-      onsave={handleSave}
-      orgName={data.org?.name ?? ''}
-      orgDescription={data.org?.description ?? null}
-      onpreviewreload={handleHeroPreviewReload}
-    />
+    <div class="brand-mode">
+      <div class="brand-mode__toggle" role="group" aria-label="Editor mode">
+        <button
+          type="button"
+          class="brand-mode__btn"
+          class:is-active={mode === 'guided'}
+          aria-pressed={mode === 'guided'}
+          onclick={() => setMode('guided')}
+        >
+          Guided
+        </button>
+        <button
+          type="button"
+          class="brand-mode__btn"
+          class:is-active={mode === 'advanced'}
+          aria-pressed={mode === 'advanced'}
+          onclick={() => setMode('advanced')}
+        >
+          Advanced
+        </button>
+      </div>
+
+      <div class="brand-mode__view">
+        {#if mode === 'guided'}
+          <BrandStudioGuided
+            {saving}
+            isDirty={brandEditor.isDirty}
+            onsave={handleSave}
+            onopenfulleditor={() => setMode('advanced')}
+            orgName={data.org?.name ?? ''}
+          />
+        {:else}
+          <BrandStudioRail
+            {saving}
+            isDirty={brandEditor.isDirty}
+            onsave={handleSave}
+            orgName={data.org?.name ?? ''}
+            orgDescription={data.org?.description ?? null}
+            onpreviewreload={handleHeroPreviewReload}
+          />
+        {/if}
+      </div>
+    </div>
   {/snippet}
   {#snippet canvas()}
     <!--
@@ -252,3 +310,60 @@
     />
   {/snippet}
 </BrandStudioLayout>
+
+<style>
+  /* Rail-region wrapper: a fixed mode toggle above the active mode's view. The
+     view fills the rest so Guided and the rail both flex to the rail height. */
+  .brand-mode {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .brand-mode__toggle {
+    display: inline-flex;
+    gap: var(--space-1);
+    align-self: flex-start;
+    margin: var(--space-3) var(--space-3) 0;
+    padding: var(--space-0-5);
+    background: var(--color-surface-secondary);
+    border: var(--border-width) var(--border-style) var(--color-border-subtle);
+    border-radius: var(--radius-lg);
+  }
+
+  .brand-mode__btn {
+    appearance: none;
+    border: none;
+    background: none;
+    padding: var(--space-1-5) var(--space-3);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text-muted);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: var(--transition-colors);
+  }
+
+  .brand-mode__btn:hover {
+    color: var(--color-text);
+  }
+
+  .brand-mode__btn.is-active {
+    background: var(--color-surface);
+    color: var(--color-text);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .brand-mode__btn:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+  }
+
+  .brand-mode__view {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+</style>

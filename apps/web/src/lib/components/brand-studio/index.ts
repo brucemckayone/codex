@@ -9,6 +9,14 @@ export { default as BrandStudioCanvas } from './BrandStudioCanvas.svelte';
 export { default as BrandStudioLayout } from './BrandStudioLayout.svelte';
 export { default as BrandStudioRail } from './BrandStudioRail.svelte';
 export { default as CanvasToolbar } from './CanvasToolbar.svelte';
+export { default as BrandStudioGuided } from './guided/BrandStudioGuided.svelte';
+export {
+  type BrandStudioMode,
+  isUnbrandedState,
+  readStoredMode,
+  resolveInitialMode,
+  writeStoredMode,
+} from './guided/brand-studio-mode';
 export { default as PreviewFrame } from './PreviewFrame.svelte';
 export {
   PREVIEW_DEVICES,
