@@ -53,9 +53,24 @@
      * post brand `pending` to `detail.origin`). Left unwired in WP-1.3.
      */
     onframeload?: (detail: PreviewFrameLoad) => void;
+    /**
+     * WP-1.6 SCOPED RELOAD — a monotonically increasing token the route bumps
+     * after a hero-text (org name/description) save. Bumping it appends a
+     * cache-busting query param to the frame `src`, which reloads the iframe in
+     * place (element identity + the WP-1.4 handle survive, same as a route
+     * change) so the freshly-persisted hero text renders. Brand TOKEN edits
+     * never touch this — they still live-preview via the postMessage bridge
+     * with no reload. Defaults to 0 (no param → clean URL).
+     */
+    reloadToken?: number;
   }
 
-  const { previewOrigin, contentSlug, onframeload }: Props = $props();
+  const {
+    previewOrigin,
+    contentSlug,
+    onframeload,
+    reloadToken = 0,
+  }: Props = $props();
 
   // Canvas view state — route/device/theme. None of these depend on brand
   // state, so the primary iframe is never reloaded by a brand edit.
@@ -71,6 +86,17 @@
   );
   // Root-relative path for the active route; null → route unavailable (no slug).
   const previewPath = $derived(resolvePreviewPath(route, contentSlug));
+  // Effective iframe src. Identical to previewPath until a hero-text save bumps
+  // reloadToken, at which point a cache-busting param forces a fresh load. The
+  // token is NOT brand-editor state — it's an explicit structural-reload signal,
+  // so this stays consistent with WP-1.3's "src derives only from route + slug
+  // (never brand edits)" invariant.
+  const previewSrc = $derived.by(() => {
+    if (!previewPath) return null;
+    if (!reloadToken) return previewPath;
+    const separator = previewPath.includes('?') ? '&' : '?';
+    return `${previewPath}${separator}__brandPreviewReload=${reloadToken}`;
+  });
 </script>
 
 <div class="brand-studio-canvas">
@@ -89,9 +115,9 @@
     data-device={device}
     data-mode={isSplit ? 'split' : 'single'}
   >
-    {#if previewPath}
+    {#if previewSrc}
       <PreviewFrame
-        src={previewPath}
+        src={previewSrc}
         title={isSplit
           ? `${route} preview (light)`
           : `${route} preview`}
@@ -102,7 +128,7 @@
       />
       {#if isSplit}
         <PreviewFrame
-          src={previewPath}
+          src={previewSrc}
           title={`${route} preview (dark)`}
           {route}
           theme="dark"

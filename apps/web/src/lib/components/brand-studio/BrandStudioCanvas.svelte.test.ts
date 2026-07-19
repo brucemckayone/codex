@@ -149,4 +149,32 @@ describe('BrandStudioCanvas', () => {
     expect(groupButton('Preview route', 'Detail').disabled).toBe(false);
     expect(groupButton('Preview route', 'Player').disabled).toBe(false);
   });
+
+  test('bumping reloadToken appends a cache-busting param → frame reloads (WP-1.6)', () => {
+    // Reactive props object so a hero-text save (token bump) re-renders the src.
+    const props = $state({
+      previewOrigin: ORIGIN,
+      contentSlug: SLUG,
+      reloadToken: 0,
+    });
+    component = mount(BrandStudioCanvas, { target: document.body, props });
+    flushSync();
+
+    // Clean URL before any hero-text save — token 0 adds no param.
+    expect(iframes()[0].getAttribute('src')).toBe('/');
+
+    // Hero-text save bumps the token → the frame src changes, which reloads the
+    // iframe in place (element identity + WP-1.4 handle survive, like a route
+    // change) so the freshly-persisted hero text renders.
+    props.reloadToken = 1;
+    flushSync();
+    expect(iframes()[0].getAttribute('src')).toBe('/?__brandPreviewReload=1');
+
+    // A brand-TOKEN edit would NOT bump the token — the src stays put and the
+    // change streams via the postMessage bridge with no reload. A second
+    // hero-text save advances the token again.
+    props.reloadToken = 2;
+    flushSync();
+    expect(iframes()[0].getAttribute('src')).toBe('/?__brandPreviewReload=2');
+  });
 });

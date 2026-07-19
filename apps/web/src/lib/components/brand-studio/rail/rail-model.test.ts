@@ -69,6 +69,8 @@ describe('RAIL_GROUPS structure', () => {
     expect(findControlGroup('shape')).toBe('foundations');
     expect(findControlGroup('typography')).toBe('identity');
     expect(findControlGroup('logo')).toBe('identity');
+    // WP-1.6: hero-text (org name + subheading) folded into Identity.
+    expect(findControlGroup('hero-text')).toBe('identity');
     expect(findControlGroup('hero-layout')).toBe('hero');
     expect(findControlGroup('hero-effects')).toBe('hero');
   });
@@ -110,6 +112,21 @@ describe('controlMatchesQuery', () => {
 
   test('non-matching query is rejected', () => {
     expect(controlMatchesQuery(shader, 'radius')).toBe(false);
+  });
+});
+
+describe('hero-text control (WP-1.6)', () => {
+  test('lives in Identity and is searchable by hero/name/subheading terms', () => {
+    const heroText = control('hero-text');
+    expect(findControlGroup('hero-text')).toBe('identity');
+    // Discoverable whether the admin searches "hero", org identity, or the
+    // subheading — it sits in Identity but the hero group's mental model must
+    // still surface it.
+    expect(controlMatchesQuery(heroText, 'hero')).toBe(true);
+    expect(controlMatchesQuery(heroText, 'name')).toBe(true);
+    expect(controlMatchesQuery(heroText, 'subheading')).toBe(true);
+    expect(controlMatchesQuery(heroText, 'tagline')).toBe(true);
+    expect(controlMatchesQuery(heroText, 'zzzznope')).toBe(false);
   });
 });
 

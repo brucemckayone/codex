@@ -109,6 +109,21 @@
 
   let saving = $state(false);
 
+  // ── Hero-text preview reload (WP-1.6) ────────────────────────────────────
+  // Org name/description are NOT brand tokens, so they can't stream through the
+  // WP-1.4 colour bridge. After the rail's hero-text control persists them
+  // (updateOrganizationForm → organization-api, which invalidates the org's
+  // public-info cache), bump this token: BrandStudioCanvas appends it to the
+  // frame `src`, reloading the iframe in place so the fresh hero text renders.
+  // Also refresh the studio's own org data (title + props) — non-critical.
+  let previewReloadToken = $state(0);
+  function handleHeroPreviewReload(): void {
+    previewReloadToken += 1;
+    invalidate('cache:org-versions').catch(() => {
+      /* non-critical — the iframe reload is the primary refresh */
+    });
+  }
+
   // Persist the current payload. Mirrors BrandEditorMount.handleSave exactly:
   // map BrandEditorState → updateBrandingCommand, markSaved(), then invalidate
   // the org layout load so public branding refreshes without a manual reload.
@@ -213,7 +228,14 @@
 
 <BrandStudioLayout>
   {#snippet rail()}
-    <BrandStudioRail {saving} isDirty={brandEditor.isDirty} onsave={handleSave} />
+    <BrandStudioRail
+      {saving}
+      isDirty={brandEditor.isDirty}
+      onsave={handleSave}
+      orgName={data.org?.name ?? ''}
+      orgDescription={data.org?.description ?? null}
+      onpreviewreload={handleHeroPreviewReload}
+    />
   {/snippet}
   {#snippet canvas()}
     <!--
@@ -226,6 +248,7 @@
       previewOrigin={page.url.origin}
       contentSlug={previewContentSlug}
       onframeload={handleFrameLoad}
+      reloadToken={previewReloadToken}
     />
   {/snippet}
 </BrandStudioLayout>

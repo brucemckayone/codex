@@ -24,6 +24,7 @@ export type RailControlId =
   | 'shape'
   | 'typography'
   | 'logo'
+  | 'hero-text'
   | 'hero-layout'
   | 'hero-effects';
 
@@ -115,6 +116,27 @@ export const RAIL_GROUPS: readonly RailGroupMeta[] = [
         icon: '◻',
         keywords: ['logo', 'image', 'mark', 'brand mark', 'upload'],
         affects: ['Header', 'Hero'],
+      },
+      {
+        id: 'hero-text',
+        label: 'Hero text',
+        icon: '¶',
+        // The org name + subheading rendered in the landing hero. Searchable
+        // from "hero", "name", "title", "tagline" etc. so it surfaces whether
+        // the admin thinks "identity" or "hero".
+        keywords: [
+          'hero',
+          'text',
+          'title',
+          'name',
+          'organization',
+          'organisation',
+          'subheading',
+          'tagline',
+          'description',
+          'headline',
+        ],
+        affects: ['Hero section'],
       },
     ],
   },

@@ -35,6 +35,7 @@
   import BrandEditorFineTuneTypography from '$lib/components/brand-editor/levels/BrandEditorFineTuneTypography.svelte';
   import BrandEditorHeaderLayout from '$lib/components/brand-editor/levels/BrandEditorHeaderLayout.svelte';
   import BrandEditorHeroEffects from '$lib/components/brand-editor/levels/BrandEditorHeroEffects.svelte';
+  import BrandEditorHeroText from '$lib/components/brand-editor/levels/BrandEditorHeroText.svelte';
   import BrandEditorLogo from '$lib/components/brand-editor/levels/BrandEditorLogo.svelte';
   import BrandEditorShape from '$lib/components/brand-editor/levels/BrandEditorShape.svelte';
   import BrandEditorTypography from '$lib/components/brand-editor/levels/BrandEditorTypography.svelte';
@@ -60,9 +61,30 @@
     isDirty?: boolean;
     /** Persist the current brand-editor payload. Owned by the route. */
     onsave: () => void;
+    /**
+     * Current org name (hero <h1>). Seeds the WP-1.6 hero-text control. Optional
+     * so the rail can still mount without org data (e.g. in unit tests).
+     */
+    orgName?: string;
+    /** Current org description (hero subheading); null when unset. */
+    orgDescription?: string | null;
+    /**
+     * Fired after a successful hero-text save. The route bumps the preview
+     * reload token so the framed page re-renders with the new hero text (org
+     * name/description are not brand tokens, so they can't ride the WP-1.4
+     * colour bridge — a structural change needs a scoped reload).
+     */
+    onpreviewreload?: () => void;
   }
 
-  const { saving = false, isDirty = false, onsave }: Props = $props();
+  const {
+    saving = false,
+    isDirty = false,
+    onsave,
+    orgName = '',
+    orgDescription = null,
+    onpreviewreload,
+  }: Props = $props();
 
   // ── Navigation state ──────────────────────────────────────────────────────
   // Which groups are open (manual state); Foundations starts open. During an
@@ -303,6 +325,12 @@
     {/if}
   {:else if id === 'logo'}
     <BrandEditorLogo />
+  {:else if id === 'hero-text'}
+    <BrandEditorHeroText
+      name={orgName}
+      description={orgDescription}
+      onsaved={onpreviewreload}
+    />
   {:else if id === 'hero-layout'}
     <BrandEditorHeaderLayout />
   {:else if id === 'hero-effects'}

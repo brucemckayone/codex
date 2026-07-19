@@ -47,6 +47,10 @@ vi.mock(
   () => import('./rail/StubField.test.svelte')
 );
 vi.mock(
+  '$lib/components/brand-editor/levels/BrandEditorHeroText.svelte',
+  () => import('./rail/StubField.test.svelte')
+);
+vi.mock(
   '$lib/components/brand-editor/levels/BrandEditorLogo.svelte',
   () => import('./rail/StubField.test.svelte')
 );
@@ -198,6 +202,38 @@ describe('BrandStudioRail', () => {
     component = mountRail();
     typeSearch('zzzznope');
     expect(document.querySelector('.brand-rail__no-results')).toBeTruthy();
+  });
+
+  test('renders the WP-1.6 hero-text control in the Identity group', () => {
+    component = mountRail();
+    const heroText = document.querySelector('[data-rail-control="hero-text"]');
+    expect(heroText).toBeTruthy();
+    // It lives inside the Identity group's region.
+    const identityRegion = document.getElementById('rail-group-identity');
+    expect(identityRegion?.contains(heroText)).toBe(true);
+  });
+
+  test('search "hero text" reveals the hero-text control, hides hero-layout', () => {
+    component = mountRail();
+    typeSearch('hero text');
+
+    // Identity (owns hero-text) is visible; its hero-text control is shown.
+    expect(
+      document
+        .querySelector('[data-rail-group="identity"]')
+        ?.classList.contains('rail-group--hidden')
+    ).toBe(false);
+    expect(
+      document
+        .querySelector('[data-rail-control="hero-text"]')
+        ?.classList.contains('rail-control--hidden')
+    ).toBe(false);
+    // "hero text" is specific enough to exclude the hero LAYOUT control.
+    expect(
+      document
+        .querySelector('[data-rail-control="hero-layout"]')
+        ?.classList.contains('rail-control--hidden')
+    ).toBe(true);
   });
 
   test('Enter in search jumps to the first match and updates the breadcrumb', () => {
