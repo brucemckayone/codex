@@ -9,6 +9,7 @@
  * checks — here we assert the state the canvas drives, not iframe navigation.
  */
 import { afterEach, describe, expect, test } from 'vitest';
+import { brandEditor } from '$lib/brand-editor';
 import {
   flushSync,
   mount,
@@ -57,6 +58,10 @@ describe('BrandStudioCanvas', () => {
       unmount(component);
       component = null;
     }
+    // The light/dark choice is the module-level store's editingTheme (shared
+    // with the rail). Reset it so a test that flips to dark can't leak into the
+    // next test's default.
+    brandEditor.setEditingTheme('light');
     document.body.innerHTML = '';
   });
 
@@ -111,6 +116,36 @@ describe('BrandStudioCanvas', () => {
     expect(
       groupButton('Preview theme', 'Dark').getAttribute('aria-pressed')
     ).toBe('true');
+  });
+
+  test('the shared editing theme drives the preview (rail ↔ canvas hookup)', () => {
+    render();
+    expect(
+      document
+        .querySelector('.preview-frame')
+        ?.getAttribute('data-preview-theme')
+    ).toBe('light');
+
+    // RAIL side: flipping the store's editing theme (what the rail's toggle does
+    // via setEditingTheme) must move THIS preview — they share one source.
+    brandEditor.setEditingTheme('dark');
+    flushSync();
+    expect(
+      document
+        .querySelector('.preview-frame')
+        ?.getAttribute('data-preview-theme')
+    ).toBe('dark');
+    expect(
+      groupButton('Preview theme', 'Dark').getAttribute('aria-pressed')
+    ).toBe('true');
+
+    // CANVAS side: the toolbar's Light/Dark writes the SAME store, so the rail +
+    // colour controls follow the preview.
+    brandEditor.setEditingTheme('light');
+    flushSync();
+    groupButton('Preview theme', 'Dark').click();
+    flushSync();
+    expect(brandEditor.editingTheme).toBe('dark');
   });
 
   test('side-by-side renders two frames — one light, one dark', () => {

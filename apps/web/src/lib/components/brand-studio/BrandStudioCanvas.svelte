@@ -22,6 +22,7 @@
   Epic: Codex-cijzb · WP-1.3.
 -->
 <script lang="ts">
+  import { brandEditor } from '$lib/brand-editor';
   import CanvasToolbar from './CanvasToolbar.svelte';
   import PreviewFrame from './PreviewFrame.svelte';
   import {
@@ -72,18 +73,37 @@
     reloadToken = 0,
   }: Props = $props();
 
-  // Canvas view state — route/device/theme. None of these depend on brand
-  // state, so the primary iframe is never reloaded by a brand edit.
+  // Canvas view state. Route + device are local; the light/dark choice is NOT —
+  // it is the store's `editingTheme`, the SINGLE source of truth shared with the
+  // rail's editing-theme toggle. So "edit dark" and "preview dark" are the same
+  // switch: flipping it here or in the rail moves the palette-you-edit AND this
+  // preview together (the old split control let them drift out of sync).
   let route = $state<PreviewRouteId>('landing');
   let device = $state<PreviewDeviceId>('desktop');
-  let themeMode = $state<PreviewThemeMode>('light');
+  // Side-by-side is a canvas-only VIEW augmentation (compare light + dark at
+  // once); it does not change which theme you're editing.
+  let split = $state(false);
 
   const contentAvailable = $derived(!!contentSlug);
-  const isSplit = $derived(themeMode === 'split');
-  // The single-frame theme (split resolves the two frames explicitly below).
-  const singleTheme = $derived<'light' | 'dark'>(
-    themeMode === 'dark' ? 'dark' : 'light'
+  const isSplit = $derived(split);
+  // The single-frame theme follows the shared editing theme.
+  const singleTheme = $derived<'light' | 'dark'>(brandEditor.editingTheme);
+  // What the toolbar's theme segment shows as active: the compare view, else the
+  // editing theme.
+  const themeMode = $derived<PreviewThemeMode>(
+    split ? 'split' : brandEditor.editingTheme
   );
+
+  function onThemeModeChange(mode: PreviewThemeMode): void {
+    if (mode === 'split') {
+      split = true;
+      return;
+    }
+    // Light/Dark drive the shared editing theme (updates the rail toggle, the
+    // colour controls' target palette, and this preview) and leave compare view.
+    split = false;
+    brandEditor.setEditingTheme(mode);
+  }
   // Root-relative path for the active route; null → route unavailable (no slug).
   const previewPath = $derived(resolvePreviewPath(route, contentSlug));
   // Effective iframe src. Identical to previewPath until a hero-text save bumps
@@ -107,7 +127,7 @@
     {contentAvailable}
     onroutechange={(id) => (route = id)}
     ondevicechange={(id) => (device = id)}
-    onthememodechange={(mode) => (themeMode = mode)}
+    onthememodechange={onThemeModeChange}
   />
 
   <div
