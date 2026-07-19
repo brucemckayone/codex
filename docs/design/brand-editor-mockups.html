@@ -1,0 +1,1209 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brand Editor — UI/UX directions</title>
+<style>
+/* =========================================================================
+   CODEX TOKENS (mirrored from apps/web/src/lib/styles/tokens + themes).
+   Every surface paints ONLY with semantic tokens; the --brand-* inputs feed
+   an OKLCH derivation (mirror of org-brand.css) so the live previews re-theme
+   from a single colour control — the signature of this exploration.
+   Fonts: CSP blocks font CDNs, so we use a system stack that reads like the
+   real Inter/JetBrains-Mono pairing rather than risk a silent fallback.
+   ========================================================================= */
+:root{
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+
+  /* type scale (fixed, non-fluid — this is a tool doc, not a fluid page) */
+  --text-xs:.75rem; --text-sm:.8125rem; --text-base:.9375rem; --text-lg:1.0625rem;
+  --text-xl:1.25rem; --text-2xl:1.5rem; --text-3xl:2rem; --text-4xl:2.75rem;
+  --fw-normal:400; --fw-medium:500; --fw-semibold:600; --fw-bold:700;
+  --lead-tight:1.2; --lead-snug:1.35; --lead-normal:1.55;
+  --track-wider:.06em; --track-tight:-.02em;
+
+  /* spacing (0.25rem unit) */
+  --s0-5:.125rem; --s1:.25rem; --s1-5:.375rem; --s2:.5rem; --s2-5:.625rem;
+  --s3:.75rem; --s4:1rem; --s5:1.25rem; --s6:1.5rem; --s7:1.75rem; --s8:2rem;
+  --s10:2.5rem; --s12:3rem; --s16:4rem; --s20:5rem;
+
+  --radius-xs:.125rem; --radius-sm:.25rem; --radius-md:.5rem; --radius-lg:.75rem;
+  --radius-xl:1rem; --radius-full:9999px;
+
+  /* neutrals (Codex neutral ramp) */
+  --n0:#fff; --n50:#fafafa; --n100:#f5f5f5; --n200:#e5e5e5; --n300:#d4d4d4;
+  --n400:#a3a3a3; --n500:#737373; --n600:#525252; --n700:#404040;
+  --n800:#262626; --n900:#171717; --n950:#0e0e0e;
+
+  /* semantic — LIGHT (default) */
+  --bg:var(--n50);
+  --surface:#fff;
+  --surface-2:var(--n100);
+  --surface-3:var(--n200);
+  --elevated:#fff;
+  --text:var(--n900);
+  --text-2:var(--n600);
+  --text-3:var(--n500);
+  --text-muted:var(--n400);
+  --border:var(--n200);
+  --border-strong:var(--n300);
+  --border-subtle:var(--n100);
+
+  /* accent for THIS doc's own chrome — a cool slate-teal, deliberately NOT
+     the terracotta brand, so doc-chrome never reads as "part of a preview". */
+  --doc-accent:#177e89;
+  --doc-accent-2:#0d5b64;
+
+  --shadow-color:220 3% 15%; --shadow-strength:1%;
+  --shadow-sm:0 1px 2px 0 hsl(var(--shadow-color)/calc(var(--shadow-strength) + 9%)),0 1px 3px 1px hsl(var(--shadow-color)/calc(var(--shadow-strength) + 4%));
+  --shadow-md:0 1px 3px 0 hsl(var(--shadow-color)/calc(var(--shadow-strength) + 9%)),0 4px 6px -1px hsl(var(--shadow-color)/calc(var(--shadow-strength) + 4%));
+  --shadow-lg:0 1px 3px 0 hsl(var(--shadow-color)/calc(var(--shadow-strength) + 9%)),0 8px 14px -2px hsl(var(--shadow-color)/calc(var(--shadow-strength) + 4%));
+  --shadow-xl:0 1px 4px 0 hsl(var(--shadow-color)/calc(var(--shadow-strength) + 9%)),0 16px 30px -4px hsl(var(--shadow-color)/calc(var(--shadow-strength) + 4%));
+
+  --glass:rgba(255,255,255,.72);
+  --glass-border:rgba(255,255,255,.55);
+  --blur:20px;
+
+  /* BRAND inputs (what the editor sets). Default = Codex terracotta. */
+  --brand-color:#c24129;
+  --brand-secondary:#525252;
+  --brand-accent:#f59e0b;
+  --brand-radius:.5rem;
+
+  --ease-smooth:cubic-bezier(.16,1,.3,1);
+  --ease-out:cubic-bezier(0,0,.2,1);
+  --dur:.2s;
+}
+
+/* Brand derivation — mirror of the real org-brand.css OKLCH relative-color
+   engine. Scoped to .preview so it re-themes independently of doc chrome. */
+.preview{
+  --p-500:var(--brand-color);
+  --p-600:oklch(from var(--brand-color) calc(l - .08) c h);
+  --p-700:oklch(from var(--brand-color) calc(l - .15) c h);
+  --p-100:oklch(from var(--brand-color) .94 calc(c * .25) h);
+  --p-50: oklch(from var(--brand-color) .97 calc(c * .15) h);
+  --interactive:var(--brand-color);
+  --interactive-hover:oklch(from var(--brand-color) calc(l - .08) c h);
+  --interactive-subtle:oklch(from var(--brand-color) .97 calc(c * .15) h);
+  --focus:var(--brand-color);
+  --on-brand:oklch(from var(--brand-color) clamp(0,(.62 - l) * 1000,1) 0 0);
+  --pv-accent:var(--brand-accent);
+  --pv-radius:var(--brand-radius);
+  --pv-surface:#fff;
+  --pv-surface-2:var(--n100);
+  --pv-text:var(--n900);
+  --pv-text-2:var(--n600);
+  --pv-border:var(--n200);
+  --scrim:color-mix(in oklab, black 60%, var(--brand-color));
+}
+:root[data-theme="dark"] .preview,
+.preview[data-pv-theme="dark"]{
+  --p-500:oklch(from var(--brand-color) calc(l + .06) c h);
+  --interactive:oklch(from var(--brand-color) calc(l + .06) c h);
+  --interactive-hover:oklch(from var(--brand-color) calc(l + .14) c h);
+  --interactive-subtle:oklch(from var(--brand-color) .2 calc(c * .3) h);
+  --pv-surface:#1c1c1e;
+  --pv-surface-2:#28282b;
+  --pv-text:#f5f5f5;
+  --pv-text-2:#b5b5b8;
+  --pv-border:#3a3a3d;
+}
+
+/* ---- THEME: dark tokens for the DOC itself ---- */
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:var(--n950); --surface:#161618; --surface-2:#1e1e21; --surface-3:#2a2a2e;
+    --elevated:#202024;
+    --text:var(--n50); --text-2:var(--n300); --text-3:var(--n400); --text-muted:var(--n600);
+    --border:#2c2c30; --border-strong:#3a3a40; --border-subtle:#232327;
+    --doc-accent:#3bc9db; --doc-accent-2:#63d3e0;
+    --shadow-color:220 40% 2%; --shadow-strength:25%;
+    --glass:rgba(24,24,27,.72); --glass-border:rgba(255,255,255,.10);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:var(--n950); --surface:#161618; --surface-2:#1e1e21; --surface-3:#2a2a2e;
+  --elevated:#202024;
+  --text:var(--n50); --text-2:var(--n300); --text-3:var(--n400); --text-muted:var(--n600);
+  --border:#2c2c30; --border-strong:#3a3a40; --border-subtle:#232327;
+  --doc-accent:#3bc9db; --doc-accent-2:#63d3e0;
+  --shadow-color:220 40% 2%; --shadow-strength:25%;
+  --glass:rgba(24,24,27,.72); --glass-border:rgba(255,255,255,.10);
+}
+:root[data-theme="light"]{
+  --bg:var(--n50); --surface:#fff; --surface-2:var(--n100); --surface-3:var(--n200);
+  --elevated:#fff;
+  --text:var(--n900); --text-2:var(--n600); --text-3:var(--n500); --text-muted:var(--n400);
+  --border:var(--n200); --border-strong:var(--n300); --border-subtle:var(--n100);
+  --doc-accent:#177e89; --doc-accent-2:#0d5b64;
+  --shadow-color:220 3% 15%; --shadow-strength:1%;
+  --glass:rgba(255,255,255,.72); --glass-border:rgba(255,255,255,.55);
+}
+
+*{box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:var(--font-sans); font-size:var(--text-base); line-height:var(--lead-normal);
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+h1,h2,h3,h4{margin:0; line-height:var(--lead-tight); text-wrap:balance; letter-spacing:var(--track-tight);}
+p{margin:0;}
+a{color:inherit;}
+button{font:inherit; cursor:pointer;}
+:focus-visible{outline:2px solid var(--doc-accent); outline-offset:2px; border-radius:var(--radius-sm);}
+.mono{font-family:var(--font-mono); font-variant-numeric:tabular-nums;}
+
+/* ================= DOC CHROME ================= */
+.topbar{
+  position:sticky; top:0; z-index:50;
+  display:flex; align-items:center; gap:var(--s4);
+  padding:var(--s3) var(--s5);
+  background:var(--glass); backdrop-filter:blur(var(--blur)); -webkit-backdrop-filter:blur(var(--blur));
+  border-bottom:1px solid var(--border);
+}
+.brandmark{display:flex; align-items:center; gap:var(--s2-5); min-width:0;}
+.brandmark__dot{
+  width:1.6rem; height:1.6rem; border-radius:var(--radius-sm); flex:none;
+  background:conic-gradient(from 210deg, #c24129, #f59e0b, #c24129);
+  box-shadow:var(--shadow-sm);
+}
+.brandmark__t{font-weight:var(--fw-bold); letter-spacing:var(--track-tight); font-size:var(--text-base); white-space:nowrap;}
+.brandmark__s{color:var(--text-3); font-size:var(--text-xs); white-space:nowrap;}
+.topbar__spacer{flex:1;}
+.iconbtn{
+  display:inline-flex; align-items:center; justify-content:center; gap:var(--s2);
+  height:2rem; padding:0 var(--s3); border-radius:var(--radius-md);
+  background:var(--surface-2); color:var(--text-2); border:1px solid var(--border);
+  font-size:var(--text-sm); font-weight:var(--fw-medium); transition:var(--dur);
+}
+.iconbtn:hover{color:var(--text); border-color:var(--border-strong);}
+
+/* tabs */
+.tabs{
+  position:sticky; top:3.4rem; z-index:40;
+  display:flex; gap:var(--s1); flex-wrap:wrap; align-items:center;
+  padding:var(--s2) var(--s5);
+  background:color-mix(in oklab, var(--bg) 88%, transparent);
+  backdrop-filter:blur(var(--blur)); -webkit-backdrop-filter:blur(var(--blur));
+  border-bottom:1px solid var(--border-subtle);
+}
+.tab{
+  display:inline-flex; align-items:center; gap:var(--s2);
+  padding:var(--s1-5) var(--s3); border-radius:var(--radius-full);
+  background:transparent; border:1px solid transparent; color:var(--text-2);
+  font-size:var(--text-sm); font-weight:var(--fw-medium); transition:var(--dur);
+}
+.tab:hover{background:var(--surface-2); color:var(--text);}
+.tab[aria-selected="true"]{background:var(--text); color:var(--bg);}
+.tab__k{font-family:var(--font-mono); font-size:var(--text-xs); opacity:.6;}
+.tab[aria-selected="true"] .tab__k{opacity:.7;}
+
+/* panels */
+.wrap{max-width:1240px; margin:0 auto; padding:var(--s8) var(--s5) var(--s20);}
+.panel{display:none;}
+.panel.is-active{display:block; animation:fade .4s var(--ease-smooth) both;}
+@keyframes fade{from{opacity:0; transform:translateY(8px);}to{opacity:1; transform:none;}}
+@media (prefers-reduced-motion:reduce){
+  .panel.is-active{animation:none;}
+  *{scroll-behavior:auto !important;}
+}
+
+.eyebrow{
+  font-family:var(--font-mono); font-size:var(--text-xs); text-transform:uppercase;
+  letter-spacing:var(--track-wider); color:var(--doc-accent); font-weight:var(--fw-semibold);
+}
+.lede{color:var(--text-2); font-size:var(--text-lg); max-width:68ch; line-height:var(--lead-snug);}
+.section-h{font-size:var(--text-3xl); font-weight:var(--fw-bold); margin-top:var(--s2);}
+.hr{height:1px; background:var(--border); border:0; margin:var(--s10) 0;}
+
+/* generic cards used in doc prose */
+.grid{display:grid; gap:var(--s4);}
+.cols-2{grid-template-columns:repeat(2,1fr);}
+.cols-3{grid-template-columns:repeat(3,1fr);}
+.cols-4{grid-template-columns:repeat(4,1fr);}
+@media (max-width:900px){.cols-2,.cols-3,.cols-4{grid-template-columns:1fr;}}
+.card{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg);
+  padding:var(--s5); box-shadow:var(--shadow-sm);
+}
+.card h3{font-size:var(--text-lg); font-weight:var(--fw-semibold); margin-bottom:var(--s2);}
+.card p{color:var(--text-2); font-size:var(--text-sm); line-height:var(--lead-normal);}
+.pill{
+  display:inline-flex; align-items:center; gap:var(--s1-5); padding:var(--s0-5) var(--s2);
+  border-radius:var(--radius-full); font-size:var(--text-xs); font-weight:var(--fw-semibold);
+  border:1px solid var(--border); color:var(--text-2); background:var(--surface-2);
+}
+.pill--rec{color:var(--doc-accent); border-color:color-mix(in oklab,var(--doc-accent) 40%,var(--border)); background:color-mix(in oklab,var(--doc-accent) 8%,transparent);}
+.pill--warn{color:#b45309; border-color:#fde68a; background:#fffbeb;}
+:root[data-theme="dark"] .pill--warn{color:#fbbf24; border-color:#78500a; background:#2a1f07;}
+
+/* annotation callouts */
+.note{
+  display:flex; gap:var(--s3); padding:var(--s3) var(--s4);
+  border-left:3px solid var(--doc-accent); background:var(--surface-2);
+  border-radius:0 var(--radius-md) var(--radius-md) 0; font-size:var(--text-sm); color:var(--text-2);
+}
+.note b{color:var(--text);}
+.note__n{
+  flex:none; width:1.4rem; height:1.4rem; border-radius:var(--radius-full);
+  background:var(--doc-accent); color:#fff; font-family:var(--font-mono); font-size:var(--text-xs);
+  font-weight:var(--fw-bold); display:grid; place-items:center;
+}
+
+/* =======================================================================
+   REUSABLE LIVE PREVIEW — a compact, realistic Codex org surface.
+   Painted only with derived --p-*/--interactive/--pv-* tokens, so setting
+   --brand-color on .preview re-themes everything. Two densities: 'full'
+   (canvas) and 'mini' (thumbnail).
+   ======================================================================= */
+.preview{
+  background:var(--pv-surface); color:var(--pv-text);
+  border-radius:var(--radius-lg); overflow:hidden; position:relative;
+  border:1px solid var(--pv-border);
+  font-size:var(--text-sm);
+}
+.pv-nav{
+  display:flex; align-items:center; gap:var(--s3); padding:var(--s3) var(--s4);
+  border-bottom:1px solid var(--pv-border); background:var(--pv-surface);
+}
+.pv-logo{display:flex; align-items:center; gap:var(--s2); font-weight:var(--fw-bold); letter-spacing:var(--track-tight);}
+.pv-logo__mk{width:1.25rem; height:1.25rem; border-radius:calc(var(--pv-radius) * .5); background:var(--interactive);}
+.pv-nav__links{display:flex; gap:var(--s3); color:var(--pv-text-2); font-size:var(--text-xs); font-weight:var(--fw-medium);}
+.pv-nav__links span:first-child{color:var(--pv-text);}
+.pv-nav__sp{flex:1;}
+.pv-nav__cta{
+  padding:var(--s1) var(--s3); border-radius:var(--pv-radius); background:var(--interactive);
+  color:var(--on-brand); font-size:var(--text-xs); font-weight:var(--fw-semibold); border:none;
+}
+.pv-nav__avatar{width:1.5rem; height:1.5rem; border-radius:var(--radius-full); background:var(--pv-surface-2); border:1px solid var(--pv-border);}
+
+.pv-hero{
+  position:relative; padding:var(--s8) var(--s5); overflow:hidden;
+  background:
+    radial-gradient(120% 120% at 80% -10%, oklch(from var(--brand-color) l c h / .38), transparent 60%),
+    linear-gradient(160deg, oklch(from var(--brand-color) calc(l - .1) c h), oklch(from var(--brand-accent) calc(l - .05) c h));
+  color:#fff;
+}
+.pv-hero__eyebrow{font-family:var(--font-mono); font-size:var(--text-xs); text-transform:uppercase; letter-spacing:var(--track-wider); opacity:.85;}
+.pv-hero__title{font-size:var(--text-3xl); font-weight:var(--fw-bold); margin:var(--s2) 0; max-width:16ch; line-height:1.05;}
+.pv-hero__desc{max-width:44ch; opacity:.9; font-size:var(--text-sm); line-height:var(--lead-snug);}
+.pv-hero__row{display:flex; gap:var(--s2); margin-top:var(--s4); flex-wrap:wrap;}
+.pv-btn{padding:var(--s2) var(--s4); border-radius:var(--pv-radius); font-size:var(--text-xs); font-weight:var(--fw-semibold); border:none;}
+.pv-btn--solid{background:#fff; color:var(--p-700);}
+.pv-btn--glass{background:rgba(255,255,255,.16); color:#fff; border:1px solid rgba(255,255,255,.4); backdrop-filter:blur(6px);}
+.pv-hero__stats{display:flex; gap:var(--s6); margin-top:var(--s5);}
+.pv-stat b{display:block; font-size:var(--text-xl); font-weight:var(--fw-bold);}
+.pv-stat span{font-size:var(--text-xs); opacity:.8; text-transform:uppercase; letter-spacing:var(--track-wider);}
+
+.pv-body{padding:var(--s5) var(--s4) var(--s6);}
+.pv-body__h{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:var(--s3);}
+.pv-body__h h4{font-size:var(--text-base); font-weight:var(--fw-semibold);}
+.pv-body__h a{font-size:var(--text-xs); color:var(--interactive); font-weight:var(--fw-semibold);}
+.pv-cards{display:grid; grid-template-columns:repeat(3,1fr); gap:var(--s3);}
+.pv-card{border-radius:var(--pv-radius); overflow:hidden; background:var(--pv-surface-2); border:1px solid var(--pv-border); transition:transform var(--dur) var(--ease-out), box-shadow var(--dur);}
+.pv-card:hover{transform:translateY(-3px) scale(var(--card-hover-scale,1.02)); box-shadow:var(--shadow-lg);}
+.pv-card__media{aspect-ratio:16/10; position:relative; background:linear-gradient(135deg, oklch(from var(--brand-color) calc(l - .05) calc(c*.7) h), oklch(from var(--brand-accent) calc(l - .1) c h));}
+.pv-card__media::after{content:""; position:absolute; inset:0; background:linear-gradient(to top, var(--scrim), transparent 65%);}
+.pv-card__badge{position:absolute; top:var(--s2); left:var(--s2); z-index:1; padding:2px var(--s1-5); border-radius:var(--radius-full); font-size:.625rem; font-weight:var(--fw-bold); background:rgba(0,0,0,.4); color:#fff; text-transform:uppercase; letter-spacing:.04em;}
+.pv-card__b{padding:var(--s2-5);}
+.pv-card__t{font-size:var(--text-xs); font-weight:var(--fw-semibold); color:var(--pv-text);}
+.pv-card__m{font-size:.6875rem; color:var(--pv-text-2); margin-top:2px;}
+
+.pv-player{
+  display:flex; align-items:center; gap:var(--s3); padding:var(--s2-5) var(--s4);
+  background:var(--p-700); color:#fff; border-top:1px solid rgba(255,255,255,.12);
+}
+.pv-player__play{width:1.75rem; height:1.75rem; border-radius:var(--radius-full); background:#fff; color:var(--p-700); display:grid; place-items:center; font-size:.7rem; border:none;}
+.pv-player__bar{flex:1; height:4px; border-radius:2px; background:rgba(255,255,255,.25); position:relative;}
+.pv-player__bar::before{content:""; position:absolute; inset:0 55% 0 0; background:#fff; border-radius:2px;}
+.pv-player__t{font-size:var(--text-xs); opacity:.85; font-variant-numeric:tabular-nums;}
+
+/* mini preview (thumbnail scale) */
+.preview--mini{font-size:.7rem;}
+.preview--mini .pv-hero{padding:var(--s5) var(--s4);}
+.preview--mini .pv-hero__title{font-size:var(--text-xl);}
+.preview--mini .pv-hero__stats,.preview--mini .pv-body__h a,.preview--mini .pv-nav__links{display:none;}
+.preview--mini .pv-cards{grid-template-columns:repeat(3,1fr);}
+
+/* swatch strip for a palette */
+.swatches{display:flex; border-radius:var(--radius-md); overflow:hidden; border:1px solid var(--border);}
+.swatches i{height:2rem; flex:1;}
+.swatches i:first-child{flex:2.2;}
+
+/* small helpers */
+.stack{display:flex; flex-direction:column;}
+.gap2{gap:var(--s2);} .gap3{gap:var(--s3);} .gap4{gap:var(--s4);} .gap6{gap:var(--s6);}
+.row{display:flex; align-items:center;}
+.muted{color:var(--text-3);}
+.tiny{font-size:var(--text-xs);}
+.kbd{font-family:var(--font-mono); font-size:var(--text-xs); padding:1px 6px; border:1px solid var(--border-strong); border-bottom-width:2px; border-radius:var(--radius-sm); background:var(--surface-2); color:var(--text-2);}
+</style>
+
+<header class="topbar">
+  <div class="brandmark">
+    <span class="brandmark__dot" aria-hidden="true"></span>
+    <div class="stack">
+      <span class="brandmark__t">Brand Editor</span>
+      <span class="brandmark__s">UI/UX directions · investigation 2026-07-18</span>
+    </div>
+  </div>
+  <div class="topbar__spacer"></div>
+  <label class="iconbtn" for="brandSeed" title="Drag to re-theme every live preview on this page">
+    <span aria-hidden="true">◐</span> Brand colour
+    <input id="brandSeed" type="color" value="#c24129" style="width:1.4rem;height:1.4rem;border:none;background:none;padding:0;cursor:pointer;">
+  </label>
+  <button class="iconbtn" id="themeBtn" aria-label="Toggle light or dark theme">
+    <span id="themeIcon" aria-hidden="true">☾</span> <span id="themeLbl">Dark</span>
+  </button>
+</header>
+
+<nav class="tabs" role="tablist" aria-label="Concepts">
+  <button class="tab" role="tab" aria-selected="true"  aria-controls="p-overview" id="t-overview">Overview</button>
+  <button class="tab" role="tab" aria-selected="false" aria-controls="p-a" id="t-a">A · Refined Panel</button>
+  <button class="tab" role="tab" aria-selected="false" aria-controls="p-b" id="t-b">B · Studio Canvas <span class="tab__k">rec</span></button>
+  <button class="tab" role="tab" aria-selected="false" aria-controls="p-c" id="t-c">C · Inspector <span class="tab__k">future</span></button>
+  <button class="tab" role="tab" aria-selected="false" aria-controls="p-d" id="t-d">D · Guided</button>
+</nav>
+
+<main class="wrap">
+
+  <!-- ============================ OVERVIEW ============================ -->
+  <section class="panel is-active" id="p-overview" role="tabpanel" aria-labelledby="t-overview">
+    <p class="eyebrow">The problem, in one screen</p>
+    <h1 class="section-h">A powerful theming engine behind a cramped drill-down.</h1>
+    <p class="lede" style="margin-top:var(--s4)">
+      Seven inputs fan out into ~50 tokens through OKLCH relative colour — the palette below is derived live from a single seed.
+      Drag the <b>Brand colour</b> control in the top bar and watch the whole preview re-theme. The engine isn't the bottleneck.
+      The 360&nbsp;px floating panel that drives it is.
+    </p>
+
+    <div class="grid cols-2" style="margin-top:var(--s8); align-items:start;">
+      <div class="stack gap4">
+        <div class="preview" data-pv>
+          <div class="pv-nav">
+            <span class="pv-logo"><span class="pv-logo__mk"></span> Northwind</span>
+            <span class="pv-nav__links"><span>Watch</span><span>Series</span><span>Live</span></span>
+            <span class="pv-nav__sp"></span>
+            <button class="pv-nav__cta">Subscribe</button>
+            <span class="pv-nav__avatar"></span>
+          </div>
+          <div class="pv-hero">
+            <span class="pv-hero__eyebrow">Featured series</span>
+            <h3 class="pv-hero__title">The Deep Field</h3>
+            <p class="pv-hero__desc">Six episodes tracing the edge of the observable universe, scored live.</p>
+            <div class="pv-hero__row">
+              <button class="pv-btn pv-btn--solid">▶ Play</button>
+              <button class="pv-btn pv-btn--glass">+ Watchlist</button>
+            </div>
+            <div class="pv-hero__stats">
+              <span class="pv-stat"><b>6</b><span>Episodes</span></span>
+              <span class="pv-stat"><b>4.9k</b><span>Members</span></span>
+              <span class="pv-stat"><b>HDR</b><span>Quality</span></span>
+            </div>
+          </div>
+          <div class="pv-body">
+            <div class="pv-body__h"><h4>Continue watching</h4><a>See all</a></div>
+            <div class="pv-cards">
+              <div class="pv-card"><div class="pv-card__media"><span class="pv-card__badge">Ep 3</span></div><div class="pv-card__b"><div class="pv-card__t">Redshift</div><div class="pv-card__m">28 min left</div></div></div>
+              <div class="pv-card"><div class="pv-card__media"><span class="pv-card__badge">New</span></div><div class="pv-card__b"><div class="pv-card__t">Parallax</div><div class="pv-card__m">Series · 6 ep</div></div></div>
+              <div class="pv-card"><div class="pv-card__media"><span class="pv-card__badge">Live</span></div><div class="pv-card__b"><div class="pv-card__t">Night Sky Q&amp;A</div><div class="pv-card__m">Starts 9pm</div></div></div>
+            </div>
+          </div>
+          <div class="pv-player">
+            <button class="pv-player__play">▶</button>
+            <span class="pv-player__t">12:04</span>
+            <span class="pv-player__bar"></span>
+            <span class="pv-player__t">27:41</span>
+          </div>
+        </div>
+        <p class="tiny muted">A single mock org surface — nav, hero, card grid, and player chrome — painted only with derived tokens. This exact component is reused as the live canvas in every concept below.</p>
+      </div>
+
+      <div class="stack gap4">
+        <div class="card">
+          <h3>What one seed colour drives</h3>
+          <p style="margin-bottom:var(--s3)">Every band re-derives from the seed via <span class="mono tiny">oklch(from …)</span> — hovers, subtle fills, focus rings, and auto-contrast text-on-brand.</p>
+          <div class="swatches" data-derive aria-hidden="true">
+            <i data-t="p700"></i><i data-t="p600"></i><i data-t="p500"></i><i data-t="p100"></i><i data-t="p50"></i><i data-t="accent"></i>
+          </div>
+          <p class="tiny muted" style="margin-top:var(--s2)">primary-700 · 600 · 500 · 100 · 50 · accent</p>
+        </div>
+
+        <div class="card">
+          <h3>The three failures a redesign must fix</h3>
+          <div class="stack gap3" style="margin-top:var(--s2)">
+            <div class="note"><span class="note__n">1</span><span><b>Occlusion &amp; scope.</b> The panel covers the preview, and the preview is only ever the landing page — never grids, detail pages, the player, or forms.</span></div>
+            <div class="note"><span class="note__n">2</span><span><b>No map.</b> Back-button-only across 12 levels — no breadcrumb, search, or jump. Getting from Colours to Typography means returning Home first.</span></div>
+            <div class="note"><span class="note__n">3</span><span><b>One width, every task.</b> Picking a brand colour and tuning a shader's caustics share the same 360&nbsp;px column.</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Four directions</h3>
+          <div class="stack gap2 tiny" style="margin-top:var(--s2); color:var(--text-2)">
+            <div class="row gap3"><span class="pill">A</span> Refined Panel — evolve today's panel; lowest risk.</div>
+            <div class="row gap3"><span class="pill pill--rec">B</span> Studio Canvas — rail + full live canvas. <b style="color:var(--doc-accent)">Near-term recommendation.</b></div>
+            <div class="row gap3"><span class="pill pill--rec">C</span> Inspector — tree → canvas → contextual inspector. The per-component future.</div>
+            <div class="row gap3"><span class="pill">D</span> Guided — presets &amp; seed-first for non-designers.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="hr">
+    <p class="eyebrow">How to read this</p>
+    <h2 class="section-h" style="font-size:var(--text-2xl)">Each tab is a working mock, not a wireframe.</h2>
+    <p class="lede" style="margin-top:var(--s3)">Switch tabs (or press <span class="kbd">1</span>–<span class="kbd">5</span>). The Brand colour and theme controls in the top bar drive every preview at once, so you can judge each layout against the same live surface. Concepts B and C share one spine — a navigable structure beside a live canvas — so B can be built such that C is an additive step, not a rewrite.</p>
+  </section>
+
+  <!-- Concept panels are injected below via edits -->
+  <section class="panel" id="p-a" role="tabpanel" aria-labelledby="t-a" hidden>
+    <style>
+    .dockgrid{display:grid; grid-template-columns:1fr 340px; min-height:560px;}
+    @media (max-width:860px){.dockgrid{grid-template-columns:1fr;} .dpanel{display:none;}}
+    .dockstage{background:
+      repeating-linear-gradient(45deg, transparent 0 11px, color-mix(in oklab, var(--text) 3%, transparent) 11px 12px), var(--bg);
+      padding:var(--s5); display:flex; align-items:flex-start; justify-content:center; overflow:auto;}
+    .dockstage .device{max-width:560px; box-shadow:var(--shadow-xl);}
+    .dpanel{display:flex; flex-direction:column; background:var(--glass); backdrop-filter:blur(var(--blur)); -webkit-backdrop-filter:blur(var(--blur)); border-left:1px solid var(--border);}
+    .dpanel__head{padding:var(--s3); border-bottom:1px solid var(--border-subtle);}
+    .dpanel__bar{display:flex; align-items:center; gap:var(--s2);}
+    .dpanel__bc{display:flex; align-items:center; gap:var(--s1-5); font-size:var(--text-sm); font-weight:var(--fw-semibold); flex:1; min-width:0;}
+    .dpanel__bc .crumb{color:var(--text-3); font-weight:var(--fw-medium);}
+    .dpanel__bc .crumb button{border:none; background:none; color:var(--text-3); font:inherit;}
+    .dpanel__bc .crumb button:hover{color:var(--text);}
+    .dpanel__icons{display:flex; gap:var(--s1);}
+    .dpanel__ic{width:1.6rem; height:1.6rem; border-radius:var(--radius-sm); border:none; background:none; color:var(--text-3); display:grid; place-items:center;}
+    .dpanel__ic:hover{background:var(--surface-2); color:var(--text);}
+    .dpanel__ic--active{background:var(--surface-2); color:var(--text);}
+    .dpanel__search{display:flex; align-items:center; gap:var(--s2); width:100%; margin-top:var(--s2-5); padding:var(--s2) var(--s2-5); border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface); color:var(--text-3); font-size:var(--text-sm);}
+    .dpanel__scroll{flex:1; overflow-y:auto; padding:var(--s2) var(--s3);}
+    .acc{border-bottom:1px solid var(--border-subtle);}
+    .acc__row{display:flex; align-items:center; gap:var(--s2-5); width:100%; padding:var(--s3) var(--s1); border:none; background:none; color:var(--text); text-align:left; font-size:var(--text-sm); font-weight:var(--fw-medium);}
+    .acc__ico{width:1.35rem; text-align:center; opacity:.85;}
+    .acc__row .rail__sw{margin-left:auto;}
+    .acc__row .chev{margin-left:auto; color:var(--text-muted); transition:transform var(--dur);}
+    .acc__row[aria-expanded="true"] .chev{transform:rotate(90deg);}
+    .acc__body{padding:0 var(--s1) var(--s3);}
+    .subnav{display:flex; align-items:center; justify-content:space-between; padding:var(--s2) var(--s2-5); border:1px dashed var(--border-strong); border-radius:var(--radius-md); font-size:var(--text-xs); color:var(--text-2); margin-top:var(--s1);}
+    </style>
+
+    <p class="eyebrow">Direction A · lowest-risk evolution</p>
+    <h1 class="section-h">Refined Panel — the same box, unlost.</h1>
+    <p class="lede" style="margin-top:var(--s4)">
+      If re-architecting isn't on the table yet, the floating panel can still lose its worst habits. Dock it to the edge so it stops
+      covering the page; give it a real breadcrumb, a search box, and inline accordion sections instead of a back-button maze; and add
+      per-field reset plus a change review. Ships inside the current architecture — same store, same injection — with no backend work.
+    </p>
+
+    <div class="app" style="margin-top:var(--s6)">
+      <div class="app__titlebar">
+        <span class="app__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="app__path">northwind.codex.tv / ?brandEditor</span>
+        <span class="app__badge"><span aria-hidden="true">◧</span> Docked right</span>
+      </div>
+      <div class="dockgrid">
+        <div class="dockstage">
+          <div class="device">
+            <div class="preview" data-pv>
+              <div class="pv-nav">
+                <span class="pv-logo"><span class="pv-logo__mk"></span> Northwind</span>
+                <span class="pv-nav__links"><span>Watch</span><span>Series</span></span>
+                <span class="pv-nav__sp"></span>
+                <button class="pv-nav__cta">Subscribe</button>
+                <span class="pv-nav__avatar"></span>
+              </div>
+              <div class="pv-hero">
+                <span class="pv-hero__eyebrow">Featured series</span>
+                <h3 class="pv-hero__title">The Deep Field</h3>
+                <p class="pv-hero__desc">Six episodes tracing the edge of the observable universe.</p>
+                <div class="pv-hero__row">
+                  <button class="pv-btn pv-btn--solid">▶ Play</button>
+                  <button class="pv-btn pv-btn--glass">+ Watchlist</button>
+                </div>
+              </div>
+              <div class="pv-body">
+                <div class="pv-body__h"><h4>Continue watching</h4><a>See all</a></div>
+                <div class="pv-cards">
+                  <div class="pv-card"><div class="pv-card__media"><span class="pv-card__badge">Ep 3</span></div><div class="pv-card__b"><div class="pv-card__t">Redshift</div><div class="pv-card__m">28 min left</div></div></div>
+                  <div class="pv-card"><div class="pv-card__media"><span class="pv-card__badge">New</span></div><div class="pv-card__b"><div class="pv-card__t">Parallax</div><div class="pv-card__m">6 ep</div></div></div>
+                  <div class="pv-card"><div class="pv-card__media"><span class="pv-card__badge">Live</span></div><div class="pv-card__b"><div class="pv-card__t">Night Sky</div><div class="pv-card__m">9pm</div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- refined docked panel -->
+        <aside class="dpanel" aria-label="Brand editor">
+          <div class="dpanel__head">
+            <div class="dpanel__bar">
+              <nav class="dpanel__bc" aria-label="Breadcrumb">
+                <span class="crumb"><button>Brand</button> ›</span> Colours
+              </nav>
+              <div class="dpanel__icons">
+                <button class="dpanel__ic dpanel__ic--active" title="Dock right" aria-label="Dock right">◧</button>
+                <button class="dpanel__ic" title="Float" aria-label="Float panel">▢</button>
+                <button class="dpanel__ic" title="Minimise" aria-label="Minimise">–</button>
+                <button class="dpanel__ic" title="Close" aria-label="Close">✕</button>
+              </div>
+            </div>
+            <div class="dpanel__search"><span aria-hidden="true">⌕</span> Search all settings <span class="kbd" style="margin-left:auto">/</span></div>
+          </div>
+
+          <div class="dpanel__scroll">
+            <!-- Colours: expanded accordion -->
+            <div class="acc">
+              <button class="acc__row" aria-expanded="true"><span class="acc__ico">◑</span> Colours <span class="rail__sw"><i style="background:var(--brand-color)"></i><i style="background:var(--brand-secondary)"></i><i style="background:var(--brand-accent)"></i></span><span class="chev">›</span></button>
+              <div class="acc__body">
+                <div class="fld" style="margin-bottom:var(--s2-5)">
+                  <div class="stack gap2">
+                    <div class="swrow"><span class="swrow__chip" style="background:var(--brand-color)"></span><span class="swrow__name">Primary</span><span class="swrow__hex" data-hex>#c24129</span></div>
+                    <div class="swrow"><span class="swrow__chip" style="background:var(--brand-secondary)"></span><span class="swrow__name">Secondary</span><span class="swrow__hex">#525252</span></div>
+                    <div class="swrow"><span class="swrow__chip" style="background:var(--brand-accent)"></span><span class="swrow__name">Accent</span><span class="swrow__hex">#f59e0b</span></div>
+                  </div>
+                </div>
+                <div class="subnav"><span>Fine-tune colours</span><span aria-hidden="true">›</span></div>
+              </div>
+            </div>
+            <!-- collapsed sections -->
+            <div class="acc"><button class="acc__row" aria-expanded="false"><span class="acc__ico">Aa</span> Typography <span class="rail__val" style="margin-left:auto; margin-right:var(--s2)">Inter</span><span class="chev">›</span></button></div>
+            <div class="acc"><button class="acc__row" aria-expanded="false"><span class="acc__ico">⬡</span> Shape &amp; density <span class="rail__val" style="margin-left:auto; margin-right:var(--s2)">0.5rem</span><span class="chev">›</span></button></div>
+            <div class="acc"><button class="acc__row" aria-expanded="false"><span class="acc__ico">◐</span> Shadows <span class="chev">›</span></button></div>
+            <div class="acc"><button class="acc__row" aria-expanded="false"><span class="acc__ico">⊞</span> Hero layout &amp; effects <span class="chev">›</span></button></div>
+            <div class="acc"><button class="acc__row" aria-expanded="false"><span class="acc__ico">✦</span> Presets <span class="chev">›</span></button></div>
+          </div>
+
+          <div class="rail__foot">
+            <div class="ledger"><span class="ledger__dot"></span> 2 changes · <a style="color:var(--interactive); font-weight:var(--fw-semibold)">Review &amp; reset</a></div>
+            <div class="btnrow">
+              <button class="btn btn--ghost">Reset</button>
+              <button class="btn btn--primary">Save</button>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <div class="grid cols-2" style="margin-top:var(--s6)">
+      <div class="note"><span class="note__n">1</span><span><b>Docked, not floating.</b> A dock-left / dock-right / float control parks the panel at the edge so it stops covering the surface it previews. (Float stays available for spot checks.)</span></div>
+      <div class="note"><span class="note__n">2</span><span><b>Breadcrumb + search.</b> The existing <span class="mono tiny">getBreadcrumb()</span> helper is finally rendered as a real trail, and a search box jumps straight to any control — no returning Home to cross between siblings.</span></div>
+      <div class="note"><span class="note__n">3</span><span><b>Accordion, not drill-down.</b> Shallow sections expand in place; only genuinely deep areas (fine-tune, shader lab) push a level. Fewer taps, less disorientation.</span></div>
+      <div class="note"><span class="note__n">4</span><span><b>Review &amp; reset.</b> A change ledger with per-field revert replaces the all-or-nothing Reset. Same store, same injection path — no backend change.</span></div>
+    </div>
+  </section>
+  <section class="panel" id="p-b" role="tabpanel" aria-labelledby="t-b" hidden>
+    <style>
+    /* ===== Shared APP SHELL (Concepts B & C) ===== */
+    .app{border:1px solid var(--border); border-radius:var(--radius-xl); overflow:hidden; box-shadow:var(--shadow-xl); background:var(--surface);}
+    .app__titlebar{display:flex; align-items:center; gap:var(--s3); padding:var(--s2-5) var(--s4); background:var(--surface-2); border-bottom:1px solid var(--border);}
+    .app__dots{display:flex; gap:6px;}
+    .app__dots i{width:.6rem; height:.6rem; border-radius:var(--radius-full); background:var(--border-strong);}
+    .app__path{font-family:var(--font-mono); font-size:var(--text-xs); color:var(--text-3); background:var(--surface); padding:2px var(--s3); border-radius:var(--radius-full); border:1px solid var(--border);}
+    .app__badge{margin-left:auto; font-size:var(--text-xs); color:var(--text-3); display:flex; align-items:center; gap:var(--s2);}
+    .app__body{display:grid; min-height:560px;}
+    .app__body--b{grid-template-columns:296px 1fr;}
+    @media (max-width:860px){.app__body--b{grid-template-columns:1fr;} .rail{display:none;}}
+
+    /* rail */
+    .rail{display:flex; flex-direction:column; border-right:1px solid var(--border); background:var(--surface); min-width:0;}
+    .rail__top{padding:var(--s3) var(--s3) var(--s2);}
+    .rail__bc{display:flex; align-items:center; gap:var(--s1-5); font-size:var(--text-xs); color:var(--text-3); margin-bottom:var(--s2-5);}
+    .rail__bc b{color:var(--text);}
+    .rail__bc button{border:none; background:none; color:var(--text-3); padding:0; font-size:var(--text-xs);}
+    .rail__bc button:hover{color:var(--text);}
+    .rail__search{display:flex; align-items:center; gap:var(--s2); width:100%; padding:var(--s2) var(--s2-5); border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface-2); color:var(--text-3); font-size:var(--text-sm);}
+    .rail__search .kbd{margin-left:auto;}
+    .rail__scroll{flex:1; overflow-y:auto; padding:var(--s2) var(--s2) var(--s3);}
+    .rail__group{margin-top:var(--s3);}
+    .rail__glabel{font-family:var(--font-mono); font-size:.625rem; text-transform:uppercase; letter-spacing:var(--track-wider); color:var(--text-muted); padding:0 var(--s2) var(--s1-5);}
+    .rail__item{display:flex; align-items:center; gap:var(--s2-5); width:100%; padding:var(--s2) var(--s2-5); border-radius:var(--radius-md); border:1px solid transparent; background:none; color:var(--text-2); text-align:left; font-size:var(--text-sm); transition:var(--dur);}
+    .rail__item:hover{background:var(--surface-2); color:var(--text);}
+    .rail__item[aria-current="true"]{background:var(--interactive-subtle, var(--surface-2)); color:var(--text); border-color:color-mix(in oklab, var(--brand-color) 30%, var(--border));}
+    .rail__ico{flex:none; width:1.35rem; height:1.35rem; display:grid; place-items:center; border-radius:var(--radius-sm); background:var(--surface-2); font-size:.8rem;}
+    .rail__item[aria-current="true"] .rail__ico{background:var(--brand-color); color:#fff;}
+    .rail__label{flex:1; font-weight:var(--fw-medium); min-width:0;}
+    .rail__val{font-size:var(--text-xs); color:var(--text-3);}
+    .rail__sw{display:flex; gap:3px;}
+    .rail__sw i{width:.75rem; height:.75rem; border-radius:var(--radius-full); border:1px solid var(--border);}
+
+    /* active section controls inside rail */
+    .rail__section{padding:var(--s2) var(--s2-5) 0;}
+    .rail__sectionhead{display:flex; align-items:center; gap:var(--s2); margin:var(--s1) 0 var(--s3);}
+    .rail__sectionhead h4{font-size:var(--text-sm); font-weight:var(--fw-semibold);}
+    .fld{margin-bottom:var(--s4);}
+    .fld__l{display:flex; align-items:center; justify-content:space-between; font-size:var(--text-sm); font-weight:var(--fw-medium); margin-bottom:var(--s2);}
+    .fld__l .reset{border:none; background:none; color:var(--text-muted); font-size:var(--text-xs);}
+    .fld__l .reset:hover{color:var(--interactive);}
+    .fld__v{font-family:var(--font-mono); font-size:var(--text-xs); color:var(--text-3);}
+    .swrow{display:flex; align-items:center; gap:var(--s2-5); padding:var(--s2); border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface-2);}
+    .swrow__chip{width:1.6rem; height:1.6rem; border-radius:var(--radius-sm); border:1px solid var(--border-strong); flex:none;}
+    .swrow__name{font-size:var(--text-sm); font-weight:var(--fw-medium); flex:1;}
+    .swrow__hex{font-family:var(--font-mono); font-size:var(--text-xs); color:var(--text-3);}
+    .rng{-webkit-appearance:none; appearance:none; width:100%; height:4px; border-radius:2px; background:var(--surface-3); accent-color:var(--brand-color);}
+    .rng::-webkit-slider-thumb{-webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:var(--brand-color); border:2px solid var(--surface); box-shadow:var(--shadow-sm); cursor:pointer;}
+    .seg{display:flex; padding:2px; gap:2px; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-md);}
+    .seg button{flex:1; padding:var(--s1-5) var(--s2); border:none; border-radius:calc(var(--radius-md) - 2px); background:none; color:var(--text-2); font-size:var(--text-xs); font-weight:var(--fw-medium);}
+    .seg button[aria-pressed="true"]{background:var(--surface); color:var(--text); box-shadow:var(--shadow-sm);}
+    .affects{display:flex; flex-wrap:wrap; gap:4px; margin-top:var(--s1);}
+    .affects .chip{font-size:.625rem; padding:1px var(--s1-5); border-radius:var(--radius-full); background:var(--surface-2); border:1px solid var(--border); color:var(--text-3);}
+
+    .rail__foot{border-top:1px solid var(--border); padding:var(--s3); background:var(--surface);}
+    .ledger{display:flex; align-items:center; gap:var(--s2); font-size:var(--text-xs); color:var(--text-2); margin-bottom:var(--s2-5);}
+    .ledger__dot{width:.5rem; height:.5rem; border-radius:var(--radius-full); background:var(--brand-accent);}
+    .btnrow{display:flex; gap:var(--s2);}
+    .btn{flex:1; padding:var(--s2) var(--s3); border-radius:var(--radius-md); font-size:var(--text-sm); font-weight:var(--fw-semibold); border:1px solid var(--border);}
+    .btn--ghost{background:none; color:var(--text-2);}
+    .btn--ghost:hover{color:var(--text); border-color:var(--border-strong);}
+    .btn--primary{background:var(--brand-color); color:#fff; border-color:transparent; flex:2;}
+    .btn--primary:hover{filter:brightness(.94);}
+
+    /* canvas — min-width:0 lets the 1fr grid track shrink below its content's
+       intrinsic width instead of overflowing (and being clipped by .app). */
+    .canvas{display:flex; flex-direction:column; min-width:0; overflow:hidden; background:
+      repeating-linear-gradient(45deg, transparent 0 11px, color-mix(in oklab, var(--text) 3%, transparent) 11px 12px), var(--bg);}
+    .cbar{display:flex; align-items:center; gap:var(--s2); padding:var(--s2-5) var(--s3); border-bottom:1px solid var(--border); background:var(--surface); flex-wrap:wrap;}
+    .routes{display:flex; gap:var(--s1); background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-full); padding:2px;}
+    .routes button{padding:var(--s1) var(--s2-5); border:none; border-radius:var(--radius-full); background:none; color:var(--text-2); font-size:var(--text-xs); font-weight:var(--fw-medium);}
+    .routes button[aria-pressed="true"]{background:var(--text); color:var(--bg);}
+    .cbar__sp{flex:1;}
+    .cbar__grp{display:flex; gap:var(--s1); align-items:center; font-size:var(--text-xs); color:var(--text-3);}
+    .cbar__grp .seg{background:var(--surface-2);}
+    .cbar__grp .seg button{padding:var(--s1) var(--s2);}
+    .stage{flex:1; display:flex; align-items:flex-start; justify-content:center; padding:var(--s6); overflow:auto;}
+    .device{width:100%; max-width:720px; box-shadow:var(--shadow-xl); border-radius:var(--radius-lg); overflow:hidden;}
+    .device--split{display:grid; grid-template-columns:1fr 1fr; gap:var(--s4); max-width:900px; box-shadow:none;}
+    .device--split .preview{box-shadow:var(--shadow-lg);}
+    .device--phone{max-width:320px;}
+    .splitlabel{font-size:var(--text-xs); color:var(--text-3); text-align:center; margin-bottom:var(--s2); font-weight:var(--fw-semibold);}
+    </style>
+
+    <p class="eyebrow">Direction B · recommended near-term</p>
+    <h1 class="section-h">Studio Canvas — the preview <em style="font-style:normal;color:var(--doc-accent)">is</em> the workspace.</h1>
+    <p class="lede" style="margin-top:var(--s4)">
+      Promote the editor out of a floating box into a dedicated Studio workspace: a fixed control rail beside a large live canvas.
+      The canvas renders the org's <b>real</b> surfaces and you flip it between routes, devices, and themes — so you finally see your brand
+      where it actually lives, at full size, nothing occluded. Try the route and device switchers; the seed control still re-themes it live.
+    </p>
+
+    <div class="app" style="margin-top:var(--s6)">
+      <div class="app__titlebar">
+        <span class="app__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="app__path">studio / brand</span>
+        <span class="app__badge"><span class="ledger__dot" style="background:var(--brand-accent)"></span> 3 unsaved changes</span>
+      </div>
+      <div class="app__body app__body--b">
+
+        <!-- CONTROL RAIL -->
+        <aside class="rail" aria-label="Brand controls">
+          <div class="rail__top">
+            <nav class="rail__bc" aria-label="Breadcrumb">
+              <button>Brand</button><span>›</span><b>Colours</b>
+            </nav>
+            <div class="rail__search"><span aria-hidden="true">⌕</span> Search settings <span class="kbd">/</span></div>
+          </div>
+
+          <div class="rail__scroll">
+            <!-- Active section: Colours, expanded in place -->
+            <div class="rail__section">
+              <div class="fld">
+                <div class="fld__l">Palette <button class="reset">Generate</button></div>
+                <div class="stack gap2">
+                  <div class="swrow"><span class="swrow__chip" style="background:var(--brand-color)"></span><span class="swrow__name">Primary</span><span class="swrow__hex" data-hex>#c24129</span></div>
+                  <div class="swrow"><span class="swrow__chip" style="background:var(--brand-secondary)"></span><span class="swrow__name">Secondary</span><span class="swrow__hex">#525252</span></div>
+                  <div class="swrow"><span class="swrow__chip" style="background:var(--brand-accent)"></span><span class="swrow__name">Accent</span><span class="swrow__hex">#f59e0b</span></div>
+                  <div class="swrow"><span class="swrow__chip" style="background:#fff"></span><span class="swrow__name">Background</span><span class="swrow__hex muted">auto</span></div>
+                </div>
+                <div class="affects"><span class="chip">buttons</span><span class="chip">links</span><span class="chip">focus rings</span><span class="chip">cards</span><span class="chip">player</span></div>
+              </div>
+
+              <div class="fld">
+                <div class="fld__l"><span>Editing theme</span></div>
+                <div class="seg" role="group" aria-label="Editing theme">
+                  <button aria-pressed="true">Light</button><button aria-pressed="false">Dark</button>
+                </div>
+                <p class="tiny muted" style="margin-top:var(--s2)">Dark values auto-derive from light until you override them.</p>
+              </div>
+
+              <div class="fld">
+                <div class="fld__l">Contrast check</div>
+                <div class="row gap2 tiny" style="color:var(--text-2)">
+                  <span class="pill pill--rec">AA ✓ text-on-brand</span>
+                  <span class="pill pill--rec">AA ✓ focus ring</span>
+                </div>
+                <p class="tiny muted" style="margin-top:var(--s2)">Auto-contrast picks black or white text for you at <span class="mono">l &lt; 0.62</span>.</p>
+              </div>
+            </div>
+
+            <!-- Other sections (collapsed nav) -->
+            <div class="rail__group">
+              <div class="rail__glabel">Foundations</div>
+              <button class="rail__item" aria-current="true"><span class="rail__ico">◑</span><span class="rail__label">Colours</span><span class="rail__sw"><i style="background:var(--brand-color)"></i><i style="background:var(--brand-secondary)"></i><i style="background:var(--brand-accent)"></i></span></button>
+              <button class="rail__item"><span class="rail__ico">Aa</span><span class="rail__label">Typography</span><span class="rail__val">Inter</span></button>
+              <button class="rail__item"><span class="rail__ico">⬡</span><span class="rail__label">Shape &amp; density</span><span class="rail__val">0.5rem</span></button>
+              <button class="rail__item"><span class="rail__ico">◐</span><span class="rail__label">Shadows</span><span class="rail__val">1×</span></button>
+            </div>
+            <div class="rail__group">
+              <div class="rail__glabel">Identity</div>
+              <button class="rail__item"><span class="rail__ico">◻</span><span class="rail__label">Logo</span><span class="rail__val muted">set</span></button>
+              <button class="rail__item"><span class="rail__ico">✦</span><span class="rail__label">Presets</span><span class="rail__val muted">12</span></button>
+            </div>
+            <div class="rail__group">
+              <div class="rail__glabel">Hero</div>
+              <button class="rail__item"><span class="rail__ico">⊞</span><span class="rail__label">Layout</span><span class="rail__val">Classic</span></button>
+              <button class="rail__item"><span class="rail__ico">◈</span><span class="rail__label">Effects</span><span class="rail__val muted">Pulse</span></button>
+              <button class="rail__item"><span class="rail__ico">▶</span><span class="rail__label">Intro video</span><span class="rail__val muted">—</span></button>
+            </div>
+          </div>
+
+          <div class="rail__foot">
+            <div class="ledger"><span class="ledger__dot"></span> 3 changes · <a style="color:var(--interactive); font-weight:var(--fw-semibold)">Review</a></div>
+            <div class="btnrow">
+              <button class="btn btn--ghost">Reset</button>
+              <button class="btn btn--primary">Save changes</button>
+            </div>
+          </div>
+        </aside>
+
+        <!-- LIVE CANVAS -->
+        <div class="canvas">
+          <div class="cbar">
+            <div class="routes" role="group" aria-label="Preview route">
+              <button aria-pressed="true">Landing</button>
+              <button aria-pressed="false">Grid</button>
+              <button aria-pressed="false">Detail</button>
+              <button aria-pressed="false">Player</button>
+            </div>
+            <span class="cbar__sp"></span>
+            <div class="cbar__grp" aria-label="Theme preview">
+              <div class="seg"><button aria-pressed="true" title="Light">☀</button><button aria-pressed="false" title="Dark">☾</button><button aria-pressed="false" title="Side by side">◧</button></div>
+            </div>
+            <div class="cbar__grp" aria-label="Device">
+              <div class="seg"><button aria-pressed="true" title="Desktop">▭</button><button aria-pressed="false" title="Phone">▯</button></div>
+            </div>
+          </div>
+          <div class="stage">
+            <div class="device">
+              <div class="preview" data-pv>
+                <div class="pv-nav">
+                  <span class="pv-logo"><span class="pv-logo__mk"></span> Northwind</span>
+                  <span class="pv-nav__links"><span>Watch</span><span>Series</span><span>Live</span></span>
+                  <span class="pv-nav__sp"></span>
+                  <button class="pv-nav__cta">Subscribe</button>
+                  <span class="pv-nav__avatar"></span>
+                </div>
+                <div class="pv-hero">
+                  <span class="pv-hero__eyebrow">Featured series</span>
+                  <h3 class="pv-hero__title">The Deep Field</h3>
+                  <p class="pv-hero__desc">Six episodes tracing the edge of the observable universe, scored live.</p>
+                  <div class="pv-hero__row">
+                    <button class="pv-btn pv-btn--solid">▶ Play</button>
+                    <button class="pv-btn pv-btn--glass">+ Watchlist</button>
+                  </div>
+                  <div class="pv-hero__stats">
+                    <span class="pv-stat"><b>6</b><span>Episodes</span></span>
+                    <span class="pv-stat"><b>4.9k</b><span>Members</span></span>
+                    <span class="pv-stat"><b>HDR</b><span>Quality</span></span>
+                  </div>
+                </div>
+                <div class="pv-body">
+                  <div class="pv-body__h"><h4>Continue watching</h4><a>See all</a></div>
+                  <div class="pv-cards">
+                    <div class="pv-card"><div class="pv-card__media"><span class="pv-card__badge">Ep 3</span></div><div class="pv-card__b"><div class="pv-card__t">Redshift</div><div class="pv-card__m">28 min left</div></div></div>
+                    <div class="pv-card"><div class="pv-card__media"><span class="pv-card__badge">New</span></div><div class="pv-card__b"><div class="pv-card__t">Parallax</div><div class="pv-card__m">Series · 6 ep</div></div></div>
+                    <div class="pv-card"><div class="pv-card__media"><span class="pv-card__badge">Live</span></div><div class="pv-card__b"><div class="pv-card__t">Night Sky Q&amp;A</div><div class="pv-card__m">Starts 9pm</div></div></div>
+                  </div>
+                </div>
+                <div class="pv-player">
+                  <button class="pv-player__play">▶</button>
+                  <span class="pv-player__t">12:04</span>
+                  <span class="pv-player__bar"></span>
+                  <span class="pv-player__t">27:41</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid cols-3" style="margin-top:var(--s6)">
+      <div class="note"><span class="note__n">1</span><span><b>Nothing occludes the preview.</b> Rail and canvas are siblings, not overlapping layers. The canvas is the biggest thing on screen — as it should be.</span></div>
+      <div class="note"><span class="note__n">2</span><span><b>Preview spans the surface.</b> Route pills swap Landing / Grid / Detail / Player; the device and theme toggles (incl. a side-by-side light+dark) let you verify everywhere the brand reaches.</span></div>
+      <div class="note"><span class="note__n">3</span><span><b>The map is always visible.</b> Grouped rail (Foundations / Identity / Hero) with the active section expanded in place — no back-button maze, and search jumps anywhere.</span></div>
+      <div class="note"><span class="note__n">4</span><span><b>Changes have a ledger.</b> A running count with Review + per-field reset, so Save is deliberate. Editing-theme and live contrast checks sit next to the colours they judge.</span></div>
+      <div class="note"><span class="note__n">5</span><span><b>“Affects” chips make impact legible.</b> Each control shows which component families it touches — answering the v2 complaint that changes felt invisible.</span></div>
+      <div class="note"><span class="note__n">6</span><span><b>One home for identity.</b> Logo and hero-text fold into the rail, ending the split between the static settings page and the live editor.</span></div>
+    </div>
+  </section>
+  <section class="panel" id="p-c" role="tabpanel" aria-labelledby="t-c" hidden>
+    <style>
+    .app__body--c{grid-template-columns:236px 1fr 300px;}
+    @media (max-width:1040px){.app__body--c{grid-template-columns:1fr;} .tree,.inspector{display:none;}}
+    .tree{border-right:1px solid var(--border); background:var(--surface); overflow-y:auto; padding:var(--s3) var(--s2);}
+    .tree__glabel{font-family:var(--font-mono); font-size:.625rem; text-transform:uppercase; letter-spacing:var(--track-wider); color:var(--text-muted); padding:var(--s3) var(--s2) var(--s1-5);}
+    .tnode{display:flex; align-items:center; gap:var(--s2); width:100%; padding:var(--s1-5) var(--s2); border-radius:var(--radius-sm); border:none; background:none; color:var(--text-2); font-size:var(--text-sm); text-align:left;}
+    .tnode:hover{background:var(--surface-2); color:var(--text);}
+    .tnode[aria-current="true"]{background:var(--interactive-subtle, var(--surface-2)); color:var(--text); font-weight:var(--fw-medium);}
+    .tnode__tw{width:.8rem; flex:none; color:var(--text-muted); font-size:.6rem;}
+    .tnode__ico{flex:none; opacity:.8;}
+    .tnode--l2{padding-left:var(--s6);}
+    .tnode--l2 .tnode__tw{display:none;}
+    .tdot{width:.4rem; height:.4rem; border-radius:2px; flex:none;}
+
+    .inspector{border-left:1px solid var(--border); background:var(--surface); overflow-y:auto; display:flex; flex-direction:column;}
+    .insp__head{padding:var(--s3) var(--s3) var(--s2); border-bottom:1px solid var(--border-subtle); position:sticky; top:0; background:var(--surface); z-index:1;}
+    .insp__crumb{font-size:var(--text-xs); color:var(--text-3);}
+    .insp__title{display:flex; align-items:center; gap:var(--s2); font-size:var(--text-base); font-weight:var(--fw-semibold); margin-top:2px;}
+    .insp__title .dot{width:.5rem; height:.5rem; border-radius:2px; background:var(--brand-color);}
+    .insp__scope{margin-top:var(--s2); font-size:var(--text-xs); color:var(--text-3); display:flex; gap:var(--s2); align-items:center;}
+    .insp__body{padding:var(--s3);}
+    .insp__group{font-family:var(--font-mono); font-size:.625rem; text-transform:uppercase; letter-spacing:var(--track-wider); color:var(--text-muted); margin:var(--s3) 0 var(--s2);}
+    .tok{font-family:var(--font-mono); font-size:.625rem; color:var(--text-muted);}
+    .insp__foot{margin-top:auto; padding:var(--s3); border-top:1px solid var(--border);}
+
+    /* selection affordance on the canvas */
+    .canvas--c .stage{align-items:center;}
+    .sel{position:relative; outline:2px solid var(--brand-color); outline-offset:3px; border-radius:var(--pv-radius);}
+    .sel__tag{position:absolute; top:-1.4rem; left:-2px; font-size:.625rem; font-weight:var(--fw-bold); background:var(--brand-color); color:#fff; padding:1px 6px; border-radius:var(--radius-sm) var(--radius-sm) var(--radius-sm) 0;}
+    .selectable{cursor:pointer;}
+    .selectable:hover{outline:1.5px dashed color-mix(in oklab, var(--brand-color) 60%, transparent); outline-offset:2px;}
+    </style>
+
+    <p class="eyebrow">Direction C · the extensibility target</p>
+    <h1 class="section-h">Inspector — foundations today, components tomorrow.</h1>
+    <p class="lede" style="margin-top:var(--s4)">
+      The same rail-beside-canvas spine as B, with a third pane: a navigable <b>tree</b> on the left (Foundations → Surfaces → Components),
+      the live canvas in the middle, and a <b>contextual inspector</b> on the right. Select a token group <em style="font-style:normal">or a specific component</em>
+      — pick "Content card" in the tree, or click the highlighted card in the canvas — and the inspector shows exactly the properties that element honours.
+      Per-component theming isn't a rebuild: <b>the token layer already carries component-scoped keys</b> (<span class="mono tiny">card-*</span>, <span class="mono tiny">player-*</span>, <span class="mono tiny">glass-tint</span>, <span class="mono tiny">hero-*</span>). This is the UI that would surface them.
+    </p>
+
+    <div class="app" style="margin-top:var(--s6)">
+      <div class="app__titlebar">
+        <span class="app__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="app__path">studio / brand / components / content-card</span>
+        <span class="app__badge"><span class="pill" style="font-size:.625rem">experimental</span></span>
+      </div>
+      <div class="app__body app__body--c">
+
+        <!-- TREE -->
+        <nav class="tree" aria-label="Design system tree">
+          <div class="tree__glabel">Foundations</div>
+          <button class="tnode"><span class="tnode__tw">▸</span><span class="tnode__ico">◑</span> Colours</button>
+          <button class="tnode"><span class="tnode__tw">▸</span><span class="tnode__ico">Aa</span> Typography</button>
+          <button class="tnode"><span class="tnode__tw">▸</span><span class="tnode__ico">⬡</span> Shape &amp; density</button>
+          <button class="tnode"><span class="tnode__tw">▸</span><span class="tnode__ico">◐</span> Shadows</button>
+
+          <div class="tree__glabel">Surfaces</div>
+          <button class="tnode"><span class="tnode__tw">▸</span><span class="tnode__ico">⊞</span> Hero</button>
+          <button class="tnode"><span class="tnode__tw">▾</span><span class="tnode__ico">▤</span> Components</button>
+          <button class="tnode tnode--l2"><span class="tdot" style="background:var(--brand-color)"></span> Button</button>
+          <button class="tnode tnode--l2" aria-current="true"><span class="tdot" style="background:var(--brand-accent)"></span> Content card</button>
+          <button class="tnode tnode--l2"><span class="tdot" style="background:var(--brand-secondary)"></span> Navigation</button>
+          <button class="tnode tnode--l2"><span class="tdot" style="background:#6b7280"></span> Player</button>
+          <button class="tnode tnode--l2"><span class="tdot" style="background:#6b7280"></span> Forms</button>
+        </nav>
+
+        <!-- CANVAS (with selection) -->
+        <div class="canvas canvas--c">
+          <div class="cbar">
+            <div class="routes" role="group" aria-label="Preview route">
+              <button aria-pressed="false">Landing</button>
+              <button aria-pressed="true">Grid</button>
+              <button aria-pressed="false">Detail</button>
+            </div>
+            <span class="cbar__sp"></span>
+            <span class="cbar__grp tiny"><span aria-hidden="true">⌖</span> Click any element to edit its tokens</span>
+          </div>
+          <div class="stage">
+            <div class="device" style="max-width:660px">
+              <div class="preview" data-pv>
+                <div class="pv-nav">
+                  <span class="pv-logo"><span class="pv-logo__mk"></span> Northwind</span>
+                  <span class="pv-nav__sp"></span>
+                  <button class="pv-nav__cta selectable">Subscribe</button>
+                  <span class="pv-nav__avatar"></span>
+                </div>
+                <div class="pv-body" style="padding-top:var(--s5)">
+                  <div class="pv-body__h"><h4>Browse the library</h4></div>
+                  <div class="pv-cards">
+                    <div class="pv-card sel"><span class="sel__tag">Content card</span><div class="pv-card__media"><span class="pv-card__badge">Ep 3</span></div><div class="pv-card__b"><div class="pv-card__t">Redshift</div><div class="pv-card__m">28 min left</div></div></div>
+                    <div class="pv-card selectable"><div class="pv-card__media"><span class="pv-card__badge">New</span></div><div class="pv-card__b"><div class="pv-card__t">Parallax</div><div class="pv-card__m">Series · 6 ep</div></div></div>
+                    <div class="pv-card selectable"><div class="pv-card__media"><span class="pv-card__badge">Live</span></div><div class="pv-card__b"><div class="pv-card__t">Night Sky</div><div class="pv-card__m">Starts 9pm</div></div></div>
+                    <div class="pv-card selectable"><div class="pv-card__media"></div><div class="pv-card__b"><div class="pv-card__t">Aphelion</div><div class="pv-card__m">Film · 98 min</div></div></div>
+                    <div class="pv-card selectable"><div class="pv-card__media"></div><div class="pv-card__b"><div class="pv-card__t">Perigee</div><div class="pv-card__m">Series · 4 ep</div></div></div>
+                    <div class="pv-card selectable"><div class="pv-card__media"></div><div class="pv-card__b"><div class="pv-card__t">Zenith</div><div class="pv-card__m">Film · 2h 10</div></div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- INSPECTOR -->
+        <aside class="inspector" aria-label="Content card properties">
+          <div class="insp__head">
+            <div class="insp__crumb">Components ›</div>
+            <div class="insp__title"><span class="dot"></span> Content card</div>
+            <div class="insp__scope"><span class="pill" style="font-size:.625rem">scoped override</span> layers on the derived palette</div>
+          </div>
+          <div class="insp__body">
+            <div class="insp__group">Shape</div>
+            <div class="fld">
+              <div class="fld__l"><span>Corner radius</span><span class="fld__v">0.75rem</span></div>
+              <input class="rng" type="range" min="0" max="24" value="12" aria-label="Corner radius">
+              <div class="tok">→ inherits --radius-card</div>
+            </div>
+
+            <div class="insp__group">Interaction</div>
+            <div class="fld">
+              <div class="fld__l"><span>Hover lift</span><span class="fld__v">1.02×</span></div>
+              <input class="rng" type="range" min="100" max="110" value="102" aria-label="Hover scale">
+              <div class="tok">→ --brand-card-hover-scale</div>
+            </div>
+            <div class="fld">
+              <div class="fld__l"><span>Image zoom on hover</span><span class="fld__v">1.05×</span></div>
+              <input class="rng" type="range" min="100" max="115" value="105" aria-label="Image hover scale">
+              <div class="tok">→ --brand-card-image-hover-scale</div>
+            </div>
+
+            <div class="insp__group">Media cover</div>
+            <div class="fld">
+              <div class="fld__l"><span>Scrim depth</span><button class="reset">reset</button></div>
+              <input class="rng" type="range" min="40" max="80" value="60" aria-label="Scrim depth">
+              <div class="tok">→ --media-scrim (60% black + bg)</div>
+            </div>
+            <div class="fld">
+              <div class="fld__l"><span>Badge</span></div>
+              <div class="seg" role="group" aria-label="Badge style"><button aria-pressed="true">Solid</button><button aria-pressed="false">Glass</button><button aria-pressed="false">Off</button></div>
+            </div>
+          </div>
+          <div class="insp__foot">
+            <div class="btnrow"><button class="btn btn--ghost">Reset to derived</button></div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <div class="grid cols-3" style="margin-top:var(--s6)">
+      <div class="note"><span class="note__n">1</span><span><b>Two ways in.</b> Navigate the tree, or click an element in the canvas — both open the same inspector. Direct manipulation is how designers expect to work.</span></div>
+      <div class="note"><span class="note__n">2</span><span><b>Grounded in real tokens.</b> Every inspector row shows the CSS variable it writes — <span class="mono tiny">--brand-card-hover-scale</span>, <span class="mono tiny">--media-scrim</span> — keys the engine <em style="font-style:normal">already</em> honours. Adding a component is a "Path B" change: no migration.</span></div>
+      <div class="note"><span class="note__n">3</span><span><b>Overrides layer, never fork.</b> A component tweak sits on top of the derived palette and always carries "Reset to derived", so per-component edits can't strand an org off-brand.</span></div>
+    </div>
+
+    <div class="card" style="margin-top:var(--s6); border-color:color-mix(in oklab,var(--doc-accent) 30%, var(--border));">
+      <h3>What it would take to ship per-component editing (future, not now)</h3>
+      <div class="grid cols-2" style="margin-top:var(--s3); gap:var(--s3)">
+        <p><b>1. A component registry</b> — map each component (Button, Content card, Nav, Player, Hero, Form) to the override keys it honours, with safe ranges and sensible controls.</p>
+        <p><b>2. Tree/inspector IA</b> — the structure shown here, so "Components" is a first-class branch beside "Foundations".</p>
+        <p><b>3. Canvas selection</b> — a lightweight <span class="mono tiny">data-brand-component</span> annotation on component roots so a click maps to the registry.</p>
+        <p><b>4. Guardrails</b> — overrides layer on the derived palette (never replace it), each with a visible reset. Contrast checks travel with the component.</p>
+      </div>
+    </div>
+  </section>
+  <section class="panel" id="p-d" role="tabpanel" aria-labelledby="t-d" hidden>
+    <style>
+    .guided{display:grid; grid-template-columns:1fr 400px; gap:0; min-height:560px;}
+    @media (max-width:900px){.guided{grid-template-columns:1fr;}}
+    .guided__left{padding:var(--s6); border-right:1px solid var(--border); background:var(--surface);}
+    .guided__right{padding:var(--s6); background:
+      repeating-linear-gradient(45deg, transparent 0 11px, color-mix(in oklab, var(--text) 3%, transparent) 11px 12px), var(--bg);
+      display:flex; flex-direction:column; gap:var(--s3);}
+    .starttabs{display:flex; gap:var(--s1); background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-md); padding:3px; margin:var(--s4) 0 var(--s5);}
+    .starttabs button{flex:1; padding:var(--s2) var(--s2-5); border:none; border-radius:calc(var(--radius-md) - 2px); background:none; color:var(--text-2); font-size:var(--text-sm); font-weight:var(--fw-medium);}
+    .starttabs button[aria-pressed="true"]{background:var(--surface); color:var(--text); box-shadow:var(--shadow-sm);}
+    .presetgrid{display:grid; grid-template-columns:1fr 1fr; gap:var(--s3);}
+    .preset{border:1px solid var(--border); border-radius:var(--radius-lg); overflow:hidden; background:var(--surface); text-align:left; padding:0; transition:var(--dur);}
+    .preset:hover{border-color:var(--border-strong); box-shadow:var(--shadow-md); transform:translateY(-2px);}
+    .preset[aria-pressed="true"]{border-color:var(--brand-color); box-shadow:0 0 0 2px color-mix(in oklab,var(--brand-color) 35%,transparent);}
+    .preset__bars{display:flex; height:3rem;}
+    .preset__bars i{flex:1;} .preset__bars i:first-child{flex:2.4;}
+    .preset__meta{padding:var(--s2-5) var(--s3); display:flex; flex-direction:column; gap:2px;}
+    .preset__name{display:block; font-size:var(--text-sm); font-weight:var(--fw-semibold);}
+    .preset__desc{display:block; font-size:var(--text-xs); color:var(--text-3);}
+    .seedwrap{display:flex; align-items:center; gap:var(--s3); padding:var(--s4); border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--surface-2);}
+    .seedwrap__sw{width:3.5rem; height:3.5rem; border-radius:var(--radius-md); border:1px solid var(--border-strong); background:var(--brand-color); flex:none;}
+    .genrow{display:flex; gap:var(--s2); margin-top:var(--s4); flex-wrap:wrap;}
+    .genopt{border:1px solid var(--border); border-radius:var(--radius-md); overflow:hidden; background:var(--surface); flex:1; min-width:120px;}
+    .genopt__bars{display:flex; height:2rem;} .genopt__bars i{flex:1;} .genopt__bars i:first-child{flex:2;}
+    .genopt__n{font-size:var(--text-xs); color:var(--text-2); padding:var(--s1-5) var(--s2);}
+    .deeper{display:flex; align-items:center; justify-content:space-between; gap:var(--s3); margin-top:var(--s6); padding:var(--s3) var(--s4); border:1px dashed var(--border-strong); border-radius:var(--radius-lg); background:var(--surface-2);}
+    </style>
+
+    <p class="eyebrow">Direction D · the 60-second path</p>
+    <h1 class="section-h">Guided — good-looking before it's deep.</h1>
+    <p class="lede" style="margin-top:var(--s4)">
+      Most admins want their space to look on-brand fast, not to tune a shader. This entry mode leads with three fast starts — pick a
+      preset, drop a seed colour and get complete palettes, or pull colours from your logo — with a live preview the whole time.
+      "Go deeper" hands off to the full editor (B) only when they want it. It directly answers the v2 note: one click to a <b>complete</b> palette, not a field-by-field grind.
+    </p>
+
+    <div class="app" style="margin-top:var(--s6)">
+      <div class="app__titlebar">
+        <span class="app__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="app__path">studio / brand · first run</span>
+      </div>
+      <div class="guided">
+        <div class="guided__left">
+          <h3 style="font-size:var(--text-xl); font-weight:var(--fw-bold)">Let's brand Northwind.</h3>
+          <p class="muted tiny" style="margin-top:var(--s1)">Start anywhere — you can refine every detail later.</p>
+
+          <div class="starttabs" role="group" aria-label="Start method">
+            <button aria-pressed="true">Presets</button>
+            <button aria-pressed="false">Seed colour</button>
+            <button aria-pressed="false">From logo</button>
+          </div>
+
+          <div class="presetgrid">
+            <button class="preset" aria-pressed="true">
+              <span class="preset__bars"><i style="background:#c24129"></i><i style="background:#525252"></i><i style="background:#f59e0b"></i></span>
+              <span class="preset__meta"><span class="preset__name">Ember</span><span class="preset__desc">Warm, editorial</span></span>
+            </button>
+            <button class="preset">
+              <span class="preset__bars"><i style="background:#1e3a8a"></i><i style="background:#0ea5e9"></i><i style="background:#f0f9ff"></i></span>
+              <span class="preset__meta"><span class="preset__name">Deep Field</span><span class="preset__desc">Cool, cinematic</span></span>
+            </button>
+            <button class="preset">
+              <span class="preset__bars"><i style="background:#14532d"></i><i style="background:#65a30d"></i><i style="background:#ecfccb"></i></span>
+              <span class="preset__meta"><span class="preset__name">Canopy</span><span class="preset__desc">Natural, calm</span></span>
+            </button>
+            <button class="preset">
+              <span class="preset__bars"><i style="background:#171717"></i><i style="background:#dc2626"></i><i style="background:#fafafa"></i></span>
+              <span class="preset__meta"><span class="preset__name">Monolith</span><span class="preset__desc">High-contrast, bold</span></span>
+            </button>
+          </div>
+
+          <div class="deeper">
+            <div><b style="font-size:var(--text-sm)">Want full control?</b><div class="tiny muted">Colours, type, shape, hero, per-component.</div></div>
+            <button class="btn btn--ghost" style="flex:none; padding:var(--s2) var(--s4)">Open full editor →</button>
+          </div>
+        </div>
+
+        <div class="guided__right">
+          <div class="splitlabel" style="text-align:left; color:var(--text-3)">Live preview · updates as you choose</div>
+          <div class="preview preview--mini" data-pv>
+            <div class="pv-hero">
+              <span class="pv-hero__eyebrow">Featured</span>
+              <h3 class="pv-hero__title">The Deep Field</h3>
+              <p class="pv-hero__desc">Scored live, in HDR.</p>
+              <div class="pv-hero__row">
+                <button class="pv-btn pv-btn--solid">▶ Play</button>
+                <button class="pv-btn pv-btn--glass">+ List</button>
+              </div>
+            </div>
+            <div class="pv-body">
+              <div class="pv-cards">
+                <div class="pv-card"><div class="pv-card__media"><span class="pv-card__badge">Ep 3</span></div><div class="pv-card__b"><div class="pv-card__t">Redshift</div></div></div>
+                <div class="pv-card"><div class="pv-card__media"></div><div class="pv-card__b"><div class="pv-card__t">Parallax</div></div></div>
+                <div class="pv-card"><div class="pv-card__media"></div><div class="pv-card__b"><div class="pv-card__t">Zenith</div></div></div>
+              </div>
+            </div>
+            <div class="pv-player">
+              <button class="pv-player__play">▶</button>
+              <span class="pv-player__t">12:04</span>
+              <span class="pv-player__bar"></span>
+            </div>
+          </div>
+          <p class="tiny muted">The preview uses your real content and the derived palette — what you approve is exactly what members see.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:var(--s6)">
+      <h3>Seed → complete palette (the v2 fix, shown)</h3>
+      <p style="margin:var(--s2) 0 var(--s3)">One seed colour generates several <b>complete</b> palettes via colour-theory strategies — primary + secondary + accent + background — as clickable options. No picking primary, then hunting for a secondary.</p>
+      <div class="seedwrap">
+        <span class="seedwrap__sw" data-seedsw></span>
+        <div class="stack" style="gap:2px"><b class="tiny">Seed colour</b><span class="mono tiny muted" data-hex>#c24129</span></div>
+        <div class="genrow" style="margin-top:0; flex:1">
+          <div class="genopt"><span class="genopt__bars" data-gen="comp"><i></i><i></i><i></i></span><span class="genopt__n">Complementary</span></div>
+          <div class="genopt"><span class="genopt__bars" data-gen="analog"><i></i><i></i><i></i></span><span class="genopt__n">Analogous</span></div>
+          <div class="genopt"><span class="genopt__bars" data-gen="triad"><i></i><i></i><i></i></span><span class="genopt__n">Triadic</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid cols-3" style="margin-top:var(--s6)">
+      <div class="note"><span class="note__n">1</span><span><b>Fast starts, not a form.</b> Preset, seed, or logo — each produces a full, coherent palette in one action.</span></div>
+      <div class="note"><span class="note__n">2</span><span><b>Progressive disclosure.</b> Depth is one click away via "Open full editor", never in the way of a quick, confident result.</span></div>
+      <div class="note"><span class="note__n">3</span><span><b>Preview from the first second.</b> The same live surface as every other concept — decisions are always seen, never guessed.</span></div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+(function(){
+  var root=document.documentElement;
+  // theme toggle
+  var mq=window.matchMedia('(prefers-color-scheme: dark)');
+  function apply(t){
+    root.setAttribute('data-theme',t);
+    document.getElementById('themeIcon').textContent = t==='dark'?'☀':'☾';
+    document.getElementById('themeLbl').textContent = t==='dark'?'Light':'Dark';
+  }
+  apply(mq.matches?'dark':'light');
+  document.getElementById('themeBtn').addEventListener('click',function(){
+    apply(root.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+
+  // brand seed → re-theme all previews AND every var(--brand-color) consumer
+  var seed=document.getElementById('brandSeed');
+  function setBrand(hex){
+    // set on :root so rail swatches / icons using var(--brand-color) track too
+    root.style.setProperty('--brand-color',hex);
+    document.querySelectorAll('.preview').forEach(function(el){ el.style.setProperty('--brand-color',hex); });
+    // hex read-outs + seed swatch
+    document.querySelectorAll('[data-hex]').forEach(function(el){ el.textContent=hex; });
+    document.querySelectorAll('[data-seedsw]').forEach(function(el){ el.style.background=hex; });
+    // derived swatch strip(s)
+    document.querySelectorAll('[data-derive]').forEach(function(strip){
+      strip.querySelectorAll('i').forEach(function(i){
+        var t=i.getAttribute('data-t'); var v;
+        switch(t){
+          case 'p700': v='oklch(from '+hex+' calc(l - .15) c h)'; break;
+          case 'p600': v='oklch(from '+hex+' calc(l - .08) c h)'; break;
+          case 'p500': v=hex; break;
+          case 'p100': v='oklch(from '+hex+' .94 calc(c * .25) h)'; break;
+          case 'p50':  v='oklch(from '+hex+' .97 calc(c * .15) h)'; break;
+          case 'accent': v='var(--brand-accent)'; break;
+        }
+        i.style.background=v;
+      });
+    });
+    // Concept D — palette-generation strategies from the seed (hue rotations)
+    var strat={comp:[0,180,180],analog:[0,30,-30],triad:[0,120,240]};
+    document.querySelectorAll('[data-gen]').forEach(function(g){
+      var rot=strat[g.getAttribute('data-gen')]||[0,0,0];
+      var bars=g.querySelectorAll('i');
+      for(var j=0;j<bars.length;j++){
+        var lift=(j===2)?' calc(l + .12)':' l';
+        bars[j].style.background='oklch(from '+hex+lift+' c calc(h + '+rot[j]+'))';
+      }
+    });
+  }
+  seed.addEventListener('input',function(){ setBrand(seed.value); });
+  setBrand(seed.value);
+
+  // tabs
+  var tabs=Array.prototype.slice.call(document.querySelectorAll('.tab'));
+  function select(tab){
+    tabs.forEach(function(t){
+      var on=t===tab; t.setAttribute('aria-selected',on?'true':'false');
+      var panel=document.getElementById(t.getAttribute('aria-controls'));
+      panel.classList.toggle('is-active',on); panel.hidden=!on;
+    });
+    tab.focus({preventScroll:true});
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+  tabs.forEach(function(t){ t.addEventListener('click',function(){select(t);}); });
+  // number-key shortcuts
+  document.addEventListener('keydown',function(e){
+    if(e.target.matches('input,textarea')) return;
+    var i=parseInt(e.key,10);
+    if(i>=1 && i<=tabs.length){ select(tabs[i-1]); }
+  });
+})();
+</script>
