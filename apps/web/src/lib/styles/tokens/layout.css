@@ -42,6 +42,14 @@
    * rail because it hosts the full brand control surface (WP-1.5). */
   --brand-studio-rail-width: 24rem;      /* 384px control rail */
 
+  /* Brand-studio device-preview widths — the viewport the live-preview canvas
+   * iframe is constrained to per device (Codex-cijzb WP-1.3). Named constants,
+   * NOT breakpoint tokens: they model real device VIEWPORTS, not layout
+   * breakpoints. Mobile ≈ iPhone-class handset; tablet = iPad portrait (which
+   * coincides with --breakpoint-md). Desktop is fluid (no cap). */
+  --brand-studio-preview-mobile: 23.4375rem; /* 375px — iPhone-class handset */
+  --brand-studio-preview-tablet: 48rem;      /* 768px — iPad portrait */
+
   /* ========================================
    * PLAYER HEIGHTS
    * ========================================

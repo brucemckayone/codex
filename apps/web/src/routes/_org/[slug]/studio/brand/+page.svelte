@@ -21,11 +21,13 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { beforeNavigate, invalidate } from '$app/navigation';
+  import { page } from '$app/state';
   import type { HeroLayout } from '@codex/validation';
   import type { BrandingSettingsResponse } from '@codex/shared-types';
   import { brandEditor } from '$lib/brand-editor';
   import type { BrandEditorState } from '$lib/brand-editor';
   import { getBrandingSettings, updateBrandingCommand } from '$lib/remote/branding.remote';
+  import { getPublicContent } from '$lib/remote/content.remote';
   import { toast } from '$lib/components/ui/Toast/toast-store';
   import {
     BrandStudioLayout,
@@ -42,6 +44,28 @@
   // Load current branding — the same remote query the old settings/branding
   // page used, so the save/load contract is unchanged.
   const brandingQuery = $derived(orgId ? getBrandingSettings(orgId) : null);
+
+  // One published content slug for the canvas' Detail/Player previews. Studio
+  // is ssr=false, so this reactive remote query resolves client-side. When the
+  // org has no published content the slug stays undefined and those tabs
+  // disable gracefully (see CanvasToolbar's content gate).
+  const previewContentQuery = $derived(
+    orgId ? getPublicContent({ orgId, limit: 1 }) : null
+  );
+  const previewContentSlug = $derived.by(() => {
+    const items = previewContentQuery?.current?.items;
+    if (!Array.isArray(items) || items.length === 0) return undefined;
+    const first = items[0];
+    if (first && typeof first === 'object') {
+      if ('slug' in first && typeof first.slug === 'string' && first.slug) {
+        return first.slug;
+      }
+      if ('id' in first && typeof first.id === 'string' && first.id) {
+        return first.id;
+      }
+    }
+    return undefined;
+  });
 
   // Own the store: open once branding is available; close on destroy. A plain
   // guard flag keeps this to a single open() even as the query refreshes.
@@ -166,6 +190,14 @@
     <BrandStudioRail {saving} isDirty={brandEditor.isDirty} onsave={handleSave} />
   {/snippet}
   {#snippet canvas()}
-    <BrandStudioCanvas />
+    <!--
+      TODO(WP-1.4): attach the postMessage bridge here via `onframeload` —
+      capture `detail.window` and post brand `pending` state to `detail.origin`
+      for live, no-reload preview. WP-1.3 only loads the page + exposes the seam.
+    -->
+    <BrandStudioCanvas
+      previewOrigin={page.url.origin}
+      contentSlug={previewContentSlug}
+    />
   {/snippet}
 </BrandStudioLayout>
