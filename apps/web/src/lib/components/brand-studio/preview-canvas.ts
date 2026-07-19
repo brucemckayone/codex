@@ -12,7 +12,7 @@
  */
 
 /** A preview target. Maps to a root-relative public path (see resolvePreviewPath). */
-export type PreviewRouteId = 'landing' | 'grid' | 'detail' | 'player' | 'nav';
+export type PreviewRouteId = 'landing' | 'grid' | 'detail' | 'player';
 
 /** A device-width preset the canvas constrains the iframe to. */
 export type PreviewDeviceId = 'desktop' | 'tablet' | 'mobile';
@@ -40,19 +40,20 @@ export interface PreviewRoute {
  *   - landing → `/`          (the org landing page)
  *   - grid    → `/explore`   (the content grid)
  *   - detail  → `/content/<slug>`
- *   - player  → `/content/<slug>` — the content page hosts the player INLINE;
- *               this codebase has no standalone player route, so Player shares
- *               the detail URL (a distinct preview lens, same surface).
- *   - nav     → `/` — the header/sidebar/footer chrome is shared across every
- *               page; landing is the canonical full-chrome view, so Nav reuses
- *               it (emphasis is on the surrounding chrome, per the WP brief).
+ *   - player  → `/brand-preview/player` — a self-contained demo surface that
+ *               renders the audio + video players in fixed states, so the
+ *               player's branded chrome always previews regardless of what
+ *               content (audio/video/none) the org has published.
+ *
+ * (Nav was retired: it aliased `/` — identical to Landing — and the nav chrome
+ * already shows in every route, so a dedicated lens was redundant.)
  */
 export const PREVIEW_ROUTES: readonly PreviewRoute[] = [
   { id: 'landing', label: 'Landing', requiresContent: false },
   { id: 'grid', label: 'Grid', requiresContent: false },
   { id: 'detail', label: 'Detail', requiresContent: true },
-  { id: 'player', label: 'Player', requiresContent: true },
-  { id: 'nav', label: 'Nav', requiresContent: false },
+  // The player demo is synthetic — it never needs a published content slug.
+  { id: 'player', label: 'Player', requiresContent: false },
 ];
 
 export interface PreviewDevice {
@@ -89,13 +90,14 @@ export function resolvePreviewPath(
 ): string | null {
   switch (id) {
     case 'landing':
-    case 'nav':
       return '/';
     case 'grid':
       return '/explore';
     case 'detail':
-    case 'player':
       return contentSlug ? `/content/${encodeURIComponent(contentSlug)}` : null;
+    case 'player':
+      // Synthetic demo surface — always available, no content slug needed.
+      return '/brand-preview/player';
   }
 }
 

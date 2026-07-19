@@ -167,18 +167,19 @@ describe('BrandStudioCanvas', () => {
     expect(iframes()[1].getAttribute('src')).toBe('/');
   });
 
-  test('content routes are disabled when the org has no published content', () => {
+  test('only Detail is disabled when the org has no published content', () => {
     render({ contentSlug: undefined });
 
+    // Detail loads a real content page → needs a slug.
     expect(groupButton('Preview route', 'Detail').disabled).toBe(true);
-    expect(groupButton('Preview route', 'Player').disabled).toBe(true);
-    // Content-free routes remain available.
+    // Content-free routes remain available — including Player, whose demo is
+    // synthetic (Nav was retired).
     expect(groupButton('Preview route', 'Landing').disabled).toBe(false);
     expect(groupButton('Preview route', 'Grid').disabled).toBe(false);
-    expect(groupButton('Preview route', 'Nav').disabled).toBe(false);
+    expect(groupButton('Preview route', 'Player').disabled).toBe(false);
   });
 
-  test('content routes are enabled once a slug is available', () => {
+  test('Detail enables once a slug is available; Player is always enabled', () => {
     render({ contentSlug: SLUG });
 
     expect(groupButton('Preview route', 'Detail').disabled).toBe(false);

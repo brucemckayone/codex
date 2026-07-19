@@ -18,10 +18,6 @@ describe('resolvePreviewPath', () => {
     expect(resolvePreviewPath('landing')).toBe('/');
   });
 
-  it('maps nav to the root path (shared full-chrome surface)', () => {
-    expect(resolvePreviewPath('nav')).toBe('/');
-  });
-
   it('maps grid to /explore', () => {
     expect(resolvePreviewPath('grid')).toBe('/explore');
   });
@@ -32,9 +28,12 @@ describe('resolvePreviewPath', () => {
     );
   });
 
-  it('maps player to the same content path as detail', () => {
+  it('maps player to the synthetic demo surface (no slug needed)', () => {
+    // The player preview is a self-contained always-works demo — it never
+    // depends on published content, so the slug is irrelevant.
+    expect(resolvePreviewPath('player')).toBe('/brand-preview/player');
     expect(resolvePreviewPath('player', 'my-first-video')).toBe(
-      '/content/my-first-video'
+      '/brand-preview/player'
     );
   });
 
@@ -42,34 +41,33 @@ describe('resolvePreviewPath', () => {
     expect(resolvePreviewPath('detail', 'a b/c')).toBe('/content/a%20b%2Fc');
   });
 
-  it('returns null for content routes without a slug', () => {
+  it('returns null only for detail without a slug', () => {
     expect(resolvePreviewPath('detail')).toBeNull();
-    expect(resolvePreviewPath('player')).toBeNull();
+    expect(resolvePreviewPath('player')).not.toBeNull();
   });
 
   it('never returns null for content-free routes', () => {
     expect(resolvePreviewPath('landing')).not.toBeNull();
     expect(resolvePreviewPath('grid')).not.toBeNull();
-    expect(resolvePreviewPath('nav')).not.toBeNull();
+    expect(resolvePreviewPath('player')).not.toBeNull();
   });
 });
 
 describe('preview model constants', () => {
-  it('exposes exactly the five route switcher entries', () => {
+  it('exposes exactly the four route switcher entries (Nav retired)', () => {
     expect(PREVIEW_ROUTES.map((r) => r.id)).toEqual([
       'landing',
       'grid',
       'detail',
       'player',
-      'nav',
     ]);
   });
 
-  it('marks only detail and player as content-requiring', () => {
+  it('marks only detail as content-requiring (player demo is synthetic)', () => {
     const requiresContent = PREVIEW_ROUTES.filter((r) => r.requiresContent).map(
       (r) => r.id
     );
-    expect(requiresContent).toEqual(['detail', 'player']);
+    expect(requiresContent).toEqual(['detail']);
   });
 
   it('exposes the three device presets with a width read-out each', () => {
