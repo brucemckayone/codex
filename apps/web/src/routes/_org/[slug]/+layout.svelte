@@ -23,7 +23,6 @@
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
   import HealthBanner from '$lib/components/subscription/HealthBanner.svelte';
   import { brandEditor, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars } from '$lib/brand-editor';
-  import type { BrandEditorState } from '$lib/brand-editor';
   import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection, loadSubscriptionFromServer, subscriptionCollection } from '$lib/collections';
   import { initProgressSync, cleanupProgressSync, forceSync } from '$lib/collections/progress-sync';
@@ -334,103 +333,13 @@
     };
   });
 
-  // ── Brand Editor ────────────────────────────────────────────────────
-  const showBrandEditor = $derived(page.url.searchParams.has('brandEditor'));
-
-  // Open/close the editor based on URL param
-  $effect(() => {
-    if (!browser) return;
-    if (showBrandEditor && brandEditor.isClosed && data.org) {
-      // Reconstruct saved tokenOverrides from server JSON. Codex-g49b4 dropped
-      // the per-field columns (shadow_scale, shadow_color, text_scale,
-      // heading_weight, body_weight, text_color_hex); their values are now
-      // backfilled into tokenOverrides JSON, so this single parse is enough.
-      const ft = data.org.brandFineTune;
-      const savedOverrides: Record<string, string> = {};
-      if (ft?.tokenOverrides) {
-        try { Object.assign(savedOverrides, JSON.parse(ft.tokenOverrides)); } catch { /* ignore parse errors */ }
-      }
-
-      // Parse saved dark mode overrides
-      let savedDarkOverrides = null;
-      if (ft?.darkModeOverrides) {
-        try { savedDarkOverrides = JSON.parse(ft.darkModeOverrides); } catch { /* ignore */ }
-      }
-
-      // Codex-wwedk: parse the parallel darkTokenOverrides JSON. Null when
-      // unset so the editor's getThemeTokenOverride falls back to the light
-      // value — matches the visitor-facing CSS fallback chain.
-      let savedDarkTokenOverrides: Record<string, string | null> | null = null;
-      if (ft?.darkTokenOverrides) {
-        try {
-          const parsed = JSON.parse(ft.darkTokenOverrides) as Record<string, string | null>;
-          if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
-            savedDarkTokenOverrides = parsed;
-          }
-        } catch { /* ignore parse errors */ }
-      }
-
-      const saved: BrandEditorState = {
-        primaryColor: brandPrimary ?? '#C24129',
-        secondaryColor: brandSecondary ?? null,
-        accentColor: brandAccent ?? null,
-        backgroundColor: brandBackground ?? null,
-        fontBody: data.org.brandFonts?.body ?? null,
-        fontHeading: data.org.brandFonts?.heading ?? null,
-        radius: Number(data.org.brandRadius) || 0.5,
-        density: Number(data.org.brandDensity) || 1,
-        logoUrl: data.org.logoUrl ?? null,
-        tokenOverrides: Object.keys(savedOverrides).length > 0 ? savedOverrides : {},
-        darkOverrides: savedDarkOverrides,
-        darkTokenOverrides: savedDarkTokenOverrides,
-        heroLayout: data.org?.heroLayout ?? 'default',
-      };
-      brandEditor.open(data.org.id, saved);
-    }
-  });
-
-  // beforeunload when dirty
-  $effect(() => {
-    if (!browser) return;
-    function onBeforeUnload(e: BeforeUnloadEvent) {
-      if (brandEditor.isDirty) {
-        e.preventDefault();
-      }
-    }
-    if (brandEditor.isDirty) {
-      window.addEventListener('beforeunload', onBeforeUnload);
-      return () => window.removeEventListener('beforeunload', onBeforeUnload);
-    }
-  });
-
-  // Dynamically load the brand editor module only when the editor is
-  // activated (URL param or store state). Keeps ~23 components and the
-  // branding remote off the critical path for normal org visitors.
-  type BrandEditorMountComponent =
-    typeof import('$lib/components/brand-editor/BrandEditorMount.svelte').default;
-  let BrandEditorMount = $state<BrandEditorMountComponent | null>(null);
-  const shouldLoadBrandEditor = $derived(
-    browser && (showBrandEditor || !brandEditor.isClosed)
-  );
-
-  $effect(() => {
-    if (shouldLoadBrandEditor && !BrandEditorMount) {
-      void import('$lib/components/brand-editor/BrandEditorMount.svelte').then(
-        (mod) => { BrandEditorMount = mod.default; }
-      );
-    }
-  });
-
-  // SvelteKit navigation guard — flush progress + brand editor dirty check
-  beforeNavigate(({ cancel }) => {
-    // Flush unsynced playback progress so server loads see it immediately
+  // SvelteKit navigation guard — flush unsynced playback progress so server
+  // loads see it immediately. The brand editor moved to its own /studio/brand
+  // workspace (Codex-cijzb), which owns its own unsaved-changes guard; the
+  // retired `?brandEditor` overlay (activation + dynamic BrandEditorMount) no
+  // longer lives here. Public branding injection above is untouched.
+  beforeNavigate(() => {
     void forceSync();
-
-    if (brandEditor.isDirty && !brandEditor.isClosed) {
-      if (!confirm('You have unsaved brand changes. Discard?')) {
-        cancel();
-      }
-    }
   });
 </script>
 
@@ -511,11 +420,6 @@
     <CommandPaletteSearch scope="org" orgSlug={data.org.slug} bind:open={searchOpen} />
   {/if}
 </div>
-
-<!-- Brand Editor — dynamically imported, rendered OUTSIDE .org-layout so it uses system tokens -->
-{#if BrandEditorMount}
-  <BrandEditorMount />
-{/if}
 
 <style>
   .org-layout {

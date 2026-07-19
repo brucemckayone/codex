@@ -221,8 +221,13 @@ async function setSliderValue(
  * variants of this suite that registered fresh users per-test
  * intermittently hit the limit (Codex-bies6 dev-stack reuse).
  */
+// QUARANTINED (Codex-cijzb WP-1.1): this suite drives the retired `?brandEditor`
+// overlay, which no longer mounts on public org routes now that the brand editor
+// moved to the /studio/brand workspace. Re-home these preset/slider assertions
+// onto the workspace's rich control rail when it lands (WP-1.5), then restore
+// `.serial` and remove `.skip`.
 test.describe
-  .serial('BrandEditorHeroEffects — Phase 2 manifest renderer', () => {
+  .skip('BrandEditorHeroEffects — Phase 2 manifest renderer', () => {
     let orgSlug: string;
     let sharedCookies: Array<{
       name: string;

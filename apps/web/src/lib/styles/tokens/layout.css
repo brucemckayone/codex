@@ -37,6 +37,11 @@
   --app-sidebar-width: var(--space-16);  /* 64px collapsed rail */
   --app-sidebar-width-expanded: 15rem;   /* 240px hover-expanded rail */
 
+  /* Brand-studio control rail width — single source of truth for the
+   * `/studio/brand` two-pane workspace (Codex-cijzb). Wider than the nav
+   * rail because it hosts the full brand control surface (WP-1.5). */
+  --brand-studio-rail-width: 24rem;      /* 384px control rail */
+
   /* ========================================
    * PLAYER HEIGHTS
    * ========================================
