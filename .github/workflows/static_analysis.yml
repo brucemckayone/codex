@@ -36,6 +36,13 @@ jobs:
       - name: Biome Check (Lint & Format)
         run: pnpm check:ci
 
+      # Codex-cijzb WP-0.2: the brand-editor UI must never be statically
+      # imported from a public (customer-facing) route — that would bundle
+      # the heavy editor into the public chunk. See
+      # apps/web/scripts/check-brand-editor-boundary.mjs for the full rule.
+      - name: Brand Editor import boundary check
+        run: pnpm --filter web run check:brand-boundary
+
       - name: Generate Paraglide i18n files
         run: pnpm --filter web exec paraglide-js compile --project ./project.inlang --outdir ./src/paraglide
 
