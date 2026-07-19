@@ -171,12 +171,10 @@
       </div>
 
       {#if !inFineTune && focusedControl.affects.length > 0}
-        <ul class="brand-rail__affects" aria-label="Affects">
-          <li class="brand-rail__affects-label" aria-hidden="true">Affects</li>
-          {#each focusedControl.affects as surface (surface)}
-            <li class="brand-rail__chip">{surface}</li>
-          {/each}
-        </ul>
+        <p class="brand-rail__affects">
+          <span class="brand-rail__affects-label">Affects</span>
+          {focusedControl.affects.join(' · ')}
+        </p>
       {/if}
     </header>
 
@@ -337,10 +335,20 @@
   .brand-rail__focus-head {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
-    padding: var(--space-4);
     border-bottom: var(--border-width) var(--border-style)
       var(--color-border-subtle);
+  }
+
+  .brand-rail__browse-head {
+    gap: var(--space-3);
+    padding: var(--space-4);
+  }
+
+  /* Tighter than browse — the focus header is chrome above the editor, so it
+     hands as much height as possible to the control body below. */
+  .brand-rail__focus-head {
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
   }
 
   .brand-rail__titles {
@@ -594,31 +602,20 @@
     color: var(--color-text);
   }
 
+  /* Compact single muted line (not chunky chips) — the same reference info the
+     browse row already hints at, kept out of the picker's way. */
   .brand-rail__affects {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-1-5);
     margin: 0;
-    padding: 0;
-    list-style: none;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    line-height: var(--leading-snug);
   }
 
   .brand-rail__affects-label {
-    font-size: var(--text-xs);
-    font-weight: var(--font-medium);
-    color: var(--color-text-muted);
+    font-weight: var(--font-semibold);
     text-transform: uppercase;
     letter-spacing: var(--tracking-wider);
-  }
-
-  .brand-rail__chip {
-    padding: var(--space-0-5) var(--space-2);
-    font-size: var(--text-xs);
-    color: var(--color-text-secondary);
-    background: var(--color-surface-secondary);
-    border: var(--border-width) var(--border-style) var(--color-border-subtle);
-    border-radius: var(--radius-full);
+    margin-right: var(--space-1);
   }
 
   /* ── Focus context bar (colour focus only) ── */

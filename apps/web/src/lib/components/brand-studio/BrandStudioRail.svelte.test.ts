@@ -193,15 +193,14 @@ describe('BrandStudioRail', () => {
     expect(document.querySelector('.brand-rail__focus-body')).toBeNull();
   });
 
-  test('the colour focus shows its Affects chips + the editing-theme/contrast context bar', () => {
+  test('the colour focus shows its Affects line + the editing-theme/contrast context bar', () => {
     component = mountRail();
     openRow('Colours');
 
-    const chips = Array.from(
-      document.querySelectorAll('.brand-rail__chip')
-    ).map((c) => c.textContent?.trim());
-    expect(chips).toContain('Buttons');
-    expect(chips).toContain('Hero');
+    const affects =
+      document.querySelector('.brand-rail__affects')?.textContent ?? '';
+    expect(affects).toContain('Buttons');
+    expect(affects).toContain('Hero');
 
     // The editing-theme + contrast bar is CONTEXTUAL — colour focus only.
     expect(

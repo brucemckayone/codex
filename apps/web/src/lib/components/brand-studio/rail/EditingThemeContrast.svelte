@@ -1,17 +1,18 @@
 <!--
   @component EditingThemeContrast
 
-  The rail's global editing context: a Light/Dark segmented toggle (which
-  palette the reused colour/font controls read + write, via the store's
-  per-theme routing) and a live WCAG contrast readout for text-on-brand.
+  The colour focus's editing context, in ONE compact row: a Light/Dark segmented
+  toggle (which palette the reused colour controls read + write, via the store's
+  per-theme routing) beside a compact WCAG contrast PILL for text-on-brand.
 
-  The readout mirrors the product's real auto-contrast rule (see
-  `./contrast.ts` + org-brand.css): it derives the black/white text the product
-  places on the brand colour and warns when that pair drops below AA (4.5:1).
-  Both the toggle's pressed state and the readout re-derive from the store, so
-  flipping the editing theme instantly re-evaluates against the dark palette.
+  The readout mirrors the product's real auto-contrast rule (see `./contrast.ts`
+  + org-brand.css): it derives the black/white text the product places on the
+  brand colour and warns when that pair drops below AA (4.5:1). Both the toggle's
+  pressed state and the readout re-derive from the store, so flipping the editing
+  theme instantly re-evaluates against the dark palette. The full verdict lives
+  in the pill's `title` (kept off-screen to stay compact).
 
-  Epic: Codex-cijzb · WP-1.5.
+  Epic: Codex-cijzb · WP-1.5 + rail-UX overhaul (compacted).
 -->
 <script lang="ts">
   import { BRAND_DEFAULT_PRIMARY, brandEditor } from '$lib/brand-editor';
@@ -32,6 +33,15 @@
 
   const contrast = $derived(evaluateBrandContrast(brandColor));
 
+  // Full sentence for the pill's tooltip / screen readers (the visible pill only
+  // shows the ratio + AA badge to stay to one line).
+  const verdict = $derived.by(() => {
+    if (contrast.ratio === null) return 'Enter a valid colour';
+    if (contrast.passesAA)
+      return `Passes AA (${formatContrastRatio(contrast.ratio)}) · text-on-brand`;
+    return `Below AA (${AA_CONTRAST_THRESHOLD}:1) · text-on-brand`;
+  });
+
   function selectTheme(theme: 'light' | 'dark') {
     // Idempotent: only write when actually changing (avoids redundant preview
     // re-stamps). Plain onclick, so no controlled-component echo.
@@ -40,78 +50,57 @@
 </script>
 
 <div class="editing-ctx">
-  <div class="editing-ctx__row">
-    <span class="editing-ctx__label" id="editing-theme-label">Editing theme</span>
-    <div class="seg" role="group" aria-labelledby="editing-theme-label">
-      <button
-        type="button"
-        class="seg__btn"
-        class:seg__btn--active={editingTheme === 'light'}
-        aria-pressed={editingTheme === 'light'}
-        onclick={() => selectTheme('light')}
-      >
-        <SunIcon size={14} />
-        <span>Light</span>
-      </button>
-      <button
-        type="button"
-        class="seg__btn"
-        class:seg__btn--active={editingTheme === 'dark'}
-        aria-pressed={editingTheme === 'dark'}
-        onclick={() => selectTheme('dark')}
-      >
-        <MoonIcon size={14} />
-        <span>Dark</span>
-      </button>
-    </div>
+  <div class="seg" role="group" aria-label="Editing theme">
+    <button
+      type="button"
+      class="seg__btn"
+      class:seg__btn--active={editingTheme === 'light'}
+      aria-pressed={editingTheme === 'light'}
+      onclick={() => selectTheme('light')}
+    >
+      <SunIcon size={14} />
+      <span>Light</span>
+    </button>
+    <button
+      type="button"
+      class="seg__btn"
+      class:seg__btn--active={editingTheme === 'dark'}
+      aria-pressed={editingTheme === 'dark'}
+      onclick={() => selectTheme('dark')}
+    >
+      <MoonIcon size={14} />
+      <span>Dark</span>
+    </button>
   </div>
 
   <div
     class="contrast"
     class:contrast--warn={!contrast.passesAA}
     data-passes-aa={contrast.passesAA}
+    title={verdict}
   >
-    <div class="contrast__swatch" aria-hidden="true" style:background={contrast.brand}>
+    <span class="contrast__swatch" aria-hidden="true" style:background={contrast.brand}>
       <span class="contrast__sample" style:color={contrast.text}>Aa</span>
-    </div>
-    <div class="contrast__detail">
-      <span class="contrast__ratio">{formatContrastRatio(contrast.ratio)}</span>
-      <span class="contrast__verdict">
-        {#if contrast.ratio === null}
-          Enter a valid colour
-        {:else if contrast.passesAA}
-          Passes AA · text-on-brand
-        {:else}
-          Below AA ({AA_CONTRAST_THRESHOLD}:1) · text-on-brand
-        {/if}
-      </span>
-    </div>
+    </span>
+    <span class="contrast__ratio">{formatContrastRatio(contrast.ratio)}</span>
     <span class="contrast__badge" class:contrast__badge--warn={!contrast.passesAA}>
       {contrast.passesAA ? 'AA' : '!'}
     </span>
+    <span class="sr-only">{verdict}</span>
   </div>
 </div>
 
 <style>
+  /* One compact row: toggle left, contrast pill right; wraps only if the rail
+     is unusually narrow. */
   .editing-ctx {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    padding: var(--space-3) var(--space-4);
-    border-bottom: var(--border-width) var(--border-style) var(--color-border-subtle);
-  }
-
-  .editing-ctx__row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--space-3);
-  }
-
-  .editing-ctx__label {
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    color: var(--color-text);
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+    border-bottom: var(--border-width) var(--border-style) var(--color-border-subtle);
   }
 
   /* Segmented toggle */
@@ -154,15 +143,15 @@
     box-shadow: var(--shadow-sm);
   }
 
-  /* Contrast readout */
+  /* Contrast pill — swatch · ratio · AA badge on one line. */
   .contrast {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-3);
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
     background: var(--color-surface-secondary);
     border: var(--border-width) var(--border-style) var(--color-border-subtle);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-full);
   }
 
   .contrast--warn {
@@ -174,43 +163,32 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: var(--space-9);
-    height: var(--space-9);
-    border-radius: var(--radius-sm);
+    width: var(--space-6);
+    height: var(--space-6);
+    border-radius: var(--radius-full);
     border: var(--border-width) var(--border-style) var(--color-border);
     flex-shrink: 0;
   }
 
   .contrast__sample {
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
     font-weight: var(--font-semibold);
-  }
-
-  .contrast__detail {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-width: 0;
+    line-height: 1;
   }
 
   .contrast__ratio {
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     color: var(--color-text);
-  }
-
-  .contrast__verdict {
-    font-size: var(--text-xs);
-    color: var(--color-text-secondary);
   }
 
   .contrast__badge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: var(--space-6);
-    height: var(--space-6);
+    min-width: var(--space-5);
+    height: var(--space-5);
     padding: 0 var(--space-1);
     font-size: var(--text-xs);
     font-weight: var(--font-bold);
