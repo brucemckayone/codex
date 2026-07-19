@@ -171,7 +171,19 @@
   --font-normal: var(--body-weight, 400);
 }
 
-[data-org-brand] :is(h1, h2, h3, h4, h5, h6) {
+/* Heading colour applies to real heading elements AND to class-based titles.
+   Card/content titles (`.cc__title`, `.card-title`, …) are class selectors that
+   — once Svelte appends its scoping class — outrank a bare `:is(h1..h6)` rule
+   (0,1,1), so the brand editor's heading colour never reached the titles users
+   actually see. Broadening the group to title-like classes is a systemic
+   backstop so future title classes inherit --color-heading too. Scoped under
+   [data-org-brand] so only branded orgs are affected. Specificity stays (0,2,0):
+   component rules that set an explicit title colour at higher specificity — e.g.
+   ContentCard's title-in-cover `--media-glyph` overrides at (0,3,0) — still win,
+   so titles overlaid on cover art keep their near-white ink. */
+[data-org-brand] :is(h1, h2, h3, h4, h5, h6),
+[data-org-brand] [class*='__title'],
+[data-org-brand] [class*='-title'] {
   color: var(--color-heading);
 }
 

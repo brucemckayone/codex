@@ -20,6 +20,8 @@
     font-size: var(--text-lg);
     font-weight: var(--font-semibold);
     line-height: var(--leading-tight);
-    color: var(--color-text);
+    /* Consume the org-brand heading colour (brand editor "Heading Color");
+       falls back to body text when unset or outside a branded org. */
+    color: var(--color-heading, var(--color-text));
   }
 </style>
