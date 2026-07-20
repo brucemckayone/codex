@@ -41,6 +41,7 @@
    * `/studio/brand` two-pane workspace (Codex-cijzb). Wider than the nav
    * rail because it hosts the full brand control surface (WP-1.5). */
   --brand-studio-rail-width: 24rem;      /* 384px control rail */
+  --brand-studio-rail-collapsed-width: 3rem; /* 48px strip — holds only the expand control */
 
   /* Brand-studio device-preview widths — the viewport the live-preview canvas
    * iframe is constrained to per device (Codex-cijzb WP-1.3). Named constants,

@@ -15,6 +15,7 @@
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { ChevronLeftIcon, ChevronRightIcon } from '$lib/components/ui/Icon';
 
   interface Props {
     /** Left control rail region. */
@@ -22,11 +23,11 @@
     /** Right live-preview canvas region. */
     canvas?: Snippet;
     /**
-     * Collapse the control rail so the canvas spans the FULL workspace width.
-     * The rail region leaves layout flow (display:none) AND its grid track is
-     * dropped — both are needed, or the empty track leaves a gap. The toggle
-     * itself lives in the canvas toolbar (always visible), so the rail can
-     * fully disappear without stranding its own re-open control.
+     * Collapse the control rail to a thin STRIP so the canvas takes most of the
+     * workspace width. The rail body hides but the rail keeps a slim column
+     * holding its own expand control — the collapse/expand button belongs ON the
+     * panel it collapses (never fully display:none, or its re-open control would
+     * vanish with it).
      */
     railCollapsed?: boolean;
     /**
@@ -36,6 +37,8 @@
      * against a large canvas.
      */
     fullscreen?: boolean;
+    /** Toggle the rail collapsed/expanded. Absent → the rail toggle hides. */
+    onToggleRail?: () => void;
   }
 
   const {
@@ -43,6 +46,7 @@
     canvas,
     railCollapsed = false,
     fullscreen = false,
+    onToggleRail,
   }: Props = $props();
 </script>
 
@@ -51,14 +55,35 @@
   data-rail-collapsed={railCollapsed}
   data-fullscreen={fullscreen}
 >
-  <!-- Stable id so the canvas-toolbar's rail toggle can point aria-controls at
-       it (the two live in sibling subtrees). -->
   <section
-    id="brand-studio-rail"
     class="brand-studio__rail"
     aria-label="Brand controls"
   >
-    {@render rail?.()}
+    <!-- Fixed head (never scrolls) so the collapse/expand control stays pinned
+         while the body scrolls. Lives ON the rail — when collapsed the head is
+         all that remains (the strip), holding the expand chevron. -->
+    <div class="brand-studio__rail-head">
+      {#if onToggleRail}
+        <button
+          type="button"
+          class="brand-studio__rail-toggle"
+          aria-expanded={!railCollapsed}
+          aria-controls="brand-studio-rail-body"
+          aria-label={railCollapsed ? 'Show controls' : 'Hide controls'}
+          title={railCollapsed ? 'Show controls' : 'Hide controls'}
+          onclick={onToggleRail}
+        >
+          {#if railCollapsed}
+            <ChevronRightIcon size={18} />
+          {:else}
+            <ChevronLeftIcon size={18} />
+          {/if}
+        </button>
+      {/if}
+    </div>
+    <div id="brand-studio-rail-body" class="brand-studio__rail-body">
+      {@render rail?.()}
+    </div>
   </section>
   <section class="brand-studio__canvas" aria-label="Brand preview">
     {@render canvas?.()}
@@ -86,14 +111,20 @@
     height: calc(100vh - var(--space-24));
   }
 
-  /* ── Rail collapsed ── the canvas takes the whole width. Drop the rail track
-     AND remove the rail from flow (see the Props note); either alone misbehaves. */
+  /* ── Rail collapsed ── shrink the rail track to a thin STRIP (not gone) so the
+     canvas takes most of the width while the rail keeps its own expand control.
+     The body hides; the head (with the expand chevron) is all that remains. */
   .brand-studio[data-rail-collapsed='true'] {
-    grid-template-columns: 1fr;
+    grid-template-columns: var(--brand-studio-rail-collapsed-width) 1fr;
   }
 
-  .brand-studio[data-rail-collapsed='true'] .brand-studio__rail {
+  .brand-studio[data-rail-collapsed='true'] .brand-studio__rail-body {
     display: none;
+  }
+
+  .brand-studio[data-rail-collapsed='true'] .brand-studio__rail-head {
+    justify-content: center;
+    padding: var(--space-2);
   }
 
   /* ── Full-screen ── lift the workspace out of the studio content column and
@@ -117,10 +148,60 @@
     flex-direction: column;
     min-height: 0;
     min-width: 0;
-    overflow-y: auto;
+    overflow: hidden;
     background-color: var(--color-surface);
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-lg);
+  }
+
+  /* Pinned head — holds the collapse/expand control. flex-shrink:0 so it never
+     collapses under the scrolling body below it. */
+  .brand-studio__rail-head {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: flex-end;
+    padding: var(--space-2) var(--space-2) 0;
+  }
+
+  .brand-studio__rail-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-8);
+    height: var(--space-8);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-md);
+    background-color: var(--color-surface-secondary);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition:
+      background-color var(--duration-fast) var(--ease-default),
+      color var(--duration-fast) var(--ease-default);
+  }
+
+  .brand-studio__rail-toggle:hover {
+    color: var(--color-text);
+    background-color: color-mix(
+      in oklch,
+      var(--color-interactive) 12%,
+      transparent
+    );
+  }
+
+  .brand-studio__rail-toggle:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus-ring);
+  }
+
+  /* The scrolling region — everything below the pinned head. */
+  .brand-studio__rail-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   /* min-width:0 lets the 1fr track shrink below its content's intrinsic width
@@ -149,14 +230,18 @@
       min-height: calc(100vh - var(--space-24));
     }
 
-    .brand-studio__rail {
+    /* Stacked: the PAGE scrolls, so the rail body grows to its natural height
+       instead of scrolling internally. */
+    .brand-studio__rail-body {
       overflow-y: visible;
     }
 
-    /* Stacked layout: with the rail row removed, collapse the two-row track to
-       one so the canvas fills instead of sitting in the vestigial `auto` row. */
+    /* Collapsed while stacked stays full-width (a thin head bar above the
+       canvas) — the strip column only makes sense side-by-side. Overrides the
+       base collapsed columns rule, which is higher-specificity than the plain
+       `.brand-studio` reset above. */
     .brand-studio[data-rail-collapsed='true'] {
-      grid-template-rows: 1fr;
+      grid-template-columns: 1fr;
     }
   }
 </style>

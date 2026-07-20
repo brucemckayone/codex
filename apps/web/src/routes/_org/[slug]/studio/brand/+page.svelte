@@ -347,7 +347,7 @@
 
 <svelte:window onkeydown={onWindowKeydown} />
 
-<BrandStudioLayout {railCollapsed} {fullscreen}>
+<BrandStudioLayout {railCollapsed} {fullscreen} onToggleRail={toggleRail}>
   {#snippet rail()}
     <div class="brand-mode">
       <div class="brand-mode__toggle" role="group" aria-label="Editor mode">
@@ -405,9 +405,7 @@
       contentSlug={previewContentSlug}
       onframeload={handleFrameLoad}
       reloadToken={previewReloadToken}
-      {railCollapsed}
       {fullscreen}
-      onToggleRail={toggleRail}
       onToggleFullscreen={toggleFullscreen}
     />
   {/snippet}

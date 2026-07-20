@@ -65,14 +65,12 @@
      */
     reloadToken?: number;
     /**
-     * Workspace view state, owned by the route (the toggles live in this
-     * canvas' toolbar but the effect applies to the sibling layout, so the page
-     * owns both). Surfaced here only to render the toolbar's pressed/expanded
-     * state; the actual grid/position changes happen in BrandStudioLayout.
+     * Full-screen preview state, owned by the route. The toggle lives in this
+     * canvas' toolbar (a preview action) but the position:fixed effect applies
+     * to the sibling layout, so the page owns the state. (Rail-collapse is owned
+     * entirely by the layout — its control lives ON the rail.)
      */
-    railCollapsed?: boolean;
     fullscreen?: boolean;
-    onToggleRail?: () => void;
     onToggleFullscreen?: () => void;
   }
 
@@ -81,9 +79,7 @@
     contentSlug,
     onframeload,
     reloadToken = 0,
-    railCollapsed = false,
     fullscreen = false,
-    onToggleRail,
     onToggleFullscreen,
   }: Props = $props();
 
@@ -139,12 +135,10 @@
     {device}
     {themeMode}
     {contentAvailable}
-    {railCollapsed}
     {fullscreen}
     onroutechange={(id) => (route = id)}
     ondevicechange={(id) => (device = id)}
     onthememodechange={onThemeModeChange}
-    ontogglerail={onToggleRail}
     ontogglefullscreen={onToggleFullscreen}
   />
 

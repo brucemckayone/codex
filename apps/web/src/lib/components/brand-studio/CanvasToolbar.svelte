@@ -11,12 +11,7 @@
   are disabled when the org has no published content to preview.
 -->
 <script lang="ts">
-  import {
-    ChevronLeftIcon,
-    ChevronRightIcon,
-    MaximizeIcon,
-    XIcon,
-  } from '$lib/components/ui/Icon';
+  import { MaximizeIcon, XIcon } from '$lib/components/ui/Icon';
   import {
     PREVIEW_DEVICES,
     PREVIEW_ROUTES,
@@ -31,15 +26,11 @@
     themeMode: PreviewThemeMode;
     /** False when the org has no published content — disables Detail/Player. */
     contentAvailable: boolean;
-    /** Whether the control rail is currently collapsed (drives the toggle glyph). */
-    railCollapsed?: boolean;
     /** Whether the workspace is full-screen (drives the toggle glyph). */
     fullscreen?: boolean;
     onroutechange: (id: PreviewRouteId) => void;
     ondevicechange: (id: PreviewDeviceId) => void;
     onthememodechange: (mode: PreviewThemeMode) => void;
-    /** Toggle the control rail's collapsed state. Absent → the button hides. */
-    ontogglerail?: () => void;
     /** Toggle full-screen preview. Absent → the button hides. */
     ontogglefullscreen?: () => void;
   }
@@ -49,12 +40,10 @@
     device,
     themeMode,
     contentAvailable,
-    railCollapsed = false,
     fullscreen = false,
     onroutechange,
     ondevicechange,
     onthememodechange,
-    ontogglerail,
     ontogglefullscreen,
   }: Props = $props();
 
@@ -125,41 +114,22 @@
     {/each}
   </div>
 
-  {#if ontogglerail || ontogglefullscreen}
+  {#if ontogglefullscreen}
     <div class="canvas-toolbar__actions" role="group" aria-label="Preview size">
-      {#if ontogglerail}
-        <button
-          type="button"
-          class="canvas-toolbar__icon"
-          aria-expanded={!railCollapsed}
-          aria-controls="brand-studio-rail"
-          aria-label={railCollapsed ? 'Show controls' : 'Hide controls'}
-          title={railCollapsed ? 'Show controls' : 'Hide controls'}
-          onclick={ontogglerail}
-        >
-          {#if railCollapsed}
-            <ChevronRightIcon size={16} />
-          {:else}
-            <ChevronLeftIcon size={16} />
-          {/if}
-        </button>
-      {/if}
-      {#if ontogglefullscreen}
-        <button
-          type="button"
-          class="canvas-toolbar__icon"
-          aria-pressed={fullscreen}
-          aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}
-          title={fullscreen ? 'Exit full screen' : 'Full screen'}
-          onclick={ontogglefullscreen}
-        >
-          {#if fullscreen}
-            <XIcon size={16} />
-          {:else}
-            <MaximizeIcon size={16} />
-          {/if}
-        </button>
-      {/if}
+      <button
+        type="button"
+        class="canvas-toolbar__icon"
+        aria-pressed={fullscreen}
+        aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}
+        title={fullscreen ? 'Exit full screen' : 'Full screen'}
+        onclick={ontogglefullscreen}
+      >
+        {#if fullscreen}
+          <XIcon size={16} />
+        {:else}
+          <MaximizeIcon size={16} />
+        {/if}
+      </button>
     </div>
   {/if}
 </div>
