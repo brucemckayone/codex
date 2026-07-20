@@ -45,8 +45,13 @@ describe('ContentCard — shape prop', () => {
     expect(card()?.getAttribute('data-shape')).toBe(shape);
   });
 
-  test('no shape and no normalizeRatio emits no data-shape (default cascade)', () => {
+  test('grid tile with no explicit shape defaults to 3:4 (homogenised browse grid)', () => {
     component = render({ contentType: 'video' });
+    expect(card()?.getAttribute('data-shape')).toBe('3:4');
+  });
+
+  test('non-grid variant with no shape emits no data-shape (default cascade preserved)', () => {
+    component = render({ contentType: 'video', variant: 'list' });
     expect(card()?.hasAttribute('data-shape')).toBe(false);
   });
 
@@ -121,26 +126,40 @@ describe('ContentCard — article title-in-cover', () => {
       shape: '3:4',
       thumbnail: null,
     });
-    expect(
-      document.querySelector('.cc__thumb .cc__cover--article')
-    ).toBeTruthy();
+    expect(document.querySelector('.cc__thumb .cc__cover--brand')).toBeTruthy();
     // No file-text placeholder icon — the cover stands in for the image.
     expect(document.querySelector('.cc__placeholder')).toBeNull();
   });
 
-  test('article + shape="3:4" WITH an image uses the image, not the gradient cover', () => {
+  test('article + shape="3:4" WITH an image uses the image; brand cover stays hidden', () => {
     component = render({
       contentType: 'article',
       shape: '3:4',
       thumbnail: 'https://cdn.example/img.jpg',
     });
     expect(document.querySelector('img.cc__image')).toBeTruthy();
-    expect(document.querySelector('.cc__cover--article')).toBeNull();
+    // The brand fallback is rendered but hidden behind the image (revealed via
+    // onerror only) — so there is no VISIBLE gradient cover.
+    const brandCover = document.querySelector('.cc__cover--brand');
+    expect(brandCover).toBeTruthy();
+    expect(brandCover?.classList.contains('hidden')).toBe(true);
   });
 
-  test('article without a shape does NOT enable title-in-cover (backward compatible)', () => {
+  test('article in the default grid auto-enables title-in-cover (homogenised)', () => {
     component = render({
       contentType: 'article',
+      description: 'This excerpt now surfaces inside the cover, not the body.',
+    });
+    const el = card();
+    expect(el?.classList.contains('cc--title-in-cover')).toBe(true);
+    // The plain body excerpt is suppressed — it moves into the scrimmed cover.
+    expect(document.querySelector('.cc__description')).toBeNull();
+  });
+
+  test('list variant does NOT enable title-in-cover; body description renders', () => {
+    component = render({
+      contentType: 'article',
+      variant: 'list',
       description: 'This excerpt should still render in the body.',
     });
     const el = card();

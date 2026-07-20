@@ -262,18 +262,33 @@
   const isArticle = $derived(contentType === 'article');
 
   // Resolved media shape. `normalizeRatio` is a deprecated alias for
-  // `shape='16:9'`; an explicit `shape` always wins.
+  // `shape='16:9'`; an explicit `shape` always wins. Homogenised browse grid
+  // (Codex-p7wc8): every grid tile defaults to a 3:4 portrait cover so
+  // audio/video/article share one shape and one editorial treatment.
+  // list/compact/resume/featured and audio-row keep their own ratios.
   const resolvedShape = $derived<'16:9' | '1:1' | '3:4' | '3:2' | undefined>(
-    shape ?? (normalizeRatio ? '16:9' : undefined),
+    shape ??
+      (normalizeRatio
+        ? '16:9'
+        : variant === 'grid' && !isAudioRow
+          ? '3:4'
+          : undefined),
   );
 
-  // Article title-in-cover overlay. Explicit `titleInCover` wins; otherwise
-  // AUTO — on for article cards in a portrait/square shape (matches the
-  // approved mockup, where shaped article sections render title-in-cover).
+  // Title-in-cover is now the shared treatment for EVERY portrait/square grid
+  // tile, not just articles: the eyebrow + title sit over the cover on a
+  // scrim, each type carrying its own flair (audio waveform, video play-ring,
+  // article dropcap). Explicit `titleInCover` wins; audio-row keeps its
+  // playlist layout. (Codex-p7wc8)
   const showTitleInCover = $derived(
     titleInCover ??
-      (isArticle && (resolvedShape === '1:1' || resolvedShape === '3:4')),
+      (!isAudioRow &&
+        (resolvedShape === '1:1' || resolvedShape === '3:4')),
   );
+
+  // First letter of the title — the imageless cover renders it as a ghosted
+  // serif dropcap flair for articles (the type's signature). (Codex-p7wc8)
+  const coverInitial = $derived((title ?? '').trim().charAt(0).toUpperCase());
 
   // Audio grid/featured tiles ALWAYS read as audio: the cover image (or a
   // brand-gradient fallback) sits BEHIND a decorative waveform + a centred
@@ -281,9 +296,14 @@
   // compact `cc--audio-row` playlist layout keeps its own treatment, so
   // this is gated to the vertical grid/featured tiles only. Decorative /
   // navigational only — the whole card is already a link.
+  // Audio's old grid overlay (waveform + play glyph with metadata BELOW) is
+  // now superseded by the title-in-cover flair on grid tiles — so it only
+  // remains for the `featured` hero variant, which isn't title-in-cover yet.
+  // (Codex-p7wc8)
   const showAudioMedia = $derived(
     contentType === 'audio' &&
       !isAudioRow &&
+      !showTitleInCover &&
       (variant === 'grid' || variant === 'featured'),
   );
 
@@ -296,8 +316,14 @@
   // stacked creator row/avatar is suppressed to avoid duplication. Articles
   // render a compact text byline in the meta row, so we suppress the avatar
   // row there too.
+  // In-body creator row (avatar + name under the title). Suppressed for
+  // title-in-cover tiles — those carry the byline in the below-cover caption
+  // instead, so it isn't duplicated. (Codex-p7wc8)
   const showCreator = $derived(
-    (variant === 'grid' || variant === 'featured') && !isAudioRow && !isArticle
+    (variant === 'grid' || variant === 'featured') &&
+      !isAudioRow &&
+      !isArticle &&
+      !showTitleInCover
   );
   // Description lives under the title in vertical tiles. For audio-row the
   // waveform + meta already fill that slot. Articles are text-led and
@@ -307,6 +333,21 @@
     !!description && !isAudioRow && !showTitleInCover &&
     (variant === 'featured' || variant === 'grid' || isArticle)
   );
+
+  // Cover excerpt — a short preview under the title INSIDE the scrim, for any
+  // title-in-cover tile (generalises the old article-only cover excerpt so
+  // audio/video tiles read as content too). (Codex-p7wc8)
+  const coverExcerpt = $derived.by(() => {
+    if (!showTitleInCover || !description) return '';
+    const plain = extractPlainText(description);
+    return plain.length > 120 ? plain.slice(0, 117).trimEnd() + '…' : plain;
+  });
+
+  // Below-cover caption (avatar + creator name) for every title-in-cover
+  // tile, giving audio/video the same media-plus-byline baseline articles
+  // already had. (Codex-p7wc8)
+  const captionName = $derived(creator?.displayName ?? creator?.username ?? '');
+  const showCaption = $derived(showTitleInCover && !!captionName);
   const showPriceBadge = $derived(
     variant !== 'compact' && variant !== 'resume' &&
     (price != null || purchased || included || contentAccessType != null)
@@ -360,9 +401,6 @@
   //                         as video/audio tiles and aligns in mixed rows.
   const showArticleMeta = $derived(
     isArticle && !showTitleInCover && (!!articleByline || !!articleReadTime)
-  );
-  const showArticleCaption = $derived(
-    isArticle && showTitleInCover && (!!articleByline || !!articleReadTime)
   );
 
   // ── Media-type kind-line ─────────────────────────────────────────────
@@ -426,7 +464,7 @@
   class:cc--access-dimmed={isDimmed}
   class:cc--audio-row={isAudioRow}
   class:cc--title-in-cover={showTitleInCover}
-  class:cc--article-captioned={showArticleCaption}
+  class:cc--article-captioned={showCaption}
   class:cc--featured-item={showFeaturedTreatment}
   data-variant={variant}
   data-layout={resolvedLayout !== 'default' ? resolvedLayout : undefined}
@@ -453,7 +491,39 @@
       class:cc__thumb--featured={showFeaturedTreatment}
       class:cc__thumb--audio-media={showAudioMedia}
     >
-      {#if showAudioMedia}
+      {#if showTitleInCover}
+        <!-- Title-in-cover (all types): the cover is the uploaded image or a
+             shared brand-gradient fallback, with a per-type FLAIR layer
+             (audio → waveform + play disc, video → play-ring, article →
+             ghosted serif dropcap) sitting behind the scrimmed title. The
+             flair is decorative/navigational — the whole card is the link.
+             (Codex-p7wc8) -->
+        {#if thumbnail}
+          <img
+            src={thumbnail}
+            srcset={getThumbnailSrcset(thumbnail)}
+            sizes={DEFAULT_SIZES}
+            alt={m.content_thumbnail_alt({ title })}
+            loading="lazy"
+            decoding="async"
+            class="cc__image"
+            onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
+          />
+          <div class="cc__cover cc__cover--brand hidden"></div>
+        {:else}
+          <div class="cc__cover cc__cover--brand"></div>
+        {/if}
+        <div class="cc__flair" aria-hidden="true">
+          {#if contentType === 'audio'}
+            <AudioWaveform {id} bars={40} class="cc__flair-wave" />
+            <span class="cc__flair-disc"><PlayIcon size={26} /></span>
+          {:else if contentType === 'video'}
+            <span class="cc__flair-ring"><PlayIcon size={26} /></span>
+          {:else if contentType === 'article' && !thumbnail}
+            <span class="cc__flair-dropcap">{coverInitial}</span>
+          {/if}
+        </div>
+      {:else if showAudioMedia}
         <!-- Audio grid/featured tile: cover image (or brand-gradient
              fallback) BEHIND a decorative waveform + centred play glyph, so
              audio never masquerades as a silent video tile. The waveform
@@ -510,11 +580,6 @@
             <FileTextIcon size={32} />
           {/if}
         </div>
-      {:else if showTitleInCover}
-        <!-- Title-in-cover with no image: a brand-tinted gradient cover
-             stands in for the photograph. The eyebrow + title render over
-             it via the scrimmed overlay body — no placeholder icon needed. -->
-        <div class="cc__cover cc__cover--article"></div>
       {:else}
         <div class="cc__placeholder">
           {#if contentType === 'video'}
@@ -624,11 +689,11 @@
         <a href={href}>{title}</a>
       </h3>
 
-      {#if showTitleInCover && articleExcerpt}
-        <!-- Cover excerpt — a short preview inside the scrim, under the title.
-             Only for title-in-cover articles; the regular excerpt (below) is
-             suppressed when the title lives in the cover. -->
-        <p class="cc__cover-excerpt">{articleExcerpt}</p>
+      {#if coverExcerpt}
+        <!-- Cover excerpt — a short preview inside the scrim, under the title,
+             for any title-in-cover tile. The regular excerpt (below) is
+             suppressed when the title lives in the cover. (Codex-p7wc8) -->
+        <p class="cc__cover-excerpt">{coverExcerpt}</p>
       {/if}
 
       {#if isAudioRow}
@@ -708,26 +773,21 @@
       {/if}
     </div>
 
-    {#if showArticleCaption}
-      <!-- Below-media caption for title-in-cover articles. The title lives
-           INSIDE the cover; this row carries the author avatar/name +
-           read-time UNDER the media, giving article cards the same
-           media-plus-caption baseline as video/audio tiles so mixed rows
-           align. Title is NOT repeated here. -->
+    {#if showCaption}
+      <!-- Below-cover caption for every title-in-cover tile: author avatar +
+           name (+ read-time for articles) UNDER the media, so audio/video get
+           the same media-plus-byline baseline articles already had. The title
+           lives INSIDE the cover and is NOT repeated here. (Codex-p7wc8) -->
       <div class="cc__article-caption">
-        {#if articleByline}
-          <a href={profileHref} class="cc__creator-link">
-            <Avatar src={creator?.avatar} class="cc__creator-avatar">
-              <AvatarImage src={creator?.avatar} alt={articleByline} />
-              <AvatarFallback>{articleByline.charAt(0).toUpperCase()}</AvatarFallback>
-            </Avatar>
-            <span class="cc__creator-name">{articleByline}</span>
-          </a>
-        {/if}
-        {#if articleByline && articleReadTime}
+        <a href={profileHref} class="cc__creator-link">
+          <Avatar src={creator?.avatar} class="cc__creator-avatar">
+            <AvatarImage src={creator?.avatar} alt={captionName} />
+            <AvatarFallback>{captionName.charAt(0).toUpperCase()}</AvatarFallback>
+          </Avatar>
+          <span class="cc__creator-name">{captionName}</span>
+        </a>
+        {#if isArticle && articleReadTime}
           <span class="cc__article-sep" aria-hidden="true">·</span>
-        {/if}
-        {#if articleReadTime}
           <span class="cc__article-read-time">{articleReadTime}</span>
         {/if}
       </div>
@@ -1908,6 +1968,30 @@
        is taller than the media's natural aspect. */
     grid-template-rows: 1fr auto;
     padding: 0;
+    /* Floating-media card: the cover fills edge-to-edge, so the card surface
+       itself is always transparent (no frame) regardless of the `chrome`
+       prop, and overflow is visible so the media tile's own shadow escapes
+       the card bounds. The media + its shadow ARE the card. (Codex-p7wc8) */
+    background: transparent;
+    border-color: transparent;
+    overflow: visible;
+    row-gap: var(--space-2);
+  }
+
+  /* Media tile carries its own shadow (the card is transparent). */
+  .cc--title-in-cover .cc__thumb {
+    box-shadow: var(--shadow-md);
+  }
+  .cc--title-in-cover:hover .cc__thumb,
+  .cc--title-in-cover:focus-within:has(:focus-visible) .cc__thumb {
+    box-shadow: var(--shadow-lg);
+  }
+  /* Card-level hover surface/shadow is redundant with the tile shadow here. */
+  .cc--title-in-cover:hover,
+  .cc--title-in-cover:focus-within:has(:focus-visible) {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
   }
 
   .cc--title-in-cover .cc__thumb {
@@ -1968,7 +2052,7 @@
      selector mirrors the article-title rule's specificity (0,6,0) and is
      declared later so it wins; scoped to article so a non-article caller that
      opts into title-in-cover keeps the neutral size. */
-  .cc--title-in-cover[data-content-type='article']:not([data-variant='compact']):not([data-variant='resume']):not([data-variant='featured']) .cc__title {
+  .cc--title-in-cover[data-content-type]:not([data-variant='compact']):not([data-variant='resume']):not([data-variant='featured']) .cc__title {
     font-size: var(--text-3xl);
     line-height: var(--leading-tight);
   }
@@ -1976,7 +2060,7 @@
   /* Two-line clamp for the overlaid headline — the excerpt below needs room,
      and a 3xl title rarely needs three lines. Mirrors the article-title rule's
      (0,3,0) specificity and is declared later so it wins over the 3-line clamp. */
-  .cc--title-in-cover[data-content-type='article'] .cc__title {
+  .cc--title-in-cover[data-content-type] .cc__title {
     -webkit-line-clamp: 2;
     line-clamp: 2;
   }
@@ -2027,12 +2111,110 @@
     inset: 0;
   }
 
-  .cc__cover--article {
+  /* The brand cover is the imageless fallback: rendered (hidden) behind a real
+     thumbnail so `onerror` can reveal it if the image 404s. This codebase has
+     no global `.hidden`, only scoped ones — so scope the hide to `.cc__cover`
+     or the absolutely-positioned cover paints OVER the photo. (Codex-p7wc8) */
+  .cc__cover.hidden {
+    display: none;
+  }
+
+  /* Shared imageless cover — a brand-tinted gradient standing in for a
+     photograph on ANY title-in-cover tile (audio/video/article). Warm brand
+     tint at the top fades to the scrim anchor at the bottom so the near-white
+     title always reads; the flair layer draws the type signature on top.
+     Re-themes per org via the brand + scrim tokens. (Codex-p7wc8) */
+  .cc__cover--brand {
     background: linear-gradient(
-      155deg,
-      color-mix(in oklab, var(--color-brand-primary) 20%, var(--color-surface-card)),
-      var(--color-surface-card)
+      158deg,
+      color-mix(in oklab, var(--color-brand-primary) 26%, var(--color-surface-card)) 0%,
+      color-mix(in oklab, var(--color-brand-primary) 12%, var(--color-surface-card)) 34%,
+      color-mix(in oklab, var(--media-scrim) 40%, var(--color-surface-card)) 66%,
+      var(--media-scrim) 100%
     );
+  }
+  /* Soft off-centre accent glow so the cover reads as lit, not a flat ramp. */
+  .cc__cover--brand::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(
+      90% 60% at 78% 8%,
+      color-mix(in srgb, var(--color-brand-accent) 26%, transparent),
+      transparent 60%
+    );
+  }
+
+  /* ═══════════════════════════════════════════
+     FLAIR LAYER (Codex-p7wc8)
+     The type's own signature, drawn over the cover but BEHIND the scrimmed
+     title (z-index 1 vs the body's 2). Decorative — aria-hidden + no pointer
+     events, so the whole-card title link still wins every click.
+     ═══════════════════════════════════════════ */
+  .cc__flair {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    overflow: hidden;
+    border-radius: inherit;
+  }
+
+  /* AUDIO — a waveform field with a centred play disc over it. */
+  :global(.cc__flair-wave) {
+    position: absolute;
+    left: 50%;
+    top: 38%;
+    transform: translate(-50%, -50%);
+    width: 78%;
+    height: 34%;
+    color: color-mix(in srgb, var(--color-brand-primary) 55%, var(--media-glyph));
+    opacity: var(--opacity-80, 0.82);
+  }
+  .cc__flair-disc,
+  .cc__flair-ring {
+    position: absolute;
+    left: 50%;
+    top: 38%;
+    transform: translate(-50%, -50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-full);
+    color: var(--media-glyph);
+    background: color-mix(in srgb, var(--media-scrim) 46%, transparent);
+    border: var(--border-width) var(--border-style)
+      color-mix(in srgb, var(--media-glyph) 55%, transparent);
+    backdrop-filter: blur(var(--blur-sm));
+    -webkit-backdrop-filter: blur(var(--blur-sm));
+  }
+  .cc__flair-disc {
+    width: var(--space-12);
+    height: var(--space-12);
+  }
+  /* VIDEO — a larger play-ring, no waveform behind it. */
+  .cc__flair-ring {
+    width: calc(var(--space-12) + var(--space-4));
+    height: calc(var(--space-12) + var(--space-4));
+  }
+  .cc__flair-disc :global(svg),
+  .cc__flair-ring :global(svg) {
+    fill: currentColor;
+    /* optical centring of the play triangle inside the disc/ring */
+    margin-left: 0.12em;
+  }
+
+  /* ARTICLE — an oversized serif dropcap ghosted top-left of the cover. */
+  .cc__flair-dropcap {
+    position: absolute;
+    left: -0.04em;
+    top: -0.12em;
+    font-family: var(--font-heading);
+    font-weight: var(--font-bold);
+    font-size: calc(var(--text-display) * 1.7);
+    line-height: 1;
+    color: color-mix(in srgb, var(--media-glyph) 26%, transparent);
+    user-select: none;
   }
 
   /* Below-media caption row for title-in-cover articles. Auto-placed into
@@ -2064,6 +2246,20 @@
 
   .cc--article-captioned .cc__body {
     border-radius: 0;
+  }
+
+  /* Floating-media cards keep ALL corners rounded — the caption sits on the
+     page background BELOW the tile (not on a contiguous card surface), so the
+     media reads as a self-contained rounded tile. Overrides the square-bottom
+     rule above for title-in-cover. (Codex-p7wc8) */
+  .cc--title-in-cover.cc--article-captioned .cc__thumb {
+    border-radius: var(--radius-xl);
+  }
+  /* Caption aligns with the tile's left edge (no card inset) and gets a small
+     top gap from the media. */
+  .cc--title-in-cover .cc__article-caption {
+    padding: var(--space-1) var(--space-1) 0;
+    color: var(--color-text-secondary);
   }
 
   @media (prefers-reduced-motion: reduce) {
