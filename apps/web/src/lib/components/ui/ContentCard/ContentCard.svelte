@@ -1096,6 +1096,11 @@
     font-size: var(--text-base);
     font-weight: var(--font-semibold);
     line-height: var(--leading-tight);
+    /* Org-brand heading colour (brand editor "Heading Color"); falls back to
+       body text when unset or outside a branded org. The title-in-cover rules
+       further down intentionally win at higher specificity so titles overlaid
+       on cover art keep the near-white --media-glyph. */
+    color: var(--color-heading, var(--color-text));
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;

@@ -20,7 +20,7 @@ import type { BrandEditorState, CssVarMapping } from './types';
 
 /** Override keys that get --brand- prefix (consumed by org-brand.css rules).
  *  All other override keys get --color- prefix (direct token replacement). */
-const BRAND_PREFIX_KEYS = new Set([
+export const BRAND_PREFIX_KEYS = new Set([
   'text-scale',
   'heading-weight',
   'body-weight',
