@@ -74,9 +74,10 @@ src/routes/
 │   └── become-creator/
 │
 ├── _org/[slug]/               Org subdomain routes
-│   ├── +layout.svelte         Org branding injection, BrandEditorPanel,
-│   │                          ShaderHero fullpage canvas, SidebarRail/MobileNav,
-│   │                          version staleness $effect, initProgressSync
+│   ├── +layout.svelte         Org branding injection + inert live-preview bridge
+│   │                          (no editor UI), ShaderHero fullpage canvas,
+│   │                          SidebarRail/MobileNav, version staleness $effect,
+│   │                          initProgressSync
 │   ├── +layout.server.ts      depends('cache:org-versions'), public org info, streams
 │   │                          versions/subscriptionContext/isFollowing
 │   ├── (space)/               Public org pages
@@ -98,7 +99,10 @@ src/routes/
 │       ├── team/
 │       ├── billing/
 │       ├── monetisation/
-│       └── settings/          General, Branding, Email Templates
+│       ├── brand/             Unified brand editor — two-pane workspace (control
+│       │                      rail + live-preview iframe), admin/owner-gated
+│       └── settings/          General, Email Templates (Branding 301-redirects
+│                              to /studio/brand)
 │
 ├── (auth)/                    Auth pages — centered card layout
 │   ├── login/, register/, forgot-password/, reset-password/, verify-email/
@@ -361,11 +365,11 @@ Hero visibility toggles (stats, pills, description, logo, title) are stored as `
 
 ### Brand Editor
 
-A floating panel activated by `?brandEditor` URL param. State is managed in `$lib/brand-editor/brand-editor-store.svelte.ts` using module-level Svelte 5 runes (`$state`, `$derived`). Live CSS injection runs via `$effect` — no React-style state lifting needed.
+Brand editing lives at `/studio/brand` — a two-pane workspace (control rail + live-preview iframe), admin/owner-gated in its `+page.server.ts`. The old `/studio/settings/branding` page 301-redirects here, and the retired `?brandEditor` floating overlay is gone.
 
-`brandEditor.open(orgId, savedState)` / `brandEditor.close()` / `brandEditor.getSavePayload()` / `brandEditor.markSaved()`
+State is managed in `$lib/brand-editor/brand-editor-store.svelte.ts` using module-level Svelte 5 runes (`$state`, `$derived`); live CSS injection runs via `$effect`. The route owns the store lifecycle: `brandEditor.open(orgId, savedState)` on mount → edit → Save (`getSavePayload()` → `updateBrandingCommand` → `markSaved()`) → `close()` on destroy.
 
-The panel is rendered OUTSIDE `.org-layout` so it uses system tokens unaffected by org branding.
+**Live preview:** the studio page posts the pending brand state to the same-origin preview iframe(s) via the WP-1.4 bridge (`createBrandPreviewSender` + `createPreviewWiring`). The public org layout (`_org/[slug]/+layout.svelte`) applies branding and hosts the INERT applier (`initBrandPreviewBridge`, embedded-only) but renders no editor UI itself.
 
 ---
 
@@ -376,7 +380,7 @@ The panel is rendered OUTSIDE `.org-layout` so it uses system tokens unaffected 
 └── (platform)/+layout.svelte      ★ SidebarRail, PageContainer, Footer
 │   └── depends('cache:versions')   version staleness + initProgressSync
 │
-└── _org/[slug]/+layout.svelte      ★ Org branding, ShaderHero, BrandEditorPanel
+└── _org/[slug]/+layout.svelte      ★ Org branding, ShaderHero, inert preview bridge
     └── depends('cache:org-versions') version staleness + initProgressSync
     │
     └── studio/+layout.svelte        ssr=false, auth+role guard

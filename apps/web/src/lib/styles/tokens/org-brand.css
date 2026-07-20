@@ -151,6 +151,7 @@
   --color-player-border: var(--brand-player-border, hsl(0 0% 100% / var(--opacity-20, 0.2)));
   --color-player-overlay: var(--brand-player-overlay, hsl(0 0% 0% / var(--opacity-60, 0.6)));
   --color-player-overlay-heavy: var(--brand-player-overlay-heavy, hsl(0 0% 0% / var(--opacity-80, 0.8)));
+  --color-player-gradient-bottom: var(--brand-player-gradient-bottom, hsl(0 0% 0% / var(--media-overlay-bottom-opacity, 0.7)));
 
   /* ─── GLASS TINT ────────────────────────────────────────────────── */
   --color-glass-tint: var(--brand-glass-tint, white);
@@ -355,6 +356,7 @@
   --color-player-border: var(--brand-player-border-dark, var(--brand-player-border, hsl(0 0% 100% / var(--opacity-20, 0.2))));
   --color-player-overlay: var(--brand-player-overlay-dark, var(--brand-player-overlay, hsl(0 0% 0% / var(--opacity-60, 0.6))));
   --color-player-overlay-heavy: var(--brand-player-overlay-heavy-dark, var(--brand-player-overlay-heavy, hsl(0 0% 0% / var(--opacity-80, 0.8))));
+  --color-player-gradient-bottom: var(--brand-player-gradient-bottom-dark, var(--brand-player-gradient-bottom, hsl(0 0% 0% / var(--media-overlay-bottom-opacity, 0.7))));
 
   /* Shadow color — consumer reads --shadow-color. */
   --shadow-color: var(--brand-shadow-color-dark, var(--brand-shadow-color, 220 3% 15%));

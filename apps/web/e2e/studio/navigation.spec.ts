@@ -226,7 +226,9 @@ test.describe('Studio Navigation - Settings Tabs', () => {
     await injectSharedStudioAuth(page, sharedAuth);
   });
 
-  test('settings page shows General and Branding tabs', async ({ page }) => {
+  test('settings page shows the General tab (Branding moved to /studio/brand)', async ({
+    page,
+  }) => {
     await navigateToStudioPage(
       page,
       sharedAuth.member.organization.slug,
@@ -238,9 +240,11 @@ test.describe('Studio Navigation - Settings Tabs', () => {
         hasText: /General/i,
       })
     ).toBeVisible();
+    // Branding is no longer a settings tab — it moved to the top-level
+    // /studio/brand workspace (Codex-cijzb).
     await expect(
       page.locator('a[href="/studio/settings/branding"]')
-    ).toBeVisible();
+    ).toHaveCount(0);
   });
 
   test('General tab is active on settings root', async ({ page }) => {
@@ -256,29 +260,13 @@ test.describe('Studio Navigation - Settings Tabs', () => {
     await expect(generalTab).toHaveClass(/active/);
   });
 
-  test('clicking Branding tab navigates to branding page', async ({ page }) => {
-    await navigateToStudioPage(
-      page,
-      sharedAuth.member.organization.slug,
-      '/settings'
-    );
-
-    await expectClickNavigates(
-      page,
-      page.locator('a[href="/studio/settings/branding"]'),
-      /\/studio\/settings\/branding/,
-      // Settings tabs are stable content-area elements, not rail items. Skip
-      // the hover: an expanded desktop rail (left over from a prior hover)
-      // overlays the tab strip and intercepts the hover, while the native JS
-      // click still bubbles to the SPA router. Per spa-nav.ts: hover:false for
-      // stable elements.
-      { hover: false }
-    );
-
-    const brandingTab = page.locator('.tab-trigger').filter({
-      hasText: /Branding/i,
-    });
-    await expect(brandingTab).toHaveClass(/active/);
+  test('clicking Brand nav link navigates to the brand workspace', async ({
+    page,
+  }) => {
+    // Branding moved out of Settings into the top-level /studio/brand
+    // workspace (Codex-cijzb); it is now a rail nav item, admin/owner only.
+    await navigateToStudio(page, sharedAuth.member.organization.slug);
+    await clickRailLink(page, '/studio/brand', /\/studio\/brand/);
   });
 });
 

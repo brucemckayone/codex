@@ -12,8 +12,11 @@
  *   - `$lib/brand-editor` (no `/components/`) — the store + css-injection
  *     helpers the public org layout legitimately imports to apply branding.
  *   - `import('$lib/components/brand-editor/...')` (dynamic, parens) — a
- *     lazy, separate chunk. See `src/routes/_org/[slug]/+layout.svelte`
- *     (BrandEditorMount) for the reference pattern.
+ *     lazy, separate chunk, not a static bundle-time dependency. No public
+ *     route needs one today (the editor UI now lives entirely in the
+ *     admin-only `/studio/brand` bundle — see the studio exclusion below), but
+ *     a dynamic import stays allowed should a public route ever lazy-load a
+ *     fragment.
  *   - Studio route files (any path with a `studio` segment) — studio is an
  *     admin-only `ssr = false` SPA that ships in its own bundle, never in
  *     the public one. Excluded from the scan entirely.
@@ -105,9 +108,8 @@ function main() {
     console.error(
       `\n${violations.length} violation(s). Public route files may not statically import from ` +
         `'${BANNED_MODULE}/...' — it bundles the heavy editor UI into the public chunk. Use a ` +
-        `dynamic import('${BANNED_MODULE}/...') instead (see ` +
-        `src/routes/_org/[slug]/+layout.svelte), or import '$lib/brand-editor' (no /components/) ` +
-        `if you only need the store/css-injection helpers.`
+        `dynamic import('${BANNED_MODULE}/...') instead, or import '$lib/brand-editor' (no ` +
+        `/components/) if you only need the store/css-injection helpers.`
     );
     process.exit(1);
   }

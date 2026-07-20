@@ -242,7 +242,7 @@
         title: 'Refine your brand',
         description:
           'Colour, typography, and hero shader presets — your public face.',
-        href: '/studio/settings/branding',
+        href: '/studio/brand',
         tone: 'muted',
         icon: EditIcon,
       });
