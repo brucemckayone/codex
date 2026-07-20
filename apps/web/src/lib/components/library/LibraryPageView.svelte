@@ -224,6 +224,7 @@
           <ContentCard
             variant={viewMode === 'list' ? 'list' : 'grid'}
             shape={viewMode === 'list' ? undefined : '3:4'}
+            titleInCover={viewMode === 'list' ? undefined : true}
             chrome="transparent"
             id={item.content.id}
             title={item.content.title}

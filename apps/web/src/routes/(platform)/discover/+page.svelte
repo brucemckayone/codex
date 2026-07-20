@@ -77,6 +77,8 @@
     {#if data.content.items && data.content.items.length > 0}
       {#each data.content.items as item (item.id)}
         <ContentCard
+          shape="3:4"
+          titleInCover
           id={item.id}
           title={item.title}
           thumbnail={item.mediaItem?.thumbnailUrl ?? null}

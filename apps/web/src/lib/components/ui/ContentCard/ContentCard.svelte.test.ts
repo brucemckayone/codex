@@ -45,13 +45,8 @@ describe('ContentCard — shape prop', () => {
     expect(card()?.getAttribute('data-shape')).toBe(shape);
   });
 
-  test('grid tile with no explicit shape defaults to 3:4 (homogenised browse grid)', () => {
+  test('no shape and no normalizeRatio emits no data-shape (default cascade)', () => {
     component = render({ contentType: 'video' });
-    expect(card()?.getAttribute('data-shape')).toBe('3:4');
-  });
-
-  test('non-grid variant with no shape emits no data-shape (default cascade preserved)', () => {
-    component = render({ contentType: 'video', variant: 'list' });
     expect(card()?.hasAttribute('data-shape')).toBe(false);
   });
 
@@ -131,29 +126,31 @@ describe('ContentCard — article title-in-cover', () => {
     expect(document.querySelector('.cc__placeholder')).toBeNull();
   });
 
-  test('article + shape="3:4" WITH an image uses the image; brand cover stays hidden', () => {
+  test('article + shape="3:4" WITH an image renders the image over an always-present brand cover', () => {
     component = render({
       contentType: 'article',
       shape: '3:4',
       thumbnail: 'https://cdn.example/img.jpg',
     });
     expect(document.querySelector('img.cc__image')).toBeTruthy();
-    // The brand fallback is rendered but hidden behind the image (revealed via
-    // onerror only) — so there is no VISIBLE gradient cover.
+    // The brand cover is ALWAYS painted behind the (promoted) image — not
+    // hidden — so a load error, even pre-hydration / no-JS, falls back to the
+    // gradient with no onerror handler required.
     const brandCover = document.querySelector('.cc__cover--brand');
     expect(brandCover).toBeTruthy();
-    expect(brandCover?.classList.contains('hidden')).toBe(true);
+    expect(brandCover?.classList.contains('hidden')).toBe(false);
   });
 
-  test('article in the default grid auto-enables title-in-cover (homogenised)', () => {
+  test('article without a shape does NOT enable title-in-cover (default cascade)', () => {
     component = render({
       contentType: 'article',
-      description: 'This excerpt now surfaces inside the cover, not the body.',
+      description: 'This excerpt should still render in the body.',
     });
     const el = card();
-    expect(el?.classList.contains('cc--title-in-cover')).toBe(true);
-    // The plain body excerpt is suppressed — it moves into the scrimmed cover.
-    expect(document.querySelector('.cc__description')).toBeNull();
+    expect(el?.classList.contains('cc--title-in-cover')).toBe(false);
+    expect(document.querySelector('.cc__description')?.textContent).toContain(
+      'This excerpt should still render'
+    );
   });
 
   test('list variant does NOT enable title-in-cover; body description renders', () => {
@@ -185,5 +182,54 @@ describe('ContentCard — article title-in-cover', () => {
       titleInCover: true,
     });
     expect(card()?.classList.contains('cc--title-in-cover')).toBe(true);
+  });
+
+  // ── Browse-grid opt-in (explore/library/discover pass shape="3:4" +
+  //    titleInCover): every type joins the title-in-cover treatment with its
+  //    own per-type flair. This is the homogenisation feature. ──
+  test('opt-in video tile → title-in-cover with the play-ring flair (no audio disc)', () => {
+    component = render({
+      contentType: 'video',
+      shape: '3:4',
+      titleInCover: true,
+    });
+    expect(card()?.classList.contains('cc--title-in-cover')).toBe(true);
+    expect(document.querySelector('.cc__flair-ring')).toBeTruthy();
+    expect(document.querySelector('.cc__flair-disc')).toBeNull();
+  });
+
+  test('opt-in audio tile → play disc flair, and the below-cover audio overlay is suppressed', () => {
+    component = render({
+      contentType: 'audio',
+      shape: '3:4',
+      titleInCover: true,
+    });
+    expect(card()?.classList.contains('cc--title-in-cover')).toBe(true);
+    expect(document.querySelector('.cc__flair-disc')).toBeTruthy();
+    // Superseded by the flair — the old audio-media overlay must not render.
+    expect(document.querySelector('.cc__audio-overlay')).toBeNull();
+  });
+
+  test('imageless article tile → dropcap flair with the uppercased initial', () => {
+    component = render({
+      contentType: 'article',
+      shape: '3:4',
+      title: 'deep work',
+      thumbnail: null,
+    });
+    const dropcap = document.querySelector('.cc__flair-dropcap');
+    expect(dropcap).toBeTruthy();
+    expect(dropcap?.textContent).toBe('D');
+  });
+
+  test('title-in-cover always paints a brand cover behind the image (JS-free fallback)', () => {
+    component = render({
+      contentType: 'video',
+      shape: '3:4',
+      titleInCover: true,
+      thumbnail: 'https://cdn.example/v.jpg',
+    });
+    expect(document.querySelector('.cc__cover--brand')).toBeTruthy();
+    expect(document.querySelector('img.cc__image')).toBeTruthy();
   });
 });

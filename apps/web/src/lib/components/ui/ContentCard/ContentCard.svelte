@@ -262,28 +262,26 @@
   const isArticle = $derived(contentType === 'article');
 
   // Resolved media shape. `normalizeRatio` is a deprecated alias for
-  // `shape='16:9'`; an explicit `shape` always wins. Homogenised browse grid
-  // (Codex-p7wc8): every grid tile defaults to a 3:4 portrait cover so
-  // audio/video/article share one shape and one editorial treatment.
-  // list/compact/resume/featured and audio-row keep their own ratios.
+  // `shape='16:9'`; an explicit `shape` always wins, otherwise no `data-shape`
+  // is emitted and the CSS default cascade applies. The homogenised browse grid
+  // (Codex-p7wc8) opts in PER CALL-SITE via shape="3:4" + titleInCover
+  // (explore/library/discover) rather than changing this default — so curated
+  // surfaces (RelatedContent, creator pages, org landing, BrowseModule) keep
+  // their own treatment and nothing flips unasked.
   const resolvedShape = $derived<'16:9' | '1:1' | '3:4' | '3:2' | undefined>(
-    shape ??
-      (normalizeRatio
-        ? '16:9'
-        : variant === 'grid' && !isAudioRow
-          ? '3:4'
-          : undefined),
+    shape ?? (normalizeRatio ? '16:9' : undefined),
   );
 
-  // Title-in-cover is now the shared treatment for EVERY portrait/square grid
-  // tile, not just articles: the eyebrow + title sit over the cover on a
-  // scrim, each type carrying its own flair (audio waveform, video play-ring,
-  // article dropcap). Explicit `titleInCover` wins; audio-row keeps its
-  // playlist layout. (Codex-p7wc8)
+  // Title-in-cover: eyebrow + title over the cover on a scrim, each type
+  // carrying its own flair (audio waveform, video play-ring, article dropcap).
+  // AUTO for shaped articles (the long-standing editorial default); every other
+  // type opts in EXPLICITLY via `titleInCover`. The homogenised browse grids
+  // (explore/library/discover) pass it so audio/video tiles join the treatment;
+  // curated surfaces don't, so it never leaks into a caller that didn't ask.
+  // (Codex-p7wc8)
   const showTitleInCover = $derived(
     titleInCover ??
-      (!isAudioRow &&
-        (resolvedShape === '1:1' || resolvedShape === '3:4')),
+      (isArticle && (resolvedShape === '1:1' || resolvedShape === '3:4')),
   );
 
   // First letter of the title — the imageless cover renders it as a ghosted
@@ -498,6 +496,12 @@
              ghosted serif dropcap) sitting behind the scrimmed title. The
              flair is decorative/navigational — the whole card is the link.
              (Codex-p7wc8) -->
+        <!-- Brand cover is ALWAYS painted behind — a 404, or a no-JS /
+             pre-hydration load error (before the onerror listener attaches),
+             reveals the gradient with no handler required. The image is
+             promoted above it (`.cc--title-in-cover .cc__image`); onerror is a
+             progressive enhancement that hides the broken <img>. (Codex-p7wc8) -->
+        <div class="cc__cover cc__cover--brand"></div>
         {#if thumbnail}
           <img
             src={thumbnail}
@@ -507,11 +511,8 @@
             loading="lazy"
             decoding="async"
             class="cc__image"
-            onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
+            onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
           />
-          <div class="cc__cover cc__cover--brand hidden"></div>
-        {:else}
-          <div class="cc__cover cc__cover--brand"></div>
         {/if}
         <div class="cc__flair" aria-hidden="true">
           {#if contentType === 'audio'}
@@ -519,7 +520,7 @@
             <span class="cc__flair-disc"><PlayIcon size={26} /></span>
           {:else if contentType === 'video'}
             <span class="cc__flair-ring"><PlayIcon size={26} /></span>
-          {:else if contentType === 'article' && !thumbnail}
+          {:else if contentType === 'article' && !thumbnail && coverInitial}
             <span class="cc__flair-dropcap">{coverInitial}</span>
           {/if}
         </div>
@@ -2111,12 +2112,12 @@
     inset: 0;
   }
 
-  /* The brand cover is the imageless fallback: rendered (hidden) behind a real
-     thumbnail so `onerror` can reveal it if the image 404s. This codebase has
-     no global `.hidden`, only scoped ones — so scope the hide to `.cc__cover`
-     or the absolutely-positioned cover paints OVER the photo. (Codex-p7wc8) */
-  .cc__cover.hidden {
-    display: none;
+  /* Title-in-cover promotes the image above the always-present brand cover
+     (mirrors the audio-media pattern) so the photo paints on top and a load
+     error — even pre-hydration / no-JS — falls back to the gradient with no
+     handler. (Codex-p7wc8) */
+  .cc--title-in-cover .cc__image {
+    position: relative;
   }
 
   /* Shared imageless cover — a brand-tinted gradient standing in for a
@@ -2169,7 +2170,7 @@
     width: 78%;
     height: 34%;
     color: color-mix(in srgb, var(--color-brand-primary) 55%, var(--media-glyph));
-    opacity: var(--opacity-80, 0.82);
+    opacity: var(--opacity-80, 0.8);
   }
   .cc__flair-disc,
   .cc__flair-ring {
@@ -2212,7 +2213,7 @@
     font-family: var(--font-heading);
     font-weight: var(--font-bold);
     font-size: calc(var(--text-display) * 1.7);
-    line-height: 1;
+    line-height: var(--leading-none);
     color: color-mix(in srgb, var(--media-glyph) 26%, transparent);
     user-select: none;
   }
