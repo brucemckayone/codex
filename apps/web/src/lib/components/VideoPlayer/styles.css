@@ -313,7 +313,7 @@ media-controller {
   --media-range-track-height: var(--space-1);
   --media-range-track-border-radius: var(--radius-full);
   --media-range-bar-color: var(--color-brand-primary, var(--color-primary-500));
-  --media-time-range-buffered-color: hsl(0 0% 100% / var(--media-range-buffered-opacity));
+  --media-time-range-buffered-color: var(--color-player-surface-active);
   --media-range-thumb-width: 0px;
   --media-range-thumb-height: 0px;
 
@@ -348,8 +348,8 @@ media-controller video {
   background: linear-gradient(
     to top,
     var(--color-player-gradient-bottom) 0%,
-    hsl(0 0% 0% / var(--media-overlay-mid-opacity)) 50%,
-    hsl(0 0% 0% / var(--opacity-10)) 80%,
+    color-mix(in oklch, var(--color-player-gradient-bottom), transparent 57%) 50%,
+    color-mix(in oklch, var(--color-player-gradient-bottom), transparent 86%) 80%,
     transparent 100%
   );
   transform: translateY(100%);

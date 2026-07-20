@@ -50,6 +50,7 @@ export const BRAND_PREFIX_KEYS = new Set([
   'player-border',
   'player-overlay',
   'player-overlay-heavy',
+  'player-gradient-bottom',
   // Glass morphism
   'glass-tint',
   // Card interaction (WP-05)

@@ -1,5 +1,5 @@
 <!--
-  @component Brand-preview player demo (Codex-cijzb · rail-UX follow-up)
+  @component Brand-preview player demo (Codex-cijzb · rail-UX follow-up; player-token fidelity Codex-cijzb.17)
 
   A SELF-CONTAINED, always-works preview surface for the `/studio/brand` canvas'
   "Player" lens. The real audio/video players can't be previewed reliably: they
@@ -13,11 +13,20 @@
   inherits the org brand tokens AND the WP-1.4 preview bridge: editing a colour
   in the studio updates this demo live, same as any other preview route.
 
+  FIDELITY CONTRACT (Codex-cijzb.17): the real players are DARK surfaces (the
+  audio player sits over the shader; the video player over black), and their
+  chrome reads the `--color-player-*` family. This demo therefore renders each
+  player on a dark stage and wires every chrome element to the SAME player token
+  the real component uses — so each "Player Chrome" dial visibly moves the
+  preview. The play buttons, the waveform and the progress-bar fill deliberately
+  follow `--color-brand-primary` (your Primary dial), exactly as the real
+  players do — so those are intentionally NOT driven by the Player Chrome group.
+
   It reuses the REAL `Waveform` component (fully inert with a static amplitude
-  array — it reads `--color-brand-primary`/`--color-brand-secondary`), and
+  array — it reads `--color-brand-primary`/`--color-brand-secondary`) and
   replicates the transport/video chrome with the real player design tokens
-  (`--color-player-*`, `--color-brand-primary`) rather than mounting the real
-  players (which would spin up HLS). Not a public destination — noindex.
+  rather than mounting the real players (which would spin up HLS). Not a public
+  destination — noindex.
 -->
 <script lang="ts">
   import Waveform from '$lib/components/AudioPlayer/Waveform.svelte';
@@ -61,7 +70,7 @@
 
   <!-- ── Audio player ── -->
   <article class="pv-card" aria-label="Audio player preview">
-    <div class="pv-card__meta">
+    <div class="pv-card__head">
       <span class="pv-badge">Audio</span>
       <div class="pv-card__titles">
         <p class="pv-card__title">A sample episode</p>
@@ -69,45 +78,58 @@
       </div>
     </div>
 
-    <div class="pv-audio__wave">
-      <Waveform
-        data={DEMO_WAVEFORM}
-        currentTime={AUDIO_POSITION}
-        duration={AUDIO_DURATION}
-        onseek={noop}
-        playing={false}
-      />
-    </div>
+    <!-- Dark player stage — the real audio player sits over the shader, so its
+         chrome tokens are white-on-dark. Rendering on a dark stage lets every
+         Player Chrome dial read correctly. -->
+    <div class="pv-stage">
+      <div class="pv-audio__wave">
+        <Waveform
+          data={DEMO_WAVEFORM}
+          currentTime={AUDIO_POSITION}
+          duration={AUDIO_DURATION}
+          onseek={noop}
+          playing={false}
+        />
+      </div>
 
-    <div class="pv-transport">
-      <button type="button" class="pv-play" aria-label="Play (preview)" disabled>
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-          <path d="M8 5v14l11-7z" fill="currentColor" />
-        </svg>
-      </button>
-      <span class="pv-time">{fmt(AUDIO_POSITION)} / {fmt(AUDIO_DURATION)}</span>
-      <span class="pv-transport__spacer"></span>
-      <button type="button" class="pv-chip" aria-label="Playback speed (preview)" disabled>
-        1×
-      </button>
-      <button type="button" class="pv-icon" aria-label="Volume (preview)" disabled>
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-          <path
-            d="M4 9v6h4l5 5V4L8 9H4z M16 8a4 4 0 0 1 0 8"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </button>
+      <div class="pv-transport">
+        <button type="button" class="pv-play" aria-label="Play (preview)" onclick={noop}>
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path d="M8 5v14l11-7z" fill="currentColor" />
+          </svg>
+        </button>
+        <span class="pv-time">{fmt(AUDIO_POSITION)} / {fmt(AUDIO_DURATION)}</span>
+        <span class="pv-transport__spacer"></span>
+        <button
+          type="button"
+          class="pv-chip pv-chip--active"
+          aria-label="Playback speed (preview)"
+          aria-pressed="true"
+          onclick={noop}
+        >
+          1×
+        </button>
+        <button type="button" class="pv-icon" aria-label="Volume (preview)" onclick={noop}>
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path
+              d="M4 9v6h4l5 5V4L8 9H4z M16 8a4 4 0 0 1 0 8"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
+
+      <p class="pv-stage__hint">Hover a control to preview its hover colour.</p>
     </div>
   </article>
 
   <!-- ── Video player ── -->
   <article class="pv-card" aria-label="Video player preview">
-    <div class="pv-card__meta">
+    <div class="pv-card__head">
       <span class="pv-badge">Video</span>
       <div class="pv-card__titles">
         <p class="pv-card__title">A sample video</p>
@@ -117,7 +139,15 @@
 
     <div class="pv-video">
       <div class="pv-video__poster" aria-hidden="true"></div>
-      <button type="button" class="pv-video__bigplay" aria-label="Play (preview)" disabled>
+
+      <!-- Floating control over media — exercises the Control Overlay tokens. -->
+      <button type="button" class="pv-video__chip" aria-label="Fullscreen (preview)" onclick={noop}>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3" />
+        </svg>
+      </button>
+
+      <button type="button" class="pv-video__bigplay" aria-label="Play (preview)" onclick={noop}>
         <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
           <path d="M8 5v14l11-7z" fill="currentColor" />
         </svg>
@@ -146,6 +176,11 @@
       </div>
     </div>
   </article>
+
+  <p class="pv__note">
+    Play buttons, the waveform and the progress bar follow your <strong>Primary</strong>
+    colour. Everything else here follows the <strong>Player Chrome</strong> colours.
+  </p>
 </main>
 
 <style>
@@ -179,7 +214,19 @@
     max-width: 52ch;
   }
 
-  /* ── Card shell ── */
+  .pv__note {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    text-align: center;
+  }
+
+  .pv__note strong {
+    color: var(--color-text-secondary);
+    font-weight: var(--font-semibold);
+  }
+
+  /* ── Card shell (org-themed frame around each dark player stage) ── */
   .pv-card {
     display: flex;
     flex-direction: column;
@@ -191,7 +238,7 @@
     box-shadow: var(--shadow-sm);
   }
 
-  .pv-card__meta {
+  .pv-card__head {
     display: flex;
     align-items: center;
     gap: var(--space-3);
@@ -228,7 +275,35 @@
     color: var(--color-text-muted);
   }
 
-  /* ── Audio ── */
+  /* ── Dark player stage — mirrors the real players' dark surface so the
+        white-on-dark --color-player-* tokens read correctly. Neutral-900 is an
+        absolute dark (does not flip with theme), matching the players, which
+        are dark in both light and dark org themes. A whisper of brand primary
+        stands in for the ambient shader behind the real audio player. ── */
+  .pv-stage {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: var(--space-5);
+    border-radius: var(--radius-md);
+    background:
+      radial-gradient(
+        130% 130% at 15% 0%,
+        color-mix(in oklch, var(--color-brand-primary) 22%, transparent),
+        transparent 62%
+      ),
+      var(--color-neutral-900);
+    isolation: isolate;
+  }
+
+  .pv-stage__hint {
+    margin: 0;
+    font-size: var(--text-xs);
+    font-style: italic;
+    color: var(--color-player-text-muted);
+  }
+
+  /* ── Audio transport ── */
   .pv-audio__wave {
     min-height: var(--space-16);
   }
@@ -239,6 +314,7 @@
     gap: var(--space-3);
   }
 
+  /* Play button — follows the Primary colour (like the real players). */
   .pv-play {
     display: inline-flex;
     align-items: center;
@@ -249,6 +325,7 @@
     background: var(--color-brand-primary);
     border: none;
     border-radius: var(--radius-full);
+    cursor: default;
     flex-shrink: 0;
   }
 
@@ -256,22 +333,34 @@
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     font-variant-numeric: tabular-nums;
-    color: var(--color-text-secondary);
+    color: var(--color-player-text-secondary);
   }
 
   .pv-transport__spacer {
     flex: 1;
   }
 
+  /* Chrome buttons — Player Chrome tokens (surface / hover / active / border). */
   .pv-chip,
   .pv-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: var(--color-text-secondary);
-    background: var(--color-surface-secondary);
-    border: var(--border-width) var(--border-style) var(--color-border-subtle);
+    color: var(--color-player-text);
+    background: var(--color-player-surface);
+    border: var(--border-width) var(--border-style) var(--color-player-border);
     border-radius: var(--radius-md);
+    cursor: default;
+    transition: background var(--duration-fast) var(--ease-default);
+  }
+
+  .pv-chip:hover,
+  .pv-icon:hover {
+    background: var(--color-player-surface-hover);
+  }
+
+  .pv-chip--active {
+    background: var(--color-player-surface-active);
   }
 
   .pv-chip {
@@ -310,11 +399,36 @@
       ),
       linear-gradient(
         135deg,
-        color-mix(in oklch, var(--color-brand-primary) 30%, var(--color-surface-secondary)),
-        var(--color-surface-secondary)
+        color-mix(in oklch, var(--color-brand-primary) 30%, var(--color-neutral-900)),
+        var(--color-neutral-900)
       );
   }
 
+  /* Floating control over media — Control Overlay tokens (rest → hover). */
+  .pv-video__chip {
+    position: absolute;
+    top: var(--space-3);
+    right: var(--space-3);
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-8);
+    height: var(--space-8);
+    color: var(--color-player-text);
+    background: var(--color-player-overlay);
+    border: none;
+    border-radius: var(--radius-full);
+    cursor: default;
+    backdrop-filter: blur(var(--blur-sm));
+    transition: background var(--duration-fast) var(--ease-default);
+  }
+
+  .pv-video__chip:hover {
+    background: var(--color-player-overlay-heavy);
+  }
+
+  /* Big play — follows the Primary colour (like the real players). */
   .pv-video__bigplay {
     position: absolute;
     top: 50%;
@@ -330,6 +444,7 @@
     border: none;
     border-radius: var(--radius-full);
     box-shadow: var(--shadow-lg);
+    cursor: default;
     z-index: 1;
   }
 
@@ -342,15 +457,17 @@
     padding: var(--space-6) var(--space-3) var(--space-3);
     background: linear-gradient(
       to top,
-      var(--color-player-gradient-bottom, rgb(0 0 0 / 0.6)),
-      transparent
+      var(--color-player-gradient-bottom, rgb(0 0 0 / 0.7)) 0%,
+      color-mix(in oklch, var(--color-player-gradient-bottom, rgb(0 0 0 / 0.7)), transparent 57%) 50%,
+      transparent 100%
     );
   }
 
+  /* Track background follows Button Hover; the fill follows Primary. */
   .pv-progress {
     height: var(--space-1);
     border-radius: var(--radius-full);
-    background: color-mix(in oklch, var(--color-player-text, #fff) 30%, transparent);
+    background: var(--color-player-surface-hover);
     overflow: hidden;
   }
 
@@ -370,15 +487,10 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: var(--color-player-text, #fff);
+    color: var(--color-player-text);
   }
 
   .pv-time--onmedia {
-    color: var(--color-player-text, #fff);
-  }
-
-  /* Nothing here is operable — it's a static brand preview. */
-  .pv-card button {
-    cursor: default;
+    color: var(--color-player-text);
   }
 </style>
