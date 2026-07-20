@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Content cards — one language, three voices</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+/* =========================================================================
+   TOKENS — mirror of tokens/org-brand.css for "of blood and bones".
+   Components paint ONLY with semantic tokens, so swapping the --brand-*
+   inputs re-themes the whole card family. Two themes: light parchment
+   (default, matches the screenshot) + dark oxblood.
+   ========================================================================= */
+:root{
+  --font-heading:'Libre Baskerville', Georgia, 'Times New Roman', serif;
+  --font-body:'Libre Baskerville', Georgia, 'Times New Roman', serif;
+  --font-ui:'Libre Baskerville', Georgia, serif;
+
+  --space-1:.25rem; --space-2:.5rem; --space-3:.75rem; --space-4:1rem;
+  --space-5:1.25rem; --space-6:1.5rem; --space-8:2rem; --space-10:2.5rem;
+  --space-12:3rem; --space-16:4rem; --space-20:5rem;
+  --radius-card:.7rem; --radius-full:9999px;
+
+  /* ---- LIGHT: parchment ---- */
+  --ground:#F0E7D8;
+  --ground-2:#E9DECB;
+  --surface-card:#FBF6EC;
+  --ink:#2B221C;
+  --ink-2:#6C5E53;
+  --ink-3:#9A8B7E;
+  --border:#E3D6C1;
+  --border-strong:#D3C2A6;
+
+  --brand:#B0462B;            /* terracotta primary */
+  --brand-hover:#9C3B22;
+  --accent:#C0762C;           /* ochre accent */
+
+  /* on-media tokens — read over any cover */
+  --media-scrim:#1C1510;      /* the dark anchor mixed into cover gradients */
+  --media-glyph:#EEC488;      /* warm gold: eyebrows + glyphs over scrim */
+  --on-media:#F7EEE3;         /* near-white title over scrim */
+  --on-media-2:#D8C7B7;       /* excerpt over scrim */
+
+  --shadow-card:0 1px 2px rgba(40,20,12,.10), 0 10px 26px -8px rgba(40,20,12,.20);
+  --shadow-lift:0 2px 6px rgba(40,20,12,.14), 0 22px 44px -14px rgba(40,20,12,.34);
+  --dur:.22s; --ease:cubic-bezier(.2,.7,.2,1);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ground:#251110; --ground-2:#2E1513; --surface-card:#3A1A16;
+    --ink:#F4E7DD; --ink-2:#CBB4A8; --ink-3:#9E8578; --border:#4C2823; --border-strong:#623128;
+    --brand:#E06A46; --brand-hover:#EC7A56; --accent:#E0913F;
+    --media-scrim:#140C09; --media-glyph:#F2CB92; --on-media:#F8EFE5; --on-media-2:#D9C7B7;
+    --shadow-card:0 1px 2px rgba(0,0,0,.4), 0 12px 30px -10px rgba(0,0,0,.6);
+    --shadow-lift:0 2px 6px rgba(0,0,0,.5), 0 26px 50px -14px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="light"]{
+  --ground:#F0E7D8; --ground-2:#E9DECB; --surface-card:#FBF6EC;
+  --ink:#2B221C; --ink-2:#6C5E53; --ink-3:#9A8B7E; --border:#E3D6C1; --border-strong:#D3C2A6;
+  --brand:#B0462B; --brand-hover:#9C3B22; --accent:#C0762C;
+  --media-scrim:#1C1510; --media-glyph:#EEC488; --on-media:#F7EEE3; --on-media-2:#D8C7B7;
+  --shadow-card:0 1px 2px rgba(40,20,12,.10), 0 10px 26px -8px rgba(40,20,12,.20);
+  --shadow-lift:0 2px 6px rgba(40,20,12,.14), 0 22px 44px -14px rgba(40,20,12,.34);
+}
+:root[data-theme="dark"]{
+  --ground:#251110; --ground-2:#2E1513; --surface-card:#3A1A16;
+  --ink:#F4E7DD; --ink-2:#CBB4A8; --ink-3:#9E8578; --border:#4C2823; --border-strong:#623128;
+  --brand:#E06A46; --brand-hover:#EC7A56; --accent:#E0913F;
+  --media-scrim:#140C09; --media-glyph:#F2CB92; --on-media:#F8EFE5; --on-media-2:#D9C7B7;
+  --shadow-card:0 1px 2px rgba(0,0,0,.4), 0 12px 30px -10px rgba(0,0,0,.6);
+  --shadow-lift:0 2px 6px rgba(0,0,0,.5), 0 26px 50px -14px rgba(0,0,0,.7);
+}
+
+*{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;}
+body{
+  font-family:var(--font-body);
+  background:
+    radial-gradient(120% 90% at 100% -10%, color-mix(in oklab, var(--brand) 12%, var(--ground)) 0%, transparent 46%),
+    var(--ground);
+  color:var(--ink);
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  min-height:100vh;
+  padding-bottom:var(--space-20);
+}
+.wrap{max-width:76rem;margin-inline:auto;padding-inline:clamp(var(--space-4),4vw,var(--space-12));}
+h1,h2,h3{font-family:var(--font-heading);font-weight:700;line-height:1.15;text-wrap:balance;}
+:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:3px;}
+
+/* ---- page header ---- */
+.masthead{padding-block:var(--space-12) var(--space-8);}
+.eyebrow-lead{
+  font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--brand);font-weight:700;margin-bottom:var(--space-4);
+}
+.masthead h1{font-size:clamp(2rem,1.4rem + 2.6vw,3.2rem);letter-spacing:-.01em;max-width:18ch;}
+.masthead p{
+  margin-top:var(--space-5);max-width:60ch;color:var(--ink-2);
+  font-size:1.05rem;line-height:1.7;
+}
+.masthead .principle{
+  margin-top:var(--space-6);padding-left:var(--space-5);
+  border-left:3px solid color-mix(in oklab, var(--brand) 60%, transparent);
+  color:var(--ink);font-style:italic;max-width:56ch;
+}
+
+.topbar{position:sticky;top:0;z-index:20;
+  background:color-mix(in oklab, var(--ground) 82%, transparent);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--border);}
+.topbar__in{max-width:76rem;margin-inline:auto;display:flex;align-items:center;gap:var(--space-4);
+  padding:var(--space-3) clamp(var(--space-4),4vw,var(--space-12));}
+.topbar__mark{font-family:var(--font-heading);font-weight:700;display:flex;align-items:center;gap:.5em;font-size:1rem;}
+.topbar__mark .dot{width:.6em;height:.6em;border-radius:var(--radius-full);background:var(--brand);}
+.topbar__mark small{font-family:var(--font-ui);font-weight:400;color:var(--ink-3);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;}
+.toggle{margin-left:auto;font:inherit;font-size:.8rem;cursor:pointer;
+  border:1px solid var(--border-strong);background:var(--surface-card);color:var(--ink);
+  border-radius:var(--radius-full);padding:.4em 1em;display:inline-flex;gap:.5em;align-items:center;}
+.toggle:hover{border-color:var(--brand);}
+
+/* ---- section scaffolding ---- */
+section{margin-top:var(--space-16);}
+.sec-head{display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-6);}
+.sec-head h2{font-size:clamp(1.4rem,1.1rem + 1vw,1.9rem);}
+.sec-head .n{font-family:var(--font-ui);font-size:.8rem;color:var(--ink-3);letter-spacing:.14em;text-transform:uppercase;
+  border:1px solid var(--border);border-radius:var(--radius-full);padding:.25em .8em;}
+.sec-head p{flex-basis:100%;color:var(--ink-2);max-width:64ch;margin-top:var(--space-1);line-height:1.7;}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(248px,1fr));gap:var(--space-8) var(--space-6);}
+
+/* =========================================================================
+   CARD — the shared language. `.cc--cover` = title-in-cover (the article
+   treatment applied to every type). `.cc__thumb` is the media frame; the
+   cover-body (eyebrow/title/excerpt) is absolutely positioned over the scrim.
+   ========================================================================= */
+.cc{display:flex;flex-direction:column;gap:var(--space-3);}
+.cc__link{display:block;border-radius:var(--radius-card);}
+.cc__thumb{
+  position:relative;aspect-ratio:3/4;border-radius:var(--radius-card);overflow:hidden;
+  background:var(--ground-2);
+  box-shadow:var(--shadow-card);
+  transition:transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+  isolation:isolate;
+}
+.cc__link:hover .cc__thumb{transform:translateY(-4px);box-shadow:var(--shadow-lift);}
+.cc__media{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;}
+.cc__media--faux{background-size:cover;background-position:center;}
+.grain{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.5;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");}
+
+/* Scrim — the reusable dark gradient that guarantees text legibility over
+   ANY cover (photo or generated). Painted from --media-scrim. */
+.cc__scrim{position:absolute;inset:0;z-index:2;pointer-events:none;
+  background:linear-gradient(to top,
+    color-mix(in oklab, var(--media-scrim) 92%, transparent) 0%,
+    color-mix(in oklab, var(--media-scrim) 74%, transparent) 22%,
+    color-mix(in oklab, var(--media-scrim) 30%, transparent) 48%,
+    transparent 72%);}
+
+/* Cover body — eyebrow + title + excerpt, bottom-aligned over the scrim */
+.cc__body{position:absolute;z-index:3;left:0;right:0;bottom:0;
+  padding:var(--space-4) var(--space-4) var(--space-5);display:flex;flex-direction:column;gap:var(--space-2);}
+.cc__kind{display:inline-flex;align-items:center;gap:.5em;
+  font-family:var(--font-ui);font-size:.7rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--media-glyph);}
+.cc__kind svg{width:.95em;height:.95em;flex:none;}
+.cc__title{color:var(--on-media);font-size:1.5rem;line-height:1.12;letter-spacing:-.01em;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+.cc__excerpt{color:var(--on-media-2);font-size:.86rem;line-height:1.55;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  text-shadow:0 1px 8px rgba(0,0,0,.4);}
+
+/* Corner chrome */
+.cc__pill{position:absolute;z-index:4;top:var(--space-3);border-radius:var(--radius-full);
+  font-family:var(--font-ui);font-size:.72rem;font-weight:700;padding:.35em .8em;display:inline-flex;align-items:center;gap:.4em;}
+.cc__pill--featured{left:var(--space-3);background:var(--brand);color:#fff;}
+.cc__pill--free{right:var(--space-3);background:color-mix(in oklab, var(--media-scrim) 66%, transparent);color:var(--on-media);
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
+.cc__dur{position:absolute;z-index:4;right:var(--space-3);bottom:var(--space-3);
+  font-family:var(--font-ui);font-size:.72rem;font-weight:700;color:var(--on-media);
+  background:color-mix(in oklab, var(--media-scrim) 60%, transparent);
+  border-radius:var(--radius-full);padding:.28em .7em;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
+/* when duration would collide with the excerpt, we float it top-right instead */
+.cc__dur--top{top:var(--space-3);bottom:auto;}
+
+/* Author row (below the cover) — unchanged from today */
+.cc__author{display:flex;align-items:center;gap:var(--space-2);padding-inline:var(--space-1);}
+.cc__avatar{width:1.85rem;height:1.85rem;border-radius:var(--radius-full);flex:none;
+  background:color-mix(in oklab, var(--brand) 22%, var(--surface-card));
+  color:var(--brand);display:grid;place-items:center;font-family:var(--font-heading);font-weight:700;font-size:.85rem;
+  border:1px solid var(--border);}
+.cc__author span{font-size:.86rem;color:var(--ink-2);}
+
+/* =========================================================================
+   FLAIR ZONE — each type's own signature, painted mid-cover so it never
+   fights the title. Present on ALL covers (photo covers get a lighter touch).
+   ========================================================================= */
+.cc__flair{position:absolute;z-index:1;inset:0;pointer-events:none;}
+
+/* VIDEO — play affordance in a ring, + faint frame ticks */
+.play-ring{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);
+  width:64px;height:64px;border-radius:var(--radius-full);display:grid;place-items:center;
+  background:color-mix(in oklab, var(--media-scrim) 42%, transparent);
+  border:1.5px solid color-mix(in oklab, var(--on-media) 60%, transparent);
+  backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);}
+.play-ring::after{content:"";width:0;height:0;margin-left:5px;
+  border-left:19px solid var(--on-media);border-top:12px solid transparent;border-bottom:12px solid transparent;}
+
+/* AUDIO — a full waveform field (bars injected by JS), + play disc */
+.wavefield{position:absolute;left:0;right:0;top:34%;transform:translateY(-50%);
+  height:38%;display:flex;align-items:center;justify-content:center;gap:2.5px;padding-inline:12%;}
+.wavefield .bar{width:3px;border-radius:2px;background:var(--media-glyph);opacity:.85;}
+.audio-disc{position:absolute;left:50%;top:34%;transform:translate(-50%,-50%);
+  width:52px;height:52px;border-radius:var(--radius-full);display:grid;place-items:center;
+  background:color-mix(in oklab, var(--media-scrim) 46%, transparent);
+  border:1.5px solid color-mix(in oklab, var(--on-media) 55%, transparent);
+  backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);}
+.audio-disc::after{content:"";width:0;height:0;margin-left:4px;
+  border-left:15px solid var(--on-media);border-top:9px solid transparent;border-bottom:9px solid transparent;}
+
+/* ARTICLE — an oversized serif dropcap ghosted top-left */
+.dropcap{position:absolute;left:-.06em;top:-.14em;font-family:var(--font-heading);font-weight:700;
+  font-size:15rem;line-height:1;color:color-mix(in oklab, var(--media-glyph) 30%, transparent);
+  user-select:none;}
+
+/* =========================================================================
+   IMAGELESS COVER FILLS — the brand gradient that stands in for a photo.
+   All three types share ONE gradient family (homogeneity); the flair zone
+   carries the difference. This is `.cc__cover--article` generalised.
+   ========================================================================= */
+.cover-brand{position:absolute;inset:0;z-index:0;
+  background:linear-gradient(158deg,
+    color-mix(in oklab, var(--brand) 26%, var(--surface-card)) 0%,
+    color-mix(in oklab, var(--brand) 12%, var(--surface-card)) 34%,
+    color-mix(in oklab, var(--media-scrim) 40%, var(--surface-card)) 66%,
+    var(--media-scrim) 100%);}
+/* subtle radial glow so it isn't a flat ramp */
+.cover-brand::after{content:"";position:absolute;inset:0;
+  background:radial-gradient(90% 60% at 78% 8%, color-mix(in oklab, var(--accent) 26%, transparent), transparent 60%);}
+
+/* alt imageless directions for the options strip */
+.cover-glyph{position:absolute;inset:0;z-index:0;
+  background:linear-gradient(158deg, color-mix(in oklab, var(--brand) 20%, var(--surface-card)), var(--media-scrim));}
+.cover-glyph .big{position:absolute;right:-.12em;bottom:-.22em;opacity:.16;color:var(--on-media);}
+.cover-glyph .big svg{width:12rem;height:12rem;}
+.cover-flat{position:absolute;inset:0;z-index:0;
+  background:linear-gradient(160deg, color-mix(in oklab, var(--brand) 30%, var(--surface-card)), color-mix(in oklab, var(--media-scrim) 88%, var(--brand)));}
+
+/* faux photographic covers (stand-ins — real thumbnails replace these) */
+.faux-canyon{background:
+  linear-gradient(to bottom, #9DB9CE 0%, #C9B08A 46%, #A9603C 74%, #7C3F27 100%);}
+.faux-textile{background:
+  repeating-linear-gradient(96deg, #7C2A2A 0 10px, #C4703A 10px 20px, #2E5A55 20px 30px, #C9A24B 30px 42px, #6B3A63 42px 52px);}
+.faux-dusk{background:
+  linear-gradient(to bottom, #2B3A55 0%, #6A4A63 44%, #B26A45 78%, #8A3F2E 100%);}
+
+/* ---- options strip ---- */
+.options{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--space-6);align-items:start;}
+.opt h3{font-size:1.05rem;margin-bottom:var(--space-1);}
+.opt .rec{color:var(--brand);font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;}
+.opt p{color:var(--ink-2);font-size:.86rem;line-height:1.6;margin-top:var(--space-2);}
+.opt .cc__thumb{aspect-ratio:3/4;margin-bottom:var(--space-3);}
+
+/* ---- anatomy callouts ---- */
+.anatomy{display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:var(--space-8);align-items:center;}
+.anatomy ul{list-style:none;display:flex;flex-direction:column;gap:var(--space-4);}
+.anatomy li{padding-left:var(--space-5);position:relative;color:var(--ink-2);line-height:1.6;}
+.anatomy li::before{content:"";position:absolute;left:0;top:.55em;width:9px;height:9px;border-radius:2px;background:var(--brand);}
+.anatomy li b{color:var(--ink);font-family:var(--font-ui);}
+@media (max-width:640px){.anatomy{grid-template-columns:1fr;}}
+
+/* ---- map / footer ---- */
+.map{margin-top:var(--space-16);border-top:1px solid var(--border);padding-top:var(--space-8);}
+.map h2{font-size:1.3rem;margin-bottom:var(--space-4);}
+.map dl{display:grid;grid-template-columns:auto 1fr;gap:var(--space-3) var(--space-5);max-width:60rem;}
+.map dt{font-family:var(--font-ui);color:var(--brand);font-weight:700;white-space:nowrap;}
+.map dd{color:var(--ink-2);line-height:1.6;}
+.map code{font-family:ui-monospace,monospace;font-size:.85em;
+  background:color-mix(in oklab, var(--brand) 10%, var(--surface-card));padding:.1em .45em;border-radius:4px;color:var(--ink);}
+@media (max-width:560px){.map dl{grid-template-columns:1fr;gap:var(--space-1) 0;} .map dt{margin-top:var(--space-3);}}
+
+@media (prefers-reduced-motion:reduce){*{transition:none !important;}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar__in">
+    <span class="topbar__mark"><span class="dot"></span>of blood &amp; bones <small>card system — mockup</small></span>
+    <button class="toggle" id="themeBtn" type="button" aria-label="Toggle light and dark theme">
+      <span id="themeIcon">☾</span><span id="themeLabel">Dark</span>
+    </button>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow-lead">Browse cards · homogenised</p>
+    <h1>One language, three voices.</h1>
+    <p>
+      Today the article card reads as an editorial object — a type eyebrow, a big serif headline, and a
+      short excerpt laid straight over the artwork. The audio and video cards don't; they hang their
+      metadata underneath a plain tile. This mockup gives all three the article's <em>title-in-cover</em>
+      treatment, then hands each type its own signature so a card still says what it is at a glance.
+    </p>
+    <p class="principle">
+      Same frame, same headline, same scrim — the flair is the difference. Audio brings a waveform,
+      video a play affordance, an article its opening letter.
+    </p>
+  </header>
+
+  <!-- ===================== ANATOMY ===================== -->
+  <section>
+    <div class="sec-head">
+      <span class="n">The shared frame</span>
+      <h2>What every card now has in common</h2>
+      <p>The parts below are identical across types. Only the <b>flair zone</b> and the imageless cover fill change per type.</p>
+    </div>
+    <div class="anatomy">
+      <div class="cc">
+        <a class="cc__link" href="#" aria-label="Anatomy example">
+          <div class="cc__thumb">
+            <div class="cover-brand"></div>
+            <div class="cc__flair"><span class="dropcap">T</span></div>
+            <div class="cc__scrim"></div>
+            <span class="cc__pill cc__pill--featured">✦ Featured</span>
+            <div class="cc__body">
+              <span class="cc__kind">📄 Article · Healing</span>
+              <h3 class="cc__title">The anatomy of a card</h3>
+              <p class="cc__excerpt">Eyebrow, headline and excerpt, all sitting over the scrim.</p>
+            </div>
+          </div>
+        </a>
+      </div>
+      <ul>
+        <li><b>Type eyebrow</b> — small-caps <code>--media-glyph</code> gold, with the type icon. Always the type + category.</li>
+        <li><b>Serif headline</b> — the card's anchor, in <code>--on-media</code> near-white, up to three lines.</li>
+        <li><b>Excerpt</b> — one or two lines of preview, quiet <code>--on-media-2</code>.</li>
+        <li><b>Scrim</b> — one reusable gradient from <code>--media-scrim</code>; keeps text legible over any cover.</li>
+        <li><b>Flair zone</b> — the type's signature, painted mid-cover behind the text.</li>
+        <li><b>Corner chrome</b> — Featured / Free pills and duration, unchanged.</li>
+        <li><b>Author row</b> — stays below the cover exactly as it does now.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ===================== WITH IMAGE ===================== -->
+  <section>
+    <div class="sec-head">
+      <span class="n">With a thumbnail</span>
+      <h2>When the creator uploaded artwork</h2>
+      <p>The photo fills the frame; the scrim carries the same headline block. Video keeps a play ring, audio keeps its waveform + play disc — their signatures ride lightly over the image.</p>
+    </div>
+    <div class="grid">
+
+      <!-- VIDEO with image -->
+      <div class="cc"><a class="cc__link" href="#">
+        <div class="cc__thumb">
+          <div class="cc__media cc__media--faux faux-dusk"></div>
+          <div class="grain"></div>
+          <div class="cc__flair"><span class="play-ring"></span></div>
+          <div class="cc__scrim"></div>
+          <span class="cc__dur">48m</span>
+          <div class="cc__body">
+            <span class="cc__kind">▶ Video · Somatic practice</span>
+            <h3 class="cc__title">Somatic Release — Full Session</h3>
+            <p class="cc__excerpt">A slow, guided descent into the body. Ninety minutes of held space.</p>
+          </div>
+        </div></a>
+        <div class="cc__author"><span class="cc__avatar">L</span><span>Luzura Peralta</span></div>
+      </div>
+
+      <!-- AUDIO with image -->
+      <div class="cc"><a class="cc__link" href="#">
+        <div class="cc__thumb">
+          <div class="cc__media cc__media--faux faux-canyon"></div>
+          <div class="grain"></div>
+          <div class="cc__flair"><div class="wavefield" data-bars="34"></div><span class="audio-disc"></span></div>
+          <div class="cc__scrim"></div>
+          <span class="cc__pill cc__pill--free">Free</span>
+          <span class="cc__dur">35m</span>
+          <div class="cc__body">
+            <span class="cc__kind">♫ Audio · Sound &amp; vibration</span>
+            <h3 class="cc__title">Sound Therapy</h3>
+            <p class="cc__excerpt">Singing bowls and low drones tuned for the parasympathetic drop.</p>
+          </div>
+        </div></a>
+        <div class="cc__author"><span class="cc__avatar">L</span><span>Luzura Peralta</span></div>
+      </div>
+
+      <!-- ARTICLE with image -->
+      <div class="cc"><a class="cc__link" href="#">
+        <div class="cc__thumb">
+          <div class="cc__media cc__media--faux faux-textile"></div>
+          <div class="grain"></div>
+          <div class="cc__scrim"></div>
+          <div class="cc__body">
+            <span class="cc__kind">📄 Article · Healing</span>
+            <h3 class="cc__title">Closing the Bones</h3>
+            <p class="cc__excerpt">A postpartum and grief ritual rooted in Latin American tradition.</p>
+          </div>
+        </div></a>
+        <div class="cc__author"><span class="cc__avatar">L</span><span>Luzura Peralta</span></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===================== WITHOUT IMAGE ===================== -->
+  <section>
+    <div class="sec-head">
+      <span class="n">Without a thumbnail</span>
+      <h2>The imageless cover — where the flair earns its keep</h2>
+      <p>No photo, no collapse, no lonely icon. Each card gets the same brand gradient (so a row stays even) and its type's signature drawn large behind the text. This is the recommended direction — the generated cover <em>is</em> the identity.</p>
+    </div>
+    <div class="grid">
+
+      <!-- VIDEO imageless -->
+      <div class="cc"><a class="cc__link" href="#">
+        <div class="cc__thumb">
+          <div class="cover-brand"></div>
+          <div class="cc__flair"><span class="play-ring"></span></div>
+          <div class="cc__scrim"></div>
+          <span class="cc__dur cc__dur--top">22m</span>
+          <div class="cc__body">
+            <span class="cc__kind">▶ Video · Breathwork</span>
+            <h3 class="cc__title">The Physiology of Letting Go</h3>
+            <p class="cc__excerpt">Why the exhale is where release actually happens.</p>
+          </div>
+        </div></a>
+        <div class="cc__author"><span class="cc__avatar">L</span><span>Luzura Peralta</span></div>
+      </div>
+
+      <!-- AUDIO imageless -->
+      <div class="cc"><a class="cc__link" href="#">
+        <div class="cc__thumb">
+          <div class="cover-brand"></div>
+          <div class="cc__flair"><div class="wavefield" data-bars="40"></div><span class="audio-disc"></span></div>
+          <div class="cc__scrim"></div>
+          <span class="cc__pill cc__pill--free">Free</span>
+          <span class="cc__dur cc__dur--top">12m</span>
+          <div class="cc__body">
+            <span class="cc__kind">♫ Audio · Meditation</span>
+            <h3 class="cc__title">A Grounding for Grief</h3>
+            <p class="cc__excerpt">Twelve minutes to come back into the body when it hurts.</p>
+          </div>
+        </div></a>
+        <div class="cc__author"><span class="cc__avatar">L</span><span>Luzura Peralta</span></div>
+      </div>
+
+      <!-- ARTICLE imageless -->
+      <div class="cc"><a class="cc__link" href="#">
+        <div class="cc__thumb">
+          <div class="cover-brand"></div>
+          <div class="cc__flair"><span class="dropcap">M</span></div>
+          <div class="cc__scrim"></div>
+          <span class="cc__pill cc__pill--featured">✦ Featured</span>
+          <div class="cc__body">
+            <span class="cc__kind">📄 Article · Healing</span>
+            <h3 class="cc__title">The Medicine of Grief</h3>
+            <p class="cc__excerpt">A written meditation on grief as sacred medicine. How loss cracks us open.</p>
+          </div>
+        </div></a>
+        <div class="cc__author"><span class="cc__avatar">L</span><span>Luzura Peralta</span></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===================== OPTIONS FOR IMAGELESS ===================== -->
+  <section>
+    <div class="sec-head">
+      <span class="n">Pick one</span>
+      <h2>Three ways to treat the imageless cover</h2>
+      <p>All use the brand gradient. They differ in what sits on top. Tell me which reads best on your orgs and I'll build that one (the others stay easy to switch to — it's one token/branch).</p>
+    </div>
+    <div class="options">
+
+      <div class="opt">
+        <div class="cc__thumb">
+          <div class="cover-brand"></div>
+          <div class="cc__flair"><div class="wavefield" data-bars="36"></div><span class="audio-disc"></span></div>
+          <div class="cc__scrim"></div>
+          <div class="cc__body"><span class="cc__kind">♫ Audio · Meditation</span><h3 class="cc__title">A Grounding for Grief</h3></div>
+        </div>
+        <span class="rec">Recommended</span>
+        <h3>A · Type-native cover</h3>
+        <p>The signature is drawn full-size — a waveform field, a play ring, a serif dropcap. Most distinctive; the cover itself tells you the type before you read a word.</p>
+      </div>
+
+      <div class="opt">
+        <div class="cc__thumb">
+          <div class="cover-glyph"><span class="big" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span></div>
+          <div class="cc__scrim"></div>
+          <div class="cc__body"><span class="cc__kind">♫ Audio · Meditation</span><h3 class="cc__title">A Grounding for Grief</h3></div>
+        </div>
+        <h3>B · Watermark glyph</h3>
+        <p>A single oversized type icon bleeding off the corner, low opacity. Calmer and more uniform; less playful than the type-native covers.</p>
+      </div>
+
+      <div class="opt">
+        <div class="cc__thumb">
+          <div class="cover-flat"></div>
+          <div class="cc__scrim"></div>
+          <div class="cc__body"><span class="cc__kind">♫ Audio · Meditation</span><h3 class="cc__title">A Grounding for Grief</h3></div>
+        </div>
+        <h3>C · Gradient only</h3>
+        <p>Just the brand gradient and the headline — the current article look, applied everywhere. Cleanest and quietest; leans entirely on the eyebrow to signal type.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===================== MAP TO CODE ===================== -->
+  <div class="map wrap" style="padding-inline:0;">
+    <h2>How this maps onto <code>ContentCard.svelte</code></h2>
+    <dl>
+      <dt>Title-in-cover</dt>
+      <dd>Extend the existing <code>showTitleInCover</code> so it's the default for <code>variant="grid"</code> across <em>all</em> types, not just articles — reusing <code>.cc--title-in-cover</code>, <code>.cc__scrim</code>, and the cover body already in the file.</dd>
+      <dt>Flair zone</dt>
+      <dd>A new <code>.cc__flair</code> layer: reuse <code>&lt;AudioWaveform&gt;</code> for audio (already imported), the existing <code>PlayIcon</code> ring for video, and a dropcap from the title's first letter for articles.</dd>
+      <dt>Imageless cover</dt>
+      <dd>Generalise <code>.cc__cover--article</code> into one <code>.cc__cover--brand</code> gradient used by every type when there's no thumbnail — this also removes the <code>display:none</code> collapse that started this.</dd>
+      <dt>Tokens</dt>
+      <dd>No new tokens needed — <code>--media-scrim</code>, <code>--media-glyph</code>, <code>--on-media</code> already exist and re-theme per org.</dd>
+      <dt>Shape</dt>
+      <dd>Shown at <code>3:4</code> portrait (what makes the article cards feel premium). Swappable to <code>1:1</code> per surface via the existing <code>shape</code> prop.</dd>
+    </dl>
+  </div>
+
+</div>
+
+<script>
+// Waveform fields — deterministic per element (no Math.random so it's stable).
+document.querySelectorAll('.wavefield').forEach((el, idx) => {
+  const n = parseInt(el.dataset.bars || '36', 10);
+  let seed = 2166136261 ^ idx;
+  const rnd = () => { seed = Math.imul(seed ^ (seed >>> 15), 2246822507); seed ^= seed >>> 13; return ((seed >>> 0) % 1000) / 1000; };
+  for (let i = 0; i < n; i++) {
+    const b = document.createElement('span');
+    b.className = 'bar';
+    const t = i / (n - 1);
+    // envelope: taller in the middle, tapered at the edges
+    const env = 0.35 + 0.65 * Math.sin(Math.PI * t);
+    const h = Math.round((0.25 + 0.75 * rnd()) * env * 100);
+    b.style.height = Math.max(8, h) + '%';
+    el.appendChild(b);
+  }
+});
+
+// Theme toggle — flips data-theme and mirrors OS default on first paint.
+const root = document.documentElement;
+const btn = document.getElementById('themeBtn');
+const icon = document.getElementById('themeIcon');
+const label = document.getElementById('themeLabel');
+function apply(theme){
+  root.setAttribute('data-theme', theme);
+  const dark = theme === 'dark';
+  icon.textContent = dark ? '☀' : '☾';
+  label.textContent = dark ? 'Light' : 'Dark';
+}
+const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+apply(prefersDark ? 'dark' : 'light');
+btn.addEventListener('click', () => apply(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
+</script>
+</body>
+</html>

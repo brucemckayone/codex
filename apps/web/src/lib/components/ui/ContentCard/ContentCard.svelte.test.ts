@@ -121,26 +121,42 @@ describe('ContentCard — article title-in-cover', () => {
       shape: '3:4',
       thumbnail: null,
     });
-    expect(
-      document.querySelector('.cc__thumb .cc__cover--article')
-    ).toBeTruthy();
+    expect(document.querySelector('.cc__thumb .cc__cover--brand')).toBeTruthy();
     // No file-text placeholder icon — the cover stands in for the image.
     expect(document.querySelector('.cc__placeholder')).toBeNull();
   });
 
-  test('article + shape="3:4" WITH an image uses the image, not the gradient cover', () => {
+  test('article + shape="3:4" WITH an image renders the image over an always-present brand cover', () => {
     component = render({
       contentType: 'article',
       shape: '3:4',
       thumbnail: 'https://cdn.example/img.jpg',
     });
     expect(document.querySelector('img.cc__image')).toBeTruthy();
-    expect(document.querySelector('.cc__cover--article')).toBeNull();
+    // The brand cover is ALWAYS painted behind the (promoted) image — not
+    // hidden — so a load error, even pre-hydration / no-JS, falls back to the
+    // gradient with no onerror handler required.
+    const brandCover = document.querySelector('.cc__cover--brand');
+    expect(brandCover).toBeTruthy();
+    expect(brandCover?.classList.contains('hidden')).toBe(false);
   });
 
-  test('article without a shape does NOT enable title-in-cover (backward compatible)', () => {
+  test('article without a shape does NOT enable title-in-cover (default cascade)', () => {
     component = render({
       contentType: 'article',
+      description: 'This excerpt should still render in the body.',
+    });
+    const el = card();
+    expect(el?.classList.contains('cc--title-in-cover')).toBe(false);
+    expect(document.querySelector('.cc__description')?.textContent).toContain(
+      'This excerpt should still render'
+    );
+  });
+
+  test('list variant does NOT enable title-in-cover; body description renders', () => {
+    component = render({
+      contentType: 'article',
+      variant: 'list',
       description: 'This excerpt should still render in the body.',
     });
     const el = card();
@@ -166,5 +182,54 @@ describe('ContentCard — article title-in-cover', () => {
       titleInCover: true,
     });
     expect(card()?.classList.contains('cc--title-in-cover')).toBe(true);
+  });
+
+  // ── Browse-grid opt-in (explore/library/discover pass shape="3:4" +
+  //    titleInCover): every type joins the title-in-cover treatment with its
+  //    own per-type flair. This is the homogenisation feature. ──
+  test('opt-in video tile → title-in-cover with the play-ring flair (no audio disc)', () => {
+    component = render({
+      contentType: 'video',
+      shape: '3:4',
+      titleInCover: true,
+    });
+    expect(card()?.classList.contains('cc--title-in-cover')).toBe(true);
+    expect(document.querySelector('.cc__flair-ring')).toBeTruthy();
+    expect(document.querySelector('.cc__flair-disc')).toBeNull();
+  });
+
+  test('opt-in audio tile → play disc flair, and the below-cover audio overlay is suppressed', () => {
+    component = render({
+      contentType: 'audio',
+      shape: '3:4',
+      titleInCover: true,
+    });
+    expect(card()?.classList.contains('cc--title-in-cover')).toBe(true);
+    expect(document.querySelector('.cc__flair-disc')).toBeTruthy();
+    // Superseded by the flair — the old audio-media overlay must not render.
+    expect(document.querySelector('.cc__audio-overlay')).toBeNull();
+  });
+
+  test('imageless article tile → dropcap flair with the uppercased initial', () => {
+    component = render({
+      contentType: 'article',
+      shape: '3:4',
+      title: 'deep work',
+      thumbnail: null,
+    });
+    const dropcap = document.querySelector('.cc__flair-dropcap');
+    expect(dropcap).toBeTruthy();
+    expect(dropcap?.textContent).toBe('D');
+  });
+
+  test('title-in-cover always paints a brand cover behind the image (JS-free fallback)', () => {
+    component = render({
+      contentType: 'video',
+      shape: '3:4',
+      titleInCover: true,
+      thumbnail: 'https://cdn.example/v.jpg',
+    });
+    expect(document.querySelector('.cc__cover--brand')).toBeTruthy();
+    expect(document.querySelector('img.cc__image')).toBeTruthy();
   });
 });

@@ -477,7 +477,8 @@
       {#each displayItems as item (item.id)}
         <ContentCard
           variant={viewMode === 'list' ? 'list' : 'grid'}
-          shape={viewMode === 'list' ? undefined : '1:1'}
+          shape={viewMode === 'list' ? undefined : '3:4'}
+          titleInCover={viewMode === 'list' ? undefined : true}
           chrome="transparent"
           id={item.id}
           title={item.title}
