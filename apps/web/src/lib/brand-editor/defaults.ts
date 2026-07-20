@@ -3,11 +3,11 @@
  *
  * These are the hex values used when an org has not yet set a brand
  * colour. They are the single source of truth for the "unbranded"
- * baseline and are shared by BrandEditorHome (swatches / palette seed)
- * and BrandEditorColors (section fallbacks).
+ * baseline and are shared by the Guided palette seed and BrandEditorColors
+ * (section fallbacks).
  *
  * Kept as literals rather than CSS tokens because palette generation,
- * OKLCH derivation, and the Home swatches need plain strings — the
+ * OKLCH derivation, and the seed swatches need plain strings — the
  * tokens that derive from `--brand-color` only exist once the editor
  * is wired up, and these fallbacks feed the editor, not the other way.
  */

@@ -1,3 +1,16 @@
+<!--
+  @component BrandEditorColors
+
+  The colour focus body for the `/studio/brand` rail. Instead of four stacked
+  accordions each hiding a cramped inline picker, this edits ONE role at a time
+  at full height: a compact role switcher (Primary / Secondary / Accent /
+  Background) selects which colour is live, and a single large OKLCH picker fills
+  the remaining space. The active role's value round-trips through the store's
+  per-theme routing (getThemeColor / setThemeColor), so flipping the editing
+  theme re-targets light vs dark automatically.
+
+  Epic: Codex-cijzb · rail-UX overhaul.
+-->
 <script lang="ts">
   import {
     BRAND_DEFAULT_ACCENT,
@@ -6,141 +19,165 @@
     BRAND_DEFAULT_SECONDARY,
     brandEditor,
   } from '$lib/brand-editor';
-  import { MinusIcon, PlusIcon } from '$lib/components/ui/Icon';
   import OklchColorPicker from '../color-picker/OklchColorPicker.svelte';
 
-  type ColorField = 'primaryColor' | 'secondaryColor' | 'accentColor' | 'backgroundColor';
+  type ColorField =
+    | 'primaryColor'
+    | 'secondaryColor'
+    | 'accentColor'
+    | 'backgroundColor';
   type SectionId = 'primary' | 'secondary' | 'accent' | 'background';
 
-  const SECTIONS: { id: SectionId; label: string; field: ColorField; fallback: string; clearable?: boolean }[] = [
+  const SECTIONS: {
+    id: SectionId;
+    label: string;
+    field: ColorField;
+    fallback: string;
+    clearable?: boolean;
+  }[] = [
     { id: 'primary', label: 'Primary', field: 'primaryColor', fallback: BRAND_DEFAULT_PRIMARY },
     { id: 'secondary', label: 'Secondary', field: 'secondaryColor', fallback: BRAND_DEFAULT_SECONDARY },
     { id: 'accent', label: 'Accent', field: 'accentColor', fallback: BRAND_DEFAULT_ACCENT },
     { id: 'background', label: 'Background', field: 'backgroundColor', fallback: BRAND_DEFAULT_BACKGROUND, clearable: true },
   ];
 
-  let expanded = $state<SectionId | null>(null);
+  let activeRole = $state<SectionId>('primary');
 
-  function toggle(id: SectionId) {
-    expanded = expanded === id ? null : id;
+  const activeSection = $derived(
+    SECTIONS.find((s) => s.id === activeRole) ?? SECTIONS[0]
+  );
+  const activeValue = $derived(
+    brandEditor.getThemeColor(activeSection.field) ?? activeSection.fallback
+  );
+  const backgroundCleared = $derived(!brandEditor.pending?.backgroundColor);
+
+  function roleSwatch(field: ColorField, fallback: string): string {
+    return brandEditor.getThemeColor(field) ?? fallback;
   }
 
-  function getColor(field: ColorField): string | null {
-    return brandEditor.getThemeColor(field);
+  // Quick-pick swatches = the org's own palette (whichever roles are set),
+  // deduped, so an admin can reuse a brand colour across roles in one click.
+  const paletteSwatches = $derived.by(() => {
+    const out: string[] = [];
+    const pushUnique = (hex: string) => {
+      if (!out.some((h) => h.toUpperCase() === hex.toUpperCase())) out.push(hex);
+    };
+    for (const s of SECTIONS) {
+      const hex = brandEditor.getThemeColor(s.field);
+      if (hex) pushUnique(hex);
+    }
+    pushUnique('#FFFFFF');
+    pushUnique('#171717');
+    return out;
+  });
+
+  function onPick(hex: string): void {
+    brandEditor.setThemeColor(activeSection.field, hex);
   }
 
-  function updateColor(field: ColorField, hex: string) {
-    brandEditor.setThemeColor(field, hex);
+  function clearBackground(): void {
+    brandEditor.updateField('backgroundColor', null);
   }
 </script>
 
-<div class="colors-level">
-  {#each SECTIONS as section (section.id)}
-    {@const currentValue = getColor(section.field) ?? section.fallback}
-    {@const pickerId = `color-picker-${section.id}`}
-    {@const isExpanded = expanded === section.id}
-    <section class="colors-level__section">
-      <div class="colors-level__header-row">
-        <button
-          type="button"
-          class="colors-level__header"
-          class:colors-level__header--expanded={isExpanded}
-          aria-expanded={isExpanded}
-          aria-controls={pickerId}
-          onclick={() => toggle(section.id)}
-        >
-          <span class="colors-level__swatch" style:background={currentValue} aria-hidden="true"></span>
-          <span class="colors-level__label">{section.label}</span>
-          <span class="colors-level__hex">{currentValue}</span>
-          <span class="colors-level__chevron" aria-hidden="true">
-            {#if isExpanded}
-              <MinusIcon size={14} />
-            {:else}
-              <PlusIcon size={14} />
-            {/if}
-          </span>
-        </button>
-        {#if section.clearable && brandEditor.pending?.backgroundColor}
-          <button
-            type="button"
-            class="colors-level__clear"
-            aria-label={`Clear ${section.label.toLowerCase()} color override`}
-            onclick={() => brandEditor.updateField('backgroundColor', null)}
-          >
-            clear
-          </button>
-        {/if}
-      </div>
+<div class="colours-focus">
+  <div class="colours-focus__roles" role="radiogroup" aria-label="Colour role">
+    {#each SECTIONS as section (section.id)}
+      {@const isActive = section.id === activeRole}
+      <button
+        type="button"
+        class="role"
+        class:role--active={isActive}
+        role="radio"
+        aria-checked={isActive}
+        onclick={() => (activeRole = section.id)}
+      >
+        <span
+          class="role__swatch"
+          class:role__swatch--empty={section.clearable && backgroundCleared}
+          style:background={roleSwatch(section.field, section.fallback)}
+          aria-hidden="true"
+        ></span>
+        <span class="role__label">{section.label}</span>
+      </button>
+    {/each}
+  </div>
 
-      {#if isExpanded}
-        <div id={pickerId} class="colors-level__picker">
-          <OklchColorPicker
-            value={currentValue}
-            onchange={(hex) => updateColor(section.field, hex)}
-          />
-        </div>
+  <div class="colours-focus__picker">
+    <OklchColorPicker
+      large
+      value={activeValue}
+      onchange={onPick}
+      swatches={paletteSwatches}
+    />
+  </div>
+
+  {#if activeSection.clearable}
+    <div class="colours-focus__bg">
+      {#if backgroundCleared}
+        <p class="colours-focus__bg-note">
+          Using the theme’s default background. Pick a colour above to override it.
+        </p>
+      {:else}
+        <button type="button" class="colours-focus__bg-clear" onclick={clearBackground}>
+          Clear background override
+        </button>
       {/if}
-    </section>
-  {/each}
+    </div>
+  {/if}
 
   <button
     type="button"
-    class="colors-level__drill"
+    class="colours-focus__finetune"
     onclick={() => brandEditor.navigateTo('fine-tune-colors')}
   >
-    Fine-tune colors...
+    Fine-tune individual tokens…
   </button>
 </div>
 
 <style>
-  .colors-level {
+  .colours-focus {
     display: flex;
     flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  /* ── Role switcher ── */
+  .colours-focus__roles {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: var(--space-2);
+    flex-shrink: 0;
   }
 
-  .colors-level__section {
-    display: flex;
-    flex-direction: column;
-    border-radius: var(--radius-md);
-    overflow: hidden;
-  }
-
-  .colors-level__header-row {
-    position: relative;
-    display: flex;
-    align-items: center;
-  }
-
-  .colors-level__header {
-    flex: 1;
+  .role {
     display: flex;
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
-    background: none;
+    background: var(--color-surface);
     border: var(--border-width) var(--border-style) var(--color-border-subtle);
     border-radius: var(--radius-md);
     cursor: pointer;
     transition: var(--transition-colors);
   }
 
-  .colors-level__header:hover {
+  .role:hover {
     background: var(--color-surface-secondary);
+    border-color: var(--color-border);
   }
 
-  .colors-level__header:focus-visible {
+  .role:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
   }
 
-  .colors-level__header--expanded {
-    border-bottom-left-radius: 0;
-    border-bottom-right-radius: 0;
-    border-bottom-color: transparent;
+  .role--active {
+    border-color: var(--color-interactive);
+    box-shadow: 0 0 0 var(--border-width) var(--color-interactive);
   }
 
-  .colors-level__swatch {
+  .role__swatch {
     width: var(--space-5);
     height: var(--space-5);
     border-radius: var(--radius-sm);
@@ -148,74 +185,87 @@
     flex-shrink: 0;
   }
 
-  .colors-level__label {
+  /* Cleared background = no override: a checkerboard hints "transparent/default". */
+  .role__swatch--empty {
+    background-image:
+      linear-gradient(45deg, var(--color-border) 25%, transparent 25%),
+      linear-gradient(-45deg, var(--color-border) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, var(--color-border) 75%),
+      linear-gradient(-45deg, transparent 75%, var(--color-border) 75%);
+    background-size: var(--space-2) var(--space-2);
+    background-position:
+      0 0,
+      0 calc(var(--space-2) / 2),
+      calc(var(--space-2) / 2) calc(-1 * var(--space-2) / 2),
+      calc(-1 * var(--space-2) / 2) 0;
+  }
+
+  .role__label {
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
     color: var(--color-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .colors-level__hex {
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-    font-family: var(--font-mono);
-    margin-left: auto;
+  /* ── Picker ── */
+  .colours-focus__picker {
+    display: flex;
+    flex-direction: column;
   }
 
-  .colors-level__chevron {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--color-text-muted);
-    width: var(--space-4);
+  /* ── Background clear affordance ── */
+  .colours-focus__bg {
     flex-shrink: 0;
   }
 
-  .colors-level__clear {
-    position: absolute;
-    right: var(--space-8);
+  .colours-focus__bg-note {
+    margin: 0;
     font-size: var(--text-xs);
     color: var(--color-text-muted);
+    line-height: var(--leading-snug);
+  }
+
+  .colours-focus__bg-clear {
+    font-size: var(--text-sm);
+    color: var(--color-interactive);
     background: none;
     border: none;
     cursor: pointer;
-    text-decoration: underline;
-    padding: var(--space-1) var(--space-2);
-    z-index: 1;
+    padding: 0;
   }
 
-  .colors-level__clear:hover {
-    color: var(--color-interactive);
+  .colours-focus__bg-clear:hover {
+    color: var(--color-interactive-hover);
   }
 
-  .colors-level__clear:focus-visible {
+  .colours-focus__bg-clear:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
+    border-radius: var(--radius-sm);
   }
 
-  .colors-level__picker {
-    padding: var(--space-3);
-    border: var(--border-width) var(--border-style) var(--color-border-subtle);
-    border-top: none;
-    border-bottom-left-radius: var(--radius-md);
-    border-bottom-right-radius: var(--radius-md);
-  }
-
-  .colors-level__drill {
+  /* ── Fine-tune drill ── */
+  .colours-focus__finetune {
+    flex-shrink: 0;
+    align-self: flex-start;
     font-size: var(--text-sm);
     color: var(--color-interactive);
     background: none;
     border: none;
     cursor: pointer;
     text-align: left;
-    padding: var(--space-2) 0;
+    padding: 0;
   }
 
-  .colors-level__drill:hover {
+  .colours-focus__finetune:hover {
     color: var(--color-interactive-hover);
   }
 
-  .colors-level__drill:focus-visible {
+  .colours-focus__finetune:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
     outline-offset: var(--space-0-5);
+    border-radius: var(--radius-sm);
   }
 </style>

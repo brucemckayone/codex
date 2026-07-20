@@ -40,11 +40,6 @@
       href: '/studio/settings',
       label: m.settings_general(),
     },
-    {
-      value: 'branding',
-      href: '/studio/settings/branding',
-      label: m.settings_branding(),
-    },
   ]);
 </script>
 

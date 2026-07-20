@@ -22,8 +22,7 @@
   import CommandPaletteSearch from '$lib/components/search/CommandPaletteSearch.svelte';
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
   import HealthBanner from '$lib/components/subscription/HealthBanner.svelte';
-  import { brandEditor, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars } from '$lib/brand-editor';
-  import type { BrandEditorState } from '$lib/brand-editor';
+  import { brandEditor, initBrandPreviewBridge, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars } from '$lib/brand-editor';
   import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection, loadSubscriptionFromServer, subscriptionCollection } from '$lib/collections';
   import { initProgressSync, cleanupProgressSync, forceSync } from '$lib/collections/progress-sync';
@@ -79,10 +78,22 @@
     const v = Number(data.org?.brandDensity);
     return Number.isFinite(v) ? String(v) : undefined;
   });
+  // When the brand editor is live-previewing, `pending` is authoritative —
+  // including a REMOVED logo (pending.logoUrl === null). The old `?? data.org…`
+  // fallback made a removal silently reappear as the server logo, so removing
+  // the logo never previewed. Only fall back to the server value when the
+  // editor is closed (a real visitor) or pending is genuinely absent.
   const brandLogoUrl = $derived(
     brandEditor.isOpen
-      ? (brandEditor.pending?.logoUrl ?? data.org?.logoUrl ?? undefined)
+      ? (brandEditor.pending?.logoUrl ?? undefined)
       : (data.org?.logoUrl ?? undefined)
+  );
+  // The nav/hero logo lives in shared components that read `org.logoUrl`
+  // (server). Hand them an org whose logoUrl is the pending-aware value so logo
+  // edits (add AND remove) preview live; a closed editor yields the server
+  // logo unchanged, so real visitors are unaffected.
+  const previewOrg = $derived(
+    data.org ? { ...data.org, logoUrl: brandLogoUrl } : data.org
   );
   const hasBranding = $derived(!!brandPrimary);
 
@@ -327,110 +338,28 @@
       initProgressSync(data.user.id);
     }
 
+    // Codex-cijzb · WP-1.4 — live edit → preview applier. When THIS page is the
+    // framed preview inside /studio/brand, brand edits pushed from the studio
+    // apply here instantly (no reload). Inert on a normal standalone visit — the
+    // embedded-only guard lives inside initBrandPreviewBridge, so a real visitor
+    // adds no listener.
+    const teardownBrandPreview = initBrandPreviewBridge();
+
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
       clearInterval(versionPollInterval);
       cleanupProgressSync();
+      teardownBrandPreview();
     };
   });
 
-  // ── Brand Editor ────────────────────────────────────────────────────
-  const showBrandEditor = $derived(page.url.searchParams.has('brandEditor'));
-
-  // Open/close the editor based on URL param
-  $effect(() => {
-    if (!browser) return;
-    if (showBrandEditor && brandEditor.isClosed && data.org) {
-      // Reconstruct saved tokenOverrides from server JSON. Codex-g49b4 dropped
-      // the per-field columns (shadow_scale, shadow_color, text_scale,
-      // heading_weight, body_weight, text_color_hex); their values are now
-      // backfilled into tokenOverrides JSON, so this single parse is enough.
-      const ft = data.org.brandFineTune;
-      const savedOverrides: Record<string, string> = {};
-      if (ft?.tokenOverrides) {
-        try { Object.assign(savedOverrides, JSON.parse(ft.tokenOverrides)); } catch { /* ignore parse errors */ }
-      }
-
-      // Parse saved dark mode overrides
-      let savedDarkOverrides = null;
-      if (ft?.darkModeOverrides) {
-        try { savedDarkOverrides = JSON.parse(ft.darkModeOverrides); } catch { /* ignore */ }
-      }
-
-      // Codex-wwedk: parse the parallel darkTokenOverrides JSON. Null when
-      // unset so the editor's getThemeTokenOverride falls back to the light
-      // value — matches the visitor-facing CSS fallback chain.
-      let savedDarkTokenOverrides: Record<string, string | null> | null = null;
-      if (ft?.darkTokenOverrides) {
-        try {
-          const parsed = JSON.parse(ft.darkTokenOverrides) as Record<string, string | null>;
-          if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
-            savedDarkTokenOverrides = parsed;
-          }
-        } catch { /* ignore parse errors */ }
-      }
-
-      const saved: BrandEditorState = {
-        primaryColor: brandPrimary ?? '#C24129',
-        secondaryColor: brandSecondary ?? null,
-        accentColor: brandAccent ?? null,
-        backgroundColor: brandBackground ?? null,
-        fontBody: data.org.brandFonts?.body ?? null,
-        fontHeading: data.org.brandFonts?.heading ?? null,
-        radius: Number(data.org.brandRadius) || 0.5,
-        density: Number(data.org.brandDensity) || 1,
-        logoUrl: data.org.logoUrl ?? null,
-        tokenOverrides: Object.keys(savedOverrides).length > 0 ? savedOverrides : {},
-        darkOverrides: savedDarkOverrides,
-        darkTokenOverrides: savedDarkTokenOverrides,
-        heroLayout: data.org?.heroLayout ?? 'default',
-      };
-      brandEditor.open(data.org.id, saved);
-    }
-  });
-
-  // beforeunload when dirty
-  $effect(() => {
-    if (!browser) return;
-    function onBeforeUnload(e: BeforeUnloadEvent) {
-      if (brandEditor.isDirty) {
-        e.preventDefault();
-      }
-    }
-    if (brandEditor.isDirty) {
-      window.addEventListener('beforeunload', onBeforeUnload);
-      return () => window.removeEventListener('beforeunload', onBeforeUnload);
-    }
-  });
-
-  // Dynamically load the brand editor module only when the editor is
-  // activated (URL param or store state). Keeps ~23 components and the
-  // branding remote off the critical path for normal org visitors.
-  type BrandEditorMountComponent =
-    typeof import('$lib/components/brand-editor/BrandEditorMount.svelte').default;
-  let BrandEditorMount = $state<BrandEditorMountComponent | null>(null);
-  const shouldLoadBrandEditor = $derived(
-    browser && (showBrandEditor || !brandEditor.isClosed)
-  );
-
-  $effect(() => {
-    if (shouldLoadBrandEditor && !BrandEditorMount) {
-      void import('$lib/components/brand-editor/BrandEditorMount.svelte').then(
-        (mod) => { BrandEditorMount = mod.default; }
-      );
-    }
-  });
-
-  // SvelteKit navigation guard — flush progress + brand editor dirty check
-  beforeNavigate(({ cancel }) => {
-    // Flush unsynced playback progress so server loads see it immediately
+  // SvelteKit navigation guard — flush unsynced playback progress so server
+  // loads see it immediately. The brand editor moved to its own /studio/brand
+  // workspace (Codex-cijzb), which owns its own unsaved-changes guard; the
+  // retired `?brandEditor` overlay (activation + dynamic BrandEditorMount) no
+  // longer lives here. Public branding injection above is untouched.
+  beforeNavigate(() => {
     void forceSync();
-
-    if (brandEditor.isDirty && !brandEditor.isClosed) {
-      if (!confirm('You have unsaved brand changes. Discard?')) {
-        cancel();
-      }
-    }
   });
 </script>
 
@@ -475,7 +404,7 @@
   <ShaderHero class="shader-hero--fullpage" />
   <div class="shader-blur-overlay" class:shader-blur-overlay--landing={isLanding}></div>
   {#if !isStudio}
-    <SidebarRail variant="org" user={data.user} org={data.org} onSearchClick={() => { searchOpen = true; }} />
+    <SidebarRail variant="org" user={data.user} org={previewOrg} onSearchClick={() => { searchOpen = true; }} />
   {/if}
 
   <main id="main-content" class="org-main" class:org-main--studio={isStudio} class:org-main--blendable={isLanding} class:org-main--landing={isLanding}>
@@ -503,19 +432,14 @@
     <MobileBottomNav
       variant="org"
       user={data.user}
-      org={data.org}
+      org={previewOrg}
       onSearchClick={() => { searchOpen = true; }}
       onMoreClick={() => { moreOpen = true; }}
     />
-    <MobileBottomSheet bind:open={moreOpen} variant="org" user={data.user} org={data.org} />
+    <MobileBottomSheet bind:open={moreOpen} variant="org" user={data.user} org={previewOrg} />
     <CommandPaletteSearch scope="org" orgSlug={data.org.slug} bind:open={searchOpen} />
   {/if}
 </div>
-
-<!-- Brand Editor — dynamically imported, rendered OUTSIDE .org-layout so it uses system tokens -->
-{#if BrandEditorMount}
-  <BrandEditorMount />
-{/if}
 
 <style>
   .org-layout {
