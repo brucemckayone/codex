@@ -21,13 +21,43 @@
     rail?: Snippet;
     /** Right live-preview canvas region. */
     canvas?: Snippet;
+    /**
+     * Collapse the control rail so the canvas spans the FULL workspace width.
+     * The rail region leaves layout flow (display:none) AND its grid track is
+     * dropped — both are needed, or the empty track leaves a gap. The toggle
+     * itself lives in the canvas toolbar (always visible), so the rail can
+     * fully disappear without stranding its own re-open control.
+     */
+    railCollapsed?: boolean;
+    /**
+     * Lift the whole workspace over the studio chrome to fill the viewport
+     * (position:fixed). Independent of railCollapsed — you can still collapse
+     * the rail while full-screen to preview edge-to-edge, or keep it to edit
+     * against a large canvas.
+     */
+    fullscreen?: boolean;
   }
 
-  const { rail, canvas }: Props = $props();
+  const {
+    rail,
+    canvas,
+    railCollapsed = false,
+    fullscreen = false,
+  }: Props = $props();
 </script>
 
-<div class="brand-studio">
-  <section class="brand-studio__rail" aria-label="Brand controls">
+<div
+  class="brand-studio"
+  data-rail-collapsed={railCollapsed}
+  data-fullscreen={fullscreen}
+>
+  <!-- Stable id so the canvas-toolbar's rail toggle can point aria-controls at
+       it (the two live in sibling subtrees). -->
+  <section
+    id="brand-studio-rail"
+    class="brand-studio__rail"
+    aria-label="Brand controls"
+  >
     {@render rail?.()}
   </section>
   <section class="brand-studio__canvas" aria-label="Brand preview">
@@ -54,6 +84,32 @@
        indefinite unless every ancestor is definitely sized. Mirrors the
        org-layout's viewport-height convention. */
     height: calc(100vh - var(--space-24));
+  }
+
+  /* ── Rail collapsed ── the canvas takes the whole width. Drop the rail track
+     AND remove the rail from flow (see the Props note); either alone misbehaves. */
+  .brand-studio[data-rail-collapsed='true'] {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-studio[data-rail-collapsed='true'] .brand-studio__rail {
+    display: none;
+  }
+
+  /* ── Full-screen ── lift the workspace out of the studio content column and
+     over the studio chrome to fill the viewport. Overrides the bounded height
+     above (higher specificity via the attribute selector). A padded, filled
+     backdrop keeps the two panes reading as one floating workspace rather than
+     butting against the raw viewport edge. */
+  .brand-studio[data-fullscreen='true'] {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal);
+    box-sizing: border-box;
+    width: 100vw;
+    height: 100vh;
+    padding: var(--space-3);
+    background-color: var(--color-surface-secondary);
   }
 
   .brand-studio__rail {
@@ -95,6 +151,12 @@
 
     .brand-studio__rail {
       overflow-y: visible;
+    }
+
+    /* Stacked layout: with the rail row removed, collapse the two-row track to
+       one so the canvas fills instead of sitting in the vestigial `auto` row. */
+    .brand-studio[data-rail-collapsed='true'] {
+      grid-template-rows: 1fr;
     }
   }
 </style>

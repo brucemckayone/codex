@@ -87,6 +87,33 @@
     if (orgId) writeStoredMode(orgId, next);
   }
 
+  // ── Workspace view (Codex-cijzb.15) ──────────────────────────────────────
+  // Give the live preview more room. Both are page-owned because the toggles
+  // live in the canvas toolbar (a sibling subtree) but the effect applies to
+  // BrandStudioLayout — the page is their nearest common ancestor. Independent:
+  // you can collapse the rail while full-screen (edge-to-edge preview) or keep
+  // it (edit against a large canvas). Ephemeral session state — resets on a hard
+  // reload, survives in-SPA studio navigation while this page is mounted.
+  let railCollapsed = $state(false);
+  let fullscreen = $state(false);
+
+  function toggleRail(): void {
+    railCollapsed = !railCollapsed;
+  }
+  function toggleFullscreen(): void {
+    fullscreen = !fullscreen;
+  }
+
+  // Escape exits full-screen — but only if nothing nearer (an open colour-picker
+  // popover, a Melt dialog) already handled the key. Those call preventDefault
+  // when they consume Escape, so honouring defaultPrevented stops us from
+  // yanking the user out of full-screen when they only meant to close a popover.
+  function onWindowKeydown(event: KeyboardEvent): void {
+    if (fullscreen && event.key === 'Escape' && !event.defaultPrevented) {
+      fullscreen = false;
+    }
+  }
+
   // Stored JSON fields that failed to PARSE on load (not merely absent), mapped
   // to their raw string. Set once by the open effect; read by handleSave to
   // round-trip the raw value instead of blanking it. Plain `let` — only read
@@ -318,7 +345,9 @@
   <title>{m.branding_title()} | {data.org?.name ?? 'Studio'}</title>
 </svelte:head>
 
-<BrandStudioLayout>
+<svelte:window onkeydown={onWindowKeydown} />
+
+<BrandStudioLayout {railCollapsed} {fullscreen}>
   {#snippet rail()}
     <div class="brand-mode">
       <div class="brand-mode__toggle" role="group" aria-label="Editor mode">
@@ -376,6 +405,10 @@
       contentSlug={previewContentSlug}
       onframeload={handleFrameLoad}
       reloadToken={previewReloadToken}
+      {railCollapsed}
+      {fullscreen}
+      onToggleRail={toggleRail}
+      onToggleFullscreen={toggleFullscreen}
     />
   {/snippet}
 </BrandStudioLayout>

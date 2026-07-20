@@ -64,6 +64,16 @@
      * with no reload. Defaults to 0 (no param → clean URL).
      */
     reloadToken?: number;
+    /**
+     * Workspace view state, owned by the route (the toggles live in this
+     * canvas' toolbar but the effect applies to the sibling layout, so the page
+     * owns both). Surfaced here only to render the toolbar's pressed/expanded
+     * state; the actual grid/position changes happen in BrandStudioLayout.
+     */
+    railCollapsed?: boolean;
+    fullscreen?: boolean;
+    onToggleRail?: () => void;
+    onToggleFullscreen?: () => void;
   }
 
   const {
@@ -71,6 +81,10 @@
     contentSlug,
     onframeload,
     reloadToken = 0,
+    railCollapsed = false,
+    fullscreen = false,
+    onToggleRail,
+    onToggleFullscreen,
   }: Props = $props();
 
   // Canvas view state. Route + device are local; the light/dark choice is NOT —
@@ -125,9 +139,13 @@
     {device}
     {themeMode}
     {contentAvailable}
+    {railCollapsed}
+    {fullscreen}
     onroutechange={(id) => (route = id)}
     ondevicechange={(id) => (device = id)}
     onthememodechange={onThemeModeChange}
+    ontogglerail={onToggleRail}
+    ontogglefullscreen={onToggleFullscreen}
   />
 
   <div
