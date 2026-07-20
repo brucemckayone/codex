@@ -143,6 +143,31 @@ describe('BrowseModule — unfiltered (grid)', () => {
     }
   });
 
+  test('every browse card opts into title-in-cover so all types share the cover treatment (Codex-p7wc8)', () => {
+    render();
+    const cards = Array.from(
+      document.querySelectorAll<HTMLElement>('.content-grid .cc')
+    );
+    expect(cards.length).toBe(items.length);
+    // The homogenised catalogue passes `titleInCover` for EVERY type — not just
+    // articles (which auto-enable it at 1:1/3:4). Before this opt-in, video and
+    // audio tiles stayed plain and clashed with the flipped article tiles in the
+    // same grid (and the flipped article tile overflowed its cell to the right).
+    for (const card of cards) {
+      expect(card.classList.contains('cc--title-in-cover')).toBe(true);
+    }
+    // Guard the non-article types explicitly — this is exactly what the opt-in
+    // adds over the article-only auto-enable.
+    const byType = (t: string) =>
+      cards.find((c) => c.getAttribute('data-content-type') === t);
+    expect(byType('video')?.classList.contains('cc--title-in-cover')).toBe(
+      true
+    );
+    expect(byType('audio')?.classList.contains('cc--title-in-cover')).toBe(
+      true
+    );
+  });
+
   test('the active tab is "All" and marked aria-selected', () => {
     render();
     expect(tabByLabel('All')?.getAttribute('aria-selected')).toBe('true');
