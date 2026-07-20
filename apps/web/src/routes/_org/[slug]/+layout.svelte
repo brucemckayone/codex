@@ -78,10 +78,22 @@
     const v = Number(data.org?.brandDensity);
     return Number.isFinite(v) ? String(v) : undefined;
   });
+  // When the brand editor is live-previewing, `pending` is authoritative —
+  // including a REMOVED logo (pending.logoUrl === null). The old `?? data.org…`
+  // fallback made a removal silently reappear as the server logo, so removing
+  // the logo never previewed. Only fall back to the server value when the
+  // editor is closed (a real visitor) or pending is genuinely absent.
   const brandLogoUrl = $derived(
     brandEditor.isOpen
-      ? (brandEditor.pending?.logoUrl ?? data.org?.logoUrl ?? undefined)
+      ? (brandEditor.pending?.logoUrl ?? undefined)
       : (data.org?.logoUrl ?? undefined)
+  );
+  // The nav/hero logo lives in shared components that read `org.logoUrl`
+  // (server). Hand them an org whose logoUrl is the pending-aware value so logo
+  // edits (add AND remove) preview live; a closed editor yields the server
+  // logo unchanged, so real visitors are unaffected.
+  const previewOrg = $derived(
+    data.org ? { ...data.org, logoUrl: brandLogoUrl } : data.org
   );
   const hasBranding = $derived(!!brandPrimary);
 
@@ -392,7 +404,7 @@
   <ShaderHero class="shader-hero--fullpage" />
   <div class="shader-blur-overlay" class:shader-blur-overlay--landing={isLanding}></div>
   {#if !isStudio}
-    <SidebarRail variant="org" user={data.user} org={data.org} onSearchClick={() => { searchOpen = true; }} />
+    <SidebarRail variant="org" user={data.user} org={previewOrg} onSearchClick={() => { searchOpen = true; }} />
   {/if}
 
   <main id="main-content" class="org-main" class:org-main--studio={isStudio} class:org-main--blendable={isLanding} class:org-main--landing={isLanding}>
@@ -420,11 +432,11 @@
     <MobileBottomNav
       variant="org"
       user={data.user}
-      org={data.org}
+      org={previewOrg}
       onSearchClick={() => { searchOpen = true; }}
       onMoreClick={() => { moreOpen = true; }}
     />
-    <MobileBottomSheet bind:open={moreOpen} variant="org" user={data.user} org={data.org} />
+    <MobileBottomSheet bind:open={moreOpen} variant="org" user={data.user} org={previewOrg} />
     <CommandPaletteSearch scope="org" orgSlug={data.org.slug} bind:open={searchOpen} />
   {/if}
 </div>
