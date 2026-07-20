@@ -93,7 +93,7 @@
       </div>
 
       <div class="pv-transport">
-        <button type="button" class="pv-play" aria-label="Play (preview)" onclick={noop}>
+        <button type="button" class="pv-play" aria-label="Play (preview)" aria-disabled="true" onclick={noop}>
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
             <path d="M8 5v14l11-7z" fill="currentColor" />
           </svg>
@@ -105,11 +105,12 @@
           class="pv-chip pv-chip--active"
           aria-label="Playback speed (preview)"
           aria-pressed="true"
+          aria-disabled="true"
           onclick={noop}
         >
           1×
         </button>
-        <button type="button" class="pv-icon" aria-label="Volume (preview)" onclick={noop}>
+        <button type="button" class="pv-icon" aria-label="Volume (preview)" aria-disabled="true" onclick={noop}>
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
             <path
               d="M4 9v6h4l5 5V4L8 9H4z M16 8a4 4 0 0 1 0 8"
@@ -141,13 +142,13 @@
       <div class="pv-video__poster" aria-hidden="true"></div>
 
       <!-- Floating control over media — exercises the Control Overlay tokens. -->
-      <button type="button" class="pv-video__chip" aria-label="Fullscreen (preview)" onclick={noop}>
+      <button type="button" class="pv-video__chip" aria-label="Fullscreen (preview)" aria-disabled="true" onclick={noop}>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3" />
         </svg>
       </button>
 
-      <button type="button" class="pv-video__bigplay" aria-label="Play (preview)" onclick={noop}>
+      <button type="button" class="pv-video__bigplay" aria-label="Play (preview)" aria-disabled="true" onclick={noop}>
         <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true">
           <path d="M8 5v14l11-7z" fill="currentColor" />
         </svg>
@@ -420,6 +421,7 @@
     border: none;
     border-radius: var(--radius-full);
     cursor: default;
+    -webkit-backdrop-filter: blur(var(--blur-sm));
     backdrop-filter: blur(var(--blur-sm));
     transition: background var(--duration-fast) var(--ease-default);
   }
