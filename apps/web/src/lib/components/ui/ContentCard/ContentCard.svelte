@@ -1968,6 +1968,11 @@
        the image edge instead of floating over blank card in a mixed row that
        is taller than the media's natural aspect. */
     grid-template-rows: 1fr auto;
+    /* Single column clamped to the card box: `minmax(0, 1fr)` (not the implicit
+       `auto` track) keeps the overlaid body's min-content title from growing the
+       column past the card and — with `overflow: visible` below — spilling the
+       tile out to the right inside a fixed-width carousel/grid cell. (Codex-p7wc8) */
+    grid-template-columns: minmax(0, 1fr);
     padding: 0;
     /* Floating-media card: the cover fills edge-to-edge, so the card surface
        itself is always transparent (no frame) regardless of the `chrome`
@@ -1998,6 +2003,8 @@
   .cc--title-in-cover .cc__thumb {
     grid-row: 1;
     grid-column: 1;
+    /* Shrink to the clamped column rather than the image's intrinsic width. */
+    min-width: 0;
     /* Fill the media row even when the card is stretched past the media's
        natural aspect (mixed rows). `stretch` grows the tile beyond its aspect
        floor so the cover image + scrimmed title reach down to the caption. */
@@ -2009,6 +2016,8 @@
   .cc--title-in-cover .cc__body {
     grid-row: 1;
     grid-column: 1;
+    /* Shrink to the clamped column so a long title can't widen the grid. */
+    min-width: 0;
     align-self: end;
     z-index: 2;
     padding: var(--space-4);
