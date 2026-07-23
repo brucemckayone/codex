@@ -69,6 +69,55 @@ export function getStaleKeys(ssrVersions: VersionMap): string[] {
 }
 
 /**
+ * A client collection that an org-version staleness check can invalidate.
+ * One per dispatch branch in `_org/[slug]/+layout.svelte`.
+ */
+export type OrgCacheTarget = 'content' | 'library' | 'subscription';
+
+/**
+ * Map a set of stale version keys to the client caches that must be
+ * invalidated, using EXACT-KEY matching.
+ *
+ * The version keys are produced server-side by `readOrgVersions`
+ * (`_org/[slug]/+layout.server.ts`) from the `@codex/cache` `CacheType`
+ * builders:
+ *   - `COLLECTION_ORG_CONTENT(orgId)`               → `org:{orgId}:content`
+ *   - `COLLECTION_USER_LIBRARY(userId)`             → `user:{userId}:library`
+ *   - `COLLECTION_USER_SUBSCRIPTION(userId, orgId)` → `user:{userId}:subscription:{orgId}`
+ *   - `ORG_CONFIG`                                  → `org:config:{orgId}` (no client
+ *     collection — served by SSR — so it maps to no target, as before)
+ * Reconstructing them from the same `{orgId, userId}` keeps client and server
+ * in lockstep without importing the server-only `@codex/cache` barrel (which
+ * re-exports `VersionedCache`/KV code) into the client bundle.
+ *
+ * Exact matching replaces the previous `key.includes(':content')` substring
+ * test: a brand-new key — e.g. a future `org:{orgId}:pages` / `:courses` — is
+ * now dispatched only via an explicit entry, never silently swallowed by (or
+ * accidentally caught in) a substring branch.
+ */
+export function resolveStaleCacheTargets(
+  staleKeys: readonly string[],
+  ids: { orgId: string; userId?: string | null }
+): Set<OrgCacheTarget> {
+  const { orgId, userId } = ids;
+
+  const keyToTarget = new Map<string, OrgCacheTarget>([
+    [`org:${orgId}:content`, 'content'],
+  ]);
+  if (userId) {
+    keyToTarget.set(`user:${userId}:library`, 'library');
+    keyToTarget.set(`user:${userId}:subscription:${orgId}`, 'subscription');
+  }
+
+  const targets = new Set<OrgCacheTarget>();
+  for (const key of staleKeys) {
+    const target = keyToTarget.get(key);
+    if (target) targets.add(target);
+  }
+  return targets;
+}
+
+/**
  * Merge non-null SSR versions into manifest and persist.
  *
  * Null versions are skipped — no version in KV means no cache entry exists yet,
