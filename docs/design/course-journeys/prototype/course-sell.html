@@ -1,0 +1,3577 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rootwork · the descent · Of Blood and Bones</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,300;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<script src="course-data.js"></script>
+<style>
+  body { background: #0d0906; }
+  /* top bar: transparent over hero, condenses on scroll (review scaffold) */
+  .switch { transition: background .4s var(--ease), border-color .4s; border-bottom-color: transparent; background: transparent; }
+  .switch.solid { background: color-mix(in oklab, var(--ink) 82%, transparent); border-bottom-color: color-mix(in oklab, var(--ember) 16%, transparent); }
+  /* persistent floating CTA */
+  .floatcta {
+    position: fixed; left: 50%; bottom: 1.3rem; transform: translate(-50%, 170%); z-index: 90;
+    display: flex; align-items: center; gap: 1rem; padding: .55rem .6rem .55rem 1.4rem;
+    background: color-mix(in oklab, var(--ink-2) 88%, transparent); backdrop-filter: blur(14px);
+    border: 1px solid color-mix(in oklab, var(--ember) 26%, transparent); border-radius: 999px;
+    box-shadow: 0 20px 50px -20px #000; transition: transform .5s var(--ease); max-width: calc(100vw - 2rem);
+  }
+  .floatcta.show { transform: translate(-50%, 0); }
+  .floatcta .fc-copy { font-size: .86rem; color: var(--bone-dim); white-space: nowrap; }
+  .floatcta .fc-copy b { color: var(--bone); font-weight: 500; font-family: var(--serif); }
+  .floatcta .cta { padding: .7rem 1.3rem; }
+  @media (max-width: 560px) { .floatcta .fc-copy { display: none; } .floatcta { padding: .5rem; } }
+</style>
+</head>
+<body>
+<div class="switch" id="topbar">
+  <span class="switch__brand">Of <b>Blood</b> and Bones</span>
+  <span class="switch__tag">Rootwork · course</span>
+  <nav>
+    <a href="course-sell.html" class="on">The course</a>
+    <a href="course-dashboard.html">Your journey</a>
+  </nav>
+</div>
+<div class="floatcta" id="floatcta">
+  <span class="fc-copy"><b>Rootwork</b> · the foundation course</span>
+  <a href="#feel" class="cta cta--ember">Begin free <span class="arrow">→</span></a>
+</div>
+<main>
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   HERO — "Of Blood and Bones" · Rootwork
+   Full-viewport, warm-dark, somatic. Breathing ember core + slow rising motes +
+   word-by-word kinetic headline. Pure CSS motion (zero JS, CSP-safe).
+   Namespace: .hero*  ·  reuses shared atoms .eyebrow / .cta / .cta--primary / .arrow
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.hero {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  text-align: center;
+  padding: clamp(6rem, 13vh, 9rem) clamp(1.2rem, 4vw, 3rem) clamp(4.5rem, 10vh, 6.75rem);
+}
+
+/* ── atmosphere layers (all decorative, behind content) ── */
+.hero__atmos { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+
+/* breathing warm core — the "living light" behind the headline */
+.hero__glow {
+  position: absolute;
+  left: 50%; top: 40%;
+  width: min(92vw, 920px);
+  aspect-ratio: 1 / 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  opacity: .72;
+  filter: blur(22px);
+  background:
+    radial-gradient(circle at 50% 46%,
+      color-mix(in oklab, var(--ember) 28%, transparent),
+      color-mix(in oklab, var(--blood) 15%, transparent) 46%,
+      transparent 70%);
+  animation: hero-breathe 11s ease-in-out infinite;
+}
+
+/* slow rising embers */
+.hero__motes { position: absolute; inset: 0; overflow: hidden; }
+.hero__mote {
+  position: absolute;
+  bottom: -12px;
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  opacity: 0;
+  background: radial-gradient(circle,
+    color-mix(in oklab, var(--ember) 92%, white),
+    color-mix(in oklab, var(--ember) 20%, transparent) 70%);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--ember) 55%, transparent);
+  animation: hero-rise linear infinite;
+}
+.hero__mote:nth-child(1)  { left: 7%;  width: 2px; height: 2px; --dx:  18px; --o: .40; animation-duration: 20s; animation-delay:  0s; }
+.hero__mote:nth-child(2)  { left: 15%; width: 3px; height: 3px; --dx: -15px; --o: .34; animation-duration: 25s; animation-delay:  3s; }
+.hero__mote:nth-child(3)  { left: 24%; width: 2px; height: 2px; --dx:  22px; --o: .48; animation-duration: 16s; animation-delay:  6s; }
+.hero__mote:nth-child(4)  { left: 33%; width: 4px; height: 4px; --dx: -10px; --o: .30; animation-duration: 28s; animation-delay:  1s; }
+.hero__mote:nth-child(5)  { left: 42%; width: 2px; height: 2px; --dx:  13px; --o: .52; animation-duration: 21s; animation-delay:  9s; }
+.hero__mote:nth-child(6)  { left: 50%; width: 3px; height: 3px; --dx: -21px; --o: .38; animation-duration: 26s; animation-delay:  4s; }
+.hero__mote:nth-child(7)  { left: 59%; width: 2px; height: 2px; --dx:  16px; --o: .46; animation-duration: 18s; animation-delay: 11s; }
+.hero__mote:nth-child(8)  { left: 67%; width: 3px; height: 3px; --dx: -12px; --o: .34; animation-duration: 23s; animation-delay:  2s; }
+.hero__mote:nth-child(9)  { left: 76%; width: 2px; height: 2px; --dx:  20px; --o: .50; animation-duration: 17s; animation-delay:  7s; }
+.hero__mote:nth-child(10) { left: 84%; width: 4px; height: 4px; --dx: -16px; --o: .28; animation-duration: 27s; animation-delay:  5s; }
+.hero__mote:nth-child(11) { left: 91%; width: 2px; height: 2px; --dx:  11px; --o: .44; animation-duration: 20s; animation-delay: 10s; }
+.hero__mote:nth-child(12) { left: 96%; width: 3px; height: 3px; --dx: -18px; --o: .36; animation-duration: 22s; animation-delay: 13s; }
+
+/* edge vignette + bottom fade to seat the cue and blend into the next section */
+.hero__vignette {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(125% 95% at 50% 42%, transparent 55%, color-mix(in oklab, var(--ink) 58%, transparent) 100%),
+    linear-gradient(to bottom, transparent 68%, color-mix(in oklab, #0f0a06 88%, transparent) 100%);
+}
+
+/* ── content column ── */
+.hero__inner {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 56rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(1.25rem, 2.6vw, 1.85rem);
+}
+
+.hero__eyebrow { animation: hero-fade-up .8s var(--ease) .1s both; }
+
+.hero__headline {
+  max-width: 14ch;
+  margin-inline: auto;
+  font-weight: 300;
+  font-optical-sizing: auto;
+  font-size: clamp(2.7rem, 9vw, 7rem);
+  line-height: 1.04;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.hero__word {
+  display: inline-block;
+  animation: hero-word-in .9s var(--ease) both;
+}
+.hero__headline .hero__word:nth-child(1) { animation-delay: .25s; }
+.hero__headline .hero__word:nth-child(2) { animation-delay: .35s; }
+.hero__headline .hero__word:nth-child(3) { animation-delay: .45s; }
+.hero__headline .hero__word:nth-child(4) { animation-delay: .55s; }
+.hero__headline .hero__word:nth-child(5) { animation-delay: .65s; }
+.hero__headline .hero__word:nth-child(6) { animation-delay: .75s; }
+.hero__headline .hero__word:nth-child(7) { animation-delay: .85s; }
+.hero__word--soften { animation-duration: 1.15s; animation-delay: .98s; }
+.hero__soften {
+  font-style: italic;
+  font-weight: 400;
+  color: var(--rose);
+  text-shadow: 0 0 26px color-mix(in oklab, var(--rose) 42%, transparent);
+  animation: hero-soften-glow 7s ease-in-out 2.3s infinite;
+}
+
+.hero__lede {
+  max-width: 42ch;
+  margin-inline: auto;
+  color: var(--bone-dim);
+  font-size: clamp(1.05rem, 1.4vw, 1.25rem);
+  line-height: 1.62;
+  animation: hero-fade-up .8s var(--ease) 1.25s both;
+}
+.hero__wm { font-family: var(--serif); font-style: italic; font-weight: 400; color: var(--bone); }
+.hero__lede-accent {
+  display: block;
+  margin-top: .55rem;
+  color: var(--bone);
+  letter-spacing: .01em;
+}
+
+.hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1.1rem 1.6rem;
+  margin-top: .3rem;
+  animation: hero-fade-up .8s var(--ease) 1.45s both;
+}
+.hero__cta-sub { font-weight: 500; opacity: .82; }
+
+/* quiet secondary link */
+.hero__quiet {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  color: var(--bone-faint);
+  font-family: var(--sans);
+  font-size: .95rem;
+  letter-spacing: .03em;
+  transition: color .25s var(--ease);
+}
+.hero__quiet::after {
+  content: "";
+  position: absolute; left: 0; bottom: -3px;
+  width: 100%; height: 1px;
+  background: linear-gradient(90deg, var(--ember), transparent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform .35s var(--ease);
+}
+.hero__quiet:hover { color: var(--bone); }
+.hero__quiet:hover::after { transform: scaleX(1); }
+.hero__quiet-arrow { transition: transform .25s var(--ease); }
+.hero__quiet:hover .hero__quiet-arrow { transform: translateY(3px); }
+
+.hero__trust {
+  display: inline-flex;
+  align-items: center;
+  color: var(--bone-faint);
+  font-size: .82rem;
+  letter-spacing: .02em;
+  animation: hero-fade-up .8s var(--ease) 1.62s both;
+}
+.hero__trust-dot {
+  width: 6px; height: 6px;
+  margin-right: .55rem;
+  border-radius: 50%;
+  background: var(--ember);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--ember) 70%, transparent);
+  animation: hero-heartbeat 4.5s ease-in-out infinite;
+}
+
+/* ── scroll cue: a light descending a hairline ── */
+.hero__cue {
+  position: absolute;
+  bottom: clamp(1.2rem, 3vh, 2rem);
+  left: 0; right: 0;
+  margin-inline: auto;
+  width: max-content;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .55rem;
+  color: var(--bone-faint);
+  animation: hero-fade-up .9s var(--ease) 1.85s both;
+}
+.hero__cue-line {
+  position: relative;
+  width: 1px; height: 46px;
+  overflow: hidden;
+  background: linear-gradient(to bottom,
+    transparent,
+    color-mix(in oklab, var(--bone) 22%, transparent) 45%,
+    transparent);
+}
+.hero__cue-spark {
+  position: absolute;
+  left: 50%; top: 0;
+  width: 3px; height: 11px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: linear-gradient(var(--ember), transparent);
+  box-shadow: 0 0 9px color-mix(in oklab, var(--ember) 80%, transparent);
+  animation: hero-spark 2.8s var(--ease) infinite;
+}
+.hero__cue-chevron {
+  color: var(--bone-faint);
+  animation: hero-cue-bob 2.8s ease-in-out infinite;
+  transition: color .25s var(--ease);
+}
+.hero__cue:hover { color: var(--bone); }
+.hero__cue:hover .hero__cue-chevron { color: var(--ember); }
+
+/* ── keyframes ── */
+@keyframes hero-word-in {
+  from { opacity: 0; transform: translateY(.42em); filter: blur(10px); }
+  to   { opacity: 1; transform: none;               filter: blur(0); }
+}
+@keyframes hero-fade-up {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes hero-breathe {
+  0%, 100% { transform: translate(-50%, -50%) scale(1);    opacity: .58; }
+  50%      { transform: translate(-50%, -50%) scale(1.09); opacity: .85; }
+}
+@keyframes hero-rise {
+  0%   { transform: translate3d(0, 0, 0);                            opacity: 0; }
+  12%  { opacity: var(--o, .42); }
+  50%  { transform: translate3d(calc(var(--dx, 12px) * .5), -48vh, 0); }
+  88%  { opacity: var(--o, .42); }
+  100% { transform: translate3d(var(--dx, 12px), -94vh, 0);          opacity: 0; }
+}
+@keyframes hero-soften-glow {
+  0%, 100% { text-shadow: 0 0 22px color-mix(in oklab, var(--rose) 36%, transparent); }
+  50%      { text-shadow: 0 0 34px color-mix(in oklab, var(--rose) 55%, transparent); }
+}
+@keyframes hero-heartbeat {
+  0%, 100% { transform: scale(1);    opacity: .9; }
+  50%      { transform: scale(1.35); opacity: .5; }
+}
+@keyframes hero-spark {
+  0%   { transform: translateY(0);    opacity: 0; }
+  22%  { opacity: 1; }
+  78%  { opacity: 1; }
+  100% { transform: translateY(37px); opacity: 0; }
+}
+@keyframes hero-cue-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(3px); }
+}
+
+/* ── responsive ── */
+@media (max-width: 560px) {
+  .hero__actions { flex-direction: column; gap: 1.1rem; }
+  .hero__cta { width: 100%; max-width: 20rem; justify-content: center; }
+}
+
+/* ── reduced motion: hold the final composed state, no movement ── */
+@media (prefers-reduced-motion: reduce) {
+  .hero__word,
+  .hero__eyebrow,
+  .hero__lede,
+  .hero__actions,
+  .hero__trust,
+  .hero__cue { opacity: 1 !important; transform: none !important; filter: none !important; }
+  .hero__glow { opacity: .7; }
+  .hero__motes,
+  .hero__cue-spark { display: none; }
+  .hero__soften { text-shadow: 0 0 22px color-mix(in oklab, var(--rose) 40%, transparent); }
+}
+</style>
+
+<header class="hero" id="top">
+  <div class="hero__atmos" aria-hidden="true">
+    <div class="hero__glow"></div>
+    <div class="hero__motes">
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+      <span class="hero__mote"></span>
+    </div>
+    <div class="hero__vignette"></div>
+  </div>
+
+  <div class="hero__inner">
+    <p class="eyebrow hero__eyebrow">The foundation course · a somatic practice</p>
+
+    <h1 class="hero__headline">
+      <span class="hero__word">Teach</span>
+      <span class="hero__word">your</span>
+      <span class="hero__word">body</span>
+      <span class="hero__word">it</span>
+      <span class="hero__word">is</span>
+      <span class="hero__word">safe</span>
+      <span class="hero__word">to</span>
+      <span class="hero__word hero__word--soften"><em class="hero__soften">soften.</em></span>
+    </h1>
+
+    <p class="hero__lede">
+      Rootwork is where <span class="hero__wm">Of Blood and Bones</span> begins — fourteen guided
+      practices that bring a braced nervous system back to ground.
+      <span class="hero__lede-accent">Not talked through. Felt through.</span>
+    </p>
+
+    <div class="hero__actions">
+      <a class="cta cta--primary hero__cta" href="#feel">
+        <span class="hero__cta-label">Begin free <span class="hero__cta-sub">· first practice</span></span>
+        <span class="arrow" aria-hidden="true">→</span>
+      </a>
+      <a class="hero__quiet" href="#map">
+        See the descent
+        <span class="hero__quiet-arrow" aria-hidden="true">↓</span>
+      </a>
+    </div>
+
+    <p class="hero__trust">
+      <span class="hero__trust-dot" aria-hidden="true"></span>
+      Practised by 2,400+ people finding their ground · cancel anytime
+    </p>
+  </div>
+
+  <a class="hero__cue" href="#map" aria-label="Descend to the next section">
+    <span class="hero__cue-line"><span class="hero__cue-spark"></span></span>
+    <svg class="hero__cue-chevron" width="16" height="10" viewBox="0 0 16 10" fill="none" aria-hidden="true">
+      <path d="M1 1l7 7 7-7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </a>
+</header>
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     INTRO FILM — the sell video. A candlelit play-frame that reads as a still of
+     the guide, to camera, waiting to be watched. Pure CSS/SVG atmosphere (no image),
+     an ember play button with a breathing pulse, and an honest mock "playing" state.
+     Self-contained fragment · prefix .intro · no external assets · CSP-safe.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<style>
+  .intro { position: relative; padding: clamp(4.5rem, 10vw, 8rem) 0; }
+  .intro__inner {
+    max-width: 1040px; margin: 0 auto; padding: 0 clamp(1.3rem, 4vw, 3rem);
+    display: flex; flex-direction: column; align-items: center;
+  }
+
+  /* ── intro copy (above the frame) ── */
+  .intro__lead { text-align: center; max-width: 40rem; }
+  .intro__eyebrow { margin-bottom: 1.1rem; }
+  .intro__heading {
+    font-family: var(--serif); font-weight: 300;
+    font-size: clamp(2rem, 4.6vw, 3.05rem); line-height: 1.06; letter-spacing: -0.015em;
+    color: var(--bone); text-wrap: balance;
+  }
+  .intro__sub {
+    color: var(--bone-dim); font-size: clamp(1.02rem, 1.15vw, 1.12rem);
+    line-height: 1.7; margin: 1.05rem auto 0; max-width: 34ch;
+  }
+
+  /* ── the play-frame ── */
+  .intro__stage {
+    position: relative; isolation: isolate;
+    width: 100%; max-width: 940px;
+    margin-top: clamp(2.5rem, 5vw, 3.75rem);
+    aspect-ratio: 16 / 9;
+    border-radius: clamp(16px, 2.4vw, 26px);
+    overflow: hidden;
+    border: 1px solid color-mix(in oklab, var(--ember) 22%, transparent);
+    background: linear-gradient(178deg, #1a0f0a, #120b07 68%, #0c0705);
+    box-shadow:
+      0 46px 110px -54px color-mix(in oklab, var(--blood) 88%, black),
+      0 4px 24px -16px #000,
+      inset 0 1px 0 color-mix(in oklab, var(--bone) 12%, transparent);
+    cursor: pointer;
+  }
+
+  /* soft central key-light — the warmth falling on the seated figure; it breathes */
+  .intro__key {
+    position: absolute; z-index: 1; left: 50%; top: 43%;
+    width: min(64%, 560px); aspect-ratio: 1 / 1; transform: translate(-50%, -50%);
+    border-radius: 50%; filter: blur(30px); opacity: .82;
+    background: radial-gradient(circle at 50% 46%,
+      color-mix(in oklab, var(--ember) 42%, transparent),
+      color-mix(in oklab, var(--blood) 16%, transparent) 46%,
+      transparent 70%);
+    animation: intro-breathe 9s ease-in-out infinite;
+  }
+
+  /* the whisper of a figure — head + shoulders as lit warm mass (no image) */
+  .intro__figure {
+    position: absolute; z-index: 2; left: 50%; bottom: -3%;
+    width: min(48%, 380px); height: 82%; transform: translateX(-50%);
+    pointer-events: none;
+  }
+  .intro__figure::before { /* head */
+    content: ""; position: absolute; left: 50%; top: 4%; transform: translateX(-50%);
+    width: 33%; aspect-ratio: 3 / 3.5; border-radius: 50%; filter: blur(10px);
+    background: radial-gradient(52% 52% at 50% 42%,
+      color-mix(in oklab, var(--clay) 66%, transparent),
+      color-mix(in oklab, var(--blood-deep) 30%, transparent) 58%,
+      transparent 74%);
+  }
+  .intro__figure::after { /* shoulders / seated torso */
+    content: ""; position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+    width: 100%; height: 60%; filter: blur(14px);
+    border-radius: 50% 50% 0 0 / 76% 76% 0 0;
+    background: radial-gradient(72% 92% at 50% 100%,
+      color-mix(in oklab, var(--clay) 48%, transparent),
+      color-mix(in oklab, var(--blood-deep) 26%, transparent) 56%,
+      transparent 78%);
+  }
+
+  /* deep vignette — seats the warm centre in shadow, cinematic edge fall-off */
+  .intro__vignette {
+    position: absolute; z-index: 3; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(86% 82% at 50% 45%, transparent 44%, color-mix(in oklab, #0b0604 92%, transparent) 100%),
+      linear-gradient(180deg, color-mix(in oklab, #0b0604 34%, transparent), transparent 22% 82%, color-mix(in oklab, #0b0604 46%, transparent));
+  }
+  /* faint film grain + a top sheen of catch-light */
+  .intro__grain {
+    position: absolute; z-index: 4; inset: 0; pointer-events: none; opacity: .13;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='in'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23in)'/%3E%3C/svg%3E");
+  }
+  .intro__sheen {
+    position: absolute; z-index: 4; inset: 0; pointer-events: none;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--bone) 9%, transparent), transparent 20%);
+  }
+  /* dim layer that fades in when "playing" */
+  .intro__dim {
+    position: absolute; z-index: 5; inset: 0; pointer-events: none;
+    background: color-mix(in oklab, #090503 60%, transparent);
+    opacity: 0; transition: opacity .6s var(--ease);
+  }
+  .intro__stage.is-playing .intro__dim { opacity: 1; }
+
+  /* ── centred play control (ember, breathing) ── */
+  .intro__controls {
+    position: absolute; z-index: 6; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    display: grid; place-items: center;
+  }
+  .intro__pulse {
+    position: absolute; left: 50%; top: 50%; width: 100%; height: 100%;
+    transform: translate(-50%, -50%); border-radius: 50%;
+    border: 1px solid color-mix(in oklab, var(--ember) 52%, transparent);
+    animation: intro-pulse 3.2s ease-out infinite;
+  }
+  .intro__pulse--2 { animation-delay: 1.6s; }
+  .intro__stage.is-playing .intro__pulse { animation-play-state: paused; opacity: 0; }
+
+  .intro__play {
+    position: relative; z-index: 1;
+    width: clamp(74px, 8.5vw, 104px); aspect-ratio: 1 / 1; border-radius: 50%;
+    display: grid; place-items: center;
+    color: #2a1c08;
+    background: radial-gradient(circle at 50% 36%, color-mix(in oklab, var(--ember) 92%, white), var(--ochre));
+    box-shadow:
+      0 16px 44px -14px color-mix(in oklab, var(--ember) 68%, black),
+      inset 0 1px 0 color-mix(in oklab, #fff 34%, transparent);
+    transition: transform .25s var(--ease), box-shadow .3s var(--ease), background .3s;
+  }
+  .intro__play > * { grid-area: 1 / 1; }
+  .intro__stage:hover .intro__play { transform: translateY(-2px) scale(1.045); box-shadow: 0 22px 54px -14px color-mix(in oklab, var(--ember) 78%, black), inset 0 1px 0 color-mix(in oklab, #fff 40%, transparent); }
+  .intro__play:focus-visible { outline: 2px solid var(--ember); outline-offset: 5px; }
+
+  .intro__tri { width: 34%; height: auto; margin-left: 8%; transition: opacity .25s, transform .25s; }
+  .intro__stage.is-playing .intro__tri { opacity: 0; transform: scale(.6); }
+
+  /* equalizer shown when "playing" */
+  .intro__eq { display: flex; align-items: flex-end; gap: 3px; height: 34%; opacity: 0; transform: scale(.6); transition: opacity .3s .05s, transform .3s .05s; }
+  .intro__stage.is-playing .intro__eq { opacity: 1; transform: none; }
+  .intro__eq span { width: 3px; height: 40%; border-radius: 2px; background: #2a1c08; animation: intro-eq 1.05s ease-in-out infinite; }
+  .intro__eq span:nth-child(2) { animation-delay: .18s; height: 90%; }
+  .intro__eq span:nth-child(3) { animation-delay: .36s; height: 55%; }
+  .intro__eq span:nth-child(4) { animation-delay: .1s;  height: 74%; }
+
+  /* click ripple (mock feedback) */
+  .intro__ripple {
+    position: absolute; z-index: 0; left: 50%; top: 50%; width: 100%; height: 100%;
+    transform: translate(-50%, -50%) scale(.5); border-radius: 50%;
+    background: radial-gradient(circle, color-mix(in oklab, var(--ember) 40%, transparent), transparent 70%);
+    opacity: 0; pointer-events: none;
+  }
+  .intro__ripple.is-on { animation: intro-ripple .7s var(--ease) forwards; }
+
+  /* ── corner chrome: label + duration + mock progress ── */
+  .intro__tag {
+    position: absolute; z-index: 7; bottom: clamp(.85rem, 2.2vw, 1.25rem);
+    display: inline-flex; align-items: center; gap: .5rem;
+    font-family: var(--sans); font-size: clamp(.62rem, 1.1vw, .72rem);
+    letter-spacing: .16em; text-transform: uppercase;
+    color: color-mix(in oklab, var(--bone) 66%, transparent);
+    text-shadow: 0 1px 8px #000;
+  }
+  .intro__tag--who { left: clamp(.95rem, 2.6vw, 1.5rem); }
+  .intro__tag--dur { right: clamp(.95rem, 2.6vw, 1.5rem);
+    padding: .28rem .6rem; border-radius: 999px;
+    background: color-mix(in oklab, #0c0704 55%, transparent);
+    border: 1px solid color-mix(in oklab, var(--bone) 16%, transparent);
+    -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+    letter-spacing: .06em;
+  }
+  .intro__tag-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 8px color-mix(in oklab, var(--ember) 70%, transparent); }
+
+  .intro__progress {
+    position: absolute; z-index: 7; left: 0; right: 0; bottom: 0; height: 3px;
+    background: color-mix(in oklab, #000 40%, transparent);
+    opacity: 0; transition: opacity .4s var(--ease);
+  }
+  .intro__stage.is-playing .intro__progress { opacity: 1; }
+  .intro__progress::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 0%;
+    background: linear-gradient(90deg, var(--ochre), var(--ember));
+    box-shadow: 0 0 10px color-mix(in oklab, var(--ember) 70%, transparent);
+    transition: width 8s linear;
+  }
+  .intro__stage.is-playing .intro__progress::before { width: 32%; }
+
+  /* honest placeholder note — appears only in the playing state */
+  .intro__note {
+    margin-top: 1.1rem; height: 0; overflow: hidden; opacity: 0;
+    font-size: .8rem; letter-spacing: .04em; color: var(--bone-faint); text-align: center;
+    transition: opacity .4s var(--ease), height .4s var(--ease), margin .4s var(--ease);
+  }
+  .intro.is-playing .intro__note { opacity: 1; height: 1.4rem; }
+  .intro__note em { font-style: italic; color: var(--bone-dim); }
+
+  /* ── reveal-on-scroll (namespaced; toggled by this section's IIFE) ── */
+  .intro-reveal { opacity: 0; transform: translateY(24px); transition: opacity .9s var(--ease), transform .9s var(--ease); transition-delay: var(--d, 0s); }
+  .intro-reveal.is-in { opacity: 1; transform: none; }
+  .intro__stage.intro-reveal { transform: translateY(26px) scale(.986); }
+  .intro__stage.intro-reveal.is-in { transform: none; }
+
+  /* ── keyframes ── */
+  @keyframes intro-breathe {
+    0%, 100% { opacity: .66; transform: translate(-50%, -50%) scale(1); }
+    50%      { opacity: .9;  transform: translate(-50%, -50%) scale(1.07); }
+  }
+  @keyframes intro-pulse {
+    0%   { transform: translate(-50%, -50%) scale(1);   opacity: .6; }
+    100% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; }
+  }
+  @keyframes intro-eq {
+    0%, 100% { transform: scaleY(.5); }
+    50%      { transform: scaleY(1); }
+  }
+  @keyframes intro-ripple {
+    0%   { transform: translate(-50%, -50%) scale(.5); opacity: .55; }
+    100% { transform: translate(-50%, -50%) scale(2.4); opacity: 0; }
+  }
+
+  /* ── mobile ── */
+  @media (max-width: 560px) {
+    .intro__tag { letter-spacing: .12em; }
+  }
+
+  /* ── reduced motion: hold the composed state, no movement ── */
+  @media (prefers-reduced-motion: reduce) {
+    .intro__key { animation: none; }
+    .intro__pulse { display: none; }
+    .intro__eq span { animation: none; }
+    .intro__progress::before { transition: none; }
+    .intro__ripple { display: none; }
+    .intro-reveal, .intro__stage.intro-reveal { opacity: 1; transform: none; transition: none; }
+    .intro__stage:hover .intro__play { transform: none; }
+  }
+</style>
+
+<section class="intro" id="intro" aria-labelledby="intro-heading">
+  <div class="intro__inner">
+    <div class="intro__lead">
+      <p class="eyebrow intro__eyebrow intro-reveal">Watch · the invitation</p>
+      <h2 class="intro__heading intro-reveal" id="intro-heading" style="--d:.08s">Ninety seconds inside the work.</h2>
+      <p class="intro__sub intro-reveal" style="--d:.16s">Meet the practice, and the voice that guides it.</p>
+    </div>
+
+    <div class="intro__stage intro-reveal" style="--d:.24s">
+      <div class="intro__key" aria-hidden="true"></div>
+      <div class="intro__figure" aria-hidden="true"></div>
+      <div class="intro__vignette" aria-hidden="true"></div>
+      <div class="intro__grain" aria-hidden="true"></div>
+      <div class="intro__sheen" aria-hidden="true"></div>
+      <div class="intro__dim" aria-hidden="true"></div>
+
+      <div class="intro__controls">
+        <span class="intro__ripple" aria-hidden="true"></span>
+        <span class="intro__pulse" aria-hidden="true"></span>
+        <span class="intro__pulse intro__pulse--2" aria-hidden="true"></span>
+        <button class="intro__play" type="button" aria-label="Play the intro film (1 minute 24 seconds)" aria-pressed="false">
+          <svg class="intro__tri" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>
+          <span class="intro__eq" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+        </button>
+      </div>
+
+      <span class="intro__tag intro__tag--who" aria-hidden="true"><span class="intro__tag-dot"></span>the guide · to camera</span>
+      <span class="intro__tag intro__tag--dur">1:24</span>
+      <div class="intro__progress" aria-hidden="true"></div>
+    </div>
+
+    <p class="intro__note" role="status"><em>Placeholder</em> — no real playback. The film lives here. Tap again to stop.</p>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var section = document.getElementById('intro');
+    if (!section) return;
+
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    /* reveal-on-scroll */
+    var items = section.querySelectorAll('.intro-reveal');
+    if (reduce || !('IntersectionObserver' in window)) {
+      items.forEach(function (el) { el.classList.add('is-in'); });
+    } else {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add('is-in'); io.unobserve(e.target); }
+        });
+      }, { threshold: 0.18, rootMargin: '0px 0px -8% 0px' });
+      items.forEach(function (el) { io.observe(el); });
+    }
+
+    /* mock play toggle — poster dims, ▶ becomes an equalizer, progress line grows */
+    var stage = section.querySelector('.intro__stage');
+    var btn = section.querySelector('.intro__play');
+    var ripple = section.querySelector('.intro__ripple');
+    if (!stage || !btn) return;
+
+    function toggle() {
+      var playing = stage.classList.toggle('is-playing');
+      section.classList.toggle('is-playing', playing);
+      btn.setAttribute('aria-pressed', playing ? 'true' : 'false');
+      btn.setAttribute('aria-label', playing
+        ? 'Stop the preview (this is a placeholder, no real video)'
+        : 'Play the intro film (1 minute 24 seconds)');
+      if (playing && ripple && !reduce) {
+        ripple.classList.remove('is-on');
+        void ripple.offsetWidth; /* restart the animation */
+        ripple.classList.add('is-on');
+      }
+    }
+
+    /* the whole poster is clickable; the button carries the semantics */
+    stage.addEventListener('click', function (ev) {
+      if (ev.target === btn || btn.contains(ev.target)) return; /* button handles its own */
+      toggle();
+    });
+    btn.addEventListener('click', function (ev) { ev.stopPropagation(); toggle(); });
+  })();
+</script>
+<!-- ═══════════════════════════════════════════════════════════════════════
+     THE ACHE — names the body's held pain before hope is offered.
+     Pinned four-beat reveal (progressive-enhancement). Default / reduced-motion
+     render is a clean, legible stacked sequence; JS + motion adds the sticky pin.
+     ═══════════════════════════════════════════════════════════════════════ -->
+
+<!-- flip to the pinned layout BEFORE first paint so there is no stack→pin flash;
+     absence of this class (no JS) leaves the accessible stacked fallback. -->
+<script>document.documentElement.classList.add('ache-js');</script>
+
+<style>
+  .ache {
+    --ache-fs:       clamp(2rem, 5.4vw, 3.6rem);      /* beats 1–3 */
+    --ache-fs-coda:  clamp(1.55rem, 3.8vw, 2.6rem);   /* beat 4 (quieter coda) */
+    --ache-measure:  min(22ch, 90vw);                  /* generous, 1–2 handsome lines */
+    --ache-lh:       1.16;
+    position: relative;
+  }
+
+  /* ── track only defines scroll length; stage does the work ── */
+  .ache__track { position: relative; }
+
+  .ache__stage {
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: clamp(4.5rem, 13vh, 9rem) clamp(1.2rem, 4vw, 3rem);
+    overflow: hidden;               /* clip the blurred aura → never scrolls the page */
+  }
+
+  /* breathing warmth behind the words — fills the frame, never a void */
+  .ache__aura {
+    position: absolute;
+    left: 50%; top: 50%;
+    translate: -50% -50%;
+    width: min(78vw, 620px);
+    aspect-ratio: 1 / 1;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%,
+      color-mix(in oklab, var(--blood) 34%, transparent) 0%,
+      color-mix(in oklab, var(--ember) 12%, transparent) 40%,
+      transparent 66%);
+    filter: blur(28px);
+    opacity: .7;
+    z-index: 0;
+    pointer-events: none;
+    animation: ache-breathe 8s var(--ease) infinite;
+  }
+  @keyframes ache-breathe {
+    0%, 100% { transform: scale(.92); opacity: .55; }
+    50%      { transform: scale(1.05); opacity: .82; }
+  }
+
+  /* gentle cinematic vignette to focus the centre */
+  .ache__stage::after {
+    content: "";
+    position: absolute; inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background: radial-gradient(125% 95% at 50% 50%,
+      transparent 52%,
+      color-mix(in oklab, var(--ink) 60%, transparent) 100%);
+  }
+
+  /* ── frame: eyebrow (top) · beats (centre) · progress (bottom) ── */
+  .ache__frame {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    justify-items: center;
+    align-items: center;
+    gap: clamp(1.8rem, 4.5vh, 3.2rem);
+    width: 100%;
+    max-width: 900px;
+    text-align: center;
+  }
+
+  /* ceremonial chapter label, stable across all beats so the frame stays anchored */
+  .ache__chapter {
+    font-family: var(--sans);
+    display: inline-flex;
+    align-items: center;
+    gap: clamp(.7rem, 2vw, 1rem);
+  }
+  .ache__chapter::before,
+  .ache__chapter::after {
+    content: "";
+    width: clamp(22px, 6vw, 58px);
+    height: 1px;
+    background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--ember) 65%, transparent));
+  }
+  .ache__chapter::after { transform: scaleX(-1); }
+
+  /* beats container — in static mode this stacks; in motion it holds absolute children */
+  .ache__beats {
+    position: relative;
+    width: 100%;
+    display: grid;
+    justify-items: center;
+    gap: clamp(2.4rem, 6vh, 4rem);
+  }
+
+  .ache__beat {
+    margin: 0 auto;
+    max-width: var(--ache-measure);
+    font-family: var(--serif);
+    font-weight: 300;
+    font-size: var(--ache-fs);
+    line-height: var(--ache-lh);
+    letter-spacing: -0.015em;
+    color: var(--bone);
+    text-align: center;
+    text-wrap: balance;
+    overflow-wrap: break-word;
+  }
+  .ache__beat em {
+    font-style: italic;
+    font-weight: 400;
+    color: var(--rose);
+  }
+  .ache__clause { display: block; }
+  .ache__clause + .ache__clause { margin-top: .12em; }
+
+  /* beat 4 — the resolving coda: deliberately quieter, same family + rhythm */
+  .ache__beat--coda {
+    font-size: var(--ache-fs-coda);
+    color: var(--bone);
+  }
+
+  /* progress rail — only meaningful during the scroll sequence, hidden otherwise */
+  .ache__progress {
+    display: none;
+    align-items: center;
+    gap: clamp(.5rem, 1.6vw, .95rem);
+  }
+  .ache__seg {
+    width: clamp(26px, 5vw, 46px);
+    height: 2px;
+    border-radius: 2px;
+    background: color-mix(in oklab, var(--bone-faint) 55%, transparent);
+    transition: background .55s var(--ease), box-shadow .55s var(--ease);
+  }
+  .ache__seg.is-on {
+    background: var(--ember);
+    box-shadow: 0 0 14px color-mix(in oklab, var(--ember) 55%, transparent);
+  }
+
+  /* ═══ ENHANCED: pinned one-beat-at-a-time reveal ═══
+     Only when JS is present AND the user tolerates motion. */
+  @media (prefers-reduced-motion: no-preference) {
+    html.ache-js .ache__track { height: 440vh; }
+
+    html.ache-js .ache__stage {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding-block: clamp(3rem, 8vh, 6rem);
+    }
+
+    html.ache-js .ache__frame {
+      height: 100%;
+      min-height: min(80vh, 620px);
+    }
+
+    /* explicit min-height defeats the collapse-to-zero trap (only absolute kids) */
+    html.ache-js .ache__beats {
+      display: block;
+      align-self: stretch;
+      min-height: clamp(220px, 40vh, 360px);
+    }
+
+    html.ache-js .ache__beat {
+      position: absolute;
+      left: 50%; top: 50%;
+      translate: -50% -50%;            /* every beat shares ONE centre */
+      width: var(--ache-measure);
+      max-width: var(--ache-measure);
+      margin: 0;
+      opacity: 0;
+      transform: translateY(14px) scale(.99);   /* enter offset — composes over translate */
+      filter: blur(3px);
+      transition: opacity .85s var(--ease), transform .85s var(--ease), filter .85s var(--ease);
+      will-change: opacity, transform;
+      pointer-events: none;
+    }
+    html.ache-js .ache__beat.is-active {
+      opacity: 1;
+      transform: none;
+      filter: none;
+    }
+
+    html.ache-js .ache__progress { display: flex; }
+  }
+</style>
+
+<section class="ache" aria-labelledby="ache-title">
+  <div class="ache__track">
+    <div class="ache__stage">
+      <div class="ache__aura" aria-hidden="true"></div>
+
+      <div class="ache__frame">
+        <h2 class="eyebrow ache__chapter" id="ache-title">the ache</h2>
+
+        <div class="ache__beats">
+          <p class="ache__beat is-active">You&rsquo;ve tried to think your way calm.</p>
+
+          <p class="ache__beat">But the body keeps its own counsel.</p>
+
+          <p class="ache__beat">
+            <span class="ache__clause">The chest that won&rsquo;t open.</span>
+            <span class="ache__clause">The breath held high.</span>
+            <span class="ache__clause">The nights it <em>won&rsquo;t let go</em>.</span>
+          </p>
+
+          <p class="ache__beat ache__beat--coda">
+            <span class="ache__clause">Safety was never an idea.</span>
+            <span class="ache__clause">It is <em>something the body learns</em>.</span>
+          </p>
+        </div>
+
+        <div class="ache__progress" aria-hidden="true">
+          <span class="ache__seg is-on"></span>
+          <span class="ache__seg"></span>
+          <span class="ache__seg"></span>
+          <span class="ache__seg"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var section = document.querySelector('.ache');
+    if (!section) return;
+
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (reduce.matches) return;               // static stacked fallback — no wiring
+
+    var track = section.querySelector('.ache__track');
+    var beats = Array.prototype.slice.call(section.querySelectorAll('.ache__beat'));
+    var segs  = Array.prototype.slice.call(section.querySelectorAll('.ache__seg'));
+    var n = beats.length;
+    if (!track || !n) return;
+
+    var current = -1;
+    function setActive(i) {
+      if (i === current) return;
+      current = i;
+      for (var b = 0; b < n; b++) beats[b].classList.toggle('is-active', b === i);
+      for (var s = 0; s < segs.length; s++) segs[s].classList.toggle('is-on', s <= i);
+    }
+
+    var ticking = false;
+    function update() {
+      ticking = false;
+      var total = track.offsetHeight - window.innerHeight;   // px the stage stays pinned
+      if (total <= 0) { setActive(0); return; }
+      var scrolled = Math.min(Math.max(-track.getBoundingClientRect().top, 0), total);
+      var idx = Math.floor((scrolled / total) * n);
+      if (idx < 0) idx = 0; else if (idx >= n) idx = n - 1;
+      setActive(idx);
+    }
+    function onScroll() {
+      if (!ticking) { ticking = true; requestAnimationFrame(update); }
+    }
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+    update();
+
+    // if the user turns on reduce-motion mid-session, unwire and rest on beat 1
+    if (reduce.addEventListener) {
+      reduce.addEventListener('change', function (e) {
+        if (!e.matches) return;
+        window.removeEventListener('scroll', onScroll);
+        window.removeEventListener('resize', onScroll);
+      });
+    }
+  })();
+</script>
+<style>
+  /* ═══ THE TURN — the pivot, and the descent into the five-stage arc ═══
+     Namespaced under .turn / .turn__*. Compound selectors (.turn .turn__x)
+     deliberately out-specify any legacy `.turn h2` / `.turn p` in sell.css. */
+
+  .turn {
+    position: relative;
+    padding: clamp(5rem, 12vw, 9rem) 0;
+    overflow: hidden;
+    isolation: isolate;
+    text-align: left;                         /* override legacy centered .turn */
+  }
+
+  /* a warm well the eye descends toward — atmosphere, not decoration */
+  .turn::before {
+    content: "";
+    position: absolute; z-index: -1;
+    left: 62%; bottom: -16%;
+    width: min(115%, 960px); aspect-ratio: 1;
+    transform: translateX(-50%);
+    background: radial-gradient(circle at 50% 50%,
+      color-mix(in oklab, var(--ember) 15%, transparent),
+      color-mix(in oklab, var(--blood) 11%, transparent) 40%,
+      transparent 66%);
+    filter: blur(22px);
+    pointer-events: none;
+  }
+  @media (max-width: 899px) {
+    .turn::before { left: 50%; bottom: 4%; width: min(140%, 700px); }
+  }
+
+  .turn__inner {
+    max-width: 1080px; margin: 0 auto;
+    padding: 0 clamp(1.3rem, 4vw, 3rem);
+  }
+
+  .turn__grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: clamp(2.6rem, 6vw, 4rem);
+  }
+  @media (min-width: 900px) {
+    .turn__grid {
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      gap: clamp(2.6rem, 5vw, 5rem);
+      align-items: center;
+    }
+  }
+
+  /* ── left: the statement (pain → promise) ── */
+  .turn__head { max-width: 32ch; }
+  .turn .turn__eyebrow { display: block; margin-bottom: clamp(1rem, 2vw, 1.4rem); }
+  .turn .turn__statement {
+    font-family: var(--serif); font-weight: 300;
+    font-size: clamp(2.3rem, 4.7vw, 3.9rem);
+    line-height: 1.03; letter-spacing: -0.02em;
+    color: var(--bone); text-wrap: balance;
+  }
+  .turn .turn__statement em { font-style: italic; color: var(--ember); }
+  .turn .turn__lede {
+    margin-top: clamp(1.2rem, 2vw, 1.7rem);
+    max-width: 40ch;
+    color: var(--bone-dim);
+    font-size: clamp(1.05rem, 1.4vw, 1.2rem);
+    line-height: 1.62;
+  }
+  /* decorative thread — the descent begins here, and flows into the arc */
+  .turn__thread {
+    margin-top: clamp(1.6rem, 3vw, 2.4rem);
+    width: clamp(3rem, 6vw, 5rem); height: 2px;
+    border-radius: 2px;
+    transform-origin: left center;
+    background: linear-gradient(90deg, var(--ember), transparent);
+    opacity: .85;
+  }
+
+  /* ── right: the descent arc (five stages) ── */
+  .turn__arc {
+    position: relative;
+    padding-left: clamp(.2rem, 0.6vw, .5rem);
+  }
+  /* the thread: faint base rail + ember progress that draws downward */
+  .turn__arc::before,
+  .turn__arc::after {
+    content: ""; position: absolute;
+    left: 5px; width: 2px;
+    top: clamp(1.2rem, 2.5vw, 1.8rem);
+    bottom: clamp(1.2rem, 2.5vw, 1.8rem);
+    transform: translateX(-1px);
+    border-radius: 2px;
+  }
+  .turn__arc::before {
+    background: linear-gradient(180deg,
+      color-mix(in oklab, var(--bone) 24%, transparent),
+      color-mix(in oklab, var(--ember) 55%, transparent));
+    opacity: .32;
+  }
+  .turn__arc::after {                          /* ember progress (default: full) */
+    background: linear-gradient(180deg,
+      color-mix(in oklab, var(--ember) 28%, transparent), var(--ember));
+    box-shadow: 0 0 12px color-mix(in oklab, var(--ember) 45%, transparent);
+    transform: translateX(-1px) scaleY(1); transform-origin: top center;
+  }
+  /* the root — where the descent lands */
+  .turn__root {
+    position: absolute; left: 5px; bottom: clamp(1.2rem, 2.5vw, 1.8rem);
+    width: 13px; height: 13px; border-radius: 50%;
+    transform: translate(-50%, 50%);
+    background: radial-gradient(circle, var(--ember),
+      color-mix(in oklab, var(--ember) 22%, transparent) 66%, transparent);
+    box-shadow: 0 0 18px 3px color-mix(in oklab, var(--ember) 42%, transparent);
+  }
+
+  .turn__stages { list-style: none; }
+
+  .turn__stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: clamp(3rem, 6vw, 4.4rem) 1fr;
+    column-gap: clamp(.7rem, 1.8vw, 1.3rem);
+    align-items: baseline;
+    padding-block: clamp(.95rem, 2vw, 1.5rem);
+  }
+  .turn__stage + .turn__stage {
+    border-top: 1px solid color-mix(in oklab, var(--bone) 8%, transparent);
+  }
+
+  .turn__num {
+    grid-column: 1;
+    justify-self: start;
+    padding-left: clamp(.7rem, 1.6vw, 1.2rem);   /* hang just off the thread */
+    font-family: var(--serif); font-style: italic; font-weight: 400;
+    font-size: clamp(1.9rem, 3.4vw, 2.9rem);
+    line-height: 1; letter-spacing: .02em;
+    color: var(--ember);                                          /* fallback */
+    color: color-mix(in oklab, var(--ember) calc(58% + var(--d, 0) * 10%), var(--bone-dim));
+    transition: color .8s var(--ease);
+  }
+
+  .turn__body {
+    grid-column: 2;
+    padding-left: calc(var(--d, 0) * clamp(0px, 1vw, 15px));       /* steps deeper */
+  }
+  .turn .turn__name {
+    font-family: var(--serif); font-weight: 400;
+    font-size: clamp(1.25rem, 2vw, 1.65rem);
+    line-height: 1.12; color: var(--bone);
+    letter-spacing: -0.005em;
+  }
+  .turn .turn__gloss {
+    margin-top: .5rem;
+    max-width: 46ch;
+    color: var(--bone-dim);
+    font-size: clamp(.98rem, 1.15vw, 1.08rem);
+    line-height: 1.55;
+  }
+
+  /* ── motion (opt-in; added by the IIFE only when motion is welcome) ── */
+  .turn--motion .turn__eyebrow,
+  .turn--motion .turn__statement,
+  .turn--motion .turn__lede {
+    opacity: 0; transform: translateY(16px);
+    transition: opacity .8s var(--ease), transform .8s var(--ease);
+  }
+  .turn--motion .turn__statement { transition-delay: .06s; }
+  .turn--motion .turn__lede { transition-delay: .12s; }
+  .turn--motion.is-in .turn__eyebrow,
+  .turn--motion.is-in .turn__statement,
+  .turn--motion.is-in .turn__lede { opacity: 1; transform: none; }
+
+  .turn--motion .turn__thread {
+    opacity: 0; transform: scaleX(0);
+    transition: transform .9s var(--ease) .2s, opacity .5s var(--ease) .2s;
+  }
+  .turn--motion.is-in .turn__thread { opacity: .85; transform: none; }
+
+  .turn--motion .turn__stage {
+    opacity: 0; transform: translateY(18px);
+    transition: opacity .8s var(--ease), transform .8s var(--ease);
+    transition-delay: calc(var(--d) * 110ms);
+  }
+  .turn--motion.is-in .turn__stage { opacity: 1; transform: none; }
+
+  .turn--motion .turn__num { color: var(--bone-faint); }
+  .turn--motion.is-in .turn__num {
+    color: color-mix(in oklab, var(--ember) calc(58% + var(--d, 0) * 10%), var(--bone-dim));
+  }
+
+  .turn--motion .turn__arc::after {
+    transform: translateX(-1px) scaleY(0);
+    transition: transform 1.5s var(--ease) .15s;
+  }
+  .turn--motion.is-in .turn__arc::after { transform: translateX(-1px) scaleY(1); }
+
+  .turn--motion .turn__root {
+    opacity: 0; transform: translate(-50%, 50%) scale(.4);
+    transition: opacity .7s var(--ease) 1s, transform .7s var(--ease) 1s;
+  }
+  .turn--motion.is-in .turn__root { opacity: 1; transform: translate(-50%, 50%) scale(1); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .turn--motion .turn__eyebrow,
+    .turn--motion .turn__statement,
+    .turn--motion .turn__lede,
+    .turn--motion .turn__stage,
+    .turn--motion .turn__thread,
+    .turn--motion .turn__root {
+      opacity: 1 !important; transform: none !important; transition: none !important;
+    }
+    .turn--motion .turn__arc::after { transform: translateX(-1px) scaleY(1) !important; }
+    .turn--motion .turn__num { color: var(--ember) !important; }
+  }
+</style>
+
+<section class="turn section" id="turn">
+  <div class="turn__inner">
+    <div class="turn__grid">
+
+      <div class="turn__head">
+        <p class="eyebrow turn__eyebrow">The five stages</p>
+        <h2 class="turn__statement">There is a way <em>down</em>. It begins at the root.</h2>
+        <p class="turn__lede">Rootwork is a descent — five stages the body walks to find its ground again. You don't climb toward calm. You settle into it.</p>
+        <div class="turn__thread" aria-hidden="true"></div>
+      </div>
+
+      <div class="turn__arc">
+        <span class="turn__root" aria-hidden="true"></span>
+        <ol class="turn__stages" aria-label="The five stages of the descent">
+          <li class="turn__stage" style="--d: 0">
+            <span class="turn__num" aria-hidden="true">i</span>
+            <div class="turn__body">
+              <h3 class="turn__name">Regulation</h3>
+              <p class="turn__gloss">Finding the ground. Teaching the body it is safe enough to soften.</p>
+            </div>
+          </li>
+          <li class="turn__stage" style="--d: 1">
+            <span class="turn__num" aria-hidden="true">ii</span>
+            <div class="turn__body">
+              <h3 class="turn__name">Embodiment</h3>
+              <p class="turn__gloss">Coming back into sensation — feeling what is actually here.</p>
+            </div>
+          </li>
+          <li class="turn__stage" style="--d: 2">
+            <span class="turn__num" aria-hidden="true">iii</span>
+            <div class="turn__body">
+              <h3 class="turn__name">Attunement</h3>
+              <p class="turn__gloss">Listening inward; letting need and impulse be known.</p>
+            </div>
+          </li>
+          <li class="turn__stage" style="--d: 3">
+            <span class="turn__num" aria-hidden="true">iv</span>
+            <div class="turn__body">
+              <h3 class="turn__name">Co-regulation</h3>
+              <p class="turn__gloss">Being met by another. The body settling in company.</p>
+            </div>
+          </li>
+          <li class="turn__stage" style="--d: 4">
+            <span class="turn__num" aria-hidden="true">v</span>
+            <div class="turn__body">
+              <h3 class="turn__name">Reclamation</h3>
+              <p class="turn__gloss">Living from wholeness — taking back what was held away.</p>
+            </div>
+          </li>
+        </ol>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var section = document.getElementById('turn');
+    if (!section) return;
+
+    var prefersReduced = window.matchMedia
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // No JS-driven motion when reduced-motion or IO is unavailable:
+    // leaving off .turn--motion means the composed final state renders as-is.
+    if (prefersReduced || !('IntersectionObserver' in window)) return;
+
+    section.classList.add('turn--motion');
+
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          section.classList.add('is-in');
+          io.disconnect();
+        }
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
+
+    io.observe(section);
+  })();
+</script>
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     REEL — "See it in motion". A cinematic practice-preview clip that sits just
+     before the curriculum map. Deliberately NOT the intro film: an ultrawide
+     letterbox (2.4:1), an editorial split header, a small inline play tucked into
+     a minimal player-chrome bar, a waveform scrubber with a sweeping playhead, and
+     whispered subtitle captions — the language of a guided somatic practice, not a
+     talking-head film. Poster is pure CSS/SVG: candlelight that breathes, a body
+     at rest catching warm rim light, vignette + grain. Mock only — no real video.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<style>
+  .reel {
+    position: relative;
+    padding: clamp(4.5rem, 11vh, 8rem) 0;
+  }
+
+  /* ── editorial split header: title left, whisper right ── */
+  .reel-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: clamp(1.4rem, 4vw, 3.5rem);
+    flex-wrap: wrap;
+    margin-bottom: clamp(1.8rem, 4.5vw, 3rem);
+  }
+  .reel-lead { max-width: 30ch; }
+  .reel-eyebrow { margin-bottom: clamp(.9rem, 2vw, 1.2rem); }
+  .reel-title {
+    font-size: clamp(2rem, 5.4vw, 3.5rem);
+    font-weight: 300;
+    letter-spacing: -0.015em;
+    line-height: 1.02;
+    color: var(--bone);
+  }
+  .reel-title em {
+    font-style: italic;
+    color: var(--rose);
+  }
+  .reel-sub {
+    font-family: var(--sans);
+    font-size: clamp(1rem, 1.5vw, 1.18rem);
+    line-height: 1.6;
+    color: var(--bone-faint);
+    max-width: 30ch;
+    text-align: right;
+    padding-bottom: .35rem;
+  }
+
+  /* ── the cinematic stage ── */
+  .reel-stage { position: relative; transform-origin: center bottom; }
+
+  .reel-frame {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 2.4 / 1;
+    border-radius: clamp(12px, 1.6vw, 18px);
+    overflow: hidden;
+    border: 1px solid color-mix(in oklab, var(--ember) 20%, transparent);
+    background: var(--ink);
+    box-shadow:
+      0 44px 110px -46px rgba(0,0,0,.85),
+      0 8px 30px -18px rgba(0,0,0,.7);
+    isolation: isolate;
+  }
+  /* thin top sheen — reads like the surface of a screen */
+  .reel-frame::before {
+    content: ""; position: absolute; inset: 0; z-index: 5; pointer-events: none;
+    border-radius: inherit;
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--bone) 10%, transparent);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--bone) 5%, transparent), transparent 12%);
+  }
+
+  /* ── poster: layered warm-dark atmosphere ── */
+  .reel-poster { position: absolute; inset: 0; z-index: 0; }
+  .reel-poster > * { position: absolute; inset: 0; pointer-events: none; }
+
+  /* warm base — a touch of lift where the candle sits */
+  .reel-base {
+    background:
+      radial-gradient(150% 130% at 26% 34%,
+        color-mix(in oklab, var(--ink-3) 88%, var(--ember) 12%) 0%,
+        var(--ink-2) 42%, var(--ink) 70%, #0b0704 100%);
+  }
+  /* the reclining body — a low warm mass catching light from the flame */
+  .reel-body {
+    background:
+      radial-gradient(78% 130% at 58% 138%,
+        color-mix(in oklab, var(--clay) 26%, transparent) 0%,
+        color-mix(in oklab, var(--blood-deep) 20%, transparent) 34%,
+        transparent 62%);
+    mix-blend-mode: screen;
+    opacity: .9;
+  }
+  /* rim light — the skin edge grazed by candlelight */
+  .reel-rim {
+    background:
+      radial-gradient(42% 60% at 38% 74%,
+        color-mix(in oklab, var(--rose) 34%, transparent) 0%,
+        transparent 56%);
+    mix-blend-mode: screen;
+    opacity: .8;
+  }
+  /* candlelight — bloom + brighter core; breathes */
+  .reel-glow {
+    background:
+      radial-gradient(closest-side at 25% 40%,
+        color-mix(in oklab, var(--ember) 92%, white 8%) 0%,
+        color-mix(in oklab, var(--ember) 55%, transparent) 20%,
+        color-mix(in oklab, var(--ochre) 22%, transparent) 46%,
+        transparent 66%);
+    mix-blend-mode: screen;
+    transform-origin: 25% 40%;
+    animation: reel-breath 8s var(--ease) infinite;
+  }
+  /* incense/haze drifting slowly across the frame */
+  .reel-haze {
+    background:
+      radial-gradient(60% 90% at 70% 20%, color-mix(in oklab, var(--ochre) 10%, transparent), transparent 60%);
+    mix-blend-mode: screen;
+    opacity: .6;
+    animation: reel-drift 22s ease-in-out infinite alternate;
+  }
+  .reel-vignette {
+    background:
+      radial-gradient(125% 120% at 50% 40%,
+        transparent 38%,
+        color-mix(in oklab, var(--ink) 55%, transparent) 74%,
+        color-mix(in oklab, #000 55%, var(--ink)) 100%);
+  }
+  .reel-grain {
+    opacity: .07; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='rn'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23rn)'/%3E%3C/svg%3E");
+  }
+
+  @keyframes reel-breath {
+    0%, 100% { transform: scale(1);    opacity: .82; }
+    50%      { transform: scale(1.07); opacity: 1; }
+  }
+  @keyframes reel-drift {
+    from { transform: translate3d(-4%, 2%, 0); }
+    to   { transform: translate3d(5%, -3%, 0); }
+  }
+
+  /* ── viewfinder corner marks — "this is framed footage" ── */
+  .reel-corner {
+    position: absolute; z-index: 4; width: clamp(16px, 2.2vw, 26px); height: clamp(16px, 2.2vw, 26px);
+    border: 0 solid color-mix(in oklab, var(--ember) 55%, transparent);
+    opacity: .55; pointer-events: none;
+  }
+  .reel-corner--tl { top: clamp(.9rem,2.2vw,1.4rem); left: clamp(.9rem,2.2vw,1.4rem); border-top-width: 1.5px; border-left-width: 1.5px; }
+  .reel-corner--tr { top: clamp(.9rem,2.2vw,1.4rem); right: clamp(.9rem,2.2vw,1.4rem); border-top-width: 1.5px; border-right-width: 1.5px; }
+  .reel-corner--bl { bottom: clamp(.9rem,2.2vw,1.4rem); left: clamp(.9rem,2.2vw,1.4rem); border-bottom-width: 1.5px; border-left-width: 1.5px; }
+  .reel-corner--br { bottom: clamp(.9rem,2.2vw,1.4rem); right: clamp(.9rem,2.2vw,1.4rem); border-bottom-width: 1.5px; border-right-width: 1.5px; }
+
+  /* ── top meta: authenticity tag + total duration ── */
+  .reel-topmeta {
+    position: absolute; z-index: 4; top: 0; left: 0; right: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: clamp(1rem, 2.8vw, 1.75rem) clamp(1.2rem, 3vw, 2rem);
+    pointer-events: none;
+  }
+  .reel-tag {
+    display: inline-flex; align-items: center; gap: .55rem;
+    font-family: var(--sans); font-size: .66rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .28em;
+    color: color-mix(in oklab, var(--bone) 74%, transparent);
+    text-shadow: 0 1px 6px rgba(0,0,0,.6);
+  }
+  .reel-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--ember);
+    box-shadow: 0 0 10px color-mix(in oklab, var(--ember) 80%, transparent);
+    animation: reel-pulse 4s var(--ease) infinite;
+  }
+  @keyframes reel-pulse { 0%,100% { opacity: .45; } 50% { opacity: 1; } }
+  .reel-dur {
+    font-family: var(--sans); font-size: .74rem; font-weight: 600;
+    letter-spacing: .06em; font-variant-numeric: tabular-nums;
+    color: var(--bone);
+    padding: .28rem .6rem; border-radius: 999px;
+    background: color-mix(in oklab, var(--ink) 55%, transparent);
+    border: 1px solid color-mix(in oklab, var(--bone) 16%, transparent);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    text-shadow: 0 1px 6px rgba(0,0,0,.5);
+  }
+
+  /* ── lower block: whispered caption + player chrome (never overlap) ── */
+  .reel-scrim {
+    position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; height: 62%;
+    pointer-events: none;
+    background: linear-gradient(0deg,
+      color-mix(in oklab, var(--ink) 90%, transparent) 0%,
+      color-mix(in oklab, var(--ink) 55%, transparent) 42%,
+      transparent 100%);
+  }
+  .reel-lower {
+    position: absolute; z-index: 4; left: 0; right: 0; bottom: 0;
+    display: flex; flex-direction: column;
+    gap: clamp(.7rem, 2vw, 1.15rem);
+    padding: clamp(1rem, 3vw, 2rem);
+  }
+
+  .reel-caption {
+    align-self: center; text-align: center;
+    font-family: var(--serif); font-style: italic; font-weight: 300;
+    font-size: clamp(1.02rem, 2.5vw, 1.55rem);
+    line-height: 1.35; letter-spacing: .005em;
+    color: color-mix(in oklab, var(--bone) 90%, transparent);
+    text-shadow: 0 2px 14px rgba(0,0,0,.7);
+    max-width: 32ch;
+    transition: opacity .42s var(--ease);
+  }
+  .reel-caption::before { content: "\201C"; opacity: .4; margin-right: .06em; }
+  .reel-caption::after  { content: "\201D"; opacity: .4; margin-left: .06em; }
+
+  /* player-chrome bar: small play · waveform scrubber · elapsed time */
+  .reel-chrome {
+    display: flex; align-items: center;
+    gap: clamp(.7rem, 2vw, 1.15rem);
+  }
+
+  .reel-play {
+    flex: none;
+    width: clamp(2.7rem, 4.4vw, 3.3rem); height: clamp(2.7rem, 4.4vw, 3.3rem);
+    border-radius: 50%;
+    display: grid; place-items: center;
+    color: var(--bone);
+    background: color-mix(in oklab, var(--ember) 16%, transparent);
+    border: 1px solid color-mix(in oklab, var(--ember) 60%, transparent);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 8px 26px -12px rgba(0,0,0,.7);
+    transition: transform .18s var(--ease), background .25s, border-color .25s;
+  }
+  .reel-play:hover { transform: translateY(-2px); background: color-mix(in oklab, var(--ember) 26%, transparent); }
+  .reel-play:active { transform: translateY(0) scale(.96); }
+  .reel-play:focus-visible { outline: 2px solid var(--ember); outline-offset: 4px; }
+  .reel-play svg { width: 44%; height: 44%; display: block; fill: currentColor; }
+  .reel-play svg { grid-area: 1 / 1; }
+  /* gentle invitation ring — only when not playing */
+  .reel-play::after {
+    content: ""; position: absolute; inset: 0; border-radius: 50%;
+    border: 1px solid color-mix(in oklab, var(--ember) 55%, transparent);
+    animation: reel-ring 2.8s var(--ease) infinite;
+  }
+  .reel-frame.reel--playing .reel-play::after { animation-play-state: paused; opacity: 0; }
+  @keyframes reel-ring {
+    0%   { transform: scale(1);    opacity: .7; }
+    70%  { transform: scale(1.55); opacity: 0; }
+    100% { transform: scale(1.55); opacity: 0; }
+  }
+  /* icon swap play <-> pause */
+  .reel-ico--pause { opacity: 0; }
+  .reel-frame.reel--playing .reel-ico--play  { opacity: 0; }
+  .reel-frame.reel--playing .reel-ico--pause { opacity: 1; }
+
+  /* waveform scrubber */
+  .reel-track {
+    position: relative; flex: 1 1 auto; min-width: 0;
+    height: clamp(24px, 3.4vw, 38px);
+  }
+  .reel-wave { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .reel-wave--base { color: color-mix(in oklab, var(--bone) 30%, transparent); }
+  .reel-wave--fill {
+    color: var(--ember);
+    clip-path: inset(0 100% 0 0);              /* hidden until played */
+    filter: drop-shadow(0 0 5px color-mix(in oklab, var(--ember) 55%, transparent));
+  }
+  .reel-frame.reel--started .reel-wave--fill {
+    animation: reel-scrub var(--reel-len, 48s) linear forwards;
+    animation-play-state: paused;
+  }
+  .reel-frame.reel--started.reel--playing .reel-wave--fill { animation-play-state: running; }
+  @keyframes reel-scrub { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+
+  .reel-playhead {
+    position: absolute; top: -12%; bottom: -12%; left: 0; width: 2px;
+    background: var(--bone);
+    box-shadow: 0 0 10px color-mix(in oklab, var(--ember) 90%, transparent);
+    opacity: 0; transform: translateX(-1px);
+  }
+  .reel-playhead::before {
+    content: ""; position: absolute; top: -3px; left: 50%; transform: translateX(-50%);
+    width: 7px; height: 7px; border-radius: 50%; background: var(--bone);
+    box-shadow: 0 0 8px color-mix(in oklab, var(--ember) 90%, transparent);
+  }
+  .reel-frame.reel--started .reel-playhead {
+    opacity: 1;
+    animation: reel-head var(--reel-len, 48s) linear forwards;
+    animation-play-state: paused;
+  }
+  .reel-frame.reel--started.reel--playing .reel-playhead { animation-play-state: running; }
+  @keyframes reel-head { from { left: 0; } to { left: 100%; } }
+
+  .reel-time {
+    flex: none;
+    font-family: var(--sans); font-size: .8rem; font-weight: 600;
+    letter-spacing: .04em; font-variant-numeric: tabular-nums;
+    color: var(--bone-dim);
+    text-shadow: 0 1px 6px rgba(0,0,0,.5);
+    min-width: 2.6em; text-align: right;
+  }
+
+  /* ── reveal-on-scroll (self-contained, prefixed) ── */
+  .reel-reveal {
+    opacity: 0; transform: translateY(26px);
+    transition: opacity .9s var(--ease), transform .9s var(--ease);
+  }
+  .reel-reveal.reel-in { opacity: 1; transform: none; }
+  .reel-reveal.reel-d1 { transition-delay: .1s; }
+  .reel-reveal.reel-d2 { transition-delay: .2s; }
+  .reel-stage.reel-reveal { transform: translateY(34px) scale(.985); }
+  .reel-stage.reel-reveal.reel-in { transform: none; }
+
+  /* ── responsive: keep the letterbox graceful, give the clip room ── */
+  @media (max-width: 760px) {
+    .reel-head { align-items: flex-start; }
+    .reel-sub { text-align: left; padding-bottom: 0; max-width: 40ch; }
+    .reel-frame { aspect-ratio: 4 / 3; min-height: 280px; }
+    .reel-caption::before, .reel-caption::after { content: none; }
+  }
+  @media (max-width: 420px) {
+    .reel-frame { aspect-ratio: 3 / 3.4; }
+    .reel-tag { letter-spacing: .2em; }
+  }
+
+  /* ── reduced motion: show the final, composed still — no movement ── */
+  @media (prefers-reduced-motion: reduce) {
+    .reel-reveal { opacity: 1; transform: none; transition: none; }
+    .reel-glow, .reel-haze, .reel-dot,
+    .reel-play::after, .reel-wave--fill, .reel-playhead {
+      animation: none !important;
+    }
+    .reel-glow { opacity: 1; transform: scale(1.04); }
+    .reel-play::after { opacity: 0; }
+  }
+</style>
+
+<section class="reel" aria-labelledby="reel-heading">
+  <div class="wrap">
+    <header class="reel-head">
+      <div class="reel-lead reel-reveal">
+        <p class="eyebrow reel-eyebrow">See it in motion</p>
+        <h2 class="reel-title" id="reel-heading">This is what a <em>descent</em> looks like.</h2>
+      </div>
+      <p class="reel-sub reel-reveal reel-d1">A glimpse of a real practice — before you walk it yourself.</p>
+    </header>
+
+    <figure class="reel-stage reel-reveal reel-d2">
+      <div class="reel-frame" style="--reel-len: 48s;">
+        <!-- poster (decorative) -->
+        <div class="reel-poster" aria-hidden="true">
+          <span class="reel-base"></span>
+          <span class="reel-body"></span>
+          <span class="reel-rim"></span>
+          <span class="reel-glow"></span>
+          <span class="reel-haze"></span>
+          <span class="reel-vignette"></span>
+          <span class="reel-grain"></span>
+        </div>
+
+        <span class="reel-corner reel-corner--tl" aria-hidden="true"></span>
+        <span class="reel-corner reel-corner--tr" aria-hidden="true"></span>
+        <span class="reel-corner reel-corner--bl" aria-hidden="true"></span>
+        <span class="reel-corner reel-corner--br" aria-hidden="true"></span>
+
+        <div class="reel-topmeta" aria-hidden="true">
+          <span class="reel-tag"><span class="reel-dot"></span>unedited · one take</span>
+          <span class="reel-dur">0:48</span>
+        </div>
+
+        <span class="reel-scrim" aria-hidden="true"></span>
+
+        <div class="reel-lower">
+          <p class="reel-caption">let the breath reach the base of the spine.</p>
+
+          <div class="reel-chrome">
+            <button class="reel-play" type="button" aria-pressed="false"
+                    aria-label="Play the practice preview (48 seconds, mock — no audio)">
+              <svg class="reel-ico--play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+              <svg class="reel-ico--pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+            </button>
+
+            <div class="reel-track" aria-hidden="true">
+              <!-- one waveform shape, drawn once, reused for base + played layers -->
+              <svg class="reel-wave reel-wave--base" viewBox="0 0 480 40" preserveAspectRatio="none">
+                <g id="reelWave" fill="currentColor">
+                  <rect x="4"   y="15" width="7" height="10" rx="3"/><rect x="19"  y="13" width="7" height="14" rx="3"/>
+                  <rect x="34"  y="10" width="7" height="20" rx="3"/><rect x="49"  y="7"  width="7" height="26" rx="3"/>
+                  <rect x="64"  y="9"  width="7" height="22" rx="3"/><rect x="79"  y="12" width="7" height="16" rx="3"/>
+                  <rect x="94"  y="14" width="7" height="12" rx="3"/><rect x="109" y="11" width="7" height="18" rx="3"/>
+                  <rect x="124" y="6"  width="7" height="28" rx="3"/><rect x="139" y="3"  width="7" height="34" rx="3"/>
+                  <rect x="154" y="5"  width="7" height="30" rx="3"/><rect x="169" y="9"  width="7" height="22" rx="3"/>
+                  <rect x="184" y="13" width="7" height="14" rx="3"/><rect x="199" y="15" width="7" height="10" rx="3"/>
+                  <rect x="214" y="12" width="7" height="16" rx="3"/><rect x="229" y="8"  width="7" height="24" rx="3"/>
+                  <rect x="244" y="4"  width="7" height="32" rx="3"/><rect x="259" y="6"  width="7" height="28" rx="3"/>
+                  <rect x="274" y="10" width="7" height="20" rx="3"/><rect x="289" y="14" width="7" height="12" rx="3"/>
+                  <rect x="304" y="12" width="7" height="16" rx="3"/><rect x="319" y="9"  width="7" height="22" rx="3"/>
+                  <rect x="334" y="5"  width="7" height="30" rx="3"/><rect x="349" y="7"  width="7" height="26" rx="3"/>
+                  <rect x="364" y="11" width="7" height="18" rx="3"/><rect x="379" y="14" width="7" height="12" rx="3"/>
+                  <rect x="394" y="15" width="7" height="10" rx="3"/><rect x="409" y="12" width="7" height="16" rx="3"/>
+                  <rect x="424" y="9"  width="7" height="22" rx="3"/><rect x="439" y="11" width="7" height="18" rx="3"/>
+                  <rect x="454" y="14" width="7" height="12" rx="3"/><rect x="469" y="16" width="7" height="8"  rx="3"/>
+                </g>
+              </svg>
+              <svg class="reel-wave reel-wave--fill" viewBox="0 0 480 40" preserveAspectRatio="none">
+                <use href="#reelWave"/>
+              </svg>
+              <span class="reel-playhead"></span>
+            </div>
+
+            <span class="reel-time" role="status" aria-live="off">0:00</span>
+          </div>
+        </div>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<script>
+  (() => {
+    const root = (document.currentScript && document.currentScript.closest('.reel'))
+      || document.querySelector('.reel');
+    if (!root) return;
+
+    const frame  = root.querySelector('.reel-frame');
+    const btn    = root.querySelector('.reel-play');
+    const timeEl = root.querySelector('.reel-time');
+    const capEl  = root.querySelector('.reel-caption');
+    const reveals = root.querySelectorAll('.reel-reveal');
+    const reduce  = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const DURATION = 48;
+    const CAPS = [
+      'let the breath reach the base of the spine.',
+      'feel the whole weight of you meet the floor.',
+      'nothing to fix here. only to feel.'
+    ];
+
+    /* reveal-on-scroll */
+    if (reduce || !('IntersectionObserver' in window)) {
+      reveals.forEach(el => el.classList.add('reel-in'));
+    } else {
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach(e => {
+          if (e.isIntersecting) { e.target.classList.add('reel-in'); io.unobserve(e.target); }
+        });
+      }, { threshold: 0.18, rootMargin: '0px 0px -8% 0px' });
+      reveals.forEach(el => io.observe(el));
+    }
+
+    /* honest mock player — clock + subtitle cycle drive the "in motion" feel */
+    let elapsed = 0, capIdx = 0, clock = null, capTimer = null;
+    const fmt = s => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+
+    function startTimers() {
+      if (reduce) return;                       // motion off: static "playing" still
+      clock = setInterval(() => {
+        elapsed += 1;
+        if (timeEl) timeEl.textContent = fmt(elapsed);
+        if (elapsed >= DURATION) end();
+      }, 1000);
+      capTimer = setInterval(() => {
+        capIdx = (capIdx + 1) % CAPS.length;
+        if (!capEl) return;
+        capEl.style.opacity = '0';
+        setTimeout(() => { capEl.textContent = CAPS[capIdx]; capEl.style.opacity = ''; }, 420);
+      }, 5600);
+    }
+    function stopTimers() {
+      clearInterval(clock); clearInterval(capTimer);
+      clock = capTimer = null;
+    }
+    function play() {
+      frame.classList.add('reel--started', 'reel--playing');
+      btn.setAttribute('aria-pressed', 'true');
+      startTimers();
+    }
+    function pause() {
+      frame.classList.remove('reel--playing');   // freezes CSS animations in place
+      btn.setAttribute('aria-pressed', 'false');
+      stopTimers();
+    }
+    function end() {
+      stopTimers();
+      frame.classList.remove('reel--started', 'reel--playing');
+      btn.setAttribute('aria-pressed', 'false');
+      elapsed = 0; capIdx = 0;
+      if (timeEl) timeEl.textContent = '0:00';
+      if (capEl) { capEl.style.opacity = ''; capEl.textContent = CAPS[0]; }
+    }
+
+    btn.addEventListener('click', () => {
+      frame.classList.contains('reel--playing') ? pause() : play();
+    });
+  })();
+</script>
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     THE DESCENT MAP — five gated depths, each a concurrent pool of practices.
+     A vertical ember spine draws downward on scroll; every gate + its practices
+     ignite in turn. Sequential gates (a bottleneck) · concurrent practices (peers).
+     Self-contained fragment · prefix .descent · built from window.COURSE · no assets.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<style>
+  .descent {
+    --descent-node: clamp(46px, 5.2vw, 62px);
+    --descent-spine-x: calc(var(--descent-node) / 2);
+    position: relative;
+    padding: clamp(3.5rem, 7.5vw, 6rem) 0 clamp(4rem, 9vw, 7rem);
+  }
+  .descent__inner { max-width: 1080px; margin: 0 auto; padding: 0 clamp(1.3rem, 4vw, 3rem); }
+
+  /* ── header ── */
+  .descent__head { text-align: center; max-width: 52ch; margin: 0 auto clamp(2.6rem, 5.5vw, 4rem); }
+  .descent__head .eyebrow { display: block; margin-bottom: 1rem; }
+  .descent__title {
+    font-family: var(--serif); font-weight: 300; color: var(--bone);
+    font-size: clamp(2rem, 5vw, 3.4rem); line-height: 1.04; letter-spacing: -0.015em;
+  }
+  .descent__sub {
+    color: var(--bone-dim); margin: 1.05rem auto 0; max-width: 48ch;
+    font-size: clamp(1rem, 1.25vw, 1.14rem); line-height: 1.68;
+  }
+  .descent__stats {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: .55rem;
+    margin-top: clamp(1.4rem, 3vw, 2rem);
+  }
+  .descent__stat {
+    display: inline-flex; align-items: baseline; gap: .4rem;
+    padding: .42rem .9rem; border-radius: 999px;
+    border: 1px solid color-mix(in oklab, var(--ember) 22%, transparent);
+    background: color-mix(in oklab, var(--ink-3) 45%, transparent);
+    font-size: .76rem; letter-spacing: .02em; color: var(--bone-dim);
+  }
+  .descent__stat b { font-family: var(--serif); font-weight: 500; color: var(--ember); font-size: .98rem; }
+
+  /* ── the spine + stack ── */
+  .descent__body { position: relative; }
+  .descent__spine { position: absolute; top: 0; bottom: 0; left: var(--descent-spine-x); width: 2px; transform: translateX(-50%); z-index: 0; pointer-events: none; }
+  .descent__spine-track {
+    position: absolute; inset: 0; border-radius: 2px;
+    background: linear-gradient(180deg,
+      color-mix(in oklab, var(--bone) 3%, transparent),
+      color-mix(in oklab, var(--bone) 15%, transparent) 12%,
+      color-mix(in oklab, var(--bone) 15%, transparent) 88%,
+      color-mix(in oklab, var(--bone) 3%, transparent));
+  }
+  .descent__spine-draw {
+    position: absolute; top: 0; left: 0; width: 100%; height: 0; border-radius: 2px;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--ember) 45%, transparent), var(--ember));
+    box-shadow: 0 0 10px color-mix(in oklab, var(--ember) 60%, transparent);
+    transition: height .22s var(--ease);
+  }
+  .descent__spine-draw::after {
+    content: ""; position: absolute; bottom: -3px; left: 50%; width: 9px; height: 9px;
+    transform: translateX(-50%); border-radius: 50%; background: var(--ember);
+    box-shadow: 0 0 12px 2px color-mix(in oklab, var(--ember) 75%, transparent);
+  }
+
+  .descent__stages { position: relative; z-index: 1; list-style: none; display: flex; flex-direction: column; gap: clamp(2.2rem, 4.6vw, 3.4rem); }
+
+  /* ── a band: [gate] [concurrent practices] ── */
+  .descent-band {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(210px, 264px) minmax(0, 1fr);
+    column-gap: clamp(1.4rem, 3.5vw, 3rem);
+    align-items: start;
+  }
+
+  /* gate = spine node + name/gloss */
+  .descent-gate {
+    display: grid;
+    grid-template-columns: var(--descent-node) minmax(0, 1fr);
+    column-gap: clamp(.75rem, 1.6vw, 1.05rem);
+    align-items: start;
+  }
+  .descent-gate__node {
+    grid-row: 1 / span 2;
+    width: var(--descent-node); height: var(--descent-node); border-radius: 50%;
+    display: grid; place-items: center;
+    background: radial-gradient(circle at 50% 38%, var(--ink-3), var(--ink-2));
+    border: 1px solid color-mix(in oklab, var(--bone) 16%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--bone) 10%, transparent);
+    opacity: .48; transform: scale(.94);
+    transition: opacity .6s var(--ease), transform .6s var(--ease), border-color .6s, box-shadow .6s, background .6s;
+  }
+  .descent-gate__rn { font-family: var(--serif); font-style: italic; font-weight: 400; font-size: clamp(1.1rem, 1.7vw, 1.42rem); color: var(--bone-faint); transition: color .6s; }
+  .descent-band.is-lit .descent-gate__node {
+    opacity: 1; transform: none;
+    border-color: color-mix(in oklab, var(--ember) 60%, transparent);
+    background: radial-gradient(circle at 50% 34%, color-mix(in oklab, var(--ember) 26%, var(--ink-3)), var(--ink-2));
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--ember) 22%, transparent), 0 10px 34px -14px color-mix(in oklab, var(--ember) 80%, black), inset 0 1px 0 color-mix(in oklab, var(--bone) 12%, transparent);
+  }
+  .descent-band.is-lit .descent-gate__rn { color: var(--ember); }
+
+  .descent-gate__meta { padding-top: .1rem; opacity: 0; transform: translateY(18px); transition: opacity .7s var(--ease), transform .7s var(--ease); }
+  .descent-band.is-lit .descent-gate__meta { opacity: 1; transform: none; }
+  .descent-gate__name {
+    font-family: var(--serif); font-weight: 400; color: var(--bone);
+    font-size: clamp(1.35rem, 2.2vw, 1.85rem); line-height: 1.08; letter-spacing: -0.01em;
+  }
+  .descent-gate__gloss { color: var(--bone-faint); margin-top: .5rem; font-size: clamp(.9rem, 1vw, 1rem); line-height: 1.55; }
+
+  /* the concurrent pool — peers side by side, wrap as needed */
+  .descent-practices { display: flex; flex-wrap: wrap; gap: clamp(.7rem, 1.4vw, 1rem); }
+
+  .descent-card {
+    position: relative; flex: 1 1 178px; min-width: 0;
+    padding: 1rem 1.1rem 1.05rem; border-radius: 14px;
+    background: color-mix(in oklab, var(--ink-3) 50%, transparent);
+    border: 1px solid color-mix(in oklab, var(--bone) 8%, transparent);
+    opacity: 0; transform: translateY(20px);
+    transition: opacity .7s var(--ease), transform .7s var(--ease), border-color .3s var(--ease), background .3s var(--ease), box-shadow .3s var(--ease);
+  }
+  .descent-band.is-lit .descent-card { opacity: 1; transform: none; }
+  .descent-band.is-lit .descent-card:nth-child(2) { transition-delay: .06s; }
+  .descent-band.is-lit .descent-card:nth-child(3) { transition-delay: .12s; }
+  .descent-band.is-lit .descent-card:nth-child(4) { transition-delay: .18s; }
+  .descent-card:hover {
+    border-color: color-mix(in oklab, var(--ember) 45%, transparent);
+    background: color-mix(in oklab, var(--ink-3) 82%, transparent);
+    box-shadow: 0 12px 34px -20px color-mix(in oklab, var(--ember) 60%, black);
+  }
+  .descent-card__top { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin-bottom: .55rem; }
+  .descent-card__type { display: inline-flex; align-items: center; gap: .38rem; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--bone-dim); }
+  .descent-card__glyph { color: var(--ember); font-size: .82rem; }
+  .descent-card__lock { font-size: .82rem; color: var(--bone-faint); flex: none; }
+  .descent-card__title { font-family: var(--serif); font-weight: 400; color: var(--bone); font-size: clamp(1.02rem, 1.25vw, 1.16rem); line-height: 1.16; }
+  .descent-card__min { margin-top: .45rem; font-size: .74rem; letter-spacing: .02em; color: var(--bone-faint); }
+
+  /* the free opening — the one door already ajar */
+  .descent-card--free {
+    border-color: color-mix(in oklab, var(--ember) 55%, transparent);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--blood) 26%, var(--ink-3)), color-mix(in oklab, var(--ink-3) 92%, transparent));
+    box-shadow: 0 10px 30px -18px color-mix(in oklab, var(--blood) 80%, black);
+  }
+  .descent-card--free .descent-card__lock { color: var(--ember); }
+  .descent-card--free:hover { border-color: var(--ember); }
+  .descent-card__flag {
+    position: absolute; top: -9px; left: 1rem;
+    background: var(--ember); color: #241a09;
+    font-size: .6rem; letter-spacing: .16em; text-transform: uppercase; font-weight: 700;
+    padding: .16rem .55rem; border-radius: 999px;
+  }
+
+  /* closing note */
+  .descent__foot {
+    margin-top: clamp(2.6rem, 5vw, 3.6rem); padding-top: clamp(1.4rem, 3vw, 2rem);
+    border-top: 1px solid color-mix(in oklab, var(--ember) 14%, transparent);
+    text-align: center; color: var(--bone-faint); font-size: .92rem; letter-spacing: .01em;
+  }
+  .descent__foot b { color: var(--bone-dim); font-weight: 500; }
+
+  .descent-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+  /* ── mobile: stack cleanly — gate (node + name + gloss), then its practices ── */
+  @media (max-width: 720px) {
+    .descent-band {
+      display: block; position: relative;
+      padding-left: calc(var(--descent-node) + clamp(.85rem, 3.5vw, 1.15rem));
+    }
+    .descent-gate { display: block; }
+    .descent-gate__node { position: absolute; top: 0; left: 0; }
+    .descent-gate__meta { padding-top: .15rem; }
+    .descent-gate__gloss { max-width: 46ch; }
+    .descent-practices { margin-top: clamp(.9rem, 3.5vw, 1.15rem); }
+    .descent-card { flex: 1 1 132px; }
+  }
+
+  @media (max-width: 380px) {
+    .descent-card { flex-basis: 100%; }
+  }
+
+  /* ── reduced motion: everything shown, nothing draws ── */
+  @media (prefers-reduced-motion: reduce) {
+    .descent-gate__node { opacity: 1; transform: none; transition: none; }
+    .descent-gate__meta, .descent-card { opacity: 1; transform: none; transition: none; }
+    .descent__spine-draw { transition: none; }
+    .descent__spine-draw::after { display: none; }
+  }
+</style>
+
+<section class="descent" id="map" aria-labelledby="descent-title">
+  <div class="descent__inner">
+    <header class="descent__head">
+      <span class="eyebrow">The whole descent</span>
+      <h2 class="descent__title" id="descent-title">Everything you'll walk.</h2>
+      <p class="descent__sub">All five depths open the moment you join. Within each, a handful of practices to move among freely — walk them at your own pace, in whatever order the body asks.</p>
+      <div class="descent__stats" id="descent-stats" aria-hidden="true"></div>
+    </header>
+
+    <div class="descent__body">
+      <div class="descent__spine" aria-hidden="true">
+        <span class="descent__spine-track"></span>
+        <span class="descent__spine-draw" id="descent-draw"></span>
+      </div>
+      <ol class="descent__stages" id="descent-stages"></ol>
+    </div>
+
+    <p class="descent__foot" id="descent-foot"></p>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var C = window.COURSE, TM = window.TYPE_META || {};
+    var section = document.getElementById('map');
+    if (!C || !section) return;
+
+    var ROMAN = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii'];
+    var stagesEl = section.querySelector('#descent-stages');
+    var statsEl = section.querySelector('#descent-stats');
+    var footEl = section.querySelector('#descent-foot');
+    var body = section.querySelector('.descent__body');
+    var draw = section.querySelector('#descent-draw');
+
+    function esc(s) {
+      return String(s).replace(/[&<>"]/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+      });
+    }
+
+    /* ── build the stack from the shared course object ── */
+    var bands = [];
+    (C.stages || []).forEach(function (s, si) {
+      var cards = (s.lessons || []).map(function (l) {
+        var meta = TM[l.type] || { label: l.type, glyph: '•' };
+        var free = !!l.free;
+        var srState = free
+          ? '<span class="descent-sr">free preview</span>'
+          : '<span class="descent-sr">included with membership</span>';
+        return '<article class="descent-card' + (free ? ' descent-card--free' : '') + '">'
+          + (free ? '<span class="descent-card__flag">free</span>' : '')
+          + '<div class="descent-card__top">'
+            + '<span class="descent-card__type"><span class="descent-card__glyph" aria-hidden="true">' + meta.glyph + '</span>' + esc(meta.label) + '</span>'
+            + '<span class="descent-card__lock" aria-hidden="true">' + (free ? '▶' : '🔒') + '</span>'
+          + '</div>'
+          + '<h4 class="descent-card__title">' + esc(l.t) + '</h4>'
+          + '<p class="descent-card__min">' + esc(l.min) + ' min</p>'
+          + srState
+        + '</article>';
+      }).join('');
+
+      var band = document.createElement('li');
+      band.className = 'descent-band';
+      band.innerHTML =
+        '<div class="descent-gate">'
+          + '<span class="descent-gate__node" aria-hidden="true"><span class="descent-gate__rn">' + (ROMAN[si] || (si + 1)) + '</span></span>'
+          + '<div class="descent-gate__meta">'
+            + '<h3 class="descent-gate__name">' + esc(s.n) + '</h3>'
+            + '<p class="descent-gate__gloss">' + esc(s.gloss) + '</p>'
+          + '</div>'
+        + '</div>'
+        + '<div class="descent-practices">' + cards + '</div>';
+      stagesEl.appendChild(band);
+      bands.push(band);
+    });
+
+    /* ── header stats + closing note, derived from the data ── */
+    var t = C.totals || {};
+    if (statsEl) {
+      statsEl.innerHTML =
+        '<span class="descent__stat"><b>' + (C.stages ? C.stages.length : 0) + '</b> gated depths</span>'
+        + '<span class="descent__stat"><b>' + (t.total || 0) + '</b> practices</span>'
+        + '<span class="descent__stat">≈ <b>' + (t.minutes || 0) + '</b> min in all</span>';
+    }
+    if (footEl) {
+      footEl.innerHTML = 'One door is already ajar. <b>' + esc(C.priceNote || 'Included with membership · £12 a month') + '</b>';
+    }
+
+    /* ── the descent: a single monotonic scroll value grows the spine and,
+          as the ember passes each gate node, ignites that gate + its practices ── */
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    function lightAll() {
+      bands.forEach(function (b) { b.classList.add('is-lit'); });
+      if (draw) draw.style.height = '100%';
+    }
+    if (reduce) { lightAll(); return; }
+
+    var maxDrawn = 0, ticking = false;
+    function update() {
+      ticking = false;
+      var br = body.getBoundingClientRect();
+      var vh = window.innerHeight || document.documentElement.clientHeight;
+      var ref = vh * 0.62;                                   // the descending "reach" line
+      var drawn = Math.max(0, Math.min(br.height, ref - br.top));
+      if (drawn > maxDrawn) maxDrawn = drawn;                // monotonic — the path stays walked
+      if (draw) draw.style.height = maxDrawn + 'px';
+      for (var i = 0; i < bands.length; i++) {
+        if (bands[i].classList.contains('is-lit')) continue;
+        var node = bands[i].querySelector('.descent-gate__node');
+        var r = node.getBoundingClientRect();
+        var cy = (r.top - br.top) + r.height / 2;            // node centre, relative to body top
+        if (maxDrawn >= cy - 6) bands[i].classList.add('is-lit');
+      }
+    }
+    function onScroll() { if (!ticking) { ticking = true; requestAnimationFrame(update); } }
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', function () { maxDrawn = 0; onScroll(); });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(onScroll);
+    requestAnimationFrame(update);
+    setTimeout(update, 400);
+  })();
+</script>
+<style>
+/* ═══ FEEL · what a practice feels like + what's inside ═══
+   Self-contained. Depends only on fresh.css tokens + Fraunces/Inter.
+   Prefix: .feel  ·  the free-taste player is the visual centrepiece. */
+
+.feel { position: relative; padding: clamp(4.5rem, 9vw, 7.5rem) 0; }
+.feel__inner { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 4vw, 3rem); }
+
+.feel__grid {
+  display: grid;
+  grid-template-columns: 1.04fr 0.96fr;
+  gap: clamp(2.2rem, 5vw, 4.5rem);
+  align-items: stretch;
+}
+.feel__col { display: flex; flex-direction: column; }
+
+/* ── shared internal type scale (both columns echo each other) ── */
+.feel__h {
+  font-family: var(--serif);
+  font-weight: 300;
+  color: var(--bone);
+  font-size: clamp(1.85rem, 3.7vw, 2.7rem);
+  line-height: 1.06;
+  letter-spacing: -0.015em;
+  margin-top: 0.85rem;
+}
+.feel__lead {
+  color: var(--bone-dim);
+  font-size: clamp(1.02rem, 1.2vw, 1.1rem);
+  line-height: 1.62;
+  margin-top: 1.15rem;
+  max-width: 46ch;
+}
+.feel__lead em {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  color: var(--rose);
+  font-size: 1.06em;
+}
+
+/* ═══ LEFT · the free-taste player ═══ */
+.feel__player {
+  position: relative;
+  margin-top: auto;               /* pins to base so the column fills, no void */
+  padding-top: clamp(1.8rem, 3vw, 2.6rem);
+}
+.feel-taste {
+  position: relative;
+  border-radius: 20px;
+  padding: clamp(1.35rem, 2.6vw, 1.9rem);
+  background:
+    linear-gradient(180deg,
+      color-mix(in oklab, var(--ink-3) 78%, transparent),
+      color-mix(in oklab, var(--ink-2) 82%, transparent));
+  border: 1px solid color-mix(in oklab, var(--ember) 24%, transparent);
+  box-shadow:
+    0 30px 70px -34px rgba(0,0,0,0.7),
+    inset 0 1px 0 color-mix(in oklab, var(--bone) 7%, transparent);
+  overflow: hidden;
+}
+/* warm hearth glow inside the card */
+.feel-taste::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background: radial-gradient(120% 90% at 12% 0%,
+    color-mix(in oklab, var(--ember) 16%, transparent), transparent 58%);
+}
+.feel-taste > * { position: relative; z-index: 1; }
+
+.feel-taste__head { display: flex; align-items: center; gap: clamp(0.9rem, 2vw, 1.2rem); }
+
+/* play / pause button */
+.feel-play {
+  flex: none; position: relative;
+  width: clamp(56px, 8vw, 66px); height: clamp(56px, 8vw, 66px);
+  border-radius: 50%;
+  display: grid; place-items: center;
+  background: linear-gradient(180deg, var(--ember), var(--ochre));
+  color: #241a09;
+  box-shadow: 0 12px 30px -10px color-mix(in oklab, var(--ember) 62%, black);
+  transition: transform .18s var(--ease), box-shadow .25s var(--ease);
+}
+.feel-play:hover { transform: translateY(-2px); box-shadow: 0 18px 40px -12px color-mix(in oklab, var(--ember) 72%, black); }
+.feel-play:active { transform: translateY(0); }
+.feel-play:focus-visible { outline: 2px solid var(--bone); outline-offset: 4px; }
+.feel-play svg { width: 42%; height: 42%; display: block; }
+.feel-play .feel-ic-pause { display: none; }
+.feel-play.is-playing .feel-ic-play { display: none; }
+.feel-play.is-playing .feel-ic-pause { display: block; }
+/* pulse ring while playing */
+.feel-play::after {
+  content: ""; position: absolute; inset: 0; border-radius: 50%;
+  border: 1px solid color-mix(in oklab, var(--ember) 60%, transparent);
+  opacity: 0; pointer-events: none;
+}
+.feel-play.is-playing::after { animation: feel-pulse 2s var(--ease) infinite; }
+@keyframes feel-pulse {
+  0%   { opacity: .55; transform: scale(1); }
+  70%  { opacity: 0;   transform: scale(1.5); }
+  100% { opacity: 0;   transform: scale(1.5); }
+}
+
+.feel-taste__meta { flex: 1 1 auto; min-width: 0; }
+.feel-taste__title { font-family: var(--serif); color: var(--bone); font-size: clamp(1.12rem, 1.6vw, 1.32rem); line-height: 1.2; }
+.feel-taste__sub { font-size: 0.82rem; color: var(--bone-faint); margin-top: 0.2rem; letter-spacing: 0.01em; }
+.feel-taste__time {
+  flex: none; align-self: flex-start;
+  font-size: 0.76rem; color: var(--bone-dim);
+  font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
+  padding-top: 0.15rem; white-space: nowrap;
+}
+.feel-taste__time .feel-cur { color: var(--ember); }
+.feel-taste__time .feel-sep { color: var(--bone-faint); margin: 0 0.15rem; }
+
+/* waveform = equaliser + scrubber in one */
+.feel-wave {
+  position: relative;
+  margin-top: clamp(1.3rem, 2.4vw, 1.7rem);
+  height: clamp(58px, 9vw, 74px);
+  display: flex; align-items: center; gap: 2px;
+  cursor: pointer;
+}
+.feel-wave i {
+  flex: 1 1 0; min-width: 0;
+  height: var(--h, 40%);
+  border-radius: 2px;
+  transform-origin: center;
+  background: color-mix(in oklab, var(--bone) 20%, transparent);   /* unplayed */
+  transition: background .35s var(--ease);
+}
+.feel-wave i.is-on {
+  background: linear-gradient(180deg,
+    color-mix(in oklab, var(--ember) 92%, transparent),
+    color-mix(in oklab, var(--ochre) 88%, transparent));
+}
+.feel-wave.is-playing i {
+  animation: feel-eq var(--d, 1.1s) var(--ease) infinite;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes feel-eq { 0%, 100% { transform: scaleY(0.56); } 50% { transform: scaleY(1); } }
+
+/* playhead */
+.feel-wave__head {
+  position: absolute; top: 6%; bottom: 6%; left: 0%;
+  width: 1.5px; background: color-mix(in oklab, var(--ember) 85%, var(--bone));
+  transform: translateX(-50%);
+  box-shadow: 0 0 10px color-mix(in oklab, var(--ember) 70%, transparent);
+  transition: left .12s linear;
+  pointer-events: none;
+}
+.feel-wave__head::before {
+  content: ""; position: absolute; left: 50%; top: 50%;
+  width: 9px; height: 9px; border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--ember);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ink) 70%, transparent), 0 0 12px color-mix(in oklab, var(--ember) 80%, transparent);
+}
+
+/* ═══ RIGHT · what's inside ═══ */
+.feel__inside { margin-top: auto; }
+.feel-list {
+  list-style: none; position: relative;
+  margin-top: clamp(1.4rem, 2.6vw, 2rem);
+  display: flex; flex-direction: column;
+}
+/* the spine — a faint ember thread stitching the markers together */
+.feel-list::before {
+  content: ""; position: absolute; z-index: 0;
+  left: calc(clamp(1.9rem, 3.5vw, 2.3rem) / 2);
+  top: clamp(1.1rem, 2vw, 1.5rem); bottom: clamp(1.1rem, 2vw, 1.5rem);
+  width: 1px; transform: translateX(-50%);
+  background: linear-gradient(180deg,
+    transparent,
+    color-mix(in oklab, var(--ember) 40%, transparent) 12%,
+    color-mix(in oklab, var(--ember) 40%, transparent) 88%,
+    transparent);
+}
+.feel-list li {
+  position: relative; z-index: 1;
+  display: grid;
+  grid-template-columns: clamp(1.9rem, 3.5vw, 2.3rem) 1fr;
+  gap: clamp(0.9rem, 1.8vw, 1.25rem);
+  align-items: center;
+  padding: clamp(0.95rem, 1.9vw, 1.3rem) 0;
+}
+.feel-list__m {
+  grid-row: span 2; align-self: center;
+  width: clamp(1.9rem, 3.5vw, 2.3rem); height: clamp(1.9rem, 3.5vw, 2.3rem);
+  border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--ink-2);
+  border: 1px solid color-mix(in oklab, var(--ember) 34%, transparent);
+  color: var(--ember); font-size: 0.82rem; line-height: 1;
+  transition: transform .3s var(--ease), border-color .3s var(--ease), box-shadow .3s var(--ease), color .3s var(--ease);
+}
+.feel-list li:hover .feel-list__m {
+  transform: scale(1.12) rotate(90deg);
+  border-color: var(--ember);
+  color: var(--bone);
+  box-shadow: 0 0 22px -4px color-mix(in oklab, var(--ember) 55%, transparent);
+}
+.feel-list__lead {
+  font-family: var(--serif); font-weight: 400;
+  color: var(--bone); font-size: clamp(1.04rem, 1.4vw, 1.16rem); line-height: 1.25;
+}
+.feel-list__sub { color: var(--bone-faint); font-size: 0.92rem; margin-top: 0.12rem; }
+.feel-list__lead, .feel-list__sub { grid-column: 2; }
+.feel-list__lead { transition: color .25s var(--ease); }
+.feel-list li:hover .feel-list__lead { color: #fff; }
+
+/* ── reveal-on-scroll (namespaced; self-driven by the IIFE) ── */
+.feel-reveal { opacity: 0; transform: translateY(24px); transition: opacity .9s var(--ease), transform .9s var(--ease); }
+.feel-reveal.feel-in { opacity: 1; transform: none; }
+.feel-d1 { transition-delay: .08s; }
+.feel-d2 { transition-delay: .16s; }
+.feel-d3 { transition-delay: .24s; }
+
+/* ── responsive ── */
+@media (max-width: 860px) {
+  .feel__grid { grid-template-columns: 1fr; gap: clamp(2.6rem, 8vw, 3.4rem); }
+  .feel__player, .feel__inside { margin-top: 1.6rem; }
+  .feel__lead { max-width: none; }
+}
+@media (max-width: 480px) {
+  .feel-taste__head { flex-wrap: wrap; }
+  .feel-taste__time { order: 3; width: 100%; padding-top: 0.4rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .feel-reveal { opacity: 1; transform: none; transition: none; }
+  .feel-wave.is-playing i { animation: none; }
+  .feel-play.is-playing::after { animation: none; }
+  .feel-wave__head { transition: none; }
+}
+</style>
+
+<section class="feel" id="feel" aria-labelledby="feel-title">
+  <div class="feel__inner">
+    <div class="feel__grid">
+
+      <!-- LEFT · what it feels like -->
+      <div class="feel__col">
+        <div class="feel-reveal">
+          <p class="eyebrow">What a practice feels like</p>
+          <h2 class="feel__h" id="feel-title">Ten minutes. A voice.<br>Your own weight.</h2>
+          <p class="feel__lead">
+            A quiet place to lie down, and a voice that asks nothing of you but to
+            notice — the weight of your back, the tide of the breath, the small
+            signals the body has been making all along. You end more
+            <em>here</em> than when you began.
+          </p>
+        </div>
+
+        <div class="feel__player feel-reveal feel-d1">
+          <div class="feel-taste" role="group" aria-label="Free taste — Orienting, an 8 minute practice preview">
+            <div class="feel-taste__head">
+              <button class="feel-play" type="button" aria-pressed="false" aria-label="Play preview">
+                <svg class="feel-ic-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.54.84l10-6.5a1 1 0 0 0 0-1.68l-10-6.5A1 1 0 0 0 8 5.5Z"/></svg>
+                <svg class="feel-ic-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.2"/><rect x="14" y="5" width="4" height="14" rx="1.2"/></svg>
+              </button>
+              <div class="feel-taste__meta">
+                <div class="feel-taste__title">Orienting</div>
+                <div class="feel-taste__sub">practice · 8 min · free to try</div>
+              </div>
+              <div class="feel-taste__time" aria-hidden="true">
+                <span class="feel-cur">0:00</span><span class="feel-sep">/</span><span class="feel-tot">8:00</span>
+              </div>
+            </div>
+            <div class="feel-wave" role="presentation" aria-hidden="true">
+              <div class="feel-wave__head"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT · what's inside -->
+      <div class="feel__col">
+        <div class="feel-reveal feel-d1">
+          <p class="eyebrow">What's inside</p>
+          <h2 class="feel__h">Everything the practice opens.</h2>
+        </div>
+        <div class="feel__inside feel-reveal feel-d2">
+          <ul class="feel-list">
+            <li>
+              <span class="feel-list__m" aria-hidden="true">&#10022;</span>
+              <span class="feel-list__lead">14 guided practices</span>
+              <span class="feel-list__sub">audio, body &amp; reflection</span>
+            </li>
+            <li>
+              <span class="feel-list__m" aria-hidden="true">&#10022;</span>
+              <span class="feel-list__lead">New practices as the work deepens</span>
+              <span class="feel-list__sub">the course keeps growing with you</span>
+            </li>
+            <li>
+              <span class="feel-list__m" aria-hidden="true">&#10022;</span>
+              <span class="feel-list__lead">Yours to return to, forever</span>
+              <span class="feel-list__sub">no expiry, no streak to keep</span>
+            </li>
+            <li>
+              <span class="feel-list__m" aria-hidden="true">&#10022;</span>
+              <span class="feel-list__lead">A private circle of fellow practitioners</span>
+              <span class="feel-list__sub">quiet company for the descent</span>
+            </li>
+            <li>
+              <span class="feel-list__m" aria-hidden="true">&#10022;</span>
+              <span class="feel-list__lead">Begin free — no card to start</span>
+              <span class="feel-list__sub">the first practice is yours today</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<script>
+(function () {
+  const root = document.getElementById('feel');
+  if (!root) return;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ── build the waveform (deterministic, organic arch shape) ── */
+  const wave = root.querySelector('.feel-wave');
+  const head = root.querySelector('.feel-wave__head');
+  const N = 56;
+  const bars = [];
+  for (let i = 0; i < N; i++) {
+    const x = i / (N - 1);
+    const env = 0.30 + 0.70 * Math.sin(Math.PI * x);            // quiet ends, full middle
+    const tex = 0.5 + 0.5 * Math.sin(i * 0.9) * Math.cos(i * 0.37); // texture
+    const h = Math.max(0.14, Math.min(1, env * (0.42 + 0.58 * Math.abs(tex))));
+    const b = document.createElement('i');
+    b.style.setProperty('--h', (h * 100).toFixed(1) + '%');
+    b.style.setProperty('--d', (0.85 + (i % 7) * 0.11).toFixed(2) + 's');
+    b.style.setProperty('--delay', ((i % 11) * 0.05).toFixed(2) + 's');
+    wave.appendChild(b);
+    bars.push(b);
+  }
+
+  /* ── mock transport ── */
+  const btn = root.querySelector('.feel-play');
+  const curEl = root.querySelector('.feel-cur');
+  const TOTAL = 8 * 60;   // 8:00
+  let t = 0, playing = false, last = 0;
+
+  const fmt = (s) => {
+    s = Math.max(0, Math.min(TOTAL, Math.round(s)));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  };
+  function render() {
+    const p = t / TOTAL;
+    const played = Math.round(p * N);
+    for (let i = 0; i < N; i++) bars[i].classList.toggle('is-on', i < played);
+    head.style.left = (p * 100).toFixed(2) + '%';
+    curEl.textContent = fmt(t);
+  }
+  function setPlaying(on) {
+    playing = on;
+    btn.classList.toggle('is-playing', on);
+    wave.classList.toggle('is-playing', on && !reduce);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.setAttribute('aria-label', on ? 'Pause preview' : 'Play preview');
+    if (on) { last = performance.now(); requestAnimationFrame(tick); }
+  }
+  function tick(now) {
+    if (!playing) return;
+    if (!reduce) {
+      t += (now - last) / 1000; last = now;
+      if (t >= TOTAL) { t = 0; render(); setPlaying(false); return; }
+      render();
+    }
+    requestAnimationFrame(tick);
+  }
+
+  btn.addEventListener('click', () => setPlaying(!playing));
+  wave.addEventListener('click', (e) => {
+    const r = wave.getBoundingClientRect();
+    t = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * TOTAL;
+    render();
+  });
+  render();
+
+  /* ── reveal-on-scroll ── */
+  const items = [...root.querySelectorAll('.feel-reveal')];
+  if (reduce || !('IntersectionObserver' in window)) {
+    items.forEach(el => el.classList.add('feel-in'));
+  } else {
+    const io = new IntersectionObserver((es) => es.forEach(e => {
+      if (e.isIntersecting) { e.target.classList.add('feel-in'); io.unobserve(e.target); }
+    }), { threshold: 0.18, rootMargin: '0px 0px -8% 0px' });
+    items.forEach(el => io.observe(el));
+  }
+})();
+</script>
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     PROOF / TESTIMONIALS — "From the circle"
+     Warm typographic quote treatment. CSS-gradient avatars (no images).
+     Desktop: 3 columns · Mobile: swipeable snap-row. Self-contained fragment.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<style>
+  .proof {
+    position: relative;
+    padding: clamp(4.5rem, 11vw, 8rem) 0;
+    /* faint local warmth behind the header — no pseudo, so nothing clips the
+       edge-bleeding mobile carousel below */
+    background: radial-gradient(78% 55% at 50% 0%,
+      color-mix(in oklab, var(--blood) 9%, transparent), transparent 62%);
+  }
+
+  /* ── header ── */
+  .proof-head {
+    text-align: center;
+    max-width: 40ch;
+    margin: 0 auto clamp(2.4rem, 5vw, 3.8rem);
+  }
+  .proof-head .eyebrow { display: block; }
+  .proof-title {
+    font-family: var(--serif);
+    font-weight: 300;
+    font-size: clamp(2rem, 4.6vw, 3.1rem);
+    color: var(--bone);
+    margin-top: 1rem;
+    text-wrap: balance;
+  }
+
+  /* ── grid (desktop) ── */
+  .proof-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: clamp(1rem, 1.7vw, 1.5rem);
+    align-items: stretch;
+  }
+
+  /* ── card ── */
+  .proof-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: clamp(300px, 38vh, 360px);
+    padding: clamp(1.7rem, 2.4vw, 2.3rem);
+    border-radius: 20px;
+    border: 1px solid color-mix(in oklab, var(--bone) 9%, transparent);
+    background:
+      linear-gradient(180deg,
+        color-mix(in oklab, var(--ink-3) 72%, transparent),
+        color-mix(in oklab, var(--ink-2) 58%, transparent));
+    box-shadow: 0 24px 55px -38px color-mix(in oklab, var(--blood) 45%, black);
+    overflow: hidden;
+    transition: transform .4s var(--ease), border-color .35s var(--ease),
+                box-shadow .4s var(--ease);
+  }
+  /* candle-catch hairline along the top edge */
+  .proof-card::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent,
+      color-mix(in oklab, var(--ember) 55%, transparent) 22%,
+      color-mix(in oklab, var(--ember) 55%, transparent) 78%, transparent);
+    opacity: .45;
+    transition: opacity .4s var(--ease);
+  }
+  @media (hover: hover) {
+    .proof-card:hover {
+      transform: translateY(-4px);
+      border-color: color-mix(in oklab, var(--ember) 34%, transparent);
+      box-shadow: 0 30px 60px -34px color-mix(in oklab, var(--blood) 60%, black);
+    }
+    .proof-card:hover::after { opacity: 1; }
+  }
+
+  /* ── quote ── */
+  .proof-quote {
+    position: relative;
+    z-index: 1;
+    font-family: var(--serif);
+    font-weight: 300;
+    font-size: clamp(1.12rem, 1.5vw, 1.28rem);
+    line-height: 1.46;
+    letter-spacing: -0.005em;
+    color: var(--bone);
+    padding-top: clamp(1.9rem, 3vw, 2.4rem);
+    text-wrap: pretty;
+  }
+  /* oversized decorative Fraunces quotation mark, low-opacity, behind the text */
+  .proof-quote::before {
+    content: "\201C";
+    position: absolute;
+    top: clamp(-0.6rem, -0.5vw, -0.2rem);
+    left: -0.3rem;
+    z-index: -1;
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(4.2rem, 7vw, 5.6rem);
+    line-height: 1;
+    color: color-mix(in oklab, var(--ember) 24%, transparent);
+    pointer-events: none;
+  }
+
+  /* ── attribution ── */
+  .proof-who {
+    margin-top: auto;
+    padding-top: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: .85rem;
+  }
+  .proof-av {
+    flex: none;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 1.15rem;
+    color: color-mix(in oklab, var(--bone) 92%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--bone) 22%, transparent),
+                0 6px 16px -8px rgba(0,0,0,.6);
+  }
+  /* per-person warm hue — pure CSS gradient circles, no images */
+  .proof-card:nth-child(1) .proof-av,
+  .proof-stack .proof-dot:nth-child(1) {
+    background: radial-gradient(circle at 34% 28%,
+      color-mix(in oklab, var(--rose) 90%, white 4%), var(--blood-deep) 82%);
+  }
+  .proof-card:nth-child(2) .proof-av,
+  .proof-stack .proof-dot:nth-child(2) {
+    background: radial-gradient(circle at 34% 28%,
+      color-mix(in oklab, var(--ember) 82%, white 6%), var(--ochre) 55%, #6a3d16 92%);
+  }
+  .proof-card:nth-child(3) .proof-av,
+  .proof-stack .proof-dot:nth-child(3) {
+    background: radial-gradient(circle at 34% 28%,
+      color-mix(in oklab, var(--clay) 92%, white 4%), var(--blood-deep) 84%);
+  }
+  .proof-id { display: flex; flex-direction: column; line-height: 1.25; }
+  .proof-name { font-family: var(--sans); font-weight: 600; font-size: .92rem; color: var(--bone); }
+  .proof-ctx  { font-family: var(--sans); font-size: .78rem; color: var(--bone-faint); letter-spacing: .01em; }
+
+  /* ── aggregate trust cue (understated, closes the section) ── */
+  .proof-trust {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .9rem;
+    flex-wrap: wrap;
+    margin-top: clamp(2.4rem, 5vw, 3.6rem);
+    color: var(--bone-dim);
+    font-size: .92rem;
+  }
+  .proof-stack { display: inline-flex; }
+  .proof-dot {
+    width: 28px; height: 28px; border-radius: 50%;
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--bone) 18%, transparent),
+                0 0 0 2px var(--ink);
+  }
+  .proof-dot + .proof-dot { margin-left: -10px; }
+  .proof-stack .proof-dot:nth-child(4) {
+    background: radial-gradient(circle at 34% 28%, var(--bone-faint), #3a2a1a);
+  }
+  .proof-stack .proof-dot:nth-child(5) {
+    background: radial-gradient(circle at 34% 28%, color-mix(in oklab, var(--rose) 60%, #3a2015), #2a1712);
+  }
+  .proof-count b { color: var(--bone); font-weight: 600; }
+  .proof-count { letter-spacing: .01em; }
+
+  /* ── reveal-on-scroll (gated by proof-js so no-JS shows final state) ── */
+  .proof-reveal { opacity: 1; transform: none; }
+  .proof.proof-js .proof-reveal {
+    opacity: 0;
+    transform: translateY(22px);
+    transition: opacity .85s var(--ease), transform .85s var(--ease);
+  }
+  .proof.proof-js.is-revealed .proof-reveal { opacity: 1; transform: none; }
+  .proof.proof-js .proof-grid .proof-card:nth-child(1) { transition-delay: .10s; }
+  .proof.proof-js .proof-grid .proof-card:nth-child(2) { transition-delay: .20s; }
+  .proof.proof-js .proof-grid .proof-card:nth-child(3) { transition-delay: .30s; }
+  .proof.proof-js .proof-trust { transition-delay: .42s; }
+
+  /* ── mobile: swipeable snap-row that bleeds to the screen edges ── */
+  @media (max-width: 720px) {
+    .proof-grid {
+      display: flex;
+      grid-template-columns: none;
+      gap: 1rem;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch;
+      scroll-padding-inline: clamp(1.2rem, 4vw, 3rem);
+      /* bleed past .wrap padding for an edge-to-edge carousel */
+      margin-inline: calc(-1 * clamp(1.2rem, 4vw, 3rem));
+      padding-inline: clamp(1.2rem, 4vw, 3rem);
+      padding-bottom: .6rem;
+    }
+    .proof-grid::-webkit-scrollbar { display: none; }
+    .proof-grid { scrollbar-width: none; }
+    .proof-card {
+      flex: 0 0 84%;
+      scroll-snap-align: center;
+      min-height: 260px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .proof.proof-js .proof-reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
+    .proof-card { transition: none !important; }
+    .proof-card:hover { transform: none !important; }
+  }
+</style>
+
+<section class="proof" id="proof" aria-labelledby="proof-heading">
+  <div class="wrap">
+    <header class="proof-head proof-reveal">
+      <span class="eyebrow">From the circle</span>
+      <h2 id="proof-heading" class="proof-title">What the ground gives back.</h2>
+    </header>
+
+    <div class="proof-grid">
+      <figure class="proof-card proof-reveal">
+        <blockquote class="proof-quote">For the first time in years, I slept without bracing. I didn't know my body was allowed to do that.</blockquote>
+        <figcaption class="proof-who">
+          <span class="proof-av" aria-hidden="true">M</span>
+          <span class="proof-id">
+            <span class="proof-name">Maya R.</span>
+            <span class="proof-ctx">3 months in</span>
+          </span>
+        </figcaption>
+      </figure>
+
+      <figure class="proof-card proof-reveal">
+        <blockquote class="proof-quote">I came for grief. Rootwork taught me how to stay in my body long enough to feel it.</blockquote>
+        <figcaption class="proof-who">
+          <span class="proof-av" aria-hidden="true">D</span>
+          <span class="proof-id">
+            <span class="proof-name">Daniel K.</span>
+            <span class="proof-ctx">new member</span>
+          </span>
+        </figcaption>
+      </figure>
+
+      <figure class="proof-card proof-reveal">
+        <blockquote class="proof-quote">The only practice I've ever kept. Ten minutes that change the whole shape of the day.</blockquote>
+        <figcaption class="proof-who">
+          <span class="proof-av" aria-hidden="true">P</span>
+          <span class="proof-id">
+            <span class="proof-name">Priya S.</span>
+            <span class="proof-ctx">8 months in</span>
+          </span>
+        </figcaption>
+      </figure>
+    </div>
+
+    <p class="proof-trust proof-reveal">
+      <span class="proof-stack" aria-hidden="true">
+        <span class="proof-dot"></span>
+        <span class="proof-dot"></span>
+        <span class="proof-dot"></span>
+        <span class="proof-dot"></span>
+        <span class="proof-dot"></span>
+      </span>
+      <span class="proof-count"><b>2,400</b> practising the ground</span>
+    </p>
+  </div>
+</section>
+
+<script>
+  /* proof — staggered reveal-on-scroll. Self-contained IIFE, no globals.
+     Adds `proof-js` before observing so content stays visible if JS never runs. */
+  (function () {
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var sections = document.querySelectorAll('.proof');
+    if (!sections.length) return;
+
+    if (reduce || !('IntersectionObserver' in window)) {
+      // leave final (visible) state — no proof-js, no hiding
+      return;
+    }
+
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) {
+          e.target.classList.add('is-revealed');
+          io.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.16, rootMargin: '0px 0px -8% 0px' });
+
+    sections.forEach(function (s) {
+      s.classList.add('proof-js');
+      io.observe(s);
+    });
+  })();
+</script>
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     THE GUIDE — credibility, warmly. Candlelit abstract "poster" that doubles as a
+     "meet your guide" video play-frame (mock — no real video, no external assets).
+     Self-contained fragment · prefix .guide · CSP-safe.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<style>
+  .guide { position: relative; padding: clamp(4.5rem, 10vw, 8rem) 0; }
+  .guide__inner {
+    max-width: 1120px; margin: 0 auto; padding: 0 clamp(1.3rem, 4vw, 3rem);
+    display: grid; grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr);
+    gap: clamp(2.2rem, 5.5vw, 4.75rem); align-items: center;
+  }
+
+  /* ── the play-frame: candlelit abstract poster, now an interactive button ── */
+  .guide__player {
+    position: relative; display: block; aspect-ratio: 4 / 5; width: 100%;
+    padding: 0; text-align: left; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    border-radius: clamp(20px, 3vw, 28px); overflow: hidden; isolation: isolate;
+    border: 1px solid color-mix(in oklab, var(--ember) 20%, transparent);
+    /* stacked warmth: firelight rising from lower-centre, clay presence upper-left, deep body */
+    background:
+      radial-gradient(46% 58% at 50% 64%, color-mix(in oklab, var(--ember) 60%, transparent), transparent 68%),
+      radial-gradient(90% 72% at 32% 26%, color-mix(in oklab, var(--clay) 62%, transparent), transparent 66%),
+      radial-gradient(120% 120% at 62% 8%, color-mix(in oklab, var(--rose) 26%, transparent), transparent 55%),
+      linear-gradient(178deg, color-mix(in oklab, var(--blood-deep) 78%, #160d0a), #150c0a 82%);
+    box-shadow:
+      0 40px 90px -50px color-mix(in oklab, var(--blood) 90%, black),
+      inset 0 1px 0 color-mix(in oklab, var(--bone) 14%, transparent);
+    transition: box-shadow .4s var(--ease), transform .4s var(--ease);
+  }
+  .guide__player:hover { box-shadow: 0 48px 100px -48px color-mix(in oklab, var(--blood) 95%, black), inset 0 1px 0 color-mix(in oklab, var(--bone) 18%, transparent); }
+  .guide__player:focus-visible { outline: 2px solid var(--ember); outline-offset: 4px; }
+
+  /* inner vignette — darkens the edges so the warm centre reads as depth */
+  .guide__player::before {
+    content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+    background: radial-gradient(78% 78% at 50% 52%, transparent 42%, color-mix(in oklab, #100a06 88%, transparent) 100%);
+  }
+  /* top sheen — candlelight catching the upper edge */
+  .guide__player::after {
+    content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--bone) 10%, transparent), transparent 22%);
+  }
+  /* the ember: a soft, tall, warm glow that breathes like a lit form */
+  .guide__ember {
+    position: absolute; left: 50%; bottom: 14%; z-index: 1;
+    width: 58%; aspect-ratio: 3 / 4; transform: translateX(-50%);
+    background: radial-gradient(50% 50% at 50% 55%, color-mix(in oklab, var(--ember) 78%, transparent), color-mix(in oklab, var(--ochre) 30%, transparent) 55%, transparent 72%);
+    filter: blur(14px);
+    animation: guide-breathe 7.5s var(--ease) infinite;
+  }
+  /* fine grain for texture */
+  .guide__grain {
+    position: absolute; inset: 0; z-index: 4; pointer-events: none; opacity: .14;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='gn'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23gn)'/%3E%3C/svg%3E");
+  }
+  /* scrim — dims the poster while "playing" so the pause + progress read clearly */
+  .guide__scrim {
+    position: absolute; inset: 0; z-index: 5; pointer-events: none;
+    background: color-mix(in oklab, #100a06 55%, transparent);
+    opacity: 0; transition: opacity .5s var(--ease);
+  }
+  .guide__player.is-playing .guide__scrim { opacity: 1; }
+
+  /* corner label — top-left, soft video title */
+  .guide__watch {
+    position: absolute; z-index: 6; top: clamp(.9rem, 2.2vw, 1.2rem); left: clamp(.9rem, 2.4vw, 1.2rem);
+    display: inline-flex; align-items: center; gap: .5em;
+    padding: .38rem .7rem; border-radius: 999px;
+    font-size: .68rem; letter-spacing: .16em; text-transform: uppercase; white-space: nowrap;
+    color: color-mix(in oklab, var(--bone) 78%, transparent);
+    background: color-mix(in oklab, var(--ink) 52%, transparent);
+    border: 1px solid color-mix(in oklab, var(--ember) 24%, transparent);
+    backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
+  }
+  .guide__watch::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 8px color-mix(in oklab, var(--ember) 80%, transparent); }
+
+  /* duration badge — bottom-right */
+  .guide__duration {
+    position: absolute; z-index: 6; right: clamp(.9rem, 2.4vw, 1.2rem); bottom: clamp(.9rem, 2.2vw, 1.2rem);
+    padding: .26rem .55rem; border-radius: 8px;
+    font-size: .72rem; font-weight: 600; letter-spacing: .04em; font-variant-numeric: tabular-nums;
+    color: color-mix(in oklab, var(--bone) 88%, transparent);
+    background: color-mix(in oklab, var(--ink) 62%, transparent);
+    border: 1px solid color-mix(in oklab, var(--bone) 16%, transparent);
+    backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
+  }
+
+  /* ── centre play button + rings ── */
+  .guide__play {
+    position: absolute; z-index: 6; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: clamp(62px, 12vw, 84px); aspect-ratio: 1; border-radius: 50%;
+    display: grid; place-items: center;
+    color: #2a1c08;
+    background: linear-gradient(180deg, var(--ember), var(--ochre));
+    box-shadow: 0 12px 34px -8px color-mix(in oklab, var(--ember) 70%, black);
+    transition: transform .3s var(--ease), box-shadow .3s var(--ease);
+  }
+  .guide__player:hover .guide__play { transform: translate(-50%, -50%) scale(1.07); box-shadow: 0 16px 42px -8px color-mix(in oklab, var(--ember) 82%, black); }
+  /* static rim ring */
+  .guide__play::before {
+    content: ""; position: absolute; inset: -9px; border-radius: 50%;
+    border: 1px solid color-mix(in oklab, var(--ember) 40%, transparent);
+  }
+  /* continuous invitation pulse (idle only) */
+  .guide__play::after {
+    content: ""; position: absolute; inset: 0; border-radius: 50%;
+    border: 1.5px solid color-mix(in oklab, var(--ember) 55%, transparent);
+    animation: guide-ping 3.2s var(--ease) infinite;
+  }
+  .guide__player.is-playing .guide__play::after { animation: none; opacity: 0; }
+
+  /* one-shot ripple fired on each click */
+  .guide__ripple {
+    position: absolute; inset: 0; border-radius: 50%; pointer-events: none; opacity: 0;
+    background: radial-gradient(circle, color-mix(in oklab, var(--ember) 45%, transparent), transparent 65%);
+  }
+  .guide__ripple.is-on { animation: guide-ripple .7s var(--ease); }
+
+  /* play / pause icons cross-fade */
+  .guide__icon { position: absolute; inset: 0; display: grid; place-items: center; transition: opacity .32s var(--ease), transform .32s var(--ease); }
+  .guide__icon--play svg { display: block; margin-left: 3px; } /* optical centring of the triangle */
+  .guide__icon--pause { gap: 5px; }
+  .guide__icon--pause i { width: 5px; height: 22px; border-radius: 2px; background: currentColor; display: block; }
+  .guide__player:not(.is-playing) .guide__icon--pause { opacity: 0; transform: scale(.6); }
+  .guide__player.is-playing .guide__icon--play { opacity: 0; transform: scale(.6); }
+
+  /* faux progress bar along the bottom edge (visible while playing) */
+  .guide__progress { position: absolute; z-index: 6; left: 0; right: 0; bottom: 0; height: 3px; background: color-mix(in oklab, var(--bone) 12%, transparent); opacity: 0; transition: opacity .4s var(--ease); }
+  .guide__player.is-playing .guide__progress { opacity: 1; }
+  .guide__progress-fill { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--ochre), var(--ember)); }
+  .guide__player.is-playing .guide__progress-fill { animation: guide-progress 9s linear forwards; }
+
+  /* ── the copy ── */
+  .guide__text { max-width: 40rem; }
+  .guide__role {
+    font-family: var(--sans); font-size: .76rem; font-weight: 600;
+    letter-spacing: .3em; text-transform: uppercase; color: var(--ember);
+    margin-bottom: 1rem;
+  }
+  .guide__heading {
+    font-family: var(--serif); font-weight: 300;
+    font-size: clamp(2rem, 4.6vw, 3.05rem); line-height: 1.06; letter-spacing: -0.015em;
+    color: var(--bone); max-width: 22ch;
+  }
+  .guide__body {
+    color: var(--bone-dim); font-size: clamp(1.02rem, 1.15vw, 1.12rem);
+    line-height: 1.72; max-width: 46ch; margin-top: 1.5rem;
+  }
+  /* ── pull quote: the emotional climax — big italic serif, ember accent ── */
+  .guide__quote {
+    position: relative; margin-top: clamp(2rem, 3.5vw, 2.75rem);
+    padding-left: clamp(1.2rem, 2.4vw, 1.7rem);
+    border-left: 2px solid color-mix(in oklab, var(--ember) 55%, transparent);
+    max-width: 27ch;
+  }
+  .guide__quote::before {
+    content: "\201C"; position: absolute; left: clamp(.7rem, 1.8vw, 1.1rem); top: -.35em;
+    font-family: var(--serif); font-size: clamp(2.6rem, 6vw, 4rem); line-height: 1;
+    color: color-mix(in oklab, var(--ember) 34%, transparent); pointer-events: none;
+  }
+  .guide__quote p {
+    font-family: var(--serif); font-style: italic; font-weight: 300;
+    font-size: clamp(1.5rem, 3.2vw, 2.15rem); line-height: 1.28; letter-spacing: -0.01em;
+    color: color-mix(in oklab, var(--rose) 55%, var(--bone));
+  }
+
+  /* ── reveal-on-scroll (namespaced; toggled by this section's own IIFE) ── */
+  .guide-reveal { opacity: 0; transform: translateY(22px); transition: opacity .9s var(--ease), transform .9s var(--ease); transition-delay: var(--gd, 0s); }
+  .guide-reveal.is-in { opacity: 1; transform: none; }
+  .guide__player.guide-reveal { transform: translateY(22px) scale(.985); }
+  .guide__player.guide-reveal.is-in { transform: none; }
+
+  @keyframes guide-breathe {
+    0%, 100% { opacity: .55; transform: translateX(-50%) scale(1); }
+    50%      { opacity: .9;  transform: translateX(-50%) translateY(-2%) scale(1.06); }
+  }
+  @keyframes guide-ping {
+    0%   { transform: scale(1);    opacity: .7; }
+    70%, 100% { transform: scale(1.7); opacity: 0; }
+  }
+  @keyframes guide-ripple {
+    0%   { transform: scale(.4); opacity: .55; }
+    100% { transform: scale(2.6); opacity: 0; }
+  }
+  @keyframes guide-progress {
+    0% { width: 0; } 100% { width: 100%; }
+  }
+
+  /* ── mobile: stack, poster first, capped so it doesn't dominate ── */
+  @media (max-width: 860px) {
+    .guide__inner { grid-template-columns: 1fr; gap: clamp(2rem, 7vw, 3rem); }
+    .guide__player { max-width: 420px; margin: 0 auto; aspect-ratio: 5 / 6; }
+    .guide__text { max-width: none; }
+    .guide__heading, .guide__body, .guide__quote { max-width: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .guide__ember { animation: none; }
+    .guide__play::after { animation: none; opacity: 0; }
+    .guide__ripple.is-on { animation: none; }
+    .guide__player.is-playing .guide__progress-fill { animation: none; width: 40%; } /* final state, no motion */
+    .guide-reveal, .guide__player.guide-reveal { opacity: 1; transform: none; transition: none; }
+  }
+</style>
+
+<section class="guide" id="guide" aria-labelledby="guide-heading">
+  <div class="guide__inner">
+    <button type="button" class="guide__player guide-reveal" aria-pressed="false"
+            aria-label="Play the meet-your-guide video, 2 minutes 4 seconds">
+      <span class="guide__ember" aria-hidden="true"></span>
+      <span class="guide__grain" aria-hidden="true"></span>
+      <span class="guide__scrim" aria-hidden="true"></span>
+
+      <span class="guide__watch" aria-hidden="true">Watch · meet your guide</span>
+      <span class="guide__duration" aria-hidden="true">2:04</span>
+
+      <span class="guide__play" aria-hidden="true">
+        <span class="guide__ripple"></span>
+        <span class="guide__icon guide__icon--play">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden="true">
+            <path d="M8 5.14v13.72a1 1 0 0 0 1.52.86l11.14-6.86a1 1 0 0 0 0-1.72L9.52 4.28A1 1 0 0 0 8 5.14Z"/>
+          </svg>
+        </span>
+        <span class="guide__icon guide__icon--pause"><i></i><i></i></span>
+      </span>
+
+      <span class="guide__progress" aria-hidden="true"><span class="guide__progress-fill"></span></span>
+    </button>
+
+    <div class="guide__text">
+      <p class="guide__role guide-reveal" style="--gd:.06s">Your guide</p>
+      <h2 class="guide__heading guide-reveal" id="guide-heading" style="--gd:.14s">Made by someone who had to find the ground first.</h2>
+      <p class="guide__body guide-reveal" style="--gd:.24s">Of Blood and Bones grew out of one practitioner's own long descent — years of somatic training, trauma-informed practice, and the slow relearning of safety in the body. Rootwork is the map they wished they'd been handed at the start.</p>
+      <blockquote class="guide__quote guide-reveal" style="--gd:.34s">
+        <p>I couldn't think my way home. I had to feel the way down.</p>
+      </blockquote>
+    </div>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var section = document.getElementById('guide');
+    if (!section) return;
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    /* reveal-on-scroll */
+    var items = section.querySelectorAll('.guide-reveal');
+    if (reduce || !('IntersectionObserver' in window)) {
+      items.forEach(function (el) { el.classList.add('is-in'); });
+    } else {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add('is-in'); io.unobserve(e.target); }
+        });
+      }, { threshold: 0.2, rootMargin: '0px 0px -8% 0px' });
+      items.forEach(function (el) { io.observe(el); });
+    }
+
+    /* mock "meet your guide" play/pause — no real video, purely presentational */
+    var player = section.querySelector('.guide__player');
+    if (!player) return;
+    var watch = player.querySelector('.guide__watch');
+    var ripple = player.querySelector('.guide__ripple');
+    var PLAY_LABEL = 'Play the meet-your-guide video, 2 minutes 4 seconds';
+
+    player.addEventListener('click', function () {
+      var playing = player.classList.toggle('is-playing');
+      player.setAttribute('aria-pressed', playing ? 'true' : 'false');
+      player.setAttribute('aria-label', playing ? 'Pause the meet-your-guide video' : PLAY_LABEL);
+      if (watch) watch.textContent = playing ? 'Now playing…' : 'Watch · meet your guide';
+      if (ripple && !reduce) { /* restart the one-shot ripple */
+        ripple.classList.remove('is-on'); void ripple.offsetWidth; ripple.classList.add('is-on');
+      }
+    });
+  })();
+</script>
+<style>
+  /* ══ FAQ · "The honest answers" — objection-handling accordion ══
+     Namespaced .faq / .faq-*. Native <details>/<summary> for a11y + no-JS
+     fallback; the IIFE only choreographs the open/close height. */
+  .faq {
+    padding: clamp(4.5rem, 9vw, 7rem) 0;
+  }
+  .faq-wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 0 clamp(1.2rem, 4vw, 2rem);
+  }
+
+  /* ── header ── */
+  .faq-head {
+    text-align: center;
+    margin-bottom: clamp(2.4rem, 5vw, 3.6rem);
+  }
+  .faq-head .eyebrow { display: block; }
+  .faq-head h2 {
+    font-family: var(--serif);
+    font-weight: 300;
+    color: var(--bone);
+    font-size: clamp(2rem, 4.6vw, 3.1rem);
+    line-height: 1.04;
+    letter-spacing: -0.012em;
+    margin-top: 1rem;
+  }
+  .faq-rule {
+    width: 46px;
+    height: 1px;
+    margin: 1.5rem auto 0;
+    background: linear-gradient(90deg,
+      transparent,
+      color-mix(in oklab, var(--ember) 60%, transparent),
+      transparent);
+  }
+
+  /* ── list ── */
+  .faq-list {
+    border-top: 1px solid color-mix(in oklab, var(--bone) 11%, transparent);
+  }
+  .faq-item {
+    border-bottom: 1px solid color-mix(in oklab, var(--bone) 11%, transparent);
+  }
+
+  /* summary = the question row */
+  .faq-q {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: clamp(1rem, 3vw, 1.75rem);
+    padding: clamp(1.15rem, 2.4vw, 1.5rem) 0;
+    list-style: none;
+    cursor: pointer;
+    outline: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .faq-q::-webkit-details-marker { display: none; }
+  .faq-q::marker { content: ""; }
+
+  .faq-q-text {
+    flex: 1;
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(1.08rem, 1.9vw, 1.32rem);
+    line-height: 1.32;
+    letter-spacing: -0.005em;
+    color: color-mix(in oklab, var(--bone) 84%, var(--ink));
+    transition: color .28s var(--ease);
+  }
+  .faq-item:hover .faq-q-text,
+  .faq-item[open] .faq-q-text { color: var(--bone); }
+
+  /* keyboard focus ring lives on the text, not the whole row */
+  .faq-q:focus-visible .faq-q-text {
+    color: var(--bone);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--ember) 70%, transparent);
+    text-underline-offset: 5px;
+  }
+
+  /* ── the +/− indicator ── */
+  .faq-ic {
+    position: relative;
+    flex: none;
+    width: clamp(30px, 4vw, 36px);
+    height: clamp(30px, 4vw, 36px);
+    margin-top: 2px;
+    border-radius: 50%;
+    border: 1px solid color-mix(in oklab, var(--ember) 26%, transparent);
+    transition: border-color .3s var(--ease), background .3s var(--ease);
+  }
+  .faq-item:hover .faq-ic,
+  .faq-item[open] .faq-ic {
+    border-color: color-mix(in oklab, var(--ember) 62%, transparent);
+    background: color-mix(in oklab, var(--ember) 8%, transparent);
+  }
+  .faq-ic::before,
+  .faq-ic::after {
+    content: "";
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 12px; height: 1.5px;
+    border-radius: 2px;
+    background: var(--ember);
+    transform: translate(-50%, -50%);
+    transition: transform .4s var(--ease), opacity .3s var(--ease);
+  }
+  /* vertical bar of the plus — collapses to leave a minus on open */
+  .faq-ic::after { transform: translate(-50%, -50%) rotate(90deg); }
+  .faq-item[open] .faq-ic::after {
+    transform: translate(-50%, -50%) rotate(0deg);
+    opacity: 0;
+  }
+
+  /* ── answer panel ── */
+  .faq-panel {
+    overflow: hidden;
+    transition: height .42s var(--ease);
+  }
+  .faq-panel-inner {
+    padding: 0 clamp(2.6rem, 8vw, 3.5rem) clamp(1.3rem, 3vw, 1.65rem) 0;
+  }
+  .faq-a {
+    font-family: var(--sans);
+    font-size: clamp(0.98rem, 1.25vw, 1.06rem);
+    line-height: 1.72;
+    color: var(--bone-dim);
+    max-width: 60ch;
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity .45s var(--ease), transform .45s var(--ease);
+  }
+  .faq-item[open] .faq-a { opacity: 1; transform: none; }
+
+  /* reveal-on-scroll (self-contained, driven by this section's IIFE) */
+  .faq-reveal {
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity .8s var(--ease), transform .8s var(--ease);
+  }
+  .faq-reveal.faq-in { opacity: 1; transform: none; }
+  .faq-r1 { transition-delay: .05s; }
+  .faq-r2 { transition-delay: .12s; }
+  .faq-r3 { transition-delay: .19s; }
+  .faq-r4 { transition-delay: .26s; }
+  .faq-r5 { transition-delay: .33s; }
+
+  @media (max-width: 560px) {
+    .faq-panel-inner { padding-right: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .faq-q-text, .faq-ic, .faq-ic::before, .faq-ic::after,
+    .faq-panel, .faq-a { transition: none !important; }
+    .faq-a { opacity: 1; transform: none; }
+    .faq-reveal { opacity: 1; transform: none; transition: none; }
+  }
+</style>
+
+<section class="faq" aria-labelledby="faq-title">
+  <div class="faq-wrap">
+    <header class="faq-head faq-reveal">
+      <span class="eyebrow">Before you begin</span>
+      <h2 id="faq-title">The honest answers.</h2>
+      <div class="faq-rule" aria-hidden="true"></div>
+    </header>
+
+    <div class="faq-list">
+      <details class="faq-item faq-reveal faq-r1">
+        <summary class="faq-q">
+          <span class="faq-q-text">I've never done somatic work. Is that a problem?</span>
+          <span class="faq-ic" aria-hidden="true"></span>
+        </summary>
+        <div class="faq-panel">
+          <div class="faq-panel-inner">
+            <p class="faq-a">Not at all — Rootwork assumes nothing. The earliest practices are the gentlest, and the order is built to hold your hand the whole way down.</p>
+          </div>
+        </div>
+      </details>
+
+      <details class="faq-item faq-reveal faq-r2">
+        <summary class="faq-q">
+          <span class="faq-q-text">What if I can't feel anything in my body?</span>
+          <span class="faq-ic" aria-hidden="true"></span>
+        </summary>
+        <div class="faq-panel">
+          <div class="faq-panel-inner">
+            <p class="faq-a">That's common, and it's welcome. Numbness is information too — several of the practices are designed to begin exactly there, with patience.</p>
+          </div>
+        </div>
+      </details>
+
+      <details class="faq-item faq-reveal faq-r3">
+        <summary class="faq-q">
+          <span class="faq-q-text">How much time does it take?</span>
+          <span class="faq-ic" aria-hidden="true"></span>
+        </summary>
+        <div class="faq-panel">
+          <div class="faq-panel-inner">
+            <p class="faq-a">Most practices run 6–12 minutes. Ten minutes a day is plenty; the work is in the returning, not the length.</p>
+          </div>
+        </div>
+      </details>
+
+      <details class="faq-item faq-reveal faq-r4">
+        <summary class="faq-q">
+          <span class="faq-q-text">Is this therapy?</span>
+          <span class="faq-ic" aria-hidden="true"></span>
+        </summary>
+        <div class="faq-panel">
+          <div class="faq-panel-inner">
+            <p class="faq-a">No. Rootwork is a practice, not treatment — a companion alongside support, never a replacement for it.</p>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var root = document.currentScript
+      ? document.currentScript.previousElementSibling
+      : document.querySelector('.faq');
+    if (!root || !root.classList.contains('faq')) {
+      root = document.querySelector('.faq');
+    }
+    if (!root) return;
+
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    /* ── reveal-on-scroll ── */
+    var reveals = root.querySelectorAll('.faq-reveal');
+    if (reduce || !('IntersectionObserver' in window)) {
+      reveals.forEach(function (el) { el.classList.add('faq-in'); });
+    } else {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) {
+            e.target.classList.add('faq-in');
+            io.unobserve(e.target);
+          }
+        });
+      }, { threshold: 0.15, rootMargin: '0px 0px -8% 0px' });
+      reveals.forEach(function (el) { io.observe(el); });
+    }
+
+    /* ── smooth accordion height (native <details> stays the source of truth) ── */
+    root.querySelectorAll('.faq-item').forEach(function (item) {
+      var summary = item.querySelector('.faq-q');
+      var panel = item.querySelector('.faq-panel');
+      if (!summary || !panel) return;
+
+      summary.addEventListener('click', function (e) {
+        // reduced motion (or no support): let the browser toggle instantly
+        if (reduce) return;
+        e.preventDefault();
+        if (item.dataset.animating) return;
+
+        if (item.open) {
+          // ── closing ──
+          item.dataset.animating = '1';
+          panel.style.height = panel.scrollHeight + 'px';
+          requestAnimationFrame(function () {
+            panel.style.height = '0px';
+          });
+          panel.addEventListener('transitionend', function te(ev) {
+            if (ev.propertyName !== 'height') return;
+            panel.removeEventListener('transitionend', te);
+            item.open = false;
+            panel.style.height = '';
+            delete item.dataset.animating;
+          });
+        } else {
+          // ── opening ──
+          item.dataset.animating = '1';
+          item.open = true;                 // reveal content so it can be measured
+          var target = panel.scrollHeight;
+          panel.style.height = '0px';
+          requestAnimationFrame(function () {
+            panel.style.height = target + 'px';
+          });
+          panel.addEventListener('transitionend', function te(ev) {
+            if (ev.propertyName !== 'height') return;
+            panel.removeEventListener('transitionend', te);
+            panel.style.height = '';        // let it flow at natural height
+            delete item.dataset.animating;
+          });
+        }
+      });
+    });
+  })();
+</script>
+<style>
+  /* ═══ THE INVITATION — the emotional close. You have descended; here is the
+        ground, warm and waiting. Ember light rises from below (inverting the
+        page's top blood-glow), a descent-spark arrives, the offer is a warm
+        threshold to step through. Self-contained, prefix .invite / .invite-. ═══ */
+
+  .invite {
+    position: relative;
+    min-height: 100svh;
+    display: grid;
+    place-items: center;
+    padding: clamp(7rem, 15vh, 11rem) clamp(1.2rem, 4vw, 3rem) clamp(5rem, 12vh, 8rem);
+    text-align: center;
+    overflow: hidden;
+    isolation: isolate;
+    scroll-margin-top: 68px;
+  }
+
+  /* warm ground: ember light rising from the floor + a settling earth-dark base.
+     This is the deep you arrive at — it fills the lower space, never a void. */
+  .invite::before {
+    content: ""; position: absolute; inset: 0; z-index: -2; pointer-events: none;
+    background:
+      radial-gradient(115% 62% at 50% 122%, color-mix(in oklab, var(--ember) 26%, transparent), transparent 62%),
+      radial-gradient(85% 50% at 50% 112%, color-mix(in oklab, var(--blood) 24%, transparent), transparent 58%),
+      linear-gradient(180deg, transparent 40%, color-mix(in oklab, #0b0705 62%, transparent));
+    animation: invite-breathe 8s ease-in-out infinite;
+  }
+  /* centred vignette focuses the eye and deepens the cinematic close */
+  .invite::after {
+    content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    background: radial-gradient(120% 90% at 50% 46%, transparent 52%, color-mix(in oklab, var(--ink) 72%, transparent));
+  }
+  @keyframes invite-breathe { 0%, 100% { opacity: .84; } 50% { opacity: 1; } }
+
+  /* ── the descent: a hairline from above, a spark that travels down and arrives
+        at a glowing seed. You have come all the way down. ── */
+  .invite__descent {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    width: 1px; height: clamp(64px, 13vh, 150px); z-index: 0; pointer-events: none;
+    background: linear-gradient(180deg, transparent, color-mix(in oklab, var(--ember) 52%, transparent));
+  }
+  .invite__descent::before {           /* the arriving spark */
+    content: ""; position: absolute; left: 50%; top: -4px; transform: translateX(-50%);
+    width: 4px; height: 4px; border-radius: 50%; opacity: 0;
+    background: var(--ember);
+    box-shadow: 0 0 12px 3px color-mix(in oklab, var(--ember) 70%, transparent);
+    animation: invite-descend 5s var(--ease) infinite;
+  }
+  .invite__seed {                       /* the point of arrival — the ground */
+    position: absolute; bottom: -4px; left: 50%; transform: translateX(-50%);
+    width: 7px; height: 7px; border-radius: 50%; background: var(--ember);
+    box-shadow: 0 0 18px 5px color-mix(in oklab, var(--ember) 55%, transparent);
+    animation: invite-pulse 5s ease-in-out infinite;
+  }
+  @keyframes invite-descend {
+    0%   { top: -4px; opacity: 0; }
+    18%  { opacity: 1; }
+    72%  { opacity: 1; }
+    100% { top: 100%; opacity: 0; }
+  }
+  @keyframes invite-pulse {
+    0%, 60%, 100% { transform: translateX(-50%) scale(1);   box-shadow: 0 0 18px 5px color-mix(in oklab, var(--ember) 55%, transparent); }
+    78%           { transform: translateX(-50%) scale(1.5); box-shadow: 0 0 26px 8px color-mix(in oklab, var(--ember) 72%, transparent); }
+  }
+
+  .invite__wrap {
+    position: relative; z-index: 1;
+    max-width: 42rem; margin: 0 auto;
+    display: flex; flex-direction: column; align-items: center;
+  }
+
+  .invite__eyebrow { display: block; margin-bottom: clamp(1.1rem, 2.4vw, 1.6rem); }
+
+  .invite__title {
+    font-family: var(--serif); font-weight: 300; color: var(--bone);
+    font-size: clamp(2.9rem, 8.6vw, 6rem);
+    line-height: .98; letter-spacing: -0.025em;
+  }
+  .invite__title em {
+    display: block; font-style: italic; font-weight: 400;
+    color: color-mix(in oklab, var(--bone) 82%, var(--rose));
+  }
+
+  .invite__sub {
+    margin: clamp(1.2rem, 3vw, 1.8rem) auto 0;
+    max-width: 33ch;
+    font-size: clamp(1.05rem, 2.1vw, 1.28rem);
+    line-height: 1.55; color: var(--bone-dim);
+  }
+
+  /* the threshold — a warm doorway to step through. Seated on its own ember pool
+     so beginning feels contained, safe, inevitable. */
+  .invite__offer {
+    position: relative;
+    margin-top: clamp(2.2rem, 5.5vh, 3.4rem);
+    display: flex; flex-direction: column; align-items: center; gap: 1.15rem;
+    padding: clamp(1.7rem, 4.5vw, 2.6rem) clamp(1.6rem, 6vw, 3.2rem);
+    border-radius: 22px;
+    border: 1px solid color-mix(in oklab, var(--ember) 22%, transparent);
+    background:
+      linear-gradient(180deg, color-mix(in oklab, var(--ink-3) 60%, transparent), color-mix(in oklab, var(--ink) 44%, transparent));
+    -webkit-backdrop-filter: blur(7px);
+    backdrop-filter: blur(7px);
+    box-shadow:
+      0 34px 90px -46px color-mix(in oklab, var(--blood) 62%, black),
+      inset 0 1px 0 color-mix(in oklab, var(--bone) 9%, transparent);
+  }
+  .invite__offer::before {              /* the warm pool it rests in */
+    content: ""; position: absolute; inset: -14% -8% -34%; z-index: -1; pointer-events: none;
+    background: radial-gradient(60% 65% at 50% 70%, color-mix(in oklab, var(--ember) 20%, transparent), transparent 72%);
+  }
+
+  .invite__price {
+    font-size: clamp(.98rem, 1.7vw, 1.08rem); letter-spacing: .01em; color: var(--bone-dim);
+  }
+  .invite__price b { color: var(--ember); font-weight: 600; font-family: var(--serif); font-style: italic; }
+
+  .invite__cta { font-size: 1.06rem; padding: 1.05rem 2.15rem; }
+
+  .invite__risk {
+    font-size: .82rem; letter-spacing: .05em; color: var(--bone-faint);
+  }
+
+  /* ── reveal-on-scroll (own observer; namespaced so nothing collides) ── */
+  .invite-reveal { opacity: 0; transform: translateY(24px); transition: opacity 1s var(--ease), transform 1s var(--ease); }
+  .invite-reveal.invite-in { opacity: 1; transform: none; }
+  .invite-reveal.dly1 { transition-delay: .1s; }
+  .invite-reveal.dly2 { transition-delay: .22s; }
+  .invite-reveal.dly3 { transition-delay: .34s; }
+
+  @media (max-width: 640px) {
+    .invite__offer { width: 100%; }
+    .invite__cta { width: 100%; justify-content: center; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .invite-reveal { opacity: 1; transform: none; transition: none; }
+    .invite::before { opacity: 1; }
+    .invite__descent::before { display: none; }
+  }
+</style>
+
+<section class="invite" id="invite">
+  <div class="invite__descent" aria-hidden="true"><span class="invite__seed"></span></div>
+
+  <div class="invite__wrap">
+    <p class="eyebrow invite__eyebrow invite-reveal">Begin the descent</p>
+
+    <h2 class="invite__title invite-reveal dly1">
+      The ground
+      <em>is waiting.</em>
+    </h2>
+
+    <p class="invite__sub invite-reveal dly2">One key opens Rootwork and every journey that grows from it.</p>
+
+    <div class="invite__offer invite-reveal dly3">
+      <p class="invite__price">Included with membership · <b>£12 a month</b></p>
+      <a href="checkout.html" class="cta cta--primary invite__cta">Begin with Rootwork <span class="arrow" aria-hidden="true">→</span></a>
+      <a href="content-standalone.html?free=1" class="invite__free" style="display:inline-block;margin-top:1rem;font-size:.9rem;text-decoration:underline;text-underline-offset:3px;opacity:.82">Or begin with the free practice →</a>
+      <p class="invite__risk">Start free · cancel anytime · keep what you've begun</p>
+    </div>
+  </div>
+</section>
+
+<script>
+(function () {
+  var section = document.getElementById('invite');
+  if (!section) return;
+  var items = section.querySelectorAll('.invite-reveal');
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (reduce || !('IntersectionObserver' in window)) {
+    for (var i = 0; i < items.length; i++) items[i].classList.add('invite-in');
+    return;
+  }
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (e.isIntersecting) { e.target.classList.add('invite-in'); io.unobserve(e.target); }
+    });
+  }, { threshold: 0.2, rootMargin: '0px 0px -8% 0px' });
+  items.forEach(function (el) { io.observe(el); });
+})();
+</script>
+</main>
+<p class="foot" style="text-align:center;padding:3rem 1rem 4rem;color:var(--bone-faint);font-size:.8rem;letter-spacing:.06em">Of Blood and Bones · a somatic practice</p>
+<script>
+(function () {
+  const tb = document.getElementById('topbar'), fc = document.getElementById('floatcta');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function s() { const vh = innerHeight; tb.classList.toggle('solid', scrollY > 40); fc.classList.toggle('show', scrollY > vh * 0.5); }
+  let t = false; addEventListener('scroll', () => { if (!t) { t = true; requestAnimationFrame(() => { s(); t = false; }); } }, { passive: true }); s();
+  document.addEventListener('click', e => {
+    const a = e.target.closest('a[href^="#"]'); if (!a) return;
+    const el = document.querySelector(a.getAttribute('href'));
+    if (el) { e.preventDefault(); el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }); }
+  });
+})();
+</script>
+<script src="protonav.js"></script>
+</body>
+</html>

@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Threshold · Of Blood and Bones</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<style>
+  /* ── Concept A · The Threshold ── */
+  .hero { position: relative; min-height: 100svh; display: grid; place-items: center; text-align: center; padding: 8rem 1.2rem 4rem; overflow: hidden; }
+  .hero__ember {
+    position: absolute; left: 50%; top: 46%; width: min(80vw, 720px); aspect-ratio: 1; transform: translate(-50%, -50%);
+    background: radial-gradient(circle, color-mix(in oklab, var(--blood) 60%, transparent), transparent 62%);
+    filter: blur(20px); z-index: -1; animation: breathe 9s var(--ease) infinite;
+  }
+  @keyframes breathe { 0%,100% { opacity: .55; transform: translate(-50%,-50%) scale(1); } 50% { opacity: .8; transform: translate(-50%,-50%) scale(1.08); } }
+  .hero .eyebrow { animation: fade 1.2s var(--ease) both; }
+  .hero h1 {
+    font-size: clamp(2.9rem, 8.5vw, 6.6rem); font-weight: 300; margin: 1.4rem 0 0; max-width: 16ch;
+    font-optical-sizing: auto; letter-spacing: -0.02em;
+  }
+  .hero h1 em { font-style: italic; color: var(--rose); }
+  .hero__line { display: block; animation: rise 1.4s var(--ease) both; }
+  .hero__line:nth-child(2) { animation-delay: .28s; }
+  .hero p.lede { margin: 2rem auto 0; max-width: 46ch; font-size: clamp(1.05rem, 2.1vw, 1.32rem); color: var(--bone-dim); animation: fade 1.6s var(--ease) .6s both; }
+  .hero__cta { margin-top: 2.6rem; display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; animation: fade 1.6s var(--ease) .9s both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  .scrollcue { position: absolute; bottom: 2rem; left: 50%; transform: translateX(-50%); font-size: .7rem; letter-spacing: .3em; text-transform: uppercase; color: var(--bone-faint); animation: fade 2s ease 1.4s both; }
+  .scrollcue::after { content: ""; display: block; width: 1px; height: 42px; margin: .8rem auto 0; background: linear-gradient(var(--ember), transparent); }
+
+  /* manifesto / the arc as typographic rhythm (not a diagram) */
+  .manifesto { padding: clamp(5rem, 12vw, 9rem) 0; }
+  .manifesto .say { font-family: var(--serif); font-weight: 300; font-size: clamp(1.6rem, 4vw, 2.8rem); line-height: 1.28; color: var(--bone); max-width: 22ch; margin: 0 auto; text-align: center; }
+  .manifesto .say b { color: var(--ember); font-weight: 400; font-style: italic; }
+  .arc { margin: clamp(3rem,7vw,5rem) auto 0; max-width: 900px; display: grid; gap: 0; }
+  .arc__step { display: grid; grid-template-columns: auto 1fr; gap: 1.4rem; align-items: baseline; padding: 1.15rem 0; border-top: 1px solid color-mix(in oklab, var(--bone) 10%, transparent); }
+  .arc__step:last-child { border-bottom: 1px solid color-mix(in oklab, var(--bone) 10%, transparent); }
+  .arc__n { font-family: var(--serif); font-size: .95rem; color: var(--ember); width: 2.2rem; }
+  .arc__name { font-family: var(--serif); font-size: clamp(1.3rem, 3vw, 1.9rem); color: var(--bone); }
+  .arc__gloss { grid-column: 2; color: var(--bone-faint); font-size: .98rem; margin-top: .2rem; }
+
+  /* journeys shelf */
+  .shelf { padding: clamp(3rem, 8vw, 6rem) 0 clamp(5rem,12vw,9rem); }
+  .shelf__head { text-align: center; margin-bottom: 3rem; }
+  .shelf__head h2 { font-size: clamp(2rem, 5vw, 3.2rem); font-weight: 300; }
+  .root {
+    position: relative; border-radius: 26px; padding: clamp(2rem, 5vw, 3.4rem); margin-bottom: 2rem; overflow: hidden;
+    background: linear-gradient(120deg, color-mix(in oklab, var(--blood) 40%, var(--ink-3)), var(--ink-2));
+    border: 1px solid color-mix(in oklab, var(--ember) 24%, transparent);
+    display: grid; grid-template-columns: 1.3fr 1fr; gap: 2rem; align-items: center;
+  }
+  .root::before { content: ""; position: absolute; right: -10%; top: -40%; width: 60%; height: 180%; background: radial-gradient(circle, color-mix(in oklab, var(--ember) 26%, transparent), transparent 60%); filter: blur(10px); }
+  .root__tag { font-size: .7rem; letter-spacing: .28em; text-transform: uppercase; color: var(--ember); }
+  .root h3 { font-size: clamp(2rem, 5vw, 3rem); font-weight: 400; margin: .6rem 0 .8rem; }
+  .root p { color: var(--bone-dim); max-width: 42ch; }
+  .root .cta { margin-top: 1.6rem; }
+  .root__aside { position: relative; text-align: right; color: var(--bone-faint); font-family: var(--serif); font-style: italic; font-size: 1.05rem; }
+
+  .then { text-align: center; color: var(--bone-faint); font-family: var(--serif); font-style: italic; font-size: 1.15rem; margin: 2.6rem 0 1.6rem; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.1rem; }
+  .jcard {
+    position: relative; border-radius: 18px; padding: 1.8rem 1.6rem 1.6rem; min-height: 220px;
+    background: color-mix(in oklab, var(--ink-3) 60%, transparent);
+    border: 1px solid color-mix(in oklab, var(--bone) 9%, transparent);
+    display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden;
+    transition: transform .3s var(--ease), border-color .3s, background .3s;
+  }
+  .jcard::before { content: ""; position: absolute; inset: 0; z-index: 0; opacity: .5; background: radial-gradient(120% 90% at 20% 0%, var(--g1, transparent), transparent 60%); transition: opacity .3s; }
+  .jcard:hover { transform: translateY(-4px); border-color: color-mix(in oklab, var(--ember) 36%, transparent); background: color-mix(in oklab, var(--ink-3) 85%, transparent); }
+  .jcard:hover::before { opacity: .85; }
+  .jcard > * { position: relative; z-index: 1; }
+  .jcard h4 { font-family: var(--serif); font-size: 1.6rem; font-weight: 400; color: var(--bone); }
+  .jcard .promise { color: var(--bone-dim); font-size: .96rem; margin-top: .4rem; }
+  .jcard .go { margin-top: 1rem; font-size: .82rem; letter-spacing: .04em; color: var(--ember); opacity: 0; transform: translateY(6px); transition: .3s var(--ease); }
+  .jcard:hover .go { opacity: 1; transform: none; }
+  .jcard--soon { opacity: .62; }
+  .jcard--soon .tag { position: absolute; top: 1.2rem; right: 1.2rem; z-index: 1; font-size: .64rem; letter-spacing: .2em; text-transform: uppercase; color: var(--bone-faint); border: 1px solid color-mix(in oklab,var(--bone) 20%, transparent); padding: .2rem .5rem; border-radius: 999px; }
+
+  /* membership — a human panel, not a table */
+  .join { padding: clamp(5rem,12vw,9rem) 0; text-align: center; }
+  .join__panel { max-width: 640px; margin: 0 auto; border-radius: 26px; padding: clamp(2.4rem,6vw,4rem); background: color-mix(in oklab, var(--ink-2) 70%, transparent); border: 1px solid color-mix(in oklab, var(--ember) 18%, transparent); }
+  .join h2 { font-size: clamp(1.8rem,4.5vw,2.8rem); font-weight: 300; }
+  .join p { color: var(--bone-dim); max-width: 44ch; margin: 1.1rem auto 0; }
+  .join .price { display: block; font-family: var(--serif); font-size: 1.05rem; color: var(--ember); margin: 1.6rem 0 .3rem; font-style: italic; }
+  .join .cta { margin-top: 1.4rem; }
+  .foot { text-align: center; padding: 3rem 1rem 4rem; color: var(--bone-faint); font-size: .8rem; letter-spacing: .06em; }
+
+  @media (max-width: 860px) {
+    .root { grid-template-columns: 1fr; }
+    .root__aside { text-align: left; }
+    .grid { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="switch">
+  <span class="switch__brand">Of <b>Blood</b> and Bones</span>
+  <span class="switch__tag">fresh concepts</span>
+  <nav>
+    <a href="1-threshold.html" class="on">The Threshold</a>
+    <a href="2-body.html">Where you feel it</a>
+    <a href="3-intake.html">One question</a>
+    <a href="4-descent.html">The Descent</a>
+    <a href="index.html" style="opacity:.6">menu</a>
+  </nav>
+</div>
+
+<header class="hero">
+  <div class="hero__ember"></div>
+  <div>
+    <p class="eyebrow">Of Blood and Bones · somatic practice</p>
+    <h1><span class="hero__line">The work begins</span> <span class="hero__line">in the <em>body</em>.</span></h1>
+    <p class="lede">Guided journeys through grief, rest, boundaries and belonging — practised slowly, in the nervous system, not the head.</p>
+    <div class="hero__cta">
+      <a href="#" class="cta cta--primary">Begin with Rootwork <span class="arrow">→</span></a>
+      <a href="#join" class="cta cta--ghost">£12 a month · what's inside</a>
+    </div>
+  </div>
+  <div class="scrollcue">the descent</div>
+</header>
+
+<main>
+  <section class="manifesto">
+    <div class="wrap">
+      <p class="say reveal">Every journey walks the same five stages — not a curriculum to complete, but a <b>path the body learns</b> to travel.</p>
+      <div class="arc">
+        <div class="arc__step reveal"><span class="arc__n">i</span><span class="arc__name">Regulation</span><span class="arc__gloss">Finding the ground. Teaching the body it is safe enough to soften.</span></div>
+        <div class="arc__step reveal d1"><span class="arc__n">ii</span><span class="arc__name">Embodiment</span><span class="arc__gloss">Coming back into sensation — feeling what is actually here.</span></div>
+        <div class="arc__step reveal d2"><span class="arc__n">iii</span><span class="arc__name">Attunement</span><span class="arc__gloss">Listening inward; letting need and impulse be known.</span></div>
+        <div class="arc__step reveal d3"><span class="arc__n">iv</span><span class="arc__name">Co-regulation</span><span class="arc__gloss">Being met by another. The body settling in company.</span></div>
+        <div class="arc__step reveal d4"><span class="arc__n">v</span><span class="arc__name">Reclamation</span><span class="arc__gloss">Living from wholeness — taking back what was held away.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="shelf">
+    <div class="wrap">
+      <div class="shelf__head reveal">
+        <p class="eyebrow">The journeys</p>
+        <h2>Begin at the root.</h2>
+      </div>
+
+      <div class="root reveal">
+        <div>
+          <span class="root__tag">The foundation · start here</span>
+          <h3>Rootwork</h3>
+          <p>Before any journey, the ground. Rootwork teaches your body the basics of safety and settling — the practices everything else grows from.</p>
+          <a href="#" class="cta cta--ember">Begin Rootwork <span class="arrow">→</span></a>
+        </div>
+        <div class="root__aside">“You cannot open<br>what has never<br>felt safe.”</div>
+      </div>
+
+      <p class="then reveal">Then, when you're ready —</p>
+
+      <div class="grid">
+        <a href="#" class="jcard reveal" style="--g1: color-mix(in oklab, var(--blood) 50%, transparent)">
+          <h4>Grief</h4>
+          <p class="promise">For when grief lives in the chest and won't move.</p>
+          <span class="go">enter →</span>
+        </a>
+        <a href="#" class="jcard reveal d1" style="--g1: color-mix(in oklab, var(--rose) 40%, transparent)">
+          <h4>Relating</h4>
+          <p class="promise">For staying yourself while close to another.</p>
+          <span class="go">enter →</span>
+        </a>
+        <a href="#" class="jcard reveal d2" style="--g1: color-mix(in oklab, var(--ochre) 40%, transparent)">
+          <h4>Ancestral lineage</h4>
+          <p class="promise">For the weight that was never only yours.</p>
+          <span class="go">enter →</span>
+        </a>
+        <a href="#" class="jcard reveal" style="--g1: color-mix(in oklab, var(--ember) 34%, transparent)">
+          <h4>Rest &amp; sleep</h4>
+          <p class="promise">For a body that has forgotten how to stop.</p>
+          <span class="go">enter →</span>
+        </a>
+        <a href="#" class="jcard reveal d1" style="--g1: color-mix(in oklab, var(--clay) 44%, transparent)">
+          <h4>Boundaries</h4>
+          <p class="promise">For the 'no' your body knows before you do.</p>
+          <span class="go">enter →</span>
+        </a>
+        <div class="jcard jcard--soon reveal d2">
+          <span class="tag">opening soon</span>
+          <h4>Creativity</h4>
+          <p class="promise">For making, when the making has gone quiet.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="join" id="join">
+    <div class="wrap">
+      <div class="join__panel reveal">
+        <p class="eyebrow">Membership</p>
+        <h2>One key. Every journey.</h2>
+        <p>Membership opens Rootwork and every guided journey — new practices added as the work grows. Cancel whenever your body says so.</p>
+        <span class="price">£12 a month</span>
+        <div><a href="#" class="cta cta--primary">Begin with Rootwork <span class="arrow">→</span></a></div>
+      </div>
+    </div>
+  </section>
+
+  <p class="foot">Of Blood and Bones · a somatic practice</p>
+</main>
+
+<script src="fresh.js"></script>
+</body>
+</html>

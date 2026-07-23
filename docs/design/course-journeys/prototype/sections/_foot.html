@@ -1,0 +1,18 @@
+</main>
+<p class="foot" style="text-align:center;padding:3rem 1rem 4rem;color:var(--bone-faint);font-size:.8rem;letter-spacing:.06em">Of Blood and Bones · a somatic practice</p>
+<script>
+(function () {
+  const tb = document.getElementById('topbar'), fc = document.getElementById('floatcta');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function s() { const vh = innerHeight; tb.classList.toggle('solid', scrollY > 40); fc.classList.toggle('show', scrollY > vh * 0.85); }
+  let t = false; addEventListener('scroll', () => { if (!t) { t = true; requestAnimationFrame(() => { s(); t = false; }); } }, { passive: true }); s();
+  document.addEventListener('click', e => {
+    const a = e.target.closest('a[href^="#"]'); if (!a) return;
+    const el = document.querySelector(a.getAttribute('href'));
+    if (el) { e.preventDefault(); el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }); }
+  });
+})();
+</script>
+<script src="protonav.js"></script>
+</body>
+</html>

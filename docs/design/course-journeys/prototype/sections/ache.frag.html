@@ -1,0 +1,282 @@
+<!-- ═══════════════════════════════════════════════════════════════════════
+     THE ACHE — names the body's held pain before hope is offered.
+     Pinned four-beat reveal (progressive-enhancement). Default / reduced-motion
+     render is a clean, legible stacked sequence; JS + motion adds the sticky pin.
+     ═══════════════════════════════════════════════════════════════════════ -->
+
+<!-- flip to the pinned layout BEFORE first paint so there is no stack→pin flash;
+     absence of this class (no JS) leaves the accessible stacked fallback. -->
+<script>document.documentElement.classList.add('ache-js');</script>
+
+<style>
+  .ache {
+    --ache-fs:       clamp(2rem, 5.4vw, 3.6rem);      /* beats 1–3 */
+    --ache-fs-coda:  clamp(1.55rem, 3.8vw, 2.6rem);   /* beat 4 (quieter coda) */
+    --ache-measure:  min(22ch, 90vw);                  /* generous, 1–2 handsome lines */
+    --ache-lh:       1.16;
+    position: relative;
+  }
+
+  /* ── track only defines scroll length; stage does the work ── */
+  .ache__track { position: relative; }
+
+  .ache__stage {
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: clamp(4.5rem, 13vh, 9rem) clamp(1.2rem, 4vw, 3rem);
+    overflow: hidden;               /* clip the blurred aura → never scrolls the page */
+  }
+
+  /* breathing warmth behind the words — fills the frame, never a void */
+  .ache__aura {
+    position: absolute;
+    left: 50%; top: 50%;
+    translate: -50% -50%;
+    width: min(78vw, 620px);
+    aspect-ratio: 1 / 1;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%,
+      color-mix(in oklab, var(--blood) 34%, transparent) 0%,
+      color-mix(in oklab, var(--ember) 12%, transparent) 40%,
+      transparent 66%);
+    filter: blur(28px);
+    opacity: .7;
+    z-index: 0;
+    pointer-events: none;
+    animation: ache-breathe 8s var(--ease) infinite;
+  }
+  @keyframes ache-breathe {
+    0%, 100% { transform: scale(.92); opacity: .55; }
+    50%      { transform: scale(1.05); opacity: .82; }
+  }
+
+  /* gentle cinematic vignette to focus the centre */
+  .ache__stage::after {
+    content: "";
+    position: absolute; inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background: radial-gradient(125% 95% at 50% 50%,
+      transparent 52%,
+      color-mix(in oklab, var(--ink) 60%, transparent) 100%);
+  }
+
+  /* ── frame: eyebrow (top) · beats (centre) · progress (bottom) ── */
+  .ache__frame {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    justify-items: center;
+    align-items: center;
+    gap: clamp(1.8rem, 4.5vh, 3.2rem);
+    width: 100%;
+    max-width: 900px;
+    text-align: center;
+  }
+
+  /* ceremonial chapter label, stable across all beats so the frame stays anchored */
+  .ache__chapter {
+    font-family: var(--sans);
+    display: inline-flex;
+    align-items: center;
+    gap: clamp(.7rem, 2vw, 1rem);
+  }
+  .ache__chapter::before,
+  .ache__chapter::after {
+    content: "";
+    width: clamp(22px, 6vw, 58px);
+    height: 1px;
+    background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--ember) 65%, transparent));
+  }
+  .ache__chapter::after { transform: scaleX(-1); }
+
+  /* beats container — in static mode this stacks; in motion it holds absolute children */
+  .ache__beats {
+    position: relative;
+    width: 100%;
+    display: grid;
+    justify-items: center;
+    gap: clamp(2.4rem, 6vh, 4rem);
+  }
+
+  .ache__beat {
+    margin: 0 auto;
+    max-width: var(--ache-measure);
+    font-family: var(--serif);
+    font-weight: 300;
+    font-size: var(--ache-fs);
+    line-height: var(--ache-lh);
+    letter-spacing: -0.015em;
+    color: var(--bone);
+    text-align: center;
+    text-wrap: balance;
+    overflow-wrap: break-word;
+  }
+  .ache__beat em {
+    font-style: italic;
+    font-weight: 400;
+    color: var(--rose);
+  }
+  .ache__clause { display: block; }
+  .ache__clause + .ache__clause { margin-top: .12em; }
+
+  /* beat 4 — the resolving coda: deliberately quieter, same family + rhythm */
+  .ache__beat--coda {
+    font-size: var(--ache-fs-coda);
+    color: var(--bone);
+  }
+
+  /* progress rail — only meaningful during the scroll sequence, hidden otherwise */
+  .ache__progress {
+    display: none;
+    align-items: center;
+    gap: clamp(.5rem, 1.6vw, .95rem);
+  }
+  .ache__seg {
+    width: clamp(26px, 5vw, 46px);
+    height: 2px;
+    border-radius: 2px;
+    background: color-mix(in oklab, var(--bone-faint) 55%, transparent);
+    transition: background .55s var(--ease), box-shadow .55s var(--ease);
+  }
+  .ache__seg.is-on {
+    background: var(--ember);
+    box-shadow: 0 0 14px color-mix(in oklab, var(--ember) 55%, transparent);
+  }
+
+  /* ═══ ENHANCED: pinned one-beat-at-a-time reveal ═══
+     Only when JS is present AND the user tolerates motion. */
+  @media (prefers-reduced-motion: no-preference) {
+    html.ache-js .ache__track { height: 440vh; }
+
+    html.ache-js .ache__stage {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding-block: clamp(3rem, 8vh, 6rem);
+    }
+
+    html.ache-js .ache__frame {
+      height: 100%;
+      min-height: min(80vh, 620px);
+    }
+
+    /* explicit min-height defeats the collapse-to-zero trap (only absolute kids) */
+    html.ache-js .ache__beats {
+      display: block;
+      align-self: stretch;
+      min-height: clamp(220px, 40vh, 360px);
+    }
+
+    html.ache-js .ache__beat {
+      position: absolute;
+      left: 50%; top: 50%;
+      translate: -50% -50%;            /* every beat shares ONE centre */
+      width: var(--ache-measure);
+      max-width: var(--ache-measure);
+      margin: 0;
+      opacity: 0;
+      transform: translateY(14px) scale(.99);   /* enter offset — composes over translate */
+      filter: blur(3px);
+      transition: opacity .85s var(--ease), transform .85s var(--ease), filter .85s var(--ease);
+      will-change: opacity, transform;
+      pointer-events: none;
+    }
+    html.ache-js .ache__beat.is-active {
+      opacity: 1;
+      transform: none;
+      filter: none;
+    }
+
+    html.ache-js .ache__progress { display: flex; }
+  }
+</style>
+
+<section class="ache" aria-labelledby="ache-title">
+  <div class="ache__track">
+    <div class="ache__stage">
+      <div class="ache__aura" aria-hidden="true"></div>
+
+      <div class="ache__frame">
+        <h2 class="eyebrow ache__chapter" id="ache-title">the ache</h2>
+
+        <div class="ache__beats">
+          <p class="ache__beat is-active">You&rsquo;ve tried to think your way calm.</p>
+
+          <p class="ache__beat">But the body keeps its own counsel.</p>
+
+          <p class="ache__beat">
+            <span class="ache__clause">The chest that won&rsquo;t open.</span>
+            <span class="ache__clause">The breath held high.</span>
+            <span class="ache__clause">The nights it <em>won&rsquo;t let go</em>.</span>
+          </p>
+
+          <p class="ache__beat ache__beat--coda">
+            <span class="ache__clause">Safety was never an idea.</span>
+            <span class="ache__clause">It is <em>something the body learns</em>.</span>
+          </p>
+        </div>
+
+        <div class="ache__progress" aria-hidden="true">
+          <span class="ache__seg is-on"></span>
+          <span class="ache__seg"></span>
+          <span class="ache__seg"></span>
+          <span class="ache__seg"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var section = document.querySelector('.ache');
+    if (!section) return;
+
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (reduce.matches) return;               // static stacked fallback — no wiring
+
+    var track = section.querySelector('.ache__track');
+    var beats = Array.prototype.slice.call(section.querySelectorAll('.ache__beat'));
+    var segs  = Array.prototype.slice.call(section.querySelectorAll('.ache__seg'));
+    var n = beats.length;
+    if (!track || !n) return;
+
+    var current = -1;
+    function setActive(i) {
+      if (i === current) return;
+      current = i;
+      for (var b = 0; b < n; b++) beats[b].classList.toggle('is-active', b === i);
+      for (var s = 0; s < segs.length; s++) segs[s].classList.toggle('is-on', s <= i);
+    }
+
+    var ticking = false;
+    function update() {
+      ticking = false;
+      var total = track.offsetHeight - window.innerHeight;   // px the stage stays pinned
+      if (total <= 0) { setActive(0); return; }
+      var scrolled = Math.min(Math.max(-track.getBoundingClientRect().top, 0), total);
+      var idx = Math.floor((scrolled / total) * n);
+      if (idx < 0) idx = 0; else if (idx >= n) idx = n - 1;
+      setActive(idx);
+    }
+    function onScroll() {
+      if (!ticking) { ticking = true; requestAnimationFrame(update); }
+    }
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+    update();
+
+    // if the user turns on reduce-motion mid-session, unwire and rest on beat 1
+    if (reduce.addEventListener) {
+      reduce.addEventListener('change', function (e) {
+        if (!e.matches) return;
+        window.removeEventListener('scroll', onScroll);
+        window.removeEventListener('resize', onScroll);
+      });
+    }
+  })();
+</script>

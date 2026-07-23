@@ -1,0 +1,183 @@
+<style>
+  /* ═══ THE INVITATION — the emotional close. You have descended; here is the
+        ground, warm and waiting. Ember light rises from below (inverting the
+        page's top blood-glow), a descent-spark arrives, the offer is a warm
+        threshold to step through. Self-contained, prefix .invite / .invite-. ═══ */
+
+  .invite {
+    position: relative;
+    min-height: 100svh;
+    display: grid;
+    place-items: center;
+    padding: clamp(7rem, 15vh, 11rem) clamp(1.2rem, 4vw, 3rem) clamp(5rem, 12vh, 8rem);
+    text-align: center;
+    overflow: hidden;
+    isolation: isolate;
+    scroll-margin-top: 68px;
+  }
+
+  /* warm ground: ember light rising from the floor + a settling earth-dark base.
+     This is the deep you arrive at — it fills the lower space, never a void. */
+  .invite::before {
+    content: ""; position: absolute; inset: 0; z-index: -2; pointer-events: none;
+    background:
+      radial-gradient(115% 62% at 50% 122%, color-mix(in oklab, var(--ember) 26%, transparent), transparent 62%),
+      radial-gradient(85% 50% at 50% 112%, color-mix(in oklab, var(--blood) 24%, transparent), transparent 58%),
+      linear-gradient(180deg, transparent 40%, color-mix(in oklab, #0b0705 62%, transparent));
+    animation: invite-breathe 8s ease-in-out infinite;
+  }
+  /* centred vignette focuses the eye and deepens the cinematic close */
+  .invite::after {
+    content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    background: radial-gradient(120% 90% at 50% 46%, transparent 52%, color-mix(in oklab, var(--ink) 72%, transparent));
+  }
+  @keyframes invite-breathe { 0%, 100% { opacity: .84; } 50% { opacity: 1; } }
+
+  /* ── the descent: a hairline from above, a spark that travels down and arrives
+        at a glowing seed. You have come all the way down. ── */
+  .invite__descent {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    width: 1px; height: clamp(64px, 13vh, 150px); z-index: 0; pointer-events: none;
+    background: linear-gradient(180deg, transparent, color-mix(in oklab, var(--ember) 52%, transparent));
+  }
+  .invite__descent::before {           /* the arriving spark */
+    content: ""; position: absolute; left: 50%; top: -4px; transform: translateX(-50%);
+    width: 4px; height: 4px; border-radius: 50%; opacity: 0;
+    background: var(--ember);
+    box-shadow: 0 0 12px 3px color-mix(in oklab, var(--ember) 70%, transparent);
+    animation: invite-descend 5s var(--ease) infinite;
+  }
+  .invite__seed {                       /* the point of arrival — the ground */
+    position: absolute; bottom: -4px; left: 50%; transform: translateX(-50%);
+    width: 7px; height: 7px; border-radius: 50%; background: var(--ember);
+    box-shadow: 0 0 18px 5px color-mix(in oklab, var(--ember) 55%, transparent);
+    animation: invite-pulse 5s ease-in-out infinite;
+  }
+  @keyframes invite-descend {
+    0%   { top: -4px; opacity: 0; }
+    18%  { opacity: 1; }
+    72%  { opacity: 1; }
+    100% { top: 100%; opacity: 0; }
+  }
+  @keyframes invite-pulse {
+    0%, 60%, 100% { transform: translateX(-50%) scale(1);   box-shadow: 0 0 18px 5px color-mix(in oklab, var(--ember) 55%, transparent); }
+    78%           { transform: translateX(-50%) scale(1.5); box-shadow: 0 0 26px 8px color-mix(in oklab, var(--ember) 72%, transparent); }
+  }
+
+  .invite__wrap {
+    position: relative; z-index: 1;
+    max-width: 42rem; margin: 0 auto;
+    display: flex; flex-direction: column; align-items: center;
+  }
+
+  .invite__eyebrow { display: block; margin-bottom: clamp(1.1rem, 2.4vw, 1.6rem); }
+
+  .invite__title {
+    font-family: var(--serif); font-weight: 300; color: var(--bone);
+    font-size: clamp(2.9rem, 8.6vw, 6rem);
+    line-height: .98; letter-spacing: -0.025em;
+  }
+  .invite__title em {
+    display: block; font-style: italic; font-weight: 400;
+    color: color-mix(in oklab, var(--bone) 82%, var(--rose));
+  }
+
+  .invite__sub {
+    margin: clamp(1.2rem, 3vw, 1.8rem) auto 0;
+    max-width: 33ch;
+    font-size: clamp(1.05rem, 2.1vw, 1.28rem);
+    line-height: 1.55; color: var(--bone-dim);
+  }
+
+  /* the threshold — a warm doorway to step through. Seated on its own ember pool
+     so beginning feels contained, safe, inevitable. */
+  .invite__offer {
+    position: relative;
+    margin-top: clamp(2.2rem, 5.5vh, 3.4rem);
+    display: flex; flex-direction: column; align-items: center; gap: 1.15rem;
+    padding: clamp(1.7rem, 4.5vw, 2.6rem) clamp(1.6rem, 6vw, 3.2rem);
+    border-radius: 22px;
+    border: 1px solid color-mix(in oklab, var(--ember) 22%, transparent);
+    background:
+      linear-gradient(180deg, color-mix(in oklab, var(--ink-3) 60%, transparent), color-mix(in oklab, var(--ink) 44%, transparent));
+    -webkit-backdrop-filter: blur(7px);
+    backdrop-filter: blur(7px);
+    box-shadow:
+      0 34px 90px -46px color-mix(in oklab, var(--blood) 62%, black),
+      inset 0 1px 0 color-mix(in oklab, var(--bone) 9%, transparent);
+  }
+  .invite__offer::before {              /* the warm pool it rests in */
+    content: ""; position: absolute; inset: -14% -8% -34%; z-index: -1; pointer-events: none;
+    background: radial-gradient(60% 65% at 50% 70%, color-mix(in oklab, var(--ember) 20%, transparent), transparent 72%);
+  }
+
+  .invite__price {
+    font-size: clamp(.98rem, 1.7vw, 1.08rem); letter-spacing: .01em; color: var(--bone-dim);
+  }
+  .invite__price b { color: var(--ember); font-weight: 600; font-family: var(--serif); font-style: italic; }
+
+  .invite__cta { font-size: 1.06rem; padding: 1.05rem 2.15rem; }
+
+  .invite__risk {
+    font-size: .82rem; letter-spacing: .05em; color: var(--bone-faint);
+  }
+
+  /* ── reveal-on-scroll (own observer; namespaced so nothing collides) ── */
+  .invite-reveal { opacity: 0; transform: translateY(24px); transition: opacity 1s var(--ease), transform 1s var(--ease); }
+  .invite-reveal.invite-in { opacity: 1; transform: none; }
+  .invite-reveal.dly1 { transition-delay: .1s; }
+  .invite-reveal.dly2 { transition-delay: .22s; }
+  .invite-reveal.dly3 { transition-delay: .34s; }
+
+  @media (max-width: 640px) {
+    .invite__offer { width: 100%; }
+    .invite__cta { width: 100%; justify-content: center; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .invite-reveal { opacity: 1; transform: none; transition: none; }
+    .invite::before { opacity: 1; }
+    .invite__descent::before { display: none; }
+  }
+</style>
+
+<section class="invite" id="invite">
+  <div class="invite__descent" aria-hidden="true"><span class="invite__seed"></span></div>
+
+  <div class="invite__wrap">
+    <p class="eyebrow invite__eyebrow invite-reveal">Begin the descent</p>
+
+    <h2 class="invite__title invite-reveal dly1">
+      The ground
+      <em>is waiting.</em>
+    </h2>
+
+    <p class="invite__sub invite-reveal dly2">One key opens Rootwork and every journey that grows from it.</p>
+
+    <div class="invite__offer invite-reveal dly3">
+      <p class="invite__price">Included with membership · <b>£12 a month</b></p>
+      <a href="#" class="cta cta--primary invite__cta">Begin with Rootwork <span class="arrow" aria-hidden="true">→</span></a>
+      <p class="invite__risk">Start free · cancel anytime · keep what you've begun</p>
+    </div>
+  </div>
+</section>
+
+<script>
+(function () {
+  var section = document.getElementById('invite');
+  if (!section) return;
+  var items = section.querySelectorAll('.invite-reveal');
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (reduce || !('IntersectionObserver' in window)) {
+    for (var i = 0; i < items.length; i++) items[i].classList.add('invite-in');
+    return;
+  }
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (e.isIntersecting) { e.target.classList.add('invite-in'); io.unobserve(e.target); }
+    });
+  }, { threshold: 0.2, rootMargin: '0px 0px -8% 0px' });
+  items.forEach(function (el) { io.observe(el); });
+})();
+</script>

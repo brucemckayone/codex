@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fresh concepts · Of Blood and Bones</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<style>
+  .menu { min-height: 100svh; display: grid; place-items: center; padding: 7rem 1.4rem 4rem; }
+  .menu__inner { max-width: 760px; width: 100%; }
+  .menu h1 { font-size: clamp(2.4rem, 6vw, 4rem); font-weight: 300; }
+  .menu h1 em { font-style: italic; color: var(--rose); }
+  .menu .sub { color: var(--bone-dim); margin: 1rem 0 .4rem; max-width: 52ch; }
+  .menu .note { color: var(--bone-faint); font-size: .86rem; max-width: 52ch; }
+  .list { margin-top: 2.6rem; display: grid; gap: .1rem; }
+  .row { display: grid; grid-template-columns: auto 1fr auto; gap: 1.2rem; align-items: baseline; padding: 1.3rem .4rem; border-top: 1px solid color-mix(in oklab, var(--bone) 12%, transparent); transition: padding-left .25s var(--ease); }
+  .list .row:last-child { border-bottom: 1px solid color-mix(in oklab, var(--bone) 12%, transparent); }
+  .row:hover { padding-left: 1rem; }
+  .row .n { font-family: var(--serif); font-style: italic; color: var(--ember); font-size: 1rem; }
+  .row .t { font-family: var(--serif); font-size: clamp(1.3rem, 3vw, 1.9rem); color: var(--bone); }
+  .row .d { color: var(--bone-dim); font-size: .92rem; margin-top: .2rem; grid-column: 2; }
+  .row .go { color: var(--ember); opacity: 0; transition: opacity .25s; }
+  .row:hover .go { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="switch">
+  <span class="switch__brand">Of <b>Blood</b> and Bones</span>
+  <span class="switch__tag">fresh concepts</span>
+  <nav>
+    <a href="1-threshold.html">The Threshold</a>
+    <a href="2-body.html">Where you feel it</a>
+    <a href="3-intake.html">One question</a>
+    <a href="4-descent.html">The Descent</a>
+    <a href="index.html" class="on">menu</a>
+  </nav>
+</div>
+
+<main class="menu">
+  <div class="menu__inner">
+    <p class="eyebrow">A totally fresh start</p>
+    <h1>Four ways to open <em>the same door</em>.</h1>
+    <p class="sub">Not maps of the content — four takes on the real job of this page: move a newcomer to begin. Each leads with feeling and one clear way in.</p>
+    <p class="note">No design system, no components yet — pure directions to react to. Once one feels right, we ground it in the real Codex tokens.</p>
+
+    <div class="list">
+      <a class="row" href="1-threshold.html">
+        <span class="n">A</span>
+        <span><span class="t">The Threshold</span><span class="d">An editorial invitation — mood, philosophy, and a single "begin at the root" door, journeys as a warm shelf.</span></span>
+        <span class="go">→</span>
+      </a>
+      <a class="row" href="2-body.html">
+        <span class="n">B</span>
+        <span><span class="t">Where you feel it</span><span class="d">A somatic body-map — the glowing figure IS the navigation. Touch where it lives; begin there.</span></span>
+        <span class="go">→</span>
+      </a>
+      <a class="row" href="3-intake.html">
+        <span class="n">C</span>
+        <span><span class="t">One question</span><span class="d">A gentle guided intake — "what brought you here?" — that receives the person, then routes them to their start.</span></span>
+        <span class="go">→</span>
+      </a>
+      <a class="row" href="4-descent.html">
+        <span class="n">D</span>
+        <span><span class="t">The Descent</span><span class="d">"How it connects" reborn as a cinematic scroll down through the five depths, journeys as doorways off the path.</span></span>
+        <span class="go">→</span>
+      </a>
+    </div>
+  </div>
+</main>
+<script src="fresh.js"></script>
+</body>
+</html>

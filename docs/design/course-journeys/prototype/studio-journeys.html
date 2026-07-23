@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Journeys · Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<style>
+  /* Studio home — the hallway that connects every creator editor.
+     Neutral studio chrome (same family as builder / course-editor / reporting);
+     brand tones only tint the small journey covers. */
+  :root {
+    --st-bg: #131519; --st-panel: #191c21; --st-panel-2: #202329; --st-panel-3: #262a31;
+    --st-line: rgba(255,255,255,.08); --st-line-2: rgba(255,255,255,.13);
+    --st-text: #dce0e6; --st-dim: #9298a3; --st-faint: #626873; --st-gold: #cdb489; --st-ok: #7fb98a;
+  }
+  body { background: var(--st-bg); color: var(--st-text); font-family: var(--sans); }
+  body::before, body::after { display: none; }
+
+  .st-top { height: 52px; display: flex; align-items: center; gap: 1rem; padding: 0 1rem; border-bottom: 1px solid var(--st-line); background: var(--st-panel); position: sticky; top: 0; z-index: 20; }
+  .st-top .brand { font-weight: 700; font-size: .82rem; } .st-top .brand span { color: var(--st-gold); }
+  .st-top .doc { font-size: .8rem; color: var(--st-dim); padding-left: 1rem; border-left: 1px solid var(--st-line); }
+  .st-top .doc b { color: var(--st-text); }
+  .st-top .who { margin-left: auto; font-size: .8rem; color: var(--st-faint); }
+
+  .wrapj { max-width: 1000px; margin: 0 auto; padding: clamp(2rem,5vw,3.4rem) 1.4rem 5rem; }
+  .jh-head { display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem; }
+  .jh-head .k { font-size: .7rem; letter-spacing: .22em; text-transform: uppercase; color: var(--st-gold); }
+  .jh-head h1 { font-family: var(--serif); font-weight: 400; color: #fff; font-size: clamp(1.9rem,4.5vw,2.7rem); margin-top: .35rem; }
+  .jh-head .sub { color: var(--st-dim); font-size: .9rem; margin-top: .25rem; }
+  .jh-head .new { margin-left: auto; font-size: .9rem; font-weight: 600; padding: .7rem 1.3rem; border-radius: 10px; color: #241a09; background: linear-gradient(180deg, var(--ember), var(--ochre)); display: inline-flex; align-items: center; gap: .5rem; }
+  .jh-head .new:hover { filter: brightness(1.05); }
+
+  /* filter row */
+  .jh-filter { display: flex; gap: .4rem; margin-bottom: 1.6rem; }
+  .jh-filter button { font-size: .78rem; padding: .42rem .9rem; border-radius: 999px; color: var(--st-dim); border: 1px solid var(--st-line-2); }
+  .jh-filter button:hover { color: var(--st-text); }
+  .jh-filter button.on { background: var(--st-panel-3); color: var(--st-text); border-color: var(--st-line-2); }
+
+  .jlist { display: grid; gap: 1rem; }
+  .jcardr { display: grid; grid-template-columns: 84px 1fr auto; gap: 1.2rem; align-items: center; padding: 1.1rem 1.2rem; border-radius: 16px; border: 1px solid var(--st-line); background: var(--st-panel); transition: border-color .16s, transform .14s var(--ease); }
+  .jcardr:hover { border-color: var(--st-line-2); transform: translateY(-1px); }
+
+  .jcov { width: 84px; height: 84px; border-radius: 12px; position: relative; display: grid; place-items: center; font-size: 1.5rem; color: #fff; overflow: hidden; }
+  .jcov.ember { background: radial-gradient(130% 130% at 30% 10%, color-mix(in oklab, var(--ember) 62%, var(--st-panel-2)), var(--st-bg)); }
+  .jcov.blood { background: radial-gradient(130% 130% at 30% 10%, color-mix(in oklab, var(--blood) 66%, var(--st-panel-2)), var(--st-bg)); }
+  .jcov.clay  { background: radial-gradient(130% 130% at 30% 10%, color-mix(in oklab, var(--clay)  56%, var(--st-panel-2)), var(--st-bg)); }
+  .jcov.rose  { background: radial-gradient(130% 130% at 30% 10%, color-mix(in oklab, var(--rose)  54%, var(--st-panel-2)), var(--st-bg)); }
+
+  .jmeta { min-width: 0; }
+  .jmeta .titlerow { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
+  .jmeta h3 { font-family: var(--serif); font-weight: 500; color: #fff; font-size: 1.35rem; line-height: 1.1; }
+  .pill { font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; padding: .22rem .55rem; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; }
+  .pill.type { color: var(--st-dim); border-color: var(--st-line-2); }
+  .pill.published { color: var(--st-ok); background: color-mix(in oklab, var(--st-ok) 12%, transparent); border-color: color-mix(in oklab, var(--st-ok) 34%, transparent); }
+  .pill.draft { color: var(--st-gold); background: color-mix(in oklab, var(--st-gold) 10%, transparent); border-color: color-mix(in oklab, var(--st-gold) 30%, transparent); }
+  .jmeta .tl { color: var(--st-dim); font-size: .84rem; margin-top: .3rem; }
+  .jmeta .stats { display: flex; gap: 1.1rem; flex-wrap: wrap; margin-top: .6rem; font-size: .78rem; color: var(--st-faint); }
+  .jmeta .stats b { color: var(--st-text); font-weight: 600; }
+  .jmeta .stats .upd { margin-left: auto; }
+
+  .jacts { display: flex; gap: .5rem; flex-wrap: wrap; justify-content: flex-end; }
+  .jacts a { font-size: .8rem; padding: .5rem .85rem; border-radius: 9px; border: 1px solid var(--st-line-2); color: var(--st-dim); display: inline-flex; align-items: center; gap: .4rem; white-space: nowrap; transition: color .14s, border-color .14s, background .14s; }
+  .jacts a:hover { color: var(--st-text); border-color: var(--st-gold); }
+  .jacts a.primary { color: var(--st-text); background: var(--st-panel-3); border-color: var(--st-line-2); }
+  .jacts a .g { color: var(--st-gold); }
+
+  .empty { color: var(--st-faint); font-size: .9rem; padding: 2rem 0; }
+
+  /* empty studio — onboarding, one clear CTA */
+  .studio-empty { text-align: center; padding: 3.5rem 1.5rem; border: 1px dashed var(--st-line-2); border-radius: 16px; }
+  .studio-empty .se-ico { font-size: 2rem; color: var(--st-gold); }
+  .studio-empty h2 { font-family: var(--serif); font-weight: 400; color: #fff; font-size: 1.6rem; margin: .7rem 0 .4rem; }
+  .studio-empty p { color: var(--st-dim); max-width: 44ch; margin: 0 auto 1.6rem; font-size: .92rem; line-height: 1.6; }
+  .studio-empty .new { display: inline-flex; }
+
+  @media (max-width: 720px) {
+    .jcardr { grid-template-columns: 56px 1fr; gap: .9rem; }
+    .jcov { width: 56px; height: 56px; font-size: 1.1rem; }
+    .jacts { grid-column: 1 / -1; justify-content: flex-start; margin-top: .3rem; }
+    .jmeta .stats .upd { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<header class="st-top">
+  <span class="brand">Studio<span>.</span></span>
+  <span class="doc">Journeys &amp; pages</span>
+  <span class="who" id="who"></span>
+</header>
+
+<div class="wrapj">
+  <div class="jh-head">
+    <div>
+      <p class="k">Studio</p>
+      <h1>Your journeys &amp; pages</h1>
+      <p class="sub" id="sub"></p>
+    </div>
+    <a class="new" href="builder-new.html">+ New</a>
+  </div>
+
+  <div class="jh-filter" id="filter">
+    <button data-f="all" class="on">All</button>
+    <button data-f="course">Journeys</button>
+    <button data-f="landing">Pages</button>
+    <button data-f="draft">Drafts</button>
+  </div>
+
+  <div class="jlist" id="list"></div>
+  <p class="empty" id="empty" hidden>Nothing here yet.</p>
+</div>
+
+<script src="mock-data.js"></script>
+<script>
+(function () {
+  const S = window.STUDIO;
+  document.getElementById('who').textContent = S.owner;
+  document.getElementById('sub').textContent =
+    `${S.items.length} in your studio · ${S.items.filter(i => i.status === 'published').length} published`;
+
+  // empty studio (?empty): first-time creator, nothing built yet — onboarding, one CTA (F15)
+  if (new URLSearchParams(location.search).has('empty')) {
+    document.getElementById('sub').textContent = 'Let’s make your first one.';
+    document.getElementById('filter').style.display = 'none';
+    document.getElementById('list').innerHTML =
+      `<div class="studio-empty"><div class="se-ico">◈</div>
+        <h2>Nothing here yet.</h2>
+        <p>Your journeys and pages will live here. Start with a guided journey — a curriculum, a sales page and a member dashboard, all from one flow.</p>
+        <a class="new" href="builder-new.html">+ Create your first</a></div>`;
+    return;
+  }
+
+  const GLYPH = { course: '◈', landing: '▤' };
+  const TYPE_LABEL = { course: 'Guided journey', landing: 'Landing page' };
+
+  // actions are derived from type — a landing page has no curriculum or insights.
+  // This is the config-driven pattern: a new page type adds a branch here, not a new screen.
+  function actionsFor(it) {
+    if (it.type === 'course') {
+      const a = [
+        { href: 'course-editor.html', label: 'Curriculum', glyph: '◈', primary: true },
+        { href: 'builder.html', label: 'Sales page', glyph: '▤' },
+      ];
+      // Insights only once published — a draft has nothing to report (F13)
+      if (it.status === 'published') a.push({ href: 'reporting.html', label: 'Insights', glyph: '↗' });
+      return a;
+    }
+    return [{ href: 'builder.html', label: 'Edit page', glyph: '▤', primary: true }];
+  }
+
+  const statsFor = (it) => {
+    if (it.type !== 'course') return `<span class="upd">Edited ${it.updated}</span>`;
+    const rev = it.revenue ? `<span><b>${it.revenue}</b> · 30d</span>` : '';
+    const enrolled = it.status === 'published' ? `<span><b>${it.enrolled}</b> enrolled</span>` : '';
+    return `<span><b>${it.stages}</b> stages</span><span><b>${it.practices}</b> practices</span>${enrolled}${rev}<span class="upd">Edited ${it.updated}</span>`;
+  };
+
+  let filter = 'all';
+  function render() {
+    const items = S.items.filter(it =>
+      filter === 'all' ? true : filter === 'draft' ? it.status === 'draft' : it.type === filter);
+    document.getElementById('empty').hidden = items.length > 0;
+    document.getElementById('list').innerHTML = items.map(it => `
+      <div class="jcardr">
+        <div class="jcov ${it.tone}">${GLYPH[it.type] || '◆'}</div>
+        <div class="jmeta">
+          <div class="titlerow">
+            <h3>${it.name}</h3>
+            <span class="pill type">${TYPE_LABEL[it.type] || it.type}</span>
+            <span class="pill ${it.status}">${it.status}</span>
+          </div>
+          <p class="tl">${it.tagline}</p>
+          <div class="stats">${statsFor(it)}</div>
+        </div>
+        <div class="jacts">
+          ${actionsFor(it).map(a => `<a href="${a.href}" class="${a.primary ? 'primary' : ''}"><span class="g">${a.glyph}</span> ${a.label}</a>`).join('')}
+        </div>
+      </div>`).join('');
+  }
+
+  document.querySelectorAll('#filter button').forEach(b =>
+    b.addEventListener('click', () => {
+      filter = b.dataset.f;
+      document.querySelectorAll('#filter button').forEach(x => x.classList.toggle('on', x === b));
+      render();
+    }));
+  render();
+})();
+</script>
+<script src="protonav.js"></script>
+</body>
+</html>
