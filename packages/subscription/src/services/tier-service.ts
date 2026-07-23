@@ -583,10 +583,10 @@ export class TierService extends BaseService {
 
         const cleared = await tx
           .update(content)
-          .set({ minimumTierId: null })
+          .set({ includedInTierId: null })
           .where(
             and(
-              eq(content.minimumTierId, tierId),
+              eq(content.includedInTierId, tierId),
               eq(content.organizationId, orgId)
             )
           )

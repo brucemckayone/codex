@@ -51,6 +51,7 @@ import {
   eq,
   ilike,
   inArray,
+  isNotNull,
   isNull,
   ne,
   or,
@@ -264,24 +265,35 @@ export class ContentService extends BaseService {
             category: validated.category || null,
             tags: validated.tags || [],
             thumbnailUrl: validated.thumbnailUrl || null,
-            accessType: validated.accessType || CONTENT_ACCESS_TYPE.FREE,
+            // Content access POLICY flags (SPEC §6.1) — hard-replace the old
+            // (accessType, minimumTierId). Flags are separable/non-exclusive.
+            isPurchasable: validated.isPurchasable ?? false,
             priceCents: validated.priceCents ?? null,
-            // Tier is only meaningful for 'subscribers' (required) and 'paid'
-            // (optional, hybrid). Clamp to null for the other access modes so
-            // we never persist a nonsensical (accessType, minimumTierId) pair.
-            // Also clamp for ORGLESS content (Codex-up7bx): subscription_tiers
-            // is org-scoped, so a tier on content with no organizationId is
-            // invalid (no org to resolve it against). The Zod schema rejects
-            // this combination outright; this clamp is the defensive backstop
-            // for any direct service caller that bypasses validation — never
-            // persist a row the access layer must then fail closed on.
-            minimumTierId:
-              (validated.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS ||
-                validated.accessType === CONTENT_ACCESS_TYPE.PAID) &&
-              validated.minimumTierId &&
-              validated.organizationId
-                ? validated.minimumTierId
+            // Codex-up7bx clamp: `includedInTierId` (subscriber gate, 1:1
+            // successor of `minimumTierId`) is only valid on org-scoped content
+            // — subscription_tiers is org-scoped. Never persist a tier the
+            // access layer must then fail closed on.
+            includedInTierId:
+              validated.includedInTierId && validated.organizationId
+                ? validated.includedInTierId
                 : null,
+            courseOnly: validated.courseOnly ?? false,
+            isFollowerGated: validated.isFollowerGated ?? false,
+            isTeamOnly: validated.isTeamOnly ?? false,
+            // FREE by default only when the creator set NO other gate — this
+            // preserves the old `accessType='free'` default. An explicit gate
+            // turns free off unless isFree was set explicitly; the resolver
+            // checks isFree first (SPEC §6.3), so this defaulting is
+            // access-relevant. [WP-1 conductor note: verify at scoping review.]
+            isFree:
+              validated.isFree ??
+              !(
+                (validated.isPurchasable ?? false) ||
+                (validated.isFollowerGated ?? false) ||
+                (validated.isTeamOnly ?? false) ||
+                (validated.courseOnly ?? false) ||
+                (!!validated.includedInTierId && !!validated.organizationId)
+              ),
             status: CONTENT_STATUS.DRAFT, // Always start as draft
             viewCount: 0,
             purchaseCount: 0,
@@ -434,31 +446,19 @@ export class ContentService extends BaseService {
         const bodyFields =
           _rawBody !== undefined ? this.parseContentBody(_rawBody) : {};
 
-        // Normalize (accessType, minimumTierId) so we can never persist a
-        // nonsensical combination via update. If the caller is switching the
-        // access mode to one that doesn't support a tier, clear the column
-        // explicitly — otherwise a previously-set tier silently lingers in
-        // the DB and the access service continues to honour it (e.g. paid
-        // content still granting subscribers access via the hybrid branch).
-        const accessTypeUpdating = restValidated.accessType;
-        const accessTypeIncompatible =
-          accessTypeUpdating !== undefined &&
-          accessTypeUpdating !== CONTENT_ACCESS_TYPE.SUBSCRIBERS &&
-          accessTypeUpdating !== CONTENT_ACCESS_TYPE.PAID;
-
-        // Codex-up7bx: a tier is only valid on org-scoped content. Determine
-        // the org the row will have AFTER this update (the incoming value when
-        // the payload touches organizationId, otherwise the existing value).
-        // If that resolves to orgless, the tier must be cleared — moving
-        // content out of an org (or setting it on already-orgless content)
-        // can never leave a dangling minimumTierId for the access layer to
-        // honour. Mirrors the create-path clamp + the read-path fail-closed
-        // guard in ContentAccessService.
+        // Codex-up7bx: `includedInTierId` (the subscriber gate) is only valid
+        // on org-scoped content — subscription_tiers is org-scoped. Determine
+        // the org the row will have AFTER this update (incoming value when the
+        // payload touches organizationId, otherwise the existing value); if
+        // that resolves to orgless, clear the tier so the access layer never
+        // honours a dangling tier. (The old accessType-incompatibility clamp is
+        // obsolete: policy flags are set directly and are non-exclusive —
+        // SPEC §6.1 — so there is no "incompatible mode" to clear against.)
         const resultingOrgId =
           'organizationId' in restValidated
             ? restValidated.organizationId
             : existing.organizationId;
-        const clearTier = accessTypeIncompatible || resultingOrgId == null;
+        const clearTier = resultingOrgId == null;
 
         // Update content
         const [updated] = await tx
@@ -466,7 +466,7 @@ export class ContentService extends BaseService {
           .set({
             ...restValidated,
             ...bodyFields,
-            ...(clearTier ? { minimumTierId: null } : {}),
+            ...(clearTier ? { includedInTierId: null } : {}),
             updatedAt: new Date(),
           })
           .where(and(eq(content.id, id), withCreatorScope(content, creatorId)))
@@ -682,9 +682,8 @@ export class ContentService extends BaseService {
         // funds in a pending payout indefinitely. Free / followers / team
         // content is unaffected.
         const isMonetised =
-          (existing.accessType === CONTENT_ACCESS_TYPE.PAID &&
-            (existing.priceCents ?? 0) > 0) ||
-          existing.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS;
+          (existing.isPurchasable && (existing.priceCents ?? 0) > 0) ||
+          existing.includedInTierId != null;
         if (isMonetised) {
           const connectReady = await this.isCreatorConnectReady(
             tx as DatabaseTransaction,
@@ -693,7 +692,7 @@ export class ContentService extends BaseService {
           if (!connectReady) {
             throw new CreatorPayoutsRequiredError(
               creatorId,
-              existing.accessType
+              existing.isPurchasable ? 'purchasable' : 'included_in_tier'
             );
           }
         }
@@ -912,7 +911,24 @@ export class ContentService extends BaseService {
         whereConditions.push(eq(content.contentType, filters.contentType));
       }
       if (filters.accessType) {
-        whereConditions.push(eq(content.accessType, filters.accessType));
+        // The list filter still accepts the legacy access-KIND labels
+        // (CONTENT_ACCESS_TYPE — the display/filter projection of the policy
+        // flags); translate each to the equivalent flag predicate on the
+        // hard-replaced columns.
+        const at = filters.accessType;
+        whereConditions.push(
+          at === CONTENT_ACCESS_TYPE.FREE
+            ? eq(content.isFree, true)
+            : at === CONTENT_ACCESS_TYPE.PAID
+              ? eq(content.isPurchasable, true)
+              : at === CONTENT_ACCESS_TYPE.SUBSCRIBERS
+                ? isNotNull(content.includedInTierId)
+                : at === CONTENT_ACCESS_TYPE.FOLLOWERS
+                  ? eq(content.isFollowerGated, true)
+                  : at === CONTENT_ACCESS_TYPE.TEAM
+                    ? eq(content.isTeamOnly, true)
+                    : eq(content.courseOnly, true)
+        );
       }
       if (filters.category) {
         whereConditions.push(eq(content.category, filters.category));
@@ -1132,12 +1148,12 @@ export class ContentService extends BaseService {
         // Strip body columns for any non-free content. The public endpoint is
         // unauthenticated and KV-cached, so it must never return the text of
         // gated articles (followers / subscribers / team / paid). Metadata —
-        // title, description, thumbnail, accessType, minimumTierId, priceCents,
+        // title, description, thumbnail, access-policy flags, priceCents,
         // creator, org, mediaItem — stays so cards and the detail page shell
         // still render. Authorized callers fetch full rows through the
         // authenticated `/api/content` endpoint (creator-scoped).
         mapItem: (item) =>
-          item.accessType === CONTENT_ACCESS_TYPE.FREE
+          item.isFree
             ? item
             : { ...item, contentBody: null, contentBodyJson: null },
       });
