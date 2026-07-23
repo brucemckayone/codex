@@ -34,6 +34,25 @@ export type {
 // Financial types (revenue splits, fees, payouts)
 export type { RevenueSplit } from './financial';
 
+// Journeys / Landing-Page-Builder contracts (Codex-2pryk · WP-0 freeze).
+// Page model (D1/§4), content access policy + entitlements + the resolver
+// signature (D2/§6). Consumed by @codex/database (schema jsonb $type),
+// @codex/access (resolver impl), and apps/web via $lib/page-builder.
+export type {
+  BrandTokenOverrides,
+  ContentAccessPolicy,
+  CourseSectionType,
+  Entitlement,
+  EntitlementResolver,
+  EntitlementSource,
+  PageBuilderState,
+  PageSection,
+  PageStatus,
+  ResourceType,
+  SectionProps,
+  StoredEntitlementSource,
+} from './journeys';
+
 // Organization and Member types
 export type { OrgMemberContext, OrgMemberRole } from './member-types';
 
