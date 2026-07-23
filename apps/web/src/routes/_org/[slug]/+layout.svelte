@@ -23,7 +23,7 @@
   import { ShaderHero } from '$lib/components/ui/ShaderHero';
   import HealthBanner from '$lib/components/subscription/HealthBanner.svelte';
   import { brandEditor, initBrandPreviewBridge, injectTokenOverrides, injectDarkTokenOverrides, clearTokenOverrides, parseDarkColorOverrides, tokenOverridesToCssVars, darkTokenOverridesToCssVars } from '$lib/brand-editor';
-  import { getStaleKeys, updateStoredVersions } from '$lib/client/version-manifest';
+  import { getStaleKeys, resolveStaleCacheTargets, updateStoredVersions } from '$lib/client/version-manifest';
   import { invalidateCollection, loadSubscriptionFromServer, subscriptionCollection } from '$lib/collections';
   import { initProgressSync, cleanupProgressSync, forceSync } from '$lib/collections/progress-sync';
   import { followingStore } from '$lib/client/following.svelte';
@@ -242,13 +242,20 @@
     const versionsRef = data.versions;
     void Promise.resolve(versionsRef).then((versions) => {
       const staleKeys = getStaleKeys(versions ?? {});
-      if (staleKeys.some((k) => k.includes(':content'))) {
+      // Exact-key dispatch — reconstructs the server's version keys from
+      // {orgId, userId} so a new key can only ever fire an explicit branch,
+      // never a substring accident (see resolveStaleCacheTargets).
+      const staleTargets = resolveStaleCacheTargets(staleKeys, {
+        orgId: data.org.id,
+        userId: data.user?.id,
+      });
+      if (staleTargets.has('content')) {
         void invalidateCollection({ kind: 'content', orgId: data.org.id });
       }
-      if (staleKeys.some((k) => k.includes(':library'))) {
+      if (staleTargets.has('library')) {
         void invalidateCollection('library');
       }
-      if (staleKeys.some((k) => k.includes(':subscription'))) {
+      if (staleTargets.has('subscription')) {
         void loadSubscriptionFromServer(data.org.id, data.org.slug);
       }
       updateStoredVersions(versions ?? {});
