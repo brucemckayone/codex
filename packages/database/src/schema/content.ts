@@ -259,8 +259,10 @@ export const content = pgTable(
     shaderConfig:
       jsonb('shader_config').$type<Record<string, number | boolean>>(),
 
-    // Access model — defines how content is gated
-    // 'free' | 'paid' | 'subscribers' | 'members'
+    // Access model — defines how content is gated.
+    // Values: 'free' | 'paid' | 'followers' | 'subscribers' | 'team'.
+    // Single source of truth: CONTENT_ACCESS_TYPE (@codex/constants);
+    // enforced by check_content_access_type below.
     accessType: varchar('access_type', { length: 50 })
       .default('free')
       .notNull(),

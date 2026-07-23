@@ -40,10 +40,11 @@ export const contentAccess = pgTable(
       onDelete: 'cascade',
     }),
 
-    // Access type with CHECK constraint enforcement
+    // Access type — how the user obtained access to this content.
+    // Values: 'purchased' | 'subscription' | 'complimentary' | 'preview'.
+    // Single source of truth: ACCESS_TYPES (@codex/constants);
+    // enforced by check_access_type below.
     accessType: varchar('access_type', { length: 50 }).notNull(),
-    // Phase 1: 'purchased', 'complimentary'
-    // Phase 2: 'subscription', 'preview'
 
     // Access window
     expiresAt: timestamp('expires_at', { withTimezone: true }),
