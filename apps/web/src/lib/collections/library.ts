@@ -14,6 +14,10 @@ import type { UserLibraryResponse } from '@codex/access';
 import { VIDEO_PROGRESS } from '@codex/constants';
 import { createCollection, localStorageCollectionOptions } from '@tanstack/db';
 import { browser } from '$app/environment';
+import {
+  LIBRARY_STORAGE_KEY,
+  reconcileLibrarySchemaVersion,
+} from '$lib/library/schema-version';
 import { logger } from '$lib/observability';
 import { getUserLibrary } from '$lib/remote/library.remote';
 
@@ -49,10 +53,21 @@ type LibraryProgress = NonNullable<LibraryItem['progress']>;
  * </script>
  * ```
  */
+// Reconcile the persisted payload's schema version BEFORE the collection is
+// created. TanStack DB reads localStorage the first time the collection syncs,
+// so an incompatible payload must be migrated or discarded first — otherwise a
+// future course-grouping schema change strands old rows (risk R-B). This is a
+// no-op at the current version; see $lib/library/schema-version.ts.
+if (browser) {
+  reconcileLibrarySchemaVersion(
+    typeof localStorage !== 'undefined' ? localStorage : undefined
+  );
+}
+
 export const libraryCollection = browser
   ? createCollection<LibraryItem, string>(
       localStorageCollectionOptions({
-        storageKey: 'codex-library',
+        storageKey: LIBRARY_STORAGE_KEY,
         getKey: (item) => item.content.id,
       })
     )
