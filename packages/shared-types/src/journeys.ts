@@ -79,9 +79,13 @@ export interface PageSection {
  * unset field inherits the org brand.
  *
  * Kept a STANDALONE structural type (deliberately NOT `Partial<BrandEditorState>`)
- * so this cross-worker contract carries no apps/web `$lib` dependency. Keep in
- * sync with `BrandEditorState` (D6). Backs `landing_pages.brandOverrides`
- * jsonb `$type<BrandTokenOverrides>()`.
+ * so this cross-worker contract carries no apps/web `$lib` dependency. It is an
+ * EXACT structural mirror of the brand editor's editable state, every field made
+ * optional (D6). The mirror is enforced at COMPILE TIME, not by convention: see
+ * the drift guard in `apps/web/src/lib/page-builder/brand-overrides-guard.ts`,
+ * which fails `pnpm typecheck` if this type and `BrandEditorState` diverge on any
+ * shared key. **A future edit to either type must keep them structurally equal.**
+ * Backs `landing_pages.brandOverrides` jsonb `$type<BrandTokenOverrides>()`.
  */
 export interface BrandTokenOverrides {
   primaryColor?: string;
@@ -95,8 +99,16 @@ export interface BrandTokenOverrides {
   logoUrl?: string | null;
   /** Per-token fine-tune overrides. null value = auto-derive from primary. */
   tokenOverrides?: Record<string, string | null>;
-  /** Dark-theme colour overrides. null = auto-derive from light values. */
-  darkOverrides?: Record<string, string | null> | null;
+  /**
+   * Dark-theme colour overrides. null = auto-derive from light values.
+   * Structural mirror of the brand editor's `Partial<ThemeColors> | null`.
+   */
+  darkOverrides?: {
+    primaryColor?: string;
+    secondaryColor?: string | null;
+    accentColor?: string | null;
+    backgroundColor?: string | null;
+  } | null;
   /** Dark-theme fine-tune overrides (parallel to tokenOverrides). */
   darkTokenOverrides?: Record<string, string | null> | null;
   heroLayout?: string;
