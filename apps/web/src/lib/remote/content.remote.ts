@@ -445,6 +445,18 @@ function accessSelectionToFlags(
       // Tier-gated; the optional price makes it ALSO purchasable (only set the
       // purchasable flag when a real price is present, so pure subscription
       // content keeps its 'subscribers' display kind).
+      //
+      // Fail-closed: subscriber gating REQUIRES a concrete tier — the flag model
+      // has no "any active subscription / no specific tier" state. Without a
+      // tier this would emit an all-gates-off row (isFree:false, every gate off)
+      // that the resolver falls through to PUBLIC. Refuse it here (defense-in-
+      // depth; the create/update schema refine is the authoritative guard, and
+      // the handler's try/catch surfaces this as a form error).
+      if (!tier) {
+        throw new Error(
+          'Subscriber content requires a subscription tier — select a tier or choose a different access type.'
+        );
+      }
       return {
         isFree: false,
         isPurchasable: priceCents > 0,

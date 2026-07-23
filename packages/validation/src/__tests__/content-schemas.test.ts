@@ -588,6 +588,85 @@ describe('Content Schemas', () => {
         })
       ).toThrow(/price greater than £0/i);
     });
+
+    // ── Non-free content MUST declare a gate (subscribers-without-tier bypass) ──
+    // Regression guard for the WP-1 hole this suite previously lacked: the studio
+    // "subscribers" pick with no tier emitted isFree:false + every gate off,
+    // which the resolver falls through to PUBLIC (a paywall bypass). The write
+    // schema now rejects any explicitly non-free, zero-gate row on BOTH create
+    // and update, and accepts every legitimately-gated combination.
+    it('rejects non-free content with no access gate (subscribers without a tier)', () => {
+      expect(() =>
+        createContentSchema.parse({
+          ...baseVideo,
+          isFree: false,
+          // no isPurchasable / includedInTierId / isFollowerGated / isTeamOnly / courseOnly
+        })
+      ).toThrow(/at least one access gate/i);
+    });
+
+    it('rejects an update marking content non-free with no access gate', () => {
+      expect(() => updateContentSchema.parse({ isFree: false })).toThrow(
+        /at least one access gate/i
+      );
+    });
+
+    it('accepts non-free content gated by a tier (the subscribers fix)', () => {
+      expect(() =>
+        createContentSchema.parse({
+          ...baseVideo,
+          isFree: false,
+          includedInTierId: tierUuid,
+        })
+      ).not.toThrow();
+    });
+
+    it('accepts non-free content gated by followers', () => {
+      expect(() =>
+        createContentSchema.parse({
+          ...baseVideo,
+          isFree: false,
+          isFollowerGated: true,
+        })
+      ).not.toThrow();
+    });
+
+    it('accepts non-free content gated by team-only', () => {
+      expect(() =>
+        createContentSchema.parse({
+          ...baseVideo,
+          isFree: false,
+          isTeamOnly: true,
+        })
+      ).not.toThrow();
+    });
+
+    it('accepts non-free content gated by a price (paid)', () => {
+      expect(() =>
+        createContentSchema.parse({
+          ...baseVideo,
+          isFree: false,
+          isPurchasable: true,
+          priceCents: 1000,
+        })
+      ).not.toThrow();
+    });
+
+    it('accepts free content (isFree true) with no gate', () => {
+      expect(() =>
+        createContentSchema.parse({ ...baseVideo, isFree: true })
+      ).not.toThrow();
+    });
+
+    it('accepts an update setting a non-free row WITH a tier gate', () => {
+      expect(() =>
+        updateContentSchema.parse({
+          isFree: false,
+          includedInTierId: tierUuid,
+          organizationId: orgUuid,
+        })
+      ).not.toThrow();
+    });
   });
 
   describe('orgless content cannot be tier-gated (Codex-up7bx)', () => {

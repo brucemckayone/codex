@@ -142,6 +142,7 @@ function toAccessFlags(c: {
   accessType?: string;
   priceCents?: number | null;
   minimumTierId?: string | null;
+  slug?: string;
 }): {
   isFree: boolean;
   isPurchasable: boolean;
@@ -173,7 +174,18 @@ function toAccessFlags(c: {
         includedInTierId: tierId,
       };
     case 'subscribers':
-      // Tier-gated; an optional price makes it ALSO purchasable.
+      // Fail-closed: subscriber gating REQUIRES a concrete tier — the flag model
+      // has no "any-subscriber / no specific tier" state. Without a tier this
+      // would author a zero-gate non-free row (isFree:false, every gate off)
+      // that the resolver treats as PUBLIC. Refuse loudly so seed-constant drift
+      // can never mint a public row (mirrors `accessSelectionToFlags` in the
+      // remote form + the `createContentSchema` refine). An optional price makes
+      // it ALSO purchasable.
+      if (!tierId) {
+        throw new Error(
+          `Seed content "${c.slug ?? '(unknown)'}" is accessType 'subscribers' but has no minimumTierId — subscriber content requires a concrete tier.`
+        );
+      }
       return {
         ...base,
         includedInTierId: tierId,

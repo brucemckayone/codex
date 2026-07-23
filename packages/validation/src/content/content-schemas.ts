@@ -441,6 +441,34 @@ export const createContentSchema = baseContentSchema
         'Subscription tier requires an organisation — orgless content cannot be tier-gated',
       path: ['includedInTierId'],
     }
+  )
+  .refine(
+    (data) => {
+      // A non-free row MUST declare at least one access gate. This WP hard-
+      // replaced the single `accessType` enum with separable flags and, in
+      // doing so, dropped the old "subscribers requires a tier" guard. Without
+      // this invariant the studio form's "subscribers, no tier" pick emits an
+      // all-gates-off row with `isFree:false`, which the resolver falls through
+      // team/follower/tier/paid to a final `return true` → PUBLIC (a paywall
+      // bypass). The "any-subscriber / no specific tier" state is intentionally
+      // NOT representable in the flag model — subscriber content REQUIRES a
+      // concrete `includedInTierId`. Reject any explicitly non-free row that
+      // carries no gate at all (generically restores the deleted guard, and
+      // also closes any other zero-gate non-free combination).
+      if (data.isFree !== false) return true;
+      return (
+        !!data.isPurchasable ||
+        !!data.isFollowerGated ||
+        !!data.isTeamOnly ||
+        !!data.courseOnly ||
+        data.includedInTierId != null
+      );
+    },
+    {
+      message:
+        'Non-free content must declare at least one access gate (price, tier, followers, team, or course).',
+      path: ['includedInTierId'],
+    }
   );
 
 export type CreateContentInput = z.infer<typeof createContentSchema>;
@@ -484,6 +512,30 @@ export const updateContentSchema = baseContentSchema
     {
       message: 'Purchasable content requires a price greater than £0',
       path: ['priceCents'],
+    }
+  )
+  .refine(
+    (data) => {
+      // Mirror of the create-schema invariant: an update that EXPLICITLY marks
+      // the row non-free (`isFree:false`) must also carry at least one access
+      // gate, otherwise it persists a zero-gate non-free row that resolves to
+      // PUBLIC (the subscribers-without-tier bypass). A partial that does not
+      // set `isFree:false` is unaffected (the existing row's policy stands);
+      // the studio update form always submits the full flag set, so its
+      // "subscribers, no tier" pick is caught here.
+      if (data.isFree !== false) return true;
+      return (
+        !!data.isPurchasable ||
+        !!data.isFollowerGated ||
+        !!data.isTeamOnly ||
+        !!data.courseOnly ||
+        data.includedInTierId != null
+      );
+    },
+    {
+      message:
+        'Non-free content must declare at least one access gate (price, tier, followers, team, or course).',
+      path: ['includedInTierId'],
     }
   );
 
