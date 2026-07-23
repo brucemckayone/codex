@@ -1,13 +1,33 @@
 /**
  * Shared helpers for content detail server loads and actions.
  *
- * Both the org content detail (`_org/[slug]/(space)/content/[contentSlug]`)
- * and the creator content detail (`_creators/[username]/content/[contentSlug]`)
- * perform the same authenticated-user access check and purchase checkout flow.
+ * # Single shared access seam — two routes, one source of truth
  *
- * This module extracts that duplicated logic:
+ * TWO content-detail routes call these helpers with identical arguments and
+ * MUST stay in lockstep. They form ONE access seam — access logic lives here,
+ * never per-route:
+ *
+ *   1. org content     — `routes/_org/[slug]/(space)/content/[contentSlug]/+page.server.ts`
+ *   2. creator content — `routes/_creators/[username]/content/[contentSlug]/+page.server.ts`
+ *
+ * Each route calls `loadAccessAndProgress(content.id, platform, cookies,
+ * content.accessType)` in both of its branches — streamed on the free
+ * fast-path, awaited on the gated path — so there are four call sites but a
+ * single signature. Neither `+page.server.ts` may add its own grant/deny
+ * logic; keeping the decision here is what stops the two routes diverging.
+ *
+ * ## WP-2 swap point (Codex-2pryk journeys)
+ *
+ * The `@codex/access` rewire (canView / canEnterCourse) replaces exactly ONE
+ * function — {@link resolveAccessGranted} — with an explicit entitlement
+ * resolver. Because both routes reach the grant decision only through that
+ * function, the swap rewires both at once and cannot diverge by route. See
+ * its doc block for the behaviour that must be preserved through the swap.
+ *
+ * This module extracts the shared logic:
  * - `loadAccessAndProgress` — parallel fetch of streaming URL + playback progress
- * - `handlePurchaseAction` — Stripe checkout session creation with error handling
+ * - `resolveAccessGranted`  — THE access-grant seam (WP-2 swap point)
+ * - `handlePurchaseAction`  — Stripe checkout session creation with error handling
  */
 import type { Cookies } from '@sveltejs/kit';
 import { fail } from '@sveltejs/kit';
@@ -103,8 +123,8 @@ type ContentAccessType = 'free' | 'paid' | 'followers' | 'subscribers' | 'team';
  * `requiresSubscription` from content state, so it stays inline rather than
  * sharing this constant.
  *
- * Iter-027 F3 — see proof test
- * `apps/web/src/__denoise_proofs__/iter-027/F3-content-detail-loader-dup.test.ts`.
+ * Shape pinned by `content-detail.test.ts` so the field set can only drift in
+ * one place (originally the removed iter-027 F3 denoise proof).
  */
 export const EMPTY_SUB_CONTEXT: SubscriptionContext = {
   requiresSubscription: false,
@@ -124,8 +144,8 @@ export const EMPTY_SUB_CONTEXT: SubscriptionContext = {
  * literal but with `hasAccess: isPublic` rather than `false`, so it can't
  * share this constant directly without a wrapper.
  *
- * Iter-027 F3 — see proof test
- * `apps/web/src/__denoise_proofs__/iter-027/F3-content-detail-loader-dup.test.ts`.
+ * Shape pinned by `content-detail.test.ts` so the field set can only drift in
+ * one place (originally the removed iter-027 F3 denoise proof).
  */
 export const DENIED_ACCESS_RESULT: AccessAndProgress = {
   hasAccess: false,
@@ -154,11 +174,54 @@ export function isPublicAccessType(
   return accessType === 'free';
 }
 
+/** The server-side API surface returned by `createServerApi`. */
+type ServerApi = ReturnType<typeof createServerApi>;
+
+/**
+ * Resolved payload of the access worker's `/stream` endpoint
+ * (`api.access.getStreamingUrl`). Threaded through {@link resolveAccessGranted}
+ * as `StreamResult | null`, where `null` means the call threw — a 403
+ * `AccessDeniedError`, a network error, or a 5xx — i.e. the backend did not
+ * grant access.
+ */
+type StreamResult = Awaited<ReturnType<ServerApi['access']['getStreamingUrl']>>;
+
+/**
+ * ── ACCESS-GRANT SEAM · single WP-2 swap point ───────────────────────────
+ *
+ * Decides whether the authenticated user may view this content. This is the
+ * ONE place both content-detail routes resolve "granted?" — see the module
+ * header for the two routes and the lockstep contract.
+ *
+ * BEHAVIOUR TODAY (must be preserved): access is inferred from the `/stream`
+ * response. A resolved response — *even one whose `streamingUrl` is null*
+ * (written articles have no media to sign) — means the backend access check
+ * passed. A thrown call (captured by the caller as `streamResult === null`)
+ * means denied. This is the historical "getStreamingUrl-throws" gate; the
+ * null-streamingUrl-but-granted case must not regress.
+ *
+ * WP-2 (Codex-2pryk · `@codex/access` rewire) replaces the BODY of this
+ * function with an explicit `canView` entitlement resolver. The signature may
+ * widen (e.g. to take contentId / accessType / platform / cookies) — keep that
+ * change inside this function so both routes inherit it in one swap and cannot
+ * diverge by route.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
+export function resolveAccessGranted(
+  streamResult: StreamResult | null
+): boolean {
+  return streamResult !== null;
+}
+
 /**
  * Fetch streaming URL and playback progress for an authenticated user.
  *
  * Returns `{ hasAccess, streamingUrl, progress }`.
  * Gracefully handles 403 / network errors by returning hasAccess=false.
+ *
+ * Shared verbatim by both content-detail routes (see module header). The
+ * access-grant decision is isolated in {@link resolveAccessGranted} — the
+ * single WP-2 swap point; everything else here is response assembly.
  *
  * `accessType` short-circuits the result for free content: `hasAccess` is
  * forced to `true` even if the stream fetch fails, so the body stays visible
@@ -177,7 +240,6 @@ export async function loadAccessAndProgress(
   // revocation `reason` from AccessDeniedError without bubbling the error
   // out of the server load. `.catch(() => null)` would swallow the detail
   // — we need the ApiError instance.
-  type StreamResult = Awaited<ReturnType<typeof api.access.getStreamingUrl>>;
   let streamResult: StreamResult | null = null;
   let streamError: unknown = null;
 
@@ -196,7 +258,9 @@ export async function loadAccessAndProgress(
   // A successful response from /stream means the access check passed,
   // even when streamingUrl is null (written articles — no media to sign).
   // Only a thrown error (403 denied, network failure) means no access.
-  const accessGranted = streamResult !== null;
+  // Single access-grant seam — WP-2 swaps `resolveAccessGranted` for an
+  // explicit `@codex/access` canView resolver (see its doc block).
+  const accessGranted = resolveAccessGranted(streamResult);
   const hasAccess = isPublicAccessType(accessType) || accessGranted;
   const streamingUrl =
     (streamResult as StreamResult | null)?.streamingUrl ?? null;
