@@ -1,29 +1,8 @@
 import type { KVNamespace, R2Bucket } from '@cloudflare/workers-types';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
-import type { Env } from '@codex/constants';
-import {
-  CONTENT_ACCESS_TYPE,
-  CONTENT_STATUS,
-  ENV_NAMES,
-  MEDIA_STATUS,
-  MEDIA_TYPES,
-  ORGANIZATION_ROLES,
-  PURCHASE_STATUS,
-  SUBSCRIPTION_STATUS,
-  VIDEO_PROGRESS,
-} from '@codex/constants';
-import { createPerRequestDbClient, toIso } from '@codex/database';
-import {
-  content,
-  mediaItems,
-  organizationFollowers,
-  organizationMemberships,
-  organizations,
-  purchases,
-  subscriptions,
-  subscriptionTiers,
-  videoPlayback,
-} from '@codex/database/schema';
+import { CONTENT_STATUS, ENV_NAMES, type Env } from '@codex/constants';
+import { createPerRequestDbClient } from '@codex/database';
+import { content } from '@codex/database/schema';
 import {
   createLazyStripeClient,
   createStripeClient,
@@ -31,15 +10,9 @@ import {
 } from '@codex/purchase';
 import {
   BaseService,
-  ForbiddenError,
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
-import {
-  getHlsMasterKey,
-  getHlsVariantKey,
-  getHlsVariantSegmentKey,
-} from '@codex/transcoding';
 import { buildServiceUrl } from '@codex/urls';
 import type {
   GetPlaybackProgressInput,
@@ -47,32 +20,29 @@ import type {
   ListUserLibraryInput,
   SavePlaybackProgressInput,
 } from '@codex/validation';
-import {
-  and,
-  desc,
-  eq,
-  gt,
-  ilike,
-  inArray,
-  isNull,
-  or,
-  sql,
-} from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { LOG_EVENTS, LOG_SEVERITY } from '../constants';
-import {
-  AccessDeniedError,
-  ContentNotFoundError,
-  InvalidContentTypeError,
-  MediaNotReadyForStreamingError,
-  R2SigningError,
-} from '../errors';
-import {
-  collectVariantSegments,
-  rewriteMasterPlaylist,
-  rewriteVariantPlaylist,
-} from '../hls-rewrite';
-import { signHlsToken } from '../hls-token';
+import { AccessDeniedError, ContentNotFoundError } from '../errors';
 import { AccessRevocation } from './access-revocation';
+import {
+  assertStreamingAccess,
+  resolveHasContentAccess,
+} from './content-access/access-decision';
+import {
+  listUserLibrary as buildUserLibrary,
+  type UserLibraryResponse,
+} from './content-access/library';
+import {
+  getPlaybackProgress as fetchPlaybackProgress,
+  savePlaybackProgress as persistPlaybackProgress,
+} from './content-access/playback-progress';
+import { DevR2Signer, type R2Signer } from './content-access/r2-signer';
+import {
+  getHlsMasterPlaylist as buildHlsMasterPlaylist,
+  getHlsVariantPlaylist as buildHlsVariantPlaylist,
+  buildStreamingResponse,
+  resolveStreamableMedia,
+} from './content-access/streaming';
 
 /**
  * Default TTL (in seconds) for presigned streaming URLs.
@@ -95,97 +65,6 @@ import { AccessRevocation } from './access-revocation';
  * See docs/subscription-cache-audit/phase-2-followup.md — Phase 3.
  */
 export const DEFAULT_STREAMING_URL_TTL_SECONDS = 600;
-
-/**
- * Interface for R2 signing functionality.
- * Can be implemented by R2Service (workers) or R2SigningClient (tests/scripts).
- */
-interface R2Signer {
-  generateSignedUrl(r2Key: string, expirySeconds: number): Promise<string>;
-  /**
-   * Read an R2 object's body as UTF-8 text, or `null` when absent. Used by the
-   * HLS playlist proxy to fetch `.m3u8` files for rewriting (WP-14).
-   */
-  getObjectText(r2Key: string): Promise<string | null>;
-}
-
-/**
- * Development-only R2Signer that returns unsigned dev-cdn URLs.
- * Miniflare R2 serves objects by key without signature verification.
- */
-class DevR2Signer implements R2Signer {
-  constructor(private baseUrl: string) {}
-
-  async generateSignedUrl(
-    r2Key: string,
-    _expirySeconds: number
-  ): Promise<string> {
-    return `${this.baseUrl}/${r2Key}`;
-  }
-
-  async getObjectText(r2Key: string): Promise<string | null> {
-    const response = await fetch(`${this.baseUrl}/${r2Key}`);
-    if (!response.ok) return null;
-    return response.text();
-  }
-}
-
-/**
- * User library item with content, access type, purchase, and progress information
- */
-interface UserLibraryItem {
-  content: {
-    id: string;
-    slug: string;
-    title: string;
-    description: string;
-    thumbnailUrl: string | null;
-    contentType: string;
-    durationSeconds: number;
-    organizationId: string | null;
-    organizationSlug: string | null;
-  };
-  /**
-   * How the user has access:
-   * - `'purchased'`     — completed (or pending-webhook) purchase row exists
-   * - `'membership'`    — user holds an org management role (owner/admin/creator)
-   * - `'subscription'`  — active subscription gates `subscribers`/tier-paid content
-   * - `'free'`          — `accessType='free'` content the user has *engaged with*
-   *                       (a `videoPlayback` row exists)
-   * - `'followers'`     — `accessType='followers'` content the user can access
-   *                       (follower row OR active subscription) AND has engaged with
-   */
-  accessType:
-    | 'purchased'
-    | 'membership'
-    | 'subscription'
-    | 'free'
-    | 'followers';
-  purchase: {
-    purchasedAt: string;
-    priceCents: number;
-  } | null;
-  progress: {
-    positionSeconds: number;
-    durationSeconds: number;
-    completed: boolean;
-    percentComplete: number;
-    updatedAt: string;
-  } | null;
-}
-
-/**
- * User library response with pagination
- */
-interface UserLibraryResponse {
-  items: UserLibraryItem[];
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-  };
-}
 
 export interface ContentAccessServiceConfig extends ServiceConfig {
   r2: R2Signer;
@@ -223,21 +102,6 @@ export interface ContentAccessServiceConfig extends ServiceConfig {
 }
 
 /**
- * Verified streamable-media descriptor returned by `resolveStreamableMedia`.
- * `creatorId`/`mediaId` are selected directly from the media item (not parsed
- * from the R2 key) so the token payload and R2 key builders are robust to the
- * key's exact shape.
- */
-interface StreamableMedia {
-  creatorId: string;
-  mediaId: string;
-  hlsMasterKey: string;
-  mediaType: 'video' | 'audio';
-  waveformKey: string | null;
-  readyVariants: string[] | null;
-}
-
-/**
  * Content Access Service
  *
  * Responsibilities:
@@ -256,6 +120,12 @@ interface StreamableMedia {
  * - P1-CONTENT-001: Queries content and media_items tables
  * - P1-ECOM-001: Verifies purchases table for access
  * - R2 Service: Generates presigned URLs via AWS SDK
+ *
+ * Structure (Codex-2pryk.1.1): this class is a thin facade. The access
+ * decision trees, streaming-URL/HLS logic, library aggregation, and playback
+ * progress live in cohesive modules under `./content-access/*`; each method
+ * delegates to them, injecting the collaborators (`db`, `obs`, `r2`,
+ * `purchaseService`, `revocation`) they need.
  */
 export class ContentAccessService extends BaseService {
   private readonly r2: R2Signer;
@@ -277,212 +147,33 @@ export class ContentAccessService extends BaseService {
    * Check whether a user currently has access to a piece of content.
    *
    * This is the boolean equivalent of the access-decision logic embedded in
-   * `getStreamingUrl`'s transaction — factored out so the progress save path
-   * (and future callers) can gate writes without duplicating the rules. It
-   * deliberately does NOT throw `AccessDeniedError` and does NOT generate
-   * signed URLs; it only answers "does this (userId, contentId) pair pass
-   * the current access rules?".
-   *
-   * Not run inside a transaction — progress saves don't require a snapshot
-   * across the access read + the videoPlayback upsert. A race where access
-   * is revoked between this check and the upsert is acceptable (the next
-   * heartbeat will be blocked) and bounded by the short KV TTL on the
-   * revocation key.
-   *
-   * Returns `false` for:
-   *   - Content not found / unpublished / soft-deleted (treated as no access)
-   *   - Team-only content when user lacks a management role
-   *   - Followers-only content when user is neither follower, active subscriber,
-   *     nor management. Note: as of Codex-xybr3 the access hierarchy is
-   *     `subscribers ⊇ followers ⊇ public` — an active subscription to the
-   *     content's org grants followers-only access without needing a follower
-   *     row. Ex-subscribers (status=cancelled) with an active follower row
-   *     still get access via the follower fallback.
-   *   - Subscribers-only content when user has neither an active subscription
-   *     meeting the minimum tier, a purchase, nor management
-   *   - Paid content when user has neither purchased nor (via tier) subscribed
-   *     nor holds a management role
-   *
-   * Returns `true` for free content the user can see, and for any of the
-   * above paths when satisfied.
+   * `getStreamingUrl`'s transaction — it does NOT throw `AccessDeniedError`
+   * and does NOT generate signed URLs. See
+   * `./content-access/access-decision.ts` for the full contract.
    */
   async hasContentAccess(userId: string, contentId: string): Promise<boolean> {
-    const contentRecord = await this.db.query.content.findFirst({
-      where: and(
-        eq(content.id, contentId),
-        eq(content.status, CONTENT_STATUS.PUBLISHED),
-        isNull(content.deletedAt)
-      ),
-      columns: {
-        id: true,
-        organizationId: true,
-        accessType: true,
-        priceCents: true,
-        minimumTierId: true,
+    return resolveHasContentAccess(
+      {
+        db: this.db,
+        purchaseService: this.purchaseService,
+        obs: this.obs,
       },
-    });
-
-    if (!contentRecord) {
-      // Missing/unpublished content → treat as no access. Don't leak the
-      // distinction between "doesn't exist" and "you can't see it" at this
-      // layer — the caller translates the boolean.
-      return false;
-    }
-
-    const orgId = contentRecord.organizationId;
-
-    // ── Fail-closed guard: orgless content can never tier-gate (Codex-up7bx) ──
-    // `subscription_tiers` is org-scoped (FK to organizations, unique per org),
-    // so a `minimumTierId` on content with NO `organizationId` is a semantically
-    // invalid row — there is no org against which a subscription/tier could be
-    // checked. Earlier this slipped through every branch that conjoined the
-    // subscription check with `orgId` being truthy, silently SKIPPING the tier
-    // gate and granting access. Deny here, before any branch, so a pre-existing
-    // bad row (regardless of how it was written) is never silently unlocked.
-    if (orgId == null && contentRecord.minimumTierId != null) {
-      this.obs.warn('Access denied - orgless content with tier gate', {
-        userId,
-        contentId,
-        minimumTierId: contentRecord.minimumTierId,
-        securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
-        severity: LOG_SEVERITY.MEDIUM,
-        eventType: LOG_EVENTS.ACCESS_CONTROL,
-      });
-      return false;
-    }
-
-    // Inline reusable helpers — mirror the branches in getStreamingUrl.
-    const MANAGEMENT_ROLES: string[] = [
-      ORGANIZATION_ROLES.OWNER,
-      ORGANIZATION_ROLES.ADMIN,
-      ORGANIZATION_ROLES.CREATOR,
-    ];
-
-    const hasManagementMembership = async (
-      organizationId: string
-    ): Promise<boolean> => {
-      const row = await this.db.query.organizationMemberships.findFirst({
-        where: and(
-          eq(organizationMemberships.organizationId, organizationId),
-          eq(organizationMemberships.userId, userId),
-          eq(organizationMemberships.status, 'active'),
-          inArray(organizationMemberships.role, MANAGEMENT_ROLES)
-        ),
-        columns: { id: true },
-      });
-      return !!row;
-    };
-
-    const hasFollower = async (organizationId: string): Promise<boolean> => {
-      const row = await this.db.query.organizationFollowers.findFirst({
-        where: and(
-          eq(organizationFollowers.organizationId, organizationId),
-          eq(organizationFollowers.userId, userId)
-        ),
-        columns: { id: true },
-      });
-      return !!row;
-    };
-
-    const hasSubscriptionAccess = async (
-      organizationId: string,
-      minimumTierId: string | null
-    ): Promise<boolean> => {
-      const userSub = await this.db.query.subscriptions.findFirst({
-        where: and(
-          eq(subscriptions.userId, userId),
-          eq(subscriptions.organizationId, organizationId),
-          inArray(subscriptions.status, [
-            SUBSCRIPTION_STATUS.ACTIVE,
-            SUBSCRIPTION_STATUS.CANCELLING,
-          ]),
-          gt(subscriptions.currentPeriodEnd, new Date())
-        ),
-        with: { tier: true },
-      });
-      if (!userSub) return false;
-      if (!minimumTierId) return true;
-      const contentTier = await this.db.query.subscriptionTiers.findFirst({
-        where: eq(subscriptionTiers.id, minimumTierId),
-        columns: { sortOrder: true },
-      });
-      if (!contentTier) return false;
-      return userSub.tier.sortOrder >= contentTier.sortOrder;
-    };
-
-    // Branch on accessType — mirrors the decision tree in getStreamingUrl.
-    if (contentRecord.accessType === CONTENT_ACCESS_TYPE.TEAM) {
-      if (!orgId) return false;
-      return hasManagementMembership(orgId);
-    }
-
-    if (contentRecord.accessType === CONTENT_ACCESS_TYPE.FOLLOWERS) {
-      if (!orgId) return false;
-      // Codex-xybr3: subscribers ⊇ followers. Active subscribers to the
-      // content's org get followers-only access without needing a follower
-      // row. Either a subscription OR a follower row grants access — both
-      // are independent reads so launch them in parallel (R12 hard rule).
-      // The deny path was previously 3 sequential round-trips; the cheap
-      // pair now overlaps, falling through to management only when both
-      // come back falsey. On grant either truthy result short-circuits.
-      const [subscribed, followed] = await Promise.all([
-        hasSubscriptionAccess(orgId, null),
-        hasFollower(orgId),
-      ]);
-      if (subscribed || followed) return true;
-      return hasManagementMembership(orgId);
-    }
-
-    if (contentRecord.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS) {
-      if (!orgId) return false;
-      // Subscription and purchase are independent gates — launch in parallel
-      // (R12 hard rule). Falls through to management only when both deny.
-      const [subscribed, purchased] = await Promise.all([
-        hasSubscriptionAccess(orgId, contentRecord.minimumTierId),
-        this.purchaseService.verifyPurchase(contentId, userId),
-      ]);
-      if (subscribed || purchased) return true;
-      return hasManagementMembership(orgId);
-    }
-
-    // Paid content (priceCents > 0) — check purchase, optional tier, membership.
-    if (contentRecord.priceCents && contentRecord.priceCents > 0) {
-      // Purchase + (optional) subscription gates are independent — launch in
-      // parallel when both apply (R12 hard rule). When no minimumTierId is
-      // set the subscription path doesn't apply, so only purchase runs.
-      if (orgId && contentRecord.minimumTierId) {
-        const [purchased, subscribed] = await Promise.all([
-          this.purchaseService.verifyPurchase(contentId, userId),
-          hasSubscriptionAccess(orgId, contentRecord.minimumTierId),
-        ]);
-        if (purchased || subscribed) return true;
-        return hasManagementMembership(orgId);
-      }
-      if (await this.purchaseService.verifyPurchase(contentId, userId)) {
-        return true;
-      }
-      if (!orgId) return false;
-      return hasManagementMembership(orgId);
-    }
-
-    // Free content with no price — access granted.
-    return true;
+      userId,
+      contentId
+    );
   }
 
   /**
-   * Generate signed streaming URL for content
+   * Generate signed streaming URL for content.
    *
    * Access control flow:
-   * 1. Verify content exists and is published (any organization)
-   * 2. Check if content is free (price_cents = 0) → grant access
-   * 3. If paid, check if user has purchased this content → grant access
-   * 4. If no purchase, check if user is member of content's organization → grant access
-   * 5. Otherwise → ACCESS_DENIED
-   * 6. Generate time-limited signed R2 URL
+   * 1. KV revocation short-circuit (before any DB work, when wired)
+   * 2. Read-only transaction: fetch content + media, run the access decision
+   *    (`assertStreamingAccess`), then resolve the streamable media target
+   * 3. Mint a short-lived HLS token and return the master-playlist proxy URL
    *
-   * Transaction safety:
-   * - All queries wrapped in transaction for consistent snapshot
-   * - Read committed isolation level for access verification
+   * Transaction safety: access verification + media resolution share one
+   * read-committed, read-only snapshot.
    *
    * @param userId - Authenticated user ID
    * @param input - Content ID and optional expiry
@@ -569,16 +260,9 @@ export class ContentAccessService extends BaseService {
         }
       }
 
-      // Step 1 & 2: Verify access and fetch content/media data within transaction
-      // Transaction ensures consistent snapshot for access verification
-      const {
-        r2Key,
-        creatorId,
-        mediaId,
-        mediaType,
-        waveformKey,
-        readyVariants,
-      } = await this.db.transaction(
+      // Step 1 & 2: Verify access and fetch content/media data within a
+      // read-only transaction (consistent snapshot for access verification).
+      const target = await this.db.transaction(
         async (tx) => {
           // Get content with media details (any organization)
           const contentRecord = await tx.query.content.findFirst({
@@ -601,511 +285,23 @@ export class ContentAccessService extends BaseService {
             throw new ContentNotFoundError(input.contentId);
           }
 
-          // ── Fail-closed guard: orgless content can never tier-gate ──
-          // (Codex-up7bx) `subscription_tiers` is org-scoped, so content
-          // with a `minimumTierId` but NO `organizationId` is a semantically
-          // invalid row: there is no org against which the tier/subscription
-          // could be resolved. Every accessType branch below conjoins the
-          // subscription check with `organizationId` being present, which
-          // for such a row silently SKIPS the gate and (in the free/paid
-          // arms) grants access. Deny up front so a pre-existing bad row —
-          // however it was written — is never silently unlocked. This must
-          // precede the accessType branching.
-          if (
-            contentRecord.organizationId == null &&
-            contentRecord.minimumTierId != null
-          ) {
-            this.obs.warn('Access denied - orgless content with tier gate', {
-              userId,
-              contentId: input.contentId,
-              minimumTierId: contentRecord.minimumTierId,
-              securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
-              severity: LOG_SEVERITY.MEDIUM,
-              eventType: LOG_EVENTS.ACCESS_CONTROL,
-            });
-            throw new AccessDeniedError(userId, input.contentId, {
-              reason: 'orgless_tier_gate',
-            });
-          }
+          // Access decision (orgless guard + accessType tree). Throws
+          // AccessDeniedError on denial; returns normally on grant.
+          await assertStreamingAccess(
+            tx,
+            { purchaseService: this.purchaseService, obs: this.obs },
+            userId,
+            input.contentId,
+            contentRecord
+          );
 
-          // NOTE: Media item existence is NOT checked here. Written content
-          // (articles) has no media item but still requires the same access
-          // verification below so the body can be unlocked on the page.
-          // Media-specific validation (status=ready, HLS key, mediaType)
-          // only runs after the access check passes AND a media item exists.
-
-          // ── Reusable helper: check active subscription access ──────
-          // Returns true if user has an active subscription to the org
-          // that meets the content's minimum tier requirement.
-          // When minimumTierId is null, any active subscription grants access.
-          const checkSubscriptionAccess = async (
-            orgId: string,
-            minimumTierId: string | null
-          ): Promise<boolean> => {
-            const userSub = await tx.query.subscriptions.findFirst({
-              where: and(
-                eq(subscriptions.userId, userId),
-                eq(subscriptions.organizationId, orgId),
-                inArray(subscriptions.status, [
-                  SUBSCRIPTION_STATUS.ACTIVE,
-                  SUBSCRIPTION_STATUS.CANCELLING,
-                ]),
-                gt(subscriptions.currentPeriodEnd, new Date())
-              ),
-              with: { tier: true },
-            });
-
-            if (!userSub) return false;
-
-            // No minimum tier set — any active subscription grants access
-            if (!minimumTierId) {
-              this.obs.info('Access granted via subscription (any tier)', {
-                userId,
-                contentId: input.contentId,
-                subscriptionTier: userSub.tier.name,
-              });
-              return true;
-            }
-
-            // Minimum tier set — compare sortOrder.
-            // Archived (soft-deleted) tiers MUST still resolve here: a
-            // creator who deletes a tier leaves historic content gated
-            // against it, and active subscribers whose own subscription
-            // predates the delete still need their access decision to
-            // compare sort orders. The deletedAt filter is therefore
-            // omitted intentionally — mirror of TierService.getTierForAccessCheck.
-            const contentTier = await tx.query.subscriptionTiers.findFirst({
-              where: eq(subscriptionTiers.id, minimumTierId),
-            });
-
-            if (
-              contentTier &&
-              userSub.tier.sortOrder >= contentTier.sortOrder
-            ) {
-              this.obs.info('Access granted via subscription', {
-                userId,
-                contentId: input.contentId,
-                subscriptionTier: userSub.tier.name,
-                contentMinTier: contentTier.name,
-              });
-              return true;
-            }
-
-            return false;
-          };
-
-          // ── Reusable helper: check org membership ──────────────────
-          const checkOrgMembership = async (orgId: string) => {
-            return tx.query.organizationMemberships.findFirst({
-              where: and(
-                eq(organizationMemberships.organizationId, orgId),
-                eq(organizationMemberships.userId, userId),
-                eq(organizationMemberships.status, 'active')
-              ),
-            });
-          };
-
-          // ── Reusable helper: check management membership ────────────
-          // Only owner/admin/creator roles bypass payment requirements.
-          // Regular 'member' and 'subscriber' roles must purchase or
-          // subscribe to access paid/subscriber content.
-          const MANAGEMENT_ROLES: string[] = [
-            ORGANIZATION_ROLES.OWNER,
-            ORGANIZATION_ROLES.ADMIN,
-            ORGANIZATION_ROLES.CREATOR,
-          ];
-
-          const checkManagementMembership = async (orgId: string) => {
-            return tx.query.organizationMemberships.findFirst({
-              where: and(
-                eq(organizationMemberships.organizationId, orgId),
-                eq(organizationMemberships.userId, userId),
-                eq(organizationMemberships.status, 'active'),
-                inArray(organizationMemberships.role, MANAGEMENT_ROLES)
-              ),
-            });
-          };
-
-          // ── Reusable helper: check follower relationship ────────────
-          const checkFollower = async (orgId: string) => {
-            return tx.query.organizationFollowers.findFirst({
-              where: and(
-                eq(organizationFollowers.organizationId, orgId),
-                eq(organizationFollowers.userId, userId)
-              ),
-            });
-          };
-
-          // ── Access decision: branch on accessType ──────────────────
-
-          // (a) Team-only: require management role (owner/admin/creator)
-          if (contentRecord.accessType === 'team') {
-            if (!contentRecord.organizationId) {
-              throw new AccessDeniedError(userId, input.contentId, {
-                reason: 'team_only_requires_org',
-              });
-            }
-
-            const membership = await checkManagementMembership(
-              contentRecord.organizationId
-            );
-
-            if (!membership) {
-              this.obs.warn('Access denied - team-only content', {
-                userId,
-                contentId: input.contentId,
-                organizationId: contentRecord.organizationId,
-                securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
-                severity: LOG_SEVERITY.MEDIUM,
-                eventType: LOG_EVENTS.ACCESS_CONTROL,
-              });
-              throw new AccessDeniedError(userId, input.contentId, {
-                organizationId: contentRecord.organizationId,
-                reason: 'team_only',
-              });
-            }
-
-            this.obs.info('Access granted via management role (team content)', {
-              userId,
-              contentId: input.contentId,
-              organizationId: contentRecord.organizationId,
-              membershipRole: membership.role,
-            });
-          }
-          // (b) Followers-only: require active subscription, follower row,
-          // or management role. Codex-xybr3 inverted the prior orthogonality:
-          // the access hierarchy is now `subscribers ⊇ followers ⊇ public`,
-          // so an active subscription to the content's org grants followers-
-          // only access without needing a follower row. The subscriber check
-          // runs FIRST so subscribers don't require the (free) follow action;
-          // the follower check remains as a fallback so ex-subscribers
-          // (status=cancelled) with an active follower row still see
-          // followers-only content via the community signal.
-          //
-          // Paused / past_due / expired subscriptions are filtered out by
-          // `checkSubscriptionAccess` (status IN (active, cancelling) AND
-          // currentPeriodEnd > now) — consistent with the PR #5 filter used
-          // for subscribers-only content.
-          else if (contentRecord.accessType === 'followers') {
-            if (!contentRecord.organizationId) {
-              throw new AccessDeniedError(userId, input.contentId, {
-                reason: 'followers_only_requires_org',
-              });
-            }
-
-            let granted = false;
-            const orgId = contentRecord.organizationId;
-
-            // Primary check (new): active subscription grants followers-only
-            // access. `minimumTierId` is passed as null — any active tier
-            // qualifies, because the content is gated to the community
-            // (followers), not to a specific paid tier.
-            const hasSubAccess = await checkSubscriptionAccess(orgId, null);
-            if (hasSubAccess) {
-              this.obs.info(
-                'Access granted via subscription (followers content)',
-                {
-                  userId,
-                  contentId: input.contentId,
-                  organizationId: orgId,
-                  reason: 'followers_content_granted_via_subscription',
-                }
-              );
-              granted = true;
-            }
-
-            // Fallback: explicit follower row — preserves access for
-            // ex-subscribers (status=cancelled) who followed before their
-            // subscription lapsed, plus free-tier followers.
-            if (!granted) {
-              const follower = await checkFollower(orgId);
-              if (follower) {
-                this.obs.info(
-                  'Access granted via follower (followers content)',
-                  {
-                    userId,
-                    contentId: input.contentId,
-                    organizationId: orgId,
-                  }
-                );
-                granted = true;
-              }
-            }
-
-            // Fallback: management membership (team implicitly has access)
-            if (!granted) {
-              const membership = await checkManagementMembership(orgId);
-              if (membership) {
-                this.obs.info(
-                  'Access granted via management role (followers content)',
-                  {
-                    userId,
-                    contentId: input.contentId,
-                    organizationId: orgId,
-                    membershipRole: membership.role,
-                  }
-                );
-                granted = true;
-              }
-            }
-
-            if (!granted) {
-              this.obs.warn('Access denied - followers-only content', {
-                userId,
-                contentId: input.contentId,
-                organizationId: orgId,
-                securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
-                severity: LOG_SEVERITY.MEDIUM,
-                eventType: LOG_EVENTS.ACCESS_CONTROL,
-              });
-              throw new AccessDeniedError(userId, input.contentId, {
-                organizationId: orgId,
-                reason: 'followers_only',
-              });
-            }
-          }
-          // (c) Subscribers-only: require active subscription (with optional tier check)
-          else if (contentRecord.accessType === 'subscribers') {
-            if (!contentRecord.organizationId) {
-              throw new AccessDeniedError(userId, input.contentId, {
-                reason: 'subscribers_only_requires_org',
-              });
-            }
-
-            let granted = false;
-
-            // Primary check: active subscription to the org
-            const hasSubAccess = await checkSubscriptionAccess(
-              contentRecord.organizationId,
-              contentRecord.minimumTierId
-            );
-
-            if (hasSubAccess) {
-              granted = true;
-            }
-
-            // Fallback: individual purchase (user may have bought it separately)
-            if (!granted) {
-              const hasPurchased = await this.purchaseService.verifyPurchase(
-                input.contentId,
-                userId
-              );
-              if (hasPurchased) {
-                this.obs.info(
-                  'Access granted via purchase (subscriber content)',
-                  {
-                    userId,
-                    contentId: input.contentId,
-                  }
-                );
-                granted = true;
-              }
-            }
-
-            // Fallback: management membership (owner/admin/creator only)
-            // Regular 'member' and 'subscriber' roles must subscribe or purchase
-            if (!granted) {
-              const membership = await checkManagementMembership(
-                contentRecord.organizationId
-              );
-              if (membership) {
-                this.obs.info(
-                  'Access granted via management membership (subscriber content)',
-                  {
-                    userId,
-                    contentId: input.contentId,
-                    organizationId: contentRecord.organizationId,
-                    membershipRole: membership.role,
-                  }
-                );
-                granted = true;
-              }
-            }
-
-            if (!granted) {
-              this.obs.warn('Access denied - subscriber-only content', {
-                userId,
-                contentId: input.contentId,
-                organizationId: contentRecord.organizationId,
-                minimumTierId: contentRecord.minimumTierId,
-                securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
-                severity: LOG_SEVERITY.MEDIUM,
-                eventType: LOG_EVENTS.ACCESS_CONTROL,
-              });
-              throw new AccessDeniedError(userId, input.contentId, {
-                organizationId: contentRecord.organizationId,
-                reason: 'subscribers_only',
-              });
-            }
-          }
-          // (c) Paid content: check purchase, then subscription, then membership
-          else if (contentRecord.priceCents && contentRecord.priceCents > 0) {
-            // Paid content - check purchase via PurchaseService
-            const hasPurchased = await this.purchaseService.verifyPurchase(
-              input.contentId,
-              userId
-            );
-
-            if (hasPurchased) {
-              this.obs.info('Access granted via purchase', {
-                userId,
-                contentId: input.contentId,
-              });
-            } else {
-              // No purchase — check subscription tier access ONLY if content
-              // is also subscriber-gated (has minimumTierId). Pure paid content
-              // (accessType='paid', no minimumTierId) requires a purchase.
-              let hasSubscriptionAccess = false;
-
-              if (contentRecord.organizationId && contentRecord.minimumTierId) {
-                hasSubscriptionAccess = await checkSubscriptionAccess(
-                  contentRecord.organizationId,
-                  contentRecord.minimumTierId
-                );
-              }
-
-              if (!hasSubscriptionAccess) {
-                // No subscription access — fall back to org membership check
-                const contentOrgId = contentRecord.organizationId;
-
-                if (!contentOrgId) {
-                  // Personal content with no org - requires purchase
-                  this.obs.warn(
-                    'Access denied - paid personal content requires purchase',
-                    {
-                      userId,
-                      contentId: input.contentId,
-                      priceCents: contentRecord.priceCents,
-                      securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
-                      severity: LOG_SEVERITY.MEDIUM,
-                      eventType: LOG_EVENTS.ACCESS_CONTROL,
-                    }
-                  );
-                  throw new AccessDeniedError(userId, input.contentId, {
-                    priceCents: contentRecord.priceCents,
-                  });
-                }
-
-                // Check if user is a management member (owner/admin/creator)
-                // Regular 'member' and 'subscriber' roles must purchase or subscribe
-                const membership =
-                  await checkManagementMembership(contentOrgId);
-
-                if (!membership) {
-                  this.obs.warn(
-                    'Access denied - no purchase and not management member',
-                    {
-                      userId,
-                      contentId: input.contentId,
-                      organizationId: contentOrgId,
-                      priceCents: contentRecord.priceCents,
-                      securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
-                      severity: LOG_SEVERITY.MEDIUM,
-                      eventType: LOG_EVENTS.ACCESS_CONTROL,
-                    }
-                  );
-                  throw new AccessDeniedError(userId, input.contentId, {
-                    priceCents: contentRecord.priceCents,
-                    organizationId: contentOrgId,
-                  });
-                }
-
-                this.obs.info('Access granted via management membership', {
-                  userId,
-                  contentId: input.contentId,
-                  organizationId: contentOrgId,
-                  membershipRole: membership.role,
-                });
-              } // end if (!hasSubscriptionAccess)
-            }
-          }
-          // (d) Free content: grant access
-          else {
-            this.obs.info('Free content - access granted', {
-              contentId: input.contentId,
-            });
-          }
-
-          // Access check passed. If content has no media item, it's a
-          // written article — return a null-URL response so the caller
-          // knows access is granted but there's nothing to stream.
-          if (!contentRecord.mediaItem) {
-            return {
-              r2Key: null,
-              creatorId: null,
-              mediaId: null,
-              mediaType: 'written' as const,
-              waveformKey: null,
-              readyVariants: null,
-            };
-          }
-
-          // Verify media is ready for streaming (status='ready' with transcoding outputs)
-          const mediaStatus = contentRecord.mediaItem.status;
-          if (mediaStatus !== MEDIA_STATUS.READY) {
-            this.obs.warn('Media not ready for streaming', {
-              contentId: input.contentId,
-              mediaItemId: contentRecord.mediaItem.id,
-              status: mediaStatus,
-            });
-            throw new MediaNotReadyForStreamingError(
-              contentRecord.mediaItem.id,
-              mediaStatus
-            );
-          }
-
-          // Extract HLS master playlist key for streaming
-          // Database constraint ensures this exists when status='ready'
-          const r2Key = contentRecord.mediaItem.hlsMasterPlaylistKey;
-
-          if (!r2Key) {
-            // This should never happen due to database constraint, but defensive check
-            this.obs.error('Media marked ready but missing HLS key', {
-              contentId: input.contentId,
-              mediaItemId: contentRecord.mediaItem.id,
-            });
-            throw new R2SigningError(
-              'missing_hls_key',
-              new Error(
-                'Media marked as ready but HLS master playlist key is missing'
-              )
-            );
-          }
-
-          // Validate media type (defense-in-depth)
-          const mediaType = contentRecord.mediaItem.mediaType;
-
-          if (
-            !([MEDIA_TYPES.VIDEO, MEDIA_TYPES.AUDIO] as string[]).includes(
-              mediaType
-            )
-          ) {
-            this.obs.error('Invalid media type', {
-              mediaType,
-              contentId: input.contentId,
-              mediaItemId: contentRecord.mediaItem.id,
-            });
-            throw new InvalidContentTypeError(input.contentId, mediaType);
-          }
-
-          // Return data for R2 signing (outside transaction).
-          // `readyVariants` is surfaced so the client can render a manual
-          // quality picker over HLS.js adaptive selection. Falls through as
-          // null when the media item has no recorded variants (e.g. during a
-          // partial transcode; the HLS master still works, we just can't
-          // enumerate the rungs).
-          return {
-            r2Key,
-            // creatorId/mediaId are selected from the media item itself (not
-            // parsed from the R2 key) so the minted token + R2 key builders
-            // are independent of the key's exact byte shape. They feed the
-            // proxy routes' R2 key construction with no extra DB hit.
-            creatorId: contentRecord.mediaItem.creatorId,
-            mediaId: contentRecord.mediaItem.id,
-            mediaType: mediaType as 'video' | 'audio',
-            waveformKey: contentRecord.mediaItem.waveformKey,
-            readyVariants: contentRecord.mediaItem.readyVariants ?? null,
-          };
+          // Access check passed — resolve the streamable media target
+          // (written article → null-URL, else validated HLS descriptor).
+          return resolveStreamableMedia(
+            this.obs,
+            input.contentId,
+            contentRecord
+          );
         },
         {
           isolationLevel: 'read committed', // Consistent snapshot for access verification
@@ -1113,89 +309,20 @@ export class ContentAccessService extends BaseService {
         }
       );
 
-      // Written content: access granted, no stream to sign.
-      if (mediaType === 'written' || r2Key === null) {
-        const expiresAt = new Date(Date.now() + expirySeconds * 1000);
-        this.obs.info('Access granted for written content (no stream)', {
-          userId,
-          contentId: input.contentId,
-        });
-        return {
-          streamingUrl: null,
-          waveformUrl: null,
-          expiresAt,
-          contentType: 'written' as const,
-        };
-      }
-
-      // Step 3: Mint a short-lived HLS token and return the master-playlist
-      // PROXY URL (NOT a direct presigned master URL). The proxy rewrites
-      // relative child URIs (variants → variant-proxy URLs; segments →
-      // presigned R2 URLs) so HLS.js never fetches an unsigned relative
-      // resource. See WP-14 (Codex-fc5oh.14).
-      //
-      // The waveform is a single static file with no relative children, so it
-      // is still presigned directly — unchanged from the prior behaviour.
-      try {
-        if (!this.contentApiBaseUrl || !this.hlsTokenSecret) {
-          // Misconfiguration (env var unbound) — fail with a typed internal
-          // error rather than emitting a token-less or broken master URL.
-          throw new R2SigningError(
-            r2Key,
-            new Error(
-              'HLS streaming proxy is not configured (contentApiBaseUrl / hlsTokenSecret missing)'
-            )
-          );
-        }
-
-        const exp = Math.floor(Date.now() / 1000) + expirySeconds;
-        const token = await signHlsToken(
-          { creatorId, mediaId, exp },
-          this.hlsTokenSecret
-        );
-
-        const base = this.contentApiBaseUrl.replace(/\/+$/, '');
-        const streamingUrl = `${base}/api/access/content/${encodeURIComponent(
-          input.contentId
-        )}/hls/master.m3u8?token=${encodeURIComponent(token)}`;
-
-        const waveformUrl =
-          mediaType === 'audio' && waveformKey
-            ? await this.r2.generateSignedUrl(waveformKey, expirySeconds)
-            : null;
-
-        const expiresAt = new Date(exp * 1000);
-
-        this.obs.info('Streaming URL generated successfully', {
-          userId,
-          contentId: input.contentId,
-          contentType: mediaType,
-          hasWaveform: !!waveformUrl,
-          expiresAt: toIso(expiresAt),
-        });
-
-        return {
-          streamingUrl,
-          waveformUrl,
-          expiresAt,
-          contentType: mediaType,
-          // `readyVariants` may be null on legacy / partially-transcoded items —
-          // convert to `undefined` so the HTTP layer can drop it from the JSON
-          // envelope via its optional() schema instead of emitting null.
-          readyVariants: readyVariants ?? undefined,
-        };
-      } catch (err) {
-        this.obs.error('Failed to mint HLS streaming URL', {
-          errorMessage: err instanceof Error ? err.message : String(err),
-          errorStack: err instanceof Error ? err.stack : undefined,
-          errorName: err instanceof Error ? err.name : undefined,
-          userId,
-          contentId: input.contentId,
-          r2Key,
-        });
-        if (err instanceof R2SigningError) throw err;
-        throw new R2SigningError(r2Key, err);
-      }
+      // Step 3: Build the streaming response (written null-URL, or mint the
+      // HLS token + master-playlist proxy URL and presign the waveform).
+      return await buildStreamingResponse(
+        target,
+        {
+          r2: this.r2,
+          contentApiBaseUrl: this.contentApiBaseUrl,
+          hlsTokenSecret: this.hlsTokenSecret,
+          obs: this.obs,
+        },
+        userId,
+        input.contentId,
+        expirySeconds
+      );
     } catch (error) {
       this.handleError(error, 'getStreamingUrl');
     }
@@ -1206,9 +333,7 @@ export class ContentAccessService extends BaseService {
    * an absolute variant-proxy URL carrying the SAME token (WP-14).
    *
    * Auth is the verified token (checked at the route via `verifyHlsToken`) —
-   * this method does NOT re-run the DB access decision. `creatorId`/`mediaId`
-   * come from the verified token payload, so the R2 key is built with no DB
-   * round-trip. Keeps all R2-read + rewrite logic in the service layer.
+   * this method does NOT re-run the DB access decision.
    *
    * @returns Rewritten master playlist text, or `null` when the master object
    *          is absent in R2 (route maps to 404).
@@ -1219,31 +344,15 @@ export class ContentAccessService extends BaseService {
     mediaId: string;
     token: string;
   }): Promise<string | null> {
-    if (!this.contentApiBaseUrl) {
-      throw new R2SigningError(
-        getHlsMasterKey(input.creatorId, input.mediaId),
-        new Error('HLS streaming proxy is not configured (contentApiBaseUrl)')
-      );
-    }
-
-    const masterKey = getHlsMasterKey(input.creatorId, input.mediaId);
-    const text = await this.r2.getObjectText(masterKey);
-    if (text === null) return null;
-
-    return rewriteMasterPlaylist(text, {
-      contentApiBaseUrl: this.contentApiBaseUrl,
-      contentId: input.contentId,
-      token: input.token,
-    });
+    return buildHlsMasterPlaylist(
+      { r2: this.r2, contentApiBaseUrl: this.contentApiBaseUrl },
+      input
+    );
   }
 
   /**
    * Read an HLS VARIANT playlist from R2 and rewrite each relative segment URI
    * to an absolute SigV4-presigned R2 URL (WP-14).
-   *
-   * Segments are presigned lazily — only this variant's segments are signed,
-   * bounding the per-invocation SigV4 work to the rungs actually requested.
-   * Segments load direct R2 → client (no further token / worker hop).
    *
    * @returns Rewritten variant playlist text, or `null` when the variant
    *          object is absent in R2 (route maps to 404).
@@ -1254,173 +363,37 @@ export class ContentAccessService extends BaseService {
     variant: string;
     expirySeconds: number;
   }): Promise<string | null> {
-    const variantKey = getHlsVariantKey(
-      input.creatorId,
-      input.mediaId,
-      input.variant
-    );
-    const text = await this.r2.getObjectText(variantKey);
-    if (text === null) return null;
-
-    // Lazily presign exactly the segments this playlist references.
-    const filenames = collectVariantSegments(text);
-    const presignedByFilename = new Map<string, string>();
-    await Promise.all(
-      filenames.map(async (filename) => {
-        const segmentKey = getHlsVariantSegmentKey(
-          input.creatorId,
-          input.mediaId,
-          input.variant,
-          filename
-        );
-        const url = await this.r2.generateSignedUrl(
-          segmentKey,
-          input.expirySeconds
-        );
-        presignedByFilename.set(filename, url);
-      })
-    );
-
-    return rewriteVariantPlaylist(text, {
-      presignSegment: (filename) => {
-        const url = presignedByFilename.get(filename);
-        if (!url) {
-          // Should never happen — collectVariantSegments + presign cover every
-          // relative line. Defensive: surface as a typed signing error.
-          throw new R2SigningError(
-            getHlsVariantSegmentKey(
-              input.creatorId,
-              input.mediaId,
-              input.variant,
-              filename
-            ),
-            new Error('Segment was not presigned before rewrite')
-          );
-        }
-        return url;
-      },
-    });
+    return buildHlsVariantPlaylist({ r2: this.r2 }, input);
   }
 
   /**
-   * Save playback progress (upsert pattern)
+   * Save playback progress (upsert pattern).
    *
-   * Access gate (MANDATORY — see docs/subscription-cache-audit/phase-2-followup.md Phase 4.1):
-   *   1. Resolve content's organizationId.
-   *   2. If `AccessRevocation.isRevoked(userId, orgId)` returns a revocation,
-   *      throw `ForbiddenError('Access revoked', { reason })`. This closes
-   *      the window where a cancelled/refunded user continues to POST
-   *      heartbeats and accidentally restores "continue watching" entries
-   *      after their subscription ends.
-   *   3. If `hasContentAccess(userId, contentId)` is false, throw
-   *      `ForbiddenError('No active access for this content')`.
-   *   4. Only then run the upsert.
+   * Access gate: KV revocation check, then a DB-level access check
+   * (`hasContentAccess`), then the upsert. See
+   * `./content-access/playback-progress.ts` for the full contract.
    *
-   * The two checks are independent — either can reject. Revocation is
-   * checked first because it's a cheap KV read and catches the common case
-   * (webhook just fired, DB subscription row may still look ACTIVE for up
-   * to 30s of replication lag) without any DB round-trip.
-   *
-   * @param userId - Authenticated user ID
-   * @param input - Content ID, position, duration, completed flag
    * @throws {ForbiddenError} Access revoked, or user lacks access to content
    */
   async savePlaybackProgress(
     userId: string,
     input: SavePlaybackProgressInput
   ): Promise<void> {
-    // ── Access gate ────────────────────────────────────────────────────
-    // (1) KV revocation check — if revocation helper is wired, fetch the
-    // content's orgId and check the block list before doing any DB writes.
-    // The orgId lookup uses `this.db` (the per-request client) and reads
-    // only the two columns the check needs.
-    if (this.revocation) {
-      const contentRow = await this.db.query.content.findFirst({
-        where: and(eq(content.id, input.contentId), isNull(content.deletedAt)),
-        columns: { organizationId: true },
-      });
-
-      // Personal content (no organizationId) can't be revoked at the org
-      // scope; fall through to the DB-level access check below.
-      const orgId = contentRow?.organizationId ?? null;
-      if (orgId) {
-        const revocation = await this.revocation.isRevoked(userId, orgId);
-        if (revocation) {
-          this.obs.warn('savePlaybackProgress blocked — access revoked', {
-            userId,
-            contentId: input.contentId,
-            organizationId: orgId,
-            reason: revocation.reason,
-          });
-          throw new ForbiddenError('Access revoked', {
-            reason: revocation.reason,
-            contentId: input.contentId,
-            organizationId: orgId,
-          });
-        }
-      }
-    }
-
-    // (2) DB-level access check — covers cancelled subscriptions, expired
-    // periods, content the user never had access to in the first place,
-    // and any path the revocation list doesn't cover (e.g. personal content).
-    const hasAccess = await this.hasContentAccess(userId, input.contentId);
-    if (!hasAccess) {
-      this.obs.warn('savePlaybackProgress blocked — no active access', {
-        userId,
-        contentId: input.contentId,
-      });
-      throw new ForbiddenError('No active access for this content', {
-        contentId: input.contentId,
-      });
-    }
-
-    // Auto-complete if watched >= completion threshold
-    const completionThreshold =
-      input.durationSeconds * VIDEO_PROGRESS.COMPLETION_THRESHOLD;
-    const isCompleted = input.positionSeconds >= completionThreshold;
-
-    this.obs.info('Saving playback progress', {
+    return persistPlaybackProgress(
+      {
+        db: this.db,
+        obs: this.obs,
+        revocation: this.revocation,
+        checkAccess: (uid, cid) => this.hasContentAccess(uid, cid),
+      },
       userId,
-      contentId: input.contentId,
-      positionSeconds: input.positionSeconds,
-      durationSeconds: input.durationSeconds,
-      completed: isCompleted,
-    });
-
-    // Upsert using unique constraint with optimistic concurrency control
-    // Only update if new position is greater (prevents backwards seeking overwrites)
-    await this.db
-      .insert(videoPlayback)
-      .values({
-        userId,
-        contentId: input.contentId,
-        positionSeconds: input.positionSeconds,
-        durationSeconds: input.durationSeconds,
-        completed: isCompleted || input.completed,
-      })
-      .onConflictDoUpdate({
-        target: [videoPlayback.userId, videoPlayback.contentId],
-        set: {
-          positionSeconds: sql`GREATEST(${videoPlayback.positionSeconds}, ${input.positionSeconds})`,
-          durationSeconds: input.durationSeconds,
-          completed: sql`${videoPlayback.completed} OR ${isCompleted || input.completed}`,
-          updatedAt: new Date(),
-        },
-      });
-
-    this.obs.info('Playback progress saved', {
-      userId,
-      contentId: input.contentId,
-      completed: isCompleted,
-    });
+      input
+    );
   }
 
   /**
-   * Get playback progress for specific content
+   * Get playback progress for specific content.
    *
-   * @param userId - Authenticated user ID
-   * @param input - Content ID
    * @returns Progress object or null
    */
   async getPlaybackProgress(
@@ -1432,825 +405,19 @@ export class ContentAccessService extends BaseService {
     completed: boolean;
     updatedAt: Date;
   } | null> {
-    const progress = await this.db.query.videoPlayback.findFirst({
-      where: and(
-        eq(videoPlayback.userId, userId),
-        eq(videoPlayback.contentId, input.contentId)
-      ),
-    });
-
-    if (!progress) {
-      return null;
-    }
-
-    return {
-      positionSeconds: progress.positionSeconds,
-      durationSeconds: progress.durationSeconds,
-      completed: progress.completed,
-      updatedAt: progress.updatedAt,
-    };
+    return fetchPlaybackProgress({ db: this.db }, userId, input);
   }
 
   /**
-   * List user's purchased content library with playback progress
+   * List user's purchased content library with playback progress.
    *
-   * @param userId - Authenticated user ID
-   * @param input - Pagination, filter, sort options
    * @returns Paginated list of content with progress
    */
   async listUserLibrary(
     userId: string,
     input: ListUserLibraryInput
   ): Promise<UserLibraryResponse> {
-    this.obs.info('Listing user library', {
-      userId,
-      page: input.page,
-      filter: input.filter,
-      sortBy: input.sortBy,
-      contentType: input.contentType,
-      accessType: input.accessType,
-      search: input.search,
-    });
-
-    const offset = (input.page - 1) * input.limit;
-
-    // ── Step 1: Resolve active membership org IDs ─────────────────────
-    const membershipConditions = [
-      eq(organizationMemberships.userId, userId),
-      eq(organizationMemberships.status, 'active'),
-    ];
-    if (input.organizationId) {
-      membershipConditions.push(
-        eq(organizationMemberships.organizationId, input.organizationId)
-      );
-    }
-
-    const MANAGEMENT_ROLES: string[] = [
-      ORGANIZATION_ROLES.OWNER,
-      ORGANIZATION_ROLES.ADMIN,
-      ORGANIZATION_ROLES.CREATOR,
-    ];
-
-    // Skip the membership lookup when the caller filters to a bucket that
-    // doesn't need it. The membership arm needs it; engaged-free and
-    // engaged-followers also reference `managementOrgIds` for cross-arm
-    // exclusion, so they must NOT skip.
-    const activeMemberships =
-      input.accessType === 'purchased' || input.accessType === 'subscription'
-        ? []
-        : await this.db.query.organizationMemberships.findMany({
-            where: and(
-              ...membershipConditions,
-              inArray(organizationMemberships.role, MANAGEMENT_ROLES)
-            ),
-            columns: { organizationId: true, role: true },
-          });
-
-    // Only management roles (owner/admin/creator) populate the library's
-    // "membership" bucket. Regular 'member' / 'subscriber' roles are handled
-    // by the subscription query (if subscribed) — they don't pull content
-    // into library just for existing.
-    const managementOrgIds = activeMemberships.map((m) => m.organizationId);
-
-    // ── Step 1b: Resolve active subscriptions with tier info ─────────
-    // Skip when filtering to a bucket that doesn't need subscription tier
-    // info. The engaged-followers arm uses an `EXISTS subscription` predicate
-    // inline (cheaper than reading + serialising tier rows here), so it can
-    // skip too. Engaged-free also doesn't reference subscriptions.
-    const activeSubscriptions =
-      input.accessType === 'purchased' ||
-      input.accessType === 'membership' ||
-      input.accessType === 'free' ||
-      input.accessType === 'followers'
-        ? []
-        : await this.db.query.subscriptions.findMany({
-            where: and(
-              eq(subscriptions.userId, userId),
-              inArray(subscriptions.status, [
-                SUBSCRIPTION_STATUS.ACTIVE,
-                SUBSCRIPTION_STATUS.CANCELLING,
-              ]),
-              gt(subscriptions.currentPeriodEnd, new Date()),
-              ...(input.organizationId
-                ? [eq(subscriptions.organizationId, input.organizationId)]
-                : [])
-            ),
-            with: { tier: true },
-          });
-
-    // ── Step 2: Build shared filter conditions ────────────────────────
-    const buildContentFilters = () => {
-      const conditions: ReturnType<typeof eq>[] = [];
-      if (input.contentType && input.contentType !== 'all') {
-        conditions.push(eq(content.contentType, input.contentType));
-      }
-      if (input.search) {
-        const pattern = `%${input.search.replace(/%/g, '\\%').replace(/_/g, '\\_')}%`;
-        const searchCondition = or(
-          ilike(content.title, pattern),
-          ilike(content.description ?? '', pattern)
-        );
-        if (searchCondition) conditions.push(searchCondition);
-      }
-      return conditions;
-    };
-
-    const buildProgressFilters = () => {
-      const conditions: ReturnType<typeof eq>[] = [];
-      if (input.filter === 'completed') {
-        conditions.push(eq(videoPlayback.completed, true));
-      } else if (input.filter === 'in_progress') {
-        conditions.push(gt(videoPlayback.positionSeconds, 0));
-        const notCompleted = or(
-          isNull(videoPlayback.completed),
-          eq(videoPlayback.completed, false)
-        );
-        if (notCompleted) conditions.push(notCompleted);
-      } else if (input.filter === 'not_started') {
-        const noProgress = or(
-          isNull(videoPlayback.positionSeconds),
-          eq(videoPlayback.positionSeconds, 0)
-        );
-        if (noProgress) conditions.push(noProgress);
-        const notCompleted = or(
-          isNull(videoPlayback.completed),
-          eq(videoPlayback.completed, false)
-        );
-        if (notCompleted) conditions.push(notCompleted);
-      }
-      return conditions;
-    };
-
-    const contentFilters = buildContentFilters();
-    const progressFilters = buildProgressFilters();
-
-    // ── Helper: map a row to UserLibraryItem ──────────────────────────
-    const mapProgress = (row: {
-      progressPositionSeconds: number | null;
-      progressDurationSeconds: number | null;
-      progressCompleted: boolean | null;
-      progressUpdatedAt: Date | null;
-    }): UserLibraryItem['progress'] => {
-      if (!row.progressUpdatedAt) return null;
-      const pos = row.progressPositionSeconds ?? 0;
-      const dur = row.progressDurationSeconds ?? 0;
-      return {
-        positionSeconds: pos,
-        durationSeconds: dur,
-        completed: row.progressCompleted ?? false,
-        percentComplete: dur > 0 ? Math.round((pos / dur) * 100) : 0,
-        updatedAt: toIso(row.progressUpdatedAt),
-      };
-    };
-
-    // ── Step 3: Query purchased items ─────────────────────────────────
-    const queryPurchased = async () => {
-      if (
-        input.accessType === 'membership' ||
-        input.accessType === 'subscription' ||
-        input.accessType === 'free' ||
-        input.accessType === 'followers'
-      ) {
-        return { items: [] as UserLibraryItem[], count: 0 };
-      }
-
-      const conditions = [
-        eq(purchases.customerId, userId),
-        eq(purchases.status, PURCHASE_STATUS.COMPLETED),
-        ...contentFilters,
-        ...progressFilters,
-      ];
-      if (input.organizationId) {
-        conditions.push(eq(purchases.organizationId, input.organizationId));
-      }
-
-      const sortClause =
-        input.sortBy === 'title'
-          ? content.title
-          : input.sortBy === 'duration'
-            ? sql`COALESCE(${mediaItems.durationSeconds}, 0)`
-            : purchases.createdAt;
-
-      const baseFrom = this.db
-        .select({
-          contentId: content.id,
-          contentSlug: content.slug,
-          contentTitle: content.title,
-          contentDescription: content.description,
-          contentThumbnailUrl: content.thumbnailUrl,
-          contentType: content.contentType,
-          mediaThumbnailKey: mediaItems.thumbnailKey,
-          mediaDurationSeconds: mediaItems.durationSeconds,
-          orgId: content.organizationId,
-          orgSlug: organizations.slug,
-          purchasedAt: purchases.createdAt,
-          amountPaidCents: purchases.amountPaidCents,
-          progressPositionSeconds: videoPlayback.positionSeconds,
-          progressDurationSeconds: videoPlayback.durationSeconds,
-          progressCompleted: videoPlayback.completed,
-          progressUpdatedAt: videoPlayback.updatedAt,
-        })
-        .from(purchases)
-        .innerJoin(content, eq(content.id, purchases.contentId))
-        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
-        .leftJoin(organizations, eq(organizations.id, content.organizationId))
-        .leftJoin(
-          videoPlayback,
-          and(
-            eq(videoPlayback.contentId, content.id),
-            eq(videoPlayback.userId, userId)
-          )
-        );
-
-      const countQuery = this.db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(purchases)
-        .innerJoin(content, eq(content.id, purchases.contentId))
-        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
-        .leftJoin(
-          videoPlayback,
-          and(
-            eq(videoPlayback.contentId, content.id),
-            eq(videoPlayback.userId, userId)
-          )
-        )
-        .where(and(...conditions));
-
-      const dataQuery = baseFrom
-        .where(and(...conditions))
-        .orderBy(input.sortBy === 'title' ? sortClause : desc(sortClause))
-        .limit(input.limit)
-        .offset(offset);
-
-      const [countResult, rows] = await Promise.all([countQuery, dataQuery]);
-
-      const items: UserLibraryItem[] = rows.map((row) => ({
-        content: {
-          id: row.contentId,
-          slug: row.contentSlug,
-          title: row.contentTitle,
-          description: row.contentDescription || '',
-          thumbnailUrl:
-            row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
-          contentType: row.contentType ?? 'video',
-          durationSeconds: row.mediaDurationSeconds ?? 0,
-          organizationId: row.orgId,
-          organizationSlug: row.orgSlug ?? null,
-        },
-        accessType: 'purchased' as const,
-        purchase: {
-          purchasedAt: row.purchasedAt.toISOString(),
-          priceCents: row.amountPaidCents,
-        },
-        progress: mapProgress(row),
-      }));
-
-      return { items, count: countResult[0]?.count ?? 0 };
-    };
-
-    // ── Step 4: Query membership items ─────────────────────────────────
-    // Library membership = content the user has via a MANAGEMENT relationship
-    // with an org (owner/admin/creator). Free + follower content from orgs the
-    // user merely follows is publicly browseable and does not belong in
-    // "my library" — followers haven't acquired anything, they're just opted-in
-    // to see it on the org's pages. Including it here would pollute every
-    // subscriber's/follower's library with the full free catalogue.
-    const queryMembership = async () => {
-      if (
-        input.accessType === 'purchased' ||
-        input.accessType === 'subscription' ||
-        input.accessType === 'free' ||
-        input.accessType === 'followers' ||
-        managementOrgIds.length === 0
-      ) {
-        return { items: [] as UserLibraryItem[], count: 0 };
-      }
-
-      // Management roles see ALL content from orgs they manage.
-      const membershipContentFilter = inArray(
-        content.organizationId,
-        managementOrgIds
-      );
-
-      const conditions = [
-        membershipContentFilter,
-        eq(content.status, CONTENT_STATUS.PUBLISHED),
-        isNull(content.deletedAt),
-        // Exclude content the user has acquired or is acquiring via purchase.
-        // Both `completed` (webhook landed) and `pending` (Stripe redirect beat
-        // the webhook — row exists but status hasn't flipped yet) count as
-        // "already owned" for library-categorisation purposes. Without the
-        // `pending` clause, a purchase mid-flight leaks into membership and
-        // shows up with the wrong accessType tag until the webhook lands.
-        sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING}))`,
-        ...contentFilters,
-        ...progressFilters,
-      ];
-
-      const sortClause =
-        input.sortBy === 'title'
-          ? content.title
-          : input.sortBy === 'duration'
-            ? sql`COALESCE(${mediaItems.durationSeconds}, 0)`
-            : content.createdAt;
-
-      const baseFrom = this.db
-        .select({
-          contentId: content.id,
-          contentSlug: content.slug,
-          contentTitle: content.title,
-          contentDescription: content.description,
-          contentThumbnailUrl: content.thumbnailUrl,
-          contentType: content.contentType,
-          mediaThumbnailKey: mediaItems.thumbnailKey,
-          mediaDurationSeconds: mediaItems.durationSeconds,
-          orgId: content.organizationId,
-          orgSlug: organizations.slug,
-          contentCreatedAt: content.createdAt,
-          progressPositionSeconds: videoPlayback.positionSeconds,
-          progressDurationSeconds: videoPlayback.durationSeconds,
-          progressCompleted: videoPlayback.completed,
-          progressUpdatedAt: videoPlayback.updatedAt,
-        })
-        .from(content)
-        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
-        .leftJoin(organizations, eq(organizations.id, content.organizationId))
-        .leftJoin(
-          videoPlayback,
-          and(
-            eq(videoPlayback.contentId, content.id),
-            eq(videoPlayback.userId, userId)
-          )
-        );
-
-      const countQuery = this.db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(content)
-        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
-        .leftJoin(
-          videoPlayback,
-          and(
-            eq(videoPlayback.contentId, content.id),
-            eq(videoPlayback.userId, userId)
-          )
-        )
-        .where(and(...conditions));
-
-      const dataQuery = baseFrom
-        .where(and(...conditions))
-        .orderBy(input.sortBy === 'title' ? sortClause : desc(sortClause))
-        .limit(input.limit)
-        .offset(offset);
-
-      const [countResult, rows] = await Promise.all([countQuery, dataQuery]);
-
-      const items: UserLibraryItem[] = rows.map((row) => ({
-        content: {
-          id: row.contentId,
-          slug: row.contentSlug,
-          title: row.contentTitle,
-          description: row.contentDescription || '',
-          thumbnailUrl:
-            row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
-          contentType: row.contentType ?? 'video',
-          durationSeconds: row.mediaDurationSeconds ?? 0,
-          organizationId: row.orgId,
-          organizationSlug: row.orgSlug ?? null,
-        },
-        accessType: 'membership' as const,
-        purchase: null,
-        progress: mapProgress(row),
-      }));
-
-      return { items, count: countResult[0]?.count ?? 0 };
-    };
-
-    // ── Step 4b: Query subscription items ───────────────────────────
-    const querySubscription = async () => {
-      if (
-        input.accessType === 'purchased' ||
-        input.accessType === 'membership' ||
-        input.accessType === 'free' ||
-        input.accessType === 'followers' ||
-        activeSubscriptions.length === 0
-      ) {
-        return { items: [] as UserLibraryItem[], count: 0 };
-      }
-
-      // Build a tier-aware filter: for each subscription, include content
-      // from that org where the user's tier sortOrder >= content's minimum tier
-      // sortOrder (or content has no minimum tier).
-      const subOrgIds = activeSubscriptions.map((s) => s.organizationId);
-
-      // Build per-subscription tier conditions using SQL:
-      // For each sub, content.organizationId = sub.orgId AND
-      //   (content.minimumTierId IS NULL
-      //    OR content.minimumTierId IN (tiers with sortOrder <= user's tier sortOrder))
-      //
-      // Since each subscription may be to a different org with a different tier,
-      // we build an OR of per-subscription conditions.
-      const subConditions = activeSubscriptions.map((sub) => {
-        const tierSortOrder = sub.tier.sortOrder;
-        return and(
-          eq(content.organizationId, sub.organizationId),
-          or(
-            isNull(content.minimumTierId),
-            // minimumTierId's sortOrder must be <= user's subscription tier sortOrder
-            sql`${content.minimumTierId} IN (
-              SELECT ${subscriptionTiers.id} FROM ${subscriptionTiers}
-              WHERE ${subscriptionTiers.sortOrder} <= ${tierSortOrder}
-                AND ${subscriptionTiers.organizationId} = ${sub.organizationId}
-                AND ${subscriptionTiers.deletedAt} IS NULL
-            )`
-          )
-        );
-      });
-
-      const conditions = [
-        // Content a subscription grants access to — either explicitly tagged
-        // `accessType='subscribers'`, or tier-gated paid content
-        // (`accessType='paid'` with a `minimumTierId` set). This mirrors the
-        // streaming-access rule in getStreamingUrl() so anything a subscriber
-        // can actually stream shows in their library. Paid content WITHOUT a
-        // minimumTierId is still gated behind purchase — it never appears
-        // here. Per-org tier-sortOrder check below (subConditions) decides
-        // whether this user's tier is high enough for any given item.
-        or(
-          eq(content.accessType, CONTENT_ACCESS_TYPE.SUBSCRIBERS),
-          and(
-            eq(content.accessType, CONTENT_ACCESS_TYPE.PAID),
-            sql`${content.minimumTierId} IS NOT NULL`
-          )
-        )!,
-        eq(content.status, CONTENT_STATUS.PUBLISHED),
-        isNull(content.deletedAt),
-        // Must belong to one of the user's subscribed orgs (with tier check)
-        or(...subConditions)!,
-        // Exclude content the user has acquired or is acquiring via purchase.
-        // Both `completed` and `pending` count — a `pending` purchase is a
-        // Stripe session whose webhook hasn't landed yet. Without the
-        // `pending` clause, a mid-flight purchase leaks into the subscription
-        // arm (particularly for `accessType='paid'` + `minimumTierId` set
-        // content, which now qualifies for both arms — see 1b6f14a0) and
-        // shows up with the wrong accessType tag on the library. Once the
-        // webhook lands and `status` flips to `completed`, the row continues
-        // to be excluded here and surfaces in the purchased arm instead.
-        sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING}))`,
-        // Exclude content from management orgs (owner/admin/creator see
-        // all their org's content via the membership query).
-        ...(managementOrgIds.length > 0
-          ? [
-              sql`${content.organizationId} NOT IN (${sql.join(
-                managementOrgIds.map((id) => sql`${id}`),
-                sql`, `
-              )})`,
-            ]
-          : []),
-        ...contentFilters,
-        ...progressFilters,
-      ];
-
-      const sortClause =
-        input.sortBy === 'title'
-          ? content.title
-          : input.sortBy === 'duration'
-            ? sql`COALESCE(${mediaItems.durationSeconds}, 0)`
-            : content.createdAt;
-
-      const baseFrom = this.db
-        .select({
-          contentId: content.id,
-          contentSlug: content.slug,
-          contentTitle: content.title,
-          contentDescription: content.description,
-          contentThumbnailUrl: content.thumbnailUrl,
-          contentType: content.contentType,
-          mediaThumbnailKey: mediaItems.thumbnailKey,
-          mediaDurationSeconds: mediaItems.durationSeconds,
-          orgId: content.organizationId,
-          orgSlug: organizations.slug,
-          contentCreatedAt: content.createdAt,
-          progressPositionSeconds: videoPlayback.positionSeconds,
-          progressDurationSeconds: videoPlayback.durationSeconds,
-          progressCompleted: videoPlayback.completed,
-          progressUpdatedAt: videoPlayback.updatedAt,
-        })
-        .from(content)
-        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
-        .leftJoin(organizations, eq(organizations.id, content.organizationId))
-        .leftJoin(
-          videoPlayback,
-          and(
-            eq(videoPlayback.contentId, content.id),
-            eq(videoPlayback.userId, userId)
-          )
-        );
-
-      const countQuery = this.db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(content)
-        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
-        .leftJoin(
-          videoPlayback,
-          and(
-            eq(videoPlayback.contentId, content.id),
-            eq(videoPlayback.userId, userId)
-          )
-        )
-        .where(and(...conditions));
-
-      const dataQuery = baseFrom
-        .where(and(...conditions))
-        .orderBy(input.sortBy === 'title' ? sortClause : desc(sortClause))
-        .limit(input.limit)
-        .offset(offset);
-
-      const [countResult, rows] = await Promise.all([countQuery, dataQuery]);
-
-      const items: UserLibraryItem[] = rows.map((row) => ({
-        content: {
-          id: row.contentId,
-          slug: row.contentSlug,
-          title: row.contentTitle,
-          description: row.contentDescription || '',
-          thumbnailUrl:
-            row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
-          contentType: row.contentType ?? 'video',
-          durationSeconds: row.mediaDurationSeconds ?? 0,
-          organizationId: row.orgId,
-          organizationSlug: row.orgSlug ?? null,
-        },
-        accessType: 'subscription' as const,
-        purchase: null,
-        progress: mapProgress(row),
-      }));
-
-      return { items, count: countResult[0]?.count ?? 0 };
-    };
-
-    // ── Step 4c/4d: Relationship-based free + followers buckets ─────
-    // Free and followers buckets are both gated by *relationship*, not
-    // engagement. The relationship is "user has a follower row OR an active
-    // in-period subscription to the org" — i.e. the user has explicitly opted
-    // in to seeing this org's content. Differences between the two buckets:
-    //
-    //   - free arm:        content.accessType = 'free'
-    //   - followers arm:   content.accessType = 'followers'
-    //
-    // Same relationship predicate, same JOIN shape, same cross-arm exclusions.
-    // The shared builder below avoids 200 lines of near-duplicate SQL plumbing.
-    //
-    // Why dropping the engagement gate matters: the user already opted in by
-    // following or subscribing. Requiring them to additionally press play
-    // before content shows up in their library makes follow/subscribe feel
-    // empty until they navigate elsewhere first. Aligns with user expectation
-    // that "I follow this org → its content shows in my library."
-    //
-    // Volume guard: relationship-bound — if you don't follow / subscribe to
-    // any org, both buckets are empty for non-management orgs.
-    const relationshipPredicate = or(
-      sql`EXISTS (SELECT 1 FROM ${organizationFollowers}
-                  WHERE ${organizationFollowers.organizationId} = ${content.organizationId}
-                    AND ${organizationFollowers.userId} = ${userId})`,
-      sql`EXISTS (SELECT 1 FROM ${subscriptions}
-                  WHERE ${subscriptions.userId} = ${userId}
-                    AND ${subscriptions.organizationId} = ${content.organizationId}
-                    AND ${subscriptions.status} IN (${SUBSCRIPTION_STATUS.ACTIVE}, ${SUBSCRIPTION_STATUS.CANCELLING})
-                    AND ${subscriptions.currentPeriodEnd} > NOW())`
-    );
-
-    const buildRelationshipQuery = async (
-      bucketAccessType:
-        | typeof CONTENT_ACCESS_TYPE.FREE
-        | typeof CONTENT_ACCESS_TYPE.FOLLOWERS,
-      tag: 'free' | 'followers'
-    ) => {
-      const conditions = [
-        eq(content.accessType, bucketAccessType),
-        eq(content.status, CONTENT_STATUS.PUBLISHED),
-        isNull(content.deletedAt),
-        sql`${content.organizationId} IS NOT NULL`,
-        relationshipPredicate!,
-        // Cross-arm exclusion: purchased rows are surfaced by queryPurchased.
-        // Free items shouldn't be purchased, but flag-flips (paid → free)
-        // could create overlap; followers items shouldn't be priced. Both
-        // exclusions are defensive — keeps the priority contract explicit.
-        sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING}))`,
-        // Cross-arm exclusion: management orgs are surfaced by queryMembership
-        // which returns ALL of an org's content for owners/admins/creators.
-        ...(managementOrgIds.length > 0
-          ? [
-              sql`${content.organizationId} NOT IN (${sql.join(
-                managementOrgIds.map((id) => sql`${id}`),
-                sql`, `
-              )})`,
-            ]
-          : []),
-        ...(input.organizationId
-          ? [eq(content.organizationId, input.organizationId)]
-          : []),
-        ...contentFilters,
-        ...progressFilters,
-      ];
-
-      const sortClause =
-        input.sortBy === 'title'
-          ? content.title
-          : input.sortBy === 'duration'
-            ? sql`COALESCE(${mediaItems.durationSeconds}, 0)`
-            : content.createdAt;
-
-      const baseFrom = this.db
-        .select({
-          contentId: content.id,
-          contentSlug: content.slug,
-          contentTitle: content.title,
-          contentDescription: content.description,
-          contentThumbnailUrl: content.thumbnailUrl,
-          contentType: content.contentType,
-          mediaThumbnailKey: mediaItems.thumbnailKey,
-          mediaDurationSeconds: mediaItems.durationSeconds,
-          orgId: content.organizationId,
-          orgSlug: organizations.slug,
-          progressPositionSeconds: videoPlayback.positionSeconds,
-          progressDurationSeconds: videoPlayback.durationSeconds,
-          progressCompleted: videoPlayback.completed,
-          progressUpdatedAt: videoPlayback.updatedAt,
-        })
-        .from(content)
-        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
-        .leftJoin(organizations, eq(organizations.id, content.organizationId))
-        .leftJoin(
-          videoPlayback,
-          and(
-            eq(videoPlayback.contentId, content.id),
-            eq(videoPlayback.userId, userId)
-          )
-        );
-
-      const countQuery = this.db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(content)
-        .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
-        .leftJoin(
-          videoPlayback,
-          and(
-            eq(videoPlayback.contentId, content.id),
-            eq(videoPlayback.userId, userId)
-          )
-        )
-        .where(and(...conditions));
-
-      const dataQuery = baseFrom
-        .where(and(...conditions))
-        .orderBy(input.sortBy === 'title' ? sortClause : desc(sortClause))
-        .limit(input.limit)
-        .offset(offset);
-
-      const [countResult, rows] = await Promise.all([countQuery, dataQuery]);
-
-      const items: UserLibraryItem[] = rows.map((row) => ({
-        content: {
-          id: row.contentId,
-          slug: row.contentSlug,
-          title: row.contentTitle,
-          description: row.contentDescription || '',
-          thumbnailUrl:
-            row.contentThumbnailUrl ?? row.mediaThumbnailKey ?? null,
-          contentType: row.contentType ?? 'video',
-          durationSeconds: row.mediaDurationSeconds ?? 0,
-          organizationId: row.orgId,
-          organizationSlug: row.orgSlug ?? null,
-        },
-        accessType: tag,
-        purchase: null,
-        progress: mapProgress(row),
-      }));
-
-      return { items, count: countResult[0]?.count ?? 0 };
-    };
-
-    const queryFreeRelationship = async () => {
-      if (input.accessType !== 'all' && input.accessType !== 'free') {
-        return { items: [] as UserLibraryItem[], count: 0 };
-      }
-      return buildRelationshipQuery(CONTENT_ACCESS_TYPE.FREE, 'free');
-    };
-
-    const queryFollowersRelationship = async () => {
-      if (input.accessType !== 'all' && input.accessType !== 'followers') {
-        return { items: [] as UserLibraryItem[], count: 0 };
-      }
-      return buildRelationshipQuery(CONTENT_ACCESS_TYPE.FOLLOWERS, 'followers');
-    };
-
-    // ── Step 5: Execute all queries in parallel ──────────────────────
-    const [
-      purchaseResult,
-      membershipResult,
-      subscriptionResult,
-      freeResult,
-      followersResult,
-    ] = await Promise.all([
-      queryPurchased(),
-      queryMembership(),
-      querySubscription(),
-      queryFreeRelationship(),
-      queryFollowersRelationship(),
-    ]);
-
-    // ── Step 6: Merge, sort, and paginate ─────────────────────────────
-    // Source priority (first-match-wins on overlap):
-    //   purchased > membership > subscription > free > followers
-    // Cross-arm exclusion clauses already minimise overlap; the explicit
-    // dedup-by-contentId step below hardens this contract for future arms.
-    const sources = [
-      purchaseResult,
-      membershipResult,
-      subscriptionResult,
-      freeResult,
-      followersResult,
-    ];
-    const activeSources = sources.filter((s) => s.count > 0);
-
-    // When a specific accessType filter is applied or only one source has
-    // items, the DB already handled pagination — return directly.
-    const filteredAccessType =
-      input.accessType === 'purchased' ||
-      input.accessType === 'membership' ||
-      input.accessType === 'subscription' ||
-      input.accessType === 'free' ||
-      input.accessType === 'followers';
-
-    if (filteredAccessType || activeSources.length <= 1) {
-      const result = filteredAccessType
-        ? input.accessType === 'purchased'
-          ? purchaseResult
-          : input.accessType === 'membership'
-            ? membershipResult
-            : input.accessType === 'subscription'
-              ? subscriptionResult
-              : input.accessType === 'free'
-                ? freeResult
-                : followersResult
-        : (activeSources[0] ?? purchaseResult);
-      return {
-        items: result.items,
-        pagination: {
-          page: input.page,
-          limit: input.limit,
-          total: result.count,
-          totalPages: Math.max(1, Math.ceil(result.count / input.limit)),
-        },
-      };
-    }
-
-    // Multiple sources have items — merge sort (each fetched with LIMIT/OFFSET
-    // from their own source, so we merge and trim to page size). Cross-arm
-    // exclusion clauses (`NOT IN purchases`, `NOT IN management orgs`, etc.)
-    // already make arms disjoint at the DB layer, so summed counts are honest.
-    // The dedup pass below preserves the priority contract defensively for
-    // any future arm that forgets an exclusion clause.
-    const totalCount = sources.reduce((sum, s) => sum + s.count, 0);
-    const seen = new Set<string>();
-    const dedupedItems: UserLibraryItem[] = [];
-    for (const source of sources) {
-      for (const item of source.items) {
-        if (seen.has(item.content.id)) continue;
-        seen.add(item.content.id);
-        dedupedItems.push(item);
-      }
-    }
-
-    if (input.sortBy === 'title') {
-      dedupedItems.sort((a, b) =>
-        a.content.title.localeCompare(b.content.title)
-      );
-    } else if (input.sortBy === 'duration') {
-      dedupedItems.sort(
-        (a, b) =>
-          (b.content.durationSeconds ?? 0) - (a.content.durationSeconds ?? 0)
-      );
-    } else {
-      dedupedItems.sort((a, b) => {
-        const dateA = a.purchase?.purchasedAt ?? '';
-        const dateB = b.purchase?.purchasedAt ?? '';
-        return dateB.localeCompare(dateA);
-      });
-    }
-
-    // Trim to page size (each source may have returned up to limit items)
-    const items = dedupedItems.slice(0, input.limit);
-
-    return {
-      items,
-      pagination: {
-        page: input.page,
-        limit: input.limit,
-        total: totalCount,
-        totalPages: Math.max(1, Math.ceil(totalCount / input.limit)),
-      },
-    };
+    return buildUserLibrary({ db: this.db, obs: this.obs }, userId, input);
   }
 }
 
