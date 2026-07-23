@@ -1,0 +1,319 @@
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     INTRO FILM — the sell video. A candlelit play-frame that reads as a still of
+     the guide, to camera, waiting to be watched. Pure CSS/SVG atmosphere (no image),
+     an ember play button with a breathing pulse, and an honest mock "playing" state.
+     Self-contained fragment · prefix .intro · no external assets · CSP-safe.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<style>
+  .intro { position: relative; padding: clamp(4.5rem, 10vw, 8rem) 0; }
+  .intro__inner {
+    max-width: 1040px; margin: 0 auto; padding: 0 clamp(1.3rem, 4vw, 3rem);
+    display: flex; flex-direction: column; align-items: center;
+  }
+
+  /* ── intro copy (above the frame) ── */
+  .intro__lead { text-align: center; max-width: 40rem; }
+  .intro__eyebrow { margin-bottom: 1.1rem; }
+  .intro__heading {
+    font-family: var(--serif); font-weight: 300;
+    font-size: clamp(2rem, 4.6vw, 3.05rem); line-height: 1.06; letter-spacing: -0.015em;
+    color: var(--bone); text-wrap: balance;
+  }
+  .intro__sub {
+    color: var(--bone-dim); font-size: clamp(1.02rem, 1.15vw, 1.12rem);
+    line-height: 1.7; margin: 1.05rem auto 0; max-width: 34ch;
+  }
+
+  /* ── the play-frame ── */
+  .intro__stage {
+    position: relative; isolation: isolate;
+    width: 100%; max-width: 940px;
+    margin-top: clamp(2.5rem, 5vw, 3.75rem);
+    aspect-ratio: 16 / 9;
+    border-radius: clamp(16px, 2.4vw, 26px);
+    overflow: hidden;
+    border: 1px solid color-mix(in oklab, var(--ember) 22%, transparent);
+    background: linear-gradient(178deg, #1a0f0a, #120b07 68%, #0c0705);
+    box-shadow:
+      0 46px 110px -54px color-mix(in oklab, var(--blood) 88%, black),
+      0 4px 24px -16px #000,
+      inset 0 1px 0 color-mix(in oklab, var(--bone) 12%, transparent);
+    cursor: pointer;
+  }
+
+  /* soft central key-light — the warmth falling on the seated figure; it breathes */
+  .intro__key {
+    position: absolute; z-index: 1; left: 50%; top: 43%;
+    width: min(64%, 560px); aspect-ratio: 1 / 1; transform: translate(-50%, -50%);
+    border-radius: 50%; filter: blur(30px); opacity: .82;
+    background: radial-gradient(circle at 50% 46%,
+      color-mix(in oklab, var(--ember) 42%, transparent),
+      color-mix(in oklab, var(--blood) 16%, transparent) 46%,
+      transparent 70%);
+    animation: intro-breathe 9s ease-in-out infinite;
+  }
+
+  /* the whisper of a figure — head + shoulders as lit warm mass (no image) */
+  .intro__figure {
+    position: absolute; z-index: 2; left: 50%; bottom: -3%;
+    width: min(48%, 380px); height: 82%; transform: translateX(-50%);
+    pointer-events: none;
+  }
+  .intro__figure::before { /* head */
+    content: ""; position: absolute; left: 50%; top: 4%; transform: translateX(-50%);
+    width: 33%; aspect-ratio: 3 / 3.5; border-radius: 50%; filter: blur(10px);
+    background: radial-gradient(52% 52% at 50% 42%,
+      color-mix(in oklab, var(--clay) 66%, transparent),
+      color-mix(in oklab, var(--blood-deep) 30%, transparent) 58%,
+      transparent 74%);
+  }
+  .intro__figure::after { /* shoulders / seated torso */
+    content: ""; position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
+    width: 100%; height: 60%; filter: blur(14px);
+    border-radius: 50% 50% 0 0 / 76% 76% 0 0;
+    background: radial-gradient(72% 92% at 50% 100%,
+      color-mix(in oklab, var(--clay) 48%, transparent),
+      color-mix(in oklab, var(--blood-deep) 26%, transparent) 56%,
+      transparent 78%);
+  }
+
+  /* deep vignette — seats the warm centre in shadow, cinematic edge fall-off */
+  .intro__vignette {
+    position: absolute; z-index: 3; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(86% 82% at 50% 45%, transparent 44%, color-mix(in oklab, #0b0604 92%, transparent) 100%),
+      linear-gradient(180deg, color-mix(in oklab, #0b0604 34%, transparent), transparent 22% 82%, color-mix(in oklab, #0b0604 46%, transparent));
+  }
+  /* faint film grain + a top sheen of catch-light */
+  .intro__grain {
+    position: absolute; z-index: 4; inset: 0; pointer-events: none; opacity: .13;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='in'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23in)'/%3E%3C/svg%3E");
+  }
+  .intro__sheen {
+    position: absolute; z-index: 4; inset: 0; pointer-events: none;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--bone) 9%, transparent), transparent 20%);
+  }
+  /* dim layer that fades in when "playing" */
+  .intro__dim {
+    position: absolute; z-index: 5; inset: 0; pointer-events: none;
+    background: color-mix(in oklab, #090503 60%, transparent);
+    opacity: 0; transition: opacity .6s var(--ease);
+  }
+  .intro__stage.is-playing .intro__dim { opacity: 1; }
+
+  /* ── centred play control (ember, breathing) ── */
+  .intro__controls {
+    position: absolute; z-index: 6; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    display: grid; place-items: center;
+  }
+  .intro__pulse {
+    position: absolute; left: 50%; top: 50%; width: 100%; height: 100%;
+    transform: translate(-50%, -50%); border-radius: 50%;
+    border: 1px solid color-mix(in oklab, var(--ember) 52%, transparent);
+    animation: intro-pulse 3.2s ease-out infinite;
+  }
+  .intro__pulse--2 { animation-delay: 1.6s; }
+  .intro__stage.is-playing .intro__pulse { animation-play-state: paused; opacity: 0; }
+
+  .intro__play {
+    position: relative; z-index: 1;
+    width: clamp(74px, 8.5vw, 104px); aspect-ratio: 1 / 1; border-radius: 50%;
+    display: grid; place-items: center;
+    color: #2a1c08;
+    background: radial-gradient(circle at 50% 36%, color-mix(in oklab, var(--ember) 92%, white), var(--ochre));
+    box-shadow:
+      0 16px 44px -14px color-mix(in oklab, var(--ember) 68%, black),
+      inset 0 1px 0 color-mix(in oklab, #fff 34%, transparent);
+    transition: transform .25s var(--ease), box-shadow .3s var(--ease), background .3s;
+  }
+  .intro__play > * { grid-area: 1 / 1; }
+  .intro__stage:hover .intro__play { transform: translateY(-2px) scale(1.045); box-shadow: 0 22px 54px -14px color-mix(in oklab, var(--ember) 78%, black), inset 0 1px 0 color-mix(in oklab, #fff 40%, transparent); }
+  .intro__play:focus-visible { outline: 2px solid var(--ember); outline-offset: 5px; }
+
+  .intro__tri { width: 34%; height: auto; margin-left: 8%; transition: opacity .25s, transform .25s; }
+  .intro__stage.is-playing .intro__tri { opacity: 0; transform: scale(.6); }
+
+  /* equalizer shown when "playing" */
+  .intro__eq { display: flex; align-items: flex-end; gap: 3px; height: 34%; opacity: 0; transform: scale(.6); transition: opacity .3s .05s, transform .3s .05s; }
+  .intro__stage.is-playing .intro__eq { opacity: 1; transform: none; }
+  .intro__eq span { width: 3px; height: 40%; border-radius: 2px; background: #2a1c08; animation: intro-eq 1.05s ease-in-out infinite; }
+  .intro__eq span:nth-child(2) { animation-delay: .18s; height: 90%; }
+  .intro__eq span:nth-child(3) { animation-delay: .36s; height: 55%; }
+  .intro__eq span:nth-child(4) { animation-delay: .1s;  height: 74%; }
+
+  /* click ripple (mock feedback) */
+  .intro__ripple {
+    position: absolute; z-index: 0; left: 50%; top: 50%; width: 100%; height: 100%;
+    transform: translate(-50%, -50%) scale(.5); border-radius: 50%;
+    background: radial-gradient(circle, color-mix(in oklab, var(--ember) 40%, transparent), transparent 70%);
+    opacity: 0; pointer-events: none;
+  }
+  .intro__ripple.is-on { animation: intro-ripple .7s var(--ease) forwards; }
+
+  /* ── corner chrome: label + duration + mock progress ── */
+  .intro__tag {
+    position: absolute; z-index: 7; bottom: clamp(.85rem, 2.2vw, 1.25rem);
+    display: inline-flex; align-items: center; gap: .5rem;
+    font-family: var(--sans); font-size: clamp(.62rem, 1.1vw, .72rem);
+    letter-spacing: .16em; text-transform: uppercase;
+    color: color-mix(in oklab, var(--bone) 66%, transparent);
+    text-shadow: 0 1px 8px #000;
+  }
+  .intro__tag--who { left: clamp(.95rem, 2.6vw, 1.5rem); }
+  .intro__tag--dur { right: clamp(.95rem, 2.6vw, 1.5rem);
+    padding: .28rem .6rem; border-radius: 999px;
+    background: color-mix(in oklab, #0c0704 55%, transparent);
+    border: 1px solid color-mix(in oklab, var(--bone) 16%, transparent);
+    -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+    letter-spacing: .06em;
+  }
+  .intro__tag-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ember); box-shadow: 0 0 8px color-mix(in oklab, var(--ember) 70%, transparent); }
+
+  .intro__progress {
+    position: absolute; z-index: 7; left: 0; right: 0; bottom: 0; height: 3px;
+    background: color-mix(in oklab, #000 40%, transparent);
+    opacity: 0; transition: opacity .4s var(--ease);
+  }
+  .intro__stage.is-playing .intro__progress { opacity: 1; }
+  .intro__progress::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 0%;
+    background: linear-gradient(90deg, var(--ochre), var(--ember));
+    box-shadow: 0 0 10px color-mix(in oklab, var(--ember) 70%, transparent);
+    transition: width 8s linear;
+  }
+  .intro__stage.is-playing .intro__progress::before { width: 32%; }
+
+  /* honest placeholder note — appears only in the playing state */
+  .intro__note {
+    margin-top: 1.1rem; height: 0; overflow: hidden; opacity: 0;
+    font-size: .8rem; letter-spacing: .04em; color: var(--bone-faint); text-align: center;
+    transition: opacity .4s var(--ease), height .4s var(--ease), margin .4s var(--ease);
+  }
+  .intro.is-playing .intro__note { opacity: 1; height: 1.4rem; }
+  .intro__note em { font-style: italic; color: var(--bone-dim); }
+
+  /* ── reveal-on-scroll (namespaced; toggled by this section's IIFE) ── */
+  .intro-reveal { opacity: 0; transform: translateY(24px); transition: opacity .9s var(--ease), transform .9s var(--ease); transition-delay: var(--d, 0s); }
+  .intro-reveal.is-in { opacity: 1; transform: none; }
+  .intro__stage.intro-reveal { transform: translateY(26px) scale(.986); }
+  .intro__stage.intro-reveal.is-in { transform: none; }
+
+  /* ── keyframes ── */
+  @keyframes intro-breathe {
+    0%, 100% { opacity: .66; transform: translate(-50%, -50%) scale(1); }
+    50%      { opacity: .9;  transform: translate(-50%, -50%) scale(1.07); }
+  }
+  @keyframes intro-pulse {
+    0%   { transform: translate(-50%, -50%) scale(1);   opacity: .6; }
+    100% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; }
+  }
+  @keyframes intro-eq {
+    0%, 100% { transform: scaleY(.5); }
+    50%      { transform: scaleY(1); }
+  }
+  @keyframes intro-ripple {
+    0%   { transform: translate(-50%, -50%) scale(.5); opacity: .55; }
+    100% { transform: translate(-50%, -50%) scale(2.4); opacity: 0; }
+  }
+
+  /* ── mobile ── */
+  @media (max-width: 560px) {
+    .intro__tag { letter-spacing: .12em; }
+  }
+
+  /* ── reduced motion: hold the composed state, no movement ── */
+  @media (prefers-reduced-motion: reduce) {
+    .intro__key { animation: none; }
+    .intro__pulse { display: none; }
+    .intro__eq span { animation: none; }
+    .intro__progress::before { transition: none; }
+    .intro__ripple { display: none; }
+    .intro-reveal, .intro__stage.intro-reveal { opacity: 1; transform: none; transition: none; }
+    .intro__stage:hover .intro__play { transform: none; }
+  }
+</style>
+
+<section class="intro" id="intro" aria-labelledby="intro-heading">
+  <div class="intro__inner">
+    <div class="intro__lead">
+      <p class="eyebrow intro__eyebrow intro-reveal">Watch · the invitation</p>
+      <h2 class="intro__heading intro-reveal" id="intro-heading" style="--d:.08s">Ninety seconds inside the work.</h2>
+      <p class="intro__sub intro-reveal" style="--d:.16s">Meet the practice, and the voice that guides it.</p>
+    </div>
+
+    <div class="intro__stage intro-reveal" style="--d:.24s">
+      <div class="intro__key" aria-hidden="true"></div>
+      <div class="intro__figure" aria-hidden="true"></div>
+      <div class="intro__vignette" aria-hidden="true"></div>
+      <div class="intro__grain" aria-hidden="true"></div>
+      <div class="intro__sheen" aria-hidden="true"></div>
+      <div class="intro__dim" aria-hidden="true"></div>
+
+      <div class="intro__controls">
+        <span class="intro__ripple" aria-hidden="true"></span>
+        <span class="intro__pulse" aria-hidden="true"></span>
+        <span class="intro__pulse intro__pulse--2" aria-hidden="true"></span>
+        <button class="intro__play" type="button" aria-label="Play the intro film (1 minute 24 seconds)" aria-pressed="false">
+          <svg class="intro__tri" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>
+          <span class="intro__eq" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+        </button>
+      </div>
+
+      <span class="intro__tag intro__tag--who" aria-hidden="true"><span class="intro__tag-dot"></span>the guide · to camera</span>
+      <span class="intro__tag intro__tag--dur">1:24</span>
+      <div class="intro__progress" aria-hidden="true"></div>
+    </div>
+
+    <p class="intro__note" role="status"><em>Placeholder</em> — no real playback. The film lives here. Tap again to stop.</p>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var section = document.getElementById('intro');
+    if (!section) return;
+
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    /* reveal-on-scroll */
+    var items = section.querySelectorAll('.intro-reveal');
+    if (reduce || !('IntersectionObserver' in window)) {
+      items.forEach(function (el) { el.classList.add('is-in'); });
+    } else {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add('is-in'); io.unobserve(e.target); }
+        });
+      }, { threshold: 0.18, rootMargin: '0px 0px -8% 0px' });
+      items.forEach(function (el) { io.observe(el); });
+    }
+
+    /* mock play toggle — poster dims, ▶ becomes an equalizer, progress line grows */
+    var stage = section.querySelector('.intro__stage');
+    var btn = section.querySelector('.intro__play');
+    var ripple = section.querySelector('.intro__ripple');
+    if (!stage || !btn) return;
+
+    function toggle() {
+      var playing = stage.classList.toggle('is-playing');
+      section.classList.toggle('is-playing', playing);
+      btn.setAttribute('aria-pressed', playing ? 'true' : 'false');
+      btn.setAttribute('aria-label', playing
+        ? 'Stop the preview (this is a placeholder, no real video)'
+        : 'Play the intro film (1 minute 24 seconds)');
+      if (playing && ripple && !reduce) {
+        ripple.classList.remove('is-on');
+        void ripple.offsetWidth; /* restart the animation */
+        ripple.classList.add('is-on');
+      }
+    }
+
+    /* the whole poster is clickable; the button carries the semantics */
+    stage.addEventListener('click', function (ev) {
+      if (ev.target === btn || btn.contains(ev.target)) return; /* button handles its own */
+      toggle();
+    });
+    btn.addEventListener('click', function (ev) { ev.stopPropagation(); toggle(); });
+  })();
+</script>

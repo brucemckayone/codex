@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Explore · Of Blood and Bones</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<style>
+  body { background: #100b07; }
+  main { max-width: 1120px; margin: 0 auto; padding: calc(53px + clamp(1.6rem,4vw,3rem)) clamp(1.2rem,4vw,3rem) 6rem; }
+
+  .ex-head { margin-bottom: 1.4rem; }
+  .ex-head .k { font-size: .7rem; letter-spacing: .26em; text-transform: uppercase; color: var(--ember); }
+  .ex-head h1 { font-size: clamp(2.4rem,6vw,3.6rem); font-weight: 300; margin: .35rem 0 .3rem; }
+  .ex-head p { color: var(--bone-faint); max-width: 50ch; }
+
+  /* search + filter row (mirrors real /explore: SearchPill + type/category chips) */
+  .ex-search { margin: 1.4rem 0 1rem; position: relative; max-width: 420px; }
+  .ex-search input { width: 100%; background: color-mix(in oklab, var(--ink-2) 60%, transparent); border: 1px solid color-mix(in oklab, var(--bone) 14%, transparent); border-radius: 999px; color: var(--bone); font: inherit; font-size: .95rem; padding: .7rem 1rem .7rem 2.5rem; }
+  .ex-search input::placeholder { color: var(--bone-faint); }
+  .ex-search input:focus { outline: none; border-color: color-mix(in oklab, var(--ember) 55%, transparent); }
+  .ex-search .mag { position: absolute; left: .95rem; top: 50%; transform: translateY(-50%); color: var(--bone-faint); }
+
+  .chips { display: flex; gap: .5rem; flex-wrap: wrap; margin: 0 0 2.4rem; }
+  .chips button { font-size: .8rem; padding: .5rem 1rem; border-radius: 999px; color: var(--bone-dim); border: 1px solid color-mix(in oklab, var(--bone) 16%, transparent); transition: all .16s; }
+  .chips button:hover { color: var(--bone); border-color: color-mix(in oklab, var(--ember) 40%, transparent); }
+  .chips button.on { color: var(--ink); background: var(--ember); border-color: var(--ember); font-weight: 600; }
+  .chips .sep { width: 1px; align-self: stretch; margin: .2rem .3rem; background: color-mix(in oklab, var(--bone) 12%, transparent); }
+
+  .ex-sec { margin-top: 2.4rem; }
+  .ex-sec[hidden] { display: none; }
+  .ex-sec__head { display: flex; align-items: baseline; gap: .8rem; margin-bottom: .5rem; flex-wrap: wrap; }
+  .ex-sec__head h2 { font-size: 1.6rem; font-weight: 400; }
+  .ex-sec__head .ct { font-size: .78rem; color: var(--bone-faint); }
+  .ex-sec__head .connect { margin-left: auto; font-size: .82rem; color: var(--ember); display: inline-flex; align-items: center; gap: .35rem; }
+  .ex-sec__head .connect:hover { text-decoration: underline; }
+
+  /* the light hierarchy cue — a sentence + an expandable note, NOT a graph */
+  .pathline { color: var(--bone-faint); font-size: .9rem; margin-bottom: 1.2rem; }
+  .pathline b { color: var(--bone-dim); }
+  .pathnote { margin-bottom: 1.4rem; padding: 1rem 1.2rem; border-radius: 14px; border: 1px solid color-mix(in oklab, var(--ember) 24%, transparent); background: color-mix(in oklab, var(--ember) 7%, var(--ink-2)); font-size: .9rem; color: var(--bone-dim); line-height: 1.6; }
+  .pathnote[hidden] { display: none; }
+  .pathnote b { color: var(--bone); font-family: var(--serif); font-weight: 500; }
+  .pathnote .steps { margin-top: .7rem; display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+  .pathnote .node { font-size: .78rem; padding: .32rem .7rem; border-radius: 999px; background: color-mix(in oklab, var(--ink) 45%, transparent); border: 1px solid color-mix(in oklab, var(--bone) 16%, transparent); color: var(--bone); }
+  .pathnote .node.root { border-color: var(--ember); color: var(--ember); }
+  .pathnote .arrow-s { color: var(--bone-faint); }
+
+  /* ── journey cards — hover-to-play seller preview ── */
+  .jgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 1.3rem; }
+  .jcard { position: relative; border-radius: 22px; overflow: hidden; border: 1px solid color-mix(in oklab, var(--bone) 10%, transparent); background: color-mix(in oklab, var(--ink-2) 55%, transparent); transition: transform .2s var(--ease), border-color .2s; display: flex; flex-direction: column; }
+  .jcard:hover { transform: translateY(-4px); border-color: color-mix(in oklab, var(--ember) 42%, transparent); }
+  .jcard__cover { height: 168px; position: relative; display: grid; align-content: end; padding: 1.1rem 1.3rem; overflow: hidden; }
+  .jcard__cover.ember { background: radial-gradient(130% 130% at 25% 0%, color-mix(in oklab, var(--ember) 55%, var(--ink-2)), var(--ink)); }
+  .jcard__cover.blood { background: radial-gradient(130% 130% at 25% 0%, color-mix(in oklab, var(--blood) 62%, var(--ink-2)), var(--ink)); }
+  .jcard__cover.clay  { background: radial-gradient(130% 130% at 25% 0%, color-mix(in oklab, var(--clay)  52%, var(--ink-2)), var(--ink)); }
+  .jcard__text { position: relative; z-index: 2; transition: opacity .3s var(--ease); }
+  .jcard__tag { position: absolute; top: 1rem; left: 1.1rem; z-index: 3; font-size: .62rem; letter-spacing: .16em; text-transform: uppercase; padding: .3rem .7rem; border-radius: 999px; background: color-mix(in oklab, var(--ink) 55%, transparent); backdrop-filter: blur(6px); color: var(--bone); border: 1px solid color-mix(in oklab, var(--bone) 22%, transparent); display: inline-flex; align-items: center; gap: .4rem; }
+  .jcard__tag.start { color: var(--ember); border-color: color-mix(in oklab, var(--ember) 44%, transparent); }
+  .jcard__cover .kk { font-size: .66rem; letter-spacing: .2em; text-transform: uppercase; color: color-mix(in oklab, var(--bone) 80%, var(--ink)); }
+  .jcard__cover h3 { font-size: 1.7rem; font-weight: 400; color: var(--bone); }
+  .jcard__cover .tl { margin-top: .3rem; font-family: var(--serif); font-style: italic; font-size: .95rem; color: color-mix(in oklab, var(--bone) 78%, var(--ink)); }
+
+  /* the hover "playing" layer — a light-sweep + scrubber illusion (no real video in prototype) */
+  .jcard__preview { position: absolute; inset: 0; z-index: 1; opacity: 0; transition: opacity .3s var(--ease); pointer-events: none; }
+  .jcard__preview::before { content: ""; position: absolute; inset: 0; background: linear-gradient(115deg, transparent 30%, color-mix(in oklab, var(--bone) 26%, transparent) 48%, transparent 66%); background-size: 250% 100%; }
+  .jcard__preview .peyeb { position: absolute; top: 1rem; right: 1.1rem; z-index: 3; font-size: .6rem; letter-spacing: .14em; text-transform: uppercase; color: var(--bone); display: inline-flex; align-items: center; gap: .35rem; }
+  .jcard__preview .peyeb .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ember); }
+  .jcard__preview .scrub { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: color-mix(in oklab, var(--ink) 60%, transparent); }
+  .jcard__preview .scrub i { display: block; height: 100%; width: 0; background: var(--ember); }
+  .jcard.has-preview:hover .jcard__preview { opacity: 1; }
+  .jcard.has-preview:hover .jcard__text { opacity: .12; }
+  .jcard.has-preview:hover .jcard__preview::before { animation: sweep 2.6s linear infinite; }
+  .jcard.has-preview:hover .jcard__preview .scrub i { animation: scrub 5s linear infinite; }
+  @keyframes sweep { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+  @keyframes scrub { from { width: 0; } to { width: 100%; } }
+
+  .jcard__body { padding: 1rem 1.3rem 1.3rem; display: flex; flex-direction: column; flex: 1; }
+  .jcard__stats { display: flex; gap: 1.1rem; font-size: .8rem; color: var(--bone-faint); margin-bottom: 1rem; }
+  .jcard__stats b { color: var(--bone-dim); font-weight: 600; }
+  .jcard__foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; }
+  .jcard__price { font-family: var(--serif); color: var(--bone); font-size: 1rem; }
+  .jcard__price small { color: var(--bone-faint); font-family: var(--sans); font-size: .78rem; }
+  .jcard__go { display: inline-flex; align-items: center; gap: .45rem; font-weight: 600; font-size: .88rem; color: var(--ember); }
+  .jcard__go .arrow { transition: transform .2s var(--ease); }
+  .jcard:hover .jcard__go .arrow { transform: translateX(4px); }
+
+  /* ── content cards ── */
+  .cgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
+  .ccard { border-radius: 16px; overflow: hidden; border: 1px solid color-mix(in oklab, var(--bone) 8%, transparent); background: color-mix(in oklab, var(--ink-2) 45%, transparent); cursor: pointer; transition: transform .18s var(--ease), border-color .18s; }
+  .ccard:hover { transform: translateY(-2px); border-color: color-mix(in oklab, var(--ember) 30%, transparent); }
+  .ccard__top { height: 96px; position: relative; display: grid; place-items: center; font-size: 1.6rem; color: color-mix(in oklab, var(--ember) 85%, var(--bone)); background: linear-gradient(160deg, color-mix(in oklab, var(--ink-3) 80%, transparent), var(--ink)); overflow: hidden; }
+  .ccard__top .glyph { position: relative; z-index: 2; transition: opacity .3s var(--ease); }
+  .ccard__top .cprev { position: absolute; inset: 0; z-index: 1; opacity: 0; transition: opacity .3s var(--ease); background: linear-gradient(115deg, transparent 30%, color-mix(in oklab, var(--bone) 22%, transparent) 48%, transparent 66%); background-size: 250% 100%; }
+  .ccard__top .cscrub { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; z-index: 3; }
+  .ccard__top .cscrub i { display: block; height: 100%; width: 0; background: var(--ember); }
+  .ccard__top .peyeb { position: absolute; top: .5rem; right: .6rem; z-index: 3; font-size: .56rem; letter-spacing: .12em; text-transform: uppercase; color: var(--bone); opacity: 0; transition: opacity .3s; }
+  .ccard.has-preview:hover .cprev { opacity: 1; animation: sweep 2.6s linear infinite; }
+  .ccard.has-preview:hover .glyph { opacity: .15; }
+  .ccard.has-preview:hover .cscrub i { animation: scrub 5s linear infinite; }
+  .ccard.has-preview:hover .peyeb { opacity: 1; }
+  .ccard__body { padding: .9rem 1rem 1.1rem; }
+  .ccard__body h4 { font-family: var(--serif); font-weight: 400; color: var(--bone); font-size: 1.1rem; line-height: 1.15; }
+  .ccard__meta { margin-top: .3rem; font-size: .74rem; color: var(--bone-faint); }
+  .ccard__acc { margin-top: .8rem; }
+  .badge { font-size: .62rem; letter-spacing: .1em; text-transform: uppercase; padding: .26rem .6rem; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; }
+  .badge--free { color: var(--bone-dim); border-color: color-mix(in oklab, var(--bone) 20%, transparent); }
+  .badge--buy { color: var(--bone); background: color-mix(in oklab, var(--bone) 10%, transparent); border-color: color-mix(in oklab, var(--bone) 24%, transparent); }
+  .badge--sub { color: var(--rose); background: color-mix(in oklab, var(--rose) 12%, transparent); border-color: color-mix(in oklab, var(--rose) 28%, transparent); }
+  .badge--course { color: var(--ember); background: color-mix(in oklab, var(--ember) 12%, transparent); border-color: color-mix(in oklab, var(--ember) 32%, transparent); }
+
+  .empty { color: var(--bone-faint); font-size: .95rem; padding: 2rem 0; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .jcard.has-preview:hover .jcard__preview::before, .jcard.has-preview:hover .jcard__preview .scrub i,
+    .ccard.has-preview:hover .cprev, .ccard.has-preview:hover .cscrub i { animation: none; }
+    .jcard.has-preview:hover .jcard__preview .scrub i, .ccard.has-preview:hover .cscrub i { width: 40%; }
+  }
+  @media (max-width: 560px) { .jgrid, .cgrid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="switch">
+  <span class="switch__brand">Of <b>Blood</b> and Bones</span>
+  <span class="switch__tag">Explore</span>
+  <nav>
+    <a href="explore.html" class="on">Explore</a>
+    <a href="library.html">Library</a>
+    <a href="course-sell.html">Rootwork</a>
+  </nav>
+</div>
+
+<main>
+  <header class="ex-head">
+    <p class="k">Explore</p>
+    <h1>Find your way in</h1>
+    <p>Start with a single practice, or follow a whole journey. However you arrive, everything begins in the body.</p>
+  </header>
+
+  <div class="ex-search">
+    <span class="mag">⌕</span>
+    <input id="q" type="search" placeholder="Search practices &amp; journeys…" autocomplete="off">
+  </div>
+  <div class="chips" id="chips"></div>
+
+  <!-- Journeys rail -->
+  <section class="ex-sec" id="jsec">
+    <div class="ex-sec__head">
+      <h2>Journeys</h2><span class="ct" id="jct"></span>
+      <a class="connect" id="connect">See how they connect <span>→</span></a>
+    </div>
+    <p class="pathline" id="pathline">Most begin with <b>Rootwork</b>, then branch into what they need.</p>
+    <div class="pathnote" id="pathnote" hidden>
+      Journeys aren’t a straight line. <b>Rootwork</b> teaches the body the baseline — safety, settling, orientation — so nearly everyone starts there. The others build on that ground and can be taken in any order once the root is in place.
+      <div class="steps">
+        <span class="node root">Rootwork</span><span class="arrow-s">→</span>
+        <span class="node">Grief &amp; the body</span><span class="arrow-s">·</span>
+        <span class="node">Sleep &amp; the nervous system</span><span class="arrow-s">·</span>
+        <span class="node">more to come</span>
+      </div>
+    </div>
+    <div class="jgrid" id="jgrid"></div>
+  </section>
+
+  <!-- Everything else -->
+  <section class="ex-sec" id="csec">
+    <div class="ex-sec__head"><h2 id="ctitle">Browse everything</h2><span class="ct" id="cct"></span></div>
+    <div class="cgrid" id="cgrid"></div>
+    <p class="empty" id="cempty" hidden>Nothing here yet — try another filter.</p>
+  </section>
+</main>
+
+<script src="course-data.js"></script>
+<script src="mock-data.js"></script>
+<script>
+(function () {
+  const E = window.EXPLORE, TM = window.TYPE_META;
+  const TOPIC_LABEL = { grief: 'Grief', rest: 'Rest & sleep', boundaries: 'Boundaries', regulation: 'Regulation' };
+  const types = [...new Set(E.content.map(c => c.type))];
+  const topics = [...new Set(E.content.map(c => c.topic))];
+
+  // chips: All / Journeys | types | topics | Free  (single-select facet)
+  const CHIPS = [
+    { label: 'Everything', kind: 'all' },
+    { label: 'Journeys', kind: 'journeys' },
+    { sep: true },
+    ...types.map(t => ({ label: (TM[t]?.label || t), kind: 'type', value: t })),
+    { sep: true },
+    ...topics.map(t => ({ label: TOPIC_LABEL[t] || t, kind: 'topic', value: t })),
+    { sep: true },
+    { label: 'Free', kind: 'free' },
+  ];
+  let facet = CHIPS[0], query = '';
+
+  const chipsEl = document.getElementById('chips');
+  function renderChips() {
+    chipsEl.innerHTML = CHIPS.map((c, i) => c.sep
+      ? '<span class="sep"></span>'
+      : `<button data-i="${i}" class="${c === facet ? 'on' : ''}">${c.label}</button>`).join('');
+    chipsEl.querySelectorAll('button').forEach(b =>
+      b.addEventListener('click', () => { facet = CHIPS[+b.dataset.i]; render(); }));
+  }
+
+  const matchesQ = (title) => !query || title.toLowerCase().includes(query);
+
+  function render() {
+    renderChips();
+    const showJourneys = (facet.kind === 'all' || facet.kind === 'journeys');
+
+    // journeys
+    const jsec = document.getElementById('jsec');
+    if (showJourneys) {
+      const js = E.courses.filter(c => matchesQ(c.title));
+      jsec.hidden = false;
+      document.getElementById('jct').textContent = js.length + ' guided journeys';
+      document.getElementById('jgrid').innerHTML = js.map(c => {
+        const hier = c.start ? '<span class="jcard__tag start">✦ Start here</span>'
+                   : c.after ? `<span class="jcard__tag">↳ After ${c.after}</span>` : '';
+        return `
+        <a class="jcard ${c.preview ? 'has-preview' : ''}" href="${c.href}">
+          <div class="jcard__cover ${c.tone}">
+            ${hier}
+            <div class="jcard__preview"><span class="peyeb"><span class="dot"></span> preview</span><span class="scrub"><i></i></span></div>
+            <div class="jcard__text">
+              <span class="kk">${c.kicker}</span>
+              <h3>${c.title}</h3>
+              <p class="tl">${c.tagline || ''}</p>
+            </div>
+          </div>
+          <div class="jcard__body">
+            <div class="jcard__stats"><span><b>${c.lessons}</b> practices</span><span><b>${c.mins}</b> min</span>${c.preview ? '<span>▶ has a preview</span>' : ''}</div>
+            <div class="jcard__foot">
+              <span class="jcard__price">${c.price.startsWith('from') ? c.price.replace('from ', '<small>from </small>') : '<small>' + c.price + '</small>'}</span>
+              <span class="jcard__go">See the journey <span class="arrow">→</span></span>
+            </div>
+          </div>
+        </a>`;
+      }).join('');
+    } else { jsec.hidden = true; }
+
+    // content
+    const csec = document.getElementById('csec');
+    if (facet.kind === 'journeys') { csec.hidden = true; return; }
+    csec.hidden = false;
+    let list = E.content.filter(c => matchesQ(c.title));
+    if (facet.kind === 'type') list = list.filter(c => c.type === facet.value);
+    else if (facet.kind === 'topic') list = list.filter(c => c.topic === facet.value);
+    else if (facet.kind === 'free') list = list.filter(c => c.access === 'free');
+
+    document.getElementById('ctitle').textContent =
+      facet.kind === 'all' ? 'Browse everything'
+      : facet.kind === 'type' ? (TM[facet.value]?.label || facet.value) + 's'
+      : facet.kind === 'topic' ? (TOPIC_LABEL[facet.value] || facet.value)
+      : 'Free practices';
+    document.getElementById('cct').textContent = list.length + ' pieces';
+
+    const accBadge = (c) =>
+      c.access === 'free' ? '<span class="badge badge--free">free</span>'
+      : c.access === 'purchasable' ? `<span class="badge badge--buy">buy · ${c.price}</span>`
+      : c.access === 'subscribers' ? '<span class="badge badge--sub">members</span>'
+      : c.access === 'course-only' ? `<span class="badge badge--course">only in ${c.course}</span>` : '';
+
+    document.getElementById('cgrid').innerHTML = list.map(c => {
+      const m = TM[c.type] || { glyph: '◆', label: c.type };
+      const canPrev = (c.type === 'video' || c.type === 'audio');   // only media has a hover preview
+      // Prototype: content-standalone.html shows the LOCKED showcase unless ?free is present, so a
+      // card badged "free" must carry ?free or it would open a paywall. The real build routes each
+      // card by its own content slug (e.g. /content/the-long-exhale) with access resolved server-side.
+      const href = c.access === 'free' ? c.href + '?free' : c.href;
+      return `<a class="ccard ${canPrev ? 'has-preview' : ''}" href="${href}">
+        <div class="ccard__top">
+          <span class="glyph">${m.glyph}</span>
+          ${canPrev ? '<span class="cprev"></span><span class="peyeb">preview</span><span class="cscrub"><i></i></span>' : ''}
+        </div>
+        <div class="ccard__body">
+          <h4>${c.title}</h4>
+          <p class="ccard__meta">${m.label} · ${c.min} min</p>
+          <div class="ccard__acc">${accBadge(c)}</div>
+        </div></a>`;
+    }).join('');
+    document.getElementById('cempty').hidden = list.length > 0;
+  }
+
+  document.getElementById('q').addEventListener('input', e => { query = e.target.value.trim().toLowerCase(); render(); });
+  document.getElementById('connect').addEventListener('click', () => {
+    const n = document.getElementById('pathnote'); n.hidden = !n.hidden;
+  });
+  render();
+})();
+</script>
+<script src="protonav.js"></script>
+</body>
+</html>

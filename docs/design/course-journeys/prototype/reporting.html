@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rootwork · insights · Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<style>
+  :root {
+    --st-bg: #131519; --st-panel: #191c21; --st-panel-2: #202329; --st-panel-3: #262a31;
+    --st-line: rgba(255,255,255,.08); --st-line-2: rgba(255,255,255,.13);
+    --st-text: #dce0e6; --st-dim: #9298a3; --st-faint: #626873; --st-gold: #cdb489; --st-ok: #7fb98a; --st-track: #c69182;
+  }
+  body { background: var(--st-bg); color: var(--st-text); font-family: var(--sans); }
+  body::before, body::after { display: none; }
+
+  .st-top { height: 52px; display: flex; align-items: center; gap: 1rem; padding: 0 1rem; border-bottom: 1px solid var(--st-line); background: var(--st-panel); }
+  .st-top .brand { font-weight: 700; font-size: .82rem; } .st-top .brand span { color: var(--st-gold); }
+  .st-top .doc { font-size: .8rem; color: var(--st-dim); padding-left: 1rem; border-left: 1px solid var(--st-line); }
+  .st-top .doc b { color: var(--st-text); }
+  .st-top .edit { margin-left: auto; font-size: .8rem; padding: .5rem 1rem; border-radius: 8px; border: 1px solid var(--st-line-2); color: var(--st-dim); }
+  .st-top .edit:hover { color: var(--st-text); }
+
+  .wrapr { max-width: 1060px; margin: 0 auto; padding: 2rem 1.4rem 5rem; }
+  .rp-head { display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.2rem; }
+  .rp-head h1 { font-family: var(--serif); font-weight: 400; color: #fff; font-size: clamp(1.8rem,4.5vw,2.6rem); }
+  .rp-head .sub { color: var(--st-dim); font-size: .9rem; }
+  .rp-head .period { margin-left: auto; display: flex; gap: .2rem; background: var(--st-panel-2); padding: .22rem; border-radius: 9px; }
+  .rp-head .period button { font-size: .74rem; padding: .35rem .7rem; border-radius: 7px; color: var(--st-dim); }
+  .rp-head .period button.on { background: var(--st-panel-3); color: var(--st-text); }
+
+  /* provenance system — the honest layer */
+  .src { display: inline-flex; align-items: center; gap: .35rem; font-size: .6rem; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; }
+  .src .d { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .src.live { color: color-mix(in oklab, var(--st-ok) 78%, var(--st-text)); } .src.live .d { background: var(--st-ok); }
+  .src.course { color: var(--st-gold); } .src.course .d { background: var(--st-gold); }
+  .src.track { color: var(--st-track); } .src.track .d { background: var(--st-track); }
+
+  .legend { display: flex; gap: 1.4rem; flex-wrap: wrap; margin-bottom: 2rem; padding: .85rem 1.1rem; border: 1px solid var(--st-line); border-radius: 12px; background: var(--st-panel); }
+  .legend .li { display: flex; align-items: baseline; gap: .5rem; font-size: .76rem; }
+  .legend .li .d { width: 8px; height: 8px; border-radius: 50%; position: relative; top: 1px; }
+  .legend .li b { color: var(--st-text); font-weight: 600; } .legend .li span { color: var(--st-faint); }
+  .legend .li.live .d { background: var(--st-ok); } .legend .li.course .d { background: var(--st-gold); } .legend .li.track .d { background: var(--st-track); }
+
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem; margin-bottom: 2.4rem; }
+  .kpi { padding: 1.2rem 1.3rem; border-radius: 14px; border: 1px solid var(--st-line); background: var(--st-panel); }
+  .kpi .l { font-size: .74rem; letter-spacing: .06em; text-transform: uppercase; color: var(--st-faint); }
+  .kpi .v { font-family: var(--serif); font-size: 2.2rem; color: #fff; margin: .3rem 0 .2rem; line-height: 1; }
+  .kpi .d { font-size: .76rem; color: var(--st-dim); }
+  .kpi .src { margin-top: .8rem; }
+
+  .cols { display: grid; grid-template-columns: 1.5fr 1fr; gap: 1.6rem; align-items: start; }
+  .card { padding: 1.4rem 1.5rem; border-radius: 16px; border: 1px solid var(--st-line); background: var(--st-panel); }
+  .card h2 { font-size: 1.05rem; font-weight: 600; margin-bottom: 1.2rem; }
+  .card h2 small { font-weight: 400; color: var(--st-faint); font-size: .78rem; margin-left: .5rem; }
+
+  /* funnel */
+  .fn { display: grid; gap: .9rem; }
+  .fn .row .top { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; font-size: .84rem; margin-bottom: .35rem; }
+  .fn .row .top .s { color: var(--st-dim); display: inline-flex; align-items: center; gap: .5rem; }
+  .fn .row .top .n { color: var(--st-text); font-weight: 600; white-space: nowrap; }
+  .fn .row .top .n small { color: var(--st-faint); font-weight: 400; margin-left: .4rem; }
+  .fn .bar { height: 12px; border-radius: 999px; background: var(--st-panel-2); overflow: hidden; }
+  .fn .bar i { display: block; height: 100%; border-radius: 999px; }
+  .fn .bar i.live { background: linear-gradient(90deg, color-mix(in oklab, var(--blood) 70%, var(--st-panel)), var(--ember)); }
+  .fn .bar i.course { background: color-mix(in oklab, var(--st-gold) 52%, var(--st-panel-2)); }
+  .fn .bar.track { background: transparent; border: 1px dashed color-mix(in oklab, var(--st-track) 50%, transparent); }
+  .fn .bar.track i { background: repeating-linear-gradient(45deg, color-mix(in oklab, var(--st-track) 24%, transparent) 0 6px, transparent 6px 12px); }
+
+  /* mix */
+  .mix { display: grid; gap: .9rem; }
+  .mix .m .top { display: flex; justify-content: space-between; font-size: .82rem; margin-bottom: .3rem; }
+  .mix .m .top .p { color: var(--st-dim); }
+  .mix .m .top .n { color: var(--st-text); }
+  .mix .bar { height: 9px; border-radius: 999px; background: var(--st-panel-2); overflow: hidden; }
+  .mix .bar i { display: block; height: 100%; }
+  .mix .bar i.ember { background: var(--ember); }
+  .mix .bar i.clay { background: var(--clay); }
+  .mix .bar i.blood { background: var(--blood); }
+  .mix-note { margin-top: 1.1rem; padding: .8rem 1rem; border-radius: 10px; border: 1px dashed color-mix(in oklab, var(--st-track) 40%, transparent); background: color-mix(in oklab, var(--st-track) 5%, transparent); }
+  .mix-note .h { font-size: .78rem; color: var(--st-track); display: flex; align-items: center; gap: .5rem; }
+  .mix-note p { font-size: .76rem; color: var(--st-faint); margin-top: .3rem; line-height: 1.5; }
+
+  /* recent */
+  .recent { margin-top: 1.6rem; }
+  .recent table { width: 100%; border-collapse: collapse; }
+  .recent td { padding: .7rem .2rem; border-bottom: 1px solid var(--st-line); font-size: .86rem; vertical-align: middle; }
+  .recent tr:last-child td { border-bottom: none; }
+  .recent .who { color: var(--st-text); font-family: ui-monospace, monospace; font-size: .82rem; }
+  .recent .what { color: var(--st-dim); }
+  .recent .what .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: .5rem; }
+  .recent .what .dot.live { background: var(--st-ok); } .recent .what .dot.course { background: var(--st-gold); } .recent .what .dot.track { background: var(--st-track); }
+  .recent .when { color: var(--st-faint); text-align: right; white-space: nowrap; }
+
+  @media (max-width: 820px) { .cols { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header class="st-top">
+  <a class="brand" href="studio-journeys.html" title="Studio home">Studio<span>.</span></a>
+  <span class="doc">Journeys · <b>Rootwork</b> · insights</span>
+  <a class="edit" href="builder.html">Edit page</a>
+</header>
+
+<div class="wrapr">
+  <div class="rp-head">
+    <div>
+      <h1>Rootwork</h1>
+      <p class="sub">How the journey is landing</p>
+    </div>
+    <div class="period">
+      <button>7d</button><button class="on">30d</button><button>All</button>
+    </div>
+  </div>
+
+  <div class="legend" id="legend"></div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="cols">
+    <div class="card">
+      <h2>The journey funnel <small>sales page → completion</small></h2>
+      <div class="fn" id="funnel"></div>
+    </div>
+    <div class="card">
+      <h2>How they paid <small>the way in</small></h2>
+      <div class="mix" id="mix"></div>
+      <div class="mix-note">
+        <div class="h"><span class="src track"><span class="d"></span></span> Where they came from — not tracked</div>
+        <p>Referrer, campaign &amp; sales-page views need new instrumentation. We can see <em>how</em> someone paid, not yet <em>where</em> they found us.</p>
+      </div>
+      <div class="recent">
+        <h2 style="margin-top:1.8rem">Recent activity</h2>
+        <table><tbody id="recent"></tbody></table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="mock-data.js"></script>
+<script>
+(function () {
+  const R = window.REPORT, L = R.legend;
+  const chip = (src) => `<span class="src ${src}"><span class="d"></span>${L[src].label}</span>`;
+
+  document.getElementById('legend').innerHTML = Object.entries(L).map(([k, v]) =>
+    `<div class="li ${k}"><span class="d"></span><b>${v.label}</b> <span>${v.tip}</span></div>`).join('');
+
+  document.getElementById('kpis').innerHTML = R.kpis.map(k =>
+    `<div class="kpi"><div class="l">${k.label}</div><div class="v">${k.value}</div><div class="d">${k.delta}</div>${chip(k.src)}</div>`).join('');
+
+  const max = R.funnel[0].n;
+  document.getElementById('funnel').innerHTML = R.funnel.map(f =>
+    `<div class="row">
+      <div class="top"><span class="s">${f.stage} ${chip(f.src)}</span><span class="n">${f.n.toLocaleString()}<small>${f.pct}%</small></span></div>
+      <div class="bar ${f.src === 'track' ? 'track' : ''}"><i class="${f.src}" style="width:${Math.max(3, (f.n / max) * 100)}%"></i></div>
+    </div>`).join('');
+
+  const mixTotal = R.mix.reduce((a, m) => a + m.n, 0);
+  document.getElementById('mix').innerHTML = R.mix.map(m =>
+    `<div class="m">
+      <div class="top"><span class="p">${m.path}</span><span class="n">${m.n}</span></div>
+      <div class="bar"><i class="${m.tone}" style="width:${(m.n / mixTotal) * 100}%"></i></div>
+    </div>`).join('');
+
+  document.getElementById('recent').innerHTML = R.recent.map(r =>
+    `<tr><td class="who">${r.who}</td><td class="what"><span class="dot ${r.src}"></span>${r.what}</td><td class="when">${r.when}</td></tr>`).join('');
+
+  // period toggle — visual only in the prototype (no data slice); moves the .on state between 7d/30d/All
+  const periodBtns = document.querySelectorAll('.rp-head .period button');
+  periodBtns.forEach(btn => btn.addEventListener('click', () => {
+    periodBtns.forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+  }));
+})();
+</script>
+<script src="protonav.js"></script>
+</body>
+</html>

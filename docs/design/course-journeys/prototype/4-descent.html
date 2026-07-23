@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Descent · Of Blood and Bones</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<style>
+  /* ── Concept D · The Descent ── */
+  body { background: #0c0805; }
+  .descent { position: relative; }
+
+  /* depth spine (fixed, left) */
+  .spine { position: fixed; left: clamp(1rem, 3vw, 2.6rem); top: 50%; transform: translateY(-50%); z-index: 40; display: flex; flex-direction: column; gap: .1rem; }
+  .spine::before { content: ""; position: absolute; left: 5px; top: 6px; bottom: 6px; width: 1px; background: color-mix(in oklab, var(--bone) 16%, transparent); }
+  .spine .node { display: flex; align-items: center; gap: .8rem; padding: .5rem 0; position: relative; }
+  .spine .bead { width: 11px; height: 11px; border-radius: 50%; border: 1px solid color-mix(in oklab, var(--bone) 30%, transparent); background: #0c0805; flex: none; transition: .35s var(--ease); }
+  .spine .lbl { font-size: .68rem; letter-spacing: .18em; text-transform: uppercase; color: var(--bone-faint); opacity: 0; transform: translateX(-6px); transition: .35s var(--ease); white-space: nowrap; }
+  .spine .node.on .bead { background: var(--ember); border-color: var(--ember); box-shadow: 0 0 16px 3px color-mix(in oklab, var(--ember) 60%, transparent); transform: scale(1.15); }
+  .spine .node.on .lbl { opacity: 1; transform: none; color: var(--bone); }
+  .spine .node.past .bead { background: color-mix(in oklab, var(--blood) 70%, transparent); border-color: transparent; }
+  @media (max-width: 680px) { .spine .lbl { display: none; } }
+
+  /* layers */
+  .layer { position: relative; min-height: 100svh; display: grid; place-items: center; text-align: center; padding: 6rem clamp(1.4rem, 5vw, 4rem); overflow: hidden; }
+  .layer::before { content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: var(--glow, 70vw); aspect-ratio: 1; background: radial-gradient(circle, var(--tint, transparent), transparent 62%); filter: blur(30px); z-index: 0; }
+  .layer > .inner { position: relative; z-index: 1; max-width: 760px; }
+  .roman { font-family: var(--serif); font-style: italic; font-size: 1rem; letter-spacing: .3em; color: var(--ember); }
+  .layer h2 { font-size: clamp(2.4rem, 7vw, 5rem); font-weight: 300; margin: .5rem 0 0; }
+  .layer .felt { font-family: var(--serif); font-weight: 300; font-size: clamp(1.2rem, 3vw, 1.7rem); color: var(--bone-dim); margin: 1.2rem auto 0; max-width: 30ch; font-style: italic; }
+
+  /* surface hero */
+  .surface h1 { font-size: clamp(3rem, 9vw, 6.5rem); font-weight: 300; }
+  .surface h1 em { font-style: italic; color: var(--rose); }
+  .surface p { color: var(--bone-dim); font-size: clamp(1.05rem,2.2vw,1.3rem); margin: 1.6rem auto 0; max-width: 40ch; }
+  .surface .scrollcue { position: absolute; bottom: 2rem; left: 50%; transform: translateX(-50%); font-size: .7rem; letter-spacing: .3em; text-transform: uppercase; color: var(--bone-faint); }
+  .surface .scrollcue::after { content: ""; display: block; width: 1px; height: 46px; margin: .8rem auto 0; background: linear-gradient(var(--ember), transparent); animation: drip 2.4s ease-in-out infinite; }
+  @keyframes drip { 0%,100% { opacity: .4; transform: scaleY(.7); transform-origin: top } 50% { opacity: 1; transform: scaleY(1) } }
+
+  /* doorways branching off the descent */
+  .doorways { display: flex; gap: 1.2rem; justify-content: center; flex-wrap: wrap; margin-top: 2.6rem; }
+  .door {
+    position: relative; width: 230px; min-height: 150px; padding: 1.6rem 1.4rem;
+    border-radius: 140px 140px 20px 20px; /* arch */
+    background: color-mix(in oklab, var(--ink-2) 66%, transparent);
+    border: 1px solid color-mix(in oklab, var(--ember) 26%, transparent);
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: .3rem;
+    transition: transform .3s var(--ease), border-color .3s, background .3s;
+  }
+  .door:hover { transform: translateY(-5px); border-color: var(--ember); background: color-mix(in oklab, var(--ink-2) 90%, transparent); }
+  .door .arch-glow { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); width: 70%; height: 70%; border-radius: 50%; background: radial-gradient(circle at 50% 30%, color-mix(in oklab, var(--ember) 26%, transparent), transparent 60%); opacity: .5; transition: opacity .3s; }
+  .door:hover .arch-glow { opacity: 1; }
+  .door h3 { position: relative; font-size: 1.4rem; font-weight: 400; color: var(--bone); }
+  .door .p { position: relative; font-size: .85rem; color: var(--bone-dim); text-align: center; }
+  .door .enter { position: relative; font-size: .74rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ember); margin-top: .5rem; }
+  .door--soon { opacity: .55; border-style: dashed; }
+  .door--soon .enter { color: var(--bone-faint); }
+  .door--root { border-color: var(--ember); background: linear-gradient(180deg, color-mix(in oklab, var(--blood) 34%, var(--ink-2)), var(--ink-2)); }
+
+  /* deepest / membership */
+  .bottom .join { margin-top: 2.4rem; }
+  .bottom .price { font-family: var(--serif); font-style: italic; color: var(--ember); display: block; margin: 1.4rem 0 .4rem; }
+</style>
+</head>
+<body>
+<div class="switch">
+  <span class="switch__brand">Of <b>Blood</b> and Bones</span>
+  <span class="switch__tag">fresh concepts</span>
+  <nav>
+    <a href="1-threshold.html">The Threshold</a>
+    <a href="2-body.html">Where you feel it</a>
+    <a href="3-intake.html">One question</a>
+    <a href="4-descent.html" class="on">The Descent</a>
+    <a href="index.html" style="opacity:.6">menu</a>
+  </nav>
+</div>
+
+<nav class="spine" aria-label="depth">
+  <div class="node" data-i="0"><span class="bead"></span><span class="lbl">Surface</span></div>
+  <div class="node" data-i="1"><span class="bead"></span><span class="lbl">Regulation</span></div>
+  <div class="node" data-i="2"><span class="bead"></span><span class="lbl">Embodiment</span></div>
+  <div class="node" data-i="3"><span class="bead"></span><span class="lbl">Attunement</span></div>
+  <div class="node" data-i="4"><span class="bead"></span><span class="lbl">Co-regulation</span></div>
+  <div class="node" data-i="5"><span class="bead"></span><span class="lbl">Reclamation</span></div>
+</nav>
+
+<main class="descent">
+  <section class="layer surface" data-i="0" style="--tint: color-mix(in oklab, var(--blood) 55%, transparent); --glow: 80vw;">
+    <div class="inner">
+      <p class="eyebrow">Of Blood and Bones</p>
+      <h1>Come down into<br>the <em>work</em>.</h1>
+      <p>Every journey here is a descent through the same five depths. Scroll slowly — this is where it begins.</p>
+    </div>
+    <div class="scrollcue">descend</div>
+  </section>
+
+  <section class="layer" data-i="1" style="--tint: color-mix(in oklab, var(--blood) 44%, transparent); --glow: 66vw;">
+    <div class="inner reveal">
+      <p class="roman">depth i</p>
+      <h2>Regulation</h2>
+      <p class="felt">Finding the ground. Teaching the body it is safe enough to soften.</p>
+      <div class="doorways">
+        <a href="#" class="door door--root">
+          <span class="arch-glow"></span>
+          <h3>Rootwork</h3>
+          <span class="p">The foundation. Everyone begins here.</span>
+          <span class="enter">begin →</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="layer" data-i="2" style="--tint: color-mix(in oklab, var(--blood) 34%, transparent); --glow: 58vw;">
+    <div class="inner reveal">
+      <p class="roman">depth ii</p>
+      <h2>Embodiment</h2>
+      <p class="felt">Coming back into sensation — feeling what is actually here.</p>
+      <div class="doorways">
+        <a href="#" class="door">
+          <span class="arch-glow"></span>
+          <h3>Rest &amp; sleep</h3>
+          <span class="p">For a body that has forgotten how to stop.</span>
+          <span class="enter">enter →</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="layer" data-i="3" style="--tint: color-mix(in oklab, var(--blood) 26%, transparent); --glow: 50vw;">
+    <div class="inner reveal">
+      <p class="roman">depth iii</p>
+      <h2>Attunement</h2>
+      <p class="felt">Listening inward; letting need and impulse be known.</p>
+      <div class="doorways">
+        <a href="#" class="door">
+          <span class="arch-glow"></span>
+          <h3>Grief</h3>
+          <span class="p">For grief that lives in the chest and won't move.</span>
+          <span class="enter">enter →</span>
+        </a>
+        <a href="#" class="door">
+          <span class="arch-glow"></span>
+          <h3>Boundaries</h3>
+          <span class="p">For the 'no' your body knows before you do.</span>
+          <span class="enter">enter →</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="layer" data-i="4" style="--tint: color-mix(in oklab, var(--ember) 18%, transparent); --glow: 42vw;">
+    <div class="inner reveal">
+      <p class="roman">depth iv</p>
+      <h2>Co-regulation</h2>
+      <p class="felt">Being met by another. The body settling in company.</p>
+      <div class="doorways">
+        <a href="#" class="door">
+          <span class="arch-glow"></span>
+          <h3>Relating</h3>
+          <span class="p">For staying yourself while close to another.</span>
+          <span class="enter">enter →</span>
+        </a>
+        <a href="#" class="door">
+          <span class="arch-glow"></span>
+          <h3>Ancestral lineage</h3>
+          <span class="p">For the weight that was never only yours.</span>
+          <span class="enter">enter →</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="layer bottom" data-i="5" style="--tint: color-mix(in oklab, var(--ember) 24%, transparent); --glow: 34vw;">
+    <div class="inner reveal">
+      <p class="roman">depth v · the deep</p>
+      <h2>Reclamation</h2>
+      <p class="felt">Living from wholeness — taking back what was held away.</p>
+      <div class="doorways">
+        <div class="door door--soon">
+          <span class="arch-glow"></span>
+          <h3>Creativity</h3>
+          <span class="p">For making, when the making has gone quiet.</span>
+          <span class="enter">opening soon</span>
+        </div>
+      </div>
+      <div class="join">
+        <span class="price">£12 a month · one key, every depth</span>
+        <a href="#" class="cta cta--ember">Begin with Rootwork <span class="arrow">→</span></a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="fresh.js"></script>
+<script>
+  const nodes = [...document.querySelectorAll('.spine .node')];
+  const layers = [...document.querySelectorAll('.layer')];
+  const setActive = (i) => nodes.forEach((n, k) => {
+    n.classList.toggle('on', k === i);
+    n.classList.toggle('past', k < i);
+  });
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if (e.isIntersecting) setActive(+e.target.dataset.i); });
+    }, { threshold: 0.55 });
+    layers.forEach(l => io.observe(l));
+  }
+  setActive(0);
+</script>
+</body>
+</html>

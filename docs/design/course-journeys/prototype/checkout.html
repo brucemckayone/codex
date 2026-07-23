@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Begin Rootwork · Of Blood and Bones</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<style>
+  body { background: #100b07; }
+  main { max-width: 1080px; margin: 0 auto; padding: calc(53px + clamp(1.6rem,4vw,3rem)) clamp(1.2rem,4vw,3rem) 6rem; }
+
+  .co-head { text-align: center; margin-bottom: 2.6rem; }
+  .co-head .k { font-size: .7rem; letter-spacing: .26em; text-transform: uppercase; color: var(--ember); }
+  .co-head h1 { font-size: clamp(2rem,5vw,3rem); font-weight: 300; margin: .4rem 0 .4rem; }
+  .co-head p { color: var(--bone-faint); }
+
+  .co-grid { display: grid; grid-template-columns: 1fr 1.5fr; gap: 2rem; align-items: start; }
+
+  /* left: what you're getting */
+  .summary { position: sticky; top: 76px; border-radius: 20px; overflow: hidden; border: 1px solid color-mix(in oklab, var(--bone) 10%, transparent); background: color-mix(in oklab, var(--ink-2) 55%, transparent); }
+  .summary__cover { height: 118px; background: radial-gradient(120% 130% at 30% 0%, color-mix(in oklab, var(--ember) 52%, var(--ink-2)), var(--ink)); display: grid; align-content: end; padding: 1rem 1.2rem; }
+  .summary__cover .kk { font-size: .66rem; letter-spacing: .2em; text-transform: uppercase; color: color-mix(in oklab, var(--bone) 80%, var(--ink)); }
+  .summary__cover h2 { font-size: 1.8rem; font-weight: 400; color: var(--bone); }
+  .summary__body { padding: 1.2rem 1.3rem 1.4rem; }
+  .summary__body ul { list-style: none; display: grid; gap: .55rem; }
+  .summary__body li { display: flex; gap: .6rem; font-size: .9rem; color: var(--bone-dim); }
+  .summary__body li .c { color: var(--ember); }
+  .summary__taste { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid color-mix(in oklab, var(--bone) 10%, transparent); font-size: .84rem; color: var(--bone-faint); }
+  .summary__taste b { color: var(--bone); font-family: var(--serif); font-weight: 500; }
+
+  /* right: the three ways in */
+  .offers { display: grid; gap: 1rem; }
+  .offer { position: relative; display: grid; grid-template-columns: 26px 1fr auto; gap: 1rem; align-items: start; padding: 1.3rem 1.4rem; border-radius: 18px; cursor: pointer; border: 1px solid color-mix(in oklab, var(--bone) 12%, transparent); background: color-mix(in oklab, var(--ink-2) 50%, transparent); transition: border-color .18s, background .18s, transform .15s var(--ease); }
+  .offer:hover { transform: translateY(-2px); border-color: color-mix(in oklab, var(--ember) 40%, transparent); }
+  .offer.sel { border-color: var(--ember); background: color-mix(in oklab, var(--ember) 10%, transparent); box-shadow: 0 0 0 1px var(--ember) inset; }
+  .offer__radio { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid color-mix(in oklab, var(--bone) 34%, transparent); margin-top: .2rem; display: grid; place-items: center; }
+  .offer.sel .offer__radio { border-color: var(--ember); }
+  .offer.sel .offer__radio::after { content: ""; width: 11px; height: 11px; border-radius: 50%; background: var(--ember); }
+  .offer h3 { font-size: 1.25rem; font-weight: 400; }
+  .offer .blurb { font-size: .88rem; color: var(--bone-dim); margin: .3rem 0 .7rem; }
+  .offer ul { list-style: none; display: flex; flex-wrap: wrap; gap: .4rem .9rem; }
+  .offer li { font-size: .78rem; color: var(--bone-faint); display: flex; gap: .35rem; }
+  .offer li::before { content: "·"; color: var(--ember); }
+  .offer__price { text-align: right; white-space: nowrap; }
+  .offer__price .p { font-family: var(--serif); font-size: 1.7rem; color: var(--bone); }
+  .offer__price .per { display: block; font-size: .72rem; color: var(--bone-faint); }
+  .offer__best { position: absolute; top: -10px; left: 1.4rem; font-size: .62rem; letter-spacing: .14em; text-transform: uppercase; padding: .22rem .6rem; border-radius: 999px; background: var(--ember); color: #241a09; font-weight: 700; }
+
+  .co-actions { margin-top: 1.6rem; display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap; }
+  .co-actions .cta { padding: 1rem 2rem; }
+  .co-actions .fine { font-size: .78rem; color: var(--bone-faint); max-width: 34ch; }
+
+  /* explicit scope × commitment label per offer (NN/g explicit-differences) */
+  .offer__who { font-size: .72rem; letter-spacing: .04em; color: var(--ember); margin: .1rem 0 .5rem; }
+
+  /* trust / risk-reversal cues (Baymard) */
+  .co-trust { margin-top: 1.3rem; display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; font-size: .76rem; color: var(--bone-faint); }
+  .co-trust span:nth-child(even) { opacity: .4; }
+  .co-proof { margin-top: 1.4rem; padding: 1rem 1.2rem; border-radius: 14px; border: 1px solid color-mix(in oklab, var(--bone) 10%, transparent); background: color-mix(in oklab, var(--ink-2) 45%, transparent); }
+  .co-proof blockquote { font-family: var(--serif); font-style: italic; color: var(--bone-dim); font-size: .95rem; line-height: 1.5; }
+  .co-proof figcaption { margin-top: .5rem; font-size: .74rem; color: var(--bone-faint); }
+
+  /* confirmation (the seam into the library) */
+  .confirm { display: none; text-align: center; padding: 3rem 1rem; }
+  .confirm.show { display: block; animation: rise .6s var(--ease) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(18px); } }
+  .confirm .seal { width: 76px; height: 76px; margin: 0 auto 1.4rem; border-radius: 50%; display: grid; place-items: center; font-size: 1.9rem; color: #241a09; background: radial-gradient(circle at 40% 30%, var(--ember), var(--ochre)); box-shadow: 0 16px 44px -12px color-mix(in oklab, var(--ember) 70%, black); }
+  .confirm h2 { font-size: clamp(1.8rem,4vw,2.6rem); font-weight: 300; }
+  .confirm p { color: var(--bone-dim); margin: .6rem auto 1.8rem; max-width: 44ch; }
+  .confirm .row { display: flex; gap: .9rem; justify-content: center; flex-wrap: wrap; }
+
+  @media (max-width: 780px) { .co-grid { grid-template-columns: 1fr; } .summary { position: static; } .offer { grid-template-columns: 22px 1fr; } .offer__price { grid-column: 2; text-align: left; } }
+</style>
+</head>
+<body>
+<div class="switch">
+  <span class="switch__brand">Of <b>Blood</b> and Bones</span>
+  <span class="switch__tag">Begin</span>
+  <nav>
+    <a href="course-sell.html">← Sales page</a>
+    <a href="checkout.html" class="on">Choose your way in</a>
+    <a href="library.html">Library</a>
+  </nav>
+</div>
+
+<main>
+  <div id="chooser">
+    <header class="co-head">
+      <p class="k" id="co-k">Rootwork</p>
+      <h1 id="co-h1">Choose your way in</h1>
+      <p id="co-note"></p>
+    </header>
+
+    <div class="co-grid">
+      <aside class="summary">
+        <div class="summary__cover"><span class="kk" id="sum-kk">The foundation course</span><h2 id="sum-title">Rootwork</h2></div>
+        <div class="summary__body">
+          <ul id="sum-list"></ul>
+          <p class="summary__taste" id="sum-taste">One practice — <b>Orienting</b> — is always free. <a href="content-standalone.html?free=1" style="color:var(--ember)">Try it before you decide →</a></p>
+        </div>
+      </aside>
+
+      <div>
+        <div class="offers" id="offers"></div>
+        <div class="co-actions">
+          <button class="cta cta--ember" id="go">Continue <span class="arrow">→</span></button>
+          <span class="fine" id="fine"></span>
+        </div>
+        <div class="co-trust">
+          <span>🔒 Secure checkout</span><span>·</span><span>No hidden fees — VAT included</span><span>·</span><span>Cancel anytime, from your account</span>
+        </div>
+        <figure class="co-proof">
+          <blockquote>“I wasn’t sure I’d keep up a practice. Rootwork is the first thing that met my body where it was.”</blockquote>
+          <figcaption>— a member, six months in</figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+
+  <div class="confirm" id="confirm">
+    <div class="seal">✓</div>
+    <h2>You're in.</h2>
+    <p id="confirm-copy"></p>
+    <div class="row">
+      <a class="cta cta--ember" id="confirm-cta" href="course-dashboard.html?state=new">Enter the journey <span class="arrow">→</span></a>
+      <a class="cta cta--ghost" href="library.html">View your library</a>
+    </div>
+  </div>
+</main>
+
+<script src="course-data.js"></script>
+<script src="mock-data.js"></script>
+<script>
+(function () {
+  const O = window.OFFERS, C = window.COURSE, t = C.totals, S = window.CONTENT_SHOWCASE;
+
+  // Two checkout modes share this surface:
+  //   • course offers — the three ways into Rootwork (?offer=membership|course-sub|one-off)
+  //   • content buy   — a single à-la-carte practice (?offer=buy). content-standalone.html's
+  //     "Buy for £9" links here; without an explicit branch, 'buy' fails the O.paths test and
+  //     silently falls back to the £12 membership — a bait-and-switch. This detects it and shows a
+  //     distinct single-item summary + a content_purchase line at the real à-la-carte price. (F8)
+  const wanted = new URLSearchParams(location.search).get('offer');
+  const contentBuy = wanted === 'buy';
+
+  const buyPrice = '£' + (S.policy.priceCents / 100).toFixed(0);   // £9, from the item's own policy
+  const PATHS = contentBuy ? [{
+    id: 'buy', kind: 'content_purchase', name: 'Buy this practice',
+    price: buyPrice, per: 'once',
+    who: 'Just this one piece, à la carte', blurb: S.blurb,
+    bullets: [`${S.min}-minute ${S.type}`, 'Yours to keep, forever', 'No subscription'],
+  }] : O.paths;
+
+  // ── head + summary: a single practice vs the whole course ──
+  if (contentBuy) {
+    document.getElementById('co-k').textContent = S.by;
+    document.getElementById('co-h1').textContent = 'Buy this practice';
+    document.getElementById('co-note').textContent = 'One practice. Yours to keep.';
+    document.getElementById('sum-kk').textContent = 'A single practice';
+    document.getElementById('sum-title').textContent = S.title;
+    document.getElementById('sum-list').innerHTML = [
+      `${S.min} minutes of ${S.type}`,
+      'Yours to keep — no subscription',
+      'Return to it as often as you need',
+    ].map(x => `<li><span class="c">❋</span>${x}</li>`).join('');
+    document.getElementById('sum-taste').innerHTML =
+      'Just this one piece. Want everything? <a href="checkout.html?offer=membership" style="color:var(--ember)">Full membership</a> opens every practice &amp; journey.';
+  } else {
+    document.getElementById('co-note').textContent = O.note;
+    document.getElementById('sum-list').innerHTML = [
+      `${t.total} practices across ${C.stages.length} stages`,
+      `≈ ${t.minutes} minutes of guidance`,
+      'Audio, practice &amp; reflection',
+      'Return as often as you need',
+    ].map(x => `<li><span class="c">❋</span>${x}</li>`).join('');
+  }
+
+  // offers — pre-select from ?offer when it names a real COURSE path (F18); "best value" stays a
+  // highlight, never a hard pre-select. Content buy pre-selects its single content_purchase offer.
+  let selected = contentBuy ? PATHS[0].id
+    : ((wanted && O.paths.some(p => p.id === wanted)) ? wanted
+      : (O.paths.find(p => p.best)?.id || O.paths[0].id));
+  const wrap = document.getElementById('offers');
+  function render() {
+    wrap.innerHTML = PATHS.map(p => `
+      <label class="offer ${p.id === selected ? 'sel' : ''}" data-id="${p.id}">
+        ${p.best ? '<span class="offer__best">Best value</span>' : ''}
+        <span class="offer__radio"></span>
+        <div>
+          <h3>${p.name}</h3>
+          ${p.who ? `<p class="offer__who">${p.who}</p>` : ''}
+          <p class="blurb">${p.blurb}</p>
+          <ul>${p.bullets.map(b => `<li>${b}</li>`).join('')}</ul>
+        </div>
+        <div class="offer__price"><span class="p">${p.price}</span><span class="per">${p.per === 'once' ? 'one-off' : 'per ' + p.per}</span></div>
+      </label>`).join('');
+    wrap.querySelectorAll('.offer').forEach(el =>
+      el.addEventListener('click', () => { selected = el.dataset.id; render(); updateFine(); }));
+  }
+  function updateFine() {
+    const p = PATHS.find(x => x.id === selected);
+    document.getElementById('fine').textContent =
+      p.per === 'once'
+        ? (contentBuy ? `One payment. ${S.title} stays in your library for good.`
+                      : 'One payment. Rootwork stays in your library for good.')
+        : `Billed ${p.price} per ${p.per}. Cancel anytime from your account.`;
+  }
+  render(); updateFine();
+
+  // mock "purchase" → confirmation (the seam into the library)
+  document.getElementById('go').addEventListener('click', () => {
+    const p = PATHS.find(x => x.id === selected);
+    // copy + the primary CTA both follow the offer kind, so a content buy lands on the practice and
+    // a course buy on the new-member arrival (course-dashboard.html?state=new). (F1 + F8)
+    let copy, cta;
+    if (p.kind === 'content_purchase') {
+      copy = `${S.title} is yours. It’s waiting in your library — press play whenever the moment is right.`;
+      cta = { href: 'content-standalone.html?member=1', label: 'Play it now' };
+    } else if (p.kind === 'course_purchase') {
+      copy = 'Rootwork is yours. It’s waiting in your library — begin whenever the moment is right.';
+      cta = { href: 'course-dashboard.html?state=new', label: 'Enter the journey' };
+    } else if (p.kind === 'course_subscription') {
+      copy = 'Your Rootwork subscription is live. The whole course is open, and it’s in your library.';
+      cta = { href: 'course-dashboard.html?state=new', label: 'Enter the journey' };
+    } else {
+      copy = 'Welcome to the full membership. Every journey is open to you now — starting with Rootwork.';
+      cta = { href: 'course-dashboard.html?state=new', label: 'Enter the journey' };
+    }
+    document.getElementById('confirm-copy').textContent = copy;
+    const cbtn = document.getElementById('confirm-cta');
+    cbtn.setAttribute('href', cta.href);
+    cbtn.innerHTML = `${cta.label} <span class="arrow">→</span>`;
+    document.getElementById('chooser').style.display = 'none';
+    document.getElementById('confirm').classList.add('show');
+    scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  });
+})();
+</script>
+<script src="protonav.js"></script>
+</body>
+</html>

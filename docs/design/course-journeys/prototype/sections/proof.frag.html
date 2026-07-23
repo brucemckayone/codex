@@ -1,0 +1,302 @@
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     PROOF / TESTIMONIALS — "From the circle"
+     Warm typographic quote treatment. CSS-gradient avatars (no images).
+     Desktop: 3 columns · Mobile: swipeable snap-row. Self-contained fragment.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<style>
+  .proof {
+    position: relative;
+    padding: clamp(4.5rem, 11vw, 8rem) 0;
+    /* faint local warmth behind the header — no pseudo, so nothing clips the
+       edge-bleeding mobile carousel below */
+    background: radial-gradient(78% 55% at 50% 0%,
+      color-mix(in oklab, var(--blood) 9%, transparent), transparent 62%);
+  }
+
+  /* ── header ── */
+  .proof-head {
+    text-align: center;
+    max-width: 40ch;
+    margin: 0 auto clamp(2.4rem, 5vw, 3.8rem);
+  }
+  .proof-head .eyebrow { display: block; }
+  .proof-title {
+    font-family: var(--serif);
+    font-weight: 300;
+    font-size: clamp(2rem, 4.6vw, 3.1rem);
+    color: var(--bone);
+    margin-top: 1rem;
+    text-wrap: balance;
+  }
+
+  /* ── grid (desktop) ── */
+  .proof-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: clamp(1rem, 1.7vw, 1.5rem);
+    align-items: stretch;
+  }
+
+  /* ── card ── */
+  .proof-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: clamp(300px, 38vh, 360px);
+    padding: clamp(1.7rem, 2.4vw, 2.3rem);
+    border-radius: 20px;
+    border: 1px solid color-mix(in oklab, var(--bone) 9%, transparent);
+    background:
+      linear-gradient(180deg,
+        color-mix(in oklab, var(--ink-3) 72%, transparent),
+        color-mix(in oklab, var(--ink-2) 58%, transparent));
+    box-shadow: 0 24px 55px -38px color-mix(in oklab, var(--blood) 45%, black);
+    overflow: hidden;
+    transition: transform .4s var(--ease), border-color .35s var(--ease),
+                box-shadow .4s var(--ease);
+  }
+  /* candle-catch hairline along the top edge */
+  .proof-card::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent,
+      color-mix(in oklab, var(--ember) 55%, transparent) 22%,
+      color-mix(in oklab, var(--ember) 55%, transparent) 78%, transparent);
+    opacity: .45;
+    transition: opacity .4s var(--ease);
+  }
+  @media (hover: hover) {
+    .proof-card:hover {
+      transform: translateY(-4px);
+      border-color: color-mix(in oklab, var(--ember) 34%, transparent);
+      box-shadow: 0 30px 60px -34px color-mix(in oklab, var(--blood) 60%, black);
+    }
+    .proof-card:hover::after { opacity: 1; }
+  }
+
+  /* ── quote ── */
+  .proof-quote {
+    position: relative;
+    z-index: 1;
+    font-family: var(--serif);
+    font-weight: 300;
+    font-size: clamp(1.12rem, 1.5vw, 1.28rem);
+    line-height: 1.46;
+    letter-spacing: -0.005em;
+    color: var(--bone);
+    padding-top: clamp(1.9rem, 3vw, 2.4rem);
+    text-wrap: pretty;
+  }
+  /* oversized decorative Fraunces quotation mark, low-opacity, behind the text */
+  .proof-quote::before {
+    content: "\201C";
+    position: absolute;
+    top: clamp(-0.6rem, -0.5vw, -0.2rem);
+    left: -0.3rem;
+    z-index: -1;
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(4.2rem, 7vw, 5.6rem);
+    line-height: 1;
+    color: color-mix(in oklab, var(--ember) 24%, transparent);
+    pointer-events: none;
+  }
+
+  /* ── attribution ── */
+  .proof-who {
+    margin-top: auto;
+    padding-top: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: .85rem;
+  }
+  .proof-av {
+    flex: none;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 1.15rem;
+    color: color-mix(in oklab, var(--bone) 92%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--bone) 22%, transparent),
+                0 6px 16px -8px rgba(0,0,0,.6);
+  }
+  /* per-person warm hue — pure CSS gradient circles, no images */
+  .proof-card:nth-child(1) .proof-av,
+  .proof-stack .proof-dot:nth-child(1) {
+    background: radial-gradient(circle at 34% 28%,
+      color-mix(in oklab, var(--rose) 90%, white 4%), var(--blood-deep) 82%);
+  }
+  .proof-card:nth-child(2) .proof-av,
+  .proof-stack .proof-dot:nth-child(2) {
+    background: radial-gradient(circle at 34% 28%,
+      color-mix(in oklab, var(--ember) 82%, white 6%), var(--ochre) 55%, #6a3d16 92%);
+  }
+  .proof-card:nth-child(3) .proof-av,
+  .proof-stack .proof-dot:nth-child(3) {
+    background: radial-gradient(circle at 34% 28%,
+      color-mix(in oklab, var(--clay) 92%, white 4%), var(--blood-deep) 84%);
+  }
+  .proof-id { display: flex; flex-direction: column; line-height: 1.25; }
+  .proof-name { font-family: var(--sans); font-weight: 600; font-size: .92rem; color: var(--bone); }
+  .proof-ctx  { font-family: var(--sans); font-size: .78rem; color: var(--bone-faint); letter-spacing: .01em; }
+
+  /* ── aggregate trust cue (understated, closes the section) ── */
+  .proof-trust {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .9rem;
+    flex-wrap: wrap;
+    margin-top: clamp(2.4rem, 5vw, 3.6rem);
+    color: var(--bone-dim);
+    font-size: .92rem;
+  }
+  .proof-stack { display: inline-flex; }
+  .proof-dot {
+    width: 28px; height: 28px; border-radius: 50%;
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--bone) 18%, transparent),
+                0 0 0 2px var(--ink);
+  }
+  .proof-dot + .proof-dot { margin-left: -10px; }
+  .proof-stack .proof-dot:nth-child(4) {
+    background: radial-gradient(circle at 34% 28%, var(--bone-faint), #3a2a1a);
+  }
+  .proof-stack .proof-dot:nth-child(5) {
+    background: radial-gradient(circle at 34% 28%, color-mix(in oklab, var(--rose) 60%, #3a2015), #2a1712);
+  }
+  .proof-count b { color: var(--bone); font-weight: 600; }
+  .proof-count { letter-spacing: .01em; }
+
+  /* ── reveal-on-scroll (gated by proof-js so no-JS shows final state) ── */
+  .proof-reveal { opacity: 1; transform: none; }
+  .proof.proof-js .proof-reveal {
+    opacity: 0;
+    transform: translateY(22px);
+    transition: opacity .85s var(--ease), transform .85s var(--ease);
+  }
+  .proof.proof-js.is-revealed .proof-reveal { opacity: 1; transform: none; }
+  .proof.proof-js .proof-grid .proof-card:nth-child(1) { transition-delay: .10s; }
+  .proof.proof-js .proof-grid .proof-card:nth-child(2) { transition-delay: .20s; }
+  .proof.proof-js .proof-grid .proof-card:nth-child(3) { transition-delay: .30s; }
+  .proof.proof-js .proof-trust { transition-delay: .42s; }
+
+  /* ── mobile: swipeable snap-row that bleeds to the screen edges ── */
+  @media (max-width: 720px) {
+    .proof-grid {
+      display: flex;
+      grid-template-columns: none;
+      gap: 1rem;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch;
+      scroll-padding-inline: clamp(1.2rem, 4vw, 3rem);
+      /* bleed past .wrap padding for an edge-to-edge carousel */
+      margin-inline: calc(-1 * clamp(1.2rem, 4vw, 3rem));
+      padding-inline: clamp(1.2rem, 4vw, 3rem);
+      padding-bottom: .6rem;
+    }
+    .proof-grid::-webkit-scrollbar { display: none; }
+    .proof-grid { scrollbar-width: none; }
+    .proof-card {
+      flex: 0 0 84%;
+      scroll-snap-align: center;
+      min-height: 260px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .proof.proof-js .proof-reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
+    .proof-card { transition: none !important; }
+    .proof-card:hover { transform: none !important; }
+  }
+</style>
+
+<section class="proof" id="proof" aria-labelledby="proof-heading">
+  <div class="wrap">
+    <header class="proof-head proof-reveal">
+      <span class="eyebrow">From the circle</span>
+      <h2 id="proof-heading" class="proof-title">What the ground gives back.</h2>
+    </header>
+
+    <div class="proof-grid">
+      <figure class="proof-card proof-reveal">
+        <blockquote class="proof-quote">For the first time in years, I slept without bracing. I didn't know my body was allowed to do that.</blockquote>
+        <figcaption class="proof-who">
+          <span class="proof-av" aria-hidden="true">M</span>
+          <span class="proof-id">
+            <span class="proof-name">Maya R.</span>
+            <span class="proof-ctx">3 months in</span>
+          </span>
+        </figcaption>
+      </figure>
+
+      <figure class="proof-card proof-reveal">
+        <blockquote class="proof-quote">I came for grief. Rootwork taught me how to stay in my body long enough to feel it.</blockquote>
+        <figcaption class="proof-who">
+          <span class="proof-av" aria-hidden="true">D</span>
+          <span class="proof-id">
+            <span class="proof-name">Daniel K.</span>
+            <span class="proof-ctx">new member</span>
+          </span>
+        </figcaption>
+      </figure>
+
+      <figure class="proof-card proof-reveal">
+        <blockquote class="proof-quote">The only practice I've ever kept. Ten minutes that change the whole shape of the day.</blockquote>
+        <figcaption class="proof-who">
+          <span class="proof-av" aria-hidden="true">P</span>
+          <span class="proof-id">
+            <span class="proof-name">Priya S.</span>
+            <span class="proof-ctx">8 months in</span>
+          </span>
+        </figcaption>
+      </figure>
+    </div>
+
+    <p class="proof-trust proof-reveal">
+      <span class="proof-stack" aria-hidden="true">
+        <span class="proof-dot"></span>
+        <span class="proof-dot"></span>
+        <span class="proof-dot"></span>
+        <span class="proof-dot"></span>
+        <span class="proof-dot"></span>
+      </span>
+      <span class="proof-count"><b>2,400</b> practising the ground</span>
+    </p>
+  </div>
+</section>
+
+<script>
+  /* proof — staggered reveal-on-scroll. Self-contained IIFE, no globals.
+     Adds `proof-js` before observing so content stays visible if JS never runs. */
+  (function () {
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var sections = document.querySelectorAll('.proof');
+    if (!sections.length) return;
+
+    if (reduce || !('IntersectionObserver' in window)) {
+      // leave final (visible) state — no proof-js, no hiding
+      return;
+    }
+
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) {
+          e.target.classList.add('is-revealed');
+          io.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.16, rootMargin: '0px 0px -8% 0px' });
+
+    sections.forEach(function (s) {
+      s.classList.add('proof-js');
+      io.observe(s);
+    });
+  })();
+</script>

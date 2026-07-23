@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One question · Of Blood and Bones</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<style>
+  /* ── Concept C · One question at a time ── */
+  .room { min-height: 100svh; display: grid; place-items: center; padding: 7rem 1.4rem 4rem; text-align: center; }
+  .view { max-width: 640px; width: 100%; transition: opacity .5s var(--ease), transform .5s var(--ease); }
+  .view[hidden] { display: none; }
+  .view.leaving { opacity: 0; transform: translateY(-12px); }
+  .view.entering { opacity: 0; transform: translateY(12px); }
+
+  .ask .eyebrow { animation: fade 1s ease both; }
+  .ask h1 { font-size: clamp(2.2rem, 6vw, 3.8rem); font-weight: 300; margin: 1.2rem 0 0; }
+  .ask h1 em { font-style: italic; color: var(--rose); }
+  @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+
+  .choices { margin-top: 3rem; display: flex; flex-direction: column; gap: .1rem; text-align: left; }
+  .choice {
+    display: flex; align-items: center; gap: 1rem; width: 100%;
+    padding: 1.15rem .4rem; border-top: 1px solid color-mix(in oklab, var(--bone) 12%, transparent);
+    font-family: var(--serif); font-size: clamp(1.2rem, 3vw, 1.7rem); color: var(--bone-dim);
+    transition: color .25s, padding-left .25s var(--ease);
+  }
+  .choices .choice:last-child { border-bottom: 1px solid color-mix(in oklab, var(--bone) 12%, transparent); }
+  .choice::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: color-mix(in oklab, var(--ember) 55%, transparent); flex: none; transform: scale(.6); transition: transform .25s var(--ease), background .25s; }
+  .choice:hover { color: var(--bone); padding-left: 1rem; }
+  .choice:hover::before { transform: scale(1); background: var(--ember); }
+  .choice .arrow { margin-left: auto; opacity: 0; color: var(--ember); transition: opacity .25s, transform .25s var(--ease); }
+  .choice:hover .arrow { opacity: 1; transform: translateX(-4px); }
+
+  .looking { margin-top: 2.4rem; }
+  .looking a { color: var(--bone-faint); font-size: .9rem; letter-spacing: .04em; border-bottom: 1px solid transparent; transition: color .2s, border-color .2s; }
+  .looking a:hover { color: var(--bone-dim); border-color: var(--bone-faint); }
+
+  /* answer view */
+  .answer .breath { font-size: .72rem; letter-spacing: .3em; text-transform: uppercase; color: var(--ember); }
+  .answer .tender { font-family: var(--serif); font-weight: 300; font-size: clamp(1.5rem, 4vw, 2.4rem); line-height: 1.3; color: var(--bone); margin: 1.4rem auto 0; max-width: 26ch; }
+  .answer .path { margin: 2.4rem auto 0; max-width: 30rem; padding: 1.4rem 1.6rem; border-radius: 18px; background: color-mix(in oklab, var(--ink-2) 72%, transparent); border: 1px solid color-mix(in oklab, var(--ember) 18%, transparent); text-align: left; }
+  .answer .path .plabel { font-size: .68rem; letter-spacing: .24em; text-transform: uppercase; color: var(--bone-faint); }
+  .answer .path .route { font-family: var(--serif); font-size: 1.25rem; color: var(--bone); margin-top: .4rem; }
+  .answer .path .route b { color: var(--ember); font-weight: 500; }
+  .answer .cta { margin-top: 2rem; }
+  .answer .again { display: block; margin-top: 1.6rem; color: var(--bone-faint); font-size: .88rem; }
+  .answer .again:hover { color: var(--bone-dim); }
+
+  .breathe-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ember); margin: 0 auto 2rem; animation: breath 5s ease-in-out infinite; box-shadow: 0 0 26px 6px color-mix(in oklab, var(--ember) 60%, transparent); }
+  @keyframes breath { 0%,100% { transform: scale(.7); opacity: .5 } 50% { transform: scale(1.25); opacity: 1 } }
+</style>
+</head>
+<body>
+<div class="switch">
+  <span class="switch__brand">Of <b>Blood</b> and Bones</span>
+  <span class="switch__tag">fresh concepts</span>
+  <nav>
+    <a href="1-threshold.html">The Threshold</a>
+    <a href="2-body.html">Where you feel it</a>
+    <a href="3-intake.html" class="on">One question</a>
+    <a href="4-descent.html">The Descent</a>
+    <a href="index.html" style="opacity:.6">menu</a>
+  </nav>
+</div>
+
+<main class="room">
+  <!-- ASK -->
+  <section class="view ask" id="view-ask">
+    <div class="breathe-dot" aria-hidden="true"></div>
+    <p class="eyebrow">Of Blood and Bones</p>
+    <h1>What brought you <em>here</em> today?</h1>
+    <div class="choices" role="list">
+      <button class="choice" data-key="grief">I'm carrying grief <span class="arrow">→</span></button>
+      <button class="choice" data-key="rest">I can't rest <span class="arrow">→</span></button>
+      <button class="choice" data-key="unsafe">I don't feel safe in my body <span class="arrow">→</span></button>
+      <button class="choice" data-key="lose">I lose myself around others <span class="arrow">→</span></button>
+      <button class="choice" data-key="far">I feel far from myself <span class="arrow">→</span></button>
+    </div>
+    <p class="looking"><a href="1-threshold.html">or just look around →</a></p>
+  </section>
+
+  <!-- ANSWER -->
+  <section class="view answer" id="view-answer" hidden>
+    <p class="breath">breathe</p>
+    <p class="tender" id="a-tender"></p>
+    <div class="path">
+      <span class="plabel">where I'd begin with you</span>
+      <p class="route" id="a-route"></p>
+    </div>
+    <a href="#" class="cta cta--ember">Begin with Rootwork <span class="arrow">→</span></a>
+    <a href="#" class="again" id="a-again">← ask again</a>
+  </section>
+</main>
+
+<script src="fresh.js"></script>
+<script>
+  const R = {
+    grief:  { tender: "Grief asks to be felt slowly, in the body — not explained away.", route: "<b>Rootwork</b>, to feel safe enough — then the <b>Grief</b> journey." },
+    rest:   { tender: "A body that can't rest is a body still bracing for something.", route: "<b>Rootwork</b> to settle the system — then <b>Rest & sleep</b>." },
+    unsafe: { tender: "Then this is exactly where to begin. Nothing is asked of you yet.", route: "<b>Rootwork</b> — teaching the body it is safe enough to soften." },
+    lose:   { tender: "Disappearing in closeness is something the body learned. It can learn another way.", route: "<b>Rootwork</b> first — then <b>Relating</b> & <b>Boundaries</b>." },
+    far:    { tender: "Coming home to yourself is the whole arc of this work.", route: "<b>Rootwork</b>, and the slow path back through all five stages." },
+  };
+  const vAsk = document.getElementById('view-ask');
+  const vAns = document.getElementById('view-answer');
+  const elT = document.getElementById('a-tender');
+  const elR = document.getElementById('a-route');
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function show(hideEl, showEl, fill) {
+    if (reduce) { hideEl.hidden = true; if (fill) fill(); showEl.hidden = false; return; }
+    hideEl.classList.add('leaving');
+    setTimeout(() => {
+      hideEl.hidden = true; hideEl.classList.remove('leaving');
+      if (fill) fill();
+      showEl.hidden = false; showEl.classList.add('entering');
+      requestAnimationFrame(() => requestAnimationFrame(() => showEl.classList.remove('entering')));
+    }, 420);
+  }
+
+  document.querySelectorAll('.choice').forEach(c => {
+    c.addEventListener('click', () => {
+      const d = R[c.dataset.key];
+      show(vAsk, vAns, () => { elT.textContent = d.tender; elR.innerHTML = d.route; });
+    });
+  });
+  document.getElementById('a-again').addEventListener('click', (e) => { e.preventDefault(); show(vAns, vAsk); });
+</script>
+</body>
+</html>

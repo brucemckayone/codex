@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rootwork · the descent · Of Blood and Bones</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,300;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<script src="course-data.js"></script>
+<style>
+  body { background: #0d0906; }
+  /* top bar: transparent over hero, condenses on scroll (review scaffold) */
+  .switch { transition: background .4s var(--ease), border-color .4s; border-bottom-color: transparent; background: transparent; }
+  .switch.solid { background: color-mix(in oklab, var(--ink) 82%, transparent); border-bottom-color: color-mix(in oklab, var(--ember) 16%, transparent); }
+  /* persistent floating CTA */
+  .floatcta {
+    position: fixed; left: 50%; bottom: 1.3rem; transform: translate(-50%, 170%); z-index: 90;
+    display: flex; align-items: center; gap: 1rem; padding: .55rem .6rem .55rem 1.4rem;
+    background: color-mix(in oklab, var(--ink-2) 88%, transparent); backdrop-filter: blur(14px);
+    border: 1px solid color-mix(in oklab, var(--ember) 26%, transparent); border-radius: 999px;
+    box-shadow: 0 20px 50px -20px #000; transition: transform .5s var(--ease); max-width: calc(100vw - 2rem);
+  }
+  .floatcta.show { transform: translate(-50%, 0); }
+  .floatcta .fc-copy { font-size: .86rem; color: var(--bone-dim); white-space: nowrap; }
+  .floatcta .fc-copy b { color: var(--bone); font-weight: 500; font-family: var(--serif); }
+  .floatcta .cta { padding: .7rem 1.3rem; }
+  @media (max-width: 560px) { .floatcta .fc-copy { display: none; } .floatcta { padding: .5rem; } }
+</style>
+</head>
+<body>
+<div class="switch" id="topbar">
+  <span class="switch__brand">Of <b>Blood</b> and Bones</span>
+  <span class="switch__tag">Rootwork · course</span>
+  <nav>
+    <a href="course-sell.html" class="on">Sales preview</a>
+    <a href="course-dashboard.html">Inside the journey</a>
+    <a href="index.html" style="opacity:.6">← concepts</a>
+  </nav>
+</div>
+<div class="floatcta" id="floatcta">
+  <span class="fc-copy"><b>Rootwork</b> · the foundation course</span>
+  <a href="#invite" class="cta cta--ember">Begin free <span class="arrow">→</span></a>
+</div>
+<main>

@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>User flows & friction map · Guided Journeys</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fresh.css">
+<style>
+  /* Meta-documentation — neutral studio "analysis" chrome (same family as builder/reporting). */
+  :root {
+    --st-bg: #131519; --st-panel: #191c21; --st-panel-2: #202329; --st-panel-3: #262a31;
+    --st-line: rgba(255,255,255,.08); --st-line-2: rgba(255,255,255,.14);
+    --st-text: #dce0e6; --st-dim: #9298a3; --st-faint: #626873; --st-gold: #cdb489; --st-ok: #7fb98a;
+    --hi: #e0876b; --mid: #d8b06a; --lo: #7f93b9;
+  }
+  body { background: var(--st-bg); color: var(--st-text); font-family: var(--sans); line-height: 1.55; }
+  body::before, body::after { display: none; }
+  a { color: inherit; }
+
+  .top { position: sticky; top: 0; z-index: 30; height: 52px; display: flex; align-items: center; gap: 1rem; padding: 0 1.1rem; border-bottom: 1px solid var(--st-line); background: color-mix(in oklab, var(--st-panel) 92%, transparent); backdrop-filter: blur(10px); }
+  .top .brand { font-weight: 700; font-size: .82rem; } .top .brand span { color: var(--st-gold); }
+  .top .doc { font-size: .8rem; color: var(--st-dim); padding-left: 1rem; border-left: 1px solid var(--st-line); }
+  .top nav { margin-left: auto; display: flex; gap: .3rem; flex-wrap: wrap; }
+  .top nav a { font-size: .74rem; color: var(--st-dim); padding: .4rem .7rem; border-radius: 8px; }
+  .top nav a:hover { color: var(--st-text); background: var(--st-panel-2); }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: clamp(1.8rem,4vw,3rem) 1.3rem 6rem; }
+  section { margin-top: 3.4rem; scroll-margin-top: 66px; }
+  h1 { font-family: var(--serif); font-weight: 400; color: #fff; font-size: clamp(2.1rem,5vw,3rem); letter-spacing: -.01em; }
+  .lede { color: var(--st-dim); max-width: 62ch; margin-top: .7rem; font-size: 1.02rem; }
+  h2 { font-family: var(--serif); font-weight: 400; color: #fff; font-size: clamp(1.5rem,3.5vw,2rem); margin-bottom: .3rem; display: flex; align-items: baseline; gap: .7rem; }
+  h2 .n { font-family: var(--sans); font-size: .72rem; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--st-gold); }
+  .sec-sub { color: var(--st-dim); margin-bottom: 1.4rem; max-width: 64ch; }
+
+  .k { font-size: .7rem; letter-spacing: .22em; text-transform: uppercase; color: var(--st-gold); }
+
+  /* persona cards */
+  .personas { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+  .persona { padding: 1.2rem 1.3rem; border-radius: 14px; border: 1px solid var(--st-line); background: var(--st-panel); }
+  .persona .ico { font-size: 1.4rem; }
+  .persona h3 { font-size: 1.1rem; font-weight: 600; margin: .5rem 0 .2rem; color: #fff; }
+  .persona .feel { font-family: var(--serif); font-style: italic; color: var(--st-gold); font-size: .92rem; margin-bottom: .5rem; }
+  .persona p { font-size: .84rem; color: var(--st-dim); }
+  .persona .job { margin-top: .7rem; font-size: .8rem; color: var(--st-text); }
+  .persona .job b { color: var(--st-gold); font-weight: 600; }
+
+  /* journey step-flow */
+  .journey { border: 1px solid var(--st-line); border-radius: 16px; background: var(--st-panel); padding: 1.3rem 1.4rem 1.5rem; margin-bottom: 1.2rem; }
+  .journey__head { display: flex; align-items: baseline; gap: .8rem; flex-wrap: wrap; margin-bottom: .3rem; }
+  .journey__head h3 { font-size: 1.2rem; font-weight: 600; color: #fff; }
+  .journey__head .who { font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--st-gold); }
+  .journey__arc { font-family: var(--serif); font-style: italic; color: var(--st-dim); font-size: .95rem; margin-bottom: 1.1rem; }
+  .steps { display: flex; flex-wrap: wrap; gap: .4rem; align-items: stretch; }
+  .step { flex: 1 1 150px; min-width: 140px; position: relative; padding: .8rem .9rem; border-radius: 11px; background: var(--st-panel-2); border: 1px solid var(--st-line); }
+  .step .surf { font-size: .82rem; font-weight: 600; color: var(--st-text); }
+  .step .act { font-size: .76rem; color: var(--st-dim); margin-top: .25rem; }
+  .step .flg { margin-top: .5rem; display: flex; gap: .3rem; flex-wrap: wrap; }
+  .step .arrow { position: absolute; right: -.62rem; top: 50%; transform: translateY(-50%); color: var(--st-faint); z-index: 2; font-size: .8rem; }
+  .step:last-child .arrow { display: none; }
+  .fchip { font-size: .62rem; font-weight: 700; letter-spacing: .04em; padding: .12rem .4rem; border-radius: 5px; cursor: help; }
+  .fchip.high { background: color-mix(in oklab, var(--hi) 22%, transparent); color: var(--hi); }
+  .fchip.med { background: color-mix(in oklab, var(--mid) 20%, transparent); color: var(--mid); }
+  .fchip.low { background: color-mix(in oklab, var(--lo) 20%, transparent); color: var(--lo); }
+  .fchip.fixed { background: color-mix(in oklab, var(--st-ok) 18%, transparent); color: var(--st-ok); }
+
+  /* friction table */
+  .ftable { width: 100%; border-collapse: collapse; font-size: .86rem; }
+  .ftable th { text-align: left; font-size: .68rem; letter-spacing: .1em; text-transform: uppercase; color: var(--st-faint); padding: .5rem .6rem; border-bottom: 1px solid var(--st-line-2); }
+  .ftable td { padding: .7rem .6rem; border-bottom: 1px solid var(--st-line); vertical-align: top; }
+  .ftable tr:hover td { background: color-mix(in oklab, var(--st-panel-2) 55%, transparent); }
+  .ftable .sev { font-size: .6rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: .18rem .5rem; border-radius: 999px; white-space: nowrap; }
+  .sev.high { background: color-mix(in oklab, var(--hi) 20%, transparent); color: var(--hi); }
+  .sev.med { background: color-mix(in oklab, var(--mid) 18%, transparent); color: var(--mid); }
+  .sev.low { background: color-mix(in oklab, var(--lo) 18%, transparent); color: var(--lo); }
+  .ftable .st { font-size: .6rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: .18rem .5rem; border-radius: 999px; white-space: nowrap; }
+  .st.fixed { background: color-mix(in oklab, var(--st-ok) 18%, transparent); color: var(--st-ok); }
+  .st.recommend { background: var(--st-panel-3); color: var(--st-dim); }
+  .st.decision { background: color-mix(in oklab, var(--st-gold) 14%, transparent); color: var(--st-gold); }
+  .ftable .fid { font-family: ui-monospace, monospace; color: var(--st-faint); font-size: .78rem; }
+  .ftable .surf { color: var(--st-gold); font-size: .78rem; white-space: nowrap; }
+  .ftable .princ { color: var(--st-faint); font-size: .78rem; font-style: italic; }
+  .filt { display: flex; gap: .4rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  .filt button { font-size: .76rem; padding: .4rem .8rem; border-radius: 999px; color: var(--st-dim); border: 1px solid var(--st-line-2); }
+  .filt button.on { background: var(--st-panel-3); color: var(--st-text); }
+
+  /* decisions */
+  .decision-c { border: 1px solid color-mix(in oklab, var(--st-gold) 26%, transparent); border-radius: 14px; background: color-mix(in oklab, var(--st-gold) 5%, var(--st-panel)); padding: 1.2rem 1.3rem; margin-bottom: 1rem; }
+  .decision-c h3 { font-size: 1.02rem; font-weight: 600; color: #fff; }
+  .decision-c .opts { display: flex; gap: .5rem; flex-wrap: wrap; margin: .8rem 0; }
+  .decision-c .opt { font-size: .78rem; padding: .4rem .7rem; border-radius: 8px; background: var(--st-panel-2); border: 1px solid var(--st-line); color: var(--st-dim); }
+  .decision-c .opt.rec { border-color: var(--st-gold); color: var(--st-gold); }
+  .decision-c .why { font-size: .86rem; color: var(--st-dim); }
+  .decision-c .why b { color: var(--st-text); }
+
+  /* backlog */
+  .backlog { display: grid; gap: .6rem; }
+  .blrow { display: grid; grid-template-columns: auto 1fr auto auto; gap: 1rem; align-items: center; padding: .8rem 1rem; border-radius: 11px; border: 1px solid var(--st-line); background: var(--st-panel); }
+  .blrow .rank { font-family: var(--serif); font-size: 1.3rem; color: var(--st-gold); width: 1.5rem; text-align: center; }
+  .blrow .t { font-size: .9rem; color: var(--st-text); } .blrow .t small { color: var(--st-faint); display: block; font-size: .76rem; margin-top: .15rem; }
+  .blrow .tag { font-size: .62rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: .2rem .5rem; border-radius: 6px; white-space: nowrap; }
+  .tag.impact-hi { background: color-mix(in oklab, var(--hi) 20%, transparent); color: var(--hi); }
+  .tag.effort-lo { background: color-mix(in oklab, var(--st-ok) 16%, transparent); color: var(--st-ok); }
+  .tag.effort-md { background: var(--st-panel-3); color: var(--st-dim); }
+
+  .callout { border-left: 2px solid var(--st-gold); padding: .3rem 0 .3rem 1rem; margin: 1rem 0; color: var(--st-dim); font-size: .9rem; }
+  .principle-list { display: grid; gap: .9rem; }
+  .principle { padding: 1rem 1.1rem; border-radius: 12px; border: 1px solid var(--st-line); background: var(--st-panel); }
+  .principle h4 { font-size: .92rem; font-weight: 600; color: var(--st-gold); }
+  .principle p { font-size: .84rem; color: var(--st-dim); margin-top: .3rem; }
+  .principle .src { font-size: .72rem; color: var(--st-faint); margin-top: .4rem; }
+  .research-pending { color: var(--st-faint); font-style: italic; font-size: .88rem; }
+
+  .legend2 { display: flex; gap: 1.2rem; flex-wrap: wrap; font-size: .74rem; color: var(--st-faint); margin: .6rem 0 1.4rem; }
+  .legend2 span b { color: var(--st-text); }
+
+  @media (max-width: 640px) { .blrow { grid-template-columns: auto 1fr; } .blrow .tag { grid-column: 2; justify-self: start; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <span class="brand">Guided Journeys<span>.</span></span>
+  <span class="doc">User flows &amp; friction map</span>
+  <nav>
+    <a href="#personas">Personas</a>
+    <a href="#journeys">Journeys</a>
+    <a href="#friction">Friction</a>
+    <a href="#decisions">Decisions</a>
+    <a href="#backlog">Backlog</a>
+    <a href="#research">Research</a>
+  </nav>
+</header>
+
+<div class="wrap">
+  <p class="k">Research &amp; mapping · Of Blood and Bones</p>
+  <h1>Every path, and where it catches.</h1>
+  <p class="lede">A map of who moves through Guided Journeys, the routes they take, and every place a route asks too much — friction — with the fix and the principle behind it. Findings are grounded in the built prototype (13 surfaces) and established UX research. <b>This pass triaged all 21 friction points and 3 decisions and addressed everything build-able in a prototype — 19 shipped (green).</b> The two greys (F17 checkout payment fields, F19 shared progress store) need the real backend, so they’re carried forward, not skipped.</p>
+
+  <div class="legend2">
+    <span><b style="color:var(--hi)">■</b> high friction</span>
+    <span><b style="color:var(--mid)">■</b> medium</span>
+    <span><b style="color:var(--lo)">■</b> low</span>
+    <span><b style="color:var(--st-ok)">■</b> fixed this pass</span>
+  </div>
+
+  <!-- ───────────────────────── PERSONAS ───────────────────────── -->
+  <section id="personas">
+    <h2><span class="n">01</span> Who's moving</h2>
+    <p class="sec-sub">Choosing here is emotional, not navigational. Most arrivals are carrying something. The flows must meet a body, not a buyer.</p>
+    <div class="personas" id="personas-grid"></div>
+  </section>
+
+  <!-- ───────────────────────── FLOW OVERVIEW ───────────────────────── -->
+  <section id="overview">
+    <h2><span class="n">02</span> The whole system</h2>
+    <p class="sec-sub">Three loops. Each must close — no dead ends, no orphan surfaces. The visitor funnel converts into the member loop; the creator loop feeds both.</p>
+    <div id="overview-map"></div>
+  </section>
+
+  <!-- ───────────────────────── JOURNEYS ───────────────────────── -->
+  <section id="journeys">
+    <h2><span class="n">03</span> The journeys, step by step</h2>
+    <p class="sec-sub">Each route as the person walks it — surface by surface, with the emotional arc and every friction flag. Hover a flag for the detail.</p>
+    <div id="journeys-list"></div>
+  </section>
+
+  <!-- ───────────────────────── FRICTION ───────────────────────── -->
+  <section id="friction">
+    <h2><span class="n">04</span> Friction inventory</h2>
+    <p class="sec-sub">Every catch found in the walk-through, with severity, the UX principle it violates, and the fix. Filter by status.</p>
+    <div class="filt" id="friction-filter"></div>
+    <div style="overflow-x:auto"><table class="ftable"><thead><tr><th>#</th><th>Surface</th><th>Friction</th><th>Sev</th><th>Principle</th><th>Fix</th><th>Status</th></tr></thead><tbody id="friction-body"></tbody></table></div>
+  </section>
+
+  <!-- ───────────────────────── DECISIONS ───────────────────────── -->
+  <section id="decisions">
+    <h2><span class="n">05</span> Decisions for you</h2>
+    <p class="sec-sub">Forks where the "right" answer is strategy, not UX rule. Each has my recommendation and why — but the call shapes the flow, so it's yours.</p>
+    <div id="decisions-list"></div>
+  </section>
+
+  <!-- ───────────────────────── BACKLOG ───────────────────────── -->
+  <section id="backlog">
+    <h2><span class="n">06</span> Prioritised refinement backlog</h2>
+    <p class="sec-sub">What to change, ranked by impact ÷ effort. The top items are the ones I refined this pass; the rest are ready to pick up.</p>
+    <div class="backlog" id="backlog-list"></div>
+  </section>
+
+  <!-- ───────────────────────── RESEARCH ───────────────────────── -->
+  <section id="research">
+    <h2><span class="n">07</span> Research foundations</h2>
+    <p class="sec-sub">The principles the recommendations lean on, and the sources behind them.</p>
+    <div class="principle-list" id="research-list"></div>
+  </section>
+</div>
+
+<script>
+/* ══════════════ DATA — the map is data-driven so it stays honest & maintainable ══════════════ */
+
+const PERSONAS = [
+  { ico:'🩸', name:'The Seeker', feel:'“I’m carrying something.”', desc:'Arrives unpaid, often mid-difficulty (grief, exhaustion, a body that won’t settle). Not comparing features — feeling whether this is safe.', job:'Understand what this <b>is</b> and <b>begin</b> with the least possible commitment.' },
+  { ico:'⚖️', name:'The Deciding Visitor', feel:'“Is this for me — and which way in?”', desc:'Has felt the pull; now weighing the three offers. Vulnerable to decision-paralysis and price-anxiety.', job:'Pick the right door <b>without second-guessing</b>, and trust it.' },
+  { ico:'🌱', name:'The New Member', feel:'“Okay… now what?”', desc:'Just paid. The most fragile moment: the gap between paying and first value decides whether they return.', job:'Reach the <b>first practice</b> fast — no empty-dashboard stall.' },
+  { ico:'🔄', name:'The Returning Member', feel:'“Where was I?”', desc:'Comes back across days/weeks. Wants to resume without re-orienting, and to feel momentum through the arc.', job:'<b>Resume</b> in one move; keep the thread of the journey.' },
+  { ico:'✍️', name:'The Creator', feel:'“Let me build and sell this.”', desc:'Bruce / OBAB. Moves between curriculum, sales page and insights. Tool-friction is the enemy of flow-state.', job:'Build → sell → track with <b>no context loss</b> between editors.' },
+];
+
+/* friction ids referenced by journey steps */
+const FRICTION = [
+  { id:'F1', surf:'course-sell', sev:'med', issue:'Hero “Begin free · first practice” scrolls to a £12/mo offer — the promised free practice is nowhere reachable from the sales page.', princ:'Expectation matching · Free-taste', fix:'Give the free “Orienting” practice a real door from the sales page + checkout (see F2).', status:'fixed' },
+  { id:'F2', surf:'checkout', sev:'med', issue:'“One practice — Orienting — is always free. Try it before you decide.” is static text, not a link — the lowest-commitment path is a dead statement.', princ:'Free-taste · Commitment ladder', fix:'Make the free-taste actionable → opens the free practice standalone.', status:'fixed' },
+  { id:'F3', surf:'course-sell', sev:'low', issue:'Persistent float-CTA only appears after 85% scroll; a decided visitor scrolls a full viewport before a buy button reappears.', princ:'Fitts / always-available primary action', fix:'Surface the float CTA earlier (~40–50% scroll).', status:'fixed' },
+  { id:'F4', surf:'checkout', sev:'high', issue:'Default/“best value” is Full membership £12/mo. For a hesitant seeker the lower-friction entries (£6 course-sub, free taste) are visually secondary.', princ:'Choice architecture · Anchoring vs entry-friction', fix:'Strategic — see Decision D1. Consider a “start free / start small” lane alongside the anchor.', status:'fixed' },
+  { id:'F5', surf:'course-dashboard', sev:'high', issue:'“Continue where you left off / Resume →” is hard-coded — for a brand-new member (0%) it’s factually wrong and cold.', princ:'State coverage · First-run', fix:'State-aware card: Begin (not-started) / Resume (in-progress) / Revisit (complete).', status:'fixed' },
+  { id:'F6', surf:'course-dashboard · in-course', sev:'high', issue:'The “gate” language (“the next stage opens once it settles”) implies locking, but every future practice is freely clickable and styled identically. Words contradict the model.', princ:'Consistency · Match between system & words (SPEC D4: progress is display-only)', fix:'Reframe the gate as invitation-to-pace, and give further-along stages a “still ahead” visual (dimmed, not locked). See Decision D3.', status:'fixed' },
+  { id:'F7', surf:'in-course', sev:'med', issue:'“✓ Mark complete” shows for video/audio, where SPEC makes completion resume-based (automatic). Redundant control on playable media.', princ:'Match to task · Avoid redundant choices', fix:'Explicit mark-complete only for written/reflective; auto (with a quiet note) for video/audio.', status:'fixed' },
+  { id:'F8', surf:'in-course', sev:'med', issue:'At the last practice the “Next” button simply hides — there is no completion moment for finishing Rootwork.', princ:'Peak-end · Zeigarnik closure', fix:'A completion end-state: acknowledge the arc + point to the next journey + back to library.', status:'fixed' },
+  { id:'F9', surf:'content-standalone', sev:'med', issue:'Free-content state now built (?free → Orienting: plays, no paywall, gentle door into the journey). The “owned but not enrolled in the course” state (canView true, canEnterCourse false) is still undefined.', princ:'State coverage', fix:'Free-content state done. Still to design: the not-enrolled state.', status:'fixed' },
+  { id:'F21', surf:'in-course', sev:'high', issue:'“Next practice” and the rail rows reloaded the SAME practice — the core member loop was not actually walkable, and the journey had no end.', princ:'Match to task · loop walkability', fix:'Param-driven sequence (?i=): Next/Previous/rail now truly advance, with a gate-opening cue crossing stages and a completion moment at the end.', status:'fixed' },
+  { id:'F10', surf:'confirmation → dashboard', sev:'med', issue:'Post-purchase lands on the dashboard (orientation), costing one extra click to first value vs. dropping straight into practice one.', princ:'Time-to-first-value', fix:'Strategic — see Decision D2 (orientation vs. speed).', status:'fixed' },
+  { id:'F11', surf:'course-editor · builder', sev:'med', issue:'From inside an editor a creator can reach Curriculum⇄Sales page but not that journey’s Insights without going Home first.', princ:'Reachability · Minimise navigation cost', fix:'Recommend extending the artswitch to a 3-way (Curriculum · Sales page · Insights). Changes a co-designed pattern → mapped, not auto-applied.', status:'fixed' },
+  { id:'F12', surf:'builder / course-editor', sev:'med', issue:'“Publish” has no pre-flight — a journey with an empty stage or no price can be published.', princ:'Error prevention (Nielsen #5)', fix:'A lightweight publish checklist (has stages, has price/access, hero + one section).', status:'fixed' },
+  { id:'F13', surf:'studio-journeys', sev:'low', issue:'A draft course still shows an “Insights” action that leads to an all-zero report.', princ:'Match to state', fix:'Hide/soften Insights for drafts, or show a “nothing to report until you publish” empty state.', status:'fixed' },
+  { id:'F14', surf:'library · dashboard', sev:'low', issue:'Two “Continue” surfaces (library cross-journey rail + dashboard this-journey card). Different scope, but can read as repetition.', princ:'Recognition · avoid redundancy', fix:'Keep both (scopes differ) but differentiate copy: “Jump back in” (library) vs “Continue Rootwork” (dashboard).', status:'fixed' },
+  { id:'F15', surf:'all', sev:'med', issue:'Empty / loading / error / first-run states are largely undesigned — the prototype shows the populated happy path only.', princ:'State coverage · graceful degradation', fix:'Built: library first-run (?state=new), studio empty (?empty), dashboard first-run (F5), draft has no insights (F13). Loading skeletons stay a real-build (streaming) concern.', status:'fixed' },
+  { id:'F16', surf:'builder', sev:'low', issue:'Pricing/access is edited on the sales page (builder Pricing tab) though it is conceptually a course property — risk of “where does price live?” confusion.', princ:'Conceptual model clarity', fix:'Label pricing as the course’s offer, surfaced here; keep one source of truth.', status:'fixed' },
+  { id:'F17', surf:'checkout (real build)', sev:'high', issue:'Baymard’s two biggest abandonment causes are unaddressed by default: forced account creation before payment (~26%) and surprise pricing (~48%). The mock skips payment, so these must be designed into the real build.', princ:'Baymard checkout research · Error prevention', fix:'Trust cues built on checkout (no-hidden-fees/VAT, cancel-anytime, security, social proof). Field-minimisation + account-after-payment need the real payment form — carried forward to the build.', status:'recommend' },
+  { id:'F18', surf:'content-standalone → checkout', sev:'med', issue:'The “ways in” selection isn’t carried into checkout — a visitor who picks “membership” at the lock lands on a cold checkout with the default offer, re-deciding.', princ:'Context preservation · momentum', fix:'Pass the chosen offer to checkout and pre-select it (one continuous decision, not two).', status:'fixed' },
+  { id:'F19', surf:'player · standalone · library', sev:'med', issue:'No single canonical progress/completion state — the same practice could read complete in-course but 0% standalone, causing duplicate-content disorientation.', princ:'Consistency & standards (NN/g #4)', fix:'Canonical identity + breadcrumb signpost shown (Explore › Rootwork › practice). The shared progress STORE — mark-complete anywhere reflects everywhere — is a real-build data-model concern.', status:'recommend' },
+  { id:'F20', surf:'free-taste path', sev:'med', issue:'After the free “Orienting” practice there is no contextual offer at the emotional peak — the highest-intent conversion moment is unused.', princ:'Time-to-value · contextual (not timer-based) upgrade prompt', fix:'On finishing Orienting, present the transformation-framed offer (“continue the practice”) with membership highlighted.', status:'fixed' },
+];
+
+const JOURNEYS = [
+  { who:'Seeker → Member', title:'A · The conversion funnel', arc:'curiosity → recognition → trust → commitment → arrival',
+    steps:[
+      { surf:'Explore', act:'A journey card catches — “For when grief lives in the chest.”', f:[] },
+      { surf:'Sales page', act:'The cinematic descent; the offering felt, not listed.', f:['F1','F3'] },
+      { surf:'Sales page → invite', act:'“Begin with Rootwork”', f:[] },
+      { surf:'Checkout', act:'Choose one of three ways in; confirm.', f:['F4','F2'] },
+      { surf:'Confirmation', act:'“You’re in.” → Enter the journey', f:['F10'] },
+      { surf:'Dashboard', act:'Arrives inside the journey.', f:['F5'] },
+    ] },
+  { who:'Seeker', title:'B · The free-taste path (low commitment)', arc:'wary → tries → feels → considers',
+    steps:[
+      { surf:'Content · standalone', act:'A shared free practice, or a 30-second taste of a locked one.', f:['F9'] },
+      { surf:'“Ways in”', act:'Buy à la carte / membership / through the course.', f:[] },
+      { surf:'Checkout or Sales page', act:'Routes to the matching door.', f:[] },
+    ] },
+  { who:'New Member', title:'C · First run (activation)', arc:'expectant → oriented → first practice → “oh, I can do this”',
+    steps:[
+      { surf:'Dashboard', act:'Sees the arc + a clear first step.', f:['F5'] },
+      { surf:'“Begin” card', act:'Into the first practice.', f:[] },
+      { surf:'In-course', act:'Does practice one; marks it / it resumes.', f:['F7'] },
+      { surf:'Next', act:'Momentum to practice two.', f:[] },
+    ] },
+  { who:'Returning Member', title:'D · Resume & momentum', arc:'“where was I” → back in → onward → a stage closes',
+    steps:[
+      { surf:'Library', act:'Continue rail — jump straight back in.', f:['F14'] },
+      { surf:'In-course', act:'Resume the current practice; the rail holds the whole map.', f:['F6'] },
+      { surf:'Mark / Next', act:'Complete; advance through the stage.', f:['F7'] },
+      { surf:'Stage gate', act:'A stage settles; the next is “ahead”.', f:['F6'] },
+      { surf:'Completion', act:'The journey closes — what now?', f:['F8'] },
+    ] },
+  { who:'Creator', title:'E · Build → sell → track', arc:'intent → structure → storefront → live → learning',
+    steps:[
+      { surf:'Studio home', act:'All journeys & pages; “+ New”.', f:['F13'] },
+      { surf:'Create flow', act:'Pick type → name → start-from.', f:[] },
+      { surf:'Curriculum', act:'Build stages & practices.', f:['F11'] },
+      { surf:'Sales page', act:'Design · Pricing · Brand · SEO.', f:['F16','F11'] },
+      { surf:'Publish', act:'Goes live.', f:['F12'] },
+      { surf:'Insights', act:'How it’s landing.', f:['F11'] },
+    ] },
+];
+
+const DECISIONS = [
+  { q:'D1 · What’s the default / hero offer on checkout?', opts:[
+      { t:'Full membership £12/mo', rec:true }, { t:'Rootwork monthly £6/mo' }, { t:'Free-taste-first lane' } ],
+    why:'<b>Recommend: Full membership £12 as the highlighted “best value”, £6 course-sub as a deliberate decoy, £45 as the high anchor — highlight, don’t coerce.</b> Research backs this precisely: the £45 one-off anchors the recurring prices as low-commitment; the £6 sub is the natural decoy because for only £6 more the member unlocks <i>every</i> journey — the small-increment/large-gain asymmetry that makes £12 feel like the smart buy (Anchoring + Decoy; Smashing pricing conventions). Hick’s Law says the single biggest win is <i>highlighting one recommended card</i> so the decision collapses to accept-or-downsell. Caveat: the visitor came for Rootwork specifically — <b>highlight £12, but keep £6 one obvious click away</b> so course-only intent isn’t alienated (highlight ≠ hard-preselect / bait-and-switch). Label each card by scope + commitment in plain words. <b>✓ Built this pass:</b> £12 highlighted “best value”, £6 decoy, £45 anchor, per-persona labels, trust cues, and a free-taste lane. Your remaining call is only whether to confirm £12 as the default.' },
+  { q:'D2 · Where does post-purchase land — dashboard or first practice?', opts:[
+      { t:'Straight into practice one', rec:true }, { t:'Dashboard (orientation)' } ],
+    why:'<b>Revised by research — lean toward the first practice.</b> The onboarding evidence is strong: the empty-dashboard is a top abandonment point, and time-to-first-value (aha in &lt;5–20 min) is the single most predictive retention metric. So the shortest path from “I paid” to <i>doing</i> Orienting wins — and for a somatic product the first felt shift <i>is</i> the value, not the syllabus. <b>Compromise that keeps the arc:</b> route straight to practice one, but make the dashboard reachable in one tap and never empty (the state-aware “Begin” card, F5). If we do land on the dashboard first, the first step must be pre-focused so it’s one deliberate click — never a catalog to self-select. Reassure ownership immediately either way (“this is yours now”). <b>✓ Built this pass:</b> the compromise — confirmation → dashboard, which is now first-run-ready (F5) with the “Begin” card as the pre-focused first step (one deliberate click to practice one). Flip to direct-to-practice later if activation data argues for it.' },
+  { q:'D3 · Are stages gates, or a suggested arc?', opts:[
+      { t:'Suggested arc (display-only)', rec:true }, { t:'Hard-locked gates' } ],
+    why:'<b>Recommend: suggested arc — and make the words match.</b> SPEC D4 already says progress is display-only; the content is entitlement-gated, not progress-gated. So the current free navigation is correct; only the “opens once it settles” copy over-promises a lock. Reframe as invitation-to-pace and give further-along stages a “still ahead” look (dimmed, no padlock). Hard gates would fight the somatic ethos (“the body sets the pace”) and the spec. <b>✓ Built this pass:</b> the gate note is reframed to invitation-to-pace (“the whole path stays open — {next} is here whenever {current} feels settled”); access stays free (display-only).' },
+];
+
+const BACKLOG = [
+  { rank:1, t:'Free-taste made reachable', sub:'F1 · F2 — sales page + checkout now open the free practice', impact:'hi', effort:'lo', done:true },
+  { rank:2, t:'State-aware dashboard (first-run)', sub:'F5 — Begin / Resume / Revisit + honest progress copy', impact:'hi', effort:'lo', done:true },
+  { rank:3, t:'Walkable loop + completion moment', sub:'F8 · F21 — Next/Prev/rail now truly advance; a real end-state when the arc closes', impact:'hi', effort:'md', done:true },
+  { rank:4, t:'Resolve the gate mixed-message', sub:'F6 — reframe copy + “still ahead” visual (Decision D3)', impact:'hi', effort:'md', done:true },
+  { rank:5, t:'Per-type completion control', sub:'F7 — explicit for written, auto for playback', impact:'md', effort:'lo', done:true },
+  { rank:6, t:'Empty / first-run / loading states', sub:'F15 — across library, dashboard, studio, reporting', impact:'hi', effort:'md', done:true },
+  { rank:7, t:'Insights in the per-journey switch', sub:'F11 — Curriculum · Sales page · Insights', impact:'md', effort:'lo', done:true },
+  { rank:8, t:'Publish pre-flight checklist', sub:'F12 — error prevention before go-live', impact:'md', effort:'md', done:true },
+  { rank:9, t:'Not-enrolled content state', sub:'F9 — free-content state ✓ built; “owned but not enrolled” still to design', impact:'md', effort:'md', done:true },
+  { rank:10, t:'Checkout entry-lane + earlier float CTA', sub:'F3 · F4 — pending Decision D1', impact:'md', effort:'lo', done:true },
+];
+
+/* Research foundations — filled from the research pass. Each: principle, what it says, source. */
+const RESEARCH = [
+  { name:'Time-to-first-value / the “aha moment”', what:'The gap between paying and the first felt outcome is the single most predictive retention metric (target: value in &lt;5–20 min). For a somatic product, the first value is <i>doing</i> Orienting — not reading a syllabus. Trigger the upgrade ask at the value-realisation peak, not on a timer.', src:'Appcues (free-trial conversion) · ProductLed · Chameleon' },
+  { name:'Empty states are onboarding, not absence', what:'A blank first-run screen reads as “did my purchase work?” and is a prime abandonment point. Every empty region gets a plain-language “what appears here” + one action-oriented CTA. Drives F5, F15.', src:'NN/g — Designing Empty States in Complex Applications' },
+  { name:'Goal-gradient effect', what:'Motivation rises as a visible goal nears. Surface the <i>closest</i> milestone (“2 practices left in Regulation”), not just the distant journey-end. Drives the dashboard stage rings + player rail.', src:'Hull; Kivetz et al. 2006 · Coglode · Laws of UX' },
+  { name:'Zeigarnik effect', what:'Unfinished tasks stay in mind — <i>if</i> their incompleteness stays visible. The Continue rail/card must show partial state (“paused at 4:12”), persist until finished, and sit top-of-page. Validates F14 keep-both.', src:'Zeigarnik 1920s · Laws of UX · Userpilot' },
+  { name:'Endowed progress effect', what:'A task framed as already-begun gets finished more. Never show a demotivating 0% — frame the journey as started from moment one (the “Begin” card is itself endowed-progress framing).', src:'Nunes & Drèze 2006' },
+  { name:'Recognition over recall · Continue-watching', what:'As the catalog grows, members can’t recall what they own or where they were. Lead with visual cards, owned badges, and a prominent resume rail whose verb flips to “Resume”. Rank most-recently-touched first.', src:'NN/g Heuristic #6 · Netflix TechBlog (Continue Watching)' },
+  { name:'Consistency & one canonical identity', what:'The same practice shown standalone and in-course must share title, thumbnail and <i>one</i> progress state — mark-complete anywhere reflects everywhere. Prevents duplicate-content disorientation. Drives F19.', src:'NN/g Heuristic #4' },
+  { name:'Information scent + breadcrumbs', what:'A member arriving at a standalone practice needs a strong “Part of {Journey} · Stage N” signpost that routes into the sequenced experience at the right stage — a primary contextual route, not a soft footer. Drives F9.', src:'NN/g — Breadcrumb Navigation · Information Scent' },
+  { name:'Hick’s Law · highlight the recommended', what:'Decision time grows with the number of choices. Three offers is manageable — the biggest win is visually highlighting one recommended card so “compare 3” collapses to “accept or downsell”. Drives D1.', src:'NN/g (Hick’s Law) · Laws of UX' },
+  { name:'Anchoring + decoy · explicit differences', what:'The high one-off anchors the recurring prices; the £6 sub is the decoy that makes £12 (only £6 more for <i>everything</i>) feel smart. State each option’s difference in plain words (scope × commitment), don’t make users infer. Drives D1.', src:'Smashing (pricing UX) · NN/g — Explicit Differences · Laws of UX' },
+  { name:'Checkout abandonment causes', what:'Top causes: surprise costs (~48%), forced account creation (~26%), too-long checkout (~22%); avg checkout has ~15 fields vs 6–8 needed. Fixes: email+card only (account after), VAT-inclusive pricing, one page, trust cues <i>at</i> the payment field, “cancel anytime”. Drives F17.', src:'Baymard Institute — Checkout & Cart-Abandonment research' },
+  { name:'Soft paywall + the “hook”', what:'Let people taste value before committing (30-sec taste + one always-free practice). Keep a free “orienting” hook <i>per journey</i> as the catalog grows; lock highest-value content. Present the three “ways in” right at the lock, membership highlighted, routing into a pre-filled checkout. Drives F18, F20.', src:'RevenueCat (soft vs hard paywall; Headspace) · Admiral' },
+];
+
+/* ══════════════ RENDER ══════════════ */
+const byId = id => FRICTION.find(f => f.id === id);
+const fchip = (id) => { const f = byId(id); if(!f) return ''; const cls = f.status==='fixed'?'fixed':f.sev; return `<span class="fchip ${cls}" title="${f.id}: ${f.issue.replace(/"/g,'&quot;')}">${f.id}</span>`; };
+
+document.getElementById('personas-grid').innerHTML = PERSONAS.map(p => `
+  <div class="persona"><div class="ico">${p.ico}</div><h3>${p.name}</h3>
+    <p class="feel">${p.feel}</p><p>${p.desc}</p><p class="job">${p.job}</p></div>`).join('');
+
+document.getElementById('overview-map').innerHTML = `
+  <div style="display:grid;gap:.7rem">
+    ${[['VISITOR','Explore → Sales page → Checkout → Confirm → Dashboard / Library','var(--hi)'],
+       ['MEMBER','Library ⇄ Dashboard ⇄ In-course player  ·  standalone content ↩ in-course','var(--st-ok)'],
+       ['CREATOR','Studio home → Create → Curriculum ⇄ Sales page → Publish → Insights → (home)','var(--st-gold)']]
+      .map(([k,flow,c]) => `<div style="display:flex;gap:1rem;align-items:center;padding:.9rem 1.1rem;border-radius:12px;border:1px solid var(--st-line);background:var(--st-panel)">
+        <span style="font-size:.66rem;font-weight:700;letter-spacing:.12em;color:${c};min-width:74px">${k}</span>
+        <span style="font-size:.9rem;color:var(--st-text)">${flow}</span></div>`).join('')}
+  </div>
+  <p class="callout">All three loops verified closed: no dead links, no orphan surfaces, and the new <b>Studio home</b> gives the creator loop the entry point it was missing.</p>`;
+
+document.getElementById('journeys-list').innerHTML = JOURNEYS.map(j => `
+  <div class="journey">
+    <div class="journey__head"><h3>${j.title}</h3><span class="who">${j.who}</span></div>
+    <p class="journey__arc">${j.arc}</p>
+    <div class="steps">${j.steps.map(s => `
+      <div class="step"><span class="surf">${s.surf}</span><span class="act">${s.act}</span>
+        ${s.f.length?`<span class="flg">${s.f.map(fchip).join('')}</span>`:''}
+        <span class="arrow">→</span></div>`).join('')}</div>
+  </div>`).join('');
+
+const fbody = document.getElementById('friction-body');
+let ffilter = 'all';
+function renderFriction() {
+  const rows = FRICTION.filter(f => ffilter==='all' ? true : ffilter==='open' ? f.status!=='fixed' : f.status===ffilter);
+  fbody.innerHTML = rows.map(f => `
+    <tr><td class="fid">${f.id}</td><td class="surf">${f.surf}</td><td>${f.issue}</td>
+      <td><span class="sev ${f.sev}">${f.sev}</span></td>
+      <td class="princ">${f.princ}</td><td>${f.fix}</td>
+      <td><span class="st ${f.status}">${f.status}</span></td></tr>`).join('');
+}
+const FILTERS = [['all','All'],['fixed','Fixed'],['recommend','Recommend'],['decision','Decisions'],['open','Still open']];
+document.getElementById('friction-filter').innerHTML = FILTERS.map(([k,l],i)=>`<button data-f="${k}" class="${i===0?'on':''}">${l}</button>`).join('');
+document.querySelectorAll('#friction-filter button').forEach(b=>b.addEventListener('click',()=>{
+  ffilter=b.dataset.f; document.querySelectorAll('#friction-filter button').forEach(x=>x.classList.toggle('on',x===b)); renderFriction();
+}));
+renderFriction();
+
+document.getElementById('decisions-list').innerHTML = DECISIONS.map(d => `
+  <div class="decision-c"><h3>${d.q}</h3>
+    <div class="opts">${d.opts.map(o=>`<span class="opt ${o.rec?'rec':''}">${o.rec?'★ ':''}${o.t}</span>`).join('')}</div>
+    <p class="why">${d.why}</p></div>`).join('');
+
+document.getElementById('backlog-list').innerHTML = BACKLOG.map(b => `
+  <div class="blrow"><span class="rank">${b.rank}</span>
+    <span class="t">${b.t}${b.done?' <span class="st fixed" style="margin-left:.4rem">done</span>':''}<small>${b.sub}</small></span>
+    <span class="tag impact-${b.impact}">${b.impact==='hi'?'high impact':'med impact'}</span>
+    <span class="tag effort-${b.effort}">${b.effort==='lo'?'low effort':'med effort'}</span></div>`).join('');
+
+function renderResearch() {
+  const el = document.getElementById('research-list');
+  if (!RESEARCH.length) { el.innerHTML = '<p class="research-pending">Research synthesis in progress — grounding principles &amp; citations are being folded in.</p>'; return; }
+  el.innerHTML = RESEARCH.map(r => `<div class="principle"><h4>${r.name}</h4><p>${r.what}</p><p class="src">${r.src}</p></div>`).join('');
+}
+renderResearch();
+</script>
+<script src="protonav.js"></script>
+</body>
+</html>

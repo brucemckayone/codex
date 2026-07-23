@@ -1,0 +1,395 @@
+<style>
+/* ═══ FEEL · what a practice feels like + what's inside ═══
+   Self-contained. Depends only on fresh.css tokens + Fraunces/Inter.
+   Prefix: .feel  ·  the free-taste player is the visual centrepiece. */
+
+.feel { position: relative; padding: clamp(4.5rem, 9vw, 7.5rem) 0; }
+.feel__inner { max-width: var(--maxw); margin: 0 auto; padding: 0 clamp(1.2rem, 4vw, 3rem); }
+
+.feel__grid {
+  display: grid;
+  grid-template-columns: 1.04fr 0.96fr;
+  gap: clamp(2.2rem, 5vw, 4.5rem);
+  align-items: stretch;
+}
+.feel__col { display: flex; flex-direction: column; }
+
+/* ── shared internal type scale (both columns echo each other) ── */
+.feel__h {
+  font-family: var(--serif);
+  font-weight: 300;
+  color: var(--bone);
+  font-size: clamp(1.85rem, 3.7vw, 2.7rem);
+  line-height: 1.06;
+  letter-spacing: -0.015em;
+  margin-top: 0.85rem;
+}
+.feel__lead {
+  color: var(--bone-dim);
+  font-size: clamp(1.02rem, 1.2vw, 1.1rem);
+  line-height: 1.62;
+  margin-top: 1.15rem;
+  max-width: 46ch;
+}
+.feel__lead em {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  color: var(--rose);
+  font-size: 1.06em;
+}
+
+/* ═══ LEFT · the free-taste player ═══ */
+.feel__player {
+  position: relative;
+  margin-top: auto;               /* pins to base so the column fills, no void */
+  padding-top: clamp(1.8rem, 3vw, 2.6rem);
+}
+.feel-taste {
+  position: relative;
+  border-radius: 20px;
+  padding: clamp(1.35rem, 2.6vw, 1.9rem);
+  background:
+    linear-gradient(180deg,
+      color-mix(in oklab, var(--ink-3) 78%, transparent),
+      color-mix(in oklab, var(--ink-2) 82%, transparent));
+  border: 1px solid color-mix(in oklab, var(--ember) 24%, transparent);
+  box-shadow:
+    0 30px 70px -34px rgba(0,0,0,0.7),
+    inset 0 1px 0 color-mix(in oklab, var(--bone) 7%, transparent);
+  overflow: hidden;
+}
+/* warm hearth glow inside the card */
+.feel-taste::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background: radial-gradient(120% 90% at 12% 0%,
+    color-mix(in oklab, var(--ember) 16%, transparent), transparent 58%);
+}
+.feel-taste > * { position: relative; z-index: 1; }
+
+.feel-taste__head { display: flex; align-items: center; gap: clamp(0.9rem, 2vw, 1.2rem); }
+
+/* play / pause button */
+.feel-play {
+  flex: none; position: relative;
+  width: clamp(56px, 8vw, 66px); height: clamp(56px, 8vw, 66px);
+  border-radius: 50%;
+  display: grid; place-items: center;
+  background: linear-gradient(180deg, var(--ember), var(--ochre));
+  color: #241a09;
+  box-shadow: 0 12px 30px -10px color-mix(in oklab, var(--ember) 62%, black);
+  transition: transform .18s var(--ease), box-shadow .25s var(--ease);
+}
+.feel-play:hover { transform: translateY(-2px); box-shadow: 0 18px 40px -12px color-mix(in oklab, var(--ember) 72%, black); }
+.feel-play:active { transform: translateY(0); }
+.feel-play:focus-visible { outline: 2px solid var(--bone); outline-offset: 4px; }
+.feel-play svg { width: 42%; height: 42%; display: block; }
+.feel-play .feel-ic-pause { display: none; }
+.feel-play.is-playing .feel-ic-play { display: none; }
+.feel-play.is-playing .feel-ic-pause { display: block; }
+/* pulse ring while playing */
+.feel-play::after {
+  content: ""; position: absolute; inset: 0; border-radius: 50%;
+  border: 1px solid color-mix(in oklab, var(--ember) 60%, transparent);
+  opacity: 0; pointer-events: none;
+}
+.feel-play.is-playing::after { animation: feel-pulse 2s var(--ease) infinite; }
+@keyframes feel-pulse {
+  0%   { opacity: .55; transform: scale(1); }
+  70%  { opacity: 0;   transform: scale(1.5); }
+  100% { opacity: 0;   transform: scale(1.5); }
+}
+
+.feel-taste__meta { flex: 1 1 auto; min-width: 0; }
+.feel-taste__title { font-family: var(--serif); color: var(--bone); font-size: clamp(1.12rem, 1.6vw, 1.32rem); line-height: 1.2; }
+.feel-taste__sub { font-size: 0.82rem; color: var(--bone-faint); margin-top: 0.2rem; letter-spacing: 0.01em; }
+.feel-taste__time {
+  flex: none; align-self: flex-start;
+  font-size: 0.76rem; color: var(--bone-dim);
+  font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
+  padding-top: 0.15rem; white-space: nowrap;
+}
+.feel-taste__time .feel-cur { color: var(--ember); }
+.feel-taste__time .feel-sep { color: var(--bone-faint); margin: 0 0.15rem; }
+
+/* waveform = equaliser + scrubber in one */
+.feel-wave {
+  position: relative;
+  margin-top: clamp(1.3rem, 2.4vw, 1.7rem);
+  height: clamp(58px, 9vw, 74px);
+  display: flex; align-items: center; gap: 2px;
+  cursor: pointer;
+}
+.feel-wave i {
+  flex: 1 1 0; min-width: 0;
+  height: var(--h, 40%);
+  border-radius: 2px;
+  transform-origin: center;
+  background: color-mix(in oklab, var(--bone) 20%, transparent);   /* unplayed */
+  transition: background .35s var(--ease);
+}
+.feel-wave i.is-on {
+  background: linear-gradient(180deg,
+    color-mix(in oklab, var(--ember) 92%, transparent),
+    color-mix(in oklab, var(--ochre) 88%, transparent));
+}
+.feel-wave.is-playing i {
+  animation: feel-eq var(--d, 1.1s) var(--ease) infinite;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes feel-eq { 0%, 100% { transform: scaleY(0.56); } 50% { transform: scaleY(1); } }
+
+/* playhead */
+.feel-wave__head {
+  position: absolute; top: 6%; bottom: 6%; left: 0%;
+  width: 1.5px; background: color-mix(in oklab, var(--ember) 85%, var(--bone));
+  transform: translateX(-50%);
+  box-shadow: 0 0 10px color-mix(in oklab, var(--ember) 70%, transparent);
+  transition: left .12s linear;
+  pointer-events: none;
+}
+.feel-wave__head::before {
+  content: ""; position: absolute; left: 50%; top: 50%;
+  width: 9px; height: 9px; border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--ember);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ink) 70%, transparent), 0 0 12px color-mix(in oklab, var(--ember) 80%, transparent);
+}
+
+/* ═══ RIGHT · what's inside ═══ */
+.feel__inside { margin-top: auto; }
+.feel-list {
+  list-style: none; position: relative;
+  margin-top: clamp(1.4rem, 2.6vw, 2rem);
+  display: flex; flex-direction: column;
+}
+/* the spine — a faint ember thread stitching the markers together */
+.feel-list::before {
+  content: ""; position: absolute; z-index: 0;
+  left: calc(clamp(1.9rem, 3.5vw, 2.3rem) / 2);
+  top: clamp(1.1rem, 2vw, 1.5rem); bottom: clamp(1.1rem, 2vw, 1.5rem);
+  width: 1px; transform: translateX(-50%);
+  background: linear-gradient(180deg,
+    transparent,
+    color-mix(in oklab, var(--ember) 40%, transparent) 12%,
+    color-mix(in oklab, var(--ember) 40%, transparent) 88%,
+    transparent);
+}
+.feel-list li {
+  position: relative; z-index: 1;
+  display: grid;
+  grid-template-columns: clamp(1.9rem, 3.5vw, 2.3rem) 1fr;
+  gap: clamp(0.9rem, 1.8vw, 1.25rem);
+  align-items: center;
+  padding: clamp(0.95rem, 1.9vw, 1.3rem) 0;
+}
+.feel-list__m {
+  grid-row: span 2; align-self: center;
+  width: clamp(1.9rem, 3.5vw, 2.3rem); height: clamp(1.9rem, 3.5vw, 2.3rem);
+  border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--ink-2);
+  border: 1px solid color-mix(in oklab, var(--ember) 34%, transparent);
+  color: var(--ember); font-size: 0.82rem; line-height: 1;
+  transition: transform .3s var(--ease), border-color .3s var(--ease), box-shadow .3s var(--ease), color .3s var(--ease);
+}
+.feel-list li:hover .feel-list__m {
+  transform: scale(1.12) rotate(90deg);
+  border-color: var(--ember);
+  color: var(--bone);
+  box-shadow: 0 0 22px -4px color-mix(in oklab, var(--ember) 55%, transparent);
+}
+.feel-list__lead {
+  font-family: var(--serif); font-weight: 400;
+  color: var(--bone); font-size: clamp(1.04rem, 1.4vw, 1.16rem); line-height: 1.25;
+}
+.feel-list__sub { color: var(--bone-faint); font-size: 0.92rem; margin-top: 0.12rem; }
+.feel-list__lead, .feel-list__sub { grid-column: 2; }
+.feel-list__lead { transition: color .25s var(--ease); }
+.feel-list li:hover .feel-list__lead { color: #fff; }
+
+/* ── reveal-on-scroll (namespaced; self-driven by the IIFE) ── */
+.feel-reveal { opacity: 0; transform: translateY(24px); transition: opacity .9s var(--ease), transform .9s var(--ease); }
+.feel-reveal.feel-in { opacity: 1; transform: none; }
+.feel-d1 { transition-delay: .08s; }
+.feel-d2 { transition-delay: .16s; }
+.feel-d3 { transition-delay: .24s; }
+
+/* ── responsive ── */
+@media (max-width: 860px) {
+  .feel__grid { grid-template-columns: 1fr; gap: clamp(2.6rem, 8vw, 3.4rem); }
+  .feel__player, .feel__inside { margin-top: 1.6rem; }
+  .feel__lead { max-width: none; }
+}
+@media (max-width: 480px) {
+  .feel-taste__head { flex-wrap: wrap; }
+  .feel-taste__time { order: 3; width: 100%; padding-top: 0.4rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .feel-reveal { opacity: 1; transform: none; transition: none; }
+  .feel-wave.is-playing i { animation: none; }
+  .feel-play.is-playing::after { animation: none; }
+  .feel-wave__head { transition: none; }
+}
+</style>
+
+<section class="feel" id="feel" aria-labelledby="feel-title">
+  <div class="feel__inner">
+    <div class="feel__grid">
+
+      <!-- LEFT · what it feels like -->
+      <div class="feel__col">
+        <div class="feel-reveal">
+          <p class="eyebrow">What a practice feels like</p>
+          <h2 class="feel__h" id="feel-title">Ten minutes. A voice.<br>Your own weight.</h2>
+          <p class="feel__lead">
+            A quiet place to lie down, and a voice that asks nothing of you but to
+            notice — the weight of your back, the tide of the breath, the small
+            signals the body has been making all along. You end more
+            <em>here</em> than when you began.
+          </p>
+        </div>
+
+        <div class="feel__player feel-reveal feel-d1">
+          <div class="feel-taste" role="group" aria-label="Free taste — Orienting, an 8 minute practice preview">
+            <div class="feel-taste__head">
+              <button class="feel-play" type="button" aria-pressed="false" aria-label="Play preview">
+                <svg class="feel-ic-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.54.84l10-6.5a1 1 0 0 0 0-1.68l-10-6.5A1 1 0 0 0 8 5.5Z"/></svg>
+                <svg class="feel-ic-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.2"/><rect x="14" y="5" width="4" height="14" rx="1.2"/></svg>
+              </button>
+              <div class="feel-taste__meta">
+                <div class="feel-taste__title">Orienting</div>
+                <div class="feel-taste__sub">practice · 8 min · free to try</div>
+              </div>
+              <div class="feel-taste__time" aria-hidden="true">
+                <span class="feel-cur">0:00</span><span class="feel-sep">/</span><span class="feel-tot">8:00</span>
+              </div>
+            </div>
+            <div class="feel-wave" role="presentation" aria-hidden="true">
+              <div class="feel-wave__head"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT · what's inside -->
+      <div class="feel__col">
+        <div class="feel-reveal feel-d1">
+          <p class="eyebrow">What's inside</p>
+          <h2 class="feel__h">Everything the practice opens.</h2>
+        </div>
+        <div class="feel__inside feel-reveal feel-d2">
+          <ul class="feel-list">
+            <li>
+              <span class="feel-list__m" aria-hidden="true">&#10022;</span>
+              <span class="feel-list__lead">14 guided practices</span>
+              <span class="feel-list__sub">audio, body &amp; reflection</span>
+            </li>
+            <li>
+              <span class="feel-list__m" aria-hidden="true">&#10022;</span>
+              <span class="feel-list__lead">New practices as the work deepens</span>
+              <span class="feel-list__sub">the course keeps growing with you</span>
+            </li>
+            <li>
+              <span class="feel-list__m" aria-hidden="true">&#10022;</span>
+              <span class="feel-list__lead">Yours to return to, forever</span>
+              <span class="feel-list__sub">no expiry, no streak to keep</span>
+            </li>
+            <li>
+              <span class="feel-list__m" aria-hidden="true">&#10022;</span>
+              <span class="feel-list__lead">A private circle of fellow practitioners</span>
+              <span class="feel-list__sub">quiet company for the descent</span>
+            </li>
+            <li>
+              <span class="feel-list__m" aria-hidden="true">&#10022;</span>
+              <span class="feel-list__lead">Begin free — no card to start</span>
+              <span class="feel-list__sub">the first practice is yours today</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<script>
+(function () {
+  const root = document.getElementById('feel');
+  if (!root) return;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ── build the waveform (deterministic, organic arch shape) ── */
+  const wave = root.querySelector('.feel-wave');
+  const head = root.querySelector('.feel-wave__head');
+  const N = 56;
+  const bars = [];
+  for (let i = 0; i < N; i++) {
+    const x = i / (N - 1);
+    const env = 0.30 + 0.70 * Math.sin(Math.PI * x);            // quiet ends, full middle
+    const tex = 0.5 + 0.5 * Math.sin(i * 0.9) * Math.cos(i * 0.37); // texture
+    const h = Math.max(0.14, Math.min(1, env * (0.42 + 0.58 * Math.abs(tex))));
+    const b = document.createElement('i');
+    b.style.setProperty('--h', (h * 100).toFixed(1) + '%');
+    b.style.setProperty('--d', (0.85 + (i % 7) * 0.11).toFixed(2) + 's');
+    b.style.setProperty('--delay', ((i % 11) * 0.05).toFixed(2) + 's');
+    wave.appendChild(b);
+    bars.push(b);
+  }
+
+  /* ── mock transport ── */
+  const btn = root.querySelector('.feel-play');
+  const curEl = root.querySelector('.feel-cur');
+  const TOTAL = 8 * 60;   // 8:00
+  let t = 0, playing = false, last = 0;
+
+  const fmt = (s) => {
+    s = Math.max(0, Math.min(TOTAL, Math.round(s)));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  };
+  function render() {
+    const p = t / TOTAL;
+    const played = Math.round(p * N);
+    for (let i = 0; i < N; i++) bars[i].classList.toggle('is-on', i < played);
+    head.style.left = (p * 100).toFixed(2) + '%';
+    curEl.textContent = fmt(t);
+  }
+  function setPlaying(on) {
+    playing = on;
+    btn.classList.toggle('is-playing', on);
+    wave.classList.toggle('is-playing', on && !reduce);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.setAttribute('aria-label', on ? 'Pause preview' : 'Play preview');
+    if (on) { last = performance.now(); requestAnimationFrame(tick); }
+  }
+  function tick(now) {
+    if (!playing) return;
+    if (!reduce) {
+      t += (now - last) / 1000; last = now;
+      if (t >= TOTAL) { t = 0; render(); setPlaying(false); return; }
+      render();
+    }
+    requestAnimationFrame(tick);
+  }
+
+  btn.addEventListener('click', () => setPlaying(!playing));
+  wave.addEventListener('click', (e) => {
+    const r = wave.getBoundingClientRect();
+    t = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * TOTAL;
+    render();
+  });
+  render();
+
+  /* ── reveal-on-scroll ── */
+  const items = [...root.querySelectorAll('.feel-reveal')];
+  if (reduce || !('IntersectionObserver' in window)) {
+    items.forEach(el => el.classList.add('feel-in'));
+  } else {
+    const io = new IntersectionObserver((es) => es.forEach(e => {
+      if (e.isIntersecting) { e.target.classList.add('feel-in'); io.unobserve(e.target); }
+    }), { threshold: 0.18, rootMargin: '0px 0px -8% 0px' });
+    items.forEach(el => io.observe(el));
+  }
+})();
+</script>
