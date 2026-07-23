@@ -1,12 +1,16 @@
 // Stubs for WP-3 (buildServiceUrl) and WP-4 (URL builders).
 // Each throws an explicit "not implemented (WP-N)" error on call.
 export {
+  type BuildJourneyUrlOptions,
   buildContentUrl,
   buildCreatorsUrl,
+  buildJourneyUrl,
   buildOrgUrl,
   buildOrgUrlFromEnv,
   buildPlatformUrl,
   buildServiceUrl,
+  type JourneySurface,
+  type JourneyUrlTarget,
 } from './build-url';
 export { getCookieConfig } from './cookie-config';
 export { cookieDomainFor } from './cookie-domain';
