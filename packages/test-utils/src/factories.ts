@@ -25,7 +25,6 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  CONTENT_ACCESS_TYPE,
   CONTENT_STATUS,
   CONTENT_TYPES,
   MEDIA_STATUS,
@@ -267,8 +266,14 @@ export function createTestContentInput(
       contentType === CONTENT_TYPES.WRITTEN ? 'Test content body' : null,
     category: 'test-category',
     tags: ['test', 'automation'],
-    accessType: CONTENT_ACCESS_TYPE.FREE,
+    // Access policy (SPEC §6.1) — free by default; overridable per test.
+    isFree: true,
+    isPurchasable: false,
     priceCents: 0,
+    includedInTierId: null,
+    courseOnly: false,
+    isFollowerGated: false,
+    isTeamOnly: false,
     status: CONTENT_STATUS.DRAFT,
     publishedAt: null,
     viewCount: 0,
@@ -303,9 +308,14 @@ export function createTestContent(overrides: Partial<Content> = {}): Content {
     contentBodyJson: null,
     category: 'test-category',
     tags: ['test', 'automation'],
-    accessType: CONTENT_ACCESS_TYPE.FREE,
+    // Access policy (SPEC §6.1) — free by default; overridable per test.
+    isFree: true,
+    isPurchasable: false,
     priceCents: 0,
-    minimumTierId: null,
+    includedInTierId: null,
+    courseOnly: false,
+    isFollowerGated: false,
+    isTeamOnly: false,
     featured: false,
     status: CONTENT_STATUS.DRAFT,
     publishedAt: null,

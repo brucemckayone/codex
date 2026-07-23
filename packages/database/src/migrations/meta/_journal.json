@@ -554,6 +554,13 @@
       "when": 1784315958922,
       "tag": "0078_romantic_power_man",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1784815988651,
+      "tag": "0079_foamy_bishop",
+      "breakpoints": true
     }
   ]
 }

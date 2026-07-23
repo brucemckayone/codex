@@ -218,8 +218,10 @@ export const visibilityEnum = z.enum([
 ]);
 
 /**
- * Content access type enum — defines the content's access model.
- * Replaces visibility for access control decisions.
+ * Content access KIND enum — the exclusive DISPLAY/FILTER projection of the
+ * flag policy (SPEC §6.1). Used for the studio access picker and the content
+ * list `accessType` filter, NOT for the stored columns (those are the flags on
+ * `baseContentSchema`). See `CONTENT_ACCESS_TYPE` (@codex/constants).
  */
 export const contentAccessTypeEnum = z.enum([
   CONTENT_ACCESS_TYPE.FREE,
@@ -227,6 +229,7 @@ export const contentAccessTypeEnum = z.enum([
   CONTENT_ACCESS_TYPE.FOLLOWERS,
   CONTENT_ACCESS_TYPE.SUBSCRIBERS,
   CONTENT_ACCESS_TYPE.TEAM,
+  CONTENT_ACCESS_TYPE.COURSE,
 ]);
 
 /**
@@ -301,13 +304,27 @@ const baseContentSchema = z.object({
   // Thumbnail (optional custom override)
   thumbnailUrl: urlSchema.optional().nullable(),
 
-  // Access control (new model)
-  accessType: contentAccessTypeEnum.default(CONTENT_ACCESS_TYPE.FREE),
+  // Access control POLICY (SPEC §6.1) — separable, non-exclusive flags that
+  // replace the single `accessType`/`minimumTierId` conflation. Structural
+  // mirror of `ContentAccessPolicy` (@codex/shared-types). All optional at the
+  // input boundary; ContentService.create normalises unset flags (isFree → true,
+  // the rest → false). The studio form builds these from an exclusive kind pick
+  // via `contentAccessKindToPolicy` (@codex/constants).
+  isFree: z.boolean().optional(),
+  isPurchasable: z.boolean().optional(),
 
   priceCents: priceCentsSchema.optional(),
 
-  // Subscription tier gating (null = not included in any subscription)
-  minimumTierId: uuidSchema.optional().nullable(),
+  // Included in this org tier AND ABOVE (by sortOrder). null = not tier-included.
+  // 1:1 successor of the former `minimumTierId`.
+  includedInTierId: uuidSchema.optional().nullable(),
+
+  // Reachable ONLY via a course entitlement (suppresses standalone paths).
+  courseOnly: z.boolean().optional(),
+  // Free to org followers / opt-in (was accessType 'followers').
+  isFollowerGated: z.boolean().optional(),
+  // Management/staff-only (was accessType 'team').
+  isTeamOnly: z.boolean().optional(),
 
   // Shader preset for immersive audio playback mode
   shaderPreset: z
@@ -370,47 +387,22 @@ export const createContentSchema = baseContentSchema
   )
   .refine(
     (data) => {
-      // 'paid' access type requires priceCents > 0
-      if (data.accessType === CONTENT_ACCESS_TYPE.PAID) {
+      // Purchasable content requires a positive price (SPEC §6.1 — priceCents
+      // pairs with isPurchasable).
+      if (data.isPurchasable) {
         return !!data.priceCents && data.priceCents > 0;
       }
       return true;
     },
     {
-      message: 'Paid content requires a price greater than £0',
+      message: 'Purchasable content requires a price greater than £0',
       path: ['priceCents'],
     }
   )
   .refine(
     (data) => {
-      // 'subscribers' access type requires a minimum tier
-      if (data.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS) {
-        return !!data.minimumTierId;
-      }
-      return true;
-    },
-    {
-      message: 'Subscriber content requires a minimum subscription tier',
-      path: ['minimumTierId'],
-    }
-  )
-  .refine(
-    (data) => {
-      // 'free' access type cannot have a price or tier
-      if (data.accessType === CONTENT_ACCESS_TYPE.FREE) {
-        return !data.priceCents || data.priceCents === 0;
-      }
-      return true;
-    },
-    {
-      message: 'Free content cannot have a price',
-      path: ['priceCents'],
-    }
-  )
-  .refine(
-    (data) => {
-      // 'followers' access type requires an organization
-      if (data.accessType === CONTENT_ACCESS_TYPE.FOLLOWERS) {
+      // Follower-gated content requires an organisation (followers are org-scoped).
+      if (data.isFollowerGated) {
         return !!data.organizationId;
       }
       return true;
@@ -422,8 +414,8 @@ export const createContentSchema = baseContentSchema
   )
   .refine(
     (data) => {
-      // 'team' access type requires an organization
-      if (data.accessType === CONTENT_ACCESS_TYPE.TEAM) {
+      // Team-only content requires an organisation (org management roles).
+      if (data.isTeamOnly) {
         return !!data.organizationId;
       }
       return true;
@@ -435,36 +427,19 @@ export const createContentSchema = baseContentSchema
   )
   .refine(
     (data) => {
-      // `minimumTierId` is only meaningful for 'subscribers' (required, gates
-      // access) and 'paid' (optional, hybrid mode — subscribers at this tier
-      // get it included alongside one-time purchases). For every other access
-      // type the tier is nonsensical and must be absent.
-      const tierAllowed =
-        data.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS ||
-        data.accessType === CONTENT_ACCESS_TYPE.PAID;
-      return tierAllowed || !data.minimumTierId;
-    },
-    {
-      message:
-        'Subscription tier is only valid for subscriber-gated or paid-hybrid content',
-      path: ['minimumTierId'],
-    }
-  )
-  .refine(
-    (data) => {
       // Codex-up7bx: `subscription_tiers` is org-scoped (FK to organizations,
-      // unique per org), so a `minimumTierId` is only meaningful on content
+      // unique per org), so `includedInTierId` is only meaningful on content
       // that belongs to an organization. Orgless (creator-direct) content with
       // a tier set is a semantically invalid row — there is no org against
-      // which a subscription/tier could be resolved — and the access layer
-      // must fail closed on it. Reject the combination here at the write
-      // boundary so such a row is never created in the first place.
-      return !data.minimumTierId || !!data.organizationId;
+      // which a subscription/tier could be resolved — and the access layer must
+      // fail closed on it. Reject the combination at the write boundary so such
+      // a row is never created in the first place.
+      return !data.includedInTierId || !!data.organizationId;
     },
     {
       message:
         'Subscription tier requires an organisation — orgless content cannot be tier-gated',
-      path: ['minimumTierId'],
+      path: ['includedInTierId'],
     }
   );
 
@@ -481,37 +456,34 @@ export const updateContentSchema = baseContentSchema
   .partial()
   .refine(
     (data) => {
-      // Only evaluate when the caller sent both fields. If accessType is absent,
-      // the DB value stands and we can't reason about the combination here.
-      if (data.accessType === undefined || !data.minimumTierId) return true;
-      return (
-        data.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS ||
-        data.accessType === CONTENT_ACCESS_TYPE.PAID
-      );
-    },
-    {
-      message:
-        'Subscription tier is only valid for subscriber-gated or paid-hybrid content',
-      path: ['minimumTierId'],
-    }
-  )
-  .refine(
-    (data) => {
-      // Codex-up7bx: reject an update that sets a tier while simultaneously
-      // clearing the organisation (organizationId explicitly null in the same
-      // payload). Tiers are org-scoped, so orgless content can never be
-      // tier-gated. When organizationId is ABSENT from the payload the existing
-      // org value stands and we can't reason here — ContentService.update()
-      // applies the defensive clamp for the "tier left set on an already-orgless
-      // row" case.
-      if (!data.minimumTierId) return true;
+      // Codex-up7bx: reject an update that sets `includedInTierId` while
+      // simultaneously clearing the organisation (organizationId explicitly null
+      // in the same payload). Tiers are org-scoped, so orgless content can never
+      // be tier-gated. When organizationId is ABSENT the existing org value
+      // stands and we can't reason here — ContentService.update() applies the
+      // defensive clamp for the "tier left set on an already-orgless row" case.
+      if (!data.includedInTierId) return true;
       if (!('organizationId' in data)) return true;
       return data.organizationId != null;
     },
     {
       message:
         'Subscription tier requires an organisation — orgless content cannot be tier-gated',
-      path: ['minimumTierId'],
+      path: ['includedInTierId'],
+    }
+  )
+  .refine(
+    (data) => {
+      // If a caller marks content purchasable AND sends a price in the same
+      // payload, the price must be positive. A price-only or flag-only partial
+      // is validated defensively in ContentService.update().
+      if (!data.isPurchasable) return true;
+      if (data.priceCents === undefined) return true;
+      return !!data.priceCents && data.priceCents > 0;
+    },
+    {
+      message: 'Purchasable content requires a price greater than £0',
+      path: ['priceCents'],
     }
   );
 
