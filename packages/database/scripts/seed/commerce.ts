@@ -591,7 +591,7 @@ export async function seedCommerce(db: typeof DbClient) {
 
   // ── Subscription Tiers ────────────────────────────────────────────
   // Tiers are now seeded in `seedTiers()` before content (FK ordering), so
-  // content rows can reference `minimumTierId` at insert time. Stripe
+  // content rows can reference `includedInTierId` at insert time. Stripe
   // Product/Price linkage still happens here, below.
 
   // ── Stripe Objects (Products, Prices, Connect) ──────────────────

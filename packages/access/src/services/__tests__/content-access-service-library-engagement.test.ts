@@ -99,8 +99,8 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
   });
 
   /**
-   * Creates published content + flips accessType to the desired value.
-   * Mirrors the helper used in the existing follower-access tests.
+   * Creates published content + sets the access-policy flags for the desired
+   * KIND. Mirrors the helper used in the existing follower-access tests.
    */
   async function createContentWithAccessType(
     accessType: 'free' | 'followers',
@@ -145,7 +145,19 @@ describe('ContentAccessService.listUserLibrary — relationship buckets', () => 
       creatorUserId
     );
     await contentService.publish(item.id, creatorUserId);
-    await db.update(content).set({ accessType }).where(eq(content.id, item.id));
+    // Translate the legacy access-KIND arg to the flag policy (full set so no
+    // stale gate lingers). This helper only passes 'free'/'followers'.
+    await db
+      .update(content)
+      .set({
+        isFree: accessType === 'free',
+        isPurchasable: false,
+        priceCents: null,
+        includedInTierId: null,
+        isFollowerGated: accessType === 'followers',
+        isTeamOnly: false,
+      })
+      .where(eq(content.id, item.id));
     return item;
   }
 

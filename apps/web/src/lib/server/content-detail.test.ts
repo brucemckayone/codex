@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DENIED_ACCESS_RESULT,
   EMPTY_SUB_CONTEXT,
-  isPublicAccessType,
+  isPublicContent,
   loadSubscriptionContext,
   resolveAccessGranted,
 } from './content-detail';
@@ -26,24 +26,20 @@ import {
 /** A non-null `/stream` payload — only its presence matters to the seam. */
 type StreamResult = NonNullable<Parameters<typeof resolveAccessGranted>[0]>;
 
-describe('isPublicAccessType', () => {
-  it('treats only "free" content as publicly readable', () => {
-    expect(isPublicAccessType('free')).toBe(true);
+describe('isPublicContent', () => {
+  it('treats free content (isFree=true) as publicly readable', () => {
+    expect(isPublicContent(true)).toBe(true);
   });
 
-  it.each([
-    'paid',
-    'followers',
-    'subscribers',
-    'team',
-  ])('gates "%s" content behind the access check', (accessType) => {
-    expect(isPublicAccessType(accessType)).toBe(false);
+  it('gates non-free content (isFree=false) behind the access check', () => {
+    // Purchasable / follower / tier / team content all report isFree=false and
+    // must fall through to the authenticated access check (WP-1 §6.1).
+    expect(isPublicContent(false)).toBe(false);
   });
 
-  it('is not public for null / undefined / empty accessType', () => {
-    expect(isPublicAccessType(null)).toBe(false);
-    expect(isPublicAccessType(undefined)).toBe(false);
-    expect(isPublicAccessType('')).toBe(false);
+  it('is not public for null / undefined isFree', () => {
+    expect(isPublicContent(null)).toBe(false);
+    expect(isPublicContent(undefined)).toBe(false);
   });
 });
 
@@ -104,16 +100,15 @@ describe('loadSubscriptionContext (non-subscriber early return)', () => {
   type Cookies = Parameters<typeof loadSubscriptionContext>[3];
   const unusedCookies = {} as unknown as Cookies;
 
-  it('returns the empty context for free content with no minimum tier', async () => {
-    // No accessType === "subscribers" and no minimumTierId → the function
-    // short-circuits before ever touching the API, and the inline literal it
-    // returns must stay identical to EMPTY_SUB_CONTEXT.
+  it('returns the empty context for content with no gating tier', async () => {
+    // A null includedInTierId (not tier-gated) short-circuits before ever
+    // touching the API, and the inline literal it returns must stay identical
+    // to EMPTY_SUB_CONTEXT.
     const ctx = await loadSubscriptionContext(
       'org-1',
       null,
       undefined,
-      unusedCookies,
-      'free'
+      unusedCookies
     );
     expect(ctx).toEqual(EMPTY_SUB_CONTEXT);
   });

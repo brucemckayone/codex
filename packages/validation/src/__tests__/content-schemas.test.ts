@@ -282,7 +282,7 @@ describe('Content Schemas', () => {
         category: 'Programming',
         tags: ['typescript', 'javascript', 'tutorial'],
         thumbnailUrl: 'https://example.com/thumb.jpg',
-        accessType: 'paid' as const,
+        isPurchasable: true,
         priceCents: 999,
       };
 
@@ -299,7 +299,10 @@ describe('Content Schemas', () => {
       };
 
       const result = createContentSchema.parse(minimalContent);
-      expect(result.accessType).toBe('free'); // Default
+      // The schema no longer owns the access-mode default — the gate flags
+      // stay unset on minimal input (ContentService.create applies isFree=true).
+      expect(result.isFree).toBeUndefined();
+      expect(result.isPurchasable).toBeUndefined();
       expect(result.tags).toEqual([]); // Default
     });
 
@@ -309,13 +312,13 @@ describe('Content Schemas', () => {
         slug: 'free-tutorial',
         contentType: 'video' as const,
         mediaItemId: '123e4567-e89b-12d3-a456-426614174000',
-        accessType: 'free' as const,
+        isFree: true,
         priceCents: null,
       };
 
       const result = createContentSchema.parse(freeContent);
       expect(result.priceCents).toBeNull();
-      expect(result.accessType).toBe('free');
+      expect(result.isFree).toBe(true);
     });
 
     it('should reject video content without mediaItemId', () => {
@@ -354,7 +357,7 @@ describe('Content Schemas', () => {
         slug: 'my-blog-post',
         contentType: 'written' as const,
         contentBody: 'This is a long blog post about coding...',
-        accessType: 'free' as const,
+        isFree: true,
         priceCents: null,
       };
 
@@ -362,17 +365,18 @@ describe('Content Schemas', () => {
       expect(result.contentBody).toBeDefined();
     });
 
-    it('should reject FREE accessType with priceCents > 0', () => {
+    it('should reject purchasable content without a price', () => {
+      // Flag model (SPEC §6.1): priceCents pairs with isPurchasable — a
+      // purchasable item MUST carry a positive price.
       expect(() =>
         createContentSchema.parse({
           title: 'Test',
           slug: 'test',
           contentType: 'video',
           mediaItemId: '123e4567-e89b-12d3-a456-426614174000',
-          accessType: 'free',
-          priceCents: 100,
+          isPurchasable: true,
         })
-      ).toThrow('Free content cannot have a price');
+      ).toThrow('Purchasable content requires a price greater than £0');
     });
 
     it('should reject price exceeding $100,000', () => {
@@ -480,11 +484,12 @@ describe('Content Schemas', () => {
     });
   });
 
-  describe('minimumTierId access-mode coupling', () => {
-    // Covers the six access modes confirmed with product:
-    //   free, followers, team → tier must be absent
-    //   subscribers           → tier required
-    //   paid                  → tier optional (null = purchasable, non-null = hybrid)
+  describe('access-policy flag refinements (SPEC §6.1)', () => {
+    // The former mutually-exclusive accessType/minimumTierId coupling was
+    // hard-replaced by separable, non-exclusive flags. The write schema now
+    // enforces two invariants (plus the org-scoping ones):
+    //   - isPurchasable requires a positive priceCents
+    //   - includedInTierId / isFollowerGated / isTeamOnly require an org
     const tierUuid = '123e4567-e89b-12d3-a456-426614174000';
     const orgUuid = '223e4567-e89b-12d3-a456-426614174000';
     const mediaUuid = '323e4567-e89b-12d3-a456-426614174000';
@@ -497,83 +502,91 @@ describe('Content Schemas', () => {
       organizationId: orgUuid,
     };
 
-    it('accepts paid content without a tier (purchasable mode)', () => {
+    const orglessVideo = {
+      title: 'T',
+      slug: 'test',
+      contentType: 'video' as const,
+      mediaItemId: mediaUuid,
+    };
+
+    it('accepts purchasable content with a positive price', () => {
       expect(() =>
         createContentSchema.parse({
           ...baseVideo,
-          accessType: 'paid',
+          isPurchasable: true,
           priceCents: 1000,
         })
       ).not.toThrow();
     });
 
-    it('accepts paid content with a tier (hybrid mode)', () => {
+    it('accepts purchasable content that is also tier-included (hybrid)', () => {
       expect(() =>
         createContentSchema.parse({
           ...baseVideo,
-          accessType: 'paid',
+          isPurchasable: true,
           priceCents: 1000,
-          minimumTierId: tierUuid,
+          includedInTierId: tierUuid,
         })
       ).not.toThrow();
     });
 
-    it('accepts subscribers content with a tier', () => {
+    it('accepts tier-included content with an org', () => {
       expect(() =>
         createContentSchema.parse({
           ...baseVideo,
-          accessType: 'subscribers',
-          minimumTierId: tierUuid,
+          includedInTierId: tierUuid,
         })
       ).not.toThrow();
     });
 
-    it('rejects subscribers content without a tier', () => {
+    it('rejects purchasable content without a price', () => {
       expect(() =>
         createContentSchema.parse({
           ...baseVideo,
-          accessType: 'subscribers',
+          isPurchasable: true,
         })
-      ).toThrow(/minimum subscription tier/i);
+      ).toThrow(/price greater than £0/i);
     });
 
-    it.each([
-      ['free', { accessType: 'free' as const }],
-      ['followers', { accessType: 'followers' as const }],
-      ['team', { accessType: 'team' as const }],
-    ])('rejects %s content with a tier set', (_mode, accessTypeFields) => {
+    it('rejects purchasable content with a zero price', () => {
       expect(() =>
         createContentSchema.parse({
           ...baseVideo,
-          ...accessTypeFields,
-          minimumTierId: tierUuid,
+          isPurchasable: true,
+          priceCents: 0,
         })
-      ).toThrow(/only valid for subscriber-gated or paid-hybrid/i);
+      ).toThrow(/price greater than £0/i);
     });
 
-    it('allows partial update with only accessType (tier invariant deferred to service layer)', () => {
+    it('rejects follower-gated content without an org', () => {
       expect(() =>
-        updateContentSchema.parse({ accessType: 'free' })
-      ).not.toThrow();
+        createContentSchema.parse({
+          ...orglessVideo,
+          isFollowerGated: true,
+        })
+      ).toThrow(/Followers-only content requires an organisation/i);
     });
 
-    it('rejects partial update that sets tier on a non-eligible access type', () => {
+    it('rejects team-only content without an org', () => {
+      expect(() =>
+        createContentSchema.parse({
+          ...orglessVideo,
+          isTeamOnly: true,
+        })
+      ).toThrow(/Team-only content requires an organisation/i);
+    });
+
+    it('allows a partial update carrying only a gate flag', () => {
+      expect(() => updateContentSchema.parse({ isFree: true })).not.toThrow();
+    });
+
+    it('rejects a partial update marking purchasable with a zero price', () => {
       expect(() =>
         updateContentSchema.parse({
-          accessType: 'free',
-          minimumTierId: tierUuid,
+          isPurchasable: true,
+          priceCents: 0,
         })
-      ).toThrow(/only valid for subscriber-gated or paid-hybrid/i);
-    });
-
-    it('allows partial update that sets tier alongside paid access type', () => {
-      expect(() =>
-        updateContentSchema.parse({
-          accessType: 'paid',
-          priceCents: 500,
-          minimumTierId: tierUuid,
-        })
-      ).not.toThrow();
+      ).toThrow(/price greater than £0/i);
     });
   });
 
@@ -592,37 +605,37 @@ describe('Content Schemas', () => {
       mediaItemId: mediaUuid,
     };
 
-    it('rejects orgless paid content with a tier (hybrid mode needs an org)', () => {
+    it('rejects orgless tier-included content (hybrid mode needs an org)', () => {
       expect(() =>
         createContentSchema.parse({
           ...orglessBase,
-          accessType: 'paid',
+          isPurchasable: true,
           priceCents: 1000,
-          minimumTierId: tierUuid,
+          includedInTierId: tierUuid,
           // organizationId intentionally absent
         })
       ).toThrow(/orgless content cannot be tier-gated/i);
     });
 
-    it('rejects orgless paid content with an explicitly-null org and a tier', () => {
+    it('rejects orgless tier-included content with an explicitly-null org', () => {
       expect(() =>
         createContentSchema.parse({
           ...orglessBase,
-          accessType: 'paid',
+          isPurchasable: true,
           priceCents: 1000,
-          minimumTierId: tierUuid,
+          includedInTierId: tierUuid,
           organizationId: null,
         })
       ).toThrow(/orgless content cannot be tier-gated/i);
     });
 
-    it('accepts org-scoped paid content with a tier (the legitimate counterpart)', () => {
+    it('accepts org-scoped tier-included content (the legitimate counterpart)', () => {
       expect(() =>
         createContentSchema.parse({
           ...orglessBase,
-          accessType: 'paid',
+          isPurchasable: true,
           priceCents: 1000,
-          minimumTierId: tierUuid,
+          includedInTierId: tierUuid,
           organizationId: orgUuid,
         })
       ).not.toThrow();
@@ -632,7 +645,7 @@ describe('Content Schemas', () => {
       expect(() =>
         createContentSchema.parse({
           ...orglessBase,
-          accessType: 'free',
+          isFree: true,
         })
       ).not.toThrow();
     });
@@ -640,9 +653,9 @@ describe('Content Schemas', () => {
     it('rejects a partial update that sets a tier while clearing the org', () => {
       expect(() =>
         updateContentSchema.parse({
-          accessType: 'paid',
+          isPurchasable: true,
           priceCents: 1000,
-          minimumTierId: tierUuid,
+          includedInTierId: tierUuid,
           organizationId: null,
         })
       ).toThrow(/orgless content cannot be tier-gated/i);
@@ -653,9 +666,9 @@ describe('Content Schemas', () => {
       // ContentService.update() applies the defensive clamp.
       expect(() =>
         updateContentSchema.parse({
-          accessType: 'paid',
+          isPurchasable: true,
           priceCents: 1000,
-          minimumTierId: tierUuid,
+          includedInTierId: tierUuid,
         })
       ).not.toThrow();
     });
@@ -951,15 +964,16 @@ describe('Security Validations', () => {
       ).toThrow();
     });
 
-    it('should enforce CHECK constraint on accessType', () => {
-      // Only specific accessType values allowed (free|paid|followers|subscribers|team)
+    it('should reject a non-boolean access-policy flag', () => {
+      // The flag policy columns are booleans (SPEC §6.1) — a non-boolean value
+      // is rejected by the schema (replaces the former accessType enum CHECK).
       expect(() =>
         createContentSchema.parse({
           title: 'Test',
           slug: 'test',
           contentType: 'video',
           mediaItemId: '123e4567-e89b-12d3-a456-426614174000',
-          accessType: 'hidden', // Not in enum
+          isPurchasable: 'hidden', // Not a boolean
         })
       ).toThrow();
     });

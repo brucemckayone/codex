@@ -47,10 +47,12 @@ interface UseSubscriptionContextParams {
   organizationId: string | null | undefined;
   /** Feature flag — when false, all subscription state is zeroed. */
   enableSubscriptions: boolean;
-  /** Content access type — `'subscribers'` means subscription is required. */
-  accessType: string;
-  /** Minimum tier ID — when set, subscription must meet this tier's sortOrder. */
-  minimumTierId: string | null | undefined;
+  /**
+   * Tier gate (WP-1) — `includedInTierId != null` means a subscription is
+   * required; the subscription's tier `sortOrder` must meet this tier. The
+   * successor of accessType 'subscribers' / the former `minimumTierId`.
+   */
+  includedInTierId: string | null | undefined;
 }
 
 interface SubCtx {
@@ -65,7 +67,7 @@ export function useSubscriptionContext(
   const initial = getParams();
   let promiseSubCtx = $state<SubCtx>({
     requiresSubscription: initial.enableSubscriptions
-      ? initial.accessType === 'subscribers' || !!initial.minimumTierId
+      ? initial.includedInTierId != null
       : false,
     hasSubscription: false,
     subscriptionCoversContent: false,
@@ -81,8 +83,7 @@ export function useSubscriptionContext(
     const {
       subscriptionContext: promise,
       enableSubscriptions,
-      accessType,
-      minimumTierId,
+      includedInTierId,
     } = getParams();
 
     if (!enableSubscriptions) {
@@ -119,7 +120,7 @@ export function useSubscriptionContext(
           });
       } else if (!promise) {
         promiseSubCtx = {
-          requiresSubscription: accessType === 'subscribers' || !!minimumTierId,
+          requiresSubscription: includedInTierId != null,
           hasSubscription: false,
           subscriptionCoversContent: false,
         };
@@ -149,15 +150,14 @@ export function useSubscriptionContext(
   const subCtx = $derived.by<SubCtx>(() => {
     const sub = liveSubscription;
     if (sub) {
-      const { accessType, minimumTierId } = getParams();
-      const requiresSubscription =
-        accessType === 'subscribers' || !!minimumTierId;
+      const { includedInTierId } = getParams();
+      const requiresSubscription = includedInTierId != null;
       let subscriptionCoversContent = false;
-      if (!minimumTierId) {
-        // Any active subscription grants access when no min tier is set.
+      if (includedInTierId == null) {
+        // Any active subscription grants access when no tier gate is set.
         subscriptionCoversContent = true;
       } else {
-        const minTier = resolvedTiers.find((t) => t.id === minimumTierId);
+        const minTier = resolvedTiers.find((t) => t.id === includedInTierId);
         subscriptionCoversContent = minTier
           ? sub.tier.sortOrder >= minTier.sortOrder
           : false;

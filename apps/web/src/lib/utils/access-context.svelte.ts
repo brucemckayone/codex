@@ -26,8 +26,12 @@ interface AccessContextInput {
 }
 
 interface ContentAccessItem {
-  accessType: string;
-  minimumTierId: string | null;
+  // SPEC §6.1 policy flags (WP-1) — the successor of the former
+  // `accessType`/`minimumTierId` conflation. Optional/nullable so both the
+  // full content row and narrower landing-page item shapes satisfy it.
+  isFollowerGated?: boolean | null;
+  isPurchasable?: boolean | null;
+  includedInTierId?: string | null;
 }
 
 /**
@@ -53,15 +57,16 @@ export function isAccessGrantingSubscription(
 /**
  * Pure decision helper for the `included` badge variant.
  *
- * Encodes two rules:
+ * Encodes two rules (WP-1 policy flags):
  *   1. `subscribers ⊇ followers` (Codex-xybr3) — any access-granting
- *      subscription covers followers-only content, regardless of tier.
- *   2. Subscriber-gated content — covered only when the user's tier
- *      `sortOrder` meets the content's `minimumTierId`. No `minimumTierId`
- *      means any tier qualifies.
+ *      subscription covers follower-gated content (`isFollowerGated`),
+ *      regardless of tier.
+ *   2. Tier-gated content (`includedInTierId != null`, the successor of
+ *      accessType 'subscribers') — covered only when the user's tier
+ *      `sortOrder` meets the content's gating tier.
  *
- * Returns false for any other access type (free, paid, team) — those
- * surfaces use `purchased` or their own labels.
+ * Returns false for free / pure-paid / team content — those surfaces use
+ * `purchased` or their own labels.
  */
 export function decideIsIncluded(
   item: ContentAccessItem,
@@ -70,11 +75,10 @@ export function decideIsIncluded(
 ): boolean {
   if (!sub) return false;
 
-  if (item.accessType === 'followers') return true;
+  if (item.isFollowerGated) return true;
 
-  if (item.accessType !== 'subscribers') return false;
-  if (!item.minimumTierId) return true;
-  const minTier = tiers.find((t) => t.id === item.minimumTierId);
+  if (item.includedInTierId == null) return false;
+  const minTier = tiers.find((t) => t.id === item.includedInTierId);
   return minTier ? sub.tier.sortOrder >= minTier.sortOrder : false;
 }
 
@@ -129,26 +133,22 @@ export function useAccessContext(getData: () => AccessContextInput) {
   /**
    * Resolve the display name of the tier associated with a content item.
    *
-   * Resolves for two access shapes:
-   *   - 'subscribers': the gating tier (or cheapest tier as marketing entry).
-   *   - 'paid' + minimumTierId: the tier that *also includes* this paid
-   *     content (hybrid mode). Purchase-only paid returns null.
+   * Resolves for two policy shapes (WP-1 flags):
+   *   - tier-gated (`includedInTierId != null`, former 'subscribers'): the
+   *     gating tier.
+   *   - purchasable + tier (hybrid, former 'paid' + minimumTierId): the tier
+   *     that *also includes* this paid content. Purchase-only paid returns null.
    *
-   * Returns null for any other access type or when tiers aren't loaded yet.
+   * Returns null for free / follower / team content or when tiers aren't
+   * loaded yet.
    */
   function getTierName(item: ContentAccessItem): string | null {
-    if (item.accessType !== 'subscribers' && item.accessType !== 'paid') {
-      return null;
-    }
+    const isTierGated = item.includedInTierId != null;
+    if (!isTierGated && !item.isPurchasable) return null;
     if (!resolvedTiers?.length) return null;
-    if (!item.minimumTierId) {
-      if (item.accessType === 'paid') return null;
-      const sorted = [...resolvedTiers].sort(
-        (a, b) => a.sortOrder - b.sortOrder
-      );
-      return sorted[0]?.name ?? null;
-    }
-    const tier = resolvedTiers.find((t) => t.id === item.minimumTierId);
+    // Pure paid with no tier association → no "included in" tier to name.
+    if (item.includedInTierId == null) return null;
+    const tier = resolvedTiers.find((t) => t.id === item.includedInTierId);
     return tier?.name ?? null;
   }
 

@@ -405,6 +405,84 @@ const contentBaseFormSchema = z.object({
   featured: formBoolean,
 });
 
+/**
+ * Translate the studio access-editor's single-select `accessType` (+ price +
+ * minimum tier) into the SPEC §6.1 policy flags the content API now expects
+ * (WP-1 hard-replaced the `accessType`/`minimumTierId` columns). The form UX
+ * is unchanged — this is the write-boundary inverse of `deriveContentAccessKind`
+ * and mirrors the legacy CHECK mapping (HARDENING §H2).
+ *
+ * `includedInTierId` is clamped to org-scoped content only (`subscription_tiers`
+ * is org-scoped) so the payload always satisfies the create/update schema
+ * refine and the `ContentService` tier clamp.
+ */
+function accessSelectionToFlags(
+  accessType: 'free' | 'paid' | 'followers' | 'subscribers' | 'team',
+  priceCents: number,
+  minimumTierId: string | undefined,
+  organizationId: string | undefined
+): {
+  isFree: boolean;
+  isPurchasable: boolean;
+  priceCents: number | null;
+  includedInTierId: string | null;
+  isFollowerGated: boolean;
+  isTeamOnly: boolean;
+} {
+  const tier = organizationId ? (minimumTierId ?? null) : null;
+  switch (accessType) {
+    case 'paid':
+      // Purchasable; may also be included in a tier (hybrid).
+      return {
+        isFree: false,
+        isPurchasable: true,
+        priceCents,
+        includedInTierId: tier,
+        isFollowerGated: false,
+        isTeamOnly: false,
+      };
+    case 'subscribers':
+      // Tier-gated; the optional price makes it ALSO purchasable (only set the
+      // purchasable flag when a real price is present, so pure subscription
+      // content keeps its 'subscribers' display kind).
+      return {
+        isFree: false,
+        isPurchasable: priceCents > 0,
+        priceCents: priceCents > 0 ? priceCents : null,
+        includedInTierId: tier,
+        isFollowerGated: false,
+        isTeamOnly: false,
+      };
+    case 'followers':
+      return {
+        isFree: false,
+        isPurchasable: false,
+        priceCents: null,
+        includedInTierId: null,
+        isFollowerGated: true,
+        isTeamOnly: false,
+      };
+    case 'team':
+      return {
+        isFree: false,
+        isPurchasable: false,
+        priceCents: null,
+        includedInTierId: null,
+        isFollowerGated: false,
+        isTeamOnly: true,
+      };
+    default:
+      return {
+        isFree: true,
+        isPurchasable: false,
+        priceCents: null,
+        includedInTierId: null,
+        isFollowerGated: false,
+        isTeamOnly: false,
+      };
+  }
+}
+
 const createContentFormSchema = contentBaseFormSchema;
 
 /**
@@ -444,14 +522,17 @@ export const createContentForm = form(
         contentType,
         mediaItemId,
         contentBody,
-        accessType,
         organizationId,
-        priceCents: price,
+        ...accessSelectionToFlags(
+          accessType,
+          price,
+          minimumTierId,
+          organizationId
+        ),
         category,
         categoryIds,
         tags,
         thumbnailUrl,
-        minimumTierId,
         shaderPreset,
         featured,
       });
@@ -584,14 +665,17 @@ export const updateContentForm = form(
         contentType,
         mediaItemId,
         contentBody,
-        accessType,
         organizationId,
-        priceCents: price,
+        ...accessSelectionToFlags(
+          accessType,
+          price,
+          minimumTierId,
+          organizationId
+        ),
         category,
         categoryIds,
         tags,
         thumbnailUrl,
-        minimumTierId,
         shaderPreset,
         featured,
       });

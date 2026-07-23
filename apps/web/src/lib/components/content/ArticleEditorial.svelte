@@ -40,7 +40,6 @@
     } | null;
     creator?: { name?: string | null } | null;
     priceCents?: number | null;
-    accessType?: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | null;
     category?: string | null;
   }
 

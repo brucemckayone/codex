@@ -110,7 +110,7 @@ describe('ContentService', () => {
         expect(result.contentType).toBe('video');
         expect(result.mediaItemId).toBe(media.id);
         expect(result.status).toBe('draft'); // Always starts as draft
-        expect(result.accessType).toBe('free');
+        expect(result.isFree).toBe(true);
         expect(result.priceCents).toBe(0);
         expect(result.publishedAt).toBeNull();
         expect(result.viewCount).toBe(0);
@@ -253,10 +253,10 @@ describe('ContentService', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'public',
-          accessType: 'paid',
+          isPurchasable: true,
           priceCents: 1000,
           // no organizationId
-          minimumTierId: '123e4567-e89b-12d3-a456-426614174000',
+          includedInTierId: '123e4567-e89b-12d3-a456-426614174000',
           tags: [],
         } as unknown as CreateContentInput;
 
@@ -300,8 +300,8 @@ describe('ContentService', () => {
             title: 'Org Tier Content',
             slug: createUniqueSlug('org-tier'),
             contentType: 'video',
-            accessType: 'subscribers',
-            minimumTierId: tier.id,
+            isFree: false,
+            includedInTierId: tier.id,
             status: 'draft',
           })
           .returning();
@@ -315,7 +315,7 @@ describe('ContentService', () => {
         );
 
         expect(updated.organizationId).toBeNull();
-        expect(updated.minimumTierId).toBeNull();
+        expect(updated.includedInTierId).toBeNull();
       });
 
       it('should create content with tags and category', async () => {
@@ -366,7 +366,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('paid'),
           contentType: 'video',
           mediaItemId: media.id,
-          accessType: 'paid',
+          isPurchasable: true,
           priceCents: 999, // £9.99
           tags: [],
         };
@@ -375,7 +375,7 @@ describe('ContentService', () => {
         const result = await service.create(input, creatorId);
 
         // Assert
-        expect(result.accessType).toBe('paid');
+        expect(result.isPurchasable).toBe(true);
         expect(result.priceCents).toBe(999);
       });
     });
@@ -921,7 +921,6 @@ describe('ContentService', () => {
           slug: createUniqueSlug('price'),
           contentType: 'video',
           mediaItemId: media.id,
-          accessType: 'free',
           priceCents: 0,
           tags: [],
         },
@@ -932,14 +931,15 @@ describe('ContentService', () => {
       const updated = await service.update(
         created.id,
         {
-          accessType: 'paid',
+          isFree: false,
+          isPurchasable: true,
           priceCents: 1999, // £19.99
         },
         creatorId
       );
 
       // Assert
-      expect(updated.accessType).toBe('paid');
+      expect(updated.isPurchasable).toBe(true);
       expect(updated.priceCents).toBe(1999);
     });
 
@@ -1141,7 +1141,7 @@ describe('ContentService', () => {
           contentType: 'written',
           contentBody: 'Paid body',
           visibility: 'public',
-          accessType: 'paid',
+          isPurchasable: true,
           priceCents: 500,
           tags: [],
         } as unknown as CreateContentInput,
@@ -1215,6 +1215,10 @@ describe('ContentService', () => {
         .insert(organizations)
         .values(createTestOrganizationInput())
         .returning();
+      const [tier] = await db
+        .insert(subscriptionTiers)
+        .values(createTestTierInput(org.id, { sortOrder: 1 }))
+        .returning();
       const [seeded] = await db
         .insert(content)
         .values({
@@ -1224,7 +1228,8 @@ describe('ContentService', () => {
           slug: createUniqueSlug('sub-no-connect'),
           contentType: 'written',
           contentBody: 'Members only',
-          accessType: 'subscribers',
+          isFree: false,
+          includedInTierId: tier.id,
           status: 'draft',
         })
         .returning();
@@ -1505,7 +1510,7 @@ describe('ContentService', () => {
         );
       }
       freeContent.items.forEach((item) => {
-        expect(item.accessType).toBe('free');
+        expect(item.isFree).toBe(true);
       });
     });
 
@@ -1574,7 +1579,7 @@ describe('ContentService', () => {
     // (contentBody / contentBodyJson) MUST be stripped before returning.
     // Free content keeps its body so search / SEO still index the article.
     it('strips body columns from non-free content and preserves them for free', async () => {
-      // Arrange: 'followers' accessType requires an organizationId, so we
+      // Arrange: follower-gated content requires an organizationId, so we
       // need an org before creating the gated article.
       const [org] = await db
         .insert(organizations)
@@ -1587,7 +1592,6 @@ describe('ContentService', () => {
           slug: createUniqueSlug('free-article'),
           contentType: 'written',
           visibility: 'public',
-          accessType: 'free',
           priceCents: 0,
           tags: [],
           contentBody: 'This is the freely readable article body.',
@@ -1602,7 +1606,7 @@ describe('ContentService', () => {
           slug: createUniqueSlug('followers-article'),
           contentType: 'written',
           visibility: 'public',
-          accessType: 'followers',
+          isFollowerGated: true,
           organizationId: org.id,
           priceCents: 0,
           tags: [],
@@ -1633,7 +1637,7 @@ describe('ContentService', () => {
       // columns are nulled before leaving the service boundary.
       expect(followers).toBeDefined();
       expect(followers?.title).toBe('Followers Only Article');
-      expect(followers?.accessType).toBe('followers');
+      expect(followers?.isFollowerGated).toBe(true);
       expect(followers?.contentBody).toBeNull();
       expect(followers?.contentBodyJson).toBeNull();
     });
