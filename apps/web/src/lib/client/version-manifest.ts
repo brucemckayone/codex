@@ -8,7 +8,7 @@
  * are server-authoritative — SSR re-renders the correct list on every request.
  */
 
-import { browser } from '$app/environment';
+import { browser, dev } from '$app/environment';
 
 const MANIFEST_KEY = 'codex-versions';
 
@@ -93,7 +93,10 @@ export type OrgCacheTarget = 'content' | 'library' | 'subscription';
  * Exact matching replaces the previous `key.includes(':content')` substring
  * test: a brand-new key — e.g. a future `org:{orgId}:pages` / `:courses` — is
  * now dispatched only via an explicit entry, never silently swallowed by (or
- * accidentally caught in) a substring branch.
+ * accidentally caught in) a substring branch. The flip side — an unmapped
+ * stale key would still be dropped — is surfaced by a dev-only warning so a
+ * key added to `readOrgVersions` without a matching entry here is caught in
+ * development rather than silently failing to cross-tab-invalidate.
  */
 export function resolveStaleCacheTargets(
   staleKeys: readonly string[],
@@ -112,7 +115,20 @@ export function resolveStaleCacheTargets(
   const targets = new Set<OrgCacheTarget>();
   for (const key of staleKeys) {
     const target = keyToTarget.get(key);
-    if (target) targets.add(target);
+    if (target) {
+      targets.add(target);
+    } else if (dev && key !== `org:config:${orgId}`) {
+      // A stale server key with no client target is dropped. That is correct
+      // for SSR-only keys (`org:config:{orgId}`), but any OTHER unmapped key
+      // means a key was added to `readOrgVersions` (`+layout.server.ts`)
+      // without a matching entry here — its collection would never
+      // cross-tab-invalidate. Surface the gap in dev; the omission is silent
+      // in prod (no behaviour change, just a lost cross-tab refresh).
+      console.warn(
+        '[version-manifest] stale key has no client cache target — add a mapping in resolveStaleCacheTargets:',
+        key
+      );
+    }
   }
   return targets;
 }

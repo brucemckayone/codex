@@ -14,9 +14,11 @@
  * per-navigation SSR, which is fine but misses the cross-tab path.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('$app/environment', () => ({ browser: true }));
+// `dev: true` exercises resolveStaleCacheTargets' dev-only unmapped-key warning;
+// its tests spy on console.warn (see the describe below) so nothing prints.
+vi.mock('$app/environment', () => ({ browser: true, dev: true }));
 
 import {
   clearClientState,
