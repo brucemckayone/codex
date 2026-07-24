@@ -8,6 +8,7 @@
 import type { KVNamespace } from '@cloudflare/workers-types';
 import { CacheType, VersionedCache } from '@codex/cache';
 import { getPublicContent } from '$lib/remote/content.remote';
+import { listPublishedJourneys } from '$lib/remote/journeys.remote';
 import { getPublicCreators } from '$lib/remote/org.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
@@ -206,12 +207,24 @@ export const load: PageServerLoad = async ({
     setHeaders(CACHE_HEADERS.PRIVATE);
   }
 
+  // Journeys discovery rail — only on the DEFAULT browse view (no search / type /
+  // category / creator / featured filter, first page). A filtered or searched
+  // view is about content, so the journeys rail is omitted there. Awaited (this
+  // page awaits all its data — not the shell+stream pattern) and cheap (a single
+  // capped, indexed read); degrades to an empty rail on any error.
+  const isDefaultBrowse =
+    !q && !contentType && !category && !creator && !featured && page === 1;
+  const journeys = isDefaultBrowse
+    ? await listPublishedJourneys({ limit: 12 }).catch(() => [])
+    : [];
+
   return {
     content: {
       items: contentResult?.items ?? [],
       total: contentResult?.pagination?.total ?? 0,
     },
     creator,
+    journeys,
     filters: {
       q: q ?? '',
       type: contentType ?? '',

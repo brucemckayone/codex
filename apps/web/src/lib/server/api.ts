@@ -109,6 +109,8 @@ import { logger } from '$lib/observability';
 // structurally-identical shapes the renderer consumes. Type-only (erased) — no
 // runtime import of the page-builder barrel.
 import type {
+  EnrolledJourneyCard,
+  JourneyCardView,
   JourneyCoursePage,
   JourneyListItem,
   JourneyPageRecord,
@@ -1116,6 +1118,38 @@ export function createServerApi(
         request<SellPreview | null>(
           'access',
           `/api/journeys/courses/${courseId}/sell-preview`
+        ),
+
+      /**
+       * Public journey DISCOVERY list (Codex-oi2w4) — published course-journeys
+       * for the org home "featured" rail (`featured: true`) + the Explore grid.
+       * Fully public; carries no per-user state.
+       */
+      listPublishedJourneys: (
+        organizationId: string,
+        opts: { featured?: boolean; limit?: number } = {}
+      ) =>
+        request<JourneyCardView[]>(
+          'access',
+          `/api/journeys/published?organizationId=${encodeURIComponent(
+            organizationId
+          )}${opts.featured ? '&featured=true' : ''}${
+            opts.limit ? `&limit=${opts.limit}` : ''
+          }`
+        ),
+
+      /**
+       * The session user's ENROLLED journeys in this org, with a progress rollup
+       * (the library "Your journeys" shelf + continue rail). Auth-scoped — the
+       * content-api reads `userId` from the forwarded session; `organizationId`
+       * scopes results to the browsed space.
+       */
+      listEnrolledJourneys: (organizationId: string) =>
+        request<EnrolledJourneyCard[]>(
+          'access',
+          `/api/journeys/enrolled?organizationId=${encodeURIComponent(
+            organizationId
+          )}`
         ),
 
       /** Dashboard payload (enrollment + curriculum + progress rollup). */

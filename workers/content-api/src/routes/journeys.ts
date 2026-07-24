@@ -3,8 +3,10 @@ import { ValidationError } from '@codex/service-errors';
 import type {
   CourseDashboardData,
   CourseSellPreview,
+  EnrolledJourneyCard,
   HonoEnv,
   InCoursePracticeData,
+  JourneyCardView,
   JourneyCoursePage,
   JourneyCourseSummary,
   JourneyListItem,
@@ -19,6 +21,7 @@ import {
   journeyOrgQuerySchema,
   journeyPageParamsSchema,
   journeyStudioListQuerySchema,
+  listPublishedJourneysQuerySchema,
   recordCompletionBodySchema,
   saveJourneyPageBodySchema,
 } from '@codex/validation';
@@ -254,6 +257,73 @@ app.post(
         ctx.user.id,
         contentId,
         source
+      );
+    },
+  })
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MEMBER DISCOVERY (Codex-oi2w4 · home / explore / library surfacing)
+//
+// The public browse reads that make journeys reachable from the member space.
+// `/published` is fully PUBLIC (`auth: 'optional'`, NO `canView`) — the org is
+// resolved web-side and passed as `organizationId`. `/enrolled` is a PER-USER
+// read (`auth: 'required'`) — `userId` comes from the SESSION (never the body);
+// the org scopes the shelf to the space being browsed.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/journeys/published?organizationId=&featured=true&limit=
+ *
+ * Published course-journeys as public discovery cards (SPEC §8.5) — the org home
+ * "featured" rail (`featured=true`) + the Explore grid (all). Fully PUBLIC; no
+ * per-user state. Returns `[]` when the org has no published journeys.
+ * @returns {JourneyCardView[]}
+ */
+app.get(
+  '/published',
+  procedure({
+    policy: {
+      auth: 'optional',
+      rateLimit: 'api', // 100 req/min
+    },
+    input: {
+      query: listPublishedJourneysQuerySchema,
+    },
+    handler: async (ctx): Promise<JourneyCardView[]> => {
+      const { organizationId, featured, limit } = ctx.input.query;
+      return ctx.services.courseJourney.listPublishedJourneys(organizationId, {
+        featured: featured === 'true',
+        limit,
+      });
+    },
+  })
+);
+
+/**
+ * GET /api/journeys/enrolled?organizationId=
+ *
+ * The session user's enrolled journeys in the org, with a progress rollup — the
+ * library "Your journeys" shelf + "Jump back in" continue rail (SPEC §8.4/§11).
+ * `auth: 'required'`; `userId` from the session, `organizationId` scopes results
+ * to the browsed space (a user only ever sees their OWN enrollments). Returns
+ * `[]` for a user with no enrollments in the org.
+ * @returns {EnrolledJourneyCard[]}
+ */
+app.get(
+  '/enrolled',
+  procedure({
+    policy: {
+      auth: 'required',
+      rateLimit: 'api', // 100 req/min
+    },
+    input: {
+      query: journeyOrgQuerySchema,
+    },
+    handler: async (ctx): Promise<EnrolledJourneyCard[]> => {
+      return ctx.services.courseJourney.listEnrolledJourneys(
+        ctx.user.id,
+        ctx.input.query.organizationId
       );
     },
   })

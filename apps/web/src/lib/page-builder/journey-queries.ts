@@ -119,6 +119,50 @@ export interface JourneyListItem {
 }
 
 /**
+ * Progress state of an enrolled journey (library shelf + continue rail).
+ * FE mirror of `@codex/shared-types` `JourneyProgressStatus`.
+ */
+export type JourneyProgressStatus = 'not-started' | 'in-progress' | 'completed';
+
+/**
+ * A journey as a PUBLIC discovery card (Codex-oi2w4 — the org home "featured
+ * journeys" rail + the Explore grid). FE mirror of `@codex/shared-types`
+ * `JourneyCardView` (structurally identical by design). Fully public — no
+ * per-user state.
+ */
+export interface JourneyCardView {
+  pageId: string;
+  /** Org-scoped landing-page slug → the public sell page (`/journeys/:slug`). */
+  slug: string;
+  title: string;
+  kicker: string | null;
+  tagline: string | null;
+  courseId: string;
+  courseSlug: string;
+  /** One-off purchase price in GBP pence; null = membership-only. */
+  priceCents: number | null;
+  stageCount: number;
+  practiceCount: number;
+  featured: boolean;
+}
+
+/**
+ * A journey the current user is enrolled in (Codex-oi2w4 — the library "Your
+ * journeys" shelf + continue rail). FE mirror of `@codex/shared-types`
+ * `EnrolledJourneyCard`. The discovery card + the user's progress rollup.
+ */
+export interface EnrolledJourneyCard extends JourneyCardView {
+  completedPractices: number;
+  totalPractices: number;
+  /** 0–100, integer. */
+  percent: number;
+  status: JourneyProgressStatus;
+  enrolledAt: string;
+  lastActivityAt: string | null;
+  completedAt: string | null;
+}
+
+/**
  * Member journey portal (non-SSR; the route's `+page.server.ts` runs the
  * `canEnterCourse` gate before this resolves — §6.4 / HARDENING §E).
  */
