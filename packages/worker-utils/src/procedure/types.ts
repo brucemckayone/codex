@@ -8,7 +8,11 @@
  * - Procedure context with full typing
  */
 
-import type { ContentAccessService, EntitlementsService } from '@codex/access';
+import type {
+  ContentAccessService,
+  CourseAccessService,
+  EntitlementsService,
+} from '@codex/access';
 import type {
   AdminAnalyticsService,
   AdminContentManagementService,
@@ -43,6 +47,7 @@ import type {
 } from '@codex/shared-types';
 import type {
   ConnectAccountService,
+  CourseSubscriptionService,
   SubscriptionService,
   TierService,
 } from '@codex/subscription';
@@ -170,6 +175,18 @@ export interface ServiceRegistry {
   subscription: SubscriptionService;
   tier: TierService;
   connect: ConnectAccountService;
+  /**
+   * Course-specific subscriptions (Codex-2pryk WP-6 · SPEC §7): plan Stripe
+   * sync, checkout, and the course-sub webhook lifecycle + payout fan-out.
+   * Stripe-backed, so lazily constructed with the deferred Stripe client.
+   */
+  courseSubscription: CourseSubscriptionService;
+  /**
+   * Course monetization access surface (Codex-2pryk WP-6): tier→course grant
+   * management (N1 guard) + the `getCourseOffer` read composing all three §7
+   * paths. Pure DB — no Stripe.
+   */
+  courseAccess: CourseAccessService;
 
   // Media & Processing domain
   transcoding: TranscodingService;

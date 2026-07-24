@@ -20,6 +20,8 @@
 import type { HonoEnv } from '@codex/shared-types';
 import {
   createCheckoutSchema,
+  createCourseCheckoutSchema,
+  createCourseSubscriptionCheckoutSchema,
   createPortalSessionSchema,
   verifyCheckoutSessionSchema,
 } from '@codex/validation';
@@ -111,6 +113,51 @@ checkout.post(
         sessionUrl: session.sessionUrl,
         sessionId: session.sessionId,
       };
+    },
+  })
+);
+
+/**
+ * POST /checkout/course
+ *
+ * Create a Stripe Checkout session for a one-off COURSE purchase (Codex-2pryk
+ * WP-6 · SPEC §7). The org + creator (payout recipient) are resolved server-side
+ * from the course row; the client supplies only the courseId + redirect URLs.
+ */
+checkout.post(
+  '/course',
+  procedure({
+    policy: { auth: 'required', rateLimit: 'strict' },
+    input: { body: createCourseCheckoutSchema },
+    handler: async (ctx): Promise<CheckoutSessionResponse> => {
+      const { courseId, successUrl, cancelUrl } = ctx.input.body;
+      const session = await ctx.services.purchase.createCourseCheckoutSession(
+        { courseId, successUrl, cancelUrl },
+        ctx.user.id
+      );
+      return { sessionUrl: session.sessionUrl, sessionId: session.sessionId };
+    },
+  })
+);
+
+/**
+ * POST /checkout/course-subscription
+ *
+ * Create a Stripe Checkout session for a course-specific SUBSCRIPTION (SPEC §7
+ * path 3). The plan + Stripe Price are resolved server-side from the courseId.
+ */
+checkout.post(
+  '/course-subscription',
+  procedure({
+    policy: { auth: 'required', rateLimit: 'strict' },
+    input: { body: createCourseSubscriptionCheckoutSchema },
+    handler: async (ctx): Promise<CheckoutSessionResponse> => {
+      const session =
+        await ctx.services.courseSubscription.createCheckoutSession(
+          ctx.user.id,
+          ctx.input.body
+        );
+      return { sessionUrl: session.sessionUrl, sessionId: session.sessionId };
     },
   })
 );

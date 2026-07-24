@@ -18,12 +18,48 @@
 
 import { invalidateUserLibrary } from '@codex/cache';
 import { CURRENCY } from '@codex/constants';
+import type { ObservabilityClient } from '@codex/observability';
 import { PurchaseService } from '@codex/purchase';
-import { checkoutSessionMetadataSchema } from '@codex/validation';
+import {
+  checkoutSessionMetadataSchema,
+  courseCheckoutSessionMetadataSchema,
+} from '@codex/validation';
 import { createWebhookDbClient, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
 import type { StripeWebhookEnv } from '../types';
+
+/**
+ * Retrieve the charge id + Stripe-collected application fee for a PaymentIntent.
+ * The payouts pipeline uses the charge as `source_transaction`; the app fee is
+ * reconciled against the calculated split. Best-effort — a miss degrades the
+ * payouts write to a no-op but the purchase + grant still complete.
+ */
+async function resolvePaymentIntentCharge(
+  stripe: Stripe,
+  paymentIntentId: string,
+  obs: ObservabilityClient | undefined
+): Promise<{
+  stripeChargeId: string | null;
+  stripeApplicationFeeCents: number | null;
+}> {
+  try {
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    return {
+      stripeApplicationFeeCents: paymentIntent.application_fee_amount ?? null,
+      stripeChargeId:
+        typeof paymentIntent.latest_charge === 'string'
+          ? paymentIntent.latest_charge
+          : (paymentIntent.latest_charge?.id ?? null),
+    };
+  } catch (piError) {
+    obs?.warn('Could not retrieve PaymentIntent for fee reconciliation', {
+      paymentIntentId,
+      error: piError instanceof Error ? piError.message : String(piError),
+    });
+    return { stripeChargeId: null, stripeApplicationFeeCents: null };
+  }
+}
 
 /**
  * Handle checkout.session.completed event
@@ -83,6 +119,14 @@ export async function handleCheckoutCompleted(
 
   if (!paymentIntentId) {
     obs?.error('Missing payment intent ID', { sessionId: session.id });
+    return;
+  }
+
+  // Codex-2pryk WP-6: a `kind: 'course'` session targets a COURSE, not content.
+  // Route to the course completion path and return — the content metadata schema
+  // below does not apply to it.
+  if (session.metadata?.kind === 'course') {
+    await handleCourseCheckoutCompleted(session, paymentIntentId, stripe, c);
     return;
   }
 
@@ -200,6 +244,109 @@ export async function handleCheckoutCompleted(
           priceFormatted: formatted,
           purchaseDate: new Date().toLocaleDateString('en-GB'),
           contentUrl: `${c.env.WEB_APP_URL || ''}/content/${validatedMetadata.contentId}`,
+        },
+      });
+    }
+  } finally {
+    await cleanup();
+  }
+}
+
+/**
+ * Complete a one-off COURSE purchase from a `kind: 'course'` checkout session
+ * (Codex-2pryk WP-6). Mirrors the content path but calls
+ * `PurchaseService.completeCoursePurchase`, which writes a `course_purchase`
+ * entitlement + auto-enrolls and reuses the Option-B payout fan-out.
+ * Idempotent by `stripePaymentIntentId`; returns 200 even on failure so Stripe
+ * does not retry a poisoned event (failures are logged for manual triage).
+ */
+async function handleCourseCheckoutCompleted(
+  session: Stripe.Checkout.Session,
+  paymentIntentId: string,
+  stripe: Stripe,
+  c: Context<StripeWebhookEnv>
+): Promise<void> {
+  const obs = c.get('obs');
+
+  let metadata: ReturnType<typeof courseCheckoutSessionMetadataSchema.parse>;
+  try {
+    metadata = courseCheckoutSessionMetadataSchema.parse(session.metadata);
+  } catch (validationError) {
+    obs?.error('Invalid course checkout session metadata', {
+      sessionId: session.id,
+      error:
+        validationError instanceof Error
+          ? validationError.message
+          : 'Unknown validation error',
+    });
+    return;
+  }
+
+  const amountTotal = session.amount_total;
+  if (typeof amountTotal !== 'number') {
+    obs?.error('Invalid amount_total on course checkout', {
+      sessionId: session.id,
+      amountTotal,
+    });
+    return;
+  }
+
+  const { stripeChargeId, stripeApplicationFeeCents } =
+    await resolvePaymentIntentCharge(stripe, paymentIntentId, obs);
+
+  const { db, cleanup } = createWebhookDbClient(c.env);
+  try {
+    const purchaseService = new PurchaseService(
+      { db, environment: c.env.ENVIRONMENT || 'development' },
+      stripe
+    );
+
+    const purchase = await purchaseService.completeCoursePurchase(
+      paymentIntentId,
+      {
+        customerId: metadata.customerId,
+        courseId: metadata.courseId,
+        amountPaidCents: amountTotal,
+        currency: CURRENCY.GBP,
+        stripeApplicationFeeCents,
+        stripeChargeId,
+      }
+    );
+
+    obs?.info('Course purchase completed successfully', {
+      purchaseId: purchase.id,
+      customerId: metadata.customerId,
+      courseId: metadata.courseId,
+      amountCents: amountTotal,
+    });
+
+    // Bump the buyer's library version so the new course entitlement + enrollment
+    // surface on their other devices.
+    if (c.executionCtx) {
+      invalidateUserLibrary({
+        kv: c.env.CACHE_KV,
+        waitUntil: c.executionCtx.waitUntil.bind(c.executionCtx),
+        userId: metadata.customerId,
+        logger: obs,
+      });
+    }
+
+    const customerEmail = session.customer_details?.email;
+    const customerName = session.customer_details?.name || 'there';
+    if (customerEmail) {
+      const formatted = `£${(amountTotal / 100).toFixed(2)}`;
+      sendEmailToWorker(c.env, c.executionCtx, {
+        to: customerEmail,
+        toName: customerName,
+        templateName: 'purchase-receipt',
+        category: 'transactional',
+        userId: metadata.customerId,
+        data: {
+          userName: customerName,
+          contentTitle: metadata.courseTitle || 'Course purchase',
+          priceFormatted: formatted,
+          purchaseDate: new Date().toLocaleDateString('en-GB'),
+          contentUrl: `${c.env.WEB_APP_URL || ''}/courses/${metadata.courseId}`,
         },
       });
     }

@@ -25,6 +25,8 @@ export * from './primitives';
 export * from './schemas/access';
 // Agreements schemas (Codex-hqke2 — WP-3 of Codex-nk4km)
 export * from './schemas/agreements';
+// Course monetization schemas (Codex-2pryk WP-6 · SPEC §7)
+export * from './schemas/course-commerce';
 // Fee configuration schemas (Codex-m644n)
 export * from './schemas/fee-config';
 // File upload schemas

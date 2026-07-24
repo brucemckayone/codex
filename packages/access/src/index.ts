@@ -80,6 +80,8 @@ export {
   createContentAccessService,
   DEFAULT_STREAMING_URL_TTL_SECONDS,
 } from './services/ContentAccessService';
+// Course monetization: tier-access management (N1 guard) + offer read (WP-6).
+export { CourseAccessService } from './services/course-access-service';
 export { EntitlementsService } from './services/entitlements-service';
 export type {
   PlaybackProgressResponse,
