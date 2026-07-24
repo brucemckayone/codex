@@ -259,7 +259,9 @@ export class AdminCustomerManagementService extends BaseService {
       const purchaseHistory = await this.db
         .select({
           purchaseId: schema.purchases.id,
-          contentId: schema.purchases.contentId,
+          // content.id is non-null via the inner join; purchases.contentId is
+          // nullable for course purchases (excluded by the join). Codex-2pryk WP-6.
+          contentId: schema.content.id,
           contentTitle: schema.content.title,
           amountPaidCents: schema.purchases.amountPaidCents,
           purchasedAt: schema.purchases.purchasedAt,

@@ -70,6 +70,15 @@ export const subscriptionTiers = pgTable(
       .on(table.organizationId, table.sortOrder)
       .where(sql`${table.deletedAt} IS NULL`),
 
+    // Codex-2pryk WP-6: composite-FK target for `course_tier_access`'s N1
+    // guarantee (a tier can only unlock a course in the SAME org). `id` is
+    // already unique via the PK; this redundant unique on (id, organization_id)
+    // is what a composite FK referencing (id, organization_id) requires.
+    uniqueIndex('uq_subscription_tiers_id_org').on(
+      table.id,
+      table.organizationId
+    ),
+
     // CHECK constraints
     check('check_tier_price_monthly_positive', sql`${table.priceMonthly} >= 0`),
     check('check_tier_price_annual_positive', sql`${table.priceAnnual} >= 0`),

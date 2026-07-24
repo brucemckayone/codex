@@ -252,3 +252,57 @@ export interface EntitlementResolver {
     courseIds: readonly string[]
   ): Promise<ReadonlyMap<string, boolean>>;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Monetization — the course offer (SPEC §7, owned by WP-6)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One of the three ways a course can be acquired (SPEC §7). Discriminates the
+ * pricing panel on the sales-page builder and the offer surface on the course
+ * landing page.
+ *
+ *   - `purchase`       — one-off, permanent (`courses.priceCents`).
+ *   - `subscription`   — course-specific recurring (`course_subscription_plans`).
+ *   - `tier`           — included in one or more org subscription tiers
+ *                        (`course_tier_access`, exact tier match, not min-tier).
+ */
+export type CourseAccessPath = 'purchase' | 'subscription' | 'tier';
+
+/** One org tier that unlocks a course (SPEC §7 tier-access path). */
+export interface CourseTierOffer {
+  tierId: string;
+  tierName: string;
+  /** Lowest active price across intervals, in GBP pence — for "from £X" copy. */
+  priceMonthly: number;
+  priceAnnual: number;
+}
+
+/**
+ * The complete monetization offer for one course (SPEC §7) — every acquisition
+ * path a viewer can take, plus whether they ALREADY hold access. Returned by the
+ * offer read (WP-6), consumed by the sales page + course landing.
+ *
+ * A path is present in `paths` only when it is actually purchasable/enterable
+ * (published course + configured price/plan/tier). `entitled=true` means the
+ * viewer already holds a live entitlement (any source) and should see "enter"
+ * rather than "buy". Amounts are GBP integer pence.
+ */
+export interface CourseOffer {
+  courseId: string;
+  organizationId: string;
+  /** Ordered subset of the three paths, only those currently available. */
+  paths: CourseAccessPath[];
+  /** One-off purchase, when `courses.priceCents` is set. */
+  purchase: { priceCents: number } | null;
+  /** Course-specific subscription, when an active plan exists. */
+  subscription: {
+    planId: string;
+    priceMonthly: number;
+    priceAnnual: number;
+  } | null;
+  /** Org tiers that include this course (exact grants). */
+  tiers: CourseTierOffer[];
+  /** True when the viewer already holds a live entitlement over the course. */
+  entitled: boolean;
+}

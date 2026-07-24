@@ -64,6 +64,29 @@ export interface CompletePurchaseMetadata {
 }
 
 /**
+ * Metadata for completing a one-off COURSE purchase (Codex-2pryk WP-6).
+ *
+ * Mirrors {@link CompletePurchaseMetadata} but targets a course. There is no
+ * `organizationId` field: courses are ALWAYS org-owned, so the org (and the
+ * creator to pay) is resolved authoritatively from the `courses` row, never
+ * trusted from Stripe metadata.
+ */
+export interface CompleteCoursePurchaseMetadata {
+  /** Course ID being purchased */
+  courseId: string;
+  /** Customer ID making purchase */
+  customerId: string;
+  /** Amount paid in cents */
+  amountPaidCents: number;
+  /** Currency code (default: 'gbp') */
+  currency?: string;
+  /** Application fee Stripe actually collected (from PaymentIntent), for reconciliation */
+  stripeApplicationFeeCents?: number | null;
+  /** Stripe charge id (PaymentIntent.latest_charge) — required for payouts ledger + source_transaction. */
+  stripeChargeId?: string | null;
+}
+
+/**
  * Purchase list item for account payment history
  */
 export interface PurchaseListItem {

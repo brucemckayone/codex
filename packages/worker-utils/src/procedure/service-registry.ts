@@ -9,6 +9,7 @@
 import {
   AccessRevocation,
   ContentAccessService,
+  CourseAccessService,
   EntitlementsService,
 } from '@codex/access';
 import {
@@ -49,6 +50,7 @@ import {
 import type { Bindings } from '@codex/shared-types';
 import {
   ConnectAccountService,
+  CourseSubscriptionService,
   SubscriptionService,
   TierService,
 } from '@codex/subscription';
@@ -158,6 +160,8 @@ export function createServiceRegistry(
   let _subscription: SubscriptionService | undefined;
   let _tier: TierService | undefined;
   let _connectAccount: ConnectAccountService | undefined;
+  let _courseSubscription: CourseSubscriptionService | undefined;
+  let _courseAccess: CourseAccessService | undefined;
   let _agreements: AgreementService | undefined;
 
   // Shared per-request DB client (for services needing transactions)
@@ -816,6 +820,35 @@ export function createServiceRegistry(
         }
       }
       return _connectAccount;
+    },
+
+    get courseSubscription() {
+      if (!_courseSubscription) {
+        // Course-sub payouts resolve fees via the same 3-tier fallback chain as
+        // purchases/subscriptions; Stripe client is deferred (read-only course
+        // pages never construct it) — same pattern as `subscription`/`tier`.
+        _courseSubscription = new CourseSubscriptionService(
+          {
+            db: getSharedDb(),
+            environment: getEnvironment(),
+            feeConfig: registry.feeConfig,
+          },
+          getLazyStripeClient()
+        );
+      }
+      return _courseSubscription;
+    },
+
+    get courseAccess() {
+      if (!_courseAccess) {
+        // Pure DB (no Stripe). Uses the shared WS client because `setTierAccess`
+        // replaces a course's tier-access rows inside a transaction.
+        _courseAccess = new CourseAccessService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+        });
+      }
+      return _courseAccess;
     },
 
     // ========================================================================

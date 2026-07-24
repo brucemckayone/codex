@@ -84,6 +84,46 @@ export class ContentNotPurchasableError extends BusinessLogicError {
 }
 
 /**
+ * Course not purchasable error (Codex-2pryk WP-6)
+ * Thrown when a course has no one-off price, is unpublished, or is deleted.
+ */
+export class CourseNotPurchasableError extends BusinessLogicError {
+  constructor(
+    courseId: string,
+    reason: 'no_price' | 'not_published' | 'deleted',
+    context?: Record<string, unknown>
+  ) {
+    const messages = {
+      no_price: 'Course is not sold as a one-off purchase',
+      not_published: 'Course must be published before it can be purchased',
+      deleted: 'Course is no longer available',
+    };
+
+    super(messages[reason], {
+      courseId,
+      reason,
+      code: 'COURSE_NOT_PURCHASABLE',
+      ...context,
+    });
+  }
+}
+
+/**
+ * Course already owned error (Codex-2pryk WP-6)
+ * Thrown when a user starts a course checkout while already holding a live
+ * entitlement over that course (purchase, subscription, tier, or grant).
+ */
+export class CourseAlreadyOwnedError extends ConflictError {
+  constructor(courseId: string, customerId: string) {
+    super('Course already owned', {
+      courseId,
+      customerId,
+      code: 'COURSE_ALREADY_OWNED',
+    });
+  }
+}
+
+/**
  * Payment processing error
  * Thrown when Stripe checkout session creation or payment processing fails
  */

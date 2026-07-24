@@ -575,7 +575,10 @@ export class AdminAnalyticsService extends BaseService {
 
       const result = await this.db
         .select({
-          contentId: schema.purchases.contentId,
+          // Codex-2pryk WP-6: use content.id (non-null via the inner join) —
+          // purchases.contentId is now nullable for course purchases, which the
+          // inner join already excludes from this content-revenue leaderboard.
+          contentId: schema.content.id,
           contentTitle: schema.content.title,
           thumbnailUrl: schema.content.thumbnailUrl,
           revenueCents: sql<number>`COALESCE(SUM(${schema.purchases.amountPaidCents}), 0)::int`,
@@ -599,7 +602,7 @@ export class AdminAnalyticsService extends BaseService {
           )
         )
         .groupBy(
-          schema.purchases.contentId,
+          schema.content.id,
           schema.content.title,
           schema.content.thumbnailUrl
         )

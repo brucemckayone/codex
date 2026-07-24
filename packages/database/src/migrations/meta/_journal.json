@@ -561,6 +561,13 @@
       "when": 1784815988651,
       "tag": "0079_foamy_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1784857425980,
+      "tag": "0080_clumsy_forge",
+      "breakpoints": true
     }
   ]
 }

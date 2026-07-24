@@ -3588,7 +3588,11 @@ describe('ContentAccessService Integration', () => {
       it('grants entry via a derived tier (course_tier_access + active subscription)', async () => {
         const tierId = await seedTier(organizationId);
         const { courseId } = await makeCourse(organizationId);
-        await db.insert(courseTierAccess).values({ courseId, tierId });
+        // Codex-2pryk WP-6: course_tier_access now carries organization_id
+        // (N1 composite-FK guarantee) — course + tier share this org.
+        await db
+          .insert(courseTierAccess)
+          .values({ courseId, tierId, organizationId });
 
         // Subscriber to the granting tier — derived, no stored row.
         const [subscriber] = await seedTestUsers(db, 1);
@@ -3661,6 +3665,7 @@ describe('ContentAccessService Integration', () => {
         await db.insert(courseTierAccess).values({
           courseId: tierGranted.courseId,
           tierId,
+          organizationId,
         });
 
         const [user] = await seedTestUsers(db, 1);

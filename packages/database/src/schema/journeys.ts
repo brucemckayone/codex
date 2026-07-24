@@ -169,6 +169,12 @@ export const courses = pgTable(
       .on(table.organizationId, table.slug)
       .where(sql`${table.deletedAt} IS NULL`),
 
+    // Codex-2pryk WP-6: composite-FK target for `course_tier_access`'s N1
+    // guarantee (see subscriptions.ts `uq_subscription_tiers_id_org`). `id` is
+    // already unique via the PK; this redundant unique on (id, organization_id)
+    // is what the composite FK referencing (id, organization_id) requires.
+    uniqueIndex('uq_courses_id_org').on(table.id, table.organizationId),
+
     check(
       'check_course_status',
       sql`${table.status} IN ('draft', 'published', 'archived')`

@@ -41,7 +41,10 @@ export type { RevenueSplit } from './financial';
 export type {
   BrandTokenOverrides,
   ContentAccessPolicy,
+  CourseAccessPath,
+  CourseOffer,
   CourseSectionType,
+  CourseTierOffer,
   Entitlement,
   EntitlementResolver,
   EntitlementSource,
