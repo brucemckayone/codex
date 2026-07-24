@@ -88,7 +88,28 @@ import type {
 } from '@codex/validation';
 import type { Cookies } from '@sveltejs/kit';
 import { dev } from '$app/environment';
+// Studio journey-insights view shape (Codex-2pryk Round-D · WP-7). The FROZEN
+// FE contract from the metric-model; the content-api route serialises the
+// structurally-identical `@codex/access` twin. Type-only (erased).
+import type { JourneyInsightsData } from '$lib/components/studio/journey-insights/metric-model';
+// Journey member-surface view shapes (Codex-2pryk Round-D). Structurally
+// identical to @codex/shared-types' cross-worker mirror the content-api routes
+// serialise; imported from the FE $lib bag so callers get the exact FE types.
+import type {
+  CompletionSource,
+  CourseDashboardData,
+  InCoursePracticeData,
+  JourneyCourseSummary,
+  PracticeCompletionRecord,
+} from '$lib/journeys/types';
 import { logger } from '$lib/observability';
+// Journey PUBLIC sales-page shapes (Codex-2pryk Round-D · WP-3). Same FE-mirror
+// rationale as above: the content-api serialises the `@codex/shared-types`
+// twins (`JourneyCoursePage` / `CourseSellPreview`); these FE types are the
+// structurally-identical shapes the renderer consumes. Type-only (erased) — no
+// runtime import of the page-builder barrel.
+import type { JourneyCoursePage } from '$lib/page-builder';
+import type { SellPreview } from '$lib/page-builder/render';
 // Import local types that extend DB types with relations
 // OrgMemberItem is in $lib/types (not here) so components can import it
 // without triggering the vite server-only module guard.
@@ -1033,6 +1054,116 @@ export function createServerApi(
         request<UserLibraryResponse>(
           'access',
           `/api/access/user/library${params ? `?${params}` : ''}`
+        ),
+
+      // ── Course journeys (Codex-2pryk Round-D) ─────────────────────────────
+      // Journey reads/writes hit content-api (ServiceName 'access' → port 4001,
+      // same worker) via the /api/access + /api/journeys mounts. The worker
+      // derives the user from the forwarded session cookie, so these take no
+      // userId argument. Each maps 1:1 to a $lib/server/journeys/round-d-seam
+      // function the Phase-2 FE swaps its mock body for.
+
+      /**
+       * Entitlement gate for a course dashboard/journey (SPEC §6.3). Unwraps the
+       * `{ canEnter }` envelope to the bare boolean the seam expects.
+       */
+      canEnterCourse: (courseId: string) =>
+        request<{ canEnter: boolean }>(
+          'access',
+          `/api/access/courses/${courseId}/can-enter`
+        ).then((r) => r.canEnter),
+
+      /**
+       * Entitlement check gating a signed stream (SPEC §6.3). Works
+       * unauthenticated (public / free content resolves as userId=null).
+       */
+      canView: (contentId: string) =>
+        request<{ canView: boolean }>(
+          'access',
+          `/api/access/content/${contentId}/can-view`
+        ).then((r) => r.canView),
+
+      /** Resolve a course summary by its org-scoped slug (null if none). */
+      courseBySlug: (organizationId: string, slug: string) =>
+        request<JourneyCourseSummary | null>(
+          'access',
+          `/api/journeys/courses/by-slug?organizationId=${encodeURIComponent(
+            organizationId
+          )}&slug=${encodeURIComponent(slug)}`
+        ),
+
+      /**
+       * Public course SALES PAGE by org-scoped landing-page slug (null if no
+       * published page/course). Fully public — no auth needed (WP-3 shell).
+       */
+      coursePage: (organizationId: string, slug: string) =>
+        request<JourneyCoursePage | null>(
+          'access',
+          `/api/journeys/pages/by-slug?organizationId=${encodeURIComponent(
+            organizationId
+          )}&slug=${encodeURIComponent(slug)}`
+        ),
+
+      /**
+       * Public 30s sell-preview clips (intro + reel) for a course (null if the
+       * course is not published). Public preview manifest URLs — no signing.
+       */
+      courseSellPreview: (courseId: string) =>
+        request<SellPreview | null>(
+          'access',
+          `/api/journeys/courses/${courseId}/sell-preview`
+        ),
+
+      /** Dashboard payload (enrollment + curriculum + progress rollup). */
+      courseDashboard: (courseId: string) =>
+        request<CourseDashboardData | null>(
+          'access',
+          `/api/journeys/courses/${courseId}/dashboard`
+        ),
+
+      /** In-course player payload (practice + playlist + signed stream URL). */
+      inCoursePractice: (courseId: string, contentSlug: string) =>
+        request<InCoursePracticeData | null>(
+          'access',
+          `/api/journeys/courses/${courseId}/practices/${encodeURIComponent(
+            contentSlug
+          )}`
+        ),
+
+      /** Record a practice completion (idempotent — repeat is a no-op). */
+      persistCompletion: (input: {
+        contentId: string;
+        source: CompletionSource;
+      }) =>
+        request<PracticeCompletionRecord>(
+          'access',
+          `/api/journeys/practices/completions`,
+          {
+            method: 'POST',
+            body: JSON.stringify(input),
+          }
+        ),
+
+      /**
+       * Studio journey INSIGHTS (Codex-2pryk Round-D · WP-7): course-scoped
+       * `live` (financial) + `course` (engagement) aggregation for one reporting
+       * period. Owner/admin only — the content-api route enforces
+       * `requireOrgManagement` and re-derives scope from the session, so the
+       * `organizationId` here is used only for org resolution, never as the
+       * authorization source. Money is GBP pence.
+       */
+      courseInsights: (
+        organizationId: string,
+        courseId: string,
+        period: string
+      ) =>
+        request<JourneyInsightsData>(
+          'access',
+          `/api/journeys/insights?organizationId=${encodeURIComponent(
+            organizationId
+          )}&courseId=${encodeURIComponent(courseId)}&period=${encodeURIComponent(
+            period
+          )}`
         ),
     },
 

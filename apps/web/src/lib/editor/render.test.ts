@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderContentBody } from './render';
+import { renderContentBody, sanitizeContentHtml } from './render';
 
 /**
  * Guards the prod 500 on /content/liberty (Codex-eb00a.2): the content-detail
@@ -57,5 +57,28 @@ describe('renderContentBody', () => {
     } finally {
       g.window = saved;
     }
+  });
+});
+
+describe('sanitizeContentHtml', () => {
+  it('strips a <script> payload from pre-rendered HTML', async () => {
+    const clean = await sanitizeContentHtml(
+      '<p>ok</p><script>alert(1)</script>'
+    );
+    // Falsifiable: a no-op / identity sanitizer would keep the <script> tag.
+    expect(clean).not.toContain('<script');
+    expect(clean).toContain('<p>ok</p>');
+  });
+
+  it('strips an onerror handler from an <img> payload', async () => {
+    const clean = await sanitizeContentHtml('<img src="x" onerror="alert(1)">');
+    expect(clean).not.toContain('onerror');
+  });
+
+  it('preserves benign formatting markup', async () => {
+    const clean = await sanitizeContentHtml(
+      '<p>hello <strong>world</strong></p>'
+    );
+    expect(clean).toContain('<strong>world</strong>');
   });
 });

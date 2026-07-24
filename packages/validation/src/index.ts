@@ -31,6 +31,8 @@ export * from './schemas/course-commerce';
 export * from './schemas/fee-config';
 // File upload schemas
 export * from './schemas/file-upload';
+// Journey member-surface route schemas (Codex-2pryk Round-D)
+export * from './schemas/journeys';
 // Notification schemas
 export * from './schemas/notifications';
 // Organization member schemas

@@ -11,6 +11,8 @@
 import type {
   ContentAccessService,
   CourseAccessService,
+  CourseInsightsService,
+  CourseJourneyService,
   EntitlementsService,
 } from '@codex/access';
 import type {
@@ -187,6 +189,19 @@ export interface ServiceRegistry {
    * paths. Pure DB — no Stripe.
    */
   courseAccess: CourseAccessService;
+  /**
+   * Course MEMBER-surface reads (Codex-2pryk Round-D): the dashboard curriculum
+   * + progress rollup and the in-course practice/playlist projections (SPEC §11
+   * / §14). Pure DB — the entitlement decision + stream signing stay on `access`.
+   */
+  courseJourney: CourseJourneyService;
+  /**
+   * Course STUDIO-reporting reads (Codex-2pryk Round-D · WP-7): course-scoped
+   * financial (`live`) + engagement (`course`) aggregation for the owner/admin
+   * insights surface. Pure DB — owner/admin gated at the route via
+   * `requireOrgManagement`; the service re-scopes the course to the managed org.
+   */
+  courseInsights: CourseInsightsService;
 
   // Media & Processing domain
   transcoding: TranscodingService;

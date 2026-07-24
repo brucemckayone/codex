@@ -306,3 +306,225 @@ export interface CourseOffer {
   /** True when the viewer already holds a live entitlement over the course. */
   entitled: boolean;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Member surfaces — dashboard + in-course player (SPEC §11 / §14, owned by WP-4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The FE-facing projections the course DASHBOARD and IN-COURSE PLAYER consume
+ * (SPEC §11 / §14) — NOT the raw Drizzle rows. Round-D (Codex-776gg) wires the
+ * web→worker plumbing that produces these: `CourseJourneyService` (@codex/access)
+ * returns them, the content-api journey routes serialise them, and the web
+ * `api.access.*` client hands them to the FE unchanged.
+ *
+ * These are the CONTRACT-HOME copies of the shapes authored for the WP-4 mock in
+ * `apps/web/src/lib/journeys/types.ts`. That FE module is a universal ($lib) type
+ * bag the components/store/seam import directly; this cross-worker mirror lets the
+ * BE packages — which cannot import an apps/web `$lib` module — produce the exact
+ * same shapes. The two are STRUCTURALLY IDENTICAL by design (a future edit to
+ * either must keep them equal), so the Phase-2 seam swap is a no-op for callers.
+ */
+
+/**
+ * Practice content type (SPEC §14.3). Drives the D-E completion boundary:
+ * `video`/`audio` auto-complete on genuine 100% finish; `written` is an explicit
+ * "Mark complete". Mirrors `content.contentType`.
+ */
+export type PracticeContentType = 'video' | 'audio' | 'written';
+
+/** How a `practice_completions` row was written (SPEC §11 / schema CHECK). */
+export type CompletionSource = 'manual' | 'auto';
+
+/** A summary of a course, enough to render chrome + build URLs. */
+export interface JourneyCourseSummary {
+  id: string;
+  slug: string | null;
+  title: string;
+  organizationSlug: string | null;
+}
+
+/**
+ * One practice (a `content` row inside a stage), as the member surfaces read it.
+ * `durationSeconds` is present for media (drives the resume + finish signal).
+ */
+export interface JourneyPractice {
+  contentId: string;
+  slug: string | null;
+  title: string;
+  contentType: PracticeContentType;
+  durationSeconds: number | null;
+  thumbnailUrl: string | null;
+  sortOrder: number;
+}
+
+/** An ordered stage (a "gate") with its concurrent practice pool (SPEC §5). */
+export interface JourneyStage {
+  id: string;
+  name: string;
+  gloss: string | null;
+  sortOrder: number;
+  practices: JourneyPractice[];
+}
+
+/** The current user's enrollment in a course (SPEC §11). */
+export interface JourneyEnrollment {
+  courseId: string;
+  enrolledAt: string;
+  lastActivityAt: string | null;
+  /** Stamped when every required practice is complete. */
+  completedAt: string | null;
+}
+
+/**
+ * A completion the SERVER knows about — the `practice_completions` row, the
+ * SOURCE OF TRUTH for course progress (SPEC §11 / D-E).
+ */
+export interface PracticeCompletionRecord {
+  contentId: string;
+  completedAt: string;
+  source: CompletionSource;
+}
+
+/**
+ * Everything the dashboard needs after the `canEnterCourse` gate passes:
+ * enrollment, the ordered curriculum, and the server-known completions.
+ */
+export interface CourseDashboardData {
+  course: JourneyCourseSummary;
+  enrollment: JourneyEnrollment;
+  stages: JourneyStage[];
+  completions: PracticeCompletionRecord[];
+}
+
+/** One row of the in-course playlist rail (the whole course sequence, flattened). */
+export interface PlaylistEntry {
+  contentId: string;
+  slug: string | null;
+  title: string;
+  contentType: PracticeContentType;
+  stageId: string;
+  stageName: string;
+  sortOrder: number;
+}
+
+/**
+ * Everything the in-course player needs after `canEnterCourse` (+ `canView` for
+ * the stream) pass. `streamingUrl` / `waveformUrl` are signed R2 URLs for media;
+ * `null` for `written` practices (their body renders from `bodyHtml`).
+ */
+export interface InCoursePracticeData {
+  course: JourneyCourseSummary;
+  stage: { id: string; name: string };
+  practice: JourneyPractice;
+  /** Signed HLS URL — media only; null for written / when stream not viewable. */
+  streamingUrl: string | null;
+  waveformUrl: string | null;
+  /** Rendered body HTML for `written` practices; null for media. */
+  bodyHtml: string | null;
+  /** Resume position for media (seconds). */
+  initialProgressSeconds: number;
+  /** The whole course sequence, for the playlist rail + prev/next. */
+  playlist: PlaylistEntry[];
+  /** Server-known completions across the course (hydrates the store). */
+  completions: PracticeCompletionRecord[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public sales-page read-model (SPEC §4/§5/§10 — the WP-3 course-sell surface)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Cross-worker mirror of the FE public sales read-model
+ * (`apps/web/src/lib/page-builder/journey-queries.ts`). The content-api produces
+ * these shapes; the FE `$lib/page-builder` types are the structurally-identical
+ * mirror the renderer consumes (BE packages cannot import an apps/web `$lib`
+ * type — same dual-home pattern as {@link JourneyCourseSummary} ↔
+ * `$lib/journeys/types`). Additive-only against the WP-0 freeze; a change here
+ * MUST keep the FE mirror structurally equal.
+ */
+
+/** One practice on the PUBLIC sales page — no completion/media (public shell). */
+export interface JourneyPracticeView {
+  contentId: string;
+  slug: string | null;
+  title: string;
+  contentType: PracticeContentType;
+  sortOrder: number;
+  /** Completion — dashboard / in-course only; omitted on the public sales page. */
+  completed?: boolean;
+}
+
+/** An ordered stage with its practice pool, as the public sales page reads it. */
+export interface JourneyStageView {
+  id: string;
+  name: string;
+  gloss: string | null;
+  sortOrder: number;
+  practices: JourneyPracticeView[];
+}
+
+/** The course chrome + rollups shown on the sales page (SPEC §5). */
+export interface JourneyCourseView {
+  id: string;
+  slug: string;
+  title: string;
+  kicker: string | null;
+  lede: string | null;
+  status: PageStatus;
+  /** One-off purchase price; null = not sold standalone (§5). */
+  priceCents: number | null;
+  stageCount: number;
+  practiceCount: number;
+}
+
+/** One testimonial rendered by the `proof` section. */
+export interface JourneyTestimonialView {
+  id: string;
+  quote: string;
+  authorName: string;
+  authorContext: string | null;
+  sortOrder: number;
+}
+
+/** A persisted landing page = the editable {@link PageBuilderState} + row identity. */
+export interface JourneyPageRecord extends PageBuilderState {
+  id: string;
+  organizationId: string;
+  publishedAt: string | null;
+}
+
+/** Public sales/landing page envelope (SSR shell+stream). No `canView` on the shell. */
+export interface JourneyCoursePage {
+  page: JourneyPageRecord;
+  course: JourneyCourseView;
+  stages: JourneyStageView[];
+  testimonials: JourneyTestimonialView[];
+}
+
+/**
+ * One public preview clip (SPEC §10). The sales page shows the existing 30s
+ * `preview.m3u8` — resolved from `mediaItems.hlsPreviewKey` to a public CDN URL,
+ * NO signing, NO `canView` (HARDENING §E course-sell row). Structurally mirrors
+ * the FE `PreviewMedia` (`$lib/page-builder/render`).
+ */
+export interface CourseSellPreviewClip {
+  /** HLS manifest URL for the 30s public preview clip. */
+  playlistUrl: string;
+  /** Optional decorative poster shown before play. */
+  posterUrl: string | null;
+  /** Advisory duration (seconds) for a "N sec preview" affordance. */
+  durationSeconds: number | null;
+}
+
+/**
+ * The STREAMED sell-preview payload of the sales page: the public intro-film and
+ * reel clips. Either clip is null when the course has no such media (or its
+ * preview has not transcoded). Mirrors the FE `SellPreview`.
+ */
+export interface CourseSellPreview {
+  /** The intro-film clip (the `introVideo` section → `courses.introVideoMediaId`). */
+  intro: CourseSellPreviewClip | null;
+  /** The practice-preview clip (the `reel` section → `courses.previewVideoMediaId`). */
+  reel: CourseSellPreviewClip | null;
+}
