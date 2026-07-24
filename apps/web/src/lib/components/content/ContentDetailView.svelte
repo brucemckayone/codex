@@ -238,10 +238,10 @@
     !hasAccess && requiresSubscription && !subscriptionCoversContent
   );
   const isFollowersOnly = $derived(
-    !hasAccess && content.accessType === 'followers'
+    !hasAccess && content.isFollowerGated === true
   );
   const isTeamOnly = $derived(
-    !hasAccess && content.accessType === 'team'
+    !hasAccess && content.isTeamOnly === true
   );
 
   // Follow state — read from the localStorage-backed store hydrated by the

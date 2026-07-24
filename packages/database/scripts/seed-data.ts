@@ -112,7 +112,7 @@ async function seedData() {
     const db = tx as unknown as typeof dbWs;
     await seedUsers(db);
     await seedOrganizations(db);
-    // Tiers MUST be seeded before content so `content.minimumTierId` FK
+    // Tiers MUST be seeded before content so `content.includedInTierId` FK
     // targets exist at insert time. Historically this ran inside
     // `seedCommerce()` after content, which forced a post-hoc update pass
     // that silently missed hybrid (paid + tier) rows. See Codex-32nb5.
@@ -132,7 +132,7 @@ async function seedData() {
   await seedR2Files();
 
   // Step 5: Validate post-seed invariants (access-mode truth-table coverage
-  // and (accessType, minimumTierId) coupling). Throws on drift so CI catches
+  // over the SPEC §6.1 policy flags). Throws on drift so CI catches
   // regressions in the seed constants before they reach local dev.
   console.log('\n  [5/5] Validating seed invariants...');
   await validateContentSeed(dbWs);

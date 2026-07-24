@@ -127,28 +127,86 @@ const DESCRIPTIONS: Record<string, string> = {
     'An essay on sound and vibration as healing modalities. The science and the sacred behind bowls, drums, and voice.',
 };
 
+/**
+ * Translate a seed constant's authoring shape (single `accessType` + price +
+ * minimum tier) into the SPEC §6.1 policy flags the `content` table now stores
+ * (WP-1 hard-replaced the `accessType`/`minimumTierId` columns). Mirrors the
+ * legacy CHECK mapping (HARDENING §H2) and the `ContentService.create`
+ * normalization, so seeded rows behave identically to app-created content.
+ *
+ * `includedInTierId` is populated only for tier-bearing modes (subscribers /
+ * hybrid paid), matching the former clamp — a nonsensical (mode, tier) pair
+ * can never land even if the constants drift.
+ */
+function toAccessFlags(c: {
+  accessType?: string;
+  priceCents?: number | null;
+  minimumTierId?: string | null;
+  slug?: string;
+}): {
+  isFree: boolean;
+  isPurchasable: boolean;
+  priceCents: number | null;
+  includedInTierId: string | null;
+  courseOnly: boolean;
+  isFollowerGated: boolean;
+  isTeamOnly: boolean;
+} {
+  const accessType = c.accessType ?? 'free';
+  const price = c.priceCents ?? null;
+  const tierId = c.minimumTierId ?? null;
+  const base = {
+    isFree: false,
+    isPurchasable: false,
+    priceCents: null as number | null,
+    includedInTierId: null as string | null,
+    courseOnly: false,
+    isFollowerGated: false,
+    isTeamOnly: false,
+  };
+  switch (accessType) {
+    case 'paid':
+      // Purchasable; a non-null tier makes it a hybrid (also tier-included).
+      return {
+        ...base,
+        isPurchasable: true,
+        priceCents: price,
+        includedInTierId: tierId,
+      };
+    case 'subscribers':
+      // Fail-closed: subscriber gating REQUIRES a concrete tier — the flag model
+      // has no "any-subscriber / no specific tier" state. Without a tier this
+      // would author a zero-gate non-free row (isFree:false, every gate off)
+      // that the resolver treats as PUBLIC. Refuse loudly so seed-constant drift
+      // can never mint a public row (mirrors `accessSelectionToFlags` in the
+      // remote form + the `createContentSchema` refine). An optional price makes
+      // it ALSO purchasable.
+      if (!tierId) {
+        throw new Error(
+          `Seed content "${c.slug ?? '(unknown)'}" is accessType 'subscribers' but has no minimumTierId — subscriber content requires a concrete tier.`
+        );
+      }
+      return {
+        ...base,
+        includedInTierId: tierId,
+        isPurchasable: (price ?? 0) > 0,
+        priceCents: (price ?? 0) > 0 ? price : null,
+      };
+    case 'followers':
+      return { ...base, isFollowerGated: true };
+    case 'team':
+      return { ...base, isTeamOnly: true };
+    default:
+      return { ...base, isFree: true };
+  }
+}
+
 export async function seedContent(db: typeof DbClient) {
   const items = Object.values(CONTENT);
 
   await db.insert(schema.content).values(
     items.map((c) => {
-      const accessType =
-        'accessType' in c ? (c as { accessType: string }).accessType : 'free';
-
-      // Defense-in-depth clamp mirroring the service-layer normalization
-      // in `ContentService.create/update` (commit 848944eb). `minimumTierId`
-      // is only meaningful for `subscribers` (required) and `paid` (optional,
-      // hybrid). For any other accessType we force null regardless of what
-      // the seed constants declare, so a nonsensical (accessType, tier) pair
-      // can never land in the DB even if the constants drift.
-      const rawTierId =
-        'minimumTierId' in c
-          ? (c as { minimumTierId: string | null }).minimumTierId
-          : null;
-      const minimumTierId =
-        accessType === 'subscribers' || accessType === 'paid'
-          ? (rawTierId ?? null)
-          : null;
+      const accessFlags = toAccessFlags(c);
 
       // Optional per-item publish offset (days ago). Items without it fall
       // back to the shared 7-days-ago constant. Lets the expanded catalogue
@@ -185,9 +243,7 @@ export async function seedContent(db: typeof DbClient) {
               : 'tutorials',
         featured: FEATURED_SLUGS.has(c.slug),
         tags: ['seed-data', c.contentType],
-        accessType,
-        priceCents: c.priceCents,
-        minimumTierId,
+        ...accessFlags,
         status: c.status,
         publishedAt:
           c.status === 'published'

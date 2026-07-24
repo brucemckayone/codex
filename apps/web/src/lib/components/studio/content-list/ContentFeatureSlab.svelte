@@ -24,6 +24,7 @@
   } from '$lib/components/ui/Icon';
   import Spinner from '$lib/components/ui/Feedback/Spinner/Spinner.svelte';
   import { formatRelativeTime } from '$lib/utils/format';
+  import { deriveContentAccessKind } from '$lib/utils/content-access';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -33,6 +34,10 @@
   }
 
   const { item, publishing = false, onPublishToggle }: Props = $props();
+
+  // Single display kind for the Access meta cell + its `data-access` selector,
+  // collapsed from the SPEC §6.1 policy flags (WP-1).
+  const accessKind = $derived(deriveContentAccessKind(item));
 
   const typeMeta = $derived.by(() => {
     switch (item.contentType) {
@@ -117,8 +122,8 @@
       {/if}
       <div class="meta-item">
         <dt class="meta-label">Access</dt>
-        <dd class="meta-value meta-access" data-access={item.accessType}>
-          {item.accessType}
+        <dd class="meta-value meta-access" data-access={accessKind}>
+          {accessKind}
         </dd>
       </div>
     </dl>

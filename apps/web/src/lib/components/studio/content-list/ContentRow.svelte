@@ -24,6 +24,7 @@
   } from '$lib/components/ui/Icon';
   import Spinner from '$lib/components/ui/Feedback/Spinner/Spinner.svelte';
   import { formatRelativeTime } from '$lib/utils/format';
+  import { deriveContentAccessKind } from '$lib/utils/content-access';
   import * as m from '$paraglide/messages';
 
   interface Props {
@@ -34,6 +35,10 @@
   }
 
   const { ordinal, item, publishing = false, onPublishToggle }: Props = $props();
+
+  // Collapse the SPEC §6.1 policy flags to the single display kind used for
+  // the meta-chip label + its `data-access` CSS selector (WP-1).
+  const accessKind = $derived(deriveContentAccessKind(item));
 
   const typeMeta = $derived.by(() => {
     switch (item.contentType) {
@@ -65,12 +70,7 @@
     }
   });
 
-  const isGated = $derived(
-    item.accessType === 'paid' ||
-      item.accessType === 'subscribers' ||
-      item.accessType === 'followers' ||
-      item.accessType === 'team'
-  );
+  const isGated = $derived(accessKind !== 'free');
 </script>
 
 <article class="row" data-status={statusVariant}>
@@ -103,11 +103,11 @@
       {#if item.category}
         <li class="meta-chip meta-chip--muted">{item.category}</li>
       {/if}
-      <li class="meta-chip meta-chip--access" data-access={item.accessType}>
+      <li class="meta-chip meta-chip--access" data-access={accessKind}>
         {#if isGated}
           <LockIcon size={10} />
         {/if}
-        <span>{item.accessType}</span>
+        <span>{accessKind}</span>
       </li>
     </ul>
   </div>

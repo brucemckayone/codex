@@ -14,6 +14,7 @@
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
+  import { deriveContentAccessKind } from '$lib/utils/content-access';
   import { CreatorExploreBanner } from '$lib/components/ui/CreatorCard';
   import { Pagination } from '$lib/components/ui/Pagination';
   import { getContentCollection, hydrateCollection, useLiveQuery } from '$lib/collections';
@@ -495,10 +496,10 @@
             amount: item.priceCents,
             currency: 'GBP',
           } : null}
-          contentAccessType={item.accessType}
-          included={access.isIncluded(item as { accessType: string; minimumTierId: string | null })}
+          contentAccessType={deriveContentAccessKind(item)}
+          included={access.isIncluded(item)}
           isFollower={access.isFollowing}
-          tierName={access.getTierName(item as { accessType: string; minimumTierId: string | null })}
+          tierName={access.getTierName(item)}
           category={item.category ?? null}
           featured={item.featured ?? false}
         />

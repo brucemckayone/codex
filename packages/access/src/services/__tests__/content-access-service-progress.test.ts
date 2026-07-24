@@ -130,12 +130,20 @@ const orgId = 'org_xyz';
 const contentId = 'content_123';
 const revocationKey = `revoked:user:${userId}:${orgId}`;
 
+// Subscriber-gating is ALWAYS a concrete tier in the flag model (no
+// "any-tier" state). Use the tier the active subscriber sits on (sortOrder
+// 10) so any active subscriber to this org qualifies.
+const tierId = 'tier_pro';
+
 const subscribersContent = {
   id: contentId,
   organizationId: orgId,
-  accessType: 'subscribers',
+  isFree: false,
+  isPurchasable: false,
   priceCents: null,
-  minimumTierId: null,
+  includedInTierId: tierId,
+  isFollowerGated: false,
+  isTeamOnly: false,
 };
 
 const progressInput: SavePlaybackProgressInput = {
@@ -165,8 +173,10 @@ describe('ContentAccessService.savePlaybackProgress — access gate', () => {
   it('allows a user with an active subscription to save progress', async () => {
     // content row — subscriber-gated, in org
     stub.mocks.content.findFirst.mockResolvedValue(subscribersContent);
-    // active subscription exists (any tier ok because minimumTierId = null)
+    // active subscription exists; the content's included tier resolves to
+    // sortOrder 10 (== the subscriber's tier), so access is granted.
     stub.mocks.subscriptions.findFirst.mockResolvedValue(activeSub);
+    stub.mocks.subscriptionTiers.findFirst.mockResolvedValue({ sortOrder: 10 });
 
     const { service } = buildService(stub);
 
@@ -299,9 +309,12 @@ describe('ContentAccessService.savePlaybackProgress — access gate', () => {
     const followersContent = {
       id: contentId,
       organizationId: orgId,
-      accessType: 'followers',
+      isFree: false,
+      isPurchasable: false,
       priceCents: null,
-      minimumTierId: null,
+      includedInTierId: null,
+      isFollowerGated: true,
+      isTeamOnly: false,
     };
 
     it('allows a subscriber who has NOT followed the org (new grant path)', async () => {
