@@ -16,7 +16,7 @@
   import type { PageStatus } from '@codex/shared-types';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { CompassIcon, PlusIcon } from '$lib/components/ui/Icon';
-  import { listJourneys } from '$lib/remote/journeys.remote';
+  import { listJourneys, listJourneyRevenue } from '$lib/remote/journeys.remote';
 
   const { data } = $props();
 
@@ -43,6 +43,14 @@
 
   const items = $derived(journeysQuery.current ?? []);
   const loading = $derived(journeysQuery.loading);
+
+  // Authoritative per-journey revenue, keyed by landing-page id. A SEPARATE
+  // query (independent of the status filter) so the row list paints immediately
+  // and the badge streams in — the figure `listJourneys` omits by design.
+  const revenueQuery = $derived(
+    listJourneyRevenue({ organizationId: data.org.id })
+  );
+  const revenue = $derived(revenueQuery.current ?? {});
 
   const gbp = new Intl.NumberFormat('en-GB', {
     style: 'currency',
@@ -118,6 +126,7 @@
     {:else if items.length > 0}
       <ol class="journeys__rows" role="list">
         {#each items as j (j.id)}
+          {@const rev = money(revenue[j.id] ?? null)}
           <li class="journey-row">
             <div class="journey-row__main">
               <div class="journey-row__title-line">
@@ -140,8 +149,8 @@
                   <span>{j.enrolledCount} enrolled</span>
                   <span aria-hidden="true">·</span>
                 {/if}
-                {#if money(j.revenueCents)}
-                  <span>{money(j.revenueCents)}</span>
+                {#if rev}
+                  <span>{rev} · 30d</span>
                   <span aria-hidden="true">·</span>
                 {/if}
                 <span class="journey-row__updated">Updated {when(j.updatedAt)}</span>
