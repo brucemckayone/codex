@@ -65,6 +65,25 @@ interface StubDb {
 }
 
 /**
+ * Chainable empty `.select()` stub. The collapsed resolver (Codex-2pryk.2.3)
+ * reads the `entitlements` / course tables via `db.select(...).from(...)` on the
+ * tier/paid deny paths; these unit mocks seed no such rows, so every additive
+ * read resolves to [] and the grant/deny OUTCOMES are unchanged.
+ */
+function emptySelect() {
+  const builder = {
+    from: () => builder,
+    innerJoin: () => builder,
+    leftJoin: () => builder,
+    where: () => builder,
+    limit: () => builder,
+    // biome-ignore lint/suspicious/noThenProperty: intentional thenable — mimics Drizzle's awaitable query builder so `await db.select()...` resolves to [].
+    then: (resolve: (rows: never[]) => unknown) => resolve([]),
+  };
+  return builder;
+}
+
+/**
  * Build a DB stub where `db.transaction(fn)` invokes the callback with a
  * transaction surface that exposes the same `.query.<table>.findFirst`
  * mocks. The real `getStreamingUrl` passes the `tx` argument (a
@@ -80,7 +99,7 @@ function createStubDb(): StubDb {
     subscriptionTiers: { findFirst: vi.fn() },
   };
 
-  const tx = { query: mocks };
+  const tx = { query: mocks, select: emptySelect };
 
   // Drizzle transaction signature: `transaction(callback, options?)`. We
   // only care about the callback — the isolationLevel/accessMode options
@@ -100,6 +119,7 @@ function buildService(stub: StubDb) {
     // transaction revocation gate, which we skip by omitting `revocation`.
     query: stub.mocks,
     transaction: stub.transaction,
+    select: emptySelect,
   } as unknown as ServiceDb;
 
   const signer = {

@@ -24,10 +24,15 @@ import {
 import { ContentService, MediaItemService } from '@codex/content';
 import {
   content,
+  courseStages,
+  courses,
+  courseTierAccess,
+  entitlements,
   organizationFollowers,
   organizationMemberships,
   organizations,
   purchases,
+  stagePractices,
   stripeConnectAccounts,
   subscriptions,
   subscriptionTiers,
@@ -3233,6 +3238,505 @@ describe('ContentAccessService Integration', () => {
           expirySeconds: 3600,
         });
         expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
+      });
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Entitlement resolver — canView / canEnterCourse / canEnterCoursesBatch
+  // (Codex-2pryk.2.3 · WP-2). The collapsed resolver both content routes gate
+  // through. The web `content-detail.ts` seam routes BOTH the org route
+  // (`_org/[slug]/(space)/content/[contentSlug]`) and the creator route
+  // (`_creators/[username]/content/[contentSlug]`) to the SAME worker
+  // `getStreamingUrl` (→ `canView`), so proving grant/deny on org-scoped
+  // content (org-route surface) AND on personal content (creator-route
+  // surface) proves route parity: a partial rollout can't leak on one URL what
+  // the other denies (J4). Every gated case asserts BOTH `canView` (boolean)
+  // and `getStreamingUrl` (throwing) so they can never disagree.
+  // ───────────────────────────────────────────────────────────────────────
+  describe('Entitlement resolver (canView / canEnterCourse) — Codex-2pryk.2.3', () => {
+    /** Create a published video, then patch it to the target access policy. */
+    async function makeContent(opts: {
+      slug: string;
+      organizationId: string | null;
+      creator?: string;
+      policy: Partial<{
+        isFree: boolean;
+        isPurchasable: boolean;
+        priceCents: number | null;
+        includedInTierId: string | null;
+        courseOnly: boolean;
+        isFollowerGated: boolean;
+        isTeamOnly: boolean;
+      }>;
+    }): Promise<string> {
+      const creator = opts.creator ?? userId;
+      const media = await mediaService.create(
+        {
+          title: `${opts.slug} Video`,
+          mediaType: 'video',
+          mimeType: 'video/mp4',
+          r2Key: getOriginalKey(
+            creator,
+            crypto.randomUUID(),
+            `${opts.slug}.mp4`
+          ),
+          fileSizeBytes: 1024,
+        },
+        creator
+      );
+      await mediaService.markAsReady(
+        media.id,
+        {
+          hlsMasterPlaylistKey: `hls/${opts.slug}/master.m3u8`,
+          thumbnailKey: `thumbnails/${opts.slug}.jpg`,
+          durationSeconds: 120,
+        },
+        creator
+      );
+      // Create as free/public (clears the publish gate), then patch the policy.
+      const item = await contentService.create(
+        {
+          ...(opts.organizationId
+            ? { organizationId: opts.organizationId }
+            : {}),
+          title: `${opts.slug} Content`,
+          slug: createUniqueSlug(opts.slug),
+          contentType: 'video',
+          mediaItemId: media.id,
+          visibility: 'public',
+          priceCents: 0,
+          tags: [],
+        },
+        creator
+      );
+      await contentService.publish(item.id, creator);
+      await db
+        .update(content)
+        .set({
+          organizationId: opts.organizationId,
+          isFree: opts.policy.isFree ?? false,
+          isPurchasable: opts.policy.isPurchasable ?? false,
+          priceCents: opts.policy.priceCents ?? null,
+          includedInTierId: opts.policy.includedInTierId ?? null,
+          courseOnly: opts.policy.courseOnly ?? false,
+          isFollowerGated: opts.policy.isFollowerGated ?? false,
+          isTeamOnly: opts.policy.isTeamOnly ?? false,
+        })
+        .where(eq(content.id, item.id));
+      return item.id;
+    }
+
+    // Tiers are unique on (organizationId, sortOrder); these tests reuse the
+    // shared org, so hand out a distinct sortOrder per tier from a counter.
+    let tierSortSeq = 100;
+
+    /** Seed an org tier and return its id. */
+    async function seedTier(orgId: string): Promise<string> {
+      const [tier] = await db
+        .insert(subscriptionTiers)
+        .values(
+          createTestTierInput(orgId, {
+            name: `Resolver Tier ${crypto.randomUUID().slice(0, 6)}`,
+            sortOrder: ++tierSortSeq,
+          })
+        )
+        .returning();
+      if (!tier) throw new Error('Failed to seed tier');
+      return tier.id;
+    }
+
+    /** Seed a published course + one stage; returns both ids. */
+    async function makeCourse(
+      orgId: string,
+      creator = userId
+    ): Promise<{ courseId: string; stageId: string }> {
+      const [course] = await db
+        .insert(courses)
+        .values({
+          organizationId: orgId,
+          creatorId: creator,
+          slug: createUniqueSlug('course'),
+          title: 'Resolver Test Course',
+          status: 'published',
+        })
+        .returning();
+      if (!course) throw new Error('Failed to seed course');
+      const [stage] = await db
+        .insert(courseStages)
+        .values({ courseId: course.id, name: 'Stage 1', sortOrder: 1 })
+        .returning();
+      if (!stage) throw new Error('Failed to seed stage');
+      return { courseId: course.id, stageId: stage.id };
+    }
+
+    async function linkPractice(stageId: string, contentId: string) {
+      await db
+        .insert(stagePractices)
+        .values({ stageId, contentId, sortOrder: 0 });
+    }
+
+    async function grantCourse(
+      uid: string,
+      orgId: string,
+      courseId: string,
+      source:
+        | 'course_purchase'
+        | 'course_subscription'
+        | 'grant' = 'course_purchase',
+      overrides: { revokedAt?: Date; expiresAt?: Date } = {}
+    ) {
+      await db.insert(entitlements).values({
+        userId: uid,
+        organizationId: orgId,
+        courseId,
+        source,
+        ...overrides,
+      });
+    }
+
+    async function grantContent(
+      uid: string,
+      orgId: string,
+      contentId: string,
+      source: 'content_purchase' | 'grant' = 'content_purchase'
+    ) {
+      await db
+        .insert(entitlements)
+        .values({ userId: uid, organizationId: orgId, contentId, source });
+    }
+
+    async function expectStreamDenied(uid: string, contentId: string) {
+      await expect(
+        accessService.getStreamingUrl(uid, { contentId, expirySeconds: 3600 })
+      ).rejects.toThrow(AccessDeniedError);
+    }
+
+    async function expectStreamGranted(uid: string, contentId: string) {
+      const result = await accessService.getStreamingUrl(uid, {
+        contentId,
+        expirySeconds: 3600,
+      });
+      expect(result.streamingUrl).toContain('/hls/master.m3u8?token=');
+    }
+
+    // ── canView — ORG route (org-scoped content) ─────────────────────────
+
+    describe('canView — org route (org-scoped content)', () => {
+      it('tier-gated: DENIES a non-subscriber, GRANTS an at-tier subscriber (canView + getStreamingUrl)', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const tierId = await seedTier(organizationId);
+        const contentId = await makeContent({
+          slug: 'org-tier',
+          organizationId,
+          policy: { includedInTierId: tierId },
+        });
+
+        // NEGATIVE — no subscription.
+        const [outsider] = await seedTestUsers(db, 1);
+        expect(await accessService.canView(outsider, contentId)).toBe(false);
+        await expectStreamDenied(outsider, contentId);
+
+        // POSITIVE — active subscription at the tier.
+        const [subscriber] = await seedTestUsers(db, 1);
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(subscriber, organizationId, tierId, {
+            status: 'active',
+          })
+        );
+        expect(await accessService.canView(subscriber, contentId)).toBe(true);
+        await expectStreamGranted(subscriber, contentId);
+      });
+
+      it('courseOnly: SUPPRESSES the free path for a non-owner, GRANTS via an owned course', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        // courseOnly wins even though isFree=true — proves suppression.
+        const contentId = await makeContent({
+          slug: 'org-courseonly',
+          organizationId,
+          policy: { courseOnly: true, isFree: true },
+        });
+        const { courseId, stageId } = await makeCourse(organizationId);
+        await linkPractice(stageId, contentId);
+
+        // NEGATIVE — user holds no entitlement over the containing course.
+        const [outsider] = await seedTestUsers(db, 1);
+        expect(await accessService.canView(outsider, contentId)).toBe(false);
+        await expectStreamDenied(outsider, contentId);
+
+        // POSITIVE — a course purchase reaches the shared practice.
+        const [owner] = await seedTestUsers(db, 1);
+        await grantCourse(owner, organizationId, courseId, 'course_purchase');
+        expect(await accessService.canView(owner, contentId)).toBe(true);
+        await expectStreamGranted(owner, contentId);
+      });
+
+      it('follower-gated: DENIES a non-follower, GRANTS a follower (canView + getStreamingUrl)', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const contentId = await makeContent({
+          slug: 'org-follower',
+          organizationId,
+          policy: { isFollowerGated: true },
+        });
+
+        const [stranger] = await seedTestUsers(db, 1);
+        expect(await accessService.canView(stranger, contentId)).toBe(false);
+        await expectStreamDenied(stranger, contentId);
+
+        const [follower] = await seedTestUsers(db, 1);
+        await db
+          .insert(organizationFollowers)
+          .values({ userId: follower, organizationId });
+        expect(await accessService.canView(follower, contentId)).toBe(true);
+        await expectStreamGranted(follower, contentId);
+      });
+
+      it('management role bypasses courseOnly (sees all org content)', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const contentId = await makeContent({
+          slug: 'org-courseonly-mgmt',
+          organizationId,
+          policy: { courseOnly: true },
+        });
+        const { stageId } = await makeCourse(organizationId);
+        await linkPractice(stageId, contentId);
+
+        const [manager] = await seedTestUsers(db, 1);
+        await db.insert(organizationMemberships).values({
+          userId: manager,
+          organizationId,
+          role: 'admin',
+          status: 'active',
+        });
+        expect(await accessService.canView(manager, contentId)).toBe(true);
+        await expectStreamGranted(manager, contentId);
+      });
+    });
+
+    // ── canView — CREATOR route (personal content, orgId = null) ─────────
+
+    describe('canView — creator route (personal content, no org)', () => {
+      it('purchasable personal content: DENIES without purchase, GRANTS with purchase', async () => {
+        // NEGATIVE — no purchase.
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+        const contentId = await makeContent({
+          slug: 'personal-paid',
+          organizationId: null,
+          policy: { isPurchasable: true, priceCents: 1500 },
+        });
+        const [buyer] = await seedTestUsers(db, 1);
+        expect(await accessService.canView(buyer, contentId)).toBe(false);
+        await expectStreamDenied(buyer, contentId);
+
+        // POSITIVE — purchase verified (PurchaseService is the authority).
+        mockPurchaseService.verifyPurchase.mockResolvedValue(true);
+        expect(await accessService.canView(buyer, contentId)).toBe(true);
+        await expectStreamGranted(buyer, contentId);
+      });
+    });
+
+    // ── canView — entitlements-table additive grant (the new source) ─────
+
+    describe('canView — stored entitlements grant (WP-6 forward-compat)', () => {
+      it('a content_purchase entitlement grants tier-gated content with no subscription', async () => {
+        mockPurchaseService.verifyPurchase.mockClear();
+        mockPurchaseService.verifyPurchase.mockResolvedValue(false);
+
+        const tierId = await seedTier(organizationId);
+        const contentId = await makeContent({
+          slug: 'entitlement-grant',
+          organizationId,
+          policy: { includedInTierId: tierId },
+        });
+
+        const [holder] = await seedTestUsers(db, 1);
+        // No subscription, no purchase — denied first (baseline).
+        expect(await accessService.canView(holder, contentId)).toBe(false);
+
+        // Stored entitlement is unioned in → now granted.
+        await grantContent(
+          holder,
+          organizationId,
+          contentId,
+          'content_purchase'
+        );
+        expect(await accessService.canView(holder, contentId)).toBe(true);
+        await expectStreamGranted(holder, contentId);
+      });
+    });
+
+    // ── canEnterCourse ───────────────────────────────────────────────────
+
+    describe('canEnterCourse', () => {
+      it('grants entry on a course_purchase entitlement', async () => {
+        const { courseId } = await makeCourse(organizationId);
+        const [buyer] = await seedTestUsers(db, 1);
+        expect(await accessService.canEnterCourse(buyer, courseId)).toBe(false);
+        await grantCourse(buyer, organizationId, courseId, 'course_purchase');
+        expect(await accessService.canEnterCourse(buyer, courseId)).toBe(true);
+      });
+
+      it('grants entry via a derived tier (course_tier_access + active subscription)', async () => {
+        const tierId = await seedTier(organizationId);
+        const { courseId } = await makeCourse(organizationId);
+        await db.insert(courseTierAccess).values({ courseId, tierId });
+
+        // Subscriber to the granting tier — derived, no stored row.
+        const [subscriber] = await seedTestUsers(db, 1);
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(subscriber, organizationId, tierId, {
+            status: 'active',
+          })
+        );
+        expect(await accessService.canEnterCourse(subscriber, courseId)).toBe(
+          true
+        );
+
+        // A user with no subscription to that tier is denied.
+        const [outsider] = await seedTestUsers(db, 1);
+        expect(await accessService.canEnterCourse(outsider, courseId)).toBe(
+          false
+        );
+      });
+
+      it('denies entry with no entitlement, and denies anonymous (null user)', async () => {
+        const { courseId } = await makeCourse(organizationId);
+        const [stranger] = await seedTestUsers(db, 1);
+        expect(await accessService.canEnterCourse(stranger, courseId)).toBe(
+          false
+        );
+        expect(await accessService.canEnterCourse(null, courseId)).toBe(false);
+      });
+
+      it('denies entry on a revoked or expired grant (instant revocation)', async () => {
+        const { courseId: revokedCourse } = await makeCourse(organizationId);
+        const { courseId: expiredCourse } = await makeCourse(organizationId);
+        const [user] = await seedTestUsers(db, 1);
+
+        await grantCourse(
+          user,
+          organizationId,
+          revokedCourse,
+          'course_purchase',
+          {
+            revokedAt: new Date(),
+          }
+        );
+        await grantCourse(
+          user,
+          organizationId,
+          expiredCourse,
+          'course_purchase',
+          {
+            expiresAt: new Date(Date.now() - 60_000),
+          }
+        );
+
+        expect(await accessService.canEnterCourse(user, revokedCourse)).toBe(
+          false
+        );
+        expect(await accessService.canEnterCourse(user, expiredCourse)).toBe(
+          false
+        );
+      });
+    });
+
+    // ── canEnterCoursesBatch — correctness + no-N+1 ──────────────────────
+
+    describe('canEnterCoursesBatch', () => {
+      it('resolves a mix of entitled and non-entitled courses', async () => {
+        const tierId = await seedTier(organizationId);
+        const purchased = await makeCourse(organizationId);
+        const tierGranted = await makeCourse(organizationId);
+        const locked = await makeCourse(organizationId);
+        await db.insert(courseTierAccess).values({
+          courseId: tierGranted.courseId,
+          tierId,
+        });
+
+        const [user] = await seedTestUsers(db, 1);
+        await grantCourse(
+          user,
+          organizationId,
+          purchased.courseId,
+          'course_purchase'
+        );
+        await db.insert(subscriptions).values(
+          createTestSubscriptionInput(user, organizationId, tierId, {
+            status: 'active',
+          })
+        );
+
+        const map = await accessService.canEnterCoursesBatch(user, [
+          purchased.courseId,
+          tierGranted.courseId,
+          locked.courseId,
+        ]);
+        expect(map.get(purchased.courseId)).toBe(true);
+        expect(map.get(tierGranted.courseId)).toBe(true);
+        expect(map.get(locked.courseId)).toBe(false);
+      });
+
+      it('empty input and anonymous user return all-false without querying', async () => {
+        const [user] = await seedTestUsers(db, 1);
+        const empty = await accessService.canEnterCoursesBatch(user, []);
+        expect(empty.size).toBe(0);
+        const anon = await accessService.canEnterCoursesBatch(null, [
+          crypto.randomUUID(),
+        ]);
+        expect([...anon.values()].every((v) => v === false)).toBe(true);
+      });
+
+      it('issues a BOUNDED query count independent of N (no N+1 on Neon HTTP)', async () => {
+        // Wrap the db so every `.select()` (one per SQL round-trip in the batch
+        // resolver) is counted; the count must not scale with N.
+        const counts = { select: 0 };
+        const countingDb = new Proxy(db, {
+          get(target, prop, receiver) {
+            if (prop === 'select') {
+              return (...args: unknown[]) => {
+                counts.select++;
+                return (
+                  target.select as unknown as (...a: unknown[]) => unknown
+                )(...args);
+              };
+            }
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        }) as typeof db;
+
+        const batchService = new ContentAccessService({
+          db: countingDb,
+          environment: 'test',
+          r2: r2Client,
+          obs: new ObservabilityClient('content-access-test', 'test'),
+          purchaseService: mockPurchaseService as unknown as PurchaseService,
+        });
+
+        const [user] = await seedTestUsers(db, 1);
+        const many = Array.from({ length: 25 }, () => crypto.randomUUID());
+
+        counts.select = 0;
+        await batchService.canEnterCoursesBatch(user, many);
+        const selectsForMany = counts.select;
+
+        counts.select = 0;
+        await batchService.canEnterCoursesBatch(user, [crypto.randomUUID()]);
+        const selectsForOne = counts.select;
+
+        // Constant round-trips (two SELECTs) regardless of course count.
+        expect(selectsForMany).toBe(selectsForOne);
+        expect(selectsForMany).toBeLessThanOrEqual(2);
       });
     });
   });
