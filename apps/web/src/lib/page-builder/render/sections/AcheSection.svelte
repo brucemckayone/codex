@@ -56,7 +56,7 @@
     z-index: -1;
     left: 50%;
     top: 50%;
-    width: min(78vw, 620px);
+    width: min(78vw, 38.75rem);
     aspect-ratio: 1;
     transform: translate(-50%, -50%);
     border-radius: var(--radius-full);

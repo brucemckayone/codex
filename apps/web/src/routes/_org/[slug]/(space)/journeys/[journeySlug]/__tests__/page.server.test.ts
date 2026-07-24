@@ -15,6 +15,7 @@
  * those); mirrors the explore page-load test precedent.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { CACHE_HEADERS } from '$lib/server/cache';
 import { MOCK_COURSE_PAGE, MOCK_SELL_PREVIEW } from '../journey-page.mock';
 
 const { getCoursePageMock, resolveSellPreviewMock } = vi.hoisted(() => ({
@@ -27,12 +28,9 @@ vi.mock('../journey-data', () => ({
   resolveSellPreview: resolveSellPreviewMock,
 }));
 
-vi.mock('$lib/server/cache', () => ({
-  CACHE_HEADERS: {
-    PRIVATE: { 'cache-control': 'private, no-store' },
-    DYNAMIC_PUBLIC: { 'cache-control': 'public, max-age=60' },
-  },
-}));
+// NOTE: `$lib/server/cache` is intentionally NOT mocked — the assertion below
+// locks the sell page's cache decision against the REAL `CACHE_HEADERS.PRIVATE`
+// constant, so a regression to a shared-cacheable header fails this test.
 
 type LoadInput = Parameters<typeof import('../+page.server').load>[0];
 
@@ -75,14 +73,23 @@ describe('journey sales +page.server load', () => {
     expect(data.orgSlug).toBe('acme');
   });
 
-  it('registers the version-cache dependency and commits a cache header', async () => {
+  it('registers the version-cache dependency and locks the PRIVATE (never shared-cacheable) header', async () => {
     const { load } = await import('../+page.server');
     const { event, setHeaders, depends } = makeEvent('rootwork');
 
     await load(event);
 
     expect(depends).toHaveBeenCalledWith('cache:versions');
+    // The sell shell is auth-varying (the org layout injects `user`) and shared
+    // caches key by URL, not Cookie — so the response MUST be private and never
+    // public / s-maxage (the content-detail bug class). Assert the exact header
+    // the load commits, against the REAL constant, so a regression to a
+    // shared-cacheable header fails here.
     expect(setHeaders).toHaveBeenCalledTimes(1);
+    expect(setHeaders).toHaveBeenCalledWith(CACHE_HEADERS.PRIVATE);
+    const [[headers]] = setHeaders.mock.calls;
+    expect(headers['Cache-Control']).toBe('private, no-cache');
+    expect(headers['Cache-Control']).not.toMatch(/public|s-maxage/);
   });
 
   it('streams the sell-preview as a promise (off the critical path)', async () => {

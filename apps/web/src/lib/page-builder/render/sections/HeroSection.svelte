@@ -65,7 +65,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: min(88svh, 720px);
+    min-height: min(88svh, 45rem);
     padding-block: var(--space-16);
     overflow: hidden;
     text-align: center;
@@ -77,7 +77,7 @@
     z-index: -1;
     left: 50%;
     top: 42%;
-    width: min(90vw, 780px);
+    width: min(90vw, 48.75rem);
     aspect-ratio: 1;
     transform: translate(-50%, -50%);
     border-radius: var(--radius-full);
