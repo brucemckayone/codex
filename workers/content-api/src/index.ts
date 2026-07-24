@@ -36,6 +36,7 @@ import {
 import categoriesRoutes from './routes/categories';
 import contentRoutes from './routes/content';
 import contentAccessRoutes from './routes/content-access';
+import journeyInsightsRoutes from './routes/journey-insights';
 import journeysRoutes from './routes/journeys';
 import mediaRoutes from './routes/media';
 import publicRoutes from './routes/public';
@@ -98,6 +99,9 @@ app.route('/api/content', contentRoutes);
 app.route('/api/categories', categoriesRoutes);
 app.route('/api/media', mediaRoutes);
 app.route('/api/access', contentAccessRoutes);
+// Studio insights mounts BEFORE the member-surface journeys (more-specific
+// prefix first — mirrors `/api/content/public` before `/api/content`).
+app.route('/api/journeys/insights', journeyInsightsRoutes);
 app.route('/api/journeys', journeysRoutes);
 
 // ============================================================================

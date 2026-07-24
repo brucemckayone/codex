@@ -15,11 +15,14 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
+  import { Alert } from '$lib/components/ui';
   import {
     JourneyInsightsPanel,
     type InsightsPeriod,
+    type JourneyInsightsData,
   } from '$lib/components/studio/journey-insights';
   import { getJourneyInsights } from '$lib/remote/journey-insights.remote';
+  import type { QueryResult } from '$lib/remote/query-result';
 
   let { data } = $props();
 
@@ -64,7 +67,16 @@
       : null
   );
 
-  const insights = $derived(insightsQuery?.current);
+  const insights = $derived(
+    (insightsQuery as QueryResult<JourneyInsightsData> | null)?.current
+  );
+  // Deferred error branch: a failed insights fetch renders an error state
+  // rather than crashing the surface (the query rejects on a 4xx/5xx from the
+  // studio route — e.g. a course that no longer resolves in this org).
+  const insightsError = $derived(
+    (insightsQuery as QueryResult<JourneyInsightsData> | null)?.error?.message ??
+      null
+  );
 
   function setPeriod(next: InsightsPeriod) {
     const url = new URL(page.url);
@@ -74,5 +86,9 @@
 </script>
 
 {#if isAuthorized}
-  <JourneyInsightsPanel data={insights} {period} onPeriodChange={setPeriod} />
+  {#if insightsError}
+    <Alert variant="error">Could not load insights: {insightsError}</Alert>
+  {:else}
+    <JourneyInsightsPanel data={insights} {period} onPeriodChange={setPeriod} />
+  {/if}
 {/if}

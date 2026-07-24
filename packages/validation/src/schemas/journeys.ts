@@ -62,3 +62,19 @@ export const recordCompletionBodySchema = z.object({
   source: z.enum(['auto', 'manual']),
 });
 export type RecordCompletionBody = z.infer<typeof recordCompletionBodySchema>;
+
+/**
+ * Studio journey-insights query (Codex-2pryk · Round-D · Codex-776gg · WP-7) —
+ * `GET /api/journeys/insights`. Owner/admin only via `requireOrgManagement`.
+ *
+ * `organizationId` is consumed ONLY by the `procedure()` org resolver; the route
+ * re-derives the authoritative scope from `ctx.organizationId` (session
+ * membership) and never trusts this value for authorization. `period` selects
+ * the reporting window (defaults to 30 days).
+ */
+export const journeyInsightsQuerySchema = z.object({
+  organizationId: uuidSchema,
+  courseId: uuidSchema,
+  period: z.enum(['7d', '30d', '90d', 'all']).default('30d'),
+});
+export type JourneyInsightsQuery = z.infer<typeof journeyInsightsQuerySchema>;

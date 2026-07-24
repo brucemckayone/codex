@@ -88,6 +88,10 @@ import type {
 } from '@codex/validation';
 import type { Cookies } from '@sveltejs/kit';
 import { dev } from '$app/environment';
+// Studio journey-insights view shape (Codex-2pryk Round-D · WP-7). The FROZEN
+// FE contract from the metric-model; the content-api route serialises the
+// structurally-identical `@codex/access` twin. Type-only (erased).
+import type { JourneyInsightsData } from '$lib/components/studio/journey-insights/metric-model';
 // Journey member-surface view shapes (Codex-2pryk Round-D). Structurally
 // identical to @codex/shared-types' cross-worker mirror the content-api routes
 // serialise; imported from the FE $lib bag so callers get the exact FE types.
@@ -1138,6 +1142,28 @@ export function createServerApi(
             method: 'POST',
             body: JSON.stringify(input),
           }
+        ),
+
+      /**
+       * Studio journey INSIGHTS (Codex-2pryk Round-D · WP-7): course-scoped
+       * `live` (financial) + `course` (engagement) aggregation for one reporting
+       * period. Owner/admin only — the content-api route enforces
+       * `requireOrgManagement` and re-derives scope from the session, so the
+       * `organizationId` here is used only for org resolution, never as the
+       * authorization source. Money is GBP pence.
+       */
+      courseInsights: (
+        organizationId: string,
+        courseId: string,
+        period: string
+      ) =>
+        request<JourneyInsightsData>(
+          'access',
+          `/api/journeys/insights?organizationId=${encodeURIComponent(
+            organizationId
+          )}&courseId=${encodeURIComponent(courseId)}&period=${encodeURIComponent(
+            period
+          )}`
         ),
     },
 

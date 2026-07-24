@@ -10,6 +10,7 @@ import {
   AccessRevocation,
   ContentAccessService,
   CourseAccessService,
+  CourseInsightsService,
   CourseJourneyService,
   EntitlementsService,
 } from '@codex/access';
@@ -164,6 +165,7 @@ export function createServiceRegistry(
   let _courseSubscription: CourseSubscriptionService | undefined;
   let _courseAccess: CourseAccessService | undefined;
   let _courseJourney: CourseJourneyService | undefined;
+  let _courseInsights: CourseInsightsService | undefined;
   let _agreements: AgreementService | undefined;
 
   // Shared per-request DB client (for services needing transactions)
@@ -864,6 +866,19 @@ export function createServiceRegistry(
         });
       }
       return _courseJourney;
+    },
+
+    get courseInsights() {
+      if (!_courseInsights) {
+        // Pure DB studio reporting reads (Round-D · WP-7): course-scoped financial
+        // + engagement aggregation for the owner/admin insights surface. Shares
+        // the WS client like the sibling course services.
+        _courseInsights = new CourseInsightsService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+        });
+      }
+      return _courseInsights;
     },
 
     // ========================================================================
