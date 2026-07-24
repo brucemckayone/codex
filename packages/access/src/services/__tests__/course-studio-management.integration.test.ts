@@ -315,4 +315,63 @@ describe('Studio journey management (Codex-isr02)', () => {
       expect(row?.enrolledCount).toBe(1);
     });
   });
+
+  describe('getCoursePagePreview (Codex-isr02 P0b-2)', () => {
+    it('resolves a DRAFT journey the published read cannot (status-agnostic)', async () => {
+      const { id: pageId, slug } = await service.createJourney(
+        orgAId,
+        creatorId,
+        { title: uniqueTitle('DraftPreview'), pageType: 'course' }
+      );
+
+      // The public, published-only read cannot see an unpublished draft…
+      expect(await service.getCoursePage(orgAId, slug)).toBeNull();
+
+      // …but the management-gated preview read resolves the full envelope so the
+      // builder iframe can render it.
+      const preview = await service.getCoursePagePreview(orgAId, slug);
+      expect(preview).not.toBeNull();
+      expect(preview?.page.id).toBe(pageId);
+      expect(preview?.page.slug).toBe(slug);
+      expect(preview?.page.status).toBe('draft');
+      expect(preview?.course.slug).toBe(slug);
+      // A fresh draft has no curriculum yet — the builder streams sections live.
+      expect(preview?.stages).toEqual([]);
+      expect(preview?.testimonials).toEqual([]);
+    });
+
+    it('is org-scoped — a foreign org never resolves the page (defence-in-depth)', async () => {
+      const { slug } = await service.createJourney(orgAId, creatorId, {
+        title: uniqueTitle('ForeignPreview'),
+        pageType: 'course',
+      });
+      // Org B must never resolve org A's draft, even via the preview read (the
+      // content-api route ALSO gates with requireOrgManagement upstream).
+      expect(await service.getCoursePagePreview(orgBId, slug)).toBeNull();
+    });
+
+    it('also resolves a PUBLISHED journey (both reads agree once live)', async () => {
+      const { id: pageId, slug } = await service.createJourney(
+        orgAId,
+        creatorId,
+        { title: uniqueTitle('PubPreview'), pageType: 'course' }
+      );
+      const loaded = await service.getJourneyForBuilder(orgAId, pageId);
+      if (!loaded) throw new Error('page not found after create');
+      await service.saveJourneyPage(orgAId, {
+        id: pageId,
+        title: loaded.title,
+        slug: loaded.slug,
+        status: 'published',
+        sections: [],
+        brandOverrides: null,
+      });
+
+      expect(
+        (await service.getCoursePagePreview(orgAId, slug))?.page.status
+      ).toBe('published');
+      // Once published, the public read sees it too.
+      expect(await service.getCoursePage(orgAId, slug)).not.toBeNull();
+    });
+  });
 });

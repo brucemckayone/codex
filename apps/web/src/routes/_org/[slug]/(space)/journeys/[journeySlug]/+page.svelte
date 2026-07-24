@@ -8,12 +8,39 @@
   where the intro/reel sections `{#await}` it behind poster skeletons.
 -->
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { extractPlainText } from '@codex/validation';
   import { StructuredData } from '$lib/components/seo';
+  import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
+  import { initPagePreviewBridge } from '$lib/page-builder/page-preview-bridge';
   import { JourneyRenderer } from '$lib/page-builder/render';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
+
+  // Live-preview receiver (Codex-isr02 P0b-2). INERT for real visitors — the
+  // bridge attaches no listener unless this page is embedded in the studio
+  // builder iframe (window.parent !== window). When embedded, builder edits
+  // arrive as `codex:page-preview:v1` messages → pageBuilder.applyPreviewState.
+  onMount(() => initPagePreviewBridge());
+
+  // The envelope the renderer draws. Standalone → the SSR `coursePage` as-is.
+  // Embedded + a preview message has landed (`pageBuilder.isOpen`) → overlay the
+  // builder's live pending sections + brand overrides so edits re-render live.
+  const renderCoursePage = $derived(
+    pageBuilder.isOpen
+      ? {
+          ...data.coursePage,
+          page: {
+            ...data.coursePage.page,
+            sections: pageBuilder.sections,
+            brandOverrides:
+              pageBuilder.pending?.brandOverrides ??
+              data.coursePage.page.brandOverrides,
+          },
+        }
+      : data.coursePage
+  );
 
   const course = $derived(data.coursePage.course);
 
@@ -52,4 +79,4 @@
 
 <StructuredData data={structuredData} />
 
-<JourneyRenderer coursePage={data.coursePage} sellPreview={data.sellPreview} />
+<JourneyRenderer coursePage={renderCoursePage} sellPreview={data.sellPreview} />

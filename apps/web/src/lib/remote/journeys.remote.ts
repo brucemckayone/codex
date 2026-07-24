@@ -263,3 +263,27 @@ export const saveJourneyPage = command(
     await ctx.api.access.saveJourneyPage(ctx.orgId, record);
   }
 );
+
+/**
+ * Studio LIVE-PREVIEW read (Codex-isr02 P0b-2). Resolves the sell-page envelope
+ * for ANY status (drafts included) so the builder iframe can render an
+ * unpublished draft. Management-gated by the worker (`requireOrgManagement`); the
+ * org is resolved from the request HOST. Returns null off a non-org host, for a
+ * non-manager (the worker denies → caught here), or when no such page exists —
+ * so the public sell load's fallback fail-closes to a 404. Reuses the public
+ * `coursePageSchema` (`{ slug }`).
+ */
+export const getCoursePagePreview = query(
+  coursePageSchema,
+  async ({ slug }): Promise<JourneyCoursePage | null> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) return null;
+    try {
+      return await ctx.api.access.coursePagePreview(ctx.orgId, slug);
+    } catch {
+      // A non-manager's session → the worker's requireOrgManagement denies;
+      // treat ANY failure as "no preview" so the caller 404s (fail-closed).
+      return null;
+    }
+  }
+);
