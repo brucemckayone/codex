@@ -2,6 +2,7 @@ import { relations, sql } from 'drizzle-orm';
 import {
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   pgTable,
@@ -154,16 +155,36 @@ export const courseSubscriptions = pgTable(
 export const courseTierAccess = pgTable(
   'course_tier_access',
   {
-    courseId: uuid('course_id')
-      .notNull()
-      .references(() => courses.id, { onDelete: 'cascade' }),
-    tierId: uuid('tier_id')
-      .notNull()
-      .references(() => subscriptionTiers.id, { onDelete: 'cascade' }),
+    courseId: uuid('course_id').notNull(),
+    tierId: uuid('tier_id').notNull(),
+    // Codex-2pryk WP-6 (N1): the organization BOTH the course and the tier
+    // belong to. Denormalised so the composite FKs below can pin them to the
+    // SAME org — a course from org A can never be unlocked by a tier from org B.
+    organizationId: uuid('organization_id').notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.courseId, table.tierId] }),
     index('idx_course_tier_access_tier_id').on(table.tierId),
+    index('idx_course_tier_access_org_id').on(table.organizationId),
+
+    // N1 DURABLE GUARANTEE (Codex-2pryk WP-6 review): a cross-org tier→course
+    // grant is IMPOSSIBLE at the DB level, not merely rejected by the service.
+    // Each composite FK forces the row's (resource, organization_id) pair to
+    // exist as a real row in the parent, so BOTH course and tier must share the
+    // one `organization_id` on this row. Requires the parent unique indexes
+    // `uq_courses_id_org` / `uq_subscription_tiers_id_org`. Both cascade so a
+    // deleted course OR tier sweeps its grants (the tier-delete sweep, SPEC §7),
+    // preserving the WP-1 `onDelete: cascade` behaviour.
+    foreignKey({
+      columns: [table.courseId, table.organizationId],
+      foreignColumns: [courses.id, courses.organizationId],
+      name: 'fk_course_tier_access_course_org',
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [table.tierId, table.organizationId],
+      foreignColumns: [subscriptionTiers.id, subscriptionTiers.organizationId],
+      name: 'fk_course_tier_access_tier_org',
+    }).onDelete('cascade'),
   ]
 );
 
@@ -212,6 +233,10 @@ export const courseTierAccessRelations = relations(
     tier: one(subscriptionTiers, {
       fields: [courseTierAccess.tierId],
       references: [subscriptionTiers.id],
+    }),
+    organization: one(organizations, {
+      fields: [courseTierAccess.organizationId],
+      references: [organizations.id],
     }),
   })
 );

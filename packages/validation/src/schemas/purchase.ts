@@ -105,6 +105,19 @@ export const createCheckoutSchema = z.object({
 });
 
 /**
+ * Create Course Checkout Session Schema (Codex-2pryk WP-6)
+ *
+ * One-off COURSE purchase checkout. Same shape as {@link createCheckoutSchema}
+ * but targets a course. The org + creator (payout recipient) are resolved
+ * server-side from the `courses` row, never accepted from the client.
+ */
+export const createCourseCheckoutSchema = z.object({
+  courseId: uuidSchema,
+  successUrl: checkoutRedirectUrlSchema,
+  cancelUrl: checkoutRedirectUrlSchema,
+});
+
+/**
  * Purchase Query Schema
  *
  * Used for GET /api/purchases with filters
@@ -155,6 +168,21 @@ export const checkoutSessionMetadataSchema = z.object({
 });
 
 /**
+ * Course Checkout Session Metadata Schema (Codex-2pryk WP-6)
+ *
+ * Validates metadata on a one-off COURSE checkout session. `kind: 'course'`
+ * discriminates it from the content metadata at the webhook so the handler
+ * routes to `completeCoursePurchase`. `organizationId` is NOT carried — it is
+ * re-derived from the course row server-side (courses are always org-owned).
+ */
+export const courseCheckoutSessionMetadataSchema = z.object({
+  kind: z.literal('course'),
+  customerId: userIdSchema,
+  courseId: uuidSchema,
+  courseTitle: z.string().optional(),
+});
+
+/**
  * Create Portal Session Schema
  *
  * Used for POST /checkout/portal-session to create a Stripe billing portal session
@@ -179,6 +207,12 @@ export const createPortalSessionSchema = z.object({
  */
 export type PurchaseStatus = z.infer<typeof purchaseStatusEnum>;
 export type CreateCheckoutInput = z.infer<typeof createCheckoutSchema>;
+export type CreateCourseCheckoutInput = z.infer<
+  typeof createCourseCheckoutSchema
+>;
+export type CourseCheckoutSessionMetadata = z.infer<
+  typeof courseCheckoutSessionMetadataSchema
+>;
 export type PurchaseQueryInput = z.infer<typeof purchaseQuerySchema>;
 export type GetPurchaseInput = z.infer<typeof getPurchaseSchema>;
 export type CheckoutSessionMetadata = z.infer<

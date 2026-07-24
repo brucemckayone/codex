@@ -35,7 +35,9 @@
 // Re-export validation schemas for convenience
 export {
   type CreateCheckoutInput,
+  type CreateCourseCheckoutInput,
   createCheckoutSchema,
+  createCourseCheckoutSchema,
   type GetPurchaseInput,
   getPurchaseSchema,
   type PurchaseQueryInput,
@@ -53,6 +55,8 @@ export {
   BusinessLogicError,
   ConflictError,
   ContentNotPurchasableError,
+  CourseAlreadyOwnedError,
+  CourseNotPurchasableError,
   ForbiddenError,
   InternalServiceError,
   isPurchaseServiceError,
@@ -64,6 +68,21 @@ export {
   ValidationError,
   wrapError,
 } from './errors';
+// Creator agreement-share resolver (Codex-nk4km WP-4, shared with WP-6)
+export {
+  type AgreementRevenueType,
+  findActiveCreatorAgreementShare,
+} from './services/agreement-share';
+// Entitlement + auto-enrollment write seam (Codex-2pryk WP-6)
+export {
+  autoEnroll,
+  type EntitlementWriteClient,
+  refreshCourseSubscriptionEntitlementExpiry,
+  revokeCourseSubscriptionEntitlement,
+  writeContentPurchaseEntitlement,
+  writeCoursePurchaseEntitlement,
+  writeCourseSubscriptionEntitlement,
+} from './services/entitlement-writer';
 // Fee configuration service (Codex-m644n)
 export {
   type AuditLogEntry,
@@ -115,6 +134,7 @@ export {
 export type {
   CheckoutSessionResult,
   CheckoutSessionVerifyResult,
+  CompleteCoursePurchaseMetadata,
   CompletePurchaseMetadata,
   NewPurchaseInput,
   Purchase,

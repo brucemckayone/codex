@@ -11,6 +11,7 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 
+import { courseSubscriptions } from './course-commerce';
 import { purchases } from './ecommerce';
 import { organizations } from './organizations';
 import { subscriptions } from './subscriptions';
@@ -50,6 +51,16 @@ export const payouts = pgTable(
     purchaseId: uuid('purchase_id').references(() => purchases.id, {
       onDelete: 'set null',
     }),
+    // Codex-2pryk WP-6 (HARDENING §H3): course-specific subscriptions are NOT
+    // org `subscriptions` rows, so their recurring-invoice payouts cannot hang
+    // off `subscriptionId` (which hard-FKs org subscriptions). This third
+    // nullable source-FK attributes a course-sub payout to its
+    // `course_subscriptions` row. `set null` mirrors the other source refs so
+    // deleting the source never destroys the immutable ledger row.
+    courseSubscriptionId: uuid('course_subscription_id').references(
+      () => courseSubscriptions.id,
+      { onDelete: 'set null' }
+    ),
 
     // Stripe correlation
     stripeChargeId: varchar('stripe_charge_id', { length: 255 }),
@@ -116,6 +127,7 @@ export const payouts = pgTable(
     ),
     index('idx_payouts_subscription').on(table.subscriptionId),
     index('idx_payouts_purchase').on(table.purchaseId),
+    index('idx_payouts_course_subscription').on(table.courseSubscriptionId),
     index('idx_payouts_org_source_created').on(
       table.organizationId,
       table.sourceType,
@@ -150,6 +162,15 @@ export const payouts = pgTable(
       'check_payouts_source',
       sql`${table.sourceType} IN ('purchase', 'subscription')`
     ),
+    // Codex-2pryk WP-6 (HARDENING §H3 "CHECK-one"): a ledger row attributes to
+    // AT MOST ONE money source — an org subscription, a one-off purchase, or a
+    // course subscription. (Not exactly-one: platform_fee rows and legacy rows
+    // may reference none.) Prevents a single payout being double-attributed
+    // across the reporting source filters.
+    check(
+      'check_payouts_source_ref_one',
+      sql`(CASE WHEN ${table.subscriptionId} IS NULL THEN 0 ELSE 1 END) + (CASE WHEN ${table.purchaseId} IS NULL THEN 0 ELSE 1 END) + (CASE WHEN ${table.courseSubscriptionId} IS NULL THEN 0 ELSE 1 END) <= 1`
+    ),
     // platform_fee rows may have a null user_id (platform isn't a user);
     // every other row type must name its recipient.
     check(
@@ -183,6 +204,10 @@ export const payoutsRelations = relations(payouts, ({ one }) => ({
   purchase: one(purchases, {
     fields: [payouts.purchaseId],
     references: [purchases.id],
+  }),
+  courseSubscription: one(courseSubscriptions, {
+    fields: [payouts.courseSubscriptionId],
+    references: [courseSubscriptions.id],
   }),
 }));
 

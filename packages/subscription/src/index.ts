@@ -18,6 +18,7 @@ export {
   type ChangeTierInput,
   type ConnectAccountStatus,
   type ConnectOnboardInput,
+  type CreateCourseSubscriptionCheckoutInput,
   type CreateSubscriptionCheckoutInput,
   type CreateTierInput,
   cancelSubscriptionSchema,
@@ -26,6 +27,7 @@ export {
   connectDashboardSchema,
   connectOnboardSchema,
   connectStatusQuerySchema,
+  createCourseSubscriptionCheckoutSchema,
   createSubscriptionCheckoutSchema,
   createTierSchema,
   getCurrentSubscriptionQuerySchema,
@@ -40,16 +42,23 @@ export {
   payoutStatusFilterEnum,
   type ReorderTiersInput,
   reorderTiersSchema,
+  type SetCourseTierAccessInput,
   type SubscriptionStatus,
+  setCourseTierAccessSchema,
   subscriptionStatusEnum,
   type UpdateTierInput,
+  type UpsertCourseSubscriptionPlanInput,
   updateTierSchema,
+  upsertCourseSubscriptionPlanSchema,
 } from '@codex/validation';
 // Error classes
 export {
+  AlreadyCourseSubscribedError,
   AlreadySubscribedError,
   ConnectAccountNotFoundError,
   ConnectAccountNotReadyError,
+  CourseSubscriptionPlanExistsError,
+  CourseSubscriptionPlanNotFoundError,
   CreatorConnectRequiredError,
   isSubscriptionServiceError,
   SubscriptionCheckoutError,
@@ -63,6 +72,11 @@ export {
 
 // Services
 export { ConnectAccountService } from './services/connect-account-service';
+export {
+  COURSE_SUBSCRIPTION_METADATA_TYPE,
+  CourseSubscriptionService,
+  type CourseSubscriptionWebhookResult,
+} from './services/course-subscription-service';
 export {
   calculateRevenueSplit,
   type RevenueSplit,

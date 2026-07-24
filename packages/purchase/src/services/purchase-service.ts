@@ -29,10 +29,10 @@ import {
 } from '@codex/constants';
 import { getConstraintName, isUniqueViolation, toIso } from '@codex/database';
 import {
-  agreementProposals,
   content,
   contentAccess,
-  creatorOrganizationAgreements,
+  courses,
+  entitlements,
   organizationMemberships,
   payouts,
   purchases,
@@ -43,6 +43,7 @@ import {
 import { BaseService, type ServiceConfig } from '@codex/service-errors';
 import type {
   CreateCheckoutInput,
+  CreateCourseCheckoutInput,
   PurchaseQueryInput,
   SalesQueryInput,
   SalesStatsQueryInput,
@@ -50,6 +51,7 @@ import type {
 import {
   checkoutSessionMetadataSchema,
   createCheckoutSchema,
+  createCourseCheckoutSchema,
   createPortalSessionSchema,
   extractPlainText,
   getPurchaseSchema,
@@ -62,7 +64,6 @@ import {
   count,
   desc,
   eq,
-  gt,
   gte,
   isNotNull,
   isNull,
@@ -75,12 +76,19 @@ import type Stripe from 'stripe';
 import {
   AlreadyPurchasedError,
   ContentNotPurchasableError,
+  CourseAlreadyOwnedError,
+  CourseNotPurchasableError,
   ForbiddenError,
   NotFoundError,
   PaymentProcessingError,
   PurchaseNotFoundError,
 } from '../errors';
 import { resolvePrimaryConnect } from '../utils/resolve-primary-connect';
+import { findActiveCreatorAgreementShare } from './agreement-share';
+import {
+  writeContentPurchaseEntitlement,
+  writeCoursePurchaseEntitlement,
+} from './entitlement-writer';
 import { withStaleCustomerRecovery } from './resolve-customer';
 
 /**
@@ -100,6 +108,7 @@ import type { PaginatedListResponse } from '@codex/shared-types';
 import type {
   CheckoutSessionResult,
   CheckoutSessionVerifyResult,
+  CompleteCoursePurchaseMetadata,
   CompletePurchaseMetadata,
   Purchase,
   PurchaseListItem,
@@ -613,58 +622,19 @@ export class PurchaseService extends BaseService {
         // row — skip the query entirely (it would also fail to typecheck
         // against the nullable `organizationId`).
         const purchasedAt = new Date();
-        const [agreementRow] = organizationId
-          ? await tx
-              .select({
-                sharePercent: agreementProposals.proposedCreatorSharePercent,
-              })
-              .from(creatorOrganizationAgreements)
-              .innerJoin(
-                agreementProposals,
-                eq(
-                  agreementProposals.id,
-                  creatorOrganizationAgreements.currentProposalId
-                )
-              )
-              .where(
-                and(
-                  eq(
-                    creatorOrganizationAgreements.organizationId,
-                    organizationId
-                  ),
-                  eq(
-                    creatorOrganizationAgreements.creatorId,
-                    contentRecord.creatorId
-                  ),
-                  eq(
-                    creatorOrganizationAgreements.revenueType,
-                    'content_purchase'
-                  ),
-                  // Per Decision Q3: active-as-of-purchase-date. The schema
-                  // check enforces (status='terminated') = (terminatedAt IS
-                  // NOT NULL) — status='active' implies terminatedAt is NULL.
-                  or(
-                    eq(creatorOrganizationAgreements.status, 'active'),
-                    and(
-                      eq(creatorOrganizationAgreements.status, 'terminated'),
-                      gt(
-                        creatorOrganizationAgreements.terminatedAt,
-                        purchasedAt
-                      )
-                    )
-                  ),
-                  lte(creatorOrganizationAgreements.effectiveFrom, purchasedAt),
-                  or(
-                    isNull(creatorOrganizationAgreements.effectiveUntil),
-                    gt(
-                      creatorOrganizationAgreements.effectiveUntil,
-                      purchasedAt
-                    )
-                  )
-                )
-              )
-              .limit(1)
-          : [undefined];
+        // Codex-2pryk WP-6: agreement lookup hoisted to the shared
+        // `findActiveCreatorAgreementShare` (reused by the course-purchase +
+        // course-subscription payout paths so all three apply IDENTICAL
+        // Decision-Q3 agreement math). Returns the creator's share in basis
+        // points, or null when no active agreement brackets `purchasedAt`.
+        const agreementSharePercent = organizationId
+          ? await findActiveCreatorAgreementShare(tx, {
+              organizationId,
+              creatorId: contentRecord.creatorId,
+              revenueType: 'content_purchase',
+              at: purchasedAt,
+            })
+          : null;
 
         // Codex-69t7c WP5: for orgless (bi-party) purchases the org leg is
         // ALWAYS zero — there is no organization to pay, so the creator keeps
@@ -677,8 +647,8 @@ export class PurchaseService extends BaseService {
         // "org keeps 100% of post-platform" unless an admin overrode it).
         const effectiveOrgFeePercent = !organizationId
           ? 0
-          : agreementRow
-            ? 10_000 - agreementRow.sharePercent
+          : agreementSharePercent != null
+            ? 10_000 - agreementSharePercent
             : fees.orgFeePercent;
 
         // Codex-69t7c WP5 hardening (d): record the orgless org-fee-zero
@@ -726,7 +696,7 @@ export class PurchaseService extends BaseService {
           platformFeeCents: revenueSplit.platformFeeCents,
           organizationFeeCents: revenueSplit.organizationFeeCents,
           creatorPayoutCents: revenueSplit.creatorPayoutCents,
-          agreementApplied: Boolean(agreementRow),
+          agreementApplied: agreementSharePercent != null,
           source: 'content_purchase',
         });
 
@@ -795,6 +765,20 @@ export class PurchaseService extends BaseService {
             },
           });
 
+        // Step 5a (Codex-2pryk WP-6): write the greenfield `entitlements` grant
+        // the resolver reads. Additive to `contentAccess` + `verifyPurchase`
+        // (the resolver unions all three). Org-scoped ONLY — `entitlements`
+        // requires a non-null org, so orgless (bi-party) content writes no grant
+        // row and stays covered by `verifyPurchase` alone. Idempotent on replay.
+        if (organizationId) {
+          await writeContentPurchaseEntitlement(tx, {
+            userId: metadata.customerId,
+            organizationId,
+            contentId: metadata.contentId,
+            purchaseId: purchase.id,
+          });
+        }
+
         return {
           purchase,
           isNew: true,
@@ -847,6 +831,347 @@ export class PurchaseService extends BaseService {
         amountPaidCents: metadata.amountPaidCents,
       });
       this.handleError(error, 'completePurchase');
+    }
+  }
+
+  // ─── Course purchase (Codex-2pryk WP-6 · SPEC §7 path 1) ─────────────────────
+
+  /**
+   * Create a Stripe Checkout session for a one-off COURSE purchase.
+   *
+   * The course analogue of {@link createCheckoutSession}: `mode: 'payment'`,
+   * platform-charge (Option B) so the SAME `writePurchasePayouts` fan-out splits
+   * the charge post-webhook. The session metadata is tagged `kind: 'course'` so
+   * the `checkout.session.completed` handler routes to
+   * {@link completeCoursePurchase}. Org + creator are NOT in metadata — they are
+   * re-derived from the `courses` row at completion (courses are always
+   * org-owned), so a tampered session can never redirect the payout.
+   */
+  async createCourseCheckoutSession(
+    input: CreateCourseCheckoutInput,
+    customerId: string
+  ): Promise<CheckoutSessionResult> {
+    const validated = createCourseCheckoutSchema.parse(input);
+
+    try {
+      const course = await this.db.query.courses.findFirst({
+        where: and(
+          eq(courses.id, validated.courseId),
+          isNull(courses.deletedAt)
+        ),
+      });
+
+      if (!course) {
+        throw new CourseNotPurchasableError(validated.courseId, 'deleted');
+      }
+      if (course.status !== CONTENT_STATUS.PUBLISHED) {
+        throw new CourseNotPurchasableError(
+          validated.courseId,
+          'not_published',
+          {
+            status: course.status,
+          }
+        );
+      }
+      if (course.priceCents === null || course.priceCents <= 0) {
+        throw new CourseNotPurchasableError(validated.courseId, 'no_price', {
+          priceCents: course.priceCents,
+        });
+      }
+
+      // Double-purchase guard: a completed course purchase already grants a
+      // permanent entitlement, so block a second checkout (mirrors the content
+      // path's AlreadyPurchasedError guard).
+      const existing = await this.db.query.purchases.findFirst({
+        where: and(
+          eq(purchases.customerId, customerId),
+          eq(purchases.courseId, validated.courseId),
+          eq(purchases.status, PURCHASE_STATUS.COMPLETED)
+        ),
+      });
+      if (existing) {
+        throw new CourseAlreadyOwnedError(validated.courseId, customerId);
+      }
+
+      const [user] = await this.db
+        .select({ email: users.email })
+        .from(users)
+        .where(eq(users.id, customerId))
+        .limit(1);
+      if (!user?.email) {
+        throw new NotFoundError('User email not found for checkout', {
+          customerId,
+          courseId: validated.courseId,
+        });
+      }
+
+      // Hoist the narrowed price across the closure boundary (TS drops the
+      // property narrowing inside the callback — same reason as the content path).
+      const priceCents = course.priceCents;
+
+      const session = await withStaleCustomerRecovery(
+        { db: this.db, stripe: this.stripe },
+        { userId: customerId, email: user.email },
+        (resolvedCustomerId) =>
+          this.stripe.checkout.sessions.create({
+            mode: 'payment',
+            payment_method_types: ['card'],
+            customer: resolvedCustomerId,
+            line_items: [
+              {
+                price_data: {
+                  currency: CURRENCY.GBP,
+                  unit_amount: priceCents,
+                  product_data: {
+                    name: course.title,
+                    description: course.lede
+                      ? course.lede.slice(0, 500)
+                      : undefined,
+                  },
+                },
+                quantity: 1,
+              },
+            ],
+            success_url: validated.successUrl,
+            cancel_url: validated.cancelUrl,
+            // `kind: 'course'` discriminates this from a content purchase at the
+            // webhook. organizationId is deliberately omitted (re-derived server
+            // side from the course row).
+            metadata: {
+              kind: 'course',
+              courseId: validated.courseId,
+              customerId,
+              courseTitle: course.title,
+            },
+            client_reference_id: customerId,
+          }),
+        {
+          onStaleRecovery: (info) =>
+            this.obs.warn(
+              'Stale users.stripe_customer_id detected; clearing and retrying',
+              { ...info, courseId: validated.courseId }
+            ),
+        }
+      );
+
+      if (!session.url) {
+        throw new PaymentProcessingError('Checkout session URL not generated', {
+          sessionId: session.id,
+        });
+      }
+
+      return { sessionUrl: session.url, sessionId: session.id };
+    } catch (error) {
+      if (
+        error instanceof CourseNotPurchasableError ||
+        error instanceof CourseAlreadyOwnedError ||
+        error instanceof NotFoundError ||
+        error instanceof PaymentProcessingError
+      ) {
+        throw error;
+      }
+      if (isStripeError(error)) {
+        throw new PaymentProcessingError(
+          'Failed to create course checkout session',
+          { stripeError: error.message, courseId: validated.courseId }
+        );
+      }
+      this.handleError(error, 'createCourseCheckoutSession');
+    }
+  }
+
+  /**
+   * Complete a one-off COURSE purchase after Stripe payment confirmation.
+   *
+   * The course analogue of {@link completePurchase}: same immutable revenue-split
+   * snapshot, same idempotency (by `stripePaymentIntentId`), and the SAME
+   * `writePurchasePayouts` Option-B fan-out (keyed on the purchase id, so a
+   * `purchases` row with a `courseId` target flows through unchanged). Differs
+   * only in the resource: it writes a `course_purchase` entitlement + auto-enrolls
+   * (via {@link writeCoursePurchaseEntitlement}) instead of a `contentAccess` row.
+   *
+   * Per HARDENING §H4(a) course purchases REUSE `content_purchase` agreement
+   * share terms — the agreement lookup uses `revenueType: 'content_purchase'`.
+   */
+  async completeCoursePurchase(
+    stripePaymentIntentId: string,
+    metadata: CompleteCoursePurchaseMetadata
+  ): Promise<Purchase> {
+    try {
+      const txResult = await this.db.transaction(async (tx) => {
+        // Idempotency — a webhook replay returns the existing purchase and skips
+        // payouts (the first-write path already ran; transfer idempotency keys
+        // protect the money side either way).
+        const existing = await tx.query.purchases.findFirst({
+          where: eq(purchases.stripePaymentIntentId, stripePaymentIntentId),
+        });
+        if (existing) {
+          return { purchase: existing, isNew: false } as const;
+        }
+
+        const course = await tx.query.courses.findFirst({
+          where: eq(courses.id, metadata.courseId),
+          columns: { organizationId: true, creatorId: true },
+        });
+        if (!course) {
+          throw new PaymentProcessingError(
+            'Course not found during purchase completion',
+            { courseId: metadata.courseId, stripePaymentIntentId }
+          );
+        }
+
+        // Courses are ALWAYS org-owned — the org is authoritative from the row.
+        const organizationId = course.organizationId;
+
+        const fees = this.feeConfig
+          ? await this.feeConfig.getFeesForCreator(
+              organizationId,
+              course.creatorId,
+              'one_off'
+            )
+          : {
+              platformFeePercent: DEFAULT_PLATFORM_FEE_PERCENTAGE,
+              orgFeePercent: DEFAULT_ORG_FEE_PERCENTAGE,
+              minPlatformFeeCents: 0,
+              minTransferCents: 0,
+            };
+
+        // HARDENING §H4(a): course purchases reuse the creator's
+        // `content_purchase` revenue-share agreement terms.
+        const purchasedAt = new Date();
+        const agreementSharePercent = await findActiveCreatorAgreementShare(
+          tx,
+          {
+            organizationId,
+            creatorId: course.creatorId,
+            revenueType: 'content_purchase',
+            at: purchasedAt,
+          }
+        );
+        const effectiveOrgFeePercent =
+          agreementSharePercent != null
+            ? 10_000 - agreementSharePercent
+            : fees.orgFeePercent;
+
+        const rawSplit = calculateRevenueSplit(
+          metadata.amountPaidCents,
+          fees.platformFeePercent,
+          effectiveOrgFeePercent
+        );
+        const revenueSplit = applyMinPlatformFeeFloor(
+          metadata.amountPaidCents,
+          rawSplit,
+          fees.minPlatformFeeCents
+        );
+
+        this.obs.info('payout_split_computed', {
+          purchaseId: undefined,
+          courseId: metadata.courseId,
+          organizationId,
+          creatorId: course.creatorId,
+          amountPaidCents: metadata.amountPaidCents,
+          platformFeeCents: revenueSplit.platformFeeCents,
+          organizationFeeCents: revenueSplit.organizationFeeCents,
+          creatorPayoutCents: revenueSplit.creatorPayoutCents,
+          agreementApplied: agreementSharePercent != null,
+          source: 'course_purchase',
+        });
+
+        if (
+          metadata.stripeApplicationFeeCents != null &&
+          metadata.stripeApplicationFeeCents !== revenueSplit.platformFeeCents
+        ) {
+          this.obs.warn(
+            'Platform fee mismatch: Stripe-collected application fee differs from calculated split',
+            {
+              stripeApplicationFeeCents: metadata.stripeApplicationFeeCents,
+              calculatedPlatformFeeCents: revenueSplit.platformFeeCents,
+              amountPaidCents: metadata.amountPaidCents,
+              stripePaymentIntentId,
+              courseId: metadata.courseId,
+            }
+          );
+        }
+
+        const [purchase] = await tx
+          .insert(purchases)
+          .values({
+            customerId: metadata.customerId,
+            // Split target — course, not content (CHECK enforces exactly one).
+            courseId: metadata.courseId,
+            organizationId,
+            amountPaidCents: metadata.amountPaidCents,
+            currency: metadata.currency || CURRENCY.GBP,
+            stripePaymentIntentId,
+            status: PURCHASE_STATUS.COMPLETED,
+            purchasedAt,
+            platformFeeCents: revenueSplit.platformFeeCents,
+            organizationFeeCents: revenueSplit.organizationFeeCents,
+            creatorPayoutCents: revenueSplit.creatorPayoutCents,
+            platformAgreementId: null,
+            creatorOrgAgreementId: null,
+          })
+          .returning();
+
+        if (!purchase) {
+          throw new PaymentProcessingError('Failed to create purchase record', {
+            stripePaymentIntentId,
+          });
+        }
+
+        // Grant the course entitlement (the resolver's READ target) + auto-enroll,
+        // atomically with the purchase row. Idempotent on replay.
+        await writeCoursePurchaseEntitlement(tx, {
+          userId: metadata.customerId,
+          organizationId,
+          courseId: metadata.courseId,
+          purchaseId: purchase.id,
+        });
+
+        return {
+          purchase,
+          isNew: true,
+          revenueSplit,
+          creatorId: course.creatorId,
+          organizationId,
+        } as const;
+      });
+
+      // Post-commit payouts — REUSE the Option-B fan-out verbatim. A course
+      // purchase row carries a `courseId` target; `writePurchasePayouts` only
+      // reads `purchase.id` + the split, so it splits the charge identically.
+      if (txResult.isNew && metadata.stripeChargeId) {
+        await this.writePurchasePayouts({
+          purchase: txResult.purchase,
+          revenueSplit: txResult.revenueSplit,
+          creatorId: txResult.creatorId,
+          organizationId: txResult.organizationId,
+          stripeChargeId: metadata.stripeChargeId,
+        });
+      } else if (txResult.isNew && !metadata.stripeChargeId) {
+        const errorId = crypto.randomUUID();
+        this.obs.error(
+          'Course purchase completed without stripeChargeId — payouts ledger entries skipped; creator will NOT be paid',
+          {
+            errorId,
+            purchaseId: txResult.purchase.id,
+            creatorId: txResult.creatorId,
+            organizationId: txResult.organizationId,
+            stripePaymentIntentId,
+          }
+        );
+      }
+
+      return txResult.purchase;
+    } catch (error) {
+      this.obs.error('Failed to complete course purchase', {
+        error: error instanceof Error ? error.message : String(error),
+        stripePaymentIntentId,
+        customerId: metadata.customerId,
+        courseId: metadata.courseId,
+        amountPaidCents: metadata.amountPaidCents,
+      });
+      this.handleError(error, 'completeCoursePurchase');
     }
   }
 
@@ -1371,8 +1696,14 @@ export class PurchaseService extends BaseService {
     const validated = purchaseQuerySchema.parse(filters);
 
     try {
-      // Build WHERE conditions
-      const conditions = [eq(purchases.customerId, customerId)];
+      // Build WHERE conditions. Codex-2pryk WP-6: this is the CONTENT purchase
+      // history (joins + returns content). Course purchases (contentId NULL) are
+      // a distinct shape surfaced via the library/enrollments shelf, not here —
+      // scope them out so the `content` join is always present.
+      const conditions = [
+        eq(purchases.customerId, customerId),
+        isNotNull(purchases.contentId),
+      ];
 
       if (validated.status) {
         conditions.push(eq(purchases.status, validated.status));
@@ -1443,7 +1774,9 @@ export class PurchaseService extends BaseService {
           id: p.id,
           customerId: p.customerId,
           createdAt: toIso(p.createdAt),
-          contentId: p.contentId,
+          // `content` is guaranteed present — getPurchaseHistory scopes to
+          // content purchases (contentId NOT NULL) — so its id is the target.
+          contentId: p.content.id,
           contentTitle: p.content.title,
           amountCents: p.amountPaidCents,
           status: coercePurchaseStatus(p.status),
@@ -1663,15 +1996,33 @@ export class PurchaseService extends BaseService {
           })
           .where(eq(purchases.id, purchase.id));
 
-        // Revoke content access (soft delete)
+        // Revoke content access (soft delete) — content purchases only. Course
+        // purchases grant no contentAccess row (they use entitlements).
+        if (purchase.contentId) {
+          await tx
+            .update(contentAccess)
+            .set({ deletedAt: new Date() })
+            .where(
+              and(
+                eq(contentAccess.userId, purchase.customerId),
+                eq(contentAccess.contentId, purchase.contentId),
+                isNull(contentAccess.deletedAt)
+              )
+            );
+        }
+
+        // Codex-2pryk WP-6: revoke the entitlement this purchase granted
+        // (content_purchase OR course_purchase — both carry sourceRef=purchase.id).
+        // Without this a refund would leave a LIVE grant the resolver still
+        // honours (access-integrity bug). Keyed on sourceRef so one statement
+        // covers either target. Idempotent (no-op if already revoked / absent).
         await tx
-          .update(contentAccess)
-          .set({ deletedAt: new Date() })
+          .update(entitlements)
+          .set({ revokedAt: new Date() })
           .where(
             and(
-              eq(contentAccess.userId, purchase.customerId),
-              eq(contentAccess.contentId, purchase.contentId),
-              isNull(contentAccess.deletedAt)
+              eq(entitlements.sourceRef, purchase.id),
+              isNull(entitlements.revokedAt)
             )
           );
       });
@@ -1999,14 +2350,30 @@ export class PurchaseService extends BaseService {
           })
           .where(eq(purchases.id, purchase.id));
 
+        // Content purchases only — course purchases grant no contentAccess row.
+        if (purchase.contentId) {
+          await tx
+            .update(contentAccess)
+            .set({ deletedAt: new Date() })
+            .where(
+              and(
+                eq(contentAccess.userId, purchase.customerId),
+                eq(contentAccess.contentId, purchase.contentId),
+                isNull(contentAccess.deletedAt)
+              )
+            );
+        }
+
+        // Codex-2pryk WP-6: a dispute is access-reducing like a refund — revoke
+        // the entitlement this purchase granted (content_purchase / course_purchase)
+        // by sourceRef so the resolver stops honouring it. Idempotent.
         await tx
-          .update(contentAccess)
-          .set({ deletedAt: new Date() })
+          .update(entitlements)
+          .set({ revokedAt: new Date() })
           .where(
             and(
-              eq(contentAccess.userId, purchase.customerId),
-              eq(contentAccess.contentId, purchase.contentId),
-              isNull(contentAccess.deletedAt)
+              eq(entitlements.sourceRef, purchase.id),
+              isNull(entitlements.revokedAt)
             )
           );
       });
@@ -2101,10 +2468,13 @@ export class PurchaseService extends BaseService {
           },
         });
 
-        if (purchase?.purchasedAt) {
+        // Content-purchase sessions populate the purchase + content blocks.
+        // Course-purchase sessions (content join null) return sessionStatus only
+        // — the course success surface reads its own offer, not this shape.
+        if (purchase?.purchasedAt && purchase.content) {
           result.purchase = {
             id: purchase.id,
-            contentId: purchase.contentId,
+            contentId: purchase.content.id,
             amountPaidCents: purchase.amountPaidCents,
             purchasedAt: purchase.purchasedAt.toISOString(),
           };
@@ -2255,7 +2625,14 @@ export class PurchaseService extends BaseService {
     const validated = salesQuerySchema.parse(filters);
 
     try {
-      const conditions = [eq(purchases.organizationId, orgId)];
+      // Codex-2pryk WP-6: the Sales ledger's SaleListItem shape is content-
+      // shaped (contentTitle/contentSlug). Scope to content purchases so the
+      // `content` join is always present; course sales get their own reporting
+      // surface (WP-7) rather than being force-fit into the content columns.
+      const conditions = [
+        eq(purchases.organizationId, orgId),
+        isNotNull(purchases.contentId),
+      ];
 
       if (validated.status === 'disputed') {
         conditions.push(isNotNull(purchases.disputedAt));
@@ -2308,29 +2685,36 @@ export class PurchaseService extends BaseService {
       ]);
       const total = countResult[0]?.total ?? 0;
 
-      const formatted: SaleListItem[] = items.map((p) => ({
-        id: p.id,
-        purchasedAt: toIso(p.purchasedAt),
-        createdAt: toIso(p.createdAt),
-        customerId: p.customerId,
-        customerName: p.customer.name,
-        customerEmail: p.customer.email,
-        contentId: p.contentId,
-        contentTitle: p.content.title,
-        contentSlug: p.content.slug,
-        amountPaidCents: p.amountPaidCents,
-        currency: p.currency,
-        status: coercePurchaseStatus(p.status) as SaleListItem['status'],
-        platformFeeCents: p.platformFeeCents,
-        organizationFeeCents: p.organizationFeeCents,
-        creatorPayoutCents: p.creatorPayoutCents,
-        refundedAt: toIso(p.refundedAt),
-        refundAmountCents: p.refundAmountCents,
-        refundReason: p.refundReason,
-        disputedAt: toIso(p.disputedAt),
-        disputeReason: p.disputeReason,
-        stripePaymentIntentId: p.stripePaymentIntentId,
-      }));
+      // `content` is guaranteed present (conditions filter contentId NOT NULL);
+      // the type predicate narrows the relation to non-null without an `as` cast.
+      const formatted: SaleListItem[] = items
+        .filter(
+          (p): p is typeof p & { content: NonNullable<typeof p.content> } =>
+            p.content !== null
+        )
+        .map((p) => ({
+          id: p.id,
+          purchasedAt: toIso(p.purchasedAt),
+          createdAt: toIso(p.createdAt),
+          customerId: p.customerId,
+          customerName: p.customer.name,
+          customerEmail: p.customer.email,
+          contentId: p.content.id,
+          contentTitle: p.content.title,
+          contentSlug: p.content.slug,
+          amountPaidCents: p.amountPaidCents,
+          currency: p.currency,
+          status: coercePurchaseStatus(p.status) as SaleListItem['status'],
+          platformFeeCents: p.platformFeeCents,
+          organizationFeeCents: p.organizationFeeCents,
+          creatorPayoutCents: p.creatorPayoutCents,
+          refundedAt: toIso(p.refundedAt),
+          refundAmountCents: p.refundAmountCents,
+          refundReason: p.refundReason,
+          disputedAt: toIso(p.disputedAt),
+          disputeReason: p.disputeReason,
+          stripePaymentIntentId: p.stripePaymentIntentId,
+        }));
 
       return {
         items: formatted,
@@ -2365,7 +2749,12 @@ export class PurchaseService extends BaseService {
     const validated = salesStatsQuerySchema.parse(filters);
 
     try {
-      const conditions = [eq(purchases.organizationId, orgId)];
+      // Content-only, to match `listSales` (course sales report separately, WP-7)
+      // so the header tiles and the table below them agree.
+      const conditions = [
+        eq(purchases.organizationId, orgId),
+        isNotNull(purchases.contentId),
+      ];
 
       conditions.push(
         ...purchaseDateWindow(validated.fromDate, validated.toDate)

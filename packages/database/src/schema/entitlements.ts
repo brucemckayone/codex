@@ -5,6 +5,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
@@ -78,6 +79,22 @@ export const entitlements = pgTable(
     // Fast "does user U hold a live grant on resource R?" lookups (resolver hot path).
     index('idx_entitlements_user_content').on(table.userId, table.contentId),
     index('idx_entitlements_user_course').on(table.userId, table.courseId),
+
+    // Idempotency of the WP-6 grant-write path (webhook redelivery / concurrent
+    // completion). At most one LIVE (`revokedAt IS NULL`) grant per
+    // (user, resource, source): the writers INSERT ... ON CONFLICT DO NOTHING,
+    // so a Stripe replay is a no-op and never duplicates a grant. Scoped to
+    // `revokedAt IS NULL` so a lawful re-purchase / re-subscribe AFTER
+    // revocation still inserts a fresh row (the revoked row persists for audit).
+    // Partial on the non-null resource FK so the split-FK CHECK stays honoured.
+    uniqueIndex('uq_entitlement_live_content')
+      .on(table.userId, table.contentId, table.source)
+      .where(
+        sql`${table.revokedAt} IS NULL AND ${table.contentId} IS NOT NULL`
+      ),
+    uniqueIndex('uq_entitlement_live_course')
+      .on(table.userId, table.courseId, table.source)
+      .where(sql`${table.revokedAt} IS NULL AND ${table.courseId} IS NOT NULL`),
 
     // Exactly one resource target is set (split-FK polymorphism).
     check(

@@ -136,6 +136,39 @@ export class SubscriptionPaymentRequiredError extends ServiceError {
 }
 
 // ============================================================================
+// Course Subscription Errors (Codex-2pryk WP-6 · SPEC §7)
+// ============================================================================
+
+export class CourseSubscriptionPlanNotFoundError extends NotFoundError {
+  constructor(courseId: string, context?: Record<string, unknown>) {
+    super('No course subscription plan configured for this course', {
+      courseId,
+      code: 'COURSE_SUBSCRIPTION_PLAN_NOT_FOUND',
+      ...context,
+    });
+  }
+}
+
+export class CourseSubscriptionPlanExistsError extends ConflictError {
+  constructor(courseId: string) {
+    super('A subscription plan already exists for this course', {
+      courseId,
+      code: 'COURSE_SUBSCRIPTION_PLAN_EXISTS',
+    });
+  }
+}
+
+export class AlreadyCourseSubscribedError extends ConflictError {
+  constructor(userId: string, courseId: string) {
+    super('User already has an active subscription to this course', {
+      userId,
+      courseId,
+      code: 'ALREADY_COURSE_SUBSCRIBED',
+    });
+  }
+}
+
+// ============================================================================
 // Connect Account Errors
 // ============================================================================
 
