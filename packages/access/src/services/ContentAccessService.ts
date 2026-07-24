@@ -13,6 +13,7 @@ import {
   type ServiceConfig,
   ValidationError,
 } from '@codex/service-errors';
+import type { EntitlementResolver } from '@codex/shared-types';
 import { buildServiceUrl } from '@codex/urls';
 import type {
   GetPlaybackProgressInput,
@@ -28,6 +29,10 @@ import {
   assertStreamingAccess,
   resolveHasContentAccess,
 } from './content-access/access-decision';
+import {
+  hasCourseEntitlement,
+  resolveCourseEntitlementsBatch,
+} from './content-access/entitlements-resolver';
 import {
   listUserLibrary as buildUserLibrary,
   type UserLibraryResponse,
@@ -127,7 +132,10 @@ export interface ContentAccessServiceConfig extends ServiceConfig {
  * delegates to them, injecting the collaborators (`db`, `obs`, `r2`,
  * `purchaseService`, `revocation`) they need.
  */
-export class ContentAccessService extends BaseService {
+export class ContentAccessService
+  extends BaseService
+  implements EntitlementResolver
+{
   private readonly r2: R2Signer;
   private readonly purchaseService: PurchaseService;
   private readonly revocation: AccessRevocation | undefined;
@@ -144,14 +152,13 @@ export class ContentAccessService extends BaseService {
   }
 
   /**
-   * Check whether a user currently has access to a piece of content.
-   *
-   * This is the boolean equivalent of the access-decision logic embedded in
-   * `getStreamingUrl`'s transaction — it does NOT throw `AccessDeniedError`
-   * and does NOT generate signed URLs. See
-   * `./content-access/access-decision.ts` for the full contract.
+   * `EntitlementResolver.canView` (frozen contract, SPEC §6.3) — may the user
+   * open this content ANYWHERE? The single authority `getStreamingUrl` gates on;
+   * the boolean adapter over the collapsed decision core (see
+   * `./content-access/access-decision.ts`). Does NOT throw on denial and does NOT
+   * sign URLs. `userId` is `null` for anonymous visitors (public / free content).
    */
-  async hasContentAccess(userId: string, contentId: string): Promise<boolean> {
+  async canView(userId: string | null, contentId: string): Promise<boolean> {
     return resolveHasContentAccess(
       {
         db: this.db,
@@ -161,6 +168,58 @@ export class ContentAccessService extends BaseService {
       userId,
       contentId
     );
+  }
+
+  /**
+   * Check whether a user currently has access to a piece of content.
+   *
+   * Retained name for existing callers (`savePlaybackProgress` gate, content
+   * invalidation fanout); delegates to {@link canView}, the collapsed resolver.
+   */
+  async hasContentAccess(userId: string, contentId: string): Promise<boolean> {
+    return this.canView(userId, contentId);
+  }
+
+  /**
+   * `EntitlementResolver.canEnterCourse` (frozen contract, SPEC §6.3) — may the
+   * user open this course's DASHBOARD / journey? Course-scoped, so shared content
+   * never leaks course access ("bought Course A that shares practice X with B" ⇒
+   * can view X, cannot enter B). Grants on a course entitlement: a stored grant
+   * (`course_purchase` / `course_subscription` / `grant`) OR a derived tier grant
+   * (an active subscription intersecting `course_tier_access`). Tier grants are
+   * derived live, so a lapsed tier loses course entry instantly — this is why the
+   * gate is entitlement-based, NOT a stale `course_enrollments` row.
+   */
+  async canEnterCourse(
+    userId: string | null,
+    courseId: string
+  ): Promise<boolean> {
+    if (userId == null) return false;
+    return hasCourseEntitlement(this.db, userId, courseId);
+  }
+
+  /**
+   * `EntitlementResolver.canEnterCoursesBatch` (frozen contract) — resolve MANY
+   * courses in a BOUNDED number of queries (two `SELECT`s, independent of N) so a
+   * dashboard/library grid avoids N+1 on Neon HTTP (HARDENING §D/§E/§12). Returns
+   * a map keyed by every requested course id (missing/denied ⇒ `false`).
+   */
+  async canEnterCoursesBatch(
+    userId: string | null,
+    courseIds: readonly string[]
+  ): Promise<ReadonlyMap<string, boolean>> {
+    const result = new Map<string, boolean>(courseIds.map((id) => [id, false]));
+    if (userId == null || courseIds.length === 0) return result;
+
+    const entitled = await resolveCourseEntitlementsBatch(
+      this.db,
+      userId,
+      courseIds
+    );
+    for (const id of courseIds) {
+      result.set(id, entitled.has(id));
+    }
+    return result;
   }
 
   /**

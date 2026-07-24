@@ -6,7 +6,11 @@
  * creation of unused services and enabling proper cleanup.
  */
 
-import { AccessRevocation, ContentAccessService } from '@codex/access';
+import {
+  AccessRevocation,
+  ContentAccessService,
+  EntitlementsService,
+} from '@codex/access';
 import {
   AdminAnalyticsService,
   AdminContentManagementService,
@@ -136,6 +140,7 @@ export function createServiceRegistry(
   let _categories: CategoriesService | undefined;
   let _media: MediaItemService | undefined;
   let _access: ContentAccessService | undefined;
+  let _entitlements: EntitlementsService | undefined;
   let _imageProcessing: ImageProcessingService | undefined;
   let _organization: OrganizationService | undefined;
   let _devDomain: DevDomainService | undefined;
@@ -380,6 +385,18 @@ export function createServiceRegistry(
         });
       }
       return _access;
+    },
+
+    get entitlements() {
+      if (!_entitlements) {
+        // READ resolution of stored `entitlements` grants (Codex-2pryk.2.3).
+        // Read-only — the write path (grant-on-purchase / course-sub) is WP-6.
+        _entitlements = new EntitlementsService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+        });
+      }
+      return _entitlements;
     },
 
     get imageProcessing() {

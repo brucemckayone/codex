@@ -185,18 +185,24 @@ type StreamResult = Awaited<ReturnType<ServerApi['access']['getStreamingUrl']>>;
  * ONE place both content-detail routes resolve "granted?" — see the module
  * header for the two routes and the lockstep contract.
  *
- * BEHAVIOUR TODAY (must be preserved): access is inferred from the `/stream`
- * response. A resolved response — *even one whose `streamingUrl` is null*
- * (written articles have no media to sign) — means the backend access check
- * passed. A thrown call (captured by the caller as `streamResult === null`)
- * means denied. This is the historical "getStreamingUrl-throws" gate; the
- * null-streamingUrl-but-granted case must not regress.
+ * BEHAVIOUR (preserved): access is inferred from the `/stream` response. A
+ * resolved response — *even one whose `streamingUrl` is null* (written articles
+ * have no media to sign) — means the backend access check passed. A thrown call
+ * (captured by the caller as `streamResult === null`) means denied. This is the
+ * historical "getStreamingUrl-throws" gate; the null-streamingUrl-but-granted
+ * case must not regress.
  *
- * WP-2 (Codex-2pryk · `@codex/access` rewire) replaces the BODY of this
- * function with an explicit `canView` entitlement resolver. The signature may
- * widen (e.g. to take contentId / accessType / platform / cookies) — keep that
- * change inside this function so both routes inherit it in one swap and cannot
- * diverge by route.
+ * WP-2 (Codex-2pryk · `@codex/access` rewire) LANDED: the content-api worker's
+ * `getStreamingUrl` now gates on the collapsed `canView` entitlement resolver
+ * (`ContentAccessService.canView`, which folds the §6.1 policy flags + purchase
+ * + subscription-tier + stored `entitlements` grants + course entitlements). So
+ * a resolved `/stream` response now reflects `canView === true`, and this seam
+ * transitively resolves `canView` for BOTH content routes at once.
+ *
+ * The resolver is NOT imported here: `@codex/access` is worker-only and must
+ * never enter the SSR bundle (see {@link AccessRevocationReason}). It is invoked
+ * over the `/stream` API instead — so the single decision point stays in the
+ * worker while this remains the single web-side seam both routes reach through.
  * ─────────────────────────────────────────────────────────────────────────
  */
 export function resolveAccessGranted(
