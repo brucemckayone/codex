@@ -29,7 +29,7 @@ export const load: PageServerLoad = async ({
 
   const coursePage = await getCoursePage({ slug: params.journeySlug });
   if (!coursePage) {
-    throw error(404, 'This journey could not be found.');
+    throw error(404, 'This portal could not be found.');
   }
 
   // Prices are server-authoritative and the pay step is per-user — a checkout

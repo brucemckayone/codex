@@ -46,7 +46,7 @@
   let isLoadingFromServer = $state(false);
   let loadError = $state(false);
 
-  // Enrolled journeys — the "Your journeys" shelf (Codex-oi2w4). Fetched
+  // Enrolled journeys — the "Your portals" shelf (Codex-oi2w4). Fetched
   // client-side via the remote (self-scoped to the session user + this org);
   // guests / errors resolve to an empty shelf (hidden). Independent of the
   // owned-content load so one failing never blanks the other.
@@ -278,11 +278,11 @@
     {#if enrolledJourneys.length > 0}
       <section class="library-journeys">
         <Carousel
-          title="Your journeys"
+          title="Your portals"
           items={enrolledJourneys}
           itemMinWidth="20rem"
           gap="var(--space-4)"
-          ariaLabel="Your journeys"
+          ariaLabel="Your portals"
         >
           {#snippet renderItem(journey)}
             <JourneyCard

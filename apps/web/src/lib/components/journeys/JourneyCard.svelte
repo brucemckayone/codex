@@ -27,7 +27,7 @@
     /**
      * Enrolled progress rollup. When set, the foot renders a progress ring +
      * status line ("N of M practices" / "Completed" / "Not started yet")
-     * instead of the price + "View journey" affordance.
+     * instead of the price + "View portal" affordance.
      */
     progress?: {
       percent: number;
@@ -68,7 +68,7 @@
 
 <a class="journey-card" {href} class:journey-card--enrolled={Boolean(progress)}>
   <div class="journey-card__head">
-    <span class="journey-card__badge">Journey</span>
+    <span class="journey-card__badge">Portal</span>
     {#if journey.kicker}
       <span class="journey-card__kicker">{journey.kicker}</span>
     {/if}
@@ -102,7 +102,7 @@
           {/if}
         </span>
         <span class="journey-card__go">
-          View journey
+          View portal
           <span class="journey-card__arrow" aria-hidden="true">&rarr;</span>
         </span>
       </div>

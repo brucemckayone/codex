@@ -589,7 +589,7 @@
     {/if}
   {/await}
 
-  <!-- Guided journeys — published course-journeys for this org (Codex-oi2w4),
+  <!-- Guided portals — published course-journeys for this org (Codex-oi2w4),
        featured-first. Streamed; hidden when the org has none. -->
   {#await data.journeys then journeys}
     {#if journeys.length > 0}
@@ -597,7 +597,7 @@
         <header class="lede">
           <p class="lede__eyebrow">Go deeper</p>
           <div class="lede__title-row">
-            <h2 class="lede__title">Guided journeys</h2>
+            <h2 class="lede__title">Guided portals</h2>
             <a href="/explore" class="lede__view-all">
               Explore all
               <span aria-hidden="true">→</span>
@@ -608,7 +608,7 @@
           items={journeys}
           itemMinWidth="20rem"
           gap="var(--space-4)"
-          ariaLabel="Guided journeys"
+          ariaLabel="Guided portals"
         >
           {#snippet renderItem(journey)}
             <JourneyCard

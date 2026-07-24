@@ -44,18 +44,18 @@
 </script>
 
 <svelte:head>
-  <title>New journey | {data.org.name}</title>
+  <title>New portal | {data.org.name}</title>
   <meta name="robots" content="noindex" />
 </svelte:head>
 
 <div class="new-journey">
   <nav class="new-journey__crumbs" aria-label="Breadcrumb">
-    <a href="/studio/journeys">Journeys</a>
+    <a href="/studio/journeys">Portals</a>
     <span aria-hidden="true">/</span>
     <span aria-current="page">New</span>
   </nav>
 
-  <h1 class="new-journey__title">Create a journey</h1>
+  <h1 class="new-journey__title">Create a portal</h1>
 
   <form class="new-journey__form" onsubmit={handleSubmit}>
     <label class="new-journey__field">
