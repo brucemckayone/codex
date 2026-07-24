@@ -28,10 +28,18 @@
  */
 
 import { AccessRevocation, type RevocationReason } from '@codex/access';
-import { VersionedCache } from '@codex/cache';
+import { invalidateUserLibrary, VersionedCache } from '@codex/cache';
 import { STRIPE_EVENTS } from '@codex/constants';
-import type { WebhookHandlerResult } from '@codex/subscription';
-import { SubscriptionService, TierService } from '@codex/subscription';
+import { FeeConfigService } from '@codex/purchase';
+import type {
+  CourseSubscriptionWebhookResult,
+  WebhookHandlerResult,
+} from '@codex/subscription';
+import {
+  CourseSubscriptionService,
+  SubscriptionService,
+  TierService,
+} from '@codex/subscription';
 import { createWebhookDbClient, sendEmailToWorker } from '@codex/worker-utils';
 import type { Context } from 'hono';
 import type Stripe from 'stripe';
@@ -261,6 +269,41 @@ export async function handleSubscriptionWebhook(
       stripe
     );
 
+    // Codex-2pryk WP-6: course-specific subscriptions flow through this SAME
+    // webhook (they are mode=subscription). They are discriminated by the Stripe
+    // subscription's `type: 'course_subscription'` metadata and routed to
+    // CourseSubscriptionService so the org SubscriptionService never records a
+    // course sub as an org subscription.
+    const courseSubService = new CourseSubscriptionService(
+      {
+        db,
+        environment: c.env.ENVIRONMENT || 'development',
+        feeConfig: new FeeConfigService({
+          db,
+          environment: c.env.ENVIRONMENT || 'development',
+          cache,
+          waitUntil,
+        }),
+      },
+      stripe
+    );
+
+    /**
+     * Bump a course-sub buyer's library version (their entitlement + enrollment
+     * just changed). Fire-and-forget, mirrors the content checkout handler.
+     */
+    const invalidateCourseBuyer = (
+      result: CourseSubscriptionWebhookResult | void
+    ): void => {
+      if (!result?.userId) return;
+      invalidateUserLibrary({
+        kv: c.env.CACHE_KV,
+        waitUntil,
+        userId: result.userId,
+        logger: obs,
+      });
+    };
+
     /**
      * Fire-and-forget org-level cache invalidation after a Stripe
      * Dashboard sync-back write. Bumps the org's version key which
@@ -322,6 +365,22 @@ export async function handleSubscriptionWebhook(
         // Retrieve the full subscription object for period dates + metadata
         const subscription =
           await stripe.subscriptions.retrieve(subscriptionId);
+
+        // Course-sub branch (Codex-2pryk WP-6): write the course_subscription
+        // entitlement + auto-enroll; never a org subscription row.
+        if (CourseSubscriptionService.isCourseSubscription(subscription)) {
+          const courseResult =
+            await courseSubService.handleCourseSubscriptionCreated(
+              subscription
+            );
+          invalidateCourseBuyer(courseResult);
+          obs?.info('Course subscription created from checkout', {
+            sessionId: session.id,
+            subscriptionId,
+          });
+          break;
+        }
+
         // `handleSubscriptionCreated` owns its own cache invalidation via
         // the orchestrator hook inside SubscriptionService.
         const result = await service.handleSubscriptionCreated(
@@ -340,6 +399,21 @@ export async function handleSubscriptionWebhook(
 
       case STRIPE_EVENTS.SUBSCRIPTION_UPDATED: {
         const subscription = event.data.object as Stripe.Subscription;
+
+        // Course-sub branch (Codex-2pryk WP-6): mirror status/period; `unpaid`
+        // revokes the grant inside the service.
+        if (CourseSubscriptionService.isCourseSubscription(subscription)) {
+          const courseResult =
+            await courseSubService.handleCourseSubscriptionUpdated(
+              subscription
+            );
+          invalidateCourseBuyer(courseResult);
+          obs?.info('Course subscription updated', {
+            subscriptionId: subscription.id,
+          });
+          break;
+        }
+
         // `handleSubscriptionUpdated` owns its own cache invalidation via
         // the orchestrator hook inside SubscriptionService. Tier changes
         // and status flips (active ↔ cancelling ↔ past_due) all bump
@@ -388,6 +462,21 @@ export async function handleSubscriptionWebhook(
 
       case STRIPE_EVENTS.SUBSCRIPTION_DELETED: {
         const subscription = event.data.object as Stripe.Subscription;
+
+        // Course-sub branch (Codex-2pryk WP-6): mark cancelled + REVOKE the
+        // stored grant so the resolver stops granting immediately.
+        if (CourseSubscriptionService.isCourseSubscription(subscription)) {
+          const courseResult =
+            await courseSubService.handleCourseSubscriptionDeleted(
+              subscription
+            );
+          invalidateCourseBuyer(courseResult);
+          obs?.info('Course subscription deleted', {
+            subscriptionId: subscription.id,
+          });
+          break;
+        }
+
         // `handleSubscriptionDeleted` owns its own cache invalidation via
         // the orchestrator hook inside SubscriptionService.
         const result = await service.handleSubscriptionDeleted(
@@ -457,6 +546,33 @@ export async function handleSubscriptionWebhook(
 
       case STRIPE_EVENTS.INVOICE_PAYMENT_SUCCEEDED: {
         const invoice = event.data.object as Stripe.Invoice;
+
+        // Course-sub branch (Codex-2pryk WP-6): discriminate via the invoice's
+        // subscription_details metadata (Stripe copies the subscription's
+        // metadata onto the invoice) so org invoices pay NO extra retrieve. Only
+        // the course path retrieves the full subscription (for period + items).
+        const subDetails = invoice.parent?.subscription_details;
+        const subMetaType = subDetails?.metadata?.type ?? null;
+        if (subMetaType === 'course_subscription') {
+          const stripeSubId =
+            typeof subDetails?.subscription === 'string'
+              ? subDetails.subscription
+              : (subDetails?.subscription?.id ?? null);
+          if (stripeSubId) {
+            const courseSub = await stripe.subscriptions.retrieve(stripeSubId);
+            const courseResult =
+              await courseSubService.handleCourseInvoicePaymentSucceeded(
+                invoice,
+                courseSub
+              );
+            invalidateCourseBuyer(courseResult);
+            obs?.info('Course subscription invoice payment succeeded', {
+              invoiceId: invoice.id,
+            });
+          }
+          break;
+        }
+
         // `handleInvoicePaymentSucceeded` owns its own cache invalidation
         // via the orchestrator hook inside SubscriptionService. Renewal
         // continues access — both per-user version keys are bumped from

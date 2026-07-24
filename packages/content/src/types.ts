@@ -42,7 +42,13 @@ import type {
 export interface ContentFilters {
   status?: 'draft' | 'published' | 'archived';
   contentType?: 'video' | 'audio' | 'written';
-  accessType?: 'free' | 'paid' | 'followers' | 'subscribers' | 'team';
+  accessType?:
+    | 'free'
+    | 'paid'
+    | 'followers'
+    | 'subscribers'
+    | 'team'
+    | 'course';
   category?: string;
   organizationId?: string | null;
   creatorId?: string;

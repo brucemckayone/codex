@@ -114,14 +114,17 @@ import { ApiError } from './errors';
  * One item from `GET /api/content/public`, typed to match what the endpoint
  * ACTUALLY returns — not the raw DB row. The worker resolves R2 keys to CDN
  * URLs (`resolveR2Urls` adds `thumbnailUrl` + `hlsPreviewUrl` to `mediaItem`)
- * and `listPublic` attaches `categorySlugs`; `content_type` / `access_type`
- * are `varchar` columns (so `ContentWithRelations` widens them to `string`)
- * but are constrained to their enums, so we narrow them here. This is the
- * single source of truth for the landing/explore `ContentItem` shape.
+ * and `listPublic` attaches `categorySlugs`; `content_type` is a `varchar`
+ * column (so `ContentWithRelations` widens it to `string`) but is constrained
+ * to its enum, so we narrow it here. The SPEC §6.1 access-policy flags
+ * (`isFree` / `isPurchasable` + `priceCents` / `includedInTierId` /
+ * `isFollowerGated` / `isTeamOnly` / `courseOnly`) flow through unchanged from
+ * `ContentWithRelations` (WP-1 replaced the single `accessType` enum). This is
+ * the single source of truth for the landing/explore `ContentItem` shape.
  */
 export type PublicContentListItem = Omit<
   ContentWithRelations,
-  'mediaItem' | 'contentType' | 'accessType'
+  'mediaItem' | 'contentType'
 > & {
   mediaItem:
     | (MediaItem & {
@@ -130,7 +133,6 @@ export type PublicContentListItem = Omit<
       })
     | null;
   contentType: 'video' | 'audio' | 'written';
-  accessType: 'free' | 'paid' | 'followers' | 'subscribers' | 'team';
   categorySlugs: string[];
 };
 
@@ -683,7 +685,7 @@ export function createServerApi(
        * - limit: number (1-100, default: 20)
        * - status: 'draft' | 'published' | 'archived' (optional)
        * - contentType: 'video' | 'audio' | 'written' (optional)
-       * - accessType: 'free' | 'paid' | 'subscribers' | 'members' (optional)
+       * - accessType: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | 'course' (optional list filter — a query KIND label, not the stored flags)
        * - category: string filter (max 100 chars, optional)
        * - organizationId: UUID filter (optional)
        * - creatorId: UUID filter (optional)

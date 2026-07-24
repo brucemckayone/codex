@@ -259,22 +259,34 @@ export const content = pgTable(
     shaderConfig:
       jsonb('shader_config').$type<Record<string, number | boolean>>(),
 
-    // Access model — defines how content is gated.
-    // Values: 'free' | 'paid' | 'followers' | 'subscribers' | 'team'.
-    // Single source of truth: CONTENT_ACCESS_TYPE (@codex/constants);
-    // enforced by check_content_access_type below.
-    accessType: varchar('access_type', { length: 50 })
-      .default('free')
-      .notNull(),
+    // Content access POLICY (SPEC §6.1) — separable, non-exclusive flags that
+    // REPLACE the single `accessType` enum. Structurally mirrors
+    // ContentAccessPolicy in @codex/shared-types (WP-0 frozen contract); read by
+    // the entitlement resolver (@codex/access, WP-2).
+    //
+    // Legacy accessType → flag mapping (HARDENING §H2): free→isFree,
+    // paid→isPurchasable, subscribers→includedInTierId, followers→isFollowerGated,
+    // team→isTeamOnly. `courseOnly` is net-new. `isFree`/`isPurchasable`/
+    // `includedInTierId` may combine freely; `courseOnly` suppresses every
+    // standalone path regardless of the others.
+    isFree: boolean('is_free').notNull().default(true), // open to all
+    isPurchasable: boolean('is_purchasable').notNull().default(false), // one-off purchase (+ priceCents)
 
-    priceCents: integer('price_cents'), // NULL = free, INTEGER = price in cents (ACID-compliant)
+    priceCents: integer('price_cents'), // Paired with isPurchasable — one-off price in pence (NULL = not priced)
 
-    // Subscription tier gating — minimum tier required for subscription access.
-    // NULL = not included in any subscription (purchase-only or free).
-    minimumTierId: uuid('minimum_tier_id').references(
+    // Included in this org tier AND ABOVE (by subscription_tiers.sortOrder).
+    // 1:1 successor to the former `minimumTierId` (same FK, set null on tier delete).
+    includedInTierId: uuid('included_in_tier_id').references(
       () => subscriptionTiers.id,
       { onDelete: 'set null' }
     ),
+
+    // NOT independently reachable — ONLY via a course entitlement (SPEC §6.1).
+    courseOnly: boolean('course_only').notNull().default(false),
+    // Free to org followers / opt-in (was accessType 'followers').
+    isFollowerGated: boolean('is_follower_gated').notNull().default(false),
+    // Management/staff-only (was accessType 'team'); also covered by resolver role-bypass.
+    isTeamOnly: boolean('is_team_only').notNull().default(false),
 
     // Status
     status: varchar('status', { length: 50 }).default('draft').notNull(),
@@ -309,7 +321,7 @@ export const content = pgTable(
     index('idx_content_status').on(table.status),
     index('idx_content_published_at').on(table.publishedAt),
     index('idx_content_category').on(table.category),
-    index('idx_content_minimum_tier').on(table.minimumTierId),
+    index('idx_content_included_in_tier').on(table.includedInTierId),
 
     // Composite indexes for landing page query performance
     index('idx_content_org_published')
@@ -345,11 +357,6 @@ export const content = pgTable(
     check(
       'check_content_status',
       sql`${table.status} IN ('draft', 'published', 'archived')`
-    ),
-    index('idx_content_access_type').on(table.accessType),
-    check(
-      'check_content_access_type',
-      sql`${table.accessType} IN ('free', 'paid', 'followers', 'subscribers', 'team')`
     ),
     check(
       'check_content_type',

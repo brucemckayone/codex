@@ -77,7 +77,25 @@ export function expectContentEqual(
     expect(actual.contentType).toBe(expected.contentType);
   }
   if (expected.status) expect(actual.status).toBe(expected.status);
-  if (expected.accessType) expect(actual.accessType).toBe(expected.accessType);
+  // Access policy flags (SPEC §6.1 — replaced the single accessType column).
+  if (expected.isFree !== undefined) {
+    expect(actual.isFree).toBe(expected.isFree);
+  }
+  if (expected.isPurchasable !== undefined) {
+    expect(actual.isPurchasable).toBe(expected.isPurchasable);
+  }
+  if (expected.includedInTierId !== undefined) {
+    expect(actual.includedInTierId).toBe(expected.includedInTierId);
+  }
+  if (expected.courseOnly !== undefined) {
+    expect(actual.courseOnly).toBe(expected.courseOnly);
+  }
+  if (expected.isFollowerGated !== undefined) {
+    expect(actual.isFollowerGated).toBe(expected.isFollowerGated);
+  }
+  if (expected.isTeamOnly !== undefined) {
+    expect(actual.isTeamOnly).toBe(expected.isTeamOnly);
+  }
   if (expected.priceCents !== undefined) {
     expect(actual.priceCents).toBe(expected.priceCents);
   }
