@@ -8,7 +8,7 @@
  * - Procedure context with full typing
  */
 
-import type { ContentAccessService } from '@codex/access';
+import type { ContentAccessService, EntitlementsService } from '@codex/access';
 import type {
   AdminAnalyticsService,
   AdminContentManagementService,
@@ -133,6 +133,12 @@ export interface ServiceRegistry {
    */
   categories: CategoriesService;
   access: ContentAccessService;
+  /**
+   * Read-resolution of stored `entitlements` grants (Codex-2pryk.2.3 · WP-2).
+   * READ-ONLY — the grant write path (purchase / course-subscription) is WP-6.
+   * The access DECISION (`canView` / `canEnterCourse`) lives on `access`.
+   */
+  entitlements: EntitlementsService;
   imageProcessing: ImageProcessingService;
 
   // Organization domain

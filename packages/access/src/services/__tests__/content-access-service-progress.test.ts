@@ -59,6 +59,26 @@ interface StubDb {
   insertSpy: InsertSpy;
 }
 
+/**
+ * Chainable empty `.select()` stub. The collapsed resolver (Codex-2pryk.2.3)
+ * reads the `entitlements` / course tables via `db.select(...).from(...)` on the
+ * tier/paid deny paths; this mock seeds no such rows, so every additive read
+ * resolves to [] and the access-gate OUTCOME (deny → ForbiddenError) is
+ * unchanged.
+ */
+function emptySelect() {
+  const builder = {
+    from: () => builder,
+    innerJoin: () => builder,
+    leftJoin: () => builder,
+    where: () => builder,
+    limit: () => builder,
+    // biome-ignore lint/suspicious/noThenProperty: intentional thenable — mimics Drizzle's awaitable query builder so `await db.select()...` resolves to [].
+    then: (resolve: (rows: never[]) => unknown) => resolve([]),
+  };
+  return builder;
+}
+
 function createStubDb(): StubDb {
   const mocks: QueryMocks = {
     content: { findFirst: vi.fn() },
@@ -88,6 +108,7 @@ function buildService(stub: StubDb, revocation?: AccessRevocation) {
   const dbForService = {
     query: stub.mocks,
     insert: stub.insert,
+    select: emptySelect,
   } as unknown as ServiceDb;
 
   const verifyPurchase = vi.fn(async () => false);

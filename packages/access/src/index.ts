@@ -19,6 +19,15 @@
  * - Access control: Paid content requires purchase verification
  */
 
+// Entitlements read-resolution (Codex-2pryk.2.3 · WP-2). The frozen resolver
+// contract lives in @codex/shared-types; re-exported here for consumers that
+// already import @codex/access.
+export type {
+  Entitlement,
+  EntitlementResolver,
+  EntitlementSource,
+  ResourceType,
+} from '@codex/shared-types';
 // Re-export validation schemas for convenience
 export {
   type GetPlaybackProgressInput,
@@ -71,6 +80,7 @@ export {
   createContentAccessService,
   DEFAULT_STREAMING_URL_TTL_SECONDS,
 } from './services/ContentAccessService';
+export { EntitlementsService } from './services/entitlements-service';
 export type {
   PlaybackProgressResponse,
   StreamingUrlResponse,
