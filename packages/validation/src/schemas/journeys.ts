@@ -1,3 +1,4 @@
+import type { BrandTokenOverrides, PageSection } from '@codex/shared-types';
 import { z } from 'zod';
 import { createSlugSchema, uuidSchema } from '../primitives';
 
@@ -78,3 +79,93 @@ export const journeyInsightsQuerySchema = z.object({
   period: z.enum(['7d', '30d', '90d', 'all']).default('30d'),
 });
 export type JourneyInsightsQuery = z.infer<typeof journeyInsightsQuerySchema>;
+
+/**
+ * ── CREATOR / STUDIO management inputs (Codex-isr02 · page-builder write path) ──
+ *
+ * All creator routes are `requireOrgManagement`; `organizationId` is consumed
+ * ONLY by the `procedure()` org resolver (which validates the caller manages it),
+ * and the handler forwards `ctx.organizationId` — never these client values — for
+ * scoping. Included here purely so the resolver can pick the org off the query.
+ */
+
+/** Page status enum, mirrors the `landing_pages`/`courses` status CHECK. */
+export const journeyPageStatusSchema = z.enum([
+  'draft',
+  'published',
+  'archived',
+]);
+
+/** Org-only query — create (POST) + get-for-builder (GET) org resolution. */
+export const journeyOrgQuerySchema = z.object({
+  organizationId: uuidSchema,
+});
+export type JourneyOrgQuery = z.infer<typeof journeyOrgQuerySchema>;
+
+/** Studio index list query — org + optional status filter. */
+export const journeyStudioListQuerySchema = z.object({
+  organizationId: uuidSchema,
+  status: journeyPageStatusSchema.optional(),
+});
+export type JourneyStudioListQuery = z.infer<
+  typeof journeyStudioListQuerySchema
+>;
+
+/** `:pageId` path param (uuid) — get-for-builder + save routes. Explicit id name
+ * (not `:id`) so the org resolver never mistakes it for an org id
+ * (feedback_procedure_resolver_id_param). */
+export const journeyPageParamsSchema = z.object({
+  pageId: uuidSchema,
+});
+export type JourneyPageParams = z.infer<typeof journeyPageParamsSchema>;
+
+/** Create-journey body — title + page type. Org comes from the resolver. */
+export const createJourneyBodySchema = z.object({
+  title: z.string().trim().min(1).max(500),
+  pageType: z.enum(['course', 'landing']),
+});
+export type CreateJourneyBody = z.infer<typeof createJourneyBodySchema>;
+
+/**
+ * A single page section. Typed as `PageSection` (so the inferred save body is
+ * assignable to the service input without a cast) with a light runtime guard —
+ * each section must be a non-null object. Deep structural validation of the
+ * section union is deferred to the renderer + a follow-up (the write path is
+ * `requireOrgManagement`, and the render path sanitises HTML).
+ */
+export const pageSectionSchema = z.custom<PageSection>(
+  (value) => typeof value === 'object' && value !== null,
+  { message: 'each section must be an object' }
+);
+
+/**
+ * Save-journey-page body — the editable page record (frozen `JourneyPageRecord`
+ * minus the server-owned `organizationId`/`publishedAt`, which the service
+ * derives). `sections`/`brandOverrides` carry their FE types via `z.custom` so
+ * the inferred type is assignable to the service input with no boundary cast.
+ */
+export const saveJourneyPageBodySchema = z.object({
+  id: uuidSchema,
+  pageType: z.string().min(1).max(30),
+  // A plain (transform-free) required slug validator — NOT `createSlugSchema`,
+  // whose `.transform().pipe()` makes SvelteKit's `command()` infer the field as
+  // OPTIONAL, breaking assignability to the (required-slug) service input. Same
+  // format rule, validated not rewritten (the builder sends an already-slugified
+  // value); a malformed slug is rejected rather than silently coerced.
+  slug: z
+    .string()
+    .trim()
+    .min(1)
+    .max(160)
+    .regex(
+      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+      'Slug must be lowercase letters, numbers and hyphens (no leading/trailing hyphen)'
+    ),
+  title: z.string().trim().min(1).max(500),
+  status: journeyPageStatusSchema,
+  subjectType: z.string().max(30).nullable(),
+  subjectId: uuidSchema.nullable(),
+  brandOverrides: z.custom<BrandTokenOverrides>().nullable(),
+  sections: z.array(pageSectionSchema),
+});
+export type SaveJourneyPageBody = z.infer<typeof saveJourneyPageBodySchema>;

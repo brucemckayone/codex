@@ -494,6 +494,29 @@ export interface JourneyPageRecord extends PageBuilderState {
   publishedAt: string | null;
 }
 
+/**
+ * A studio-index row (Codex-isr02 · creator management view). One journey/page a
+ * creator owns, with `live` course rollups. Mirrors the FE-frozen `JourneyListItem`
+ * (`apps/web/.../page-builder/journey-queries.ts`) — the same parallel-def pattern
+ * `JourneyPageRecord` uses, since BE packages cannot import an apps/web module.
+ * Course-only rollups are `null` for a plain (non-course) landing page.
+ */
+export interface JourneyListItem {
+  id: string;
+  pageType: string;
+  subjectType: string | null;
+  slug: string;
+  title: string;
+  status: PageStatus;
+  tagline: string | null;
+  stageCount: number | null;
+  practiceCount: number | null;
+  enrolledCount: number | null;
+  /** `live` provenance (completed one-off purchases for the subject course). */
+  revenueCents: number | null;
+  updatedAt: string;
+}
+
 /** Public sales/landing page envelope (SSR shell+stream). No `canView` on the shell. */
 export interface JourneyCoursePage {
   page: JourneyPageRecord;

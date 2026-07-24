@@ -3,13 +3,13 @@
 
   Names a new journey/landing page and hands off to the builder. Mirrors
   `content/new/` — client-only (studio `ssr = false`), a `command()`-shaped
-  create. AGGRESSIVE-MODE MOCKS: `createJourneyMock` stands in for the real
-  create command; the conductor swaps it after WP-2.
+  create. Wired to the REAL `createJourney` remote (Codex-isr02): a course create
+  writes both the course + landing-page rows in one transaction, worker-side.
 -->
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { toast } from '$lib/components/ui/Toast/toast-store';
-  import { createJourneyMock } from '$lib/components/page-builder/journey-queries.mock.svelte';
+  import { createJourney } from '$lib/remote/journeys.remote';
 
   const { data } = $props();
 
@@ -31,7 +31,7 @@
     if (!canSubmit) return;
     submitting = true;
     try {
-      const { id } = await createJourneyMock({ title: title.trim(), pageType });
+      const { id } = await createJourney({ title: title.trim(), pageType });
       toast.success('Journey created');
       // Courses go to the curriculum first; landing pages straight to the builder.
       const next = pageType === 'course' ? 'curriculum' : 'page';
