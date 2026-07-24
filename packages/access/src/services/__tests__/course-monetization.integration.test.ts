@@ -17,6 +17,14 @@
  *   5. One-off content purchase → content entitlement → resolver reads it.
  *   6. getCourseOffer composes all three paths + the viewer's entitlement.
  *   7. Payout idempotency: the Option-B fan-out writes each ledger row once.
+ *   8. Refund a one-off COURSE purchase → the grant is revoked → canEnterCourse
+ *      DENIES (the money-critical refund-revokes-access invariant).
+ *   9. Refund a one-off CONTENT purchase → the grant is revoked → canView DENIES.
+ *  10. Dispute/chargeback a one-off COURSE purchase → the SAME sourceRef-keyed
+ *      revoke fires → canEnterCourse DENIES. Higher-severity than the content
+ *      case: a course_purchase grant is permanent and has NO verifyPurchase
+ *      backstop, so the entitlement row is the sole access record.
+ *  11. Dispute a one-off CONTENT purchase → the grant is revoked → canView DENIES.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -410,5 +418,241 @@ describe('Course monetization round-trip (WP-6)', () => {
     });
     expect(payoutRowsAfter).toHaveLength(payoutRows.length);
     expect(transferCreate.mock.calls.length).toBe(transfersAfterFirst);
+  });
+
+  it('8. refunding a one-off course purchase revokes the grant → canEnterCourse denies', async () => {
+    const courseId = await createCourse(db, orgAId, creatorId, {
+      priceCents: 5000,
+    });
+    const { stripe } = makeStripeStub();
+    const svc = new PurchaseService({ db, environment: 'test' }, stripe);
+
+    // No stripeChargeId → payouts (and thus the refund's payout-reversal) are
+    // skipped: this test isolates the access invariant, not the money movement
+    // (transfer reversal is covered by the purchase-service refund suite).
+    const pi = `pi_${randomUUID()}`;
+    await svc.completeCoursePurchase(pi, {
+      customerId: buyerId,
+      courseId,
+      amountPaidCents: 5000,
+      currency: 'gbp',
+    });
+
+    // Round-trip: the resolver GRANTS and the stored grant is LIVE.
+    expect(await hasCourseEntitlement(db, buyerId, courseId)).toBe(true);
+    const [grantBefore] = await db
+      .select({ revokedAt: entitlements.revokedAt })
+      .from(entitlements)
+      .where(
+        and(
+          eq(entitlements.userId, buyerId),
+          eq(entitlements.courseId, courseId),
+          eq(entitlements.source, 'course_purchase')
+        )
+      );
+    expect(grantBefore?.revokedAt).toBeNull();
+
+    // Refund the charge → the entitlement this purchase granted is revoked.
+    await svc.processRefund(pi, {
+      stripeRefundId: `re_${randomUUID()}`,
+      refundAmountCents: 5000,
+      refundReason: 'requested_by_customer',
+    });
+
+    // The grant now carries a revokedAt AND the resolver DENIES on next read.
+    const [grantAfter] = await db
+      .select({ revokedAt: entitlements.revokedAt })
+      .from(entitlements)
+      .where(
+        and(
+          eq(entitlements.userId, buyerId),
+          eq(entitlements.courseId, courseId),
+          eq(entitlements.source, 'course_purchase')
+        )
+      );
+    expect(grantAfter?.revokedAt).toBeInstanceOf(Date);
+    expect(await hasCourseEntitlement(db, buyerId, courseId)).toBe(false);
+  });
+
+  it('9. refunding a one-off content purchase revokes the grant → canView denies', async () => {
+    const [contentRow] = await db
+      .insert(content)
+      .values(
+        createTestContentInput(creatorId, {
+          organizationId: orgAId,
+          status: 'published',
+          isFree: false,
+          isPurchasable: true,
+          priceCents: 3000,
+        })
+      )
+      .returning({ id: content.id });
+    if (!contentRow) throw new Error('failed to create content');
+
+    const { stripe } = makeStripeStub();
+    const svc = new PurchaseService({ db, environment: 'test' }, stripe);
+
+    const pi = `pi_${randomUUID()}`;
+    await svc.completePurchase(pi, {
+      customerId: buyerId,
+      contentId: contentRow.id,
+      organizationId: orgAId,
+      amountPaidCents: 3000,
+      currency: 'gbp',
+    });
+
+    // Round-trip: the resolver reads a LIVE stored content grant.
+    expect(await hasStoredContentEntitlement(db, buyerId, contentRow.id)).toBe(
+      true
+    );
+    const [grantBefore] = await db
+      .select({ revokedAt: entitlements.revokedAt })
+      .from(entitlements)
+      .where(
+        and(
+          eq(entitlements.userId, buyerId),
+          eq(entitlements.contentId, contentRow.id),
+          eq(entitlements.source, 'content_purchase')
+        )
+      );
+    expect(grantBefore?.revokedAt).toBeNull();
+
+    await svc.processRefund(pi, {
+      stripeRefundId: `re_${randomUUID()}`,
+      refundAmountCents: 3000,
+      refundReason: 'requested_by_customer',
+    });
+
+    const [grantAfter] = await db
+      .select({ revokedAt: entitlements.revokedAt })
+      .from(entitlements)
+      .where(
+        and(
+          eq(entitlements.userId, buyerId),
+          eq(entitlements.contentId, contentRow.id),
+          eq(entitlements.source, 'content_purchase')
+        )
+      );
+    expect(grantAfter?.revokedAt).toBeInstanceOf(Date);
+    expect(await hasStoredContentEntitlement(db, buyerId, contentRow.id)).toBe(
+      false
+    );
+  });
+
+  it('10. disputing a one-off course purchase revokes the grant → canEnterCourse denies', async () => {
+    // Higher-severity than the refund/content cases: a course_purchase grant is
+    // PERMANENT (no expiresAt) with NO verifyPurchase backstop, so if the
+    // chargeback failed to revoke it the buyer would keep paid-for course access
+    // after the money is clawed back. processDispute runs the SAME sourceRef=
+    // purchase.id revoke as processRefund; this pins that invariant.
+    const courseId = await createCourse(db, orgAId, creatorId, {
+      priceCents: 5000,
+    });
+    const { stripe } = makeStripeStub();
+    const svc = new PurchaseService({ db, environment: 'test' }, stripe);
+
+    const pi = `pi_${randomUUID()}`;
+    await svc.completeCoursePurchase(pi, {
+      customerId: buyer2Id,
+      courseId,
+      amountPaidCents: 5000,
+      currency: 'gbp',
+    });
+
+    // Round-trip: the resolver GRANTS and the stored grant is LIVE.
+    expect(await hasCourseEntitlement(db, buyer2Id, courseId)).toBe(true);
+    const [grantBefore] = await db
+      .select({ revokedAt: entitlements.revokedAt })
+      .from(entitlements)
+      .where(
+        and(
+          eq(entitlements.userId, buyer2Id),
+          eq(entitlements.courseId, courseId),
+          eq(entitlements.source, 'course_purchase')
+        )
+      );
+    expect(grantBefore?.revokedAt).toBeNull();
+
+    // Chargeback (charge.dispute.created) → access-reducing, same as a refund.
+    await svc.processDispute(pi, {
+      stripeDisputeId: `dp_${randomUUID()}`,
+      disputeReason: 'fraudulent',
+    });
+
+    const [grantAfter] = await db
+      .select({ revokedAt: entitlements.revokedAt })
+      .from(entitlements)
+      .where(
+        and(
+          eq(entitlements.userId, buyer2Id),
+          eq(entitlements.courseId, courseId),
+          eq(entitlements.source, 'course_purchase')
+        )
+      );
+    expect(grantAfter?.revokedAt).toBeInstanceOf(Date);
+    expect(await hasCourseEntitlement(db, buyer2Id, courseId)).toBe(false);
+  });
+
+  it('11. disputing a one-off content purchase revokes the grant → canView denies', async () => {
+    const [contentRow] = await db
+      .insert(content)
+      .values(
+        createTestContentInput(creatorId, {
+          organizationId: orgAId,
+          status: 'published',
+          isFree: false,
+          isPurchasable: true,
+          priceCents: 3000,
+        })
+      )
+      .returning({ id: content.id });
+    if (!contentRow) throw new Error('failed to create content');
+
+    const { stripe } = makeStripeStub();
+    const svc = new PurchaseService({ db, environment: 'test' }, stripe);
+
+    const pi = `pi_${randomUUID()}`;
+    await svc.completePurchase(pi, {
+      customerId: buyer2Id,
+      contentId: contentRow.id,
+      organizationId: orgAId,
+      amountPaidCents: 3000,
+      currency: 'gbp',
+    });
+
+    expect(await hasStoredContentEntitlement(db, buyer2Id, contentRow.id)).toBe(
+      true
+    );
+    const [grantBefore] = await db
+      .select({ revokedAt: entitlements.revokedAt })
+      .from(entitlements)
+      .where(
+        and(
+          eq(entitlements.userId, buyer2Id),
+          eq(entitlements.contentId, contentRow.id),
+          eq(entitlements.source, 'content_purchase')
+        )
+      );
+    expect(grantBefore?.revokedAt).toBeNull();
+
+    await svc.processDispute(pi, {
+      stripeDisputeId: `dp_${randomUUID()}`,
+      disputeReason: 'fraudulent',
+    });
+
+    const [grantAfter] = await db
+      .select({ revokedAt: entitlements.revokedAt })
+      .from(entitlements)
+      .where(
+        and(
+          eq(entitlements.userId, buyer2Id),
+          eq(entitlements.contentId, contentRow.id),
+          eq(entitlements.source, 'content_purchase')
+        )
+      );
+    expect(grantAfter?.revokedAt).toBeInstanceOf(Date);
+    expect(await hasStoredContentEntitlement(db, buyer2Id, contentRow.id)).toBe(
+      false
+    );
   });
 });
