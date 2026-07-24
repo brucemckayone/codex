@@ -138,6 +138,18 @@ export const load: PageServerLoad = async ({
 
   const page = pageParam ? Math.max(1, parseInt(pageParam, 10) || 1) : 1;
 
+  // Journeys discovery rail — only on the DEFAULT browse view (no search / type /
+  // category / creator / featured filter, first page). A filtered or searched
+  // view is about content, so the rail is omitted. Fire the query HERE so it
+  // runs CONCURRENTLY with the content fetch below (this page awaits all its
+  // data — not shell+stream — so it's awaited at the return); a single capped,
+  // indexed read that degrades to an empty rail on any error.
+  const isDefaultBrowse =
+    !q && !contentType && !category && !creator && !featured && page === 1;
+  const journeysPromise = isDefaultBrowse
+    ? listPublishedJourneys({ limit: 12 }).catch(() => [])
+    : Promise.resolve([]);
+
   // Fork API call: authenticated endpoint for popularity/sales sort, public otherwise
   let contentResult: {
     items?: unknown[];
@@ -207,24 +219,15 @@ export const load: PageServerLoad = async ({
     setHeaders(CACHE_HEADERS.PRIVATE);
   }
 
-  // Journeys discovery rail — only on the DEFAULT browse view (no search / type /
-  // category / creator / featured filter, first page). A filtered or searched
-  // view is about content, so the journeys rail is omitted there. Awaited (this
-  // page awaits all its data — not the shell+stream pattern) and cheap (a single
-  // capped, indexed read); degrades to an empty rail on any error.
-  const isDefaultBrowse =
-    !q && !contentType && !category && !creator && !featured && page === 1;
-  const journeys = isDefaultBrowse
-    ? await listPublishedJourneys({ limit: 12 }).catch(() => [])
-    : [];
-
   return {
     content: {
       items: contentResult?.items ?? [],
       total: contentResult?.pagination?.total ?? 0,
     },
     creator,
-    journeys,
+    // Awaited here, but the query was fired above so it overlapped the content
+    // fetch rather than adding serial latency.
+    journeys: await journeysPromise,
     filters: {
       q: q ?? '',
       type: contentType ?? '',

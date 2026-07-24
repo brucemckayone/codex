@@ -571,11 +571,23 @@ export class CourseJourneyService extends BaseService {
         )
         .limit(opts.limit ?? 24);
 
+      // Dedupe by courseId — one card per subject course. The create path binds
+      // one landing page per course (1:1), but nothing enforces it; guard against
+      // >1 published page for the same course surfacing as duplicate cards
+      // (mirrors listEnrolledJourneys' dedupe). Ordering above keeps the leading
+      // (featured / earliest-sorted) page as the survivor.
+      const seen = new Set<string>();
+      const unique = rows.filter((r) => {
+        if (seen.has(r.courseId)) return false;
+        seen.add(r.courseId);
+        return true;
+      });
+
       const counts = await this.loadPublishedCurriculumCounts(
-        rows.map((r) => r.courseId)
+        unique.map((r) => r.courseId)
       );
 
-      return rows.map((r) => {
+      return unique.map((r) => {
         const count = counts.get(r.courseId);
         return {
           pageId: r.pageId,
