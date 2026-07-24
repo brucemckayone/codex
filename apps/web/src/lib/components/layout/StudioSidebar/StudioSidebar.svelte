@@ -26,6 +26,7 @@
     LayoutDashboardIcon,
     FileIcon,
     FileTextIcon,
+    CompassIcon,
     VideoIcon,
     TagIcon,
     TrendingUpIcon,
@@ -60,6 +61,7 @@
   const ICON_MAP: Record<SidebarIcon, Component<Record<string, unknown>>> = {
     dashboard: LayoutDashboardIcon,
     content: FileIcon,
+    journeys: CompassIcon,
     media: VideoIcon,
     categories: TagIcon,
     analytics: TrendingUpIcon,
