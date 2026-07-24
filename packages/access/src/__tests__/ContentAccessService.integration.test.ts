@@ -234,7 +234,7 @@ describe('ContentAccessService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
-          accessType: 'paid',
+          isPurchasable: true,
           priceCents: 1999, // $19.99
           tags: [],
         },
@@ -301,7 +301,7 @@ describe('ContentAccessService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
-          accessType: 'paid',
+          isPurchasable: true,
           priceCents: 4999, // $49.99
           tags: [],
         },
@@ -363,7 +363,7 @@ describe('ContentAccessService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
-          accessType: 'paid',
+          isPurchasable: true,
           priceCents: 2999, // $29.99
           tags: [],
         },
@@ -816,7 +816,7 @@ describe('ContentAccessService Integration', () => {
           contentType: 'video',
           mediaItemId: media.id,
           visibility: 'purchased_only',
-          accessType: 'paid',
+          isPurchasable: true,
           priceCents: 999,
           tags: [],
         },
@@ -903,7 +903,7 @@ describe('ContentAccessService Integration', () => {
           contentType: 'video',
           mediaItemId: media1.id,
           visibility: 'purchased_only',
-          accessType: 'paid',
+          isPurchasable: true,
           priceCents: 500,
           tags: [],
         },
@@ -989,7 +989,7 @@ describe('ContentAccessService Integration', () => {
         };
       }
 
-      /** Publish a content row and override accessType + minimumTierId. */
+      /** Publish a content row and override the access-policy flags. */
       async function createSubscriberContent(
         creator: string,
         orgId: string,
@@ -1023,11 +1023,12 @@ describe('ContentAccessService Integration', () => {
           },
           creator
         );
-        // contentService.create's Zod schema couples accessType + priceCents
-        // + visibility. We always insert as free to clear the schema (no
-        // price, public visibility) and then patch the row directly to the
-        // target accessType / priceCents / minimumTierId — mirroring the
-        // Team Access helper further down this file.
+        // contentService.create's Zod schema couples the access-policy flags
+        // + priceCents. We always insert as free to clear the schema (no
+        // price) and then patch the row directly to the target flag set —
+        // mirroring the Team Access helper further down this file. The helper
+        // signature still speaks in the legacy access-KIND (accessType) +
+        // minimumTierId; we translate to flags here at the write boundary.
         const item = await contentService.create(
           {
             organizationId: orgId,
@@ -1046,9 +1047,12 @@ describe('ContentAccessService Integration', () => {
         await db
           .update(content)
           .set({
-            accessType: opts.accessType,
-            priceCents: opts.priceCents,
-            minimumTierId: opts.minimumTierId,
+            isFree: false,
+            isPurchasable: opts.accessType === 'paid',
+            priceCents: opts.accessType === 'paid' ? opts.priceCents : null,
+            includedInTierId: opts.minimumTierId,
+            isFollowerGated: false,
+            isTeamOnly: false,
           })
           .where(eq(content.id, item.id));
 
@@ -1056,13 +1060,15 @@ describe('ContentAccessService Integration', () => {
       }
 
       it('includes accessType=subscribers content (regression)', async () => {
-        const { creatorUserId, subscriberUserId, orgId } =
+        const { creatorUserId, subscriberUserId, orgId, tierId } =
           await seedOrgWithTierAndSubscriber();
 
+        // Subscriber gating is always a concrete tier in the flag model — use
+        // the seeded tier the subscriber holds so any active subscriber sees it.
         const item = await createSubscriberContent(creatorUserId, orgId, {
           slugPrefix: 'sub-only',
           accessType: 'subscribers',
-          minimumTierId: null,
+          minimumTierId: tierId,
           priceCents: 0,
         });
 
@@ -1793,7 +1799,7 @@ describe('ContentAccessService Integration', () => {
             contentType: 'video',
             mediaItemId: media.id,
             visibility: 'purchased_only',
-            accessType: 'paid',
+            isPurchasable: true,
             priceCents: 9999999, // $99,999.99 (max allowed is $100,000)
             tags: [],
           },
@@ -1908,7 +1914,7 @@ describe('ContentAccessService Integration', () => {
             contentType: 'video',
             mediaItemId: media.id,
             visibility: 'purchased_only',
-            accessType: 'paid',
+            isPurchasable: true,
             priceCents: 999,
             tags: [],
           },
@@ -2015,9 +2021,9 @@ describe('ContentAccessService Integration', () => {
             contentType: 'video',
             mediaItemId: media.id,
             visibility: 'purchased_only',
-            accessType: 'paid',
+            isPurchasable: true,
             priceCents: 1999,
-            minimumTierId,
+            includedInTierId: minimumTierId,
             tags: [],
           },
           userId
@@ -2172,8 +2178,9 @@ describe('ContentAccessService Integration', () => {
 
     describe('Team Access (replaces members-only)', () => {
       /**
-       * Helper: create published content with a given accessType.
-       * Content is created as free (default), then accessType is updated directly.
+       * Helper: create published content gated to a given access KIND.
+       * Content is created as free (default), then the access-policy flags are
+       * patched directly.
        */
       async function createContentWithAccessType(
         accessType: string,
@@ -2220,10 +2227,21 @@ describe('ContentAccessService Integration', () => {
 
         await contentService.publish(item.id, userId);
 
-        // Set accessType directly (bypasses validation since we're in tests)
+        // Set the access-policy flags directly (bypasses validation since
+        // we're in tests)
         await db
           .update(content)
-          .set({ accessType })
+          .set({
+            // Translate the legacy access-KIND arg to the flag policy (full
+            // set so no stale gate lingers). These helpers only pass
+            // 'team'/'followers', but the mapping stays faithful for 'free' too.
+            isFree: accessType === 'free',
+            isPurchasable: false,
+            priceCents: null,
+            includedInTierId: null,
+            isFollowerGated: accessType === 'followers',
+            isTeamOnly: accessType === 'team',
+          })
           .where(eq(content.id, item.id));
 
         return item;
@@ -2366,7 +2384,17 @@ describe('ContentAccessService Integration', () => {
 
         await db
           .update(content)
-          .set({ accessType })
+          .set({
+            // Translate the legacy access-KIND arg to the flag policy (full
+            // set so no stale gate lingers). These helpers only pass
+            // 'team'/'followers', but the mapping stays faithful for 'free' too.
+            isFree: accessType === 'free',
+            isPurchasable: false,
+            priceCents: null,
+            includedInTierId: null,
+            isFollowerGated: accessType === 'followers',
+            isTeamOnly: accessType === 'team',
+          })
           .where(eq(content.id, item.id));
 
         return item;
@@ -2477,7 +2505,7 @@ describe('ContentAccessService Integration', () => {
             contentType: 'video',
             mediaItemId: media.id,
             visibility: 'purchased_only',
-            accessType: 'paid',
+            isPurchasable: true,
             priceCents: 4999,
             tags: [],
           },
@@ -2537,7 +2565,7 @@ describe('ContentAccessService Integration', () => {
             contentType: 'video',
             mediaItemId: media.id,
             visibility: 'purchased_only',
-            accessType: 'paid',
+            isPurchasable: true,
             priceCents: 2999,
             tags: [],
           },
@@ -2604,7 +2632,7 @@ describe('ContentAccessService Integration', () => {
             contentType: 'video',
             mediaItemId: media.id,
             visibility: 'purchased_only',
-            accessType: 'paid',
+            isPurchasable: true,
             priceCents: 999,
             tags: [],
           },
@@ -2928,9 +2956,9 @@ describe('ContentAccessService Integration', () => {
       }
 
       /**
-       * Seed a PUBLISHED content row in the invalid (orgless + minimumTierId)
+       * Seed a PUBLISHED content row in the invalid (orgless + includedInTierId)
        * state. Creates the row as orgless free content (passes the write
-       * path), then patches accessType/priceCents/minimumTierId directly while
+       * path), then patches the access-policy flags directly while
        * keeping organizationId NULL.
        */
       async function seedOrglessTierGatedContent(opts: {
@@ -2979,14 +3007,19 @@ describe('ContentAccessService Integration', () => {
         );
         await contentService.publish(item.id, opts.creator);
 
-        // Force the invalid state: orgless (organizationId stays NULL) + a tier.
+        // Force the invalid state: orgless (organizationId stays NULL) + a tier
+        // (includedInTierId set). Translate the legacy KIND arg to the full
+        // flag set at the write boundary.
         await db
           .update(content)
           .set({
             organizationId: null,
-            accessType: opts.accessType,
-            priceCents: opts.priceCents,
-            minimumTierId: opts.minimumTierId,
+            isFree: opts.accessType === 'free',
+            isPurchasable: opts.accessType === 'paid',
+            priceCents: opts.accessType === 'paid' ? opts.priceCents : null,
+            includedInTierId: opts.minimumTierId,
+            isFollowerGated: false,
+            isTeamOnly: false,
           })
           .where(eq(content.id, item.id));
 
@@ -3112,7 +3145,14 @@ describe('ContentAccessService Integration', () => {
         // Orgless PAID, NO tier.
         await db
           .update(content)
-          .set({ accessType: 'paid', priceCents: 1500, minimumTierId: null })
+          .set({
+            isFree: false,
+            isPurchasable: true,
+            priceCents: 1500,
+            includedInTierId: null,
+            isFollowerGated: false,
+            isTeamOnly: false,
+          })
           .where(eq(content.id, item.id));
 
         const result = await accessService.getStreamingUrl(viewerId, {
@@ -3171,7 +3211,14 @@ describe('ContentAccessService Integration', () => {
         await contentService.publish(item.id, userId);
         await db
           .update(content)
-          .set({ accessType: 'subscribers', minimumTierId: tierId })
+          .set({
+            isFree: false,
+            isPurchasable: false,
+            priceCents: null,
+            includedInTierId: tierId,
+            isFollowerGated: false,
+            isTeamOnly: false,
+          })
           .where(eq(content.id, item.id));
 
         // Active subscription at the required tier.

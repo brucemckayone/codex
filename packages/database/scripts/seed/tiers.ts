@@ -6,7 +6,7 @@ const now = new Date();
 
 /**
  * Seed subscription tiers for each org. Must run BEFORE content so that
- * content rows can reference `minimumTierId` via FK at insert time without
+ * content rows can reference `includedInTierId` via FK at insert time without
  * relying on a post-hoc update pass.
  *
  * Stripe Product/Price linkage is handled later in `seedCommerce()` when

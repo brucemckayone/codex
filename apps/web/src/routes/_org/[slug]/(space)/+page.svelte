@@ -12,6 +12,7 @@
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
+  import { deriveContentAccessKind } from '$lib/utils/content-access';
   import { CreatorCarouselCard, SkeletonCreatorCard } from '$lib/components/ui/CreatorCard';
   import Carousel from '$lib/components/carousel/Carousel.svelte';
   import FeatureCarousel from '$lib/components/carousel/FeatureCarousel.svelte';
@@ -178,7 +179,7 @@
   // hides gracefully (the component checks `previewContent?.length > 0`).
   const subscribeGatedContent = $derived(
     data.allContent.filter(
-      (c) => c.accessType === 'subscribers' || c.accessType === 'followers'
+      (c) => c.includedInTierId != null || c.isFollowerGated === true
     )
   );
 
@@ -241,7 +242,7 @@
       category: c.category ?? null,
       categorySlugs: c.categorySlugs ?? [],
       featured: c.featured ?? false,
-      contentAccessType: c.accessType,
+      contentAccessType: deriveContentAccessKind(c),
       included: access.isIncluded(c),
       isFollower: access.isFollowing,
       tierName: access.getTierName(c),
@@ -612,7 +613,7 @@
       price={c.priceCents != null
         ? { amount: c.priceCents, currency: 'GBP' }
         : null}
-      contentAccessType={c.accessType}
+      contentAccessType={deriveContentAccessKind(c)}
       included={access.isIncluded(c)}
       isFollower={access.isFollowing}
       tierName={access.getTierName(c)}

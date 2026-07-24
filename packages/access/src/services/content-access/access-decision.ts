@@ -60,10 +60,13 @@ const MANAGEMENT_ROLES: string[] = [
 
 /** Content fields the streaming-access tree reads. */
 interface StreamingAccessContent {
-  accessType: string;
   organizationId: string | null;
-  minimumTierId: string | null;
+  isFree: boolean;
+  isPurchasable: boolean;
   priceCents: number | null;
+  includedInTierId: string | null;
+  isFollowerGated: boolean;
+  isTeamOnly: boolean;
 }
 
 /**
@@ -116,9 +119,12 @@ export async function resolveHasContentAccess(
     columns: {
       id: true,
       organizationId: true,
-      accessType: true,
+      isFree: true,
+      isPurchasable: true,
       priceCents: true,
-      minimumTierId: true,
+      includedInTierId: true,
+      isFollowerGated: true,
+      isTeamOnly: true,
     },
   });
 
@@ -139,11 +145,11 @@ export async function resolveHasContentAccess(
   // subscription check with `orgId` being truthy, silently SKIPPING the tier
   // gate and granting access. Deny here, before any branch, so a pre-existing
   // bad row (regardless of how it was written) is never silently unlocked.
-  if (orgId == null && contentRecord.minimumTierId != null) {
+  if (orgId == null && contentRecord.includedInTierId != null) {
     obs.warn('Access denied - orgless content with tier gate', {
       userId,
       contentId,
-      minimumTierId: contentRecord.minimumTierId,
+      includedInTierId: contentRecord.includedInTierId,
       securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
       severity: LOG_SEVERITY.MEDIUM,
       eventType: LOG_EVENTS.ACCESS_CONTROL,
@@ -204,13 +210,17 @@ export async function resolveHasContentAccess(
     return userSub.tier.sortOrder >= contentTier.sortOrder;
   };
 
-  // Branch on accessType — mirrors the decision tree in getStreamingUrl.
-  if (contentRecord.accessType === CONTENT_ACCESS_TYPE.TEAM) {
+  // Branch on the access-policy flags — behavior-preserving translation of the
+  // former mutually-exclusive `accessType` chain (WP-1); WP-2 replaces this with
+  // the entitlements resolver. Precedence: team > followers > tier > paid > free
+  // (matches the old accessType chain; migrated single-mode rows set exactly one
+  // gate, so precedence is observable only for future multi-flag content).
+  if (contentRecord.isTeamOnly) {
     if (!orgId) return false;
     return hasManagementMembership(orgId);
   }
 
-  if (contentRecord.accessType === CONTENT_ACCESS_TYPE.FOLLOWERS) {
+  if (contentRecord.isFollowerGated) {
     if (!orgId) return false;
     // Codex-xybr3: subscribers ⊇ followers. Active subscribers to the
     // content's org get followers-only access without needing a follower
@@ -227,12 +237,12 @@ export async function resolveHasContentAccess(
     return hasManagementMembership(orgId);
   }
 
-  if (contentRecord.accessType === CONTENT_ACCESS_TYPE.SUBSCRIBERS) {
+  if (contentRecord.includedInTierId != null) {
     if (!orgId) return false;
     // Subscription and purchase are independent gates — launch in parallel
     // (R12 hard rule). Falls through to management only when both deny.
     const [subscribed, purchased] = await Promise.all([
-      hasSubscriptionAccess(orgId, contentRecord.minimumTierId),
+      hasSubscriptionAccess(orgId, contentRecord.includedInTierId),
       purchaseService.verifyPurchase(contentId, userId),
     ]);
     if (subscribed || purchased) return true;
@@ -244,10 +254,10 @@ export async function resolveHasContentAccess(
     // Purchase + (optional) subscription gates are independent — launch in
     // parallel when both apply (R12 hard rule). When no minimumTierId is
     // set the subscription path doesn't apply, so only purchase runs.
-    if (orgId && contentRecord.minimumTierId) {
+    if (orgId && contentRecord.includedInTierId) {
       const [purchased, subscribed] = await Promise.all([
         purchaseService.verifyPurchase(contentId, userId),
-        hasSubscriptionAccess(orgId, contentRecord.minimumTierId),
+        hasSubscriptionAccess(orgId, contentRecord.includedInTierId),
       ]);
       if (purchased || subscribed) return true;
       return hasManagementMembership(orgId);
@@ -294,12 +304,12 @@ export async function assertStreamingAccess(
   // precede the accessType branching.
   if (
     contentRecord.organizationId == null &&
-    contentRecord.minimumTierId != null
+    contentRecord.includedInTierId != null
   ) {
     obs.warn('Access denied - orgless content with tier gate', {
       userId,
       contentId,
-      minimumTierId: contentRecord.minimumTierId,
+      includedInTierId: contentRecord.includedInTierId,
       securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
       severity: LOG_SEVERITY.MEDIUM,
       eventType: LOG_EVENTS.ACCESS_CONTROL,
@@ -391,10 +401,13 @@ export async function assertStreamingAccess(
     });
   };
 
-  // ── Access decision: branch on accessType ──────────────────
+  // ── Access decision: branch on the access-policy flags ─────
+  // Behavior-preserving translation of the former accessType else-if chain
+  // (WP-1); precedence team > followers > tier > paid > free. WP-2 replaces
+  // this with the entitlements resolver.
 
   // (a) Team-only: require management role (owner/admin/creator)
-  if (contentRecord.accessType === 'team') {
+  if (contentRecord.isTeamOnly) {
     if (!contentRecord.organizationId) {
       throw new AccessDeniedError(userId, contentId, {
         reason: 'team_only_requires_org',
@@ -441,7 +454,7 @@ export async function assertStreamingAccess(
   // `checkSubscriptionAccess` (status IN (active, cancelling) AND
   // currentPeriodEnd > now) — consistent with the PR #5 filter used
   // for subscribers-only content.
-  else if (contentRecord.accessType === 'followers') {
+  else if (contentRecord.isFollowerGated) {
     if (!contentRecord.organizationId) {
       throw new AccessDeniedError(userId, contentId, {
         reason: 'followers_only_requires_org',
@@ -511,7 +524,7 @@ export async function assertStreamingAccess(
     }
   }
   // (c) Subscribers-only: require active subscription (with optional tier check)
-  else if (contentRecord.accessType === 'subscribers') {
+  else if (contentRecord.includedInTierId != null) {
     if (!contentRecord.organizationId) {
       throw new AccessDeniedError(userId, contentId, {
         reason: 'subscribers_only_requires_org',
@@ -523,7 +536,7 @@ export async function assertStreamingAccess(
     // Primary check: active subscription to the org
     const hasSubAccess = await checkSubscriptionAccess(
       contentRecord.organizationId,
-      contentRecord.minimumTierId
+      contentRecord.includedInTierId
     );
 
     if (hasSubAccess) {
@@ -570,7 +583,7 @@ export async function assertStreamingAccess(
         userId,
         contentId,
         organizationId: contentRecord.organizationId,
-        minimumTierId: contentRecord.minimumTierId,
+        includedInTierId: contentRecord.includedInTierId,
         securityEvent: LOG_EVENTS.UNAUTHORIZED_ACCESS,
         severity: LOG_SEVERITY.MEDIUM,
         eventType: LOG_EVENTS.ACCESS_CONTROL,
@@ -600,10 +613,10 @@ export async function assertStreamingAccess(
       // (accessType='paid', no minimumTierId) requires a purchase.
       let hasSubscriptionAccess = false;
 
-      if (contentRecord.organizationId && contentRecord.minimumTierId) {
+      if (contentRecord.organizationId && contentRecord.includedInTierId) {
         hasSubscriptionAccess = await checkSubscriptionAccess(
           contentRecord.organizationId,
-          contentRecord.minimumTierId
+          contentRecord.includedInTierId
         );
       }
 

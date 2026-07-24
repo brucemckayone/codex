@@ -150,9 +150,12 @@ const streamingInput: GetStreamingUrlInput = {
 const followersContentRow = {
   id: contentId,
   organizationId: orgId,
-  accessType: 'followers' as const,
+  isFree: false,
+  isPurchasable: false,
   priceCents: null,
-  minimumTierId: null,
+  includedInTierId: null,
+  isFollowerGated: true,
+  isTeamOnly: false,
   mediaItem: {
     id: 'media_123',
     creatorId: 'creator_abc',
@@ -166,8 +169,8 @@ const followersContentRow = {
 
 const subscribersContentRow = {
   ...followersContentRow,
-  accessType: 'subscribers' as const,
-  minimumTierId: 'tier_pro',
+  isFollowerGated: false,
+  includedInTierId: 'tier_pro',
 };
 
 function makeActiveSub(
@@ -446,7 +449,7 @@ describe('ContentAccessService.getStreamingUrl — followers-only content (Codex
       stub.mocks.subscriptions.findFirst.mockResolvedValue(
         makeActiveSub({ sortOrder: 20 }) // user's tier >= content's tier
       );
-      // The content's minimumTierId resolves to sortOrder=10 (< user's 20).
+      // The content's includedInTierId resolves to sortOrder=10 (< user's 20).
       stub.mocks.subscriptionTiers.findFirst.mockResolvedValue({
         id: 'tier_pro',
         name: 'pro',

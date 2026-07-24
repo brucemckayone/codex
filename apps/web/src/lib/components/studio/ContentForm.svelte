@@ -43,6 +43,7 @@
   import ContentFormSectionRail from './content-form/ContentFormSectionRail.svelte';
   import FormSection from './content-form/FormSection.svelte';
   import AccessSection from './content-form/AccessSection.svelte';
+  import { deriveContentAccessKind } from '$lib/utils/content-access';
   import OrganizeSection from './content-form/OrganizeSection.svelte';
   import ReadinessPanel from './content-form/ReadinessPanel.svelte';
   import DangerZone from './content-form/DangerZone.svelte';
@@ -124,7 +125,9 @@
   // svelte-ignore state_referenced_locally — form field: user edits must survive until submit
   let selectedCategoryIds = $state<string[]>(content?.categoryIds ?? []);
   // svelte-ignore state_referenced_locally — form field: user edits must survive until submit
-  let selectedMinimumTierId = $state<string>(content?.minimumTierId ?? '');
+  // WP-1: the single-select access UI still edits a `minimumTierId`; it is
+  // seeded from (and saved back to) the policy flag `includedInTierId`.
+  let selectedMinimumTierId = $state<string>(content?.includedInTierId ?? '');
 
   const contentTypeVal = $derived(form.fields.contentType.value() ?? content?.contentType ?? 'video');
   const formPending = $derived(form.pending > 0);
@@ -189,7 +192,9 @@
           contentBody: content!.contentBodyJson
             ? JSON.stringify(content!.contentBodyJson)
             : content!.contentBody ?? '',
-          accessType: content!.accessType ?? 'free',
+          // Reconstruct the single-select access kind from the WP-1 policy
+          // flags so the existing radio UI re-populates on edit.
+          accessType: deriveContentAccessKind(content!),
           visibility: content!.visibility ?? 'public',
           price: content!.priceCents ? (content!.priceCents / 100).toFixed(2) : '0.00',
           category: content!.category ?? '',

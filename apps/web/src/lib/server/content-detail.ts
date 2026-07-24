@@ -11,7 +11,7 @@
  *   2. creator content — `routes/_creators/[username]/content/[contentSlug]/+page.server.ts`
  *
  * Each route calls `loadAccessAndProgress(content.id, platform, cookies,
- * content.accessType)` in both of its branches — streamed on the free
+ * content.isFree)` in both of its branches — streamed on the free
  * fast-path, awaited on the gated path — so there are four call sites but a
  * single signature. Neither `+page.server.ts` may add its own grant/deny
  * logic; keeping the decision here is what stops the two routes diverging.
@@ -106,15 +106,9 @@ function extractRevocationReason(
 }
 
 /**
- * `accessType` values recognised by the content schema. Mirrors the DB CHECK
- * constraint in packages/database/src/schema/content.ts.
- */
-type ContentAccessType = 'free' | 'paid' | 'followers' | 'subscribers' | 'team';
-
-/**
  * Empty subscription-context fallback used by content detail loaders when
- * the content does not require a subscription (free / paid / followers /
- * team accessTypes with no minimum tier). Both the org and creators content
+ * the content does not require a subscription (any content with no tier gate —
+ * `includedInTierId == null`). Both the org and creators content
  * detail loaders return this exact 5-field shape — extracted here so the
  * shape can only drift in one place. Truth-source for the field set is
  * `SubscriptionContext` in `$lib/types`.
@@ -163,15 +157,13 @@ export const DENIED_ACCESS_RESULT: AccessAndProgress = {
  * authenticated user (because signed R2 URLs are issued per-user), but the
  * page shell should not be gated behind that.
  *
- * All other access types (paid / followers / subscribers / team) keep the
- * body gated behind the authenticated access check: anonymous visitors see
- * the paywall teaser, signed-in users fall through to `loadAccessAndProgress`
+ * Gated content (`isFree=false` — purchasable / follower / tier / team) keeps
+ * the body behind the authenticated access check: anonymous visitors see the
+ * paywall teaser, signed-in users fall through to `loadAccessAndProgress`
  * which asks the backend authoritatively.
  */
-export function isPublicAccessType(
-  accessType: string | null | undefined
-): boolean {
-  return accessType === 'free';
+export function isPublicContent(isFree: boolean | null | undefined): boolean {
+  return isFree === true;
 }
 
 /** The server-side API surface returned by `createServerApi`. */
@@ -223,16 +215,16 @@ export function resolveAccessGranted(
  * access-grant decision is isolated in {@link resolveAccessGranted} — the
  * single WP-2 swap point; everything else here is response assembly.
  *
- * `accessType` short-circuits the result for free content: `hasAccess` is
- * forced to `true` even if the stream fetch fails, so the body stays visible
- * when the stream worker is degraded. Authenticated streaming still runs so
- * we can render the player when the URL is available.
+ * `isFree` short-circuits the result for free content: `hasAccess` is forced
+ * to `true` even if the stream fetch fails, so the body stays visible when the
+ * stream worker is degraded. Authenticated streaming still runs so we can
+ * render the player when the URL is available.
  */
 export async function loadAccessAndProgress(
   contentId: string,
   platform: App.Platform | undefined,
   cookies: Cookies,
-  accessType?: string | null
+  isFree?: boolean | null
 ): Promise<AccessAndProgress> {
   const api = createServerApi(platform, cookies);
 
@@ -261,7 +253,7 @@ export async function loadAccessAndProgress(
   // Single access-grant seam — WP-2 swaps `resolveAccessGranted` for an
   // explicit `@codex/access` canView resolver (see its doc block).
   const accessGranted = resolveAccessGranted(streamResult);
-  const hasAccess = isPublicAccessType(accessType) || accessGranted;
+  const hasAccess = isPublicContent(isFree) || accessGranted;
   const streamingUrl =
     (streamResult as StreamResult | null)?.streamingUrl ?? null;
   const waveformUrl =
@@ -304,15 +296,14 @@ export async function loadAccessAndProgress(
  */
 export async function loadSubscriptionContext(
   orgId: string,
-  contentMinimumTierId: string | null,
+  includedInTierId: string | null,
   platform: App.Platform | undefined,
-  cookies: Cookies,
-  contentAccessType?: string
+  cookies: Cookies
 ): Promise<SubscriptionContext> {
-  // Content requires a subscription if accessType is 'subscribers' OR if a minimum tier is set.
-  // When accessType is 'subscribers' with no minimumTierId, any active subscription grants access.
-  const isSubscriberContent =
-    contentAccessType === 'subscribers' || !!contentMinimumTierId;
+  // Content requires a subscription when it is tier-gated — the WP-1
+  // successor of accessType 'subscribers' is a non-null includedInTierId.
+  // Any active subscription meeting the tier's sortOrder grants access.
+  const isSubscriberContent = includedInTierId != null;
 
   if (!isSubscriberContent) {
     return {
@@ -344,10 +335,10 @@ export async function loadSubscriptionContext(
   let subscriptionCoversContent = false;
 
   if (isAccessGranting && currentSubscription) {
-    if (!contentMinimumTierId) {
+    if (!includedInTierId) {
       subscriptionCoversContent = true;
     } else {
-      const contentTier = tiers.find((t) => t.id === contentMinimumTierId);
+      const contentTier = tiers.find((t) => t.id === includedInTierId);
       if (contentTier) {
         subscriptionCoversContent =
           currentSubscription.tier.sortOrder >= contentTier.sortOrder;

@@ -43,8 +43,7 @@
     subscriptionContext: data.subscriptionContext,
     organizationId: data.content.organizationId,
     enableSubscriptions: true,
-    accessType: data.content.accessType,
-    minimumTierId: data.content.minimumTierId,
+    includedInTierId: data.content.includedInTierId,
   }));
 
   // Access state — resolved reactively from the streaming promise.
