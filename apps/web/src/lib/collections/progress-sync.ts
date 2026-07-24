@@ -11,7 +11,11 @@
  */
 
 import { browser } from '$app/environment';
-import { getUnsyncedProgress, syncProgressToServer } from './progress';
+import {
+  getUnsyncedProgress,
+  syncCompletionsToServer,
+  syncProgressToServer,
+} from './progress';
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let initializedForUser: string | null = null;
@@ -20,11 +24,21 @@ let initializedForUser: string | null = null;
 const SYNC_INTERVAL_MS = 120_000;
 
 /**
+ * Flush both server-bound queues: playback position AND course completions
+ * (SPEC §11 / D-E). Completions usually persist on the mark-complete action;
+ * this loop is the retry safety net for the ones that didn't land.
+ */
+function flushToServer(): void {
+  void syncProgressToServer();
+  void syncCompletionsToServer();
+}
+
+/**
  * Start the sync interval
  */
 function startSync(): void {
   if (syncInterval) return;
-  syncInterval = setInterval(syncProgressToServer, SYNC_INTERVAL_MS);
+  syncInterval = setInterval(flushToServer, SYNC_INTERVAL_MS);
 }
 
 /**
@@ -43,12 +57,12 @@ function stopSync(): void {
 function handleVisibilityChange(): void {
   if (document.visibilityState === 'visible') {
     // Page became visible - sync and start interval
-    syncProgressToServer();
+    flushToServer();
     startSync();
   } else {
     // Page hidden - stop interval and do final sync
     stopSync();
-    syncProgressToServer();
+    flushToServer();
   }
 }
 
@@ -158,5 +172,5 @@ export function cleanupProgressSync(): void {
  * Useful for syncing after important actions like completing a video.
  */
 export async function forceSync(): Promise<void> {
-  await syncProgressToServer();
+  await Promise.all([syncProgressToServer(), syncCompletionsToServer()]);
 }
