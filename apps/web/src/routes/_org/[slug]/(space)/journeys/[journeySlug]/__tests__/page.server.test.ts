@@ -15,8 +15,55 @@
  * those); mirrors the explore page-load test precedent.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { JourneyCoursePage } from '$lib/page-builder';
+import type { SellPreview } from '$lib/page-builder/render';
 import { CACHE_HEADERS } from '$lib/server/cache';
-import { MOCK_COURSE_PAGE, MOCK_SELL_PREVIEW } from '../journey-page.mock';
+
+// Contract-shaped fixtures (inlined — the WP-3 `journey-page.mock` was deleted
+// at integration). This test mocks the `../journey-data` seam, so it exercises
+// only the load's shell/stream wiring; these fixtures just flow through it. The
+// load reads `page.id` + `course.id` to build the streamed preview args.
+const MOCK_COURSE_PAGE = {
+  page: {
+    id: '00000000-0000-4000-8000-0000000000a0',
+    organizationId: '00000000-0000-4000-8000-000000000001',
+    publishedAt: '2026-05-01T09:00:00.000Z',
+    pageType: 'course',
+    slug: 'rootwork',
+    title: 'Rootwork',
+    status: 'published',
+    subjectType: 'course',
+    subjectId: '00000000-0000-4000-8000-0000000000c0',
+    brandOverrides: null,
+    sections: [],
+  },
+  course: {
+    id: '00000000-0000-4000-8000-0000000000c0',
+    slug: 'rootwork',
+    title: 'Rootwork',
+    kicker: null,
+    lede: null,
+    status: 'published',
+    priceCents: 4900,
+    stageCount: 0,
+    practiceCount: 0,
+  },
+  stages: [],
+  testimonials: [],
+} satisfies JourneyCoursePage;
+
+const MOCK_SELL_PREVIEW = {
+  intro: {
+    playlistUrl: '/cdn/preview/rootwork-intro/preview.m3u8',
+    posterUrl: null,
+    durationSeconds: 90,
+  },
+  reel: {
+    playlistUrl: '/cdn/preview/rootwork-reel/preview.m3u8',
+    posterUrl: null,
+    durationSeconds: 30,
+  },
+} satisfies SellPreview;
 
 const { getCoursePageMock, resolveSellPreviewMock } = vi.hoisted(() => ({
   getCoursePageMock: vi.fn(),

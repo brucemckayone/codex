@@ -46,6 +46,8 @@ const accessSpies = {
 
 const journeySpies = {
   getCourseBySlug: vi.fn(),
+  getCoursePage: vi.fn(),
+  getCourseSellPreview: vi.fn(),
   getCourseDashboard: vi.fn(),
   getInCoursePractice: vi.fn(),
   recordPracticeCompletion: vi.fn(),
@@ -129,6 +131,53 @@ const WRITTEN_PRACTICE = {
   bodyHtml: '<p>Set your intention.</p>',
 };
 
+const PAGE_ID = '2c000000-0000-4000-8000-0000000000f0';
+
+// Public sales-page envelope (WP-3) — the `getCoursePage` projection.
+const COURSE_PAGE = {
+  page: {
+    id: PAGE_ID,
+    organizationId: ORG_ID,
+    publishedAt: '2026-05-01T09:00:00.000Z',
+    pageType: 'course',
+    slug: SLUG,
+    title: 'Rootwork',
+    status: 'published' as const,
+    subjectType: 'course',
+    subjectId: COURSE_ID,
+    brandOverrides: null,
+    sections: [],
+  },
+  course: {
+    id: COURSE_ID,
+    slug: SLUG,
+    title: 'Rootwork',
+    kicker: null,
+    lede: null,
+    status: 'published' as const,
+    priceCents: 4900,
+    stageCount: 0,
+    practiceCount: 0,
+  },
+  stages: [],
+  testimonials: [],
+};
+
+// Public 30s sell-preview clips (WP-3 · SPEC §10) — the `getCourseSellPreview`
+// projection (already resolved to CDN URLs; no signing).
+const SELL_PREVIEW = {
+  intro: {
+    playlistUrl: 'http://localhost:4100/hls/intro-media/preview/preview.m3u8',
+    posterUrl: 'http://localhost:4100/thumbnails/intro-media/thumb.jpg',
+    durationSeconds: 90,
+  },
+  reel: {
+    playlistUrl: 'http://localhost:4100/hls/reel-media/preview/preview.m3u8',
+    posterUrl: null,
+    durationSeconds: 30,
+  },
+};
+
 const COMPLETION_RECORD = {
   contentId: CONTENT_ID,
   completedAt: '2026-07-24T00:00:00.000Z',
@@ -143,12 +192,18 @@ const STREAM_RESULT = {
   readyVariants: ['1080p', '720p'],
 };
 
+// The public CDN base the sell-preview route forwards to the service (and that
+// the `access` registry getter reads for its dev R2 signer). `ProvidedEnv` does
+// not declare this optional binding, so it lives as a typed local the tests can
+// both inject and assert against.
+const R2_PUBLIC_URL_BASE = 'http://localhost:4100';
+
 // The env the real `access` registry getter needs to build its dev R2 signer
 // without touching a real bucket (the service is mocked, so nothing signs).
 const testEnv = {
   ...env,
   ENVIRONMENT: 'development',
-  R2_PUBLIC_URL_BASE: 'http://localhost:4100',
+  R2_PUBLIC_URL_BASE,
 } as typeof env;
 
 /** Mount both journey route groups behind a user-injection middleware. */
@@ -194,6 +249,8 @@ beforeEach(() => {
   accessSpies.canView.mockResolvedValue(true);
   accessSpies.getStreamingUrl.mockResolvedValue(STREAM_RESULT);
   journeySpies.getCourseBySlug.mockResolvedValue(COURSE_SUMMARY);
+  journeySpies.getCoursePage.mockResolvedValue(COURSE_PAGE);
+  journeySpies.getCourseSellPreview.mockResolvedValue(SELL_PREVIEW);
   journeySpies.getCourseDashboard.mockResolvedValue(DASHBOARD);
   journeySpies.getInCoursePractice.mockResolvedValue(MEDIA_PRACTICE);
   journeySpies.recordPracticeCompletion.mockResolvedValue(COMPLETION_RECORD);
@@ -321,6 +378,114 @@ describe('GET /api/journeys/courses/by-slug — resolve summary', () => {
     );
     expect(res.status).toBe(400);
     expect(journeySpies.getCourseBySlug).not.toHaveBeenCalled();
+  });
+});
+
+// ─── GET /api/journeys/pages/by-slug ─────────────────────────────────────────
+
+describe('GET /api/journeys/pages/by-slug — public sales page (optional auth)', () => {
+  it('found → 200 { data: coursePage }, service called with (orgId, slug)', async () => {
+    const res = await dispatch(
+      buildApp(USER),
+      getReq(
+        `/api/journeys/pages/by-slug?organizationId=${ORG_ID}&slug=${SLUG}`
+      )
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: COURSE_PAGE });
+    expect(journeySpies.getCoursePage).toHaveBeenCalledWith(ORG_ID, SLUG);
+  });
+
+  it('anonymous (no session) → 200 — the sell shell is fully public', async () => {
+    const res = await dispatch(
+      buildApp(null),
+      getReq(
+        `/api/journeys/pages/by-slug?organizationId=${ORG_ID}&slug=${SLUG}`
+      )
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: COURSE_PAGE });
+    expect(journeySpies.getCoursePage).toHaveBeenCalledWith(ORG_ID, SLUG);
+  });
+
+  it('no published page → 200 { data: null }', async () => {
+    journeySpies.getCoursePage.mockResolvedValue(null);
+    const res = await dispatch(
+      buildApp(USER),
+      getReq(
+        `/api/journeys/pages/by-slug?organizationId=${ORG_ID}&slug=missing`
+      )
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: null });
+  });
+
+  it('missing organizationId → 400, service NOT called', async () => {
+    const res = await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/pages/by-slug?slug=${SLUG}`)
+    );
+    expect(res.status).toBe(400);
+    expect(journeySpies.getCoursePage).not.toHaveBeenCalled();
+  });
+
+  it('non-uuid organizationId → 400, service NOT called', async () => {
+    const res = await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/pages/by-slug?organizationId=nope&slug=${SLUG}`)
+    );
+    expect(res.status).toBe(400);
+    expect(journeySpies.getCoursePage).not.toHaveBeenCalled();
+  });
+});
+
+// ─── GET /api/journeys/courses/:courseId/sell-preview ────────────────────────
+
+describe('GET /api/journeys/courses/:courseId/sell-preview — public previews', () => {
+  it('found → 200 { data: preview }, service called with (courseId, R2 base)', async () => {
+    const res = await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/courses/${COURSE_ID}/sell-preview`)
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: SELL_PREVIEW });
+    // The route supplies the env-owned CDN base; the service resolves URLs.
+    expect(journeySpies.getCourseSellPreview).toHaveBeenCalledWith(
+      COURSE_ID,
+      R2_PUBLIC_URL_BASE
+    );
+  });
+
+  it('anonymous → 200 — previews are public (no auth, no canView)', async () => {
+    const res = await dispatch(
+      buildApp(null),
+      getReq(`/api/journeys/courses/${COURSE_ID}/sell-preview`)
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: SELL_PREVIEW });
+    expect(journeySpies.getCourseSellPreview).toHaveBeenCalledWith(
+      COURSE_ID,
+      R2_PUBLIC_URL_BASE
+    );
+  });
+
+  it('course not published → 200 { data: null }', async () => {
+    journeySpies.getCourseSellPreview.mockResolvedValue(null);
+    const res = await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/courses/${COURSE_ID}/sell-preview`)
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: null });
+  });
+
+  it('non-uuid courseId → 400, service NOT called', async () => {
+    const res = await dispatch(
+      buildApp(USER),
+      getReq('/api/journeys/courses/not-a-uuid/sell-preview')
+    );
+    expect(res.status).toBe(400);
+    expect(journeySpies.getCourseSellPreview).not.toHaveBeenCalled();
   });
 });
 

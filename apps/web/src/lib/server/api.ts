@@ -99,6 +99,13 @@ import type {
   PracticeCompletionRecord,
 } from '$lib/journeys/types';
 import { logger } from '$lib/observability';
+// Journey PUBLIC sales-page shapes (Codex-2pryk Round-D · WP-3). Same FE-mirror
+// rationale as above: the content-api serialises the `@codex/shared-types`
+// twins (`JourneyCoursePage` / `CourseSellPreview`); these FE types are the
+// structurally-identical shapes the renderer consumes. Type-only (erased) — no
+// runtime import of the page-builder barrel.
+import type { JourneyCoursePage } from '$lib/page-builder';
+import type { SellPreview } from '$lib/page-builder/render';
 // Import local types that extend DB types with relations
 // OrgMemberItem is in $lib/types (not here) so components can import it
 // without triggering the vite server-only module guard.
@@ -1079,6 +1086,28 @@ export function createServerApi(
           `/api/journeys/courses/by-slug?organizationId=${encodeURIComponent(
             organizationId
           )}&slug=${encodeURIComponent(slug)}`
+        ),
+
+      /**
+       * Public course SALES PAGE by org-scoped landing-page slug (null if no
+       * published page/course). Fully public — no auth needed (WP-3 shell).
+       */
+      coursePage: (organizationId: string, slug: string) =>
+        request<JourneyCoursePage | null>(
+          'access',
+          `/api/journeys/pages/by-slug?organizationId=${encodeURIComponent(
+            organizationId
+          )}&slug=${encodeURIComponent(slug)}`
+        ),
+
+      /**
+       * Public 30s sell-preview clips (intro + reel) for a course (null if the
+       * course is not published). Public preview manifest URLs — no signing.
+       */
+      courseSellPreview: (courseId: string) =>
+        request<SellPreview | null>(
+          'access',
+          `/api/journeys/courses/${courseId}/sell-preview`
         ),
 
       /** Dashboard payload (enrollment + curriculum + progress rollup). */

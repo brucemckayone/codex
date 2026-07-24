@@ -30,6 +30,8 @@ import {
   courseEnrollments,
   courseStages,
   courses,
+  courseTestimonials,
+  landingPages,
   mediaItems,
   organizations,
   practiceCompletions,
@@ -38,13 +40,21 @@ import {
 } from '@codex/database/schema';
 import { BaseService } from '@codex/service-errors';
 import type {
+  BrandTokenOverrides,
   CompletionSource,
   CourseDashboardData,
+  CourseSellPreview,
+  CourseSellPreviewClip,
   InCoursePracticeData,
+  JourneyCoursePage,
   JourneyCourseSummary,
   JourneyEnrollment,
   JourneyPractice,
   JourneyStage,
+  JourneyStageView,
+  JourneyTestimonialView,
+  PageSection,
+  PageStatus,
   PlaylistEntry,
   PracticeCompletionRecord,
   PracticeContentType,
@@ -100,6 +110,208 @@ export class CourseJourneyService extends BaseService {
       };
     } catch (error) {
       this.handleError(error, 'getCourseBySlug');
+    }
+  }
+
+  /**
+   * Resolve the PUBLIC course sales page for `(organizationId, slug)` — the
+   * awaited shell of the WP-3 sell surface (SPEC §4/§5). This is a fully PUBLIC
+   * read: NO `canView` / entitlement gate (HARDENING §E course-sell row). Scoped
+   * to a PUBLISHED, non-deleted landing page whose subject is a PUBLISHED,
+   * non-deleted course in the SAME org. Returns `null` when no such page exists
+   * (→ the route maps that to `{ data: null }` → the load throws 404).
+   *
+   * The streamed sell-preview media is a separate read ({@link getCourseSellPreview})
+   * so first paint / SEO never blocks on R2/CDN resolution.
+   */
+  async getCoursePage(
+    organizationId: string,
+    slug: string
+  ): Promise<JourneyCoursePage | null> {
+    try {
+      // 1. The published landing page by org-scoped slug (partial-unique index).
+      const [pageRow] = await this.db
+        .select({
+          id: landingPages.id,
+          organizationId: landingPages.organizationId,
+          publishedAt: landingPages.publishedAt,
+          pageType: landingPages.pageType,
+          slug: landingPages.slug,
+          title: landingPages.title,
+          status: landingPages.status,
+          subjectType: landingPages.subjectType,
+          subjectId: landingPages.subjectId,
+          brandOverrides: landingPages.brandOverrides,
+          sections: landingPages.sections,
+        })
+        .from(landingPages)
+        .where(
+          and(
+            eq(landingPages.organizationId, organizationId),
+            eq(landingPages.slug, slug),
+            eq(landingPages.status, CONTENT_STATUS.PUBLISHED),
+            isNull(landingPages.deletedAt)
+          )
+        )
+        .limit(1);
+
+      if (!pageRow) return null;
+
+      // A course-sell page must bind a course subject (validated here, not by an
+      // FK — HARDENING §C polymorphic subject). Anything else has no curriculum.
+      if (pageRow.subjectType !== 'course' || !pageRow.subjectId) return null;
+
+      // 2. The subject course — PUBLISHED, non-deleted, and space-scoped to the
+      //    SAME org as the page (guards a cross-org subjectId).
+      const [courseRow] = await this.db
+        .select({
+          id: courses.id,
+          slug: courses.slug,
+          title: courses.title,
+          kicker: courses.kicker,
+          lede: courses.lede,
+          status: courses.status,
+          priceCents: courses.priceCents,
+        })
+        .from(courses)
+        .where(
+          and(
+            eq(courses.id, pageRow.subjectId),
+            eq(courses.organizationId, organizationId),
+            eq(courses.status, CONTENT_STATUS.PUBLISHED),
+            isNull(courses.deletedAt)
+          )
+        )
+        .limit(1);
+
+      if (!courseRow) return null;
+
+      // 3. Curriculum + social proof (bounded, parallel).
+      const [stages, testimonials] = await Promise.all([
+        this.loadPublicStages(courseRow.id),
+        this.loadTestimonials(courseRow.id),
+      ]);
+
+      const practiceCount = stages.reduce(
+        (total, stage) => total + stage.practices.length,
+        0
+      );
+
+      return {
+        page: {
+          id: pageRow.id,
+          organizationId: pageRow.organizationId,
+          publishedAt: pageRow.publishedAt?.toISOString() ?? null,
+          pageType: pageRow.pageType,
+          slug: pageRow.slug,
+          title: pageRow.title,
+          status: pageRow.status as PageStatus,
+          subjectType: pageRow.subjectType,
+          subjectId: pageRow.subjectId,
+          brandOverrides:
+            (pageRow.brandOverrides as BrandTokenOverrides) ?? null,
+          sections: (pageRow.sections as PageSection[]) ?? [],
+        },
+        course: {
+          id: courseRow.id,
+          slug: courseRow.slug,
+          title: courseRow.title,
+          kicker: courseRow.kicker,
+          lede: courseRow.lede,
+          status: courseRow.status as PageStatus,
+          priceCents: courseRow.priceCents,
+          stageCount: stages.length,
+          practiceCount,
+        },
+        stages,
+        testimonials,
+      };
+    } catch (error) {
+      this.handleError(error, 'getCoursePage');
+    }
+  }
+
+  /**
+   * Resolve the PUBLIC 30s sell-preview clips for a course's intro-film +
+   * practice reel (SPEC §10) — the streamed, off-critical-path payload of the
+   * sales page. PUBLIC: NO auth, NO `canView` (HARDENING §E). The clips reuse the
+   * SAME public preview path the org-landing hero consumes —
+   * `mediaItems.hlsPreviewKey` resolved to a CDN URL by plain concatenation with
+   * `R2_PUBLIC_URL_BASE` (mirrors `content-api/routes/public.ts` `resolveR2Urls`);
+   * NO R2 signing is ever involved. A clip is `null` when the course has no such
+   * media, its preview has not transcoded (`hlsPreviewKey` null), or no CDN base
+   * is configured. Returns `null` when the course is not published/non-deleted.
+   */
+  async getCourseSellPreview(
+    courseId: string,
+    r2PublicUrlBase: string | undefined
+  ): Promise<CourseSellPreview | null> {
+    try {
+      const [courseRow] = await this.db
+        .select({
+          introVideoMediaId: courses.introVideoMediaId,
+          previewVideoMediaId: courses.previewVideoMediaId,
+        })
+        .from(courses)
+        .where(
+          and(
+            eq(courses.id, courseId),
+            eq(courses.status, CONTENT_STATUS.PUBLISHED),
+            isNull(courses.deletedAt)
+          )
+        )
+        .limit(1);
+
+      if (!courseRow) return null;
+
+      const mediaIds = [
+        courseRow.introVideoMediaId,
+        courseRow.previewVideoMediaId,
+      ].filter((id): id is string => id !== null);
+
+      const previewByMediaId = new Map<
+        string,
+        {
+          hlsPreviewKey: string | null;
+          thumbnailKey: string | null;
+          durationSeconds: number | null;
+        }
+      >();
+
+      if (mediaIds.length > 0) {
+        const mediaRows = await this.db
+          .select({
+            id: mediaItems.id,
+            hlsPreviewKey: mediaItems.hlsPreviewKey,
+            thumbnailKey: mediaItems.thumbnailKey,
+            durationSeconds: mediaItems.durationSeconds,
+          })
+          .from(mediaItems)
+          .where(inArray(mediaItems.id, mediaIds));
+        for (const row of mediaRows) previewByMediaId.set(row.id, row);
+      }
+
+      // Resolve one media id → a public clip. Null unless a transcoded preview
+      // key AND a CDN base exist (a preview-less clip has no playable manifest).
+      const toClip = (mediaId: string | null): CourseSellPreviewClip | null => {
+        if (!mediaId) return null;
+        const media = previewByMediaId.get(mediaId);
+        if (!media?.hlsPreviewKey || !r2PublicUrlBase) return null;
+        return {
+          playlistUrl: `${r2PublicUrlBase}/${media.hlsPreviewKey}`,
+          posterUrl: media.thumbnailKey
+            ? `${r2PublicUrlBase}/${media.thumbnailKey}`
+            : null,
+          durationSeconds: media.durationSeconds ?? null,
+        };
+      };
+
+      return {
+        intro: toClip(courseRow.introVideoMediaId),
+        reel: toClip(courseRow.previewVideoMediaId),
+      };
+    } catch (error) {
+      this.handleError(error, 'getCourseSellPreview');
     }
   }
 
@@ -379,6 +591,111 @@ export class CourseJourneyService extends BaseService {
       practices: (practicesByStage.get(stage.id) ?? []).sort(
         (a, b) => a.sortOrder - b.sortOrder
       ),
+    }));
+  }
+
+  /**
+   * Load the ordered curriculum for the PUBLIC sales page (SPEC §5): non-deleted
+   * stages (by `sortOrder`), each with its PUBLISHED, non-deleted practices (by
+   * `stage_practices.sortOrder`). Distinct from {@link loadStages} (the member
+   * dashboard shape): the public view carries NO completion flag and NO media
+   * (duration / thumbnail / stream) — the sell map lists titles + types only.
+   */
+  private async loadPublicStages(
+    courseId: string
+  ): Promise<JourneyStageView[]> {
+    const stageRows = await this.db
+      .select({
+        id: courseStages.id,
+        name: courseStages.name,
+        gloss: courseStages.gloss,
+        sortOrder: courseStages.sortOrder,
+      })
+      .from(courseStages)
+      .where(
+        and(eq(courseStages.courseId, courseId), isNull(courseStages.deletedAt))
+      )
+      .orderBy(asc(courseStages.sortOrder));
+
+    if (stageRows.length === 0) return [];
+
+    const stageIds = stageRows.map((s) => s.id);
+
+    const practiceRows = await this.db
+      .select({
+        stageId: stagePractices.stageId,
+        sortOrder: stagePractices.sortOrder,
+        contentId: content.id,
+        slug: content.slug,
+        title: content.title,
+        contentType: content.contentType,
+      })
+      .from(stagePractices)
+      .innerJoin(content, eq(content.id, stagePractices.contentId))
+      .where(
+        and(
+          inArray(stagePractices.stageId, stageIds),
+          eq(content.status, CONTENT_STATUS.PUBLISHED),
+          isNull(content.deletedAt)
+        )
+      )
+      .orderBy(asc(stagePractices.sortOrder));
+
+    const practicesByStage = new Map<string, JourneyStageView['practices']>();
+    for (const row of practiceRows) {
+      const practice = {
+        contentId: row.contentId,
+        slug: row.slug,
+        title: row.title,
+        contentType: toPracticeContentType(row.contentType),
+        sortOrder: row.sortOrder,
+      };
+      const list = practicesByStage.get(row.stageId);
+      if (list) list.push(practice);
+      else practicesByStage.set(row.stageId, [practice]);
+    }
+
+    return stageRows.map((stage) => ({
+      id: stage.id,
+      name: stage.name,
+      gloss: stage.gloss,
+      sortOrder: stage.sortOrder,
+      practices: (practicesByStage.get(stage.id) ?? []).sort(
+        (a, b) => a.sortOrder - b.sortOrder
+      ),
+    }));
+  }
+
+  /**
+   * The course's testimonials for the `proof` section, ordered by the curator's
+   * `sortOrder`. Scoped to non-deleted rows.
+   */
+  private async loadTestimonials(
+    courseId: string
+  ): Promise<JourneyTestimonialView[]> {
+    const rows = await this.db
+      .select({
+        id: courseTestimonials.id,
+        quote: courseTestimonials.quote,
+        authorName: courseTestimonials.authorName,
+        authorContext: courseTestimonials.authorContext,
+        sortOrder: courseTestimonials.sortOrder,
+      })
+      .from(courseTestimonials)
+      .where(
+        and(
+          eq(courseTestimonials.courseId, courseId),
+          isNull(courseTestimonials.deletedAt)
+        )
+      )
+      .orderBy(asc(courseTestimonials.sortOrder));
+
+    return rows.map((row) => ({
+      id: row.id,
+      quote: row.quote,
+      authorName: row.authorName,
+      authorContext: row.authorContext ?? null,
+      sortOrder: row.sortOrder,
     }));
   }
 

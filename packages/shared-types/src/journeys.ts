@@ -429,3 +429,102 @@ export interface InCoursePracticeData {
   /** Server-known completions across the course (hydrates the store). */
   completions: PracticeCompletionRecord[];
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public sales-page read-model (SPEC §4/§5/§10 — the WP-3 course-sell surface)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Cross-worker mirror of the FE public sales read-model
+ * (`apps/web/src/lib/page-builder/journey-queries.ts`). The content-api produces
+ * these shapes; the FE `$lib/page-builder` types are the structurally-identical
+ * mirror the renderer consumes (BE packages cannot import an apps/web `$lib`
+ * type — same dual-home pattern as {@link JourneyCourseSummary} ↔
+ * `$lib/journeys/types`). Additive-only against the WP-0 freeze; a change here
+ * MUST keep the FE mirror structurally equal.
+ */
+
+/** One practice on the PUBLIC sales page — no completion/media (public shell). */
+export interface JourneyPracticeView {
+  contentId: string;
+  slug: string | null;
+  title: string;
+  contentType: PracticeContentType;
+  sortOrder: number;
+  /** Completion — dashboard / in-course only; omitted on the public sales page. */
+  completed?: boolean;
+}
+
+/** An ordered stage with its practice pool, as the public sales page reads it. */
+export interface JourneyStageView {
+  id: string;
+  name: string;
+  gloss: string | null;
+  sortOrder: number;
+  practices: JourneyPracticeView[];
+}
+
+/** The course chrome + rollups shown on the sales page (SPEC §5). */
+export interface JourneyCourseView {
+  id: string;
+  slug: string;
+  title: string;
+  kicker: string | null;
+  lede: string | null;
+  status: PageStatus;
+  /** One-off purchase price; null = not sold standalone (§5). */
+  priceCents: number | null;
+  stageCount: number;
+  practiceCount: number;
+}
+
+/** One testimonial rendered by the `proof` section. */
+export interface JourneyTestimonialView {
+  id: string;
+  quote: string;
+  authorName: string;
+  authorContext: string | null;
+  sortOrder: number;
+}
+
+/** A persisted landing page = the editable {@link PageBuilderState} + row identity. */
+export interface JourneyPageRecord extends PageBuilderState {
+  id: string;
+  organizationId: string;
+  publishedAt: string | null;
+}
+
+/** Public sales/landing page envelope (SSR shell+stream). No `canView` on the shell. */
+export interface JourneyCoursePage {
+  page: JourneyPageRecord;
+  course: JourneyCourseView;
+  stages: JourneyStageView[];
+  testimonials: JourneyTestimonialView[];
+}
+
+/**
+ * One public preview clip (SPEC §10). The sales page shows the existing 30s
+ * `preview.m3u8` — resolved from `mediaItems.hlsPreviewKey` to a public CDN URL,
+ * NO signing, NO `canView` (HARDENING §E course-sell row). Structurally mirrors
+ * the FE `PreviewMedia` (`$lib/page-builder/render`).
+ */
+export interface CourseSellPreviewClip {
+  /** HLS manifest URL for the 30s public preview clip. */
+  playlistUrl: string;
+  /** Optional decorative poster shown before play. */
+  posterUrl: string | null;
+  /** Advisory duration (seconds) for a "N sec preview" affordance. */
+  durationSeconds: number | null;
+}
+
+/**
+ * The STREAMED sell-preview payload of the sales page: the public intro-film and
+ * reel clips. Either clip is null when the course has no such media (or its
+ * preview has not transcoded). Mirrors the FE `SellPreview`.
+ */
+export interface CourseSellPreview {
+  /** The intro-film clip (the `introVideo` section → `courses.introVideoMediaId`). */
+  intro: CourseSellPreviewClip | null;
+  /** The practice-preview clip (the `reel` section → `courses.previewVideoMediaId`). */
+  reel: CourseSellPreviewClip | null;
+}

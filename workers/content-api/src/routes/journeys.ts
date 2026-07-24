@@ -1,8 +1,10 @@
 import { DEFAULT_STREAMING_URL_TTL_SECONDS } from '@codex/access';
 import type {
   CourseDashboardData,
+  CourseSellPreview,
   HonoEnv,
   InCoursePracticeData,
+  JourneyCoursePage,
   JourneyCourseSummary,
   PracticeCompletionRecord,
 } from '@codex/shared-types';
@@ -19,19 +21,22 @@ import { Hono } from 'hono';
  * Journey member-surface routes (Codex-2pryk · Round-D · Codex-776gg).
  *
  * The web→worker plumbing behind the course DASHBOARD and IN-COURSE PLAYER
- * (SPEC §11 / §14). Co-located on content-api (port 4001) with the access +
- * streaming routes because the in-course player needs a signed R2 URL from the
- * SAME `ContentAccessService.getStreamingUrl` the `/stream` route uses.
+ * (SPEC §11 / §14) plus the PUBLIC COURSE SALES PAGE (SPEC §4/§5/§10). Co-located
+ * on content-api (port 4001) with the access + streaming routes because the
+ * in-course player needs a signed R2 URL from the SAME
+ * `ContentAccessService.getStreamingUrl` the `/stream` route uses.
  *
  * Split of concerns (routes stay thin):
- *   - `ctx.services.courseJourney` — curriculum + progress + completion reads.
+ *   - `ctx.services.courseJourney` — curriculum + progress + completion reads,
+ *     and the public sales-page + sell-preview projections.
  *   - `ctx.services.access`        — the entitlement GATE (`canEnterCourse`) and
  *     the signed-stream authority (`getStreamingUrl`, which itself gates on
  *     `canView`). Signing is NEVER reinvented here.
  *
  * The dashboard + practice reads gate on `canEnterCourse` (entitlement, SPEC
  * §6.3) and return `null` (→ `{ data: null }`) on deny, so an authenticated but
- * un-entitled caller never receives curriculum data.
+ * un-entitled caller never receives curriculum data. The sales-page + sell
+ * -preview reads are fully PUBLIC (NO `canView`; HARDENING §E course-sell row).
  */
 
 const app = new Hono<HonoEnv>();
@@ -58,6 +63,70 @@ app.get(
     handler: async (ctx): Promise<JourneyCourseSummary | null> => {
       const { organizationId, slug } = ctx.input.query;
       return ctx.services.courseJourney.getCourseBySlug(organizationId, slug);
+    },
+  })
+);
+
+/**
+ * GET /api/journeys/pages/by-slug?organizationId=&slug=
+ *
+ * The awaited shell of the PUBLIC course sales page (SPEC §4/§5): the published
+ * landing page + its subject course + ordered curriculum + testimonials, as one
+ * `JourneyCoursePage` envelope. Fully PUBLIC — `auth: 'optional'`, NO `canView`
+ * on the shell (HARDENING §E course-sell row); the org is resolved web-side and
+ * passed as `organizationId` (the slug is org-scoped, mirroring `by-slug`).
+ * Returns `null` when no published page/course matches (→ the load 404s). The
+ * streamed sell-preview media is a separate read (`sell-preview` below).
+ * @returns {JourneyCoursePage | null}
+ */
+app.get(
+  '/pages/by-slug',
+  procedure({
+    policy: {
+      auth: 'optional',
+      rateLimit: 'api', // 100 req/min
+    },
+    input: {
+      // Same `{ organizationId, slug }` shape as the course by-slug read — here
+      // `slug` is the org-scoped LANDING-PAGE slug (both are varchar(160)).
+      query: courseBySlugQuerySchema,
+    },
+    handler: async (ctx): Promise<JourneyCoursePage | null> => {
+      const { organizationId, slug } = ctx.input.query;
+      return ctx.services.courseJourney.getCoursePage(organizationId, slug);
+    },
+  })
+);
+
+/**
+ * GET /api/journeys/courses/:courseId/sell-preview
+ *
+ * The STREAMED, off-critical-path payload of the sales page (SPEC §10): the
+ * public 30s intro-film + practice-reel clips. Fully PUBLIC (`auth: 'optional'`,
+ * NO `canView`). Clips reuse the SAME public preview path the org-landing hero
+ * consumes — `mediaItems.hlsPreviewKey` → a CDN URL via `R2_PUBLIC_URL_BASE`,
+ * NO R2 signing (mirrors `public.ts` `resolveR2Urls`). The URL base is supplied
+ * by the route (env-owned) and resolved inside the service. Returns `null` when
+ * the course is not published/non-deleted; a clip is `null` when its media has
+ * no transcoded preview.
+ * @returns {CourseSellPreview | null}
+ */
+app.get(
+  '/courses/:courseId/sell-preview',
+  procedure({
+    policy: {
+      auth: 'optional',
+      rateLimit: 'api', // 100 req/min
+    },
+    input: {
+      params: courseParamsSchema,
+    },
+    handler: async (ctx): Promise<CourseSellPreview | null> => {
+      const { courseId } = ctx.input.params;
+      return ctx.services.courseJourney.getCourseSellPreview(
+        courseId,
+        ctx.env.R2_PUBLIC_URL_BASE
+      );
     },
   })
 );
