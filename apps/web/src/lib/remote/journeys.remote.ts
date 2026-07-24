@@ -22,6 +22,7 @@ import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
 import type { PracticeCompletionRecord } from '$lib/journeys/types';
+import { logger } from '$lib/observability';
 import type {
   EnrolledJourneyCard,
   JourneyCardView,
@@ -280,9 +281,18 @@ export const getCoursePagePreview = query(
     if (!ctx) return null;
     try {
       return await ctx.api.access.coursePagePreview(ctx.orgId, slug);
-    } catch {
-      // A non-manager's session → the worker's requireOrgManagement denies;
-      // treat ANY failure as "no preview" so the caller 404s (fail-closed).
+    } catch (err) {
+      // Fail-closed: ANY failure → no preview → the caller 404s. A 403 is the
+      // EXPECTED non-manager denial (the worker's requireOrgManagement), so it
+      // stays silent; log only UNEXPECTED failures (5xx / timeout) so a transient
+      // worker outage degrading a real manager's preview to a 404 isn't invisible.
+      const status = (err as { status?: number } | null)?.status;
+      if (status !== 403) {
+        logger.error('journey draft preview read failed', {
+          error: err instanceof Error ? err.message : String(err),
+          status,
+        });
+      }
       return null;
     }
   }

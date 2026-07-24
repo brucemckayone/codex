@@ -1243,9 +1243,10 @@ export function createServerApi(
       /**
        * Studio LIVE-PREVIEW read (Codex-isr02 P0b-2) — the sell-page envelope
        * for ANY status (drafts included), management-gated (owner/admin; the
-       * worker re-derives org from the session). Powers the builder iframe
-       * rendering an unpublished draft; null for a foreign/missing/non-managed
-       * page so the public load fail-closes to 404.
+       * worker authorizes the client-supplied org against the session's
+       * membership). Powers the builder iframe rendering an unpublished draft;
+       * null for a foreign/missing/non-managed page so the public load
+       * fail-closes to 404.
        */
       coursePagePreview: (organizationId: string, slug: string) =>
         request<JourneyCoursePage | null>(
