@@ -144,18 +144,18 @@ const listJourneysSchema = z.object({
 });
 
 /**
- * Studio index list (frozen `ListJourneysQuery`). `organizationId` is validated
- * as a manageable org by the worker's `requireOrgManagement`; the studio passes
- * its own (server-loaded, trusted) org id.
+ * Studio index list (frozen `ListJourneysQuery`). The org is resolved from the
+ * request HOST via `resolveStudioOrg` — consistent with the sibling studio
+ * remotes and least-privilege. The `organizationId` in the input is accepted for
+ * the frozen contract but is NOT trusted here (review L2); the worker's
+ * `requireOrgManagement` is the authority in any case.
  */
 export const listJourneys = query(
   listJourneysSchema,
-  async ({ organizationId, status }): Promise<JourneyListItem[]> => {
-    const { platform, cookies } = getRequestEvent();
-    return createServerApi(platform, cookies).access.listJourneys(
-      organizationId,
-      status
-    );
+  async ({ status }): Promise<JourneyListItem[]> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) return [];
+    return ctx.api.access.listJourneys(ctx.orgId, status);
   }
 );
 

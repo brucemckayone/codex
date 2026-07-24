@@ -640,7 +640,8 @@ export class CourseJourneyService extends BaseService {
    * in ONE transaction, so a half-created journey can never exist. A `landing`
    * page creates only the page row. The slug is derived from the title and made
    * unique within the org (both tables share the org slug-space); resolution runs
-   * inside the transaction so a concurrent create can't claim the same slug.
+   * inside the transaction, and the org-unique partial index is the final arbiter
+   * if two creates race.
    */
   async createJourney(
     organizationId: string,
@@ -657,8 +658,11 @@ export class CourseJourneyService extends BaseService {
 
       return await this.txDb.transaction(async (tx) => {
         // Resolve a free org-unique slug, checking BOTH tables that share the
-        // org slug-space (landing_pages + courses) among non-deleted rows.
-        let slug = base;
+        // org slug-space (landing_pages + courses) among non-deleted rows. The
+        // partial-unique index is the final arbiter if two creates race (this
+        // SELECT is not a lock); on exhaustion we throw rather than fall through
+        // to a colliding insert (review L3).
+        let slug: string | null = null;
         for (let n = 1; n < 1000; n++) {
           const candidate = n === 1 ? base : `${base}-${n}`;
           const [pageClash] = await tx
@@ -687,6 +691,11 @@ export class CourseJourneyService extends BaseService {
             slug = candidate;
             break;
           }
+        }
+        if (!slug) {
+          throw new ConflictError(
+            'Could not find an available slug for this title — try a different title'
+          );
         }
 
         let subjectId: string | null = null;

@@ -1,4 +1,5 @@
 import { DEFAULT_STREAMING_URL_TTL_SECONDS } from '@codex/access';
+import { ValidationError } from '@codex/service-errors';
 import type {
   CourseDashboardData,
   CourseSellPreview,
@@ -371,6 +372,15 @@ app.put(
       body: saveJourneyPageBodySchema,
     },
     handler: async (ctx): Promise<null> => {
+      // The URL id and the body id must identify the SAME page — else the URL
+      // names a different resource than the one mutated (audit/caching/least-
+      // surprise; review L1). Not an IDOR — both are org-scoped by the service —
+      // but a mismatch is a client bug, so reject it.
+      if (ctx.input.params.pageId !== ctx.input.body.id) {
+        throw new ValidationError(
+          'Path id does not match the page id in the body'
+        );
+      }
       await ctx.services.courseJourney.saveJourneyPage(
         ctx.organizationId,
         ctx.input.body
