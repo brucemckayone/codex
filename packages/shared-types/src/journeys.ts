@@ -518,6 +518,54 @@ export interface JourneyListItem {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// STUDIO curriculum-editor read-model (Codex-03cwh — admin two-pane editor)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One practice as the STUDIO CURRICULUM EDITOR reads it — a SUPERSET of the
+ * public {@link JourneyPracticeView}. A practice IS a join to a `content` row
+ * (`stage_practices.contentId`), so the editor inspector's media-slot needs the
+ * linked content's picker metadata (title/type/thumbnail/publish status) that
+ * the public sales view deliberately omits. Additive against the WP-0 freeze; the
+ * FE mirror in `apps/web/src/lib/page-builder/journey-queries.ts` MUST stay
+ * structurally equal.
+ */
+export interface EditorPracticeView {
+  /** The linked `content` row id (the join's `contentId`). */
+  contentId: string;
+  /** Public slug of the linked content; null when unslugged. */
+  slug: string | null;
+  /** Linked content title — the media-slot label + tree row text. */
+  title: string;
+  contentType: PracticeContentType;
+  /** Publish status of the LINKED CONTENT (draft ⇒ not yet member-visible). */
+  status: PageStatus;
+  /** Poster/thumbnail for the media-slot; null when the content has none. */
+  thumbnailUrl: string | null;
+  sortOrder: number;
+}
+
+/** An ordered stage with its practice pool, as the studio editor reads it. */
+export interface EditorStageView {
+  id: string;
+  name: string;
+  gloss: string | null;
+  sortOrder: number;
+  practices: EditorPracticeView[];
+}
+
+/**
+ * The full admin curriculum payload the studio editor loads for one course:
+ * ordered non-deleted stages, each with its ordered practices + picker metadata.
+ * The content-library PICKER options are read separately (the reused org
+ * content-list endpoint) — this payload is only the CURRENT curriculum.
+ */
+export interface EditorCurriculum {
+  courseId: string;
+  stages: EditorStageView[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Member-facing DISCOVERY read-model (Codex-oi2w4 — home / explore / library)
 // ─────────────────────────────────────────────────────────────────────────────
 

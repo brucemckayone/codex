@@ -41,6 +41,7 @@ import {
 import {
   BaseService,
   ConflictError,
+  ForbiddenError,
   NotFoundError,
   ValidationError,
 } from '@codex/service-errors';
@@ -50,6 +51,9 @@ import type {
   CourseDashboardData,
   CourseSellPreview,
   CourseSellPreviewClip,
+  EditorCurriculum,
+  EditorPracticeView,
+  EditorStageView,
   EnrolledJourneyCard,
   InCoursePracticeData,
   JourneyCardView,
@@ -79,6 +83,15 @@ import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
  */
 function toPracticeContentType(value: string | null): PracticeContentType {
   return value === 'audio' || value === 'written' ? value : 'video';
+}
+
+/**
+ * Narrow a stored `content.status` varchar to the shared {@link PageStatus}
+ * union. The DB CHECK guarantees one of these; fall back to `'draft'` for any
+ * legacy/unexpected value (defensive, mirrors {@link toPracticeContentType}).
+ */
+function toPageStatus(value: string | null): PageStatus {
+  return value === 'published' || value === 'archived' ? value : 'draft';
 }
 
 export class CourseJourneyService extends BaseService {
@@ -1197,7 +1210,340 @@ export class CourseJourneyService extends BaseService {
     }
   }
 
+  // ── Curriculum editor (Codex-03cwh — admin two-pane editor) ────────────────
+
+  /**
+   * Resolve the subject COURSE id for a landing-page id, org-scoped. The
+   * curriculum editor addresses a journey by its landing-page id (the studio
+   * URL `/studio/journeys/[id]/curriculum`), but the curriculum belongs to the
+   * subject course. Scoped to `(id, organizationId, deletedAt IS NULL)` — a
+   * foreign, missing, or non-course page throws `NotFoundError` (never a
+   * cross-org read; mirrors {@link saveJourneyPage}'s guard shape).
+   */
+  async resolveCourseIdForPage(
+    organizationId: string,
+    pageId: string
+  ): Promise<string> {
+    try {
+      const [page] = await this.db
+        .select({
+          subjectId: landingPages.subjectId,
+          subjectType: landingPages.subjectType,
+        })
+        .from(landingPages)
+        .where(
+          and(
+            eq(landingPages.id, pageId),
+            eq(landingPages.organizationId, organizationId),
+            isNull(landingPages.deletedAt)
+          )
+        )
+        .limit(1);
+      if (!page || page.subjectType !== 'course' || !page.subjectId) {
+        throw new NotFoundError('Journey course not found');
+      }
+      return page.subjectId;
+    } catch (error) {
+      this.handleError(error, 'resolveCourseIdForPage');
+    }
+  }
+
+  /**
+   * The admin CURRICULUM for the studio editor. Distinct from
+   * {@link loadStages}/{@link loadPublicStages}: the editor must show practices
+   * whose linked content is still a DRAFT (a curriculum is built before its
+   * media publishes), so it does NOT filter to PUBLISHED content — it returns
+   * each practice's publish `status` for the inspector instead. Scoped to
+   * `(id, organizationId, deletedAt IS NULL)`; a foreign/missing course throws
+   * `NotFoundError` (mirrors `CourseInsightsService.getInsights`).
+   */
+  async getCourseCurriculumForEditor(
+    organizationId: string,
+    courseId: string
+  ): Promise<EditorCurriculum> {
+    try {
+      await this.assertCourseInOrg(organizationId, courseId);
+      const stages = await this.loadEditorStages(courseId);
+      return { courseId, stages };
+    } catch (error) {
+      this.handleError(error, 'getCourseCurriculumForEditor');
+    }
+  }
+
+  /**
+   * Persist the WHOLE curriculum for a course in ONE transaction. The editor is
+   * "edit locally → Save", so this diffs the desired stages/practices against
+   * the persisted state and reconciles atomically:
+   *   - a desired stage with a known id → renamed + reordered; an unknown/null
+   *     id → inserted (server-assigned id); a persisted stage absent from the
+   *     desired set → soft-deleted.
+   *   - practices are the `stage_practices` JOIN; every desired `contentId` is
+   *     SPACE-GUARDED (must be non-deleted content in the course's org —
+   *     HARDENING §5) then reconciled per stage (insert new joins, hard-delete
+   *     removed, rewrite `sortOrder`).
+   *
+   * The `(courseId, sortOrder)` UNIQUE index (partial on non-deleted) forbids a
+   * naive reorder — a mid-swap collision — so stage sort values are first parked
+   * at a high temporary offset, then written to their final `0..n-1` positions
+   * within the same tx. Returns the freshly-persisted curriculum.
+   */
+  async saveCurriculum(
+    organizationId: string,
+    courseId: string,
+    input: {
+      stages: Array<{
+        id: string | null;
+        name: string;
+        gloss: string | null;
+        practices: Array<{ contentId: string }>;
+      }>;
+    }
+  ): Promise<EditorCurriculum> {
+    try {
+      await this.assertCourseInOrg(organizationId, courseId);
+
+      // Space guard (HARDENING §5): every desired practice must point at
+      // non-deleted content in THIS course's org. The picker only offers such
+      // content, so a mismatch is tampering — reject the whole save.
+      const desiredContentIds = [
+        ...new Set(
+          input.stages.flatMap((s) => s.practices.map((p) => p.contentId))
+        ),
+      ];
+      if (desiredContentIds.length > 0) {
+        const okRows = await this.db
+          .select({ id: content.id })
+          .from(content)
+          .where(
+            and(
+              inArray(content.id, desiredContentIds),
+              eq(content.organizationId, organizationId),
+              isNull(content.deletedAt)
+            )
+          );
+        if (okRows.length !== desiredContentIds.length) {
+          throw new ForbiddenError(
+            'A practice references content outside this organization'
+          );
+        }
+      }
+
+      await this.txDb.transaction(async (tx) => {
+        const existing = await tx
+          .select({ id: courseStages.id })
+          .from(courseStages)
+          .where(
+            and(
+              eq(courseStages.courseId, courseId),
+              isNull(courseStages.deletedAt)
+            )
+          );
+        const existingIds = new Set(existing.map((s) => s.id));
+
+        // 1. Soft-delete stages the editor dropped — they leave the partial
+        //    unique index, freeing their sort slots.
+        const keptIds = new Set(
+          input.stages
+            .map((s) => s.id)
+            .filter((id): id is string => id !== null && existingIds.has(id))
+        );
+        const toDelete = [...existingIds].filter((id) => !keptIds.has(id));
+        if (toDelete.length > 0) {
+          await tx
+            .update(courseStages)
+            .set({ deletedAt: new Date() })
+            .where(inArray(courseStages.id, toDelete));
+        }
+
+        // 2. Park every surviving/new stage at a disjoint temporary sort offset,
+        //    vacating the final 0..n-1 range so step 3 cannot collide.
+        const TEMP_OFFSET = 1_000_000;
+        const resolvedIds: string[] = []; // final real id per desired stage, in order
+        let temp = TEMP_OFFSET;
+        for (const s of input.stages) {
+          if (s.id !== null && existingIds.has(s.id)) {
+            await tx
+              .update(courseStages)
+              .set({ name: s.name, gloss: s.gloss, sortOrder: temp })
+              .where(eq(courseStages.id, s.id));
+            resolvedIds.push(s.id);
+          } else {
+            const [row] = await tx
+              .insert(courseStages)
+              .values({
+                courseId,
+                name: s.name,
+                gloss: s.gloss,
+                sortOrder: temp,
+              })
+              .returning({ id: courseStages.id });
+            if (!row) {
+              throw new Error('saveCurriculum: stage insert returned no row');
+            }
+            resolvedIds.push(row.id);
+          }
+          temp++;
+        }
+
+        // 3. Write the final 0..n-1 sort positions (the range is now free).
+        for (const [i, stageId] of resolvedIds.entries()) {
+          await tx
+            .update(courseStages)
+            .set({ sortOrder: i })
+            .where(eq(courseStages.id, stageId));
+        }
+
+        // 4. Reconcile practices per stage (the join has no sort unique index).
+        for (const [i, stageId] of resolvedIds.entries()) {
+          const stage = input.stages[i];
+          if (!stage) continue;
+          const desired = stage.practices;
+          const current = await tx
+            .select({ contentId: stagePractices.contentId })
+            .from(stagePractices)
+            .where(eq(stagePractices.stageId, stageId));
+          const currentSet = new Set(current.map((c) => c.contentId));
+          const desiredSet = new Set(desired.map((p) => p.contentId));
+
+          const removeIds = [...currentSet].filter((c) => !desiredSet.has(c));
+          if (removeIds.length > 0) {
+            await tx
+              .delete(stagePractices)
+              .where(
+                and(
+                  eq(stagePractices.stageId, stageId),
+                  inArray(stagePractices.contentId, removeIds)
+                )
+              );
+          }
+          for (const [j, practice] of desired.entries()) {
+            if (currentSet.has(practice.contentId)) {
+              await tx
+                .update(stagePractices)
+                .set({ sortOrder: j })
+                .where(
+                  and(
+                    eq(stagePractices.stageId, stageId),
+                    eq(stagePractices.contentId, practice.contentId)
+                  )
+                );
+            } else {
+              await tx.insert(stagePractices).values({
+                stageId,
+                contentId: practice.contentId,
+                sortOrder: j,
+              });
+            }
+          }
+        }
+      });
+
+      return await this.getCourseCurriculumForEditor(organizationId, courseId);
+    } catch (error) {
+      this.handleError(error, 'saveCurriculum');
+    }
+  }
+
   // ── Private read helpers ──────────────────────────────────────────────────
+
+  /**
+   * Guard: the course exists, is non-deleted, and belongs to `organizationId`.
+   * Throws `NotFoundError` otherwise (never leaks a foreign course). Mirrors the
+   * `(id, organizationId, deletedAt IS NULL)` guard in `CourseInsightsService`.
+   */
+  private async assertCourseInOrg(
+    organizationId: string,
+    courseId: string
+  ): Promise<void> {
+    const [course] = await this.db
+      .select({ id: courses.id })
+      .from(courses)
+      .where(
+        and(
+          eq(courses.id, courseId),
+          eq(courses.organizationId, organizationId),
+          isNull(courses.deletedAt)
+        )
+      )
+      .limit(1);
+    if (!course) {
+      throw new NotFoundError('Course not found');
+    }
+  }
+
+  /**
+   * The editor's stage+practice read — the {@link loadStages} shape WITHOUT the
+   * PUBLISHED filter (drafts must remain visible in the editor) and WITH the
+   * linked content's publish `status` for the inspector.
+   */
+  private async loadEditorStages(courseId: string): Promise<EditorStageView[]> {
+    const stageRows = await this.db
+      .select({
+        id: courseStages.id,
+        name: courseStages.name,
+        gloss: courseStages.gloss,
+        sortOrder: courseStages.sortOrder,
+      })
+      .from(courseStages)
+      .where(
+        and(eq(courseStages.courseId, courseId), isNull(courseStages.deletedAt))
+      )
+      .orderBy(asc(courseStages.sortOrder));
+
+    if (stageRows.length === 0) return [];
+
+    const stageIds = stageRows.map((s) => s.id);
+
+    const practiceRows = await this.db
+      .select({
+        stageId: stagePractices.stageId,
+        sortOrder: stagePractices.sortOrder,
+        contentId: content.id,
+        slug: content.slug,
+        title: content.title,
+        contentType: content.contentType,
+        status: content.status,
+        thumbnailUrl: content.thumbnailUrl,
+        mediaThumbnailKey: mediaItems.thumbnailKey,
+      })
+      .from(stagePractices)
+      .innerJoin(content, eq(content.id, stagePractices.contentId))
+      .leftJoin(mediaItems, eq(mediaItems.id, content.mediaItemId))
+      .where(
+        and(
+          inArray(stagePractices.stageId, stageIds),
+          // NO `status = PUBLISHED` filter — the editor shows draft practices.
+          isNull(content.deletedAt)
+        )
+      )
+      .orderBy(asc(stagePractices.sortOrder));
+
+    const byStage = new Map<string, EditorPracticeView[]>();
+    for (const row of practiceRows) {
+      const practice: EditorPracticeView = {
+        contentId: row.contentId,
+        slug: row.slug,
+        title: row.title,
+        contentType: toPracticeContentType(row.contentType),
+        status: toPageStatus(row.status),
+        thumbnailUrl: row.thumbnailUrl ?? row.mediaThumbnailKey ?? null,
+        sortOrder: row.sortOrder,
+      };
+      const list = byStage.get(row.stageId);
+      if (list) list.push(practice);
+      else byStage.set(row.stageId, [practice]);
+    }
+
+    return stageRows.map((stage) => ({
+      id: stage.id,
+      name: stage.name,
+      gloss: stage.gloss,
+      sortOrder: stage.sortOrder,
+      practices: (byStage.get(stage.id) ?? []).sort(
+        (a, b) => a.sortOrder - b.sortOrder
+      ),
+    }));
+  }
 
   /**
    * Curriculum + enrolment rollups for a set of course ids (BATCHED — no N+1),

@@ -204,3 +204,44 @@ export const saveJourneyPageBodySchema = z.object({
   sections: z.array(pageSectionSchema),
 });
 export type SaveJourneyPageBody = z.infer<typeof saveJourneyPageBodySchema>;
+
+/**
+ * ── STUDIO curriculum-editor inputs (Codex-03cwh · admin two-pane editor) ──
+ *
+ * The two-pane curriculum editor is owner/admin (`requireOrgManagement`). The
+ * route addresses a journey by its landing-page `:pageId` (path param) and
+ * takes `organizationId` in the query — consumed ONLY by the `procedure()` org
+ * resolver; the handler forwards `ctx.organizationId` and resolves the subject
+ * course from the page. A practice is a JOIN to a `content` row (never free
+ * text), so its only editable field here is which content it points at.
+ */
+
+/** One practice in the save body — a reference to an existing content row. */
+export const saveCurriculumPracticeSchema = z.object({
+  contentId: uuidSchema,
+});
+
+/**
+ * One stage in the save body. `id` is the persisted stage id for an existing
+ * stage, or `null` for a stage the editor just added (the server assigns its
+ * id). Bounds mirror the `course_stages` columns (`name` varchar(255); `gloss`
+ * is `text`, capped defensively). A `contentId` may not repeat WITHIN a stage
+ * (the `stage_practices` PK is `(stageId, contentId)`).
+ */
+export const saveCurriculumStageSchema = z.object({
+  id: uuidSchema.nullable(),
+  name: z.string().trim().min(1).max(255),
+  gloss: z.string().trim().max(2000).nullable(),
+  practices: z
+    .array(saveCurriculumPracticeSchema)
+    .max(200)
+    .refine((ps) => new Set(ps.map((p) => p.contentId)).size === ps.length, {
+      message: 'A practice can only appear once per stage',
+    }),
+});
+
+/** Bulk-save body — the whole desired curriculum, reconciled server-side. */
+export const saveCurriculumBodySchema = z.object({
+  stages: z.array(saveCurriculumStageSchema).max(100),
+});
+export type SaveCurriculumBody = z.infer<typeof saveCurriculumBodySchema>;
