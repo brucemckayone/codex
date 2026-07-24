@@ -984,6 +984,138 @@ describe('ContentService', () => {
         service.update(created.id, { title: 'Hacked' }, creatorId)
       ).rejects.toThrow(ContentNotFoundError);
     });
+
+    describe('isFree clamp — non-free ⟺ ≥1 gate (partial-PATCH bypass guard)', () => {
+      // Regression guard: a partial PATCH that clears the SOLE gate without
+      // restating isFree must NOT persist a zero-gate row with isFree:false —
+      // the resolver falls through team/follower/tier/paid to `return true`, so
+      // such a row is silently PUBLIC. update() recomputes the effective merged
+      // policy and clamps isFree:true when no gate remains (a gate-less row IS
+      // free). The Zod refine can't catch this — a partial has no existing row.
+
+      /** Seed a gated (isFree:false) video row directly, bypassing the create
+       *  schema — mirrors how a legitimately-gated row lands in the table. */
+      async function seedGated(flags: {
+        isPurchasable?: boolean;
+        priceCents?: number | null;
+        isFollowerGated?: boolean;
+        isTeamOnly?: boolean;
+        includedInTierId?: string | null;
+        organizationId?: string | null;
+      }): Promise<string> {
+        const [media] = await db
+          .insert(mediaItems)
+          .values(
+            createTestMediaItemInput(creatorId, {
+              mediaType: 'video',
+              status: 'ready',
+            })
+          )
+          .returning();
+        const [row] = await db
+          .insert(content)
+          .values({
+            creatorId,
+            mediaItemId: media.id,
+            title: 'Gated Content',
+            slug: createUniqueSlug('gated'),
+            contentType: 'video',
+            isFree: false,
+            status: 'draft',
+            ...flags,
+          })
+          .returning();
+        return row.id;
+      }
+
+      it('clearing a subscriber tier makes the row FREE, not a zero-gate public row', async () => {
+        const [org] = await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning();
+        const [tier] = await db
+          .insert(subscriptionTiers)
+          .values(createTestTierInput(org.id, { sortOrder: 1 }))
+          .returning();
+        const id = await seedGated({
+          organizationId: org.id,
+          includedInTierId: tier.id,
+        });
+
+        // Partial PATCH clears the sole gate WITHOUT restating isFree.
+        const updated = await service.update(
+          id,
+          { includedInTierId: null },
+          creatorId
+        );
+
+        expect(updated.includedInTierId).toBeNull();
+        expect(updated.isFree).toBe(true); // clamped — never non-free + zero-gate
+        expect(updated.isPurchasable).toBe(false);
+        expect(updated.isFollowerGated).toBe(false);
+        expect(updated.isTeamOnly).toBe(false);
+      });
+
+      it('clearing the follower gate makes the row FREE', async () => {
+        const id = await seedGated({ isFollowerGated: true });
+        const updated = await service.update(
+          id,
+          { isFollowerGated: false },
+          creatorId
+        );
+        expect(updated.isFollowerGated).toBe(false);
+        expect(updated.isFree).toBe(true);
+      });
+
+      it('clearing the team gate makes the row FREE', async () => {
+        const id = await seedGated({ isTeamOnly: true });
+        const updated = await service.update(
+          id,
+          { isTeamOnly: false },
+          creatorId
+        );
+        expect(updated.isTeamOnly).toBe(false);
+        expect(updated.isFree).toBe(true);
+      });
+
+      it('clearing the paid gate makes the row FREE', async () => {
+        const id = await seedGated({ isPurchasable: true, priceCents: 1500 });
+        const updated = await service.update(
+          id,
+          { isPurchasable: false, priceCents: null },
+          creatorId
+        );
+        expect(updated.isPurchasable).toBe(false);
+        expect(updated.isFree).toBe(true);
+      });
+
+      it('does NOT clamp when another gate remains (hybrid drops price, keeps tier)', async () => {
+        const [org] = await db
+          .insert(organizations)
+          .values(createTestOrganizationInput())
+          .returning();
+        const [tier] = await db
+          .insert(subscriptionTiers)
+          .values(createTestTierInput(org.id, { sortOrder: 1 }))
+          .returning();
+        const id = await seedGated({
+          organizationId: org.id,
+          isPurchasable: true,
+          priceCents: 1500,
+          includedInTierId: tier.id,
+        });
+
+        const updated = await service.update(
+          id,
+          { isPurchasable: false, priceCents: null },
+          creatorId
+        );
+
+        expect(updated.isPurchasable).toBe(false);
+        expect(updated.includedInTierId).toBe(tier.id); // tier gate remains
+        expect(updated.isFree).toBe(false); // still gated → NOT clamped free
+      });
+    });
   });
 
   describe('publish', () => {

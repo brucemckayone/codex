@@ -460,6 +460,29 @@ export class ContentService extends BaseService {
             : existing.organizationId;
         const clearTier = resultingOrgId == null;
 
+        // Access-policy invariant: NON-FREE ⟺ at least one active gate.
+        // A partial PATCH can clear the sole gate WITHOUT restating `isFree`
+        // (the Zod refine can't reason across a partial — it never sees the
+        // existing row), which would persist a zero-gate row still carrying
+        // `isFree:false`; the resolver then falls through team/follower/tier/
+        // paid to its final `return true` → the content is silently PUBLIC.
+        // Recompute the EFFECTIVE merged policy (existing row overlaid with the
+        // partial + the tier clamp above) and, when it carries no gate, force
+        // `isFree:true`. CLAMP (not throw): a gate-less row IS free — this
+        // mirrors create()'s `isFree ?? !gates` derivation and keeps a
+        // legitimate "clear the gate → make it free" edit working.
+        const effIncludedInTierId = clearTier
+          ? null
+          : 'includedInTierId' in restValidated
+            ? restValidated.includedInTierId
+            : existing.includedInTierId;
+        const effHasGate =
+          (restValidated.isPurchasable ?? existing.isPurchasable) ||
+          (restValidated.isFollowerGated ?? existing.isFollowerGated) ||
+          (restValidated.isTeamOnly ?? existing.isTeamOnly) ||
+          (restValidated.courseOnly ?? existing.courseOnly) ||
+          effIncludedInTierId != null;
+
         // Update content
         const [updated] = await tx
           .update(content)
@@ -467,6 +490,9 @@ export class ContentService extends BaseService {
             ...restValidated,
             ...bodyFields,
             ...(clearTier ? { includedInTierId: null } : {}),
+            // Clamp AFTER the spread so it overrides a stale `isFree:false` the
+            // partial may carry alongside the gate it just cleared.
+            ...(effHasGate ? {} : { isFree: true }),
             updatedAt: new Date(),
           })
           .where(and(eq(content.id, id), withCreatorScope(content, creatorId)))
