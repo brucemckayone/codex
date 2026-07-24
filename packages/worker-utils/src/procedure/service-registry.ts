@@ -10,6 +10,7 @@ import {
   AccessRevocation,
   ContentAccessService,
   CourseAccessService,
+  CourseJourneyService,
   EntitlementsService,
 } from '@codex/access';
 import {
@@ -162,6 +163,7 @@ export function createServiceRegistry(
   let _connectAccount: ConnectAccountService | undefined;
   let _courseSubscription: CourseSubscriptionService | undefined;
   let _courseAccess: CourseAccessService | undefined;
+  let _courseJourney: CourseJourneyService | undefined;
   let _agreements: AgreementService | undefined;
 
   // Shared per-request DB client (for services needing transactions)
@@ -849,6 +851,19 @@ export function createServiceRegistry(
         });
       }
       return _courseAccess;
+    },
+
+    get courseJourney() {
+      if (!_courseJourney) {
+        // Pure DB member-surface reads (Round-D): dashboard curriculum + progress
+        // rollup, in-course practice/playlist, idempotent completion write.
+        // Shares the WS client like the sibling course services.
+        _courseJourney = new CourseJourneyService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+        });
+      }
+      return _courseJourney;
     },
 
     // ========================================================================

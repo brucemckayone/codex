@@ -36,6 +36,7 @@ import {
 import categoriesRoutes from './routes/categories';
 import contentRoutes from './routes/content';
 import contentAccessRoutes from './routes/content-access';
+import journeysRoutes from './routes/journeys';
 import mediaRoutes from './routes/media';
 import publicRoutes from './routes/public';
 
@@ -97,6 +98,7 @@ app.route('/api/content', contentRoutes);
 app.route('/api/categories', categoriesRoutes);
 app.route('/api/media', mediaRoutes);
 app.route('/api/access', contentAccessRoutes);
+app.route('/api/journeys', journeysRoutes);
 
 // ============================================================================
 // Export

@@ -11,6 +11,7 @@
 import type {
   ContentAccessService,
   CourseAccessService,
+  CourseJourneyService,
   EntitlementsService,
 } from '@codex/access';
 import type {
@@ -187,6 +188,12 @@ export interface ServiceRegistry {
    * paths. Pure DB — no Stripe.
    */
   courseAccess: CourseAccessService;
+  /**
+   * Course MEMBER-surface reads (Codex-2pryk Round-D): the dashboard curriculum
+   * + progress rollup and the in-course practice/playlist projections (SPEC §11
+   * / §14). Pure DB — the entitlement decision + stream signing stay on `access`.
+   */
+  courseJourney: CourseJourneyService;
 
   // Media & Processing domain
   transcoding: TranscodingService;

@@ -82,6 +82,8 @@ export {
 } from './services/ContentAccessService';
 // Course monetization: tier-access management (N1 guard) + offer read (WP-6).
 export { CourseAccessService } from './services/course-access-service';
+// Course member surfaces: dashboard + in-course player reads (Round-D · Codex-776gg).
+export { CourseJourneyService } from './services/course-journey-service';
 export { EntitlementsService } from './services/entitlements-service';
 export type {
   PlaybackProgressResponse,

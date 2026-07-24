@@ -306,3 +306,126 @@ export interface CourseOffer {
   /** True when the viewer already holds a live entitlement over the course. */
   entitled: boolean;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Member surfaces — dashboard + in-course player (SPEC §11 / §14, owned by WP-4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The FE-facing projections the course DASHBOARD and IN-COURSE PLAYER consume
+ * (SPEC §11 / §14) — NOT the raw Drizzle rows. Round-D (Codex-776gg) wires the
+ * web→worker plumbing that produces these: `CourseJourneyService` (@codex/access)
+ * returns them, the content-api journey routes serialise them, and the web
+ * `api.access.*` client hands them to the FE unchanged.
+ *
+ * These are the CONTRACT-HOME copies of the shapes authored for the WP-4 mock in
+ * `apps/web/src/lib/journeys/types.ts`. That FE module is a universal ($lib) type
+ * bag the components/store/seam import directly; this cross-worker mirror lets the
+ * BE packages — which cannot import an apps/web `$lib` module — produce the exact
+ * same shapes. The two are STRUCTURALLY IDENTICAL by design (a future edit to
+ * either must keep them equal), so the Phase-2 seam swap is a no-op for callers.
+ */
+
+/**
+ * Practice content type (SPEC §14.3). Drives the D-E completion boundary:
+ * `video`/`audio` auto-complete on genuine 100% finish; `written` is an explicit
+ * "Mark complete". Mirrors `content.contentType`.
+ */
+export type PracticeContentType = 'video' | 'audio' | 'written';
+
+/** How a `practice_completions` row was written (SPEC §11 / schema CHECK). */
+export type CompletionSource = 'manual' | 'auto';
+
+/** A summary of a course, enough to render chrome + build URLs. */
+export interface JourneyCourseSummary {
+  id: string;
+  slug: string | null;
+  title: string;
+  organizationSlug: string | null;
+}
+
+/**
+ * One practice (a `content` row inside a stage), as the member surfaces read it.
+ * `durationSeconds` is present for media (drives the resume + finish signal).
+ */
+export interface JourneyPractice {
+  contentId: string;
+  slug: string | null;
+  title: string;
+  contentType: PracticeContentType;
+  durationSeconds: number | null;
+  thumbnailUrl: string | null;
+  sortOrder: number;
+}
+
+/** An ordered stage (a "gate") with its concurrent practice pool (SPEC §5). */
+export interface JourneyStage {
+  id: string;
+  name: string;
+  gloss: string | null;
+  sortOrder: number;
+  practices: JourneyPractice[];
+}
+
+/** The current user's enrollment in a course (SPEC §11). */
+export interface JourneyEnrollment {
+  courseId: string;
+  enrolledAt: string;
+  lastActivityAt: string | null;
+  /** Stamped when every required practice is complete. */
+  completedAt: string | null;
+}
+
+/**
+ * A completion the SERVER knows about — the `practice_completions` row, the
+ * SOURCE OF TRUTH for course progress (SPEC §11 / D-E).
+ */
+export interface PracticeCompletionRecord {
+  contentId: string;
+  completedAt: string;
+  source: CompletionSource;
+}
+
+/**
+ * Everything the dashboard needs after the `canEnterCourse` gate passes:
+ * enrollment, the ordered curriculum, and the server-known completions.
+ */
+export interface CourseDashboardData {
+  course: JourneyCourseSummary;
+  enrollment: JourneyEnrollment;
+  stages: JourneyStage[];
+  completions: PracticeCompletionRecord[];
+}
+
+/** One row of the in-course playlist rail (the whole course sequence, flattened). */
+export interface PlaylistEntry {
+  contentId: string;
+  slug: string | null;
+  title: string;
+  contentType: PracticeContentType;
+  stageId: string;
+  stageName: string;
+  sortOrder: number;
+}
+
+/**
+ * Everything the in-course player needs after `canEnterCourse` (+ `canView` for
+ * the stream) pass. `streamingUrl` / `waveformUrl` are signed R2 URLs for media;
+ * `null` for `written` practices (their body renders from `bodyHtml`).
+ */
+export interface InCoursePracticeData {
+  course: JourneyCourseSummary;
+  stage: { id: string; name: string };
+  practice: JourneyPractice;
+  /** Signed HLS URL — media only; null for written / when stream not viewable. */
+  streamingUrl: string | null;
+  waveformUrl: string | null;
+  /** Rendered body HTML for `written` practices; null for media. */
+  bodyHtml: string | null;
+  /** Resume position for media (seconds). */
+  initialProgressSeconds: number;
+  /** The whole course sequence, for the playlist rail + prev/next. */
+  playlist: PlaylistEntry[];
+  /** Server-known completions across the course (hydrates the store). */
+  completions: PracticeCompletionRecord[];
+}
