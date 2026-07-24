@@ -33,7 +33,6 @@
  */
 
 import type { RequestEvent } from '@sveltejs/kit';
-import { sanitizeContentHtml } from '$lib/editor/render';
 import type {
   CompletionSource,
   CourseDashboardData,
@@ -131,10 +130,19 @@ export async function fetchInCoursePractice(
   const data = await apiFor(ctx).access.inCoursePractice(courseId, contentSlug);
   if (!data) return null;
 
-  return {
-    ...data,
-    bodyHtml: data.bodyHtml ? await sanitizeContentHtml(data.bodyHtml) : null,
-  };
+  // Sanitise written bodies server-side (stored-XSS guard). Imported LAZILY so
+  // this seam's module-eval doesn't eagerly pull the heavy editor render chain
+  // ($lib/editor/render → ./extensions), which is CJS-interop-hostile to
+  // vitest's SSR eval and — via progress.ts → journeys.remote → round-d-seam —
+  // was breaking the collections/access-context unit suites. The real build is
+  // unaffected (SvelteKit strips the remote body from the client bundle).
+  // [[feedback_vite_ssr_module_load_cascade]]
+  let bodyHtml: string | null = null;
+  if (data.bodyHtml) {
+    const { sanitizeContentHtml } = await import('$lib/editor/render');
+    bodyHtml = await sanitizeContentHtml(data.bodyHtml);
+  }
+  return { ...data, bodyHtml };
 }
 
 /**
