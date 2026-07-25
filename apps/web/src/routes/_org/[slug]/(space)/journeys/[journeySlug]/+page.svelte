@@ -52,4 +52,8 @@
 
 <StructuredData data={structuredData} />
 
-<JourneyRenderer coursePage={data.coursePage} sellPreview={data.sellPreview} />
+<JourneyRenderer
+  coursePage={data.coursePage}
+  sellPreview={data.sellPreview}
+  enrolled={data.enrolled}
+/>
