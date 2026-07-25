@@ -10,13 +10,18 @@
  * still gets the chrome; the stream URL is withheld.
  *
  * ─── ROUND-D SEAM ───────────────────────────────────────────────────────────
- * The resolver + practice fetch are mocked in
- * `$lib/server/journeys/round-d-seam.ts`; Round-D swaps them for real
- * `@codex/access` calls (incl. R2-signed stream URLs). This file is unchanged.
+ * The resolver + practice fetch go through `$lib/server/journeys/round-d-seam.ts`,
+ * which calls the real `@codex/access` routes (incl. R2-signed stream URLs).
+ *
+ * Alongside the practice we fetch the course dashboard (same enrollment-gated
+ * rollup the dashboard page reads) ONLY to surface the current stage's reflective
+ * `gloss` in the working pane. It runs in parallel and `.catch()`es to null, so a
+ * failure degrades the "why" line — it never weakens a gate or rejects the load.
  */
 import { error, redirect } from '@sveltejs/kit';
 import { evaluateCourseGate } from '$lib/journeys/gate';
 import {
+  fetchCourseDashboard,
   fetchInCoursePractice,
   resolveCanEnterCourse,
   resolveCanView,
@@ -61,12 +66,16 @@ export const load: PageServerLoad = async (event) => {
     );
   }
 
-  const practice = await fetchInCoursePractice(
-    event,
-    user!.id,
-    course!.id,
-    params.contentSlug
-  );
+  // Past the gate, both are present — the outcome is derived from their
+  // existence. Narrow here so the rest of the load needs no non-null assertion.
+  if (!user || !course) error(404, 'Course not found');
+
+  // Practice payload (gated) + the enrollment rollup (for the stage gloss) in
+  // parallel; the dashboard degrades to null without affecting the practice gate.
+  const [practice, dashboard] = await Promise.all([
+    fetchInCoursePractice(event, user.id, course.id, params.contentSlug),
+    fetchCourseDashboard(event, user.id, course.id).catch(() => null),
+  ]);
   if (!practice) error(404, 'Practice not found');
 
   // `canView` gates the media stream. Written practices are gated by course
@@ -74,12 +83,18 @@ export const load: PageServerLoad = async (event) => {
   const streamViewable =
     practice.practice.contentType === 'written'
       ? true
-      : await resolveCanView(event, user!.id, practice.practice.contentId);
+      : await resolveCanView(event, user.id, practice.practice.contentId);
+
+  // The current stage's reflective line (SPEC §5 `gloss`), if the rollup carries
+  // it — surfaced as the working pane's "why". Absent → the line just doesn't render.
+  const stageGloss =
+    dashboard?.stages.find((s) => s.id === practice.stage.id)?.gloss ?? null;
 
   return {
     practice: {
       ...practice,
       streamingUrl: streamViewable ? practice.streamingUrl : null,
     },
+    stageGloss,
   };
 };
