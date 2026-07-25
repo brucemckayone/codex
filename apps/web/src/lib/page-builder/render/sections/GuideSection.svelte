@@ -26,16 +26,32 @@
     portraitUrl: asString(config, 'portraitUrl'),
     credentials: asStringArray(config, 'credentials'),
   });
+
+  // A single-glyph mark for the decorative candlelit poster when no portrait is
+  // configured — the guide's initial, evoking a portrait placeholder.
+  const mark = $derived(
+    (p.name ?? p.heading ?? '').trim().charAt(0).toUpperCase() || '·'
+  );
 </script>
 
 {#if p.bio || p.name || p.heading}
   <div class="guide">
     <div class="guide__inner">
-      {#if p.portraitUrl}
-        <div class="guide__portrait">
-          <img src={p.portraitUrl} alt={p.name ? `Portrait of ${p.name}` : ''} loading="lazy" />
-        </div>
-      {/if}
+      <!-- Left: a candlelit "meet your guide" poster. A real portrait layers in
+           when configured; otherwise a decorative brand-lit panel holds the
+           column's visual weight (matching the prototype's play-frame) without
+           implying playback we don't have. -->
+      <div class="guide__poster" class:guide__poster--photo={p.portraitUrl}>
+        {#if p.portraitUrl}
+          <img
+            src={p.portraitUrl}
+            alt={p.name ? `Portrait of ${p.name}` : ''}
+            loading="lazy"
+          />
+        {:else}
+          <span class="guide__mark" aria-hidden="true">{mark}</span>
+        {/if}
+      </div>
       <div class="guide__body">
         {#if p.eyebrow}
           <p class="guide__eyebrow">{p.eyebrow}</p>
@@ -87,18 +103,56 @@
     }
   }
 
-  .guide__portrait {
-    aspect-ratio: 3 / 4;
+  /* Candlelit poster: firelight rising from lower-centre + a clay presence
+     upper-left over a deep body — the same brand-derived warmth as the sell
+     video frames, so the guide reads as part of one candlelit world. */
+  .guide__poster {
+    position: relative;
+    aspect-ratio: 4 / 5;
     border-radius: var(--radius-card);
     overflow: hidden;
+    display: grid;
+    place-items: center;
+    border: var(--border-width) solid
+      color-mix(in oklab, var(--color-brand-primary) 20%, transparent);
+    background:
+      radial-gradient(
+        46% 58% at 50% 66%,
+        color-mix(in oklab, var(--color-brand-primary) 46%, transparent),
+        transparent 68%
+      ),
+      radial-gradient(
+        90% 72% at 30% 24%,
+        color-mix(in oklab, var(--color-brand-accent, var(--color-brand-primary)) 22%, transparent),
+        transparent 66%
+      ),
+      var(--color-surface);
+    box-shadow:
+      0 var(--space-8) var(--space-16) calc(-1 * var(--space-10))
+        color-mix(in oklab, var(--color-brand-primary) 55%, #000),
+      inset 0 var(--border-width) 0
+        color-mix(in oklab, var(--color-heading) 10%, transparent);
+  }
+
+  .guide__poster--photo {
     background: var(--color-surface-secondary);
   }
 
-  .guide__portrait img {
+  .guide__poster img {
     display: block;
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  .guide__mark {
+    font-family: var(--font-heading);
+    font-size: var(--text-6xl, var(--text-display));
+    font-weight: var(--font-normal);
+    line-height: 1;
+    color: color-mix(in oklab, var(--color-heading) 78%, transparent);
+    text-shadow: 0 0 var(--space-6)
+      color-mix(in oklab, var(--color-brand-primary) 45%, transparent);
   }
 
   .guide__body {

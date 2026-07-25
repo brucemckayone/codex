@@ -27,12 +27,24 @@
     ctaLabel: asString(config, 'ctaLabel'),
     secondaryLabel: asString(config, 'secondaryLabel'),
     secondaryHref: asString(config, 'secondaryHref'),
+    trust: asString(config, 'trust'),
   });
 
   const eyebrow = $derived(p.eyebrow ?? context.course.kicker ?? undefined);
   const headline = $derived(p.headline ?? context.course.title);
   const subheadline = $derived(p.subheadline ?? context.course.lede ?? undefined);
-  const ctaLabel = $derived(p.ctaLabel ?? 'Begin the journey');
+
+  // CTA branches on the viewer's enrolment (the sales page is otherwise fully
+  // public): an enrolled member goes to their dashboard; everyone else is sent
+  // to the offer/checkout surface to join.
+  const ctaHref = $derived(
+    context.enrolled ? context.dashboardUrl : context.checkoutUrl
+  );
+  const ctaLabel = $derived(
+    context.enrolled
+      ? 'Go to your dashboard'
+      : (p.ctaLabel ?? 'Begin the journey')
+  );
 </script>
 
 <div class="hero">
@@ -46,7 +58,7 @@
       <p class="hero__sub">{subheadline}</p>
     {/if}
     <div class="hero__actions">
-      <CtaLink href={context.checkoutUrl} variant="primary" size="lg">
+      <CtaLink href={ctaHref} variant="primary" size="lg">
         {ctaLabel}
       </CtaLink>
       {#if p.secondaryLabel && p.secondaryHref}
@@ -55,6 +67,12 @@
         </CtaLink>
       {/if}
     </div>
+    {#if p.trust}
+      <p class="hero__trust">
+        <span class="hero__trust-dot" aria-hidden="true"></span>
+        {p.trust}
+      </p>
+    {/if}
   </div>
 </div>
 
@@ -135,5 +153,23 @@
     justify-content: center;
     gap: var(--space-3);
     margin-top: var(--space-2);
+  }
+
+  .hero__trust {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: var(--space-3) 0 0;
+    font-size: var(--text-sm);
+    color: var(--color-text-tertiary);
+  }
+
+  .hero__trust-dot {
+    width: var(--space-2);
+    height: var(--space-2);
+    border-radius: var(--radius-full);
+    background: var(--color-brand-primary);
+    box-shadow: 0 0 0 var(--space-1)
+      color-mix(in oklab, var(--color-brand-primary) 22%, transparent);
   }
 </style>

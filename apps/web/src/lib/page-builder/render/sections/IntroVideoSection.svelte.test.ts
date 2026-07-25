@@ -37,6 +37,8 @@ function baseContext(
     stages: [],
     testimonials: [],
     checkoutUrl: 'http://lvh.me:3000/journeys/demo/checkout',
+    dashboardUrl: 'http://lvh.me:3000/journeys/demo/dashboard',
+    enrolled: false,
     sellPreview,
   };
 }
