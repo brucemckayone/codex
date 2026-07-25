@@ -26,6 +26,10 @@
   const sections = $derived(pageBuilder.sections);
   let picking = $state(false);
 
+  // Pointer drag-reorder (keyboard reorder stays on the up/down buttons).
+  let draggingId = $state<string | null>(null);
+  let dragOverId = $state<string | null>(null);
+
   function labelFor(type: string): string {
     return findSectionDefinition(type)?.label ?? type;
   }
@@ -37,6 +41,33 @@
   function onAdd(type: string): void {
     pageBuilder.addSection(type);
     picking = false;
+  }
+
+  function onDragStart(event: DragEvent, id: string): void {
+    draggingId = id;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', id);
+    }
+  }
+
+  function onDragOver(event: DragEvent, id: string): void {
+    if (!draggingId) return;
+    event.preventDefault();
+    dragOverId = id;
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  }
+
+  function onDrop(event: DragEvent, index: number): void {
+    event.preventDefault();
+    if (draggingId) pageBuilder.moveSectionTo(draggingId, index);
+    draggingId = null;
+    dragOverId = null;
+  }
+
+  function onDragEnd(): void {
+    draggingId = null;
+    dragOverId = null;
   }
 </script>
 
@@ -64,7 +95,23 @@
     <ol class="section-list__rows" role="list">
       {#each sections as section, i (section.id)}
         {@const selected = pageBuilder.selectedSectionId === section.id}
-        <li class="section-list__row" class:section-list__row--selected={selected}>
+        <li
+          class="section-list__row"
+          class:section-list__row--selected={selected}
+          class:section-list__row--dragover={dragOverId === section.id &&
+            draggingId !== section.id}
+          class:section-list__row--dragging={draggingId === section.id}
+          ondragover={(e) => onDragOver(e, section.id)}
+          ondrop={(e) => onDrop(e, i)}
+          ondragend={onDragEnd}
+        >
+          <span
+            class="section-list__grip"
+            draggable="true"
+            title="Drag to reorder"
+            aria-hidden="true"
+            ondragstart={(e) => onDragStart(e, section.id)}
+          >⠿</span>
           <div class="section-list__reorder">
             <button
               type="button"
@@ -209,6 +256,31 @@
   .section-list__row--selected {
     background-color: var(--color-surface-secondary);
     box-shadow: inset var(--space-0-5) 0 0 0 var(--color-interactive);
+  }
+
+  /* Drop-target indicator — a bar at the top edge of the hovered row. */
+  .section-list__row--dragover {
+    box-shadow: inset 0 var(--border-width-thick) 0 0 var(--color-interactive);
+  }
+
+  .section-list__row--dragging {
+    opacity: var(--opacity-40, 0.4);
+  }
+
+  .section-list__grip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--space-4);
+    flex-shrink: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    line-height: 1;
+    cursor: grab;
+  }
+
+  .section-list__grip:active {
+    cursor: grabbing;
   }
 
   .section-list__reorder {

@@ -24,10 +24,13 @@
 
 import type {
   PageBuilderState,
+  PageOffer,
   PageSection,
+  PageSeo,
   SectionProps,
 } from '@codex/shared-types';
 import { browser } from '$app/environment';
+import { createSection, findSectionDefinition } from './section-catalog';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
@@ -120,6 +123,78 @@ function indexOf(id: string): number {
   return state.pending?.sections.findIndex((s) => s.id === id) ?? -1;
 }
 
+// ── Undo / redo (section-model history) ───────────────────────────────────────
+// snapshot() captures `pending` BEFORE a discrete action; snapshotEdit() coalesces
+// a burst of typing into ONE step (mirrors the prototype's snap()/snapEdit()).
+// Scoped to the section model — the same scope the prototype's history covers.
+
+const history = $state<{ undo: PageBuilderState[]; redo: PageBuilderState[] }>({
+  undo: [],
+  redo: [],
+});
+const MAX_HISTORY = 80;
+let burstTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearHistory(): void {
+  history.undo = [];
+  history.redo = [];
+  if (burstTimer) {
+    clearTimeout(burstTimer);
+    burstTimer = null;
+  }
+}
+
+/** Capture the pre-mutation `pending` as one undo step (a discrete action). */
+function snapshot(): void {
+  if (!state.pending) return;
+  history.undo.push(clone(state.pending));
+  if (history.undo.length > MAX_HISTORY) history.undo.shift();
+  history.redo = [];
+}
+
+/** Capture once per typing burst — coalesces keystrokes into a single step. */
+function snapshotEdit(): void {
+  if (burstTimer) {
+    clearTimeout(burstTimer);
+  } else {
+    snapshot();
+  }
+  burstTimer = setTimeout(() => {
+    burstTimer = null;
+  }, 600);
+}
+
+/** Re-focus a valid section after a history swap replaced the section list. */
+function ensureSelection(): void {
+  if (!state.pending) return;
+  if (!state.pending.sections.some((s) => s.id === state.selectedSectionId)) {
+    state.selectedSectionId = firstSectionId(state.pending);
+  }
+}
+
+/** Step back one discrete edit (Cmd/Ctrl+Z). */
+function undo(): void {
+  if (!state.pending || history.undo.length === 0) return;
+  // Seal any in-flight typing burst so it is its own step before walking back.
+  if (burstTimer) {
+    clearTimeout(burstTimer);
+    burstTimer = null;
+  }
+  history.redo.push(clone(state.pending));
+  const prev = history.undo.pop();
+  if (prev) state.pending = prev;
+  ensureSelection();
+}
+
+/** Re-apply the last undone edit (Cmd/Ctrl+Shift+Z / Ctrl+Y). */
+function redo(): void {
+  if (!state.pending || history.redo.length === 0) return;
+  history.undo.push(clone(state.pending));
+  const next = history.redo.pop();
+  if (next) state.pending = next;
+  ensureSelection();
+}
+
 // ── Actions ───────────────────────────────────────────────────────────────
 
 /**
@@ -129,6 +204,7 @@ function indexOf(id: string): number {
  */
 function open(pageId: string, saved: PageBuilderState): void {
   initEffects();
+  clearHistory();
   state.pageId = pageId;
   state.saved = clone(saved);
 
@@ -166,6 +242,7 @@ function firstSectionId(page: PageBuilderState): string | null {
 /** End the session and clear crash-recovery state. */
 function close(): void {
   clearStorage();
+  clearHistory();
   state.saved = null;
   state.pending = null;
   state.pageId = null;
@@ -191,6 +268,7 @@ function updateMeta<K extends keyof PageBuilderState>(
 function setSectionProps(id: string, props: SectionProps): void {
   const i = indexOf(id);
   if (i < 0 || !state.pending) return;
+  snapshotEdit();
   state.pending.sections[i].props = props;
 }
 
@@ -198,6 +276,7 @@ function setSectionProps(id: string, props: SectionProps): void {
 function setSectionProp(id: string, key: string, value: unknown): void {
   const i = indexOf(id);
   if (i < 0 || !state.pending) return;
+  snapshotEdit();
   state.pending.sections[i].props = {
     ...state.pending.sections[i].props,
     [key]: value,
@@ -208,26 +287,75 @@ function setSectionProp(id: string, key: string, value: unknown): void {
 function toggleSection(id: string): void {
   const i = indexOf(id);
   if (i < 0 || !state.pending) return;
+  snapshot();
   state.pending.sections[i].enabled = !state.pending.sections[i].enabled;
 }
 
 /**
- * Append a new section of `type` (empty props, enabled) and focus it. Returns
- * the new section's id so the caller can scroll/focus it. The WP-3 renderer
- * skips unknown types, so `type` is a plain string (matches the contract).
+ * Insert a new section of `type` (seeded from the catalogue with its default
+ * variant + placeholder copy) and focus it. Inserts AFTER `afterId` when given
+ * (the add-picker/canvas "add after this" affordance), else appends. Returns the
+ * new section's id so the caller can scroll/focus it. The renderer skips unknown
+ * types, so `type` is a plain string (matches the contract).
  */
-function addSection(type: string): string {
+function addSection(type: string, afterId?: string): string {
   if (!state.pending) return '';
-  const section: PageSection = { id: makeId(), type, enabled: true, props: {} };
-  state.pending.sections.push(section);
+  snapshot();
+  const section = createSection(type, makeId);
+  const from = afterId ? indexOf(afterId) : -1;
+  const at = from >= 0 ? from + 1 : state.pending.sections.length;
+  state.pending.sections.splice(at, 0, section);
   state.selectedSectionId = section.id;
   return section.id;
+}
+
+/**
+ * Duplicate a section in place (inserted directly after the source, focused).
+ * The copy gets a fresh id and a " copy"-suffixed display name. Returns the new
+ * id, or '' when the source is absent.
+ */
+function duplicateSection(id: string): string {
+  const i = indexOf(id);
+  if (i < 0 || !state.pending) return '';
+  snapshot();
+  const src = state.pending.sections[i];
+  const baseName =
+    src.name ?? findSectionDefinition(src.type)?.label ?? src.type;
+  const copy: PageSection = {
+    ...clone(src),
+    id: makeId(),
+    name: `${baseName} copy`,
+  };
+  state.pending.sections.splice(i + 1, 0, copy);
+  state.selectedSectionId = copy.id;
+  return copy.id;
+}
+
+/** Switch a section's layout composition (§4.1 "options per component"). */
+function setSectionVariant(id: string, variant: string): void {
+  const i = indexOf(id);
+  if (i < 0 || !state.pending) return;
+  snapshot();
+  state.pending.sections[i].variant = variant;
+}
+
+/** Move a section to an absolute index (the drag-reorder drop target). */
+function moveSectionTo(id: string, toIndex: number): void {
+  const from = indexOf(id);
+  if (from < 0 || !state.pending) return;
+  const list = state.pending.sections;
+  const to = Math.max(0, Math.min(toIndex, list.length - 1));
+  if (from === to) return;
+  snapshot();
+  const [moved] = list.splice(from, 1);
+  list.splice(to, 0, moved);
 }
 
 /** Remove a section; re-focus a neighbour so the editor never points at nothing. */
 function removeSection(id: string): void {
   const i = indexOf(id);
   if (i < 0 || !state.pending) return;
+  snapshot();
   state.pending.sections.splice(i, 1);
   if (state.selectedSectionId === id) {
     const next = state.pending.sections[i] ?? state.pending.sections[i - 1];
@@ -241,6 +369,7 @@ function moveSection(id: string, direction: -1 | 1): void {
   if (i < 0 || !state.pending) return;
   const target = i + direction;
   if (target < 0 || target >= state.pending.sections.length) return;
+  snapshot();
   const list = state.pending.sections;
   [list[i], list[target]] = [list[target], list[i]];
 }
@@ -256,12 +385,25 @@ function updateBrandOverrides(
   };
 }
 
+/** Merge a partial SEO patch into `pending.seo` (SEO builder mode). */
+function updateSeo(patch: Partial<PageSeo>): void {
+  if (!state.pending) return;
+  state.pending.seo = { ...(state.pending.seo ?? {}), ...patch };
+}
+
+/** Merge a partial offer patch into `pending.offer` (Pricing builder mode). */
+function updateOffer(patch: Partial<PageOffer>): void {
+  if (!state.pending) return;
+  state.pending.offer = { ...(state.pending.offer ?? {}), ...patch };
+}
+
 /** Revert every pending edit to the last saved draft. */
 function discard(): void {
   if (!state.saved) return;
   state.pending = clone(state.saved);
   state.selectedSectionId = firstSectionId(state.pending);
   clearStorage();
+  clearHistory();
 }
 
 /**
@@ -274,6 +416,7 @@ function resetSection(id: string): void {
   const savedSection = state.saved.sections.find((s) => s.id === id);
   const i = indexOf(id);
   if (!savedSection || i < 0) return;
+  snapshot();
   state.pending.sections[i] = clone(savedSection);
 }
 
@@ -300,6 +443,7 @@ function markSaved(): void {
   if (!state.pending) return;
   state.saved = clone(state.pending);
   clearStorage();
+  clearHistory();
 }
 
 function clearStorage(): void {
@@ -339,19 +483,32 @@ export const pageBuilder = {
   get selectedSection() {
     return selectedSection;
   },
+  get canUndo() {
+    return history.undo.length > 0;
+  },
+  get canRedo() {
+    return history.redo.length > 0;
+  },
 
   // Actions
   open,
   close,
+  undo,
+  redo,
   selectSection,
   updateMeta,
   setSectionProps,
   setSectionProp,
   toggleSection,
   addSection,
+  duplicateSection,
+  setSectionVariant,
   removeSection,
   moveSection,
+  moveSectionTo,
   updateBrandOverrides,
+  updateSeo,
+  updateOffer,
   discard,
   resetSection,
   applyPreviewState,

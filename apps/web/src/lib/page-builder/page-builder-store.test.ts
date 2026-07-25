@@ -92,7 +92,7 @@ describe('pageBuilder — section mutations', () => {
     expect(pageBuilder.isDirty).toBe(true);
   });
 
-  it('addSection appends an enabled section with the injected id and focuses it', () => {
+  it('addSection appends a seeded enabled section with the injected id and focuses it', () => {
     const id = pageBuilder.addSection('faq');
     expect(id).toBe('new-1');
     const added = pageBuilder.sections.at(-1);
@@ -100,9 +100,57 @@ describe('pageBuilder — section mutations', () => {
       id: 'new-1',
       type: 'faq',
       enabled: true,
-      props: {},
+      variant: 'accordion',
     });
+    // Seeded from the catalogue so it renders populated the moment it is added.
+    expect(added?.props.heading).toBeDefined();
     expect(pageBuilder.selectedSectionId).toBe('new-1');
+  });
+
+  it('addSection(type, afterId) inserts directly after the anchor section', () => {
+    const id = pageBuilder.addSection('proof', 'sec-hero');
+    expect(id).toBe('new-1');
+    expect(pageBuilder.sections.map((s) => s.id)).toEqual([
+      'sec-hero',
+      'new-1',
+      'sec-ache',
+      'sec-invite',
+    ]);
+  });
+
+  it('duplicateSection clones a section directly after it with a fresh id + copy name', () => {
+    const id = pageBuilder.duplicateSection('sec-ache');
+    expect(id).toBe('new-1');
+    expect(pageBuilder.sections.map((s) => s.id)).toEqual([
+      'sec-hero',
+      'sec-ache',
+      'new-1',
+      'sec-invite',
+    ]);
+    expect(pageBuilder.sections.find((s) => s.id === 'new-1')?.name).toContain(
+      'copy'
+    );
+    expect(pageBuilder.selectedSectionId).toBe('new-1');
+  });
+
+  it('setSectionVariant switches the composition and marks dirty', () => {
+    pageBuilder.setSectionVariant('sec-hero', 'split');
+    expect(pageBuilder.sections.find((s) => s.id === 'sec-hero')?.variant).toBe(
+      'split'
+    );
+    expect(pageBuilder.isDirty).toBe(true);
+  });
+
+  it('moveSectionTo reorders to an absolute index and clamps to range', () => {
+    pageBuilder.moveSectionTo('sec-invite', 0);
+    expect(pageBuilder.sections.map((s) => s.id)).toEqual([
+      'sec-invite',
+      'sec-hero',
+      'sec-ache',
+    ]);
+    // Out-of-range index clamps to the last slot.
+    pageBuilder.moveSectionTo('sec-invite', 99);
+    expect(pageBuilder.sections.at(-1)?.id).toBe('sec-invite');
   });
 
   it('removeSection drops the section and re-focuses a neighbour', () => {
@@ -191,7 +239,7 @@ describe('pageBuilder — revert paths', () => {
 
     pageBuilder.resetSection(id);
     // Still present, still carries the edit — reset can't invent a saved value.
-    expect(pageBuilder.sections.find((s) => s.id === id)?.props).toEqual({
+    expect(pageBuilder.sections.find((s) => s.id === id)?.props).toMatchObject({
       q: 'How long?',
     });
   });
@@ -224,5 +272,78 @@ describe('pageBuilder — save + preview applier', () => {
     expect(pageBuilder.pending?.title).toBe('Live preview draft');
     // A preview frame must never own a persisted pageId (would pollute storage).
     expect(pageBuilder.pageId).toBeNull();
+  });
+});
+
+describe('pageBuilder — undo / redo', () => {
+  beforeEach(() => {
+    pageBuilder.close();
+    let n = 0;
+    pageBuilder.setIdFactory(() => `new-${++n}`);
+    pageBuilder.open(PAGE_ID, makeSaved());
+  });
+
+  it('opens with an empty history', () => {
+    expect(pageBuilder.canUndo).toBe(false);
+    expect(pageBuilder.canRedo).toBe(false);
+  });
+
+  it('undo reverts a discrete action and redo re-applies it', () => {
+    pageBuilder.addSection('faq');
+    expect(pageBuilder.sections).toHaveLength(4);
+    expect(pageBuilder.canUndo).toBe(true);
+
+    pageBuilder.undo();
+    expect(pageBuilder.sections.map((s) => s.id)).toEqual([
+      'sec-hero',
+      'sec-ache',
+      'sec-invite',
+    ]);
+    expect(pageBuilder.canRedo).toBe(true);
+
+    pageBuilder.redo();
+    expect(pageBuilder.sections).toHaveLength(4);
+    expect(pageBuilder.canRedo).toBe(false);
+  });
+
+  it('coalesces a burst of prop edits into a single undo step', () => {
+    pageBuilder.setSectionProp('sec-hero', 'headline', 'a');
+    pageBuilder.setSectionProp('sec-hero', 'headline', 'ab');
+    pageBuilder.setSectionProp('sec-hero', 'headline', 'abc');
+
+    pageBuilder.undo();
+    expect(
+      pageBuilder.sections.find((s) => s.id === 'sec-hero')?.props.headline
+    ).toBeUndefined();
+    expect(pageBuilder.canUndo).toBe(false);
+  });
+
+  it('a new action clears the redo stack', () => {
+    pageBuilder.addSection('faq');
+    pageBuilder.undo();
+    expect(pageBuilder.canRedo).toBe(true);
+
+    pageBuilder.addSection('proof');
+    expect(pageBuilder.canRedo).toBe(false);
+  });
+
+  it('undo keeps the selection pointing at a section that still exists', () => {
+    pageBuilder.removeSection('sec-invite');
+    pageBuilder.undo();
+    expect(pageBuilder.sections.map((s) => s.id)).toContain('sec-invite');
+    expect(
+      pageBuilder.sections.some((s) => s.id === pageBuilder.selectedSectionId)
+    ).toBe(true);
+  });
+
+  it('discard and markSaved both clear the history', () => {
+    pageBuilder.addSection('faq');
+    expect(pageBuilder.canUndo).toBe(true);
+    pageBuilder.discard();
+    expect(pageBuilder.canUndo).toBe(false);
+
+    pageBuilder.addSection('proof');
+    pageBuilder.markSaved();
+    expect(pageBuilder.canUndo).toBe(false);
   });
 });

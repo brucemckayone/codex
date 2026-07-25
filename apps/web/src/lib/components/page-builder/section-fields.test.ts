@@ -22,7 +22,15 @@ describe('section-fields', () => {
     for (const fields of Object.values(SECTION_FIELDS)) {
       for (const field of fields) {
         expect(field.key).toMatch(/^[a-zA-Z][a-zA-Z0-9]*$/);
-        expect(['text', 'textarea']).toContain(field.control);
+        expect(['text', 'textarea', 'select', 'media']).toContain(
+          field.control
+        );
+        // A select must carry choices; nothing else should.
+        if (field.control === 'select') {
+          expect(field.options?.length ?? 0).toBeGreaterThan(0);
+        } else {
+          expect(field.options).toBeUndefined();
+        }
       }
     }
   });

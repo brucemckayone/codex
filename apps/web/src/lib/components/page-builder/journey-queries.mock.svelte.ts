@@ -12,16 +12,19 @@
  * │ (`listContent(...).current` / `.loading`) for the real shape.               │
  * └────────────────────────────────────────────────────────────────────────────┘
  *
- * All money is pence, GBP (§ grounding). All returned shapes conform to the
- * frozen read-model types re-exported from `$lib/page-builder`.
+ * The builder-draft mock is seeded with the finished prototype's "Rootwork" copy
+ * + variants + a warm/dark per-page brand override, so the builder OPENS looking
+ * like the mockup (`docs/design/course-journeys/prototype/course-sell.html`). All
+ * money is pence, GBP. All returned shapes conform to the frozen read-model types.
  */
 import { browser } from '$app/environment';
 import type {
   JourneyListItem,
   JourneyPageRecord,
+  PageSection,
   PageStatus,
 } from '$lib/page-builder';
-import { createDefaultSections } from '$lib/page-builder';
+import type { JourneyStagePreview } from '$lib/page-builder/render';
 
 // ── Reactive resource (mirrors SvelteKit remote query().current/.loading) ─────
 
@@ -69,22 +72,22 @@ function createMockResource<T>(loader: () => Promise<T>): MockResource<T> {
   };
 }
 
-// ── Mock data ─────────────────────────────────────────────────────────────────
+// ── Mock list data ────────────────────────────────────────────────────────────
 
 const MOCK_JOURNEYS: readonly JourneyListItem[] = [
   {
-    id: 'jny-stillness',
+    id: 'jny-rootwork',
     pageType: 'course',
     subjectType: 'course',
-    slug: 'stillness',
-    title: 'Stillness — a 6-week descent',
-    status: 'published',
-    tagline: 'Come home to the quiet underneath the noise.',
-    stageCount: 6,
-    practiceCount: 24,
-    enrolledCount: 148,
-    revenueCents: 512_400,
-    updatedAt: '2026-07-20T09:12:00.000Z',
+    slug: 'rootwork',
+    title: 'Rootwork — the foundation course',
+    status: 'draft',
+    tagline: 'Teach your body it is safe to soften.',
+    stageCount: 5,
+    practiceCount: 14,
+    enrolledCount: 2400,
+    revenueCents: 1_728_000,
+    updatedAt: '2026-07-24T09:12:00.000Z',
   },
   {
     id: 'jny-first-light',
@@ -116,37 +119,199 @@ const MOCK_JOURNEYS: readonly JourneyListItem[] = [
   },
 ];
 
-/** Build a fresh course-page draft record (a new page or a mock existing one). */
+// ── The "Rootwork" seed — the prototype's initial page (course-sell.html) ─────
+
+/** The descent map's curriculum, previewed by the map/descent section. */
+export const MOCK_PREVIEW_STAGES: readonly JourneyStagePreview[] = [
+  {
+    name: 'Arrival',
+    gloss: 'Landing in the body, before anything is asked of it.',
+    lessons: [
+      { title: 'The first breath', type: 'audio', minutes: 8, free: true },
+      { title: 'Where you brace', type: 'practice', minutes: 11 },
+      { title: 'The weight of the day', type: 'audio', minutes: 9 },
+    ],
+  },
+  {
+    name: 'Ground',
+    gloss: 'Finding the floor beneath the feeling.',
+    lessons: [
+      { title: 'Feet, floor, gravity', type: 'practice', minutes: 12 },
+      { title: 'The long exhale', type: 'audio', minutes: 7 },
+      { title: 'Settling the chest', type: 'meditation', minutes: 14 },
+    ],
+  },
+  {
+    name: 'Thaw',
+    gloss: 'Letting the held places begin to move.',
+    lessons: [
+      { title: 'Small movements', type: 'video', minutes: 10 },
+      { title: 'The shake', type: 'practice', minutes: 9 },
+      { title: 'Warmth returning', type: 'audio', minutes: 11 },
+    ],
+  },
+  {
+    name: 'Tend',
+    gloss: 'Staying with what surfaces, without fixing.',
+    lessons: [
+      { title: 'A hand on the sternum', type: 'practice', minutes: 8 },
+      { title: 'Naming, softly', type: 'reflection', minutes: 6 },
+      { title: 'The quiet after', type: 'meditation', minutes: 13 },
+    ],
+  },
+  {
+    name: 'Root',
+    gloss: 'Practising the return, so it becomes yours.',
+    lessons: [
+      { title: 'The daily ten', type: 'practice', minutes: 10 },
+      { title: 'Coming back', type: 'audio', minutes: 9 },
+    ],
+  },
+];
+
+/** A seeded section with the prototype copy — stable ids so selection persists. */
+function seed(
+  id: string,
+  type: string,
+  variant: string,
+  name: string,
+  props: Record<string, unknown>,
+  enabled = true
+): PageSection {
+  return { id, type, enabled, variant, name, props };
+}
+
+function courseSeedSections(): PageSection[] {
+  return [
+    seed('sec-hero', 'hero', 'centered', 'Hero', {
+      eyebrow: 'The foundation course · a somatic practice',
+      headline: 'Teach your body it is safe to',
+      accent: 'soften.',
+      sub: 'Rootwork is where Of Blood and Bones begins — fourteen guided practices that bring a braced nervous system back to ground.',
+      felt: 'Not talked through. Felt through.',
+      button: 'Begin free · first practice',
+      quiet: 'See the descent',
+      trust: 'Practised by 2,400+ people finding their ground · cancel anytime',
+      bg: 'ember',
+    }),
+    seed('sec-introvideo', 'introVideo', 'cinema', 'Intro film', {
+      kicker: 'The film',
+      heading: 'Meet the work',
+      sub: 'A short introduction to how Rootwork actually feels — in the body, not the head.',
+      clip: 'Intro film',
+      duration: '1:24',
+    }),
+    seed('sec-ache', 'ache', 'centered', 'The ache', {
+      kicker: 'If this is you',
+      heading: 'A body that never quite feels safe.',
+      body: 'The tight chest. The shallow breath. The sense of bracing for something that never comes. You have tried to think your way out. The body does not speak in thoughts.',
+    }),
+    seed('sec-turn', 'turn', 'statement', 'The turn', {
+      kicker: 'What changes',
+      heading: 'Safety is a skill the body can learn.',
+      body: 'Not insight — practice. Small, repeatable practices that teach the nervous system it is allowed to settle. That is all Rootwork is: the ground beneath every other journey.',
+    }),
+    seed('sec-reel', 'reel', 'cinema', 'See it in motion', {
+      kicker: 'In motion',
+      heading: 'A practice, in real time',
+      sub: 'Watch a full practice unfold — unscripted, unhurried, exactly as you would meet it.',
+      clip: 'Practice preview',
+      duration: '0:42',
+    }),
+    seed('sec-map', 'map', 'descent', 'The descent map', {
+      eyebrow: 'The whole descent',
+      heading: "Everything you'll walk.",
+      sub: 'Five gated depths. Within each, a handful of practices to move among freely — settle one ground before the next opens.',
+      note: 'One door is already ajar. Included with membership · £12 a month',
+    }),
+    seed(
+      'sec-feel',
+      'feel',
+      'centered',
+      'Feels like',
+      {
+        kicker: 'What to expect',
+        heading: 'Quiet. Slow. Yours.',
+        body: 'No performance, no getting it right. Just you, a quiet room, and a voice that lets the body set the pace.',
+      },
+      false
+    ),
+    seed('sec-proof', 'proof', 'grid', 'Proof', {
+      eyebrow: 'From the circle',
+      heading: 'What the ground gives back.',
+      q1: "For the first time in years, I slept without bracing. I didn't know my body was allowed to do that.",
+      n1: 'Maya R.',
+      c1: '3 months in',
+      q2: 'I came for grief. Rootwork taught me how to stay in my body long enough to feel it.',
+      n2: 'Daniel K.',
+      c2: 'new member',
+      q3: "The only practice I've ever kept. Ten minutes that change the whole shape of the day.",
+      n3: 'Priya S.',
+      c3: '8 months in',
+      trust: '2,400 practising the ground',
+    }),
+    seed('sec-guide', 'guide', 'portrait', 'The guide', {
+      role: 'Your guide',
+      heading: 'Made by someone who had to find the ground first.',
+      body: "Of Blood and Bones grew out of one practitioner's own long descent — years of somatic training, trauma-informed practice, and the slow relearning of safety in the body. Rootwork is the map they wished they'd been handed at the start.",
+      quote: "I couldn't think my way home. I had to feel the way down.",
+      clip: 'Meet your guide',
+      duration: '2:04',
+    }),
+    seed('sec-faq', 'faq', 'accordion', 'FAQ', {
+      heading: 'The honest answers',
+      q1: 'Do I need any experience?',
+      a1: 'None at all. Rootwork assumes a body and a few quiet minutes — nothing else. Every practice is guided from the very first step.',
+      q2: 'What if I can only manage five minutes?',
+      a2: 'Then five minutes is the practice. Most are under twelve, and the shorter ones are built for exactly the days when that is all there is.',
+      q3: 'Can I keep the practices after?',
+      a3: "Anything you've begun stays yours to return to for as long as your membership is active — and you can pause or cancel any time.",
+    }),
+    seed('sec-invite', 'invite', 'descent', 'The invitation', {
+      eyebrow: 'Begin the descent',
+      heading: 'The ground',
+      accent: 'is waiting.',
+      sub: 'One key opens Rootwork and every journey that grows from it.',
+      price: 'Included with membership · £12 a month',
+      button: 'Begin with Rootwork',
+      risk: "Start free · cancel anytime · keep what you've begun",
+    }),
+  ];
+}
+
+/** Build the seeded course-page draft record (the mock "Rootwork" journey). */
 function makePageRecord(
   overrides: Partial<JourneyPageRecord> = {}
 ): JourneyPageRecord {
   return {
-    id: overrides.id ?? 'jny-stillness',
+    id: overrides.id ?? 'jny-rootwork',
     organizationId: overrides.organizationId ?? 'org-mock',
     publishedAt: overrides.publishedAt ?? null,
     pageType: 'course',
-    slug: overrides.slug ?? 'stillness',
-    title: overrides.title ?? 'Stillness — a 6-week descent',
+    slug: overrides.slug ?? 'rootwork',
+    title: overrides.title ?? 'Rootwork',
     status: overrides.status ?? 'draft',
     subjectType: 'course',
-    subjectId: overrides.subjectId ?? 'course-stillness',
-    brandOverrides: overrides.brandOverrides ?? null,
-    sections:
-      overrides.sections ??
-      createDefaultSections().map((s, i) =>
-        i === 0
-          ? {
-              ...s,
-              props: {
-                kicker: 'A 6-week descent',
-                headline: 'Come home to stillness',
-                subhead:
-                  'A guided journey back to the quiet underneath the noise.',
-                ctaLabel: 'Begin the journey',
-              },
-            }
-          : s
-      ),
+    subjectId: overrides.subjectId ?? 'course-rootwork',
+    brandOverrides: overrides.brandOverrides ?? {
+      primaryColor: '#d8a94e',
+      secondaryColor: '#8a2b22',
+      accentColor: '#c9857f',
+      backgroundColor: '#15110c',
+    },
+    seo: overrides.seo ?? {
+      title: 'Rootwork — the foundation course',
+      description:
+        'Somatic practices that teach the body the basics of safety and settling.',
+    },
+    offer: overrides.offer ?? {
+      tiersEnabled: true,
+      subscriptionEnabled: true,
+      subscriptionPriceCents: 600,
+      oneOffEnabled: false,
+      oneOffPriceCents: 4500,
+    },
+    sections: overrides.sections ?? courseSeedSections(),
   };
 }
 
@@ -166,12 +331,7 @@ export function listJourneysMock(input: {
 export function getJourneyForBuilderMock(input: {
   id: string;
 }): MockResource<JourneyPageRecord | null> {
-  return createMockResource(async () =>
-    makePageRecord({
-      id: input.id,
-      slug: input.id.replace(/^jny-/, '') || 'draft',
-    })
-  );
+  return createMockResource(async () => makePageRecord({ id: input.id }));
 }
 
 // ── Command mocks (the real ones are command()/form() — WP-5 BE) ──────────────
