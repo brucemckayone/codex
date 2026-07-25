@@ -68,6 +68,19 @@ export interface PageSection {
   readonly id: string;
   type: string;
   enabled: boolean;
+  /**
+   * Which composition of {@link PageSection.type} the renderer draws (SPEC §4.1 —
+   * "options per component"). OPTIONAL + widenable `string`: the renderer/catalog
+   * supplies a per-type default when unset, and an unknown variant falls back to
+   * the type's default composition (forward-compatible, like {@link PageSection.type}).
+   */
+  variant?: string;
+  /**
+   * Optional builder display label for the outline row + inspector title (e.g.
+   * "Hero", "Hero copy" for a duplicate). Unset → the type's catalogue label.
+   * Purely editorial; the public renderer ignores it.
+   */
+  name?: string;
   props: SectionProps;
 }
 
@@ -134,8 +147,44 @@ export interface PageBuilderState {
   /** → `courses.id` (validated in the service layer; §4). */
   subjectId: string | null;
   brandOverrides: BrandTokenOverrides | null;
+  /**
+   * Page-level SEO / share metadata (optional; unset → derive from `title`).
+   * Additive WP-5 editor field — the SEO builder mode writes it; the public page
+   * head reads it. Backs `landing_pages.seo` jsonb.
+   */
+  seo?: PageSeo;
+  /**
+   * The page's offer summary — which ways-in are presented (optional). Additive
+   * WP-5 editor field for the Pricing builder mode. The AUTHORITATIVE access rule
+   * still lives on the course/content policy (SPEC §6.1); this is the page's
+   * presentation of it. Backs `landing_pages.offer` jsonb.
+   */
+  offer?: PageOffer;
   /** Ordered, typed, toggleable (§4.1). */
   sections: PageSection[];
+}
+
+/** Page-level SEO / social-share metadata (D1 · WP-5 editor-additive). */
+export interface PageSeo {
+  /** Meta title; unset → the page `title`. */
+  title?: string;
+  description?: string;
+  /** → a media item id for the 1200×630 share image. */
+  shareImageId?: string | null;
+}
+
+/**
+ * The page's presentation of the journey's ways-in (D1 · WP-5 editor-additive).
+ * NOT the source of truth for access — that is the per-content
+ * {@link ContentAccessPolicy} + tiers (SPEC §6.1); this only drives what the
+ * sales page shows. Prices are pence, GBP.
+ */
+export interface PageOffer {
+  tiersEnabled?: boolean;
+  subscriptionEnabled?: boolean;
+  subscriptionPriceCents?: number | null;
+  oneOffEnabled?: boolean;
+  oneOffPriceCents?: number | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
