@@ -21,20 +21,37 @@
 import { error } from '@sveltejs/kit';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import type { PageServerLoad } from './$types';
-import { getCoursePage, resolveSellPreview } from './journey-data';
+import {
+  getCoursePage,
+  getCoursePagePreview,
+  resolveSellPreview,
+} from './journey-data';
 
 export const load: PageServerLoad = async ({
   params,
   parent,
   setHeaders,
   depends,
+  locals,
 }) => {
   // Ensure the org layout (auth + branding + org resolution) has resolved before
   // we commit cache headers — mirrors the org-landing precedent.
   await parent();
 
-  // AWAIT: the SEO-critical, first-paint envelope. Null → no published page.
-  const coursePage = await getCoursePage({ slug: params.journeySlug });
+  // AWAIT: the SEO-critical, first-paint envelope. Null → no PUBLISHED page.
+  let coursePage = await getCoursePage({ slug: params.journeySlug });
+
+  // Draft live-preview (Codex-isr02 P0b-2): when there's no published page but a
+  // user IS signed in, try the management-gated preview read so an org manager
+  // can preview an UNPUBLISHED draft in the builder iframe. The worker's
+  // requireOrgManagement is the sole authority — a non-manager (or anon, who
+  // never reaches this branch) gets null → 404 (fail-closed). This shell is
+  // minimal for a fresh draft; the builder streams live sections/brand over the
+  // page-preview bridge, which +page.svelte overlays on top.
+  if (!coursePage && locals.user) {
+    coursePage = await getCoursePagePreview({ slug: params.journeySlug });
+  }
+
   if (!coursePage) {
     throw error(404, 'This journey could not be found.');
   }

@@ -1241,6 +1241,22 @@ export function createServerApi(
         ),
 
       /**
+       * Studio LIVE-PREVIEW read (Codex-isr02 P0b-2) — the sell-page envelope
+       * for ANY status (drafts included), management-gated (owner/admin; the
+       * worker authorizes the client-supplied org against the session's
+       * membership). Powers the builder iframe rendering an unpublished draft;
+       * null for a foreign/missing/non-managed page so the public load
+       * fail-closes to 404.
+       */
+      coursePagePreview: (organizationId: string, slug: string) =>
+        request<JourneyCoursePage | null>(
+          'access',
+          `/api/journeys/studio/journeys/preview/by-slug?organizationId=${encodeURIComponent(
+            organizationId
+          )}&slug=${encodeURIComponent(slug)}`
+        ),
+
+      /**
        * Persist the builder's draft (sections/brand/title/slug/status). The param
        * is the editable subset the save touches; `brandOverrides` is optional to
        * stay assignable from SvelteKit's `command()`-inferred record (which infers

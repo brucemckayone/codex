@@ -22,6 +22,7 @@ import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
 import type { PracticeCompletionRecord } from '$lib/journeys/types';
+import { logger } from '$lib/observability';
 import type {
   EnrolledJourneyCard,
   JourneyCardView,
@@ -261,5 +262,38 @@ export const saveJourneyPage = command(
       error(400, 'Journeys can only be saved within an organization');
     }
     await ctx.api.access.saveJourneyPage(ctx.orgId, record);
+  }
+);
+
+/**
+ * Studio LIVE-PREVIEW read (Codex-isr02 P0b-2). Resolves the sell-page envelope
+ * for ANY status (drafts included) so the builder iframe can render an
+ * unpublished draft. Management-gated by the worker (`requireOrgManagement`); the
+ * org is resolved from the request HOST. Returns null off a non-org host, for a
+ * non-manager (the worker denies → caught here), or when no such page exists —
+ * so the public sell load's fallback fail-closes to a 404. Reuses the public
+ * `coursePageSchema` (`{ slug }`).
+ */
+export const getCoursePagePreview = query(
+  coursePageSchema,
+  async ({ slug }): Promise<JourneyCoursePage | null> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) return null;
+    try {
+      return await ctx.api.access.coursePagePreview(ctx.orgId, slug);
+    } catch (err) {
+      // Fail-closed: ANY failure → no preview → the caller 404s. A 403 is the
+      // EXPECTED non-manager denial (the worker's requireOrgManagement), so it
+      // stays silent; log only UNEXPECTED failures (5xx / timeout) so a transient
+      // worker outage degrading a real manager's preview to a 404 isn't invisible.
+      const status = (err as { status?: number } | null)?.status;
+      if (status !== 403) {
+        logger.error('journey draft preview read failed', {
+          error: err instanceof Error ? err.message : String(err),
+          status,
+        });
+      }
+      return null;
+    }
   }
 );

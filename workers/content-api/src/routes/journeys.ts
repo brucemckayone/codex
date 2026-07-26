@@ -397,6 +397,40 @@ app.post(
 );
 
 /**
+ * GET /api/journeys/studio/journeys/preview/by-slug?organizationId=&slug=
+ *
+ * The STUDIO live-preview read (Codex-isr02 P0b-2): the same `JourneyCoursePage`
+ * envelope as the public sell page but for ANY status, so the builder iframe can
+ * render an UNPUBLISHED draft. `requireOrgManagement` AUTHORIZES the
+ * client-supplied `organizationId` against the session user's owner/admin
+ * membership before using it as `ctx.organizationId` (the handler forwards that
+ * verified value, never the raw client one); a non-manager / foreign caller is
+ * denied here, so the public sell load's preview fallback fail-closes to 404.
+ * The 4-segment path cannot collide with `:pageId` (3 segments), and is
+ * registered before it regardless.
+ * @returns {JourneyCoursePage | null}
+ */
+app.get(
+  '/studio/journeys/preview/by-slug',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      query: courseBySlugQuerySchema,
+    },
+    handler: async (ctx): Promise<JourneyCoursePage | null> => {
+      return ctx.services.courseJourney.getCoursePagePreview(
+        ctx.organizationId,
+        ctx.input.query.slug
+      );
+    },
+  })
+);
+
+/**
  * GET /api/journeys/studio/journeys/:pageId?organizationId=
  * Load a page draft into the builder (any status; org-scoped → null if foreign).
  * @returns {JourneyPageRecord | null}

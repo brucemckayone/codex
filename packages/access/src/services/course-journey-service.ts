@@ -253,6 +253,120 @@ export class CourseJourneyService extends BaseService {
   }
 
   /**
+   * Resolve a course sales page for the STUDIO LIVE-PREVIEW iframe (Codex-isr02
+   * P0b-2). Structurally identical to {@link getCoursePage} but ANY status
+   * (draft / published / archived), so a creator can preview an UNPUBLISHED
+   * draft in the builder before it goes live. This is NEVER a public read: the
+   * content-api route gates it with `requireOrgManagement` (owner/admin of THIS
+   * org), and this method still scopes every query to `organizationId` as
+   * defence-in-depth. {@link getCoursePage} remains the only unauthenticated
+   * by-slug read and stays published-only.
+   *
+   * The initial payload can be minimal for a brand-new draft (empty
+   * sections/stages) — the builder streams live sections + brand overrides over
+   * the page-preview bridge, which the public sell page overlays on top.
+   */
+  async getCoursePagePreview(
+    organizationId: string,
+    slug: string
+  ): Promise<JourneyCoursePage | null> {
+    try {
+      // The landing page by org-scoped slug — ANY status (draft included).
+      const [pageRow] = await this.db
+        .select({
+          id: landingPages.id,
+          organizationId: landingPages.organizationId,
+          publishedAt: landingPages.publishedAt,
+          pageType: landingPages.pageType,
+          slug: landingPages.slug,
+          title: landingPages.title,
+          status: landingPages.status,
+          subjectType: landingPages.subjectType,
+          subjectId: landingPages.subjectId,
+          brandOverrides: landingPages.brandOverrides,
+          sections: landingPages.sections,
+        })
+        .from(landingPages)
+        .where(
+          and(
+            eq(landingPages.organizationId, organizationId),
+            eq(landingPages.slug, slug),
+            isNull(landingPages.deletedAt)
+          )
+        )
+        .limit(1);
+
+      if (!pageRow) return null;
+      if (pageRow.subjectType !== 'course' || !pageRow.subjectId) return null;
+
+      // The subject course — ANY status, org-scoped (guards a cross-org subjectId).
+      const [courseRow] = await this.db
+        .select({
+          id: courses.id,
+          slug: courses.slug,
+          title: courses.title,
+          kicker: courses.kicker,
+          lede: courses.lede,
+          status: courses.status,
+          priceCents: courses.priceCents,
+        })
+        .from(courses)
+        .where(
+          and(
+            eq(courses.id, pageRow.subjectId),
+            eq(courses.organizationId, organizationId),
+            isNull(courses.deletedAt)
+          )
+        )
+        .limit(1);
+
+      if (!courseRow) return null;
+
+      const [stages, testimonials] = await Promise.all([
+        this.loadPublicStages(courseRow.id),
+        this.loadTestimonials(courseRow.id),
+      ]);
+
+      const practiceCount = stages.reduce(
+        (total, stage) => total + stage.practices.length,
+        0
+      );
+
+      return {
+        page: {
+          id: pageRow.id,
+          organizationId: pageRow.organizationId,
+          publishedAt: pageRow.publishedAt?.toISOString() ?? null,
+          pageType: pageRow.pageType,
+          slug: pageRow.slug,
+          title: pageRow.title,
+          status: pageRow.status as PageStatus,
+          subjectType: pageRow.subjectType,
+          subjectId: pageRow.subjectId,
+          brandOverrides:
+            (pageRow.brandOverrides as BrandTokenOverrides) ?? null,
+          sections: (pageRow.sections as PageSection[]) ?? [],
+        },
+        course: {
+          id: courseRow.id,
+          slug: courseRow.slug,
+          title: courseRow.title,
+          kicker: courseRow.kicker,
+          lede: courseRow.lede,
+          status: courseRow.status as PageStatus,
+          priceCents: courseRow.priceCents,
+          stageCount: stages.length,
+          practiceCount,
+        },
+        stages,
+        testimonials,
+      };
+    } catch (error) {
+      this.handleError(error, 'getCoursePagePreview');
+    }
+  }
+
+  /**
    * Resolve the PUBLIC 30s sell-preview clips for a course's intro-film +
    * practice reel (SPEC §10) — the streamed, off-critical-path payload of the
    * sales page. PUBLIC: NO auth, NO `canView` (HARDENING §E). The clips reuse the
