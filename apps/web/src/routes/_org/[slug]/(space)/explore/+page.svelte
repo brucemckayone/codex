@@ -516,7 +516,7 @@
           Each journey stands on its own — begin wherever you feel the pull.
         </p>
       {/if}
-      <div class="explore__journeys-grid">
+      <div class="content-grid">
         {#each filteredJourneys as journey, i (journey.id)}
           <JourneyRailCard {journey} href={journeyHref(journey)} index={i} />
         {/each}
@@ -647,53 +647,16 @@
 <BackToTop />
 
 <style>
-  /* ── Layout ── */
+  /* ── Layout ──
+     Full-bleed browsing surface: fills the org-main content area (no centered
+     max-width column). The page inherits the semantic theme tokens, so it
+     respects the org's light OR dark theme — no per-page palette override. */
   .explore {
-    /* ── Candlelit dark palette (course-journeys surface) ──
-       Re-point the semantic tokens for this page's subtree, deriving a warm
-       near-black from the org brand hue (keeps the org's temperature; forces a
-       fixed dark lightness + a fraction of the brand chroma). Shared components
-       (ContentCard, Pagination, drawer trigger, EmptyState) read only these
-       semantic names, so the whole surface re-themes without touching them.
-       `--color-brand-primary` is deliberately NOT overridden — accents/CTAs stay
-       the org's true brand colour on the dark ground. */
-    --color-background: oklch(from var(--color-brand-primary) 0.15 calc(c * 0.28) h);
-    --color-surface: oklch(from var(--color-brand-primary) 0.2 calc(c * 0.24) h);
-    --color-surface-secondary: oklch(from var(--color-brand-primary) 0.25 calc(c * 0.24) h);
-    --color-surface-tertiary: oklch(from var(--color-brand-primary) 0.3 calc(c * 0.22) h);
-    --color-surface-elevated: oklch(from var(--color-brand-primary) 0.24 calc(c * 0.26) h);
-    --color-surface-card: oklch(from var(--color-brand-primary) 0.22 calc(c * 0.24) h);
-    --color-text: oklch(from var(--color-brand-primary) 0.95 calc(c * 0.04) h);
-    --color-text-primary: oklch(from var(--color-brand-primary) 0.95 calc(c * 0.04) h);
-    --color-text-secondary: oklch(from var(--color-brand-primary) 0.8 calc(c * 0.045) h);
-    --color-text-tertiary: oklch(from var(--color-brand-primary) 0.68 calc(c * 0.04) h);
-    --color-text-muted: oklch(from var(--color-brand-primary) 0.6 calc(c * 0.03) h);
-    --color-heading: oklch(from var(--color-brand-primary) 0.97 calc(c * 0.05) h);
-    --color-border: oklch(from var(--color-brand-primary) 0.32 calc(c * 0.14) h);
-    --color-border-strong: oklch(from var(--color-brand-primary) 0.42 calc(c * 0.18) h);
-    --color-border-subtle: oklch(from var(--color-brand-primary) 0.26 calc(c * 0.1) h);
-    --color-border-hover: oklch(from var(--color-brand-primary) 0.5 calc(c * 0.2) h);
-    --color-skeleton-shimmer: hsl(0 0% 100% / 0.08);
-    color-scheme: dark;
-
     width: 100%;
-    max-width: var(--container-max, 1200px);
-    margin: 0 auto;
-    padding: var(--space-8) var(--space-6) var(--space-16);
+    padding: var(--space-8) var(--space-8) var(--space-16);
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
-    color: var(--color-text);
-    border-radius: var(--radius-xl, var(--radius-lg));
-    /* Warm ember glow from the top edge — the "candlelit" cue — over the
-       brand-derived near-black ground. */
-    background:
-      radial-gradient(
-        120% 70% at 50% 0%,
-        oklch(from var(--color-brand-primary) 0.28 calc(c * 0.42) h),
-        transparent 62%
-      ),
-      var(--color-background);
   }
 
   /* ── Scope chips (All / Journeys) ── */
@@ -758,7 +721,9 @@
     font-family: var(--font-heading);
     font-size: var(--text-2xl);
     font-weight: var(--font-medium);
-    color: var(--color-heading);
+    /* Match the page h1 (.explore__title) — consistent heading colour in the
+       org's theme, whatever it is. */
+    color: var(--color-text-primary);
     line-height: var(--leading-tight);
   }
 
@@ -774,11 +739,8 @@
     max-width: 60ch;
   }
 
-  .explore__journeys-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
-    gap: var(--space-5);
-  }
+  /* The journeys rail reuses the shared `.content-grid` utility so journey
+     cards share the exact column rhythm of the content cards below. */
 
   /* ── Browse-everything section heading (only when journeys present) ── */
   .explore__browse-head {
@@ -793,7 +755,7 @@
     font-family: var(--font-heading);
     font-size: var(--text-2xl);
     font-weight: var(--font-medium);
-    color: var(--color-heading);
+    color: var(--color-text-primary);
     line-height: var(--leading-tight);
   }
 
