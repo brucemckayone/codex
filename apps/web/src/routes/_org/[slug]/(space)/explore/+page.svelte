@@ -15,8 +15,6 @@
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { deriveContentAccessKind } from '$lib/utils/content-access';
-  import Carousel from '$lib/components/carousel/Carousel.svelte';
-  import JourneyCard from '$lib/components/journeys/JourneyCard.svelte';
   import { CreatorExploreBanner } from '$lib/components/ui/CreatorCard';
   import { Pagination } from '$lib/components/ui/Pagination';
   import { getContentCollection, hydrateCollection, useLiveQuery } from '$lib/collections';
@@ -25,6 +23,8 @@
   import { buildContentUrl, buildJourneyUrl } from '$lib/utils/subdomain';
   import JourneyRailCard from '$lib/components/explore/JourneyRailCard.svelte';
   import type { CourseCardSummary } from '$lib/journeys/types';
+  import type { ContentWithRelations } from '$lib/types';
+  import { getDisplayThumbnail } from '$lib/utils/thumbnail';
   import { SearchXIcon, FileIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { ViewToggle } from '$lib/components/ui/ViewToggle';
@@ -42,6 +42,16 @@
   import ExploreFilterDrawer from '$lib/components/explore/ExploreFilterDrawer.svelte';
   import type { PageData } from './$types';
 
+  // The public content collection carries a transcoded `mediaItem.thumbnailUrl`
+  // at runtime; the base `MediaItem` type omits it, so widen it locally for the
+  // grid's display-thumbnail lookup (matches getDisplayThumbnail's contract).
+  type ExploreItem = ContentWithRelations & {
+    mediaItem?:
+      | (NonNullable<ContentWithRelations['mediaItem']> & {
+          thumbnailUrl?: string | null;
+        })
+      | null;
+  };
 
   const { data }: { data: PageData } = $props();
 
@@ -114,7 +124,7 @@
     (q) => q.from({ item: orgContentCollection }),
     [() => data.org?.id],
     // svelte-ignore state_referenced_locally — ssrData is only used for initial SSR render
-    { ssrData: data.content?.items ?? [] }
+    { ssrData: (data.content?.items ?? []) as ExploreItem[] }
   );
 
   const orgName = $derived(data.org?.name ?? 'Organization');
@@ -132,8 +142,8 @@
   // The org-equality filter is defense in depth against cache poisoning
   // (mirrors filterLibraryItemsByOrg, Codex-q3zuf).
   const items = $derived.by(() => {
-    const liveItems = contentQuery.data ?? [];
-    const ssrItems = data.content?.items ?? [];
+    const liveItems = (contentQuery.data ?? []) as ExploreItem[];
+    const ssrItems = (data.content?.items ?? []) as ExploreItem[];
     const source = liveItems.length === 0 && ssrItems.length > 0
       ? ssrItems
       : liveItems;
@@ -455,33 +465,6 @@
     {/if}
   </header>
 
-  <!-- Guided portals rail (Codex-oi2w4) — shown only on the default browse view
-       (the server omits it under any active filter/search). Journeys read
-       differently from content (SPEC §8.5): a distinct discovery affordance
-       above the content grid. -->
-  {#if data.journeys.length > 0}
-    <section class="explore__journeys">
-      <Carousel
-        title="Guided portals"
-        items={data.journeys}
-        itemMinWidth="20rem"
-        gap="var(--space-4)"
-        ariaLabel="Guided portals"
-      >
-        {#snippet renderItem(journey)}
-          <JourneyCard
-            {journey}
-            href={buildJourneyUrl(
-              page.url,
-              { slug: journey.slug, id: journey.pageId },
-              { surface: 'sales' }
-            )}
-          />
-        {/snippet}
-      </Carousel>
-    </section>
-  {/if}
-
   <!-- Sticky command bar: search + filter trigger + view toggle. Type,
        Featured, and Sort live inside the drawer. -->
   <StickyToolbar>
@@ -606,7 +589,7 @@
           chrome="transparent"
           id={item.id}
           title={item.title}
-          thumbnail={item.mediaItem?.thumbnailUrl ?? item.thumbnailUrl ?? null}
+          thumbnail={getDisplayThumbnail(item)}
           description={item.description}
           contentType={(item.contentType === 'written' ? 'article' : item.contentType) as 'video' | 'audio' | 'article'}
           duration={item.mediaItem?.durationSeconds ?? null}

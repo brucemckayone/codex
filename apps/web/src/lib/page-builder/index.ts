@@ -24,7 +24,9 @@ export type {
   EntitlementResolver,
   EntitlementSource,
   PageBuilderState,
+  PageOffer,
   PageSection,
+  PageSeo,
   PageStatus,
   ResourceType,
   SectionProps,
@@ -67,14 +69,18 @@ export {
   type PagePreviewMessage,
   type PagePreviewSender,
 } from './preview-protocol';
-// Section model — the catalogue + ordering + search + default-template factory.
+// Section model — the catalogue + ordering + search + variants + factories.
 export {
   createDefaultSections,
+  createSection,
   defaultSectionOrder,
   findSectionDefinition,
   firstSectionMatch,
   listSectionDefinitions,
+  resolveVariant,
   SECTION_CATALOG,
   type SectionDefinition,
+  type SectionVariant,
   sectionMatchesQuery,
+  variantsForType,
 } from './section-catalog';

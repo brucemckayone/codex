@@ -2,11 +2,16 @@
  * Per-section editable-field model (Codex-2pryk.3.3 · WP-5).
  *
  * The pragmatic analog of `brand-editor/levels/*`: it declares which copy fields
- * the rail's config editor renders for each {@link CourseSectionType}. The exact
- * per-type prop schema is deliberately NOT frozen (SPEC §4.1 / `journey-queries`
- * comment: the WP-3 renderer + WP-5 editor co-own it), so this is EXTENSIBLE —
- * add fields here and the public renderer reads the same `PageSection.props`
- * keys. Unknown/absent types fall back to a generic body field.
+ * the rail's config editor renders for each {@link CourseSectionType}, and which
+ * `PageSection.props` key each reads/writes. Ported from the finished prototype's
+ * inspector SCHEMA (`docs/design/course-journeys/prototype/builder.html`) so the
+ * editor fields, the public renderer props, and the catalogue's seed copy all
+ * speak ONE prop vocabulary.
+ *
+ * The app's more granular semantic types share field sets where the prototype
+ * shared a renderer: `ache`/`turn`/`feel` reuse {@link PROSE_FIELDS}; `introVideo`/
+ * `reel` reuse {@link VIDEO_FIELDS}. Keys are additive — extend a set without
+ * breaking stored drafts (an unknown key is simply ignored on render).
  *
  * Pure + framework-free — no component imports — so it stays cheap to unit-test
  * and cheap to bundle in the editor chunk.
@@ -14,7 +19,12 @@
 import type { CourseSectionType } from '@codex/shared-types';
 
 /** The control a field renders as in the config editor. */
-export type SectionFieldControl = 'text' | 'textarea';
+export type SectionFieldControl = 'text' | 'textarea' | 'select' | 'media';
+
+export interface SectionFieldOption {
+  readonly value: string;
+  readonly label: string;
+}
 
 export interface SectionFieldDef {
   /** The `PageSection.props` key this field reads/writes. */
@@ -22,6 +32,10 @@ export interface SectionFieldDef {
   readonly label: string;
   readonly control: SectionFieldControl;
   readonly placeholder?: string;
+  /** Helper text shown under the control (optional/where-it-shows guidance). */
+  readonly hint?: string;
+  /** Choices for a `select` control. */
+  readonly options?: readonly SectionFieldOption[];
 }
 
 const GENERIC_FIELDS: readonly SectionFieldDef[] = [
@@ -33,120 +47,149 @@ const GENERIC_FIELDS: readonly SectionFieldDef[] = [
   },
 ];
 
+/** Shared "prose" field set — the prototype's one text renderer (ache/turn/feel). */
+const PROSE_FIELDS: readonly SectionFieldDef[] = [
+  { key: 'kicker', label: 'Kicker', control: 'text' },
+  { key: 'heading', label: 'Heading', control: 'textarea' },
+  { key: 'body', label: 'Body', control: 'textarea' },
+];
+
+/** Shared "video" field set — the prototype's cinematic frame (introVideo/reel). */
+const VIDEO_FIELDS: readonly SectionFieldDef[] = [
+  { key: 'kicker', label: 'Kicker', control: 'text' },
+  { key: 'heading', label: 'Heading', control: 'text' },
+  { key: 'sub', label: 'Sub-line', control: 'textarea' },
+  { key: 'clip', label: 'Video', control: 'media' },
+  { key: 'duration', label: 'Duration', control: 'text' },
+];
+
 /**
- * Field sets per course-section type, grounded in the prototype's section copy
- * (`docs/design/course-journeys/prototype/`). Keys are additive: extend a set
- * without breaking stored drafts (an unknown key is simply ignored on render).
+ * Field sets per course-section type, grounded in the prototype's inspector
+ * schema. The renderer reads the same `PageSection.props` keys.
  */
 export const SECTION_FIELDS: Readonly<
   Record<CourseSectionType, readonly SectionFieldDef[]>
 > = {
   hero: [
+    { key: 'eyebrow', label: 'Eyebrow', control: 'text' },
+    { key: 'headline', label: 'Headline', control: 'textarea' },
     {
-      key: 'kicker',
-      label: 'Kicker',
+      key: 'accent',
+      label: 'Accent ending',
       control: 'text',
-      placeholder: 'A 6-week descent',
+      hint: 'Set in italic accent at the end of the headline. Leave blank for none.',
     },
+    { key: 'sub', label: 'Sub-line', control: 'textarea' },
     {
-      key: 'headline',
-      label: 'Headline',
+      key: 'felt',
+      label: 'Emphasis line',
       control: 'text',
-      placeholder: 'Come home to stillness',
+      hint: 'A short line under the sub-line. Optional.',
     },
-    { key: 'subhead', label: 'Subhead', control: 'textarea' },
+    { key: 'button', label: 'Primary button', control: 'text' },
     {
-      key: 'ctaLabel',
-      label: 'Primary CTA label',
+      key: 'quiet',
+      label: 'Quiet link',
       control: 'text',
-      placeholder: 'Begin the journey',
+      hint: 'A secondary link beside the button. Optional.',
     },
-  ],
-  introVideo: [
-    { key: 'headline', label: 'Headline', control: 'text' },
     {
-      key: 'mediaId',
-      label: 'Media id',
+      key: 'trust',
+      label: 'Trust line',
       control: 'text',
-      placeholder: 'Sell/intro video id',
+      hint: 'Small reassurance under the buttons. Optional.',
     },
-    { key: 'caption', label: 'Caption', control: 'textarea' },
-  ],
-  ache: [
-    { key: 'headline', label: 'Headline', control: 'text' },
     {
-      key: 'body',
-      label: 'Body',
-      control: 'textarea',
-      placeholder: 'Name the ache…',
+      key: 'bg',
+      label: 'Background',
+      control: 'select',
+      hint: 'Uses the org brand shader unless overridden in Brand & theme.',
+      options: [
+        { value: 'ember', label: 'Glow · warm' },
+        { value: 'blood', label: 'Glow · deep' },
+        { value: 'still', label: 'Still · quiet' },
+      ],
     },
   ],
-  turn: [
-    { key: 'headline', label: 'Headline', control: 'text' },
-    {
-      key: 'body',
-      label: 'Body',
-      control: 'textarea',
-      placeholder: 'The shift on offer…',
-    },
-  ],
-  reel: [
-    { key: 'headline', label: 'Headline', control: 'text' },
-    { key: 'caption', label: 'Caption', control: 'textarea' },
-  ],
+  introVideo: VIDEO_FIELDS,
+  ache: PROSE_FIELDS,
+  turn: PROSE_FIELDS,
+  reel: VIDEO_FIELDS,
   map: [
+    { key: 'eyebrow', label: 'Eyebrow', control: 'text' },
+    { key: 'heading', label: 'Heading', control: 'textarea' },
+    { key: 'sub', label: 'Sub-line', control: 'textarea' },
     {
-      key: 'headline',
-      label: 'Headline',
-      control: 'text',
-      placeholder: 'The descent',
-    },
-    { key: 'intro', label: 'Intro', control: 'textarea' },
-  ],
-  feel: [
-    { key: 'headline', label: 'Headline', control: 'text' },
-    { key: 'body', label: 'Body', control: 'textarea' },
-    {
-      key: 'freeTasteLabel',
-      label: 'Free-taste label',
-      control: 'text',
-      placeholder: 'Take a free breath',
+      key: 'note',
+      label: 'Closing note',
+      control: 'textarea',
+      hint: 'Shown under the map. The stages & practices come from the course editor.',
     },
   ],
+  feel: PROSE_FIELDS,
   proof: [
+    { key: 'eyebrow', label: 'Eyebrow', control: 'text' },
+    { key: 'heading', label: 'Heading', control: 'text' },
+    { key: 'q1', label: 'Quote 1', control: 'textarea' },
+    { key: 'n1', label: 'Name 1', control: 'text' },
+    { key: 'c1', label: 'Context 1', control: 'text' },
+    { key: 'q2', label: 'Quote 2', control: 'textarea' },
+    { key: 'n2', label: 'Name 2', control: 'text' },
+    { key: 'c2', label: 'Context 2', control: 'text' },
+    { key: 'q3', label: 'Quote 3', control: 'textarea' },
+    { key: 'n3', label: 'Name 3', control: 'text' },
+    { key: 'c3', label: 'Context 3', control: 'text' },
     {
-      key: 'headline',
-      label: 'Headline',
+      key: 'trust',
+      label: 'Trust line',
       control: 'text',
-      placeholder: 'What members say',
+      hint: 'Aggregate reassurance under the quotes. Optional.',
     },
   ],
   guide: [
-    { key: 'name', label: 'Guide name', control: 'text' },
-    { key: 'bio', label: 'Bio', control: 'textarea' },
-    { key: 'mediaId', label: 'Guide video id', control: 'text' },
+    { key: 'role', label: 'Role / eyebrow', control: 'text' },
+    { key: 'heading', label: 'Heading', control: 'textarea' },
+    { key: 'body', label: 'Bio', control: 'textarea' },
+    {
+      key: 'quote',
+      label: 'Pull-quote',
+      control: 'textarea',
+      hint: 'Big italic quote. Optional.',
+    },
+    { key: 'clip', label: 'Video', control: 'media' },
+    { key: 'duration', label: 'Duration', control: 'text' },
   ],
   faq: [
-    {
-      key: 'headline',
-      label: 'Headline',
-      control: 'text',
-      placeholder: 'Questions',
-    },
+    { key: 'heading', label: 'Heading', control: 'text' },
+    { key: 'q1', label: 'Question 1', control: 'text' },
+    { key: 'a1', label: 'Answer 1', control: 'textarea' },
+    { key: 'q2', label: 'Question 2', control: 'text' },
+    { key: 'a2', label: 'Answer 2', control: 'textarea' },
+    { key: 'q3', label: 'Question 3', control: 'text' },
+    { key: 'a3', label: 'Answer 3', control: 'textarea' },
   ],
   invite: [
+    { key: 'eyebrow', label: 'Eyebrow', control: 'text' },
+    { key: 'heading', label: 'Heading', control: 'textarea' },
     {
-      key: 'headline',
-      label: 'Headline',
+      key: 'accent',
+      label: 'Accent line',
       control: 'text',
-      placeholder: 'Join the journey',
+      hint: 'A second line, italic accent. Optional.',
     },
-    { key: 'body', label: 'Body', control: 'textarea' },
+    { key: 'sub', label: 'Sub-line', control: 'textarea' },
     {
-      key: 'ctaLabel',
-      label: 'CTA label',
+      key: 'price',
+      label: 'Price line',
       control: 'text',
-      placeholder: 'Enrol now',
+      hint: 'Wrap the amount in the offer. e.g. Included with membership · £12 a month',
+    },
+    { key: 'button', label: 'Button', control: 'text' },
+    {
+      key: 'risk',
+      label: 'Risk-reversal',
+      control: 'text',
+      hint: 'Reassurance under the button. Optional.',
     },
   ],
 };

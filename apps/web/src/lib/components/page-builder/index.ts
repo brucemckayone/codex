@@ -11,10 +11,8 @@
  */
 
 export { default as AddSectionPicker } from './AddSectionPicker.svelte';
-// Canvas (stable same-origin iframe of the real journey page + preview bridge seam).
+// Canvas (INLINE WYSIWYG render of the section components + block toolbar).
 export { default as JourneyBuilderCanvas } from './JourneyBuilderCanvas.svelte';
-// Rail (section list + add-picker + per-section config editor).
-export { default as JourneyBuilderRail } from './JourneyBuilderRail.svelte';
 export { default as JourneyCanvasToolbar } from './JourneyCanvasToolbar.svelte';
 export { default as JourneyPreviewFrame } from './JourneyPreviewFrame.svelte';
 export {
@@ -26,6 +24,10 @@ export {
   type JourneyPreviewThemeMode,
   resolveJourneyPreviewPath,
 } from './journey-preview-canvas';
+// Page-mode settings panels (Pricing / Brand / SEO).
+export { default as PageBrandPanel } from './PageBrandPanel.svelte';
+export { default as PagePricingPanel } from './PagePricingPanel.svelte';
+export { default as PageSeoPanel } from './PageSeoPanel.svelte';
 export {
   createJourneyPreviewWiring,
   type JourneyPreviewWiring,
@@ -37,4 +39,6 @@ export {
   SECTION_FIELDS,
   type SectionFieldControl,
   type SectionFieldDef,
+  type SectionFieldOption,
 } from './section-fields';
+export { default as VariantPicker } from './VariantPicker.svelte';
