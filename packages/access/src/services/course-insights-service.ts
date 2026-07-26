@@ -45,6 +45,7 @@ import {
   courseEnrollments,
   courseSubscriptions,
   courses,
+  landingPages,
   payouts,
   purchases,
 } from '@codex/database/schema';
@@ -177,6 +178,115 @@ export class CourseInsightsService extends BaseService {
       };
     } catch (error) {
       this.handleError(error, 'getInsights');
+    }
+  }
+
+  /**
+   * BATCH course revenue for the studio index badge — gross revenue over
+   * `period` (default 30d) for every course-type journey the org owns, keyed by
+   * **landing-page id** (the id each index row already carries). This is the
+   * authoritative figure `listJourneysForOrg` deliberately returns as `null`
+   * (see its docstring): the per-row money join lives HERE, computed with the
+   * SAME definition as {@link aggregateFinancials} (one-off course purchases +
+   * course-subscription payouts), so the badge can never drift from the
+   * per-journey Insights read. Org-scoped by construction — the course ids come
+   * only from the org's own non-deleted `landing_pages`, so no foreign revenue
+   * can be summed. Only pages with `> 0` revenue are returned (the badge hides
+   * falsy values, matching the prototype's `it.revenue ? … : ''`).
+   */
+  async getOrgJourneyRevenue(
+    organizationId: string,
+    period: InsightsPeriod = '30d'
+  ): Promise<Record<string, number>> {
+    try {
+      // Org's non-deleted course-type journeys → (landingPageId, courseId). The
+      // inner join to a non-deleted, same-org course is the cross-org guard.
+      const pages = await this.db
+        .select({ landingPageId: landingPages.id, courseId: courses.id })
+        .from(landingPages)
+        .innerJoin(
+          courses,
+          and(
+            eq(courses.id, landingPages.subjectId),
+            eq(courses.organizationId, landingPages.organizationId),
+            isNull(courses.deletedAt)
+          )
+        )
+        .where(
+          and(
+            eq(landingPages.organizationId, organizationId),
+            eq(landingPages.subjectType, 'course'),
+            isNull(landingPages.deletedAt)
+          )
+        );
+
+      if (pages.length === 0) return {};
+
+      const courseIds = pages.map((p) => p.courseId);
+      const window = resolveInsightsWindow(period, new Date());
+
+      // Two GROUPED aggregates (no per-row N+1), each mirroring one arm of
+      // `aggregateFinancials`: completed one-off purchases + course-subscription
+      // payout ledger rows, summed within `[start, end)`, grouped by course.
+      const [purchaseRows, payoutRows] = await Promise.all([
+        this.db
+          .select({
+            courseId: purchases.courseId,
+            gross: sql<number>`coalesce(sum(${purchases.amountPaidCents}), 0)`,
+          })
+          .from(purchases)
+          .where(
+            and(
+              inArray(purchases.courseId, courseIds),
+              eq(purchases.status, PURCHASE_STATUS_COMPLETED),
+              gte(purchases.createdAt, window.start),
+              lt(purchases.createdAt, window.end)
+            )
+          )
+          .groupBy(purchases.courseId),
+        this.db
+          .select({
+            courseId: courseSubscriptions.courseId,
+            gross: sql<number>`coalesce(sum(${payouts.amountCents}), 0)`,
+          })
+          .from(payouts)
+          .innerJoin(
+            courseSubscriptions,
+            eq(payouts.courseSubscriptionId, courseSubscriptions.id)
+          )
+          .where(
+            and(
+              inArray(courseSubscriptions.courseId, courseIds),
+              inArray(payouts.status, [...PAYOUT_REVENUE_STATUSES]),
+              gte(payouts.createdAt, window.start),
+              lt(payouts.createdAt, window.end)
+            )
+          )
+          .groupBy(courseSubscriptions.courseId),
+      ]);
+
+      const byCourse = new Map<string, number>();
+      for (const r of purchaseRows) {
+        if (r.courseId) byCourse.set(r.courseId, Number(r.gross ?? 0));
+      }
+      for (const r of payoutRows) {
+        if (r.courseId) {
+          byCourse.set(
+            r.courseId,
+            (byCourse.get(r.courseId) ?? 0) + Number(r.gross ?? 0)
+          );
+        }
+      }
+
+      // Re-key by landing-page id; omit zero (the badge hides falsy values).
+      const out: Record<string, number> = {};
+      for (const p of pages) {
+        const cents = byCourse.get(p.courseId) ?? 0;
+        if (cents > 0) out[p.landingPageId] = cents;
+      }
+      return out;
+    } catch (error) {
+      this.handleError(error, 'getOrgJourneyRevenue');
     }
   }
 

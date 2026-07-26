@@ -33,9 +33,9 @@
     type JourneyPreviewFrameLoad,
   } from '$lib/components/page-builder';
   import {
-    getJourneyForBuilderMock,
-    saveJourneyPageMock,
-  } from '$lib/components/page-builder/journey-queries.mock.svelte';
+    getJourneyForBuilder,
+    saveJourneyPage,
+  } from '$lib/remote/journeys.remote';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import { createPagePreviewSender } from '$lib/page-builder/page-preview-bridge';
   import { toast } from '$lib/components/ui/Toast/toast-store';
@@ -46,7 +46,7 @@
 
   // Load the page draft — the reactive query the conductor swaps for the real
   // remote after WP-2 (identical `.current` access).
-  const draftQuery = $derived(pageId ? getJourneyForBuilderMock({ id: pageId }) : null);
+  const draftQuery = $derived(pageId ? getJourneyForBuilder({ id: pageId }) : null);
 
   // ── Workspace view (mirrors studio/brand) ─────────────────────────────────
   // Give the preview more room. Page-owned because the toggles live in the
@@ -124,7 +124,7 @@
     if (!payload || !record) return;
     saving = true;
     try {
-      await saveJourneyPageMock({
+      await saveJourneyPage({
         ...record,
         ...payload,
       });

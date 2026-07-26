@@ -10,6 +10,7 @@
 import { error } from '@sveltejs/kit';
 import { renderContentBody } from '$lib/editor/render';
 import { getPublicContent } from '$lib/remote/content.remote';
+import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import {
   DENIED_ACCESS_RESULT,
@@ -79,6 +80,16 @@ export const load: PageServerLoad = async ({
     .then((r) => r?.items ?? [])
     .catch(() => [] as Awaited<ReturnType<typeof getPublicContent>>['items']);
 
+  // Journey cross-link (Codex-2pryk.3.10, F19/F20): the PUBLISHED course(s) this
+  // item belongs to. Streamed — it's below-the-fold context (breadcrumb signpost
+  // + "part of a journey" + free upsell), not first-paint-critical. PUBLIC read
+  // (no auth), so it runs for visitors and owners alike. `.catch(() => null)`
+  // keeps an unhandled rejection from crashing the load; the FE omits the
+  // cross-link gracefully on null / empty.
+  const parentCoursesPromise = createServerApi(platform, cookies)
+    .access.contentCourses(content.id)
+    .catch(() => null);
+
   // Only run the subscription-context fetch when content is tier-gated
   // (includedInTierId set — the WP-1 successor of accessType 'subscribers').
   // Non-gated content (paid / free / followers / team) never consumes the
@@ -111,6 +122,7 @@ export const load: PageServerLoad = async ({
       accessAndProgress: null,
       subscriptionContext,
       relatedContent: relatedPromise,
+      parentCourses: parentCoursesPromise,
     };
   }
 
@@ -132,6 +144,7 @@ export const load: PageServerLoad = async ({
       ).catch(() => ({ ...DENIED_ACCESS_RESULT, hasAccess: isPublic })),
       subscriptionContext,
       relatedContent: relatedPromise,
+      parentCourses: parentCoursesPromise,
     };
   }
 
@@ -161,6 +174,7 @@ export const load: PageServerLoad = async ({
     accessAndProgress: Promise.resolve(accessResult),
     subscriptionContext,
     relatedContent: relatedPromise,
+    parentCourses: parentCoursesPromise,
   };
 };
 

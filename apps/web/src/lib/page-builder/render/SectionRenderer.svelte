@@ -26,7 +26,10 @@
 </script>
 
 {#each renderable as { section, Component } (section.id)}
-  <section class="jp-section" data-section-type={section.type}>
+  <!-- `id={type}` gives in-page anchors a stable target (e.g. the hero's
+       "See the descent" → #map, the scroll cue → #map). Section types are
+       unique within a page, so the type doubles as the anchor id. -->
+  <section id={section.type} class="jp-section" data-section-type={section.type}>
     <Component config={section.props} {context} />
   </section>
 {/each}

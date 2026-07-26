@@ -15,12 +15,14 @@
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { deriveContentAccessKind } from '$lib/utils/content-access';
+  import Carousel from '$lib/components/carousel/Carousel.svelte';
+  import JourneyCard from '$lib/components/journeys/JourneyCard.svelte';
   import { CreatorExploreBanner } from '$lib/components/ui/CreatorCard';
   import { Pagination } from '$lib/components/ui/Pagination';
   import { getContentCollection, hydrateCollection, useLiveQuery } from '$lib/collections';
   import { filterContentItemsByOrg } from '$lib/content/filter-by-org';
   import { followingStore } from '$lib/client/following.svelte';
-  import { buildContentUrl } from '$lib/utils/subdomain';
+  import { buildContentUrl, buildJourneyUrl } from '$lib/utils/subdomain';
   import { SearchXIcon, FileIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { ViewToggle } from '$lib/components/ui/ViewToggle';
@@ -417,6 +419,33 @@
     {/if}
   </header>
 
+  <!-- Guided portals rail (Codex-oi2w4) — shown only on the default browse view
+       (the server omits it under any active filter/search). Journeys read
+       differently from content (SPEC §8.5): a distinct discovery affordance
+       above the content grid. -->
+  {#if data.journeys.length > 0}
+    <section class="explore__journeys">
+      <Carousel
+        title="Guided portals"
+        items={data.journeys}
+        itemMinWidth="20rem"
+        gap="var(--space-4)"
+        ariaLabel="Guided portals"
+      >
+        {#snippet renderItem(journey)}
+          <JourneyCard
+            {journey}
+            href={buildJourneyUrl(
+              page.url,
+              { slug: journey.slug, id: journey.pageId },
+              { surface: 'sales' }
+            )}
+          />
+        {/snippet}
+      </Carousel>
+    </section>
+  {/if}
+
   <!-- Sticky command bar: search + filter trigger + view toggle. Type,
        Featured, and Sort live inside the drawer. -->
   <StickyToolbar>
@@ -561,6 +590,10 @@
     justify-content: space-between;
     gap: var(--space-4);
     flex-wrap: wrap;
+  }
+
+  .explore__journeys {
+    margin-block: var(--space-6);
   }
 
   .explore__title {

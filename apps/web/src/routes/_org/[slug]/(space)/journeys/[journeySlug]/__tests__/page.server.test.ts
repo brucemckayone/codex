@@ -65,14 +65,23 @@ const MOCK_SELL_PREVIEW = {
   },
 } satisfies SellPreview;
 
-const { getCoursePageMock, resolveSellPreviewMock } = vi.hoisted(() => ({
-  getCoursePageMock: vi.fn(),
-  resolveSellPreviewMock: vi.fn(),
-}));
+const { getCoursePageMock, resolveSellPreviewMock, resolveCanEnterCourseMock } =
+  vi.hoisted(() => ({
+    getCoursePageMock: vi.fn(),
+    resolveSellPreviewMock: vi.fn(),
+    resolveCanEnterCourseMock: vi.fn(),
+  }));
 
 vi.mock('../journey-data', () => ({
   getCoursePage: getCoursePageMock,
   resolveSellPreview: resolveSellPreviewMock,
+}));
+
+// The enrolment check that flips the hero/invite CTA (anon → checkout; enrolled
+// → dashboard). Mocked so the load's CTA-branch wiring is tested without a
+// content-api round-trip.
+vi.mock('$lib/server/journeys/round-d-seam', () => ({
+  resolveCanEnterCourse: resolveCanEnterCourseMock,
 }));
 
 // NOTE: `$lib/server/cache` is intentionally NOT mocked — the assertion below
@@ -89,15 +98,19 @@ type LoadData = Extract<
   object
 >;
 
-function makeEvent(journeySlug: string) {
+function makeEvent(journeySlug: string, user: { id: string } | null = null) {
   const setHeaders = vi.fn();
   const depends = vi.fn();
   const event = {
     params: { slug: 'acme', journeySlug },
-    parent: async () => ({}),
+    parent: async () => ({ user }),
     setHeaders,
     depends,
     url: new URL(`http://acme.lvh.me:3000/journeys/${journeySlug}`),
+    // Present so the load can build a round-d-seam context (the seam is mocked).
+    platform: {},
+    cookies: {},
+    locals: {},
   } as unknown as LoadInput;
   return { event, setHeaders, depends };
 }
@@ -107,6 +120,7 @@ describe('journey sales +page.server load', () => {
     vi.clearAllMocks();
     getCoursePageMock.mockResolvedValue(MOCK_COURSE_PAGE);
     resolveSellPreviewMock.mockResolvedValue(MOCK_SELL_PREVIEW);
+    resolveCanEnterCourseMock.mockResolvedValue(false);
   });
 
   it('awaits the course page and returns it for first paint / SEO', async () => {
@@ -172,5 +186,44 @@ describe('journey sales +page.server load', () => {
     const { event } = makeEvent('does-not-exist');
 
     await expect(load(event)).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('skips the enrolment check for an anonymous visitor (enrolled=false)', async () => {
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork'); // no user
+
+    const data = (await load(event)) as LoadData;
+
+    // No session ⇒ definitionally not enrolled; the worker round-trip is skipped
+    // entirely so the SEO-critical anonymous path never blocks on it.
+    expect(data.enrolled).toBe(false);
+    expect(resolveCanEnterCourseMock).not.toHaveBeenCalled();
+  });
+
+  it('resolves enrolled=true for an enrolled member (CTA → dashboard)', async () => {
+    resolveCanEnterCourseMock.mockResolvedValueOnce(true);
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork', { id: 'user-1' });
+
+    const data = (await load(event)) as LoadData;
+
+    expect(resolveCanEnterCourseMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'user-1',
+      MOCK_COURSE_PAGE.course.id
+    );
+    expect(data.enrolled).toBe(true);
+  });
+
+  it('degrades to enrolled=false when the entitlement check throws', async () => {
+    resolveCanEnterCourseMock.mockRejectedValueOnce(new Error('resolver down'));
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork', { id: 'user-1' });
+
+    const data = (await load(event)) as LoadData;
+
+    // A resolver hiccup must never throw the SEO-critical load — it degrades to
+    // the public/join CTA.
+    expect(data.enrolled).toBe(false);
   });
 });
