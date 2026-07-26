@@ -571,41 +571,37 @@
     primitives (ProgressRing) inherit these tokens and adapt to the dark room.
   */
   .library {
-    /* Room palette — hue borrowed from the org brand, lightness/chroma fixed. */
-    --lib-ink: oklch(from var(--color-brand-primary) 0.15 0.018 h);
-    --lib-ink-2: oklch(from var(--color-brand-primary) 0.21 0.024 h);
-    --lib-bone: oklch(from var(--color-brand-primary) 0.93 0.02 h);
-    --lib-accent: oklch(from var(--color-brand-primary) 0.74 0.13 h);
-    --lib-hair: color-mix(in oklab, var(--lib-bone) 14%, transparent);
-    --lib-hair-strong: color-mix(in oklab, var(--lib-accent) 40%, transparent);
+    /*
+      Inherit the org's REAL theme — no forced palette, no per-page --color-*
+      re-point. studio-alpha resolves to dark (#0A0A0A surfaces) + green
+      (#4ADE80 interactive) via org-brand.css; a light org would render light.
+      The --lib-* helpers below are DERIVED from the semantic tokens (never
+      overriding them), so they follow whatever theme the org applies —
+      light-alpha hairlines / lifts on dark, dark-alpha on light.
+    */
+    --lib-ink: var(--color-surface);
+    --lib-ink-2: color-mix(in oklab, var(--color-text) 6%, var(--color-surface));
+    --lib-bone: var(--color-text);
+    --lib-accent: var(--color-interactive);
+    --lib-hair: color-mix(in oklab, var(--color-text) 12%, transparent);
+    --lib-hair-strong: color-mix(
+      in oklab,
+      var(--color-interactive) 45%,
+      transparent
+    );
 
-    /* Re-point semantics so descendants + ProgressRing adopt the dark room. */
-    --color-heading: var(--lib-bone);
-    --color-text: oklch(from var(--color-brand-primary) 0.88 0.02 h);
-    --color-text-secondary: oklch(from var(--color-brand-primary) 0.72 0.02 h);
-    --color-text-tertiary: oklch(from var(--color-brand-primary) 0.62 0.018 h);
-    --color-text-muted: oklch(from var(--color-brand-primary) 0.58 0.015 h);
-    --color-primary-600: var(--lib-accent);
-    --color-primary-700: oklch(from var(--color-brand-primary) 0.66 0.13 h);
-    --color-border-subtle: color-mix(in oklab, var(--lib-bone) 12%, transparent);
-    --color-success: var(--lib-accent);
-    --color-text-on-brand: var(--lib-ink);
-
-    /* Tone hues for cover / motif variety (all brand-derived). */
-    --tone-0: oklch(from var(--color-brand-primary) 0.56 0.14 h);
-    --tone-1: oklch(from var(--color-brand-primary) 0.5 0.13 calc(h + 26));
-    --tone-2: oklch(from var(--color-brand-primary) 0.48 0.1 calc(h - 32));
-    --tone-3: oklch(from var(--color-brand-primary) 0.6 0.12 calc(h + 12));
+    /* Cover / motif variety, all from the brand-family accent (on-brand). */
+    --tone-0: var(--color-interactive);
+    --tone-1: var(--color-interactive-hover);
+    --tone-2: var(--color-success);
+    --tone-3: color-mix(in oklab, var(--color-interactive) 60%, var(--color-text));
 
     min-height: 100%;
-    /* Full-bleed within its own box (no negative margin — that overflows narrow
-       viewports); horizontal scroll lives only in the inner rails. */
+    /* Full-bleed browsing layout — fills the org-main width; horizontal scroll
+       lives only in the inner rails. */
     overflow-x: clip;
     padding: clamp(var(--space-6), 4vw, var(--space-12))
       clamp(var(--space-4), 4vw, var(--space-10)) var(--space-24);
-    background: var(--lib-ink);
-    color: var(--color-text);
-    border-radius: var(--radius-xl, 1rem);
   }
 
   /* ── Header ── */
@@ -624,7 +620,7 @@
     font-family: var(--font-heading);
     font-weight: 300;
     font-size: clamp(var(--text-3xl), 5vw, var(--text-5xl));
-    color: var(--color-heading);
+    color: var(--color-text);
   }
   .lib-head__sub {
     margin: 0;
@@ -694,7 +690,7 @@
     white-space: nowrap;
   }
   .chip:hover {
-    color: var(--color-heading);
+    color: var(--color-text);
     border-color: var(--lib-hair-strong);
   }
   .chip--on {
@@ -727,7 +723,7 @@
     font-family: var(--font-heading);
     font-weight: 400;
     font-size: var(--text-2xl);
-    color: var(--color-heading);
+    color: var(--color-text);
   }
   .sec__ct {
     font-size: var(--text-sm);
@@ -832,7 +828,7 @@
     font-weight: 400;
     font-size: var(--text-lg);
     line-height: var(--leading-tight);
-    color: var(--color-heading);
+    color: var(--color-text);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     line-clamp: 2;
@@ -1030,7 +1026,7 @@
     font-weight: 400;
     font-size: var(--text-base);
     line-height: var(--leading-tight);
-    color: var(--color-heading);
+    color: var(--color-text);
   }
   .row__meta {
     margin-top: 2px;
@@ -1065,7 +1061,7 @@
     border-color: color-mix(in oklab, var(--lib-bone) 20%, transparent);
   }
   .badge--purchased {
-    color: var(--color-heading);
+    color: var(--color-text);
     background: color-mix(in oklab, var(--lib-bone) 10%, transparent);
     border-color: color-mix(in oklab, var(--lib-bone) 24%, transparent);
   }
@@ -1113,7 +1109,7 @@
     font-family: var(--font-heading);
     font-weight: 300;
     font-size: clamp(var(--text-3xl), 5vw, var(--text-4xl));
-    color: var(--color-heading);
+    color: var(--color-text);
   }
   .firstrun__sub {
     margin: 0 0 var(--space-6);
@@ -1168,7 +1164,7 @@
   .firstrun__ct {
     font-family: var(--font-heading);
     font-size: var(--text-xl);
-    color: var(--color-heading);
+    color: var(--color-text);
   }
   .firstrun__cd {
     margin: var(--space-1) 0 var(--space-2);
