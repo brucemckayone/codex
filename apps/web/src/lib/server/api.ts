@@ -1204,6 +1204,21 @@ export function createServerApi(
           )}`
         ),
 
+      /**
+       * Studio index BATCH revenue (Codex-9p47t): authoritative gross revenue
+       * per journey (30d default), keyed by landing-page id — the figure
+       * `listJourneys` omits (revenueCents null) to avoid drift. Owner/admin
+       * only; `organizationId` is for org resolution only. Money is GBP pence;
+       * journeys with no revenue are omitted from the map.
+       */
+      listJourneyRevenue: (organizationId: string, period?: string) =>
+        request<Record<string, number>>(
+          'access',
+          `/api/journeys/insights/org-revenue?organizationId=${encodeURIComponent(
+            organizationId
+          )}${period ? `&period=${encodeURIComponent(period)}` : ''}`
+        ),
+
       // ── Studio journey MANAGEMENT (Codex-isr02 · page-builder write path) ──
       // Owner/admin only — the content-api routes enforce `requireOrgManagement`
       // and re-derive scope from the session; `organizationId` here is used ONLY

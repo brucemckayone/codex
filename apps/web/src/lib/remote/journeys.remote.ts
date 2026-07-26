@@ -223,6 +223,28 @@ export const listJourneys = query(
   }
 );
 
+const listJourneyRevenueSchema = z
+  .object({ organizationId: z.string().uuid() })
+  .optional();
+
+/**
+ * Studio index BATCH revenue (Codex-9p47t) — authoritative gross 30d revenue per
+ * journey, keyed by landing-page id (the figure `listJourneys` omits to avoid
+ * drift from the per-journey Insights read). Runs as a SEPARATE query from
+ * `listJourneys` so the row list paints immediately and the badge streams in
+ * (SPA-native "await critical, stream secondary"). Org from the request HOST via
+ * `resolveStudioOrg`; the input org is not trusted (the worker's
+ * `requireOrgManagement` is the authority). `{}` off a non-org host.
+ */
+export const listJourneyRevenue = query(
+  listJourneyRevenueSchema,
+  async (): Promise<Record<string, number>> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) return {};
+    return ctx.api.access.listJourneyRevenue(ctx.orgId, '30d');
+  }
+);
+
 const journeyIdSchema = z.object({ id: z.string().uuid() });
 
 /**

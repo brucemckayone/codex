@@ -99,6 +99,23 @@ export const journeyInsightsQuerySchema = z.object({
 export type JourneyInsightsQuery = z.infer<typeof journeyInsightsQuerySchema>;
 
 /**
+ * Studio index BATCH-revenue query (Codex-9p47t) — `GET
+ * /api/journeys/insights/org-revenue`. Owner/admin only via
+ * `requireOrgManagement`. Returns authoritative gross revenue per journey keyed
+ * by landing-page id (the figure `listJourneysForOrg` omits to avoid drift).
+ * `organizationId` is consumed ONLY by the `procedure()` org resolver; the route
+ * re-derives the authoritative scope from `ctx.organizationId`. No `courseId` —
+ * this is org-wide. `period` defaults to 30 days (matching the badge label).
+ */
+export const orgJourneyRevenueQuerySchema = z.object({
+  organizationId: uuidSchema,
+  period: z.enum(['7d', '30d', '90d', 'all']).default('30d'),
+});
+export type OrgJourneyRevenueQuery = z.infer<
+  typeof orgJourneyRevenueQuerySchema
+>;
+
+/**
  * ── CREATOR / STUDIO management inputs (Codex-isr02 · page-builder write path) ──
  *
  * All creator routes are `requireOrgManagement`; `organizationId` is consumed
