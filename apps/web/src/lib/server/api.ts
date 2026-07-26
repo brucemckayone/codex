@@ -97,6 +97,7 @@ import type { JourneyInsightsData } from '$lib/components/studio/journey-insight
 // serialise; imported from the FE $lib bag so callers get the exact FE types.
 import type {
   CompletionSource,
+  ContentCourseLinks,
   CourseDashboardData,
   InCoursePracticeData,
   JourneyCourseSummary,
@@ -1097,6 +1098,18 @@ export function createServerApi(
           `/api/journeys/courses/by-slug?organizationId=${encodeURIComponent(
             organizationId
           )}&slug=${encodeURIComponent(slug)}`
+        ),
+
+      /**
+       * Public: the PUBLISHED course(s) that include a content item as a
+       * practice — the standalone content page's journey cross-link (F19/F20).
+       * No auth needed (published-course public chrome only). `{ courses: [] }`
+       * when the item belongs to no published course.
+       */
+      contentCourses: (contentId: string) =>
+        request<ContentCourseLinks>(
+          'access',
+          `/api/journeys/content/${encodeURIComponent(contentId)}/courses`
         ),
 
       /**

@@ -1,6 +1,7 @@
 import { DEFAULT_STREAMING_URL_TTL_SECONDS } from '@codex/access';
 import { ValidationError } from '@codex/service-errors';
 import type {
+  ContentCourseLinks,
   CourseDashboardData,
   CourseSellPreview,
   EditorCurriculum,
@@ -15,6 +16,7 @@ import type {
   PracticeCompletionRecord,
 } from '@codex/shared-types';
 import {
+  contentCoursesParamsSchema,
   courseBySlugQuerySchema,
   courseParamsSchema,
   createJourneyBodySchema,
@@ -76,6 +78,35 @@ app.get(
     handler: async (ctx): Promise<JourneyCourseSummary | null> => {
       const { organizationId, slug } = ctx.input.query;
       return ctx.services.courseJourney.getCourseBySlug(organizationId, slug);
+    },
+  })
+);
+
+/**
+ * GET /api/journeys/content/:contentId/courses
+ *
+ * The PUBLISHED course(s) that include a content item as a practice — the
+ * standalone content page's journey cross-link (Codex-2pryk.3.10, F19/F20).
+ * `auth: 'optional'` and fully PUBLIC: it reveals only published-course public
+ * chrome (title/slug/org), never body or stream (NO `canView`), so it serves an
+ * anonymous visitor the same as an owner — mirroring the by-slug / sales-page
+ * reads (HARDENING §E course-sell row). Returns `{ courses: [] }` when the item
+ * belongs to no published course.
+ * @returns {ContentCourseLinks}
+ */
+app.get(
+  '/content/:contentId/courses',
+  procedure({
+    policy: {
+      auth: 'optional',
+      rateLimit: 'api', // 100 req/min
+    },
+    input: {
+      params: contentCoursesParamsSchema,
+    },
+    handler: async (ctx): Promise<ContentCourseLinks> => {
+      const { contentId } = ctx.input.params;
+      return ctx.services.courseJourney.getContentCourses(contentId);
     },
   })
 );

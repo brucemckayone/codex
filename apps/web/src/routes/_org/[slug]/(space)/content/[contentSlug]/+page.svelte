@@ -16,7 +16,7 @@
   import * as m from '$paraglide/messages';
   import { ContentDetailView, RelatedContent } from '$lib/components/content';
   import { formatPrice } from '$lib/utils/format';
-  import { buildContentUrl } from '$lib/utils/subdomain';
+  import { buildContentUrl, buildJourneyUrl } from '$lib/utils/subdomain';
   import { useSubscriptionContext } from '$lib/utils/subscription-context.svelte';
   import type { AccessRevocationReason } from '$lib/server/content-detail';
   import type { PageData } from './$types';
@@ -121,6 +121,36 @@
     });
   });
 
+  // Journey cross-link (Codex-2pryk.3.10) — resolved from the streamed
+  // `parentCourses` promise. Mirrors the accessAndProgress pattern above: a
+  // single ContentDetailView stays mounted, so we resolve into $state rather
+  // than awaiting in markup (which would gate the whole view on the link).
+  // The primary (first) published course drives the breadcrumb + "part of a
+  // journey" context; buildJourneyUrl resolves same-origin root-relative (or
+  // a cross-org absolute URL). Null → no journey chrome renders.
+  let parentCourse = $state<{ title: string; salesHref: string } | null>(null);
+  let resolvedParentCourses: Promise<unknown> | null = null;
+
+  $effect(() => {
+    const promise = data.parentCourses;
+    untrack(() => {
+      if (promise && promise !== resolvedParentCourses) {
+        resolvedParentCourses = promise;
+        parentCourse = null; // clear any stale link while the new one resolves
+        promise.then((links) => {
+          if (resolvedParentCourses !== promise) return;
+          const course = links?.courses?.[0] ?? null;
+          parentCourse = course
+            ? { title: course.title, salesHref: buildJourneyUrl(page.url, course) }
+            : null;
+        });
+      } else if (!promise) {
+        parentCourse = null;
+        resolvedParentCourses = null;
+      }
+    });
+  });
+
   const creatorName = $derived(content.creator?.name ?? content.creator?.email ?? '');
   const titleSuffix = $derived(data.org?.name ?? 'Codex');
   const priceCents = $derived(content.priceCents ?? null);
@@ -172,6 +202,7 @@
   {purchasing}
   {creatorName}
   {titleSuffix}
+  journeyLink={parentCourse}
   requiresSubscription={subscription.subCtx.requiresSubscription}
   hasSubscription={subscription.subCtx.hasSubscription}
   subscriptionCoversContent={subscription.subCtx.subscriptionCoversContent}
@@ -208,7 +239,7 @@
       <div class="skeleton skeleton--heading"></div>
     </div>
     <div class="related-skeleton__grid">
-      {#each Array(3) as _}
+      {#each Array(3) as _, i (i)}
         <div class="related-skeleton__card">
           <div class="skeleton skeleton--thumbnail"></div>
           <div class="skeleton skeleton--title"></div>
