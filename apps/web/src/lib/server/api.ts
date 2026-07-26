@@ -98,6 +98,7 @@ import type { JourneyInsightsData } from '$lib/components/studio/journey-insight
 import type {
   CompletionSource,
   CourseDashboardData,
+  EnrolledCourseSummary,
   InCoursePracticeData,
   JourneyCourseSummary,
   PracticeCompletionRecord,
@@ -1119,6 +1120,19 @@ export function createServerApi(
         request<CourseDashboardData | null>(
           'access',
           `/api/journeys/courses/${courseId}/dashboard`
+        ),
+
+      /**
+       * The member LIBRARY "Your journeys" shelf: every course the caller is
+       * enrolled in within one org, each with a progress rollup. The worker
+       * derives the user from the session; `organizationId` only narrows scope.
+       */
+      listEnrolledCourses: (organizationId: string) =>
+        request<EnrolledCourseSummary[]>(
+          'access',
+          `/api/journeys/user/enrollments?organizationId=${encodeURIComponent(
+            organizationId
+          )}`
         ),
 
       /** In-course player payload (practice + playlist + signed stream URL). */

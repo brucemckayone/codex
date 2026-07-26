@@ -117,3 +117,45 @@ export interface InCoursePracticeData {
   /** Server-known completions across the course (hydrates the store). */
   completions: PracticeCompletionRecord[];
 }
+
+/**
+ * Per-course progress rollup for the member library "Your journeys" shelf
+ * (SPEC §8.4). The FE-facing twin of `@codex/shared-types`'
+ * `EnrolledCourseProgress` — the SAME `practice_completions ⋈ stage_practices`
+ * rollup the dashboard computes, summarised to a journey card's numbers.
+ */
+export interface EnrolledCourseProgress {
+  done: number;
+  total: number;
+  /** Integer 0–100; `0` when the course has no practices. */
+  percent: number;
+  status: 'not-started' | 'in-progress' | 'completed';
+  /** Most recent completion timestamp (ISO), or `null`. */
+  lastCompletedAt: string | null;
+  /** First incomplete practice in course order — the resume target; `null` when done/empty. */
+  nextPracticeSlug: string | null;
+  /** Title of {@link nextPracticeSlug} — the "Next · …" resume label. */
+  nextPracticeTitle: string | null;
+}
+
+/**
+ * One enrolled course as the member LIBRARY "Your journeys" shelf reads it
+ * (SPEC §8.4). FE-facing twin of `@codex/shared-types`' `EnrolledCourseSummary`
+ * (the content-api serialises the structurally-identical shape). Strictly
+ * scoped to `(user, org)` by the worker — never another user's enrollments.
+ */
+export interface EnrolledCourseSummary {
+  course: {
+    id: string;
+    slug: string | null;
+    title: string;
+    organizationSlug: string | null;
+    kicker: string | null;
+    lede: string | null;
+    guideName: string | null;
+  };
+  enrollment: JourneyEnrollment;
+  /** `course_enrollments.source` (e.g. `course_purchase`) → access badge. */
+  enrollmentSource: string;
+  progress: EnrolledCourseProgress;
+}
