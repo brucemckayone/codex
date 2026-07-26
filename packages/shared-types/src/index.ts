@@ -43,6 +43,7 @@ export type {
   CompletionSource,
   ContentAccessPolicy,
   CourseAccessPath,
+  CourseCardSummary,
   CourseDashboardData,
   CourseOffer,
   CourseSectionType,

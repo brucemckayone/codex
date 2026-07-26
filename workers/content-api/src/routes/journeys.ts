@@ -1,5 +1,6 @@
 import { DEFAULT_STREAMING_URL_TTL_SECONDS } from '@codex/access';
 import type {
+  CourseCardSummary,
   CourseDashboardData,
   CourseSellPreview,
   HonoEnv,
@@ -12,6 +13,7 @@ import {
   courseBySlugQuerySchema,
   courseParamsSchema,
   inCoursePracticeParamsSchema,
+  listPublishedCoursesQuerySchema,
   recordCompletionBodySchema,
 } from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
@@ -40,6 +42,33 @@ import { Hono } from 'hono';
  */
 
 const app = new Hono<HonoEnv>();
+
+/**
+ * GET /api/journeys/courses?organizationId=
+ *
+ * List an org's PUBLISHED courses as discovery card summaries — the /explore
+ * "Journeys" rail (SPEC §8.5). Fully PUBLIC (`auth: 'optional'`, NO `canView`;
+ * HARDENING §E course-sell row), the same public-chrome surface as the sales
+ * page. Returns `[]` when the org has no published courses. Declared BEFORE the
+ * `/courses/:courseId/*` routes so the bare `/courses` match is unambiguous.
+ * @returns {CourseCardSummary[]}
+ */
+app.get(
+  '/courses',
+  procedure({
+    policy: {
+      auth: 'optional',
+      rateLimit: 'api', // 100 req/min
+    },
+    input: {
+      query: listPublishedCoursesQuerySchema,
+    },
+    handler: async (ctx): Promise<CourseCardSummary[]> => {
+      const { organizationId } = ctx.input.query;
+      return ctx.services.courseJourney.listPublishedCourses(organizationId);
+    },
+  })
+);
 
 /**
  * GET /api/journeys/courses/by-slug?organizationId=&slug=
