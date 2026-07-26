@@ -20,6 +20,7 @@
 
 import { getPublicCategories } from '$lib/remote/categories.remote';
 import { getPublicContent } from '$lib/remote/content.remote';
+import { listPublishedJourneys } from '$lib/remote/journeys.remote';
 import { getContinueWatching } from '$lib/remote/library.remote';
 import { getPublicCreators, getPublicStats } from '$lib/remote/org.remote';
 import { listTiers } from '$lib/remote/subscription.remote';
@@ -120,6 +121,9 @@ export const load: PageServerLoad = async ({
     // Streamed: cross-device resume rail (server-backed via video_playback).
     // Anonymous visitors and any transport error resolve to an empty rail.
     continueWatching: getContinueWatching(undefined).catch(() => []),
+    // Streamed: guided journeys for this org (featured-first, capped). Hidden
+    // when the org has none; any transport error degrades to an empty rail.
+    journeys: listPublishedJourneys({ limit: 12 }).catch(() => []),
     creators: creatorsPromise
       .then((r) => ({
         items: r?.items ?? [],

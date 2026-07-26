@@ -342,6 +342,29 @@ export interface JourneyCourseSummary {
   slug: string | null;
   title: string;
   organizationSlug: string | null;
+  /**
+   * One-line course framing (the sell lede), surfaced on the member dashboard
+   * header. Optional/additive: summary builders that don't need it (e.g. the
+   * gate's by-slug resolver) may omit it.
+   */
+  lede?: string | null;
+}
+
+/**
+ * The PUBLISHED course(s) that include a given content item as a practice —
+ * resolved via `stage_practices → course_stages → courses` (Codex-2pryk.3.10,
+ * standalone content viewer). Powers the journey cross-link on the standalone
+ * content page: the breadcrumb signpost (F19), the "part of a journey" context,
+ * and the free-content upsell (F20).
+ *
+ * Fully PUBLIC read — scoped to PUBLISHED, non-deleted courses (via non-deleted
+ * stages), so it never leaks a draft/archived course. `courses` is empty when
+ * the item belongs to no published course (→ the cross-link is omitted
+ * gracefully). A content item can sit in more than one course; the FE renders
+ * the primary (first) one.
+ */
+export interface ContentCourseLinks {
+  courses: JourneyCourseSummary[];
 }
 
 /**
@@ -492,6 +515,136 @@ export interface JourneyPageRecord extends PageBuilderState {
   id: string;
   organizationId: string;
   publishedAt: string | null;
+}
+
+/**
+ * A studio-index row (Codex-isr02 · creator management view). One journey/page a
+ * creator owns, with `live` course rollups. Mirrors the FE-frozen `JourneyListItem`
+ * (`apps/web/.../page-builder/journey-queries.ts`) — the same parallel-def pattern
+ * `JourneyPageRecord` uses, since BE packages cannot import an apps/web module.
+ * Course-only rollups are `null` for a plain (non-course) landing page.
+ */
+export interface JourneyListItem {
+  id: string;
+  pageType: string;
+  subjectType: string | null;
+  slug: string;
+  title: string;
+  status: PageStatus;
+  tagline: string | null;
+  stageCount: number | null;
+  practiceCount: number | null;
+  enrolledCount: number | null;
+  /** `live` provenance (completed one-off purchases for the subject course). */
+  revenueCents: number | null;
+  updatedAt: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STUDIO curriculum-editor read-model (Codex-03cwh — admin two-pane editor)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * One practice as the STUDIO CURRICULUM EDITOR reads it — a SUPERSET of the
+ * public {@link JourneyPracticeView}. A practice IS a join to a `content` row
+ * (`stage_practices.contentId`), so the editor inspector's media-slot needs the
+ * linked content's picker metadata (title/type/thumbnail/publish status) that
+ * the public sales view deliberately omits. Additive against the WP-0 freeze; the
+ * FE mirror in `apps/web/src/lib/page-builder/journey-queries.ts` MUST stay
+ * structurally equal.
+ */
+export interface EditorPracticeView {
+  /** The linked `content` row id (the join's `contentId`). */
+  contentId: string;
+  /** Public slug of the linked content; null when unslugged. */
+  slug: string | null;
+  /** Linked content title — the media-slot label + tree row text. */
+  title: string;
+  contentType: PracticeContentType;
+  /** Publish status of the LINKED CONTENT (draft ⇒ not yet member-visible). */
+  status: PageStatus;
+  /** Poster/thumbnail for the media-slot; null when the content has none. */
+  thumbnailUrl: string | null;
+  sortOrder: number;
+}
+
+/** An ordered stage with its practice pool, as the studio editor reads it. */
+export interface EditorStageView {
+  id: string;
+  name: string;
+  gloss: string | null;
+  sortOrder: number;
+  practices: EditorPracticeView[];
+}
+
+/**
+ * The full admin curriculum payload the studio editor loads for one course:
+ * ordered non-deleted stages, each with its ordered practices + picker metadata.
+ * The content-library PICKER options are read separately (the reused org
+ * content-list endpoint) — this payload is only the CURRENT curriculum.
+ */
+export interface EditorCurriculum {
+  courseId: string;
+  stages: EditorStageView[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Member-facing DISCOVERY read-model (Codex-oi2w4 — home / explore / library)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Progress state of an enrolled journey (library shelf + continue rail). */
+export type JourneyProgressStatus = 'not-started' | 'in-progress' | 'completed';
+
+/**
+ * A journey as a PUBLIC discovery card (Codex-oi2w4 — the org home "featured
+ * journeys" rail + the Explore grid). A PUBLISHED, course-type landing page
+ * joined to its PUBLISHED subject course, plus the member-visible curriculum
+ * rollups. Fully PUBLIC: carries no per-user state and no `canView`. Mirrored
+ * FE-side in `apps/web/.../page-builder/journey-queries.ts` (structurally
+ * identical by design — the same dual-home pattern as {@link JourneyListItem}).
+ */
+export interface JourneyCardView {
+  /** The landing-page (journey portal) id. */
+  pageId: string;
+  /** Org-scoped landing-page slug → the public sell page (`/journeys/:slug`). */
+  slug: string;
+  title: string;
+  /** Course eyebrow above the title (e.g. "Foundation course"). */
+  kicker: string | null;
+  /** Course lede — the one-line invitation under the title. */
+  tagline: string | null;
+  /** Subject course id + slug (build the dashboard / enrol URL). */
+  courseId: string;
+  courseSlug: string;
+  /** One-off purchase price in GBP pence; null = membership-only / not sold standalone. */
+  priceCents: number | null;
+  stageCount: number;
+  /** MEMBER-visible (published, non-deleted) practice count — matches the sell page. */
+  practiceCount: number;
+  /** Creator-flagged for the home "featured" rail (`landing_pages.featured`). */
+  featured: boolean;
+}
+
+/**
+ * A journey the CURRENT USER is enrolled in (Codex-oi2w4 — the library "Your
+ * journeys" shelf + "Jump back in" continue rail). The discovery card plus the
+ * user's progress rollup and status. Per-user: the route reads `userId` from the
+ * session, never the client. `percent`/`completedPractices` are scoped to the
+ * SAME published curriculum as {@link JourneyCardView.practiceCount}, so the
+ * numerator can never exceed the denominator.
+ */
+export interface EnrolledJourneyCard extends JourneyCardView {
+  /** Completed practices (from `practice_completions`) for this user. */
+  completedPractices: number;
+  /** Total published, non-deleted practices in the course. */
+  totalPractices: number;
+  /** 0–100, integer; 0 when the course has no published practices yet. */
+  percent: number;
+  status: JourneyProgressStatus;
+  enrolledAt: string;
+  lastActivityAt: string | null;
+  /** Stamped when the enrollment is complete (drives the `completed` status). */
+  completedAt: string | null;
 }
 
 /** Public sales/landing page envelope (SSR shell+stream). No `canView` on the shell. */

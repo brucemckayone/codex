@@ -18,6 +18,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { HTMLAnchorAttributes } from 'svelte/elements';
+  import { safeHref } from './safe-href';
 
   interface Props extends HTMLAnchorAttributes {
     href: string;
@@ -34,10 +35,15 @@
     class: className,
     ...restProps
   }: Props = $props();
+
+  // href is creator-authored (section props) and rendered on the PUBLIC page.
+  // Svelte does not sanitise href, so guard the scheme (reject javascript:/data:
+  // etc.) — see safe-href.ts (review M1, Codex-isr02).
+  const guardedHref = $derived(safeHref(href));
 </script>
 
 <a
-  {href}
+  href={guardedHref}
   class="cta {className ?? ''}"
   data-variant={variant}
   data-size={size}

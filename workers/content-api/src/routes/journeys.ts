@@ -1,18 +1,33 @@
 import { DEFAULT_STREAMING_URL_TTL_SECONDS } from '@codex/access';
+import { ValidationError } from '@codex/service-errors';
 import type {
+  ContentCourseLinks,
   CourseDashboardData,
   CourseSellPreview,
+  EditorCurriculum,
+  EnrolledJourneyCard,
   HonoEnv,
   InCoursePracticeData,
+  JourneyCardView,
   JourneyCoursePage,
   JourneyCourseSummary,
+  JourneyListItem,
+  JourneyPageRecord,
   PracticeCompletionRecord,
 } from '@codex/shared-types';
 import {
+  contentCoursesParamsSchema,
   courseBySlugQuerySchema,
   courseParamsSchema,
+  createJourneyBodySchema,
   inCoursePracticeParamsSchema,
+  journeyOrgQuerySchema,
+  journeyPageParamsSchema,
+  journeyStudioListQuerySchema,
+  listPublishedJourneysQuerySchema,
   recordCompletionBodySchema,
+  saveCurriculumBodySchema,
+  saveJourneyPageBodySchema,
 } from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
@@ -63,6 +78,35 @@ app.get(
     handler: async (ctx): Promise<JourneyCourseSummary | null> => {
       const { organizationId, slug } = ctx.input.query;
       return ctx.services.courseJourney.getCourseBySlug(organizationId, slug);
+    },
+  })
+);
+
+/**
+ * GET /api/journeys/content/:contentId/courses
+ *
+ * The PUBLISHED course(s) that include a content item as a practice — the
+ * standalone content page's journey cross-link (Codex-2pryk.3.10, F19/F20).
+ * `auth: 'optional'` and fully PUBLIC: it reveals only published-course public
+ * chrome (title/slug/org), never body or stream (NO `canView`), so it serves an
+ * anonymous visitor the same as an owner — mirroring the by-slug / sales-page
+ * reads (HARDENING §E course-sell row). Returns `{ courses: [] }` when the item
+ * belongs to no published course.
+ * @returns {ContentCourseLinks}
+ */
+app.get(
+  '/content/:contentId/courses',
+  procedure({
+    policy: {
+      auth: 'optional',
+      rateLimit: 'api', // 100 req/min
+    },
+    input: {
+      params: contentCoursesParamsSchema,
+    },
+    handler: async (ctx): Promise<ContentCourseLinks> => {
+      const { contentId } = ctx.input.params;
+      return ctx.services.courseJourney.getContentCourses(contentId);
     },
   })
 );
@@ -246,6 +290,313 @@ app.post(
         ctx.user.id,
         contentId,
         source
+      );
+    },
+  })
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MEMBER DISCOVERY (Codex-oi2w4 · home / explore / library surfacing)
+//
+// The public browse reads that make journeys reachable from the member space.
+// `/published` is fully PUBLIC (`auth: 'optional'`, NO `canView`) — the org is
+// resolved web-side and passed as `organizationId`. `/enrolled` is a PER-USER
+// read (`auth: 'required'`) — `userId` comes from the SESSION (never the body);
+// the org scopes the shelf to the space being browsed.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/journeys/published?organizationId=&featured=true&limit=
+ *
+ * Published course-journeys as public discovery cards (SPEC §8.5) — the org home
+ * "featured" rail (`featured=true`) + the Explore grid (all). Fully PUBLIC; no
+ * per-user state. Returns `[]` when the org has no published journeys.
+ * @returns {JourneyCardView[]}
+ */
+app.get(
+  '/published',
+  procedure({
+    policy: {
+      auth: 'optional',
+      rateLimit: 'api', // 100 req/min
+    },
+    input: {
+      query: listPublishedJourneysQuerySchema,
+    },
+    handler: async (ctx): Promise<JourneyCardView[]> => {
+      const { organizationId, featured, limit } = ctx.input.query;
+      return ctx.services.courseJourney.listPublishedJourneys(organizationId, {
+        featured: featured === 'true',
+        limit,
+      });
+    },
+  })
+);
+
+/**
+ * GET /api/journeys/enrolled?organizationId=
+ *
+ * The session user's enrolled journeys in the org, with a progress rollup — the
+ * library "Your journeys" shelf + "Jump back in" continue rail (SPEC §8.4/§11).
+ * `auth: 'required'`; `userId` from the session, `organizationId` scopes results
+ * to the browsed space (a user only ever sees their OWN enrollments). Returns
+ * `[]` for a user with no enrollments in the org.
+ * @returns {EnrolledJourneyCard[]}
+ */
+app.get(
+  '/enrolled',
+  procedure({
+    policy: {
+      auth: 'required',
+      rateLimit: 'api', // 100 req/min
+    },
+    input: {
+      query: journeyOrgQuerySchema,
+    },
+    handler: async (ctx): Promise<EnrolledJourneyCard[]> => {
+      return ctx.services.courseJourney.listEnrolledJourneys(
+        ctx.user.id,
+        ctx.input.query.organizationId
+      );
+    },
+  })
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CREATOR / STUDIO management (Codex-isr02 · the page-builder write path)
+//
+// The authoring side of a journey — list / create / load-for-builder / save.
+// AUTHORIZATION mirrors `journey-insights.ts`: `requireOrgManagement` (owner OR
+// admin) re-derives the org from the session membership and sets
+// `ctx.organizationId`. The `organizationId` in the query string is consumed
+// ONLY by the procedure org resolver — every handler forwards `ctx.organizationId`
+// (and `ctx.user.id` for the creator), NEVER the client value; the service ALSO
+// scopes to that org, so a manager of org A can never touch org B's pages.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/journeys/studio/journeys?organizationId=&status=
+ * The studio index — the org's journeys/pages, newest-edited first, optional
+ * status filter, with `live` course rollups.
+ * @returns {JourneyListItem[]}
+ */
+app.get(
+  '/studio/journeys',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      query: journeyStudioListQuerySchema,
+    },
+    handler: async (ctx): Promise<JourneyListItem[]> => {
+      return ctx.services.courseJourney.listJourneysForOrg(
+        ctx.organizationId,
+        ctx.input.query.status
+      );
+    },
+  })
+);
+
+/**
+ * POST /api/journeys/studio/journeys?organizationId=  { title, pageType }
+ * Create a new journey (course → course + landing_page rows in one tx; landing →
+ * page only), as a draft. Returns the new page id + slug (the builder navigates
+ * to `/studio/journeys/:id/page`).
+ * @returns {{ id: string; slug: string }}
+ */
+app.post(
+  '/studio/journeys',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      query: journeyOrgQuerySchema,
+      body: createJourneyBodySchema,
+    },
+    handler: async (ctx): Promise<{ id: string; slug: string }> => {
+      return ctx.services.courseJourney.createJourney(
+        ctx.organizationId,
+        ctx.user.id,
+        ctx.input.body
+      );
+    },
+  })
+);
+
+/**
+ * GET /api/journeys/studio/journeys/preview/by-slug?organizationId=&slug=
+ *
+ * The STUDIO live-preview read (Codex-isr02 P0b-2): the same `JourneyCoursePage`
+ * envelope as the public sell page but for ANY status, so the builder iframe can
+ * render an UNPUBLISHED draft. `requireOrgManagement` AUTHORIZES the
+ * client-supplied `organizationId` against the session user's owner/admin
+ * membership before using it as `ctx.organizationId` (the handler forwards that
+ * verified value, never the raw client one); a non-manager / foreign caller is
+ * denied here, so the public sell load's preview fallback fail-closes to 404.
+ * The 4-segment path cannot collide with `:pageId` (3 segments), and is
+ * registered before it regardless.
+ * @returns {JourneyCoursePage | null}
+ */
+app.get(
+  '/studio/journeys/preview/by-slug',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      query: courseBySlugQuerySchema,
+    },
+    handler: async (ctx): Promise<JourneyCoursePage | null> => {
+      return ctx.services.courseJourney.getCoursePagePreview(
+        ctx.organizationId,
+        ctx.input.query.slug
+      );
+    },
+  })
+);
+
+/**
+ * GET /api/journeys/studio/journeys/:pageId?organizationId=
+ * Load a page draft into the builder (any status; org-scoped → null if foreign).
+ * @returns {JourneyPageRecord | null}
+ */
+app.get(
+  '/studio/journeys/:pageId',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    handler: async (ctx): Promise<JourneyPageRecord | null> => {
+      return ctx.services.courseJourney.getJourneyForBuilder(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
+    },
+  })
+);
+
+/**
+ * PUT /api/journeys/studio/journeys/:pageId?organizationId=  { ...record }
+ * Persist the builder's draft (sections/brand/title/slug/status). Publishing a
+ * course page publishes its subject course too. 204 on success.
+ * @returns {null}
+ */
+app.put(
+  '/studio/journeys/:pageId',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+      body: saveJourneyPageBodySchema,
+    },
+    handler: async (ctx): Promise<null> => {
+      // The URL id and the body id must identify the SAME page — else the URL
+      // names a different resource than the one mutated (audit/caching/least-
+      // surprise; review L1). Not an IDOR — both are org-scoped by the service —
+      // but a mismatch is a client bug, so reject it.
+      if (ctx.input.params.pageId !== ctx.input.body.id) {
+        throw new ValidationError(
+          'Path id does not match the page id in the body'
+        );
+      }
+      await ctx.services.courseJourney.saveJourneyPage(
+        ctx.organizationId,
+        ctx.input.body
+      );
+      return null;
+    },
+  })
+);
+
+/**
+ * GET /api/journeys/studio/journeys/:pageId/curriculum?organizationId=
+ *
+ * The admin CURRICULUM read for the two-pane editor (Codex-03cwh): the journey's
+ * subject-course stages + practice joins, INCLUDING practices whose linked
+ * content is still a draft (unlike the public/member reads), each with the
+ * picker metadata the inspector needs (title/type/thumbnail/status). The course
+ * is resolved from the landing-page `:pageId` (org-scoped) — a foreign, missing,
+ * or non-course page 404s. The 4-segment path cannot collide with the 3-segment
+ * `:pageId` route.
+ * @returns {EditorCurriculum}
+ */
+app.get(
+  '/studio/journeys/:pageId/curriculum',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    handler: async (ctx): Promise<EditorCurriculum> => {
+      const courseId = await ctx.services.courseJourney.resolveCourseIdForPage(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
+      return ctx.services.courseJourney.getCourseCurriculumForEditor(
+        ctx.organizationId,
+        courseId
+      );
+    },
+  })
+);
+
+/**
+ * PUT /api/journeys/studio/journeys/:pageId/curriculum?organizationId=  { stages }
+ *
+ * Bulk-save the whole curriculum (stages + practice joins) for the journey's
+ * subject course in ONE transaction — diff against the persisted state and
+ * reconcile (insert/rename/reorder/soft-delete stages; insert/remove/reorder
+ * practice joins), space-guarding every practice's content to the course's org.
+ * The stage reorder respects the `(courseId, sortOrder)` unique index. Returns
+ * the freshly-persisted curriculum (server ids for newly-added stages).
+ * @returns {EditorCurriculum}
+ */
+app.put(
+  '/studio/journeys/:pageId/curriculum',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+      body: saveCurriculumBodySchema,
+    },
+    handler: async (ctx): Promise<EditorCurriculum> => {
+      const courseId = await ctx.services.courseJourney.resolveCourseIdForPage(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
+      return ctx.services.courseJourney.saveCurriculum(
+        ctx.organizationId,
+        courseId,
+        ctx.input.body
       );
     },
   })

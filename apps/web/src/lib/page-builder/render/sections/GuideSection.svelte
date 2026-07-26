@@ -7,6 +7,7 @@
 -->
 <script lang="ts">
   import { asString, asStringArray } from '../coerce';
+  import { safeHref } from '../safe-href';
   import type { GuideSectionProps, JourneySalesContext } from '../types';
   import type { SectionProps } from '$lib/page-builder';
 
@@ -44,7 +45,7 @@
       <div class="guide__poster" class:guide__poster--photo={p.portraitUrl}>
         {#if p.portraitUrl}
           <img
-            src={p.portraitUrl}
+            src={safeHref(p.portraitUrl)}
             alt={p.name ? `Portrait of ${p.name}` : ''}
             loading="lazy"
           />

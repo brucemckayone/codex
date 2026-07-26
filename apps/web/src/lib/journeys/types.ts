@@ -29,6 +29,23 @@ export interface JourneyCourseSummary {
   slug: string | null;
   title: string;
   organizationSlug: string | null;
+  /**
+   * One-line course framing (the sell lede), surfaced on the member dashboard
+   * header. Optional/additive: summary builders that don't need it (e.g. the
+   * gate's by-slug resolver) may omit it.
+   */
+  lede?: string | null;
+}
+
+/**
+ * The PUBLISHED course(s) that include a content item as a practice — the
+ * standalone content page's journey cross-link (Codex-2pryk.3.10, F19/F20).
+ * FE mirror of `@codex/shared-types`' `ContentCourseLinks` (must stay equal).
+ * `courses` is empty when the item belongs to no published course (the
+ * cross-link is then omitted); the FE renders the primary (first) course.
+ */
+export interface ContentCourseLinks {
+  courses: JourneyCourseSummary[];
 }
 
 /**
