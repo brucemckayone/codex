@@ -1,6 +1,9 @@
 import type { JourneyInsightsData } from '@codex/access';
 import type { HonoEnv } from '@codex/shared-types';
-import { journeyInsightsQuerySchema } from '@codex/validation';
+import {
+  journeyInsightsQuerySchema,
+  orgJourneyRevenueQuerySchema,
+} from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
@@ -48,6 +51,38 @@ app.get(
       return ctx.services.courseInsights.getInsights(
         ctx.organizationId,
         courseId,
+        period
+      );
+    },
+  })
+);
+
+/**
+ * GET /api/journeys/insights/org-revenue?organizationId=&period=
+ *
+ * BATCH authoritative gross revenue for every course-type journey the org owns,
+ * keyed by landing-page id — the studio index badge (Codex-9p47t). Same
+ * `requireOrgManagement` guard as the per-course insights read; the handler
+ * forwards `ctx.organizationId`, never the client value.
+ *
+ * @returns {Record<string, number>} landing-page id → gross revenue (GBP pence);
+ * pages with no revenue are omitted.
+ */
+app.get(
+  '/org-revenue',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api', // 100 req/min
+    },
+    input: {
+      query: orgJourneyRevenueQuerySchema,
+    },
+    handler: async (ctx): Promise<Record<string, number>> => {
+      const { period } = ctx.input.query;
+      return ctx.services.courseInsights.getOrgJourneyRevenue(
+        ctx.organizationId,
         period
       );
     },

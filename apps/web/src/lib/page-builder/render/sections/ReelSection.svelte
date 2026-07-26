@@ -142,6 +142,9 @@
     }
   }
 
+  /* Ultrawide letterbox with a cinematic candlelit wash — a single warm bloom
+     low-centre over a deep body, derived from the org brand (never a flat box).
+     A real poster layers over the top when configured. */
   .reel__stage {
     position: relative;
     isolation: isolate;
@@ -149,15 +152,31 @@
     aspect-ratio: 2.4 / 1;
     border-radius: var(--radius-card);
     overflow: hidden;
-    border: var(--border-width) solid var(--color-border-subtle);
+    border: var(--border-width) solid
+      color-mix(in oklab, var(--color-brand-primary) 22%, transparent);
     background:
       var(--poster, none) center / cover no-repeat,
-      var(--color-surface-secondary);
+      radial-gradient(
+        50% 90% at 50% 78%,
+        color-mix(in oklab, var(--color-brand-primary) 34%, transparent),
+        transparent 70%
+      ),
+      linear-gradient(
+        178deg,
+        color-mix(in oklab, var(--color-brand-primary) 10%, var(--color-surface)),
+        var(--color-background)
+      );
+    box-shadow:
+      0 var(--space-8) var(--space-16) calc(-1 * var(--space-10))
+        color-mix(in oklab, var(--color-brand-primary) 50%, #000),
+      inset 0 var(--border-width) 0
+        color-mix(in oklab, var(--color-heading) 8%, transparent);
     display: grid;
     place-items: center;
   }
 
   .reel__play {
+    position: relative;
     display: inline-grid;
     place-items: center;
     width: var(--space-14);
@@ -167,9 +186,32 @@
     cursor: pointer;
     color: var(--color-text-on-brand);
     background: var(--color-brand-primary);
+    box-shadow: 0 0 var(--space-8)
+      color-mix(in oklab, var(--color-brand-primary) 60%, transparent);
     transition:
       transform var(--duration-fast) var(--ease-default),
       background-color var(--duration-fast) var(--ease-default);
+  }
+
+  .reel__play::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border: var(--border-width) solid
+      color-mix(in oklab, var(--color-brand-primary) 60%, transparent);
+    animation: reel-pulse 3.2s var(--ease-default) infinite;
+  }
+
+  @keyframes reel-pulse {
+    0% {
+      transform: scale(1);
+      opacity: 0.7;
+    }
+    100% {
+      transform: scale(1.9);
+      opacity: 0;
+    }
   }
 
   .reel__play:hover {
@@ -197,6 +239,10 @@
   @media (prefers-reduced-motion: reduce) {
     .reel__play {
       transition: none;
+    }
+    .reel__play::after {
+      animation: none;
+      opacity: 0;
     }
     .reel__play:hover {
       transform: none;

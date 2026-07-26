@@ -70,9 +70,23 @@ export interface JourneySalesContext {
   /**
    * Absolute URL of the offer/checkout surface for this journey
    * (`buildJourneyUrl(..., { surface: 'checkout' })`). Sections link their
-   * primary CTA here.
+   * primary CTA here for a visitor who has not yet joined.
    */
   checkoutUrl: string;
+  /**
+   * Absolute URL of the member dashboard surface
+   * (`buildJourneyUrl(..., { surface: 'dashboard' })`). The primary CTA points
+   * here instead of `checkoutUrl` for a viewer who is already enrolled.
+   */
+  dashboardUrl: string;
+  /**
+   * Whether the current viewer is already enrolled in this course. The public
+   * sales page is fully public (no `canView`); this flag ONLY re-targets the
+   * conversion CTA — anonymous / not-enrolled → "join" (→ `checkoutUrl`);
+   * enrolled → "go to your dashboard" (→ `dashboardUrl`). Defaults to `false`
+   * so the studio builder's live preview always shows the pre-purchase state.
+   */
+  enrolled: boolean;
   /**
    * The streamed sell-preview. Sections consume it via `{#await}` with a
    * poster skeleton so a slow/failed media resolution degrades gracefully and
@@ -93,6 +107,8 @@ export interface HeroSectionProps {
   ctaLabel?: string;
   secondaryLabel?: string;
   secondaryHref?: string;
+  /** A quiet trust line under the CTAs ("Practised by 2,400+ …"). */
+  trust?: string;
 }
 
 /** `introVideo` — the 90-second sell film (streamed preview). */

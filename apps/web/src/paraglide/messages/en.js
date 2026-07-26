@@ -9920,3 +9920,51 @@ export const email_payout_released_subject = () => `Your payout is on its way`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const email_payout_released_body = () => `Your pending earnings have been transferred to your Stripe account.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_journey_part_of_kicker = () => `Part of a journey`
+
+
+/**
+ * @param {{ course: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_journey_part_of_body = (params) => `This practice stands on its own — or arrives inside ${params.course}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_journey_free_kicker = () => `If that lands`
+
+
+/**
+ * @param {{ course: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_journey_free_title = (params) => `Keep going with ${params.course}`
+
+
+/**
+ * @param {{ course: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_journey_free_body = (params) => `This practice is part of ${params.course}. Continue the whole path whenever you feel ready.`
+
+
+/**
+ * @param {{ course: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_journey_see_journey = (params) => `See the ${params.course} journey`

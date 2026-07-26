@@ -45,7 +45,14 @@
   });
 
   const heading = $derived(p.heading ?? 'Begin the work.');
-  const ctaLabel = $derived(p.ctaLabel ?? 'Join now');
+  // CTA branches on enrolment: an enrolled member is sent to their dashboard;
+  // everyone else funnels to checkout to join.
+  const ctaHref = $derived(
+    context.enrolled ? context.dashboardUrl : context.checkoutUrl
+  );
+  const ctaLabel = $derived(
+    context.enrolled ? 'Go to your dashboard' : (p.ctaLabel ?? 'Join now')
+  );
   // One-off price fallback when no offer paths are teased on the sell page.
   const oneOffPrice = $derived(
     context.course.priceCents !== null ? formatPrice(context.course.priceCents) : null
@@ -82,7 +89,7 @@
               <p class="invite__offer-blurb">{offer.blurb}</p>
             {/if}
             <CtaLink
-              href={context.checkoutUrl}
+              href={ctaHref}
               variant={offer.best ? 'primary' : 'secondary'}
               size="md"
             >
@@ -101,7 +108,7 @@
         {#if p.priceNote}
           <p class="invite__note">{p.priceNote}</p>
         {/if}
-        <CtaLink href={context.checkoutUrl} variant="primary" size="lg">
+        <CtaLink href={ctaHref} variant="primary" size="lg">
           {ctaLabel}
         </CtaLink>
       </div>

@@ -20,24 +20,52 @@
  */
 import { error } from '@sveltejs/kit';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { resolveCanEnterCourse } from '$lib/server/journeys/round-d-seam';
 import type { PageServerLoad } from './$types';
-import { getCoursePage, resolveSellPreview } from './journey-data';
+import {
+  getCoursePage,
+  getCoursePagePreview,
+  resolveSellPreview,
+} from './journey-data';
 
-export const load: PageServerLoad = async ({
-  params,
-  parent,
-  setHeaders,
-  depends,
-}) => {
+export const load: PageServerLoad = async (event) => {
+  const { params, parent, setHeaders, depends, locals } = event;
+
   // Ensure the org layout (auth + branding + org resolution) has resolved before
   // we commit cache headers — mirrors the org-landing precedent.
-  await parent();
+  const { user } = await parent();
 
-  // AWAIT: the SEO-critical, first-paint envelope. Null → no published page.
-  const coursePage = await getCoursePage({ slug: params.journeySlug });
-  if (!coursePage) {
-    throw error(404, 'This journey could not be found.');
+  // AWAIT: the SEO-critical, first-paint envelope. Null → no PUBLISHED page.
+  let coursePage = await getCoursePage({ slug: params.journeySlug });
+
+  // Draft live-preview (Codex-isr02 P0b-2): when there's no published page but a
+  // user IS signed in, try the management-gated preview read so an org manager
+  // can preview an UNPUBLISHED draft in the builder iframe. The worker's
+  // requireOrgManagement is the sole authority — a non-manager (or anon, who
+  // never reaches this branch) gets null → 404 (fail-closed). This shell is
+  // minimal for a fresh draft; the builder streams live sections/brand over the
+  // page-preview bridge, which +page.svelte overlays on top.
+  if (!coursePage && locals.user) {
+    coursePage = await getCoursePagePreview({ slug: params.journeySlug });
   }
+
+  if (!coursePage) {
+    throw error(404, 'This portal could not be found.');
+  }
+
+  // AWAIT the enrolment flag: it flips the ABOVE-THE-FOLD hero CTA (anon/
+  // not-enrolled → "join" → checkout; enrolled → "go to your dashboard" →
+  // dashboard), so it belongs on the first-paint path, not streamed. The sales
+  // page itself stays fully PUBLIC (no `canView` gate) — this only re-targets
+  // the CTA. We skip the worker round-trip entirely for anonymous visitors (the
+  // SEO-critical common case): no session ⇒ definitionally not enrolled. The
+  // check is `.catch()`-guarded so an entitlement-resolver hiccup degrades to
+  // the public/join CTA rather than throwing.
+  const enrolled = user
+    ? await resolveCanEnterCourse(event, user.id, coursePage.course.id).catch(
+        () => false
+      )
+    : false;
 
   // Version-keyed invalidation dependency. NOTE (flagged for the conductor):
   // the page/course payload should cache under new `CacheType.PAGE_CONFIG` /
@@ -66,6 +94,7 @@ export const load: PageServerLoad = async ({
   return {
     coursePage,
     orgSlug: params.slug,
+    enrolled,
     // STREAM: public sell previews (no auth). `.catch()` → null on any failure.
     sellPreview: resolveSellPreview({
       pageId: coursePage.page.id,

@@ -54,6 +54,54 @@ export interface JourneyStageView {
   practices: JourneyPracticeView[];
 }
 
+/**
+ * STUDIO curriculum-editor mirror (Codex-03cwh) — the structural twin of the BE
+ * `EditorPracticeView` (`@codex/shared-types`). A SUPERSET of
+ * {@link JourneyPracticeView}: the editor inspector's media-slot needs the
+ * linked content's picker metadata (title/type/thumbnail/publish status) the
+ * public view omits, and the editor shows DRAFT-content practices too.
+ */
+export interface EditorPracticeView {
+  contentId: string;
+  slug: string | null;
+  title: string;
+  contentType: JourneyContentType;
+  /** Publish status of the LINKED CONTENT (draft ⇒ not yet member-visible). */
+  status: PageStatus;
+  thumbnailUrl: string | null;
+  sortOrder: number;
+}
+
+/** An ordered stage with its practice pool, as the studio editor reads it. */
+export interface EditorStageView {
+  id: string;
+  name: string;
+  gloss: string | null;
+  sortOrder: number;
+  practices: EditorPracticeView[];
+}
+
+/** The full admin curriculum the studio editor loads for one course. */
+export interface EditorCurriculum {
+  courseId: string;
+  stages: EditorStageView[];
+}
+
+/**
+ * One "Choose from your library" PICKER option (Codex-03cwh). A projection of
+ * the org's existing content the editor can attach as a practice — sourced from
+ * the reused content-list read, NOT a new endpoint. Shaped so a picked option
+ * drops straight into an {@link EditorPracticeView} (by `contentId`).
+ */
+export interface CurriculumContentOption {
+  contentId: string;
+  title: string;
+  contentType: JourneyContentType;
+  /** Publish status — the picker flags drafts (attachable, but not yet live). */
+  status: PageStatus;
+  thumbnailUrl: string | null;
+}
+
 export interface JourneyCourseView {
   id: string;
   slug: string;
@@ -116,6 +164,50 @@ export interface JourneyListItem {
   /** `live` provenance (purchases + subscriptions). */
   revenueCents: number | null;
   updatedAt: string;
+}
+
+/**
+ * Progress state of an enrolled journey (library shelf + continue rail).
+ * FE mirror of `@codex/shared-types` `JourneyProgressStatus`.
+ */
+export type JourneyProgressStatus = 'not-started' | 'in-progress' | 'completed';
+
+/**
+ * A journey as a PUBLIC discovery card (Codex-oi2w4 — the org home "featured
+ * journeys" rail + the Explore grid). FE mirror of `@codex/shared-types`
+ * `JourneyCardView` (structurally identical by design). Fully public — no
+ * per-user state.
+ */
+export interface JourneyCardView {
+  pageId: string;
+  /** Org-scoped landing-page slug → the public sell page (`/journeys/:slug`). */
+  slug: string;
+  title: string;
+  kicker: string | null;
+  tagline: string | null;
+  courseId: string;
+  courseSlug: string;
+  /** One-off purchase price in GBP pence; null = membership-only. */
+  priceCents: number | null;
+  stageCount: number;
+  practiceCount: number;
+  featured: boolean;
+}
+
+/**
+ * A journey the current user is enrolled in (Codex-oi2w4 — the library "Your
+ * journeys" shelf + continue rail). FE mirror of `@codex/shared-types`
+ * `EnrolledJourneyCard`. The discovery card + the user's progress rollup.
+ */
+export interface EnrolledJourneyCard extends JourneyCardView {
+  completedPractices: number;
+  totalPractices: number;
+  /** 0–100, integer. */
+  percent: number;
+  status: JourneyProgressStatus;
+  enrolledAt: string;
+  lastActivityAt: string | null;
+  completedAt: string | null;
 }
 
 /**
