@@ -7,10 +7,10 @@
   standalone — route context selects this UI. Client-rendered (ssr=false); the
   server gate enforced canEnterCourse + canView.
 
-  The page owns the candlelit dark palette: it re-points the semantic `--color-*`
-  tokens on `.practice` via OKLCH relative-colour from `--color-brand-primary`,
-  so every child (players, playlist, breadcrumb) inherits it and the org-brand
-  heading selector follows automatically. Accents stay on `--color-brand-primary`.
+  The page INHERITS the design-system semantic theme (like the library / explore
+  / standalone-viewer surfaces) — no forced palette. Surfaces, text, and borders
+  come from the theme tokens; accents use the real `--color-brand-primary` (the
+  org brand); the video/audio player keeps its own dark `--color-player-*` chrome.
 
   Completion + playback read the SINGLE progress store (F19): the working pane
   auto-marks media on genuine 100% finish and writes explicit completions for
@@ -190,30 +190,11 @@
 </div>
 
 <style>
-  /* Candlelit dark palette — re-point the semantic tokens from the org brand
-     via OKLCH relative colour. Every descendant reads `--color-*`, so the whole
-     player (players, playlist, breadcrumb) inherits it; the org-brand heading
-     selector reads the same re-pointed `--color-heading` and follows. Accents
-     stay on `--color-brand-primary` (the org's real hue → the "ember"). */
+  /* Inherit the design-system semantic theme — no forced palette. The wrapper is
+     layout-only; surfaces / text / borders resolve from the theme tokens, accents
+     from the real `--color-brand-primary`, and the players keep `--color-player-*`. */
   .practice {
-    position: relative;
-    isolation: isolate;
     min-height: 100dvh;
-    --color-background: oklch(from var(--color-brand-primary) 0.16 calc(c * 0.5) h);
-    --color-surface: oklch(from var(--color-brand-primary) 0.21 calc(c * 0.45) h);
-    --color-surface-secondary: oklch(from var(--color-brand-primary) 0.25 calc(c * 0.42) h);
-    --color-surface-tertiary: oklch(from var(--color-brand-primary) 0.29 calc(c * 0.4) h);
-    --color-heading: oklch(from var(--color-brand-primary) 0.96 calc(c * 0.12) h);
-    --color-text: oklch(from var(--color-brand-primary) 0.9 calc(c * 0.08) h);
-    --color-text-secondary: oklch(from var(--color-brand-primary) 0.76 calc(c * 0.07) h);
-    --color-text-tertiary: oklch(from var(--color-brand-primary) 0.62 calc(c * 0.07) h);
-    --color-text-muted: oklch(from var(--color-brand-primary) 0.62 calc(c * 0.07) h);
-    --color-border-subtle: oklch(from var(--color-brand-primary) 0.3 calc(c * 0.3) h);
-    --color-border: oklch(from var(--color-brand-primary) 0.36 calc(c * 0.32) h);
-    --color-border-strong: oklch(from var(--color-brand-primary) 0.44 calc(c * 0.34) h);
-    --color-border-hover: oklch(from var(--color-brand-primary) 0.54 calc(c * 0.36) h);
-    background: var(--color-background);
-    color: var(--color-text);
   }
 
   .practice__grid {
