@@ -45,6 +45,8 @@ import type {
   CourseDashboardData,
   CourseSellPreview,
   CourseSellPreviewClip,
+  EnrolledCourseProgress,
+  EnrolledCourseSummary,
   InCoursePracticeData,
   JourneyCoursePage,
   JourneyCourseSummary,
@@ -59,7 +61,7 @@ import type {
   PracticeCompletionRecord,
   PracticeContentType,
 } from '@codex/shared-types';
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 
 /**
  * Narrow a stored `content.contentType` varchar to the practice union. The DB
@@ -69,6 +71,49 @@ import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
  */
 function toPracticeContentType(value: string | null): PracticeContentType {
   return value === 'audio' || value === 'written' ? value : 'video';
+}
+
+/**
+ * Summarise the member-library journey-card rollup from the SAME curriculum +
+ * completion shapes the dashboard uses (`practice_completions ⋈ stage_practices`,
+ * SPEC §11). Flattens the curriculum in course order (stage → practice
+ * `sortOrder`) so `nextPractice*` is the first incomplete step to resume.
+ */
+function rollUpEnrollment(
+  stages: readonly JourneyStage[],
+  completions: readonly PracticeCompletionRecord[]
+): EnrolledCourseProgress {
+  const completedIds = new Set(completions.map((c) => c.contentId));
+  const ordered = [...stages]
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .flatMap((s) => [...s.practices].sort((a, b) => a.sortOrder - b.sortOrder));
+
+  const total = ordered.length;
+  const done = ordered.filter((p) => completedIds.has(p.contentId)).length;
+  const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+  const status: EnrolledCourseProgress['status'] =
+    total === 0 || done === 0
+      ? 'not-started'
+      : done >= total
+        ? 'completed'
+        : 'in-progress';
+
+  const next = ordered.find((p) => !completedIds.has(p.contentId)) ?? null;
+  // ISO-8601 strings sort lexicographically, so a string max == the latest date.
+  const lastCompletedAt = completions.reduce<string | null>(
+    (max, c) => (max === null || c.completedAt > max ? c.completedAt : max),
+    null
+  );
+
+  return {
+    done,
+    total,
+    percent,
+    status,
+    lastCompletedAt,
+    nextPracticeSlug: next?.slug ?? null,
+    nextPracticeTitle: next?.title ?? null,
+  };
 }
 
 export class CourseJourneyService extends BaseService {
@@ -481,6 +526,83 @@ export class CourseJourneyService extends BaseService {
       };
     } catch (error) {
       this.handleError(error, 'recordPracticeCompletion');
+    }
+  }
+
+  /**
+   * List every course the caller is enrolled in within ONE org — the member
+   * library "Your journeys" shelf (SPEC §8.4). STRICTLY scoped to
+   * `(userId, organizationId)`: the enrollment join is filtered by `userId` and
+   * the course by `organizationId` + PUBLISHED + non-deleted, so another user's
+   * enrollments and other orgs' / draft courses can never surface (IDOR guard).
+   *
+   * Each row carries the course chrome (kicker / lede / guide name), the
+   * enrollment, its access `source` (→ card badge), and the progress rollup —
+   * the SAME `practice_completions ⋈ stage_practices` rollup the dashboard uses
+   * (reusing {@link loadStages} + {@link loadCompletions}). One rollup pair of
+   * bounded reads per enrolled course; enrollment counts are small in practice.
+   */
+  async listEnrolledCourses(
+    userId: string,
+    organizationId: string
+  ): Promise<EnrolledCourseSummary[]> {
+    try {
+      const rows = await this.db
+        .select({
+          courseId: courses.id,
+          slug: courses.slug,
+          title: courses.title,
+          kicker: courses.kicker,
+          lede: courses.lede,
+          guide: courses.guide,
+          organizationSlug: organizations.slug,
+          enrolledAt: courseEnrollments.enrolledAt,
+          lastActivityAt: courseEnrollments.lastActivityAt,
+          completedAt: courseEnrollments.completedAt,
+          source: courseEnrollments.source,
+        })
+        .from(courseEnrollments)
+        .innerJoin(courses, eq(courses.id, courseEnrollments.courseId))
+        .leftJoin(organizations, eq(organizations.id, courses.organizationId))
+        .where(
+          and(
+            eq(courseEnrollments.userId, userId),
+            eq(courses.organizationId, organizationId),
+            eq(courses.status, CONTENT_STATUS.PUBLISHED),
+            isNull(courses.deletedAt)
+          )
+        )
+        .orderBy(desc(courseEnrollments.enrolledAt));
+
+      if (rows.length === 0) return [];
+
+      const summaries: EnrolledCourseSummary[] = [];
+      for (const row of rows) {
+        const stages = await this.loadStages(row.courseId);
+        const completions = await this.loadCompletions(userId, stages);
+        summaries.push({
+          course: {
+            id: row.courseId,
+            slug: row.slug,
+            title: row.title,
+            organizationSlug: row.organizationSlug ?? null,
+            kicker: row.kicker ?? null,
+            lede: row.lede ?? null,
+            guideName: row.guide?.name ?? null,
+          },
+          enrollment: {
+            courseId: row.courseId,
+            enrolledAt: row.enrolledAt.toISOString(),
+            lastActivityAt: row.lastActivityAt?.toISOString() ?? null,
+            completedAt: row.completedAt?.toISOString() ?? null,
+          },
+          enrollmentSource: row.source,
+          progress: rollUpEnrollment(stages, completions),
+        });
+      }
+      return summaries;
+    } catch (error) {
+      this.handleError(error, 'listEnrolledCourses');
     }
   }
 

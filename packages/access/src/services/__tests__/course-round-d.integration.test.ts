@@ -625,6 +625,108 @@ describe('Round-D read services (Codex-776gg)', () => {
       ).toBeNull();
     });
 
+    it('listEnrolledCourses: strictly scoped to the caller — user A never sees user B enrollments (IDOR)', async () => {
+      const journey = new CourseJourneyService({ db, environment: 'test' });
+      const courseX = await createCourse(db, orgAId, creatorId, {
+        status: 'published',
+      });
+      const courseY = await createCourse(db, orgAId, creatorId, {
+        status: 'published',
+      });
+      const sx = await createStage(db, courseX.id, 1);
+      await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId: sx,
+        sortOrder: 1,
+      });
+      await insertEnrollment(db, {
+        userId: u3,
+        courseId: courseX.id,
+        enrolledAt: daysAgo(2),
+        source: 'course_purchase',
+      });
+      // A foreign user's enrollment in a DIFFERENT course — must never surface.
+      await insertEnrollment(db, {
+        userId: u4,
+        courseId: courseY.id,
+        enrolledAt: daysAgo(1),
+        source: 'tier_subscription',
+      });
+
+      const forU3 = await journey.listEnrolledCourses(u3, orgAId);
+      const ids = forU3.map((e) => e.course.id);
+      expect(ids).toContain(courseX.id);
+      expect(ids).not.toContain(courseY.id);
+    });
+
+    it('listEnrolledCourses: org-scoped, published-only, with a per-course progress rollup', async () => {
+      const journey = new CourseJourneyService({ db, environment: 'test' });
+      const course = await createCourse(db, orgAId, creatorId, {
+        status: 'published',
+      });
+      const stage = await createStage(db, course.id, 1);
+      const p1 = await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId: stage,
+        sortOrder: 1,
+      });
+      const p2 = await addPractice(db, {
+        creatorId,
+        organizationId: orgAId,
+        stageId: stage,
+        sortOrder: 2,
+      });
+
+      // Enrollments that MUST be excluded: a draft course (org A) and a
+      // published course in ORG B — seeded as real foreign rows so the test
+      // fails if either scope regresses.
+      const draft = await createCourse(db, orgAId, creatorId, {
+        status: 'draft',
+      });
+      const foreign = await createCourse(db, orgBId, creatorId, {
+        status: 'published',
+      });
+      await insertEnrollment(db, {
+        userId: u5,
+        courseId: course.id,
+        enrolledAt: daysAgo(3),
+        source: 'course_purchase',
+      });
+      await insertEnrollment(db, {
+        userId: u5,
+        courseId: draft.id,
+        enrolledAt: daysAgo(2),
+        source: 'course_purchase',
+      });
+      await insertEnrollment(db, {
+        userId: u5,
+        courseId: foreign.id,
+        enrolledAt: daysAgo(1),
+        source: 'course_purchase',
+      });
+      // One of two practices complete → 50%, in-progress, next = p2.
+      await db
+        .insert(practiceCompletions)
+        .values({ userId: u5, contentId: p1.contentId, source: 'manual' });
+
+      const list = await journey.listEnrolledCourses(u5, orgAId);
+      const ids = list.map((e) => e.course.id);
+      expect(ids).toContain(course.id);
+      expect(ids).not.toContain(draft.id); // draft excluded (published-only)
+      expect(ids).not.toContain(foreign.id); // org B excluded (org scope)
+
+      const entry = list.find((e) => e.course.id === course.id);
+      expect(entry).toBeDefined();
+      expect(entry?.progress.done).toBe(1);
+      expect(entry?.progress.total).toBe(2);
+      expect(entry?.progress.percent).toBe(50);
+      expect(entry?.progress.status).toBe('in-progress');
+      expect(entry?.progress.nextPracticeSlug).toBe(p2.slug);
+      expect(entry?.enrollmentSource).toBe('course_purchase');
+    });
+
     it('recordPracticeCompletion is idempotent (repeat is a no-op returning the canonical row)', async () => {
       const journey = new CourseJourneyService({ db, environment: 'test' });
       const course = await createCourse(db, orgAId, creatorId, {

@@ -49,6 +49,8 @@ export type {
   CourseSellPreview,
   CourseSellPreviewClip,
   CourseTierOffer,
+  EnrolledCourseProgress,
+  EnrolledCourseSummary,
   Entitlement,
   EntitlementResolver,
   EntitlementSource,
