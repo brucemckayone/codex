@@ -1,4 +1,5 @@
 import { DEFAULT_STREAMING_URL_TTL_SECONDS } from '@codex/access';
+import { ValidationError } from '@codex/service-errors';
 import type {
   CourseDashboardData,
   CourseSellPreview,
@@ -6,13 +7,20 @@ import type {
   InCoursePracticeData,
   JourneyCoursePage,
   JourneyCourseSummary,
+  JourneyListItem,
+  JourneyPageRecord,
   PracticeCompletionRecord,
 } from '@codex/shared-types';
 import {
   courseBySlugQuerySchema,
   courseParamsSchema,
+  createJourneyBodySchema,
   inCoursePracticeParamsSchema,
+  journeyOrgQuerySchema,
+  journeyPageParamsSchema,
+  journeyStudioListQuerySchema,
   recordCompletionBodySchema,
+  saveJourneyPageBodySchema,
 } from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
@@ -247,6 +255,137 @@ app.post(
         contentId,
         source
       );
+    },
+  })
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CREATOR / STUDIO management (Codex-isr02 · the page-builder write path)
+//
+// The authoring side of a journey — list / create / load-for-builder / save.
+// AUTHORIZATION mirrors `journey-insights.ts`: `requireOrgManagement` (owner OR
+// admin) re-derives the org from the session membership and sets
+// `ctx.organizationId`. The `organizationId` in the query string is consumed
+// ONLY by the procedure org resolver — every handler forwards `ctx.organizationId`
+// (and `ctx.user.id` for the creator), NEVER the client value; the service ALSO
+// scopes to that org, so a manager of org A can never touch org B's pages.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/journeys/studio/journeys?organizationId=&status=
+ * The studio index — the org's journeys/pages, newest-edited first, optional
+ * status filter, with `live` course rollups.
+ * @returns {JourneyListItem[]}
+ */
+app.get(
+  '/studio/journeys',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      query: journeyStudioListQuerySchema,
+    },
+    handler: async (ctx): Promise<JourneyListItem[]> => {
+      return ctx.services.courseJourney.listJourneysForOrg(
+        ctx.organizationId,
+        ctx.input.query.status
+      );
+    },
+  })
+);
+
+/**
+ * POST /api/journeys/studio/journeys?organizationId=  { title, pageType }
+ * Create a new journey (course → course + landing_page rows in one tx; landing →
+ * page only), as a draft. Returns the new page id + slug (the builder navigates
+ * to `/studio/journeys/:id/page`).
+ * @returns {{ id: string; slug: string }}
+ */
+app.post(
+  '/studio/journeys',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      query: journeyOrgQuerySchema,
+      body: createJourneyBodySchema,
+    },
+    handler: async (ctx): Promise<{ id: string; slug: string }> => {
+      return ctx.services.courseJourney.createJourney(
+        ctx.organizationId,
+        ctx.user.id,
+        ctx.input.body
+      );
+    },
+  })
+);
+
+/**
+ * GET /api/journeys/studio/journeys/:pageId?organizationId=
+ * Load a page draft into the builder (any status; org-scoped → null if foreign).
+ * @returns {JourneyPageRecord | null}
+ */
+app.get(
+  '/studio/journeys/:pageId',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    handler: async (ctx): Promise<JourneyPageRecord | null> => {
+      return ctx.services.courseJourney.getJourneyForBuilder(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
+    },
+  })
+);
+
+/**
+ * PUT /api/journeys/studio/journeys/:pageId?organizationId=  { ...record }
+ * Persist the builder's draft (sections/brand/title/slug/status). Publishing a
+ * course page publishes its subject course too. 204 on success.
+ * @returns {null}
+ */
+app.put(
+  '/studio/journeys/:pageId',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+      body: saveJourneyPageBodySchema,
+    },
+    handler: async (ctx): Promise<null> => {
+      // The URL id and the body id must identify the SAME page — else the URL
+      // names a different resource than the one mutated (audit/caching/least-
+      // surprise; review L1). Not an IDOR — both are org-scoped by the service —
+      // but a mismatch is a client bug, so reject it.
+      if (ctx.input.params.pageId !== ctx.input.body.id) {
+        throw new ValidationError(
+          'Path id does not match the page id in the body'
+        );
+      }
+      await ctx.services.courseJourney.saveJourneyPage(
+        ctx.organizationId,
+        ctx.input.body
+      );
+      return null;
     },
   })
 );

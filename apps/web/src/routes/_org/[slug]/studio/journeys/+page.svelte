@@ -6,9 +6,9 @@
   server load — the studio `+layout.server.ts` already gates creator/admin/owner,
   and the studio subtree is `ssr = false`.
 
-  AGGRESSIVE-MODE MOCKS: data comes from `journey-queries.mock` (the frozen
-  `ListJourneysQuery` shape). The conductor swaps it for the real remote after
-  WP-2 — the `.current` / `.loading` access stays identical.
+  Wired to the REAL `listJourneys` remote (Codex-isr02): `.current` / `.loading`
+  access is identical to the retired `journey-queries.mock`. Owner/admin only —
+  the content-api route enforces `requireOrgManagement`.
 -->
 <script lang="ts">
   import { page } from '$app/state';
@@ -16,7 +16,7 @@
   import type { PageStatus } from '@codex/shared-types';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { CompassIcon, PlusIcon } from '$lib/components/ui/Icon';
-  import { listJourneysMock } from '$lib/components/page-builder/journey-queries.mock.svelte';
+  import { listJourneys } from '$lib/remote/journeys.remote';
 
   const { data } = $props();
 
@@ -35,7 +35,7 @@
   });
 
   const journeysQuery = $derived(
-    listJourneysMock({
+    listJourneys({
       organizationId: data.org.id,
       ...(urlStatus !== 'all' && { status: urlStatus }),
     })

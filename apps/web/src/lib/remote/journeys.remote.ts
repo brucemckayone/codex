@@ -14,11 +14,19 @@
  * `resolveCourseBySlug`.
  */
 
+import {
+  createJourneyBodySchema,
+  saveJourneyPageBodySchema,
+} from '@codex/validation';
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
 import type { PracticeCompletionRecord } from '$lib/journeys/types';
-import type { JourneyCoursePage } from '$lib/page-builder';
+import type {
+  JourneyCoursePage,
+  JourneyListItem,
+  JourneyPageRecord,
+} from '$lib/page-builder';
 import type { SellPreview } from '$lib/page-builder/render';
 import { createServerApi } from '$lib/server/api';
 import { persistPracticeCompletion } from '$lib/server/journeys/round-d-seam';
@@ -98,5 +106,97 @@ export const markPracticeCompleted = command(
     if (!userId) error(401, 'Sign in to record progress');
 
     return persistPracticeCompletion(event, userId, { contentId, source });
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Codex-isr02 · Studio journey MANAGEMENT (list / builder-load / create / save)
+//
+// The creator write-path — the REAL remotes that replace the aggressive-mode
+// `journey-queries.mock`. All hit the content-api `requireOrgManagement` routes
+// (owner/admin); the worker re-derives scope from the session, so a client can
+// never redirect an operation to an org it doesn't manage. The org is resolved
+// from the studio's request HOST (org subdomain → slug → id), mirroring
+// `getCoursePage` above.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve the current studio org (host subdomain → `getPublicInfo` id) plus a
+ * session-forwarding API client. Returns `null` off a non-org host. Not exported
+ * — `.remote.ts` may export only remote functions.
+ */
+async function resolveStudioOrg(): Promise<{
+  api: ReturnType<typeof createServerApi>;
+  orgId: string;
+} | null> {
+  const { platform, cookies, url } = getRequestEvent();
+  const context = getSubdomainContext(url.hostname);
+  if (context.type !== 'organization') return null;
+  const api = createServerApi(platform, cookies);
+  const org = await api.org.getPublicInfo(context.slug);
+  if (!org || typeof org !== 'object' || !('id' in org)) return null;
+  return { api, orgId: (org as { id: string }).id };
+}
+
+const listJourneysSchema = z.object({
+  organizationId: z.string().uuid(),
+  status: z.enum(['draft', 'published', 'archived']).optional(),
+});
+
+/**
+ * Studio index list (frozen `ListJourneysQuery`). The org is resolved from the
+ * request HOST via `resolveStudioOrg` — consistent with the sibling studio
+ * remotes and least-privilege. The `organizationId` in the input is accepted for
+ * the frozen contract but is NOT trusted here (review L2); the worker's
+ * `requireOrgManagement` is the authority in any case.
+ */
+export const listJourneys = query(
+  listJourneysSchema,
+  async ({ status }): Promise<JourneyListItem[]> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) return [];
+    return ctx.api.access.listJourneys(ctx.orgId, status);
+  }
+);
+
+const journeyIdSchema = z.object({ id: z.string().uuid() });
+
+/**
+ * Load a page draft into the builder (frozen `GetJourneyForBuilderQuery`).
+ * Org-scoped by the worker → `null` for a foreign/missing page (IDOR-safe).
+ */
+export const getJourneyForBuilder = query(
+  journeyIdSchema,
+  async ({ id }): Promise<JourneyPageRecord | null> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) return null;
+    return ctx.api.access.getJourneyForBuilder(ctx.orgId, id);
+  }
+);
+
+/**
+ * Create a journey (draft) and return its page id + slug. A `course` page also
+ * creates the subject course row (one transaction, worker-side).
+ */
+export const createJourney = command(
+  createJourneyBodySchema,
+  async (input): Promise<{ id: string; slug: string }> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'Journeys can only be created within an organization');
+    }
+    return ctx.api.access.createJourney(ctx.orgId, input);
+  }
+);
+
+/** Persist the builder's draft (frozen save command). */
+export const saveJourneyPage = command(
+  saveJourneyPageBodySchema,
+  async (record): Promise<void> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'Journeys can only be saved within an organization');
+    }
+    await ctx.api.access.saveJourneyPage(ctx.orgId, record);
   }
 );

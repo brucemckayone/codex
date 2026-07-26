@@ -38,7 +38,12 @@ import {
   stagePractices,
   videoPlayback,
 } from '@codex/database/schema';
-import { BaseService } from '@codex/service-errors';
+import {
+  BaseService,
+  ConflictError,
+  NotFoundError,
+  ValidationError,
+} from '@codex/service-errors';
 import type {
   BrandTokenOverrides,
   CompletionSource,
@@ -49,6 +54,8 @@ import type {
   JourneyCoursePage,
   JourneyCourseSummary,
   JourneyEnrollment,
+  JourneyListItem,
+  JourneyPageRecord,
   JourneyPractice,
   JourneyStage,
   JourneyStageView,
@@ -59,7 +66,7 @@ import type {
   PracticeCompletionRecord,
   PracticeContentType,
 } from '@codex/shared-types';
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 /**
  * Narrow a stored `content.contentType` varchar to the practice union. The DB
@@ -72,6 +79,17 @@ function toPracticeContentType(value: string | null): PracticeContentType {
 }
 
 export class CourseJourneyService extends BaseService {
+  /**
+   * The transaction-capable WS client. The registry injects `getSharedDb()` (the
+   * WS driver) as `this.db`, but `BaseService.db`'s static type doesn't expose the
+   * full interactive-transaction signature — this narrow getter recovers it for
+   * the create/save write paths (mirrors `CourseAccessService.txDb`), avoiding an
+   * `as any` blast at each call site.
+   */
+  private get txDb(): typeof import('@codex/database').dbWs {
+    return this.db as typeof import('@codex/database').dbWs;
+  }
+
   /**
    * Resolve the public course summary for `(organizationId, slug)`. Scoped to
    * PUBLISHED, non-deleted courses (member/public surface). Returns `null` when
@@ -484,7 +502,462 @@ export class CourseJourneyService extends BaseService {
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // CREATOR / STUDIO management (Codex-isr02 · the page-builder write path)
+  //
+  // The AUTHORING side of a journey — list / load-for-builder / create / save.
+  // Distinct from the member reads above: these are org-MANAGEMENT operations.
+  // The content-api routes gate them with `requireOrgManagement` and forward the
+  // SESSION-derived org; every method here ALSO scopes to `organizationId` as
+  // defence-in-depth, so a manager of org A can never read or write org B's pages.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * List the org's journeys for the studio index (frozen `ListJourneysQuery`).
+   * A MANAGEMENT view — every non-deleted page the ORG owns (not per-creator),
+   * newest-edited first, optional `status` filter. Course-type pages carry live
+   * curriculum rollups (stage/practice/enrolled counts) + the course `lede` as
+   * tagline; plain landing pages get nulls. `revenueCents` is null here —
+   * accurate, disjoint course revenue is the per-journey Insights read
+   * (`CourseInsightsService`), never duplicated across the index (a heavy per-row
+   * money join that would risk drifting from the authoritative figure).
+   */
+  async listJourneysForOrg(
+    organizationId: string,
+    status?: PageStatus
+  ): Promise<JourneyListItem[]> {
+    try {
+      const pageRows = await this.db
+        .select({
+          id: landingPages.id,
+          pageType: landingPages.pageType,
+          subjectType: landingPages.subjectType,
+          subjectId: landingPages.subjectId,
+          slug: landingPages.slug,
+          title: landingPages.title,
+          status: landingPages.status,
+          updatedAt: landingPages.updatedAt,
+        })
+        .from(landingPages)
+        .where(
+          and(
+            eq(landingPages.organizationId, organizationId),
+            isNull(landingPages.deletedAt),
+            status ? eq(landingPages.status, status) : undefined
+          )
+        )
+        .orderBy(desc(landingPages.updatedAt));
+
+      const courseIds = pageRows
+        .filter((p) => p.subjectType === 'course' && p.subjectId !== null)
+        .map((p) => p.subjectId as string);
+
+      const rollups = await this.loadCourseRollups(organizationId, courseIds);
+
+      return pageRows.map((p) => {
+        const roll =
+          p.subjectType === 'course' && p.subjectId
+            ? rollups.get(p.subjectId)
+            : undefined;
+        return {
+          id: p.id,
+          pageType: p.pageType,
+          subjectType: p.subjectType,
+          slug: p.slug,
+          title: p.title,
+          status: p.status as PageStatus,
+          tagline: roll?.tagline ?? null,
+          stageCount: roll?.stageCount ?? null,
+          practiceCount: roll?.practiceCount ?? null,
+          enrolledCount: roll?.enrolledCount ?? null,
+          revenueCents: null,
+          updatedAt: p.updatedAt.toISOString(),
+        };
+      });
+    } catch (error) {
+      this.handleError(error, 'listJourneysForOrg');
+    }
+  }
+
+  /**
+   * Load a page draft into the studio builder (frozen `GetJourneyForBuilderQuery`).
+   * Scoped to `(id, org)` among non-deleted pages — a foreign or missing id
+   * resolves to `null` (IDOR-safe: never leaks another org's page). ANY status
+   * (drafts included) — the builder edits unpublished pages.
+   */
+  async getJourneyForBuilder(
+    organizationId: string,
+    pageId: string
+  ): Promise<JourneyPageRecord | null> {
+    try {
+      const [row] = await this.db
+        .select({
+          id: landingPages.id,
+          organizationId: landingPages.organizationId,
+          publishedAt: landingPages.publishedAt,
+          pageType: landingPages.pageType,
+          slug: landingPages.slug,
+          title: landingPages.title,
+          status: landingPages.status,
+          subjectType: landingPages.subjectType,
+          subjectId: landingPages.subjectId,
+          brandOverrides: landingPages.brandOverrides,
+          sections: landingPages.sections,
+        })
+        .from(landingPages)
+        .where(
+          and(
+            eq(landingPages.id, pageId),
+            eq(landingPages.organizationId, organizationId),
+            isNull(landingPages.deletedAt)
+          )
+        )
+        .limit(1);
+
+      if (!row) return null;
+      return {
+        id: row.id,
+        organizationId: row.organizationId,
+        publishedAt: row.publishedAt?.toISOString() ?? null,
+        pageType: row.pageType,
+        slug: row.slug,
+        title: row.title,
+        status: row.status as PageStatus,
+        subjectType: row.subjectType,
+        subjectId: row.subjectId,
+        brandOverrides: (row.brandOverrides as BrandTokenOverrides) ?? null,
+        sections: (row.sections as PageSection[]) ?? [],
+      };
+    } catch (error) {
+      this.handleError(error, 'getJourneyForBuilder');
+    }
+  }
+
+  /**
+   * Create a new journey/page (as a draft) and return its page id + slug. For a
+   * `course` page this is a TWO-ROW create — a `courses` row (the curriculum
+   * subject) + a `landing_pages` row bound to it via `subjectType`/`subjectId` —
+   * in ONE transaction, so a half-created journey can never exist. A `landing`
+   * page creates only the page row. The slug is derived from the title and made
+   * unique within the org (both tables share the org slug-space); resolution runs
+   * inside the transaction, and the org-unique partial index is the final arbiter
+   * if two creates race.
+   */
+  async createJourney(
+    organizationId: string,
+    creatorId: string,
+    input: { title: string; pageType: string }
+  ): Promise<{ id: string; slug: string }> {
+    try {
+      const title = input.title.trim();
+      if (!title) {
+        throw new ValidationError('A journey needs a title');
+      }
+      const pageType = input.pageType === 'landing' ? 'landing' : 'course';
+      const base = slugifyTitle(title);
+
+      return await this.txDb.transaction(async (tx) => {
+        // Resolve a free org-unique slug, checking BOTH tables that share the
+        // org slug-space (landing_pages + courses) among non-deleted rows. The
+        // partial-unique index is the final arbiter if two creates race (this
+        // SELECT is not a lock); on exhaustion we throw rather than fall through
+        // to a colliding insert (review L3).
+        let slug: string | null = null;
+        for (let n = 1; n < 1000; n++) {
+          const candidate = n === 1 ? base : `${base}-${n}`;
+          const [pageClash] = await tx
+            .select({ id: landingPages.id })
+            .from(landingPages)
+            .where(
+              and(
+                eq(landingPages.organizationId, organizationId),
+                eq(landingPages.slug, candidate),
+                isNull(landingPages.deletedAt)
+              )
+            )
+            .limit(1);
+          const [courseClash] = await tx
+            .select({ id: courses.id })
+            .from(courses)
+            .where(
+              and(
+                eq(courses.organizationId, organizationId),
+                eq(courses.slug, candidate),
+                isNull(courses.deletedAt)
+              )
+            )
+            .limit(1);
+          if (!pageClash && !courseClash) {
+            slug = candidate;
+            break;
+          }
+        }
+        if (!slug) {
+          throw new ConflictError(
+            'Could not find an available slug for this title — try a different title'
+          );
+        }
+
+        let subjectId: string | null = null;
+        if (pageType === 'course') {
+          const [course] = await tx
+            .insert(courses)
+            .values({
+              organizationId,
+              creatorId,
+              slug,
+              title,
+              status: 'draft',
+            })
+            .returning({ id: courses.id });
+          if (!course) {
+            throw new Error('createJourney: course insert returned no row');
+          }
+          subjectId = course.id;
+        }
+
+        const [page] = await tx
+          .insert(landingPages)
+          .values({
+            organizationId,
+            creatorId,
+            pageType,
+            slug,
+            title,
+            status: 'draft',
+            subjectType: pageType === 'course' ? 'course' : null,
+            subjectId,
+            sections: [],
+          })
+          .returning({ id: landingPages.id, slug: landingPages.slug });
+        if (!page) {
+          throw new Error('createJourney: landing page insert returned no row');
+        }
+
+        return { id: page.id, slug: page.slug };
+      });
+    } catch (error) {
+      this.handleError(error, 'createJourney');
+    }
+  }
+
+  /**
+   * Persist the builder's draft (the frozen save command). Scoped to `(id, org)`
+   * among non-deleted pages — a foreign/missing id throws `NotFoundError` (never a
+   * silent cross-org write). A changed slug is collision-checked against the org's
+   * other non-deleted pages first, so it surfaces as a `ConflictError` (409)
+   * rather than a raw unique-violation. Publishing a COURSE page ALSO publishes
+   * its subject course, so the public sales page — `getCoursePage` requires BOTH
+   * page and course published — goes live in one action.
+   */
+  async saveJourneyPage(
+    organizationId: string,
+    // The editable fields the save touches. A structural subset of the frozen
+    // `JourneyPageRecord` (minus the server-owned id-scoping fields) — declared
+    // inline rather than via `Omit` because SvelteKit's `command()` infers the
+    // `.nullable()` fields as optional, and a narrow accepts-what-it-uses shape
+    // stays assignable from that without a boundary cast. `subjectType`/
+    // `subjectId` are read from the persisted row, never the client payload.
+    record: {
+      id: string;
+      title: string;
+      slug: string;
+      status: PageStatus;
+      sections: PageSection[];
+      brandOverrides?: BrandTokenOverrides | null;
+    }
+  ): Promise<void> {
+    try {
+      const status: PageStatus = record.status;
+      const nextSlug = record.slug.trim();
+      if (!nextSlug) {
+        throw new ValidationError('A journey needs a slug');
+      }
+
+      await this.txDb.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({
+            id: landingPages.id,
+            slug: landingPages.slug,
+            publishedAt: landingPages.publishedAt,
+            subjectType: landingPages.subjectType,
+            subjectId: landingPages.subjectId,
+          })
+          .from(landingPages)
+          .where(
+            and(
+              eq(landingPages.id, record.id),
+              eq(landingPages.organizationId, organizationId),
+              isNull(landingPages.deletedAt)
+            )
+          )
+          .limit(1);
+
+        if (!existing) {
+          throw new NotFoundError('Journey page not found');
+        }
+
+        // A slug change must respect the org-unique slug-space → 409, not a raw
+        // constraint error.
+        if (nextSlug !== existing.slug) {
+          const [clash] = await tx
+            .select({ id: landingPages.id })
+            .from(landingPages)
+            .where(
+              and(
+                eq(landingPages.organizationId, organizationId),
+                eq(landingPages.slug, nextSlug),
+                isNull(landingPages.deletedAt)
+              )
+            )
+            .limit(1);
+          if (clash && clash.id !== record.id) {
+            throw new ConflictError(`The slug "${nextSlug}" is already in use`);
+          }
+        }
+
+        const publishing = status === 'published';
+        const nowPublishedAt =
+          publishing && !existing.publishedAt ? new Date() : undefined;
+
+        await tx
+          .update(landingPages)
+          .set({
+            title: record.title,
+            slug: nextSlug,
+            status,
+            sections: record.sections,
+            brandOverrides: record.brandOverrides,
+            ...(nowPublishedAt ? { publishedAt: nowPublishedAt } : {}),
+          })
+          .where(
+            and(
+              eq(landingPages.id, record.id),
+              eq(landingPages.organizationId, organizationId)
+            )
+          );
+
+        // Publishing a course page publishes its subject course too (getCoursePage
+        // requires BOTH published), so one "Publish" makes the sales page live.
+        if (
+          publishing &&
+          existing.subjectType === 'course' &&
+          existing.subjectId
+        ) {
+          await tx
+            .update(courses)
+            .set({
+              status: 'published',
+              ...(nowPublishedAt ? { publishedAt: nowPublishedAt } : {}),
+            })
+            .where(
+              and(
+                eq(courses.id, existing.subjectId),
+                eq(courses.organizationId, organizationId),
+                isNull(courses.deletedAt)
+              )
+            );
+        }
+      });
+    } catch (error) {
+      this.handleError(error, 'saveJourneyPage');
+    }
+  }
+
   // ── Private read helpers ──────────────────────────────────────────────────
+
+  /**
+   * Curriculum + enrolment rollups for a set of course ids (BATCHED — no N+1),
+   * scoped to the org. Returns a map keyed by courseId; `tagline` is the course
+   * `lede`. Counts cover non-deleted stages, their practice associations, and
+   * enrolments. A course with no matching row simply doesn't appear in the map.
+   */
+  private async loadCourseRollups(
+    organizationId: string,
+    courseIds: string[]
+  ): Promise<
+    Map<
+      string,
+      {
+        tagline: string | null;
+        stageCount: number;
+        practiceCount: number;
+        enrolledCount: number;
+      }
+    >
+  > {
+    const map = new Map<
+      string,
+      {
+        tagline: string | null;
+        stageCount: number;
+        practiceCount: number;
+        enrolledCount: number;
+      }
+    >();
+    if (courseIds.length === 0) return map;
+
+    // Course lede (tagline) — org-scoped, non-deleted. Seeds the map.
+    const courseRows = await this.db
+      .select({ id: courses.id, lede: courses.lede })
+      .from(courses)
+      .where(
+        and(
+          inArray(courses.id, courseIds),
+          eq(courses.organizationId, organizationId),
+          isNull(courses.deletedAt)
+        )
+      );
+    for (const c of courseRows) {
+      map.set(c.id, {
+        tagline: c.lede ?? null,
+        stageCount: 0,
+        practiceCount: 0,
+        enrolledCount: 0,
+      });
+    }
+
+    // Stage counts + practice-association counts (practices left-joined to their
+    // non-deleted stage), grouped by course.
+    const stageRows = await this.db
+      .select({
+        courseId: courseStages.courseId,
+        stageCount: sql<number>`count(distinct ${courseStages.id})`,
+        practiceCount: sql<number>`count(${stagePractices.stageId})`,
+      })
+      .from(courseStages)
+      .leftJoin(stagePractices, eq(stagePractices.stageId, courseStages.id))
+      .where(
+        and(
+          inArray(courseStages.courseId, courseIds),
+          isNull(courseStages.deletedAt)
+        )
+      )
+      .groupBy(courseStages.courseId);
+    for (const s of stageRows) {
+      const entry = map.get(s.courseId);
+      if (entry) {
+        entry.stageCount = Number(s.stageCount);
+        entry.practiceCount = Number(s.practiceCount);
+      }
+    }
+
+    // Enrolment counts.
+    const enrolRows = await this.db
+      .select({
+        courseId: courseEnrollments.courseId,
+        enrolledCount: sql<number>`count(*)`,
+      })
+      .from(courseEnrollments)
+      .where(inArray(courseEnrollments.courseId, courseIds))
+      .groupBy(courseEnrollments.courseId);
+    for (const e of enrolRows) {
+      const entry = map.get(e.courseId);
+      if (entry) entry.enrolledCount = Number(e.enrolledCount);
+    }
+
+    return map;
+  }
 
   /**
    * Course summary + org slug for a PUBLISHED, non-deleted course id.
@@ -760,6 +1233,21 @@ export class CourseJourneyService extends BaseService {
     });
     return row?.contentBody ?? null;
   }
+}
+
+/**
+ * Slugify a title → a URL-safe, org-unique-able base (lowercase, alnum, single
+ * dashes, no leading/trailing dash). Mirrors the FE `createJourneyMock` slug rule
+ * so builder behaviour is unchanged; the empty case falls back to `'untitled'`.
+ */
+function slugifyTitle(title: string): string {
+  return (
+    title
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'untitled'
+  );
 }
 
 /**

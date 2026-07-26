@@ -57,6 +57,7 @@ export type {
   JourneyCourseSummary,
   JourneyCourseView,
   JourneyEnrollment,
+  JourneyListItem,
   JourneyPageRecord,
   JourneyPractice,
   JourneyPracticeView,

@@ -108,7 +108,11 @@ import { logger } from '$lib/observability';
 // twins (`JourneyCoursePage` / `CourseSellPreview`); these FE types are the
 // structurally-identical shapes the renderer consumes. Type-only (erased) — no
 // runtime import of the page-builder barrel.
-import type { JourneyCoursePage } from '$lib/page-builder';
+import type {
+  JourneyCoursePage,
+  JourneyListItem,
+  JourneyPageRecord,
+} from '$lib/page-builder';
 import type { SellPreview } from '$lib/page-builder/render';
 // Import local types that extend DB types with relations
 // OrgMemberItem is in $lib/types (not here) so components can import it
@@ -1164,6 +1168,64 @@ export function createServerApi(
           )}&courseId=${encodeURIComponent(courseId)}&period=${encodeURIComponent(
             period
           )}`
+        ),
+
+      // ── Studio journey MANAGEMENT (Codex-isr02 · page-builder write path) ──
+      // Owner/admin only — the content-api routes enforce `requireOrgManagement`
+      // and re-derive scope from the session; `organizationId` here is used ONLY
+      // for org resolution, never as the authorization source.
+
+      /** Studio index — the org's journeys, newest-edited first (optional status). */
+      listJourneys: (organizationId: string, status?: string) =>
+        request<JourneyListItem[]>(
+          'access',
+          `/api/journeys/studio/journeys?organizationId=${encodeURIComponent(
+            organizationId
+          )}${status ? `&status=${encodeURIComponent(status)}` : ''}`
+        ),
+
+      /** Create a journey (draft). Returns the new page id + slug. */
+      createJourney: (
+        organizationId: string,
+        input: { title: string; pageType: string }
+      ) =>
+        request<{ id: string; slug: string }>(
+          'access',
+          `/api/journeys/studio/journeys?organizationId=${encodeURIComponent(
+            organizationId
+          )}`,
+          { method: 'POST', body: JSON.stringify(input) }
+        ),
+
+      /** Load a page draft into the builder (null if foreign/missing). */
+      getJourneyForBuilder: (organizationId: string, pageId: string) =>
+        request<JourneyPageRecord | null>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}?organizationId=${encodeURIComponent(organizationId)}`
+        ),
+
+      /**
+       * Persist the builder's draft (sections/brand/title/slug/status). The param
+       * is the editable subset the save touches; `brandOverrides` is optional to
+       * stay assignable from SvelteKit's `command()`-inferred record (which infers
+       * `.nullable()` fields as optional). The full record is still serialised —
+       * the worker's Zod schema validates/strips it.
+       */
+      saveJourneyPage: (
+        organizationId: string,
+        record: Pick<
+          JourneyPageRecord,
+          'id' | 'title' | 'slug' | 'status' | 'sections'
+        > & { brandOverrides?: JourneyPageRecord['brandOverrides'] }
+      ) =>
+        request<null>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            record.id
+          )}?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'PUT', body: JSON.stringify(record) }
         ),
     },
 
