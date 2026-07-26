@@ -1,223 +1,379 @@
 <!--
   @component CurriculumMap
 
-  The journey dashboard's curriculum: ordered stages (gates), each with its
-  concurrent practice pool and a per-stage progress ring. Practices link into
-  the in-course player and show completion state (the `practice_completions`
-  row — source of truth). Presentational: completion + rollup are supplied.
+  "The whole arc" — the course curriculum as a stage accordion (SPEC §8.3,
+  prototype `course-dashboard.html` `.map`). One `<details>` per ordered stage:
+  the CURRENT stage (the one holding the resume target) is open; DONE stages
+  (every practice complete) and upcoming stages collapse. Each lesson row shows
+  its completion state (done ✓ / current ● / upcoming medium glyph) and links
+  into the in-course player.
 
-  @prop {JourneyStage[]} stages - Ordered curriculum from the server load.
-  @prop {ReadonlySet<string>} completedIds - Content ids with a completion row.
-  @prop {CourseRollup} rollup - Per-stage + overall counts (computed by caller).
-  @prop {string} courseSlug - For building /journeys/{slug}/practice/{slug} hrefs.
+  Presentational: completion + rollup + the resume pointer are supplied by the
+  dashboard root; colours read the re-pointed portal palette so the map stays
+  legible on the warm/dark surface.
 -->
 <script lang="ts">
   import {
-    CheckCircleIcon,
-    CircleIcon,
+    CheckIcon,
+    ChevronRightIcon,
     FileTextIcon,
     MusicIcon,
     VideoIcon,
   } from '$lib/components/ui/Icon';
   import type { CourseRollup } from '$lib/journeys/rollup';
+  import {
+    countWord,
+    practiceKindLabel,
+    practiceMinutes,
+    stageNumeral,
+  } from '$lib/journeys/practice-display';
   import type {
-    JourneyPractice,
     JourneyStage,
     PracticeContentType,
   } from '$lib/journeys/types';
-  import ProgressRing from './ProgressRing.svelte';
 
   interface Props {
     stages: JourneyStage[];
     completedIds: ReadonlySet<string>;
     rollup: CourseRollup;
     courseSlug: string;
+    /** Content id of the resume target — its row renders as "current" (●). */
+    currentContentId: string | null;
+    /** Stage that owns the resume target — auto-opened. */
+    currentStageId: string | null;
   }
 
-  const { stages, completedIds, rollup, courseSlug }: Props = $props();
+  const {
+    stages,
+    completedIds,
+    rollup,
+    courseSlug,
+    currentContentId,
+    currentStageId,
+  }: Props = $props();
 
   const orderedStages = $derived(
     [...stages].sort((a, b) => a.sortOrder - b.sortOrder)
   );
 
-  function iconFor(type: PracticeContentType) {
-    if (type === 'video') return VideoIcon;
-    if (type === 'audio') return MusicIcon;
-    return FileTextIcon;
-  }
-
-  function practiceHref(practice: JourneyPractice): string {
-    return `/journeys/${courseSlug}/practice/${practice.slug ?? practice.contentId}`;
-  }
-
   const EMPTY_COUNTS = { done: 0, total: 0, percent: 0 };
+
+  function iconFor(type: PracticeContentType) {
+    if (type === 'audio') return MusicIcon;
+    if (type === 'written') return FileTextIcon;
+    return VideoIcon;
+  }
+
+  function practiceHref(slug: string | null, contentId: string): string {
+    return `/journeys/${courseSlug}/practice/${slug ?? contentId}`;
+  }
 </script>
 
-<div class="curriculum">
-  {#each orderedStages as stage, stageIndex (stage.id)}
-    {@const counts = rollup.byStage.get(stage.id) ?? EMPTY_COUNTS}
-    {@const orderedPractices = [...stage.practices].sort(
-      (a, b) => a.sortOrder - b.sortOrder
-    )}
-    <section class="stage">
-      <header class="stage__header">
-        <div class="stage__heading">
-          <span class="stage__index">Stage {stageIndex + 1}</span>
-          <h2 class="stage__name">{stage.name}</h2>
-          {#if stage.gloss}
-            <p class="stage__gloss">{stage.gloss}</p>
-          {/if}
-        </div>
-        <div class="stage__progress">
-          <ProgressRing
-            percent={counts.percent}
-            size="var(--space-14)"
-            ariaLabel="{stage.name}: {counts.done} of {counts.total} practices complete"
-          />
-          <span class="stage__count">{counts.done}/{counts.total}</span>
-        </div>
-      </header>
+<section class="map">
+  <p class="map__kicker">
+    The whole arc — {countWord(orderedStages.length)}
+    {orderedStages.length === 1 ? 'stage' : 'stages'}
+  </p>
 
-      <ul class="practices">
-        {#each orderedPractices as practice (practice.contentId)}
-          {@const done = completedIds.has(practice.contentId)}
-          {@const Icon = iconFor(practice.contentType)}
-          <li class="practice" class:practice--done={done}>
-            <a class="practice__link" href={practiceHref(practice)}>
-              <span class="practice__status" aria-hidden="true">
+  <div class="map__stages">
+    {#each orderedStages as stage, stageIndex (stage.id)}
+      {@const counts = rollup.byStage.get(stage.id) ?? EMPTY_COUNTS}
+      {@const allDone = counts.total > 0 && counts.done === counts.total}
+      {@const isCurrent = stage.id === currentStageId}
+      {@const orderedPractices = [...stage.practices].sort(
+        (a, b) => a.sortOrder - b.sortOrder
+      )}
+      <details
+        class="stage"
+        class:stage--current={isCurrent}
+        class:stage--done={!isCurrent && allDone}
+        open={isCurrent}
+      >
+        <summary class="stage__head">
+          <span class="stage__numeral">{stageNumeral(stageIndex)}</span>
+          <span class="stage__labels">
+            <span class="stage__name">{stage.name}</span>
+            {#if stage.gloss}
+              <span class="stage__gloss">{stage.gloss}</span>
+            {/if}
+          </span>
+          <span class="stage__count">{counts.done}/{counts.total}</span>
+          <span class="stage__chevron"><ChevronRightIcon size={18} /></span>
+        </summary>
+
+        <div class="stage__lessons">
+          {#each orderedPractices as practice (practice.contentId)}
+            {@const done = completedIds.has(practice.contentId)}
+            {@const isCur = practice.contentId === currentContentId}
+            {@const minutes = practiceMinutes(practice.durationSeconds)}
+            {@const TypeIcon = iconFor(practice.contentType)}
+            <a
+              class="lrow"
+              class:lrow--done={done}
+              class:lrow--current={isCur}
+              href={practiceHref(practice.slug, practice.contentId)}
+            >
+              <span
+                class="lrow__icon"
+                class:lrow__icon--done={done}
+                class:lrow__icon--current={isCur}
+                aria-hidden="true"
+              >
                 {#if done}
-                  <CheckCircleIcon />
+                  <CheckIcon size={13} />
+                {:else if isCur}
+                  <span class="lrow__dot"></span>
                 {:else}
-                  <CircleIcon />
+                  <TypeIcon size={13} />
                 {/if}
               </span>
-              <span class="practice__type" aria-hidden="true"><Icon /></span>
-              <span class="practice__title">{practice.title}</span>
-              <span class="practice__meta">
-                {#if done}Complete{:else}{practice.contentType}{/if}
+              <span class="lrow__labels">
+                <span class="lrow__title">{practice.title}</span>
+                <span class="lrow__meta">
+                  {practiceKindLabel(practice.contentType)}{minutes
+                    ? ` · ${minutes} min`
+                    : ''}
+                </span>
               </span>
+              <span class="lrow__go">{isCur ? 'Resume →' : 'Open →'}</span>
             </a>
-          </li>
-        {/each}
-      </ul>
-    </section>
-  {/each}
-</div>
+          {/each}
+        </div>
+      </details>
+    {/each}
+  </div>
+</section>
 
 <style>
-  .curriculum {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-8);
-  }
-
-  .stage__header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: var(--space-4);
-    padding-bottom: var(--space-3);
-    margin-bottom: var(--space-4);
-    border-bottom: var(--border-width) var(--border-style) var(--color-border-subtle);
-  }
-
-  .stage__index {
-    display: block;
+  .map__kicker {
+    margin: 0 0 var(--space-4);
     font-size: var(--text-xs);
-    text-transform: var(--text-transform-label);
-    letter-spacing: 0.06em;
-    color: var(--color-text-muted);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--portal-text-faint);
   }
 
-  .stage__name {
-    margin: var(--space-0-5) 0 0;
-    font-family: var(--font-heading);
-    font-size: var(--text-xl);
-    color: var(--color-heading);
-  }
-
-  .stage__gloss {
-    margin: var(--space-1) 0 0;
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    max-width: 52ch;
-  }
-
-  .stage__progress {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-1);
-    flex-shrink: 0;
-  }
-
-  .stage__count {
-    font-size: var(--text-xs);
-    color: var(--color-text-muted);
-  }
-
-  .practices {
-    list-style: none;
-    margin: 0;
-    padding: 0;
+  .map__stages {
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
   }
 
-  .practice__link {
+  /* ── stage (accordion) ─────────────────────────────────────────────────── */
+  .stage {
+    border: var(--border-width) var(--border-style)
+      color-mix(in oklab, var(--portal-text) 10%, transparent);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: color-mix(in oklab, var(--portal-surface) 45%, transparent);
+  }
+
+  .stage[open] {
+    border-color: color-mix(in oklab, var(--portal-text) 16%, transparent);
+    background: color-mix(in oklab, var(--portal-surface-2) 55%, transparent);
+  }
+
+  .stage--current {
+    border-color: color-mix(in oklab, var(--portal-ember) 34%, transparent);
+  }
+
+  .stage__head {
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    padding: var(--space-3) var(--space-4);
-    border-radius: var(--radius-card);
-    color: var(--color-text);
-    text-decoration: none;
-    transition:
-      background-color var(--duration-fast) ease,
-      transform var(--duration-fast) ease;
+    padding: var(--space-4) var(--space-4);
+    cursor: pointer;
+    list-style: none;
   }
 
-  .practice__link:hover {
-    background: var(--color-surface-secondary);
+  .stage__head::-webkit-details-marker {
+    display: none;
   }
 
-  .practice__link:focus-visible {
+  .stage__head:focus-visible {
     outline: none;
     box-shadow: var(--shadow-focus-ring);
   }
 
-  .practice__status {
-    display: inline-flex;
-    color: var(--color-text-muted);
+  .stage__numeral {
+    flex: none;
+    width: var(--space-8);
+    height: var(--space-8);
+    border-radius: var(--radius-full);
+    display: grid;
+    place-items: center;
+    font-family: var(--font-heading);
+    font-style: italic;
+    font-size: var(--text-sm);
+    color: var(--portal-text-dim);
+    border: var(--border-width) var(--border-style)
+      color-mix(in oklab, var(--portal-text) 18%, transparent);
   }
 
-  .practice--done .practice__status {
-    color: var(--color-success);
+  .stage--done .stage__numeral {
+    background: color-mix(in oklab, var(--portal-ember) 20%, transparent);
+    border-color: transparent;
+    color: var(--portal-ember);
   }
 
-  .practice__type {
-    display: inline-flex;
-    color: var(--color-text-muted);
+  .stage--current .stage__numeral {
+    border-color: var(--portal-ember);
+    color: var(--portal-ember);
+    box-shadow: 0 0 var(--space-3) calc(var(--border-width) * 1)
+      color-mix(in oklab, var(--portal-ember) 35%, transparent);
   }
 
-  .practice__title {
+  .stage__labels {
+    min-width: 0;
     flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .stage__name {
+    font-family: var(--font-heading);
+    font-size: var(--text-lg);
+    line-height: var(--leading-snug);
+    color: var(--portal-text);
+  }
+
+  .stage__gloss {
+    margin-top: var(--space-0-5);
+    font-size: var(--text-sm);
+    color: var(--portal-text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .stage__count {
+    flex: none;
+    font-size: var(--text-sm);
+    color: var(--portal-text-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stage__chevron {
+    flex: none;
+    display: inline-flex;
+    color: var(--portal-text-faint);
+    transition: transform var(--duration-normal) var(--ease-out);
+  }
+
+  .stage[open] .stage__chevron {
+    transform: rotate(90deg);
+  }
+
+  /* ── lesson rows ───────────────────────────────────────────────────────── */
+  .stage__lessons {
+    padding: 0 var(--space-2) var(--space-2);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .lrow {
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+    padding: var(--space-2-5) var(--space-2-5);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    transition: background-color var(--duration-fast) var(--ease-out);
+  }
+
+  .lrow:hover {
+    background: color-mix(in oklab, var(--portal-text) 6%, transparent);
+  }
+
+  .lrow--current {
+    background: color-mix(in oklab, var(--portal-ember) 12%, transparent);
+  }
+
+  .lrow:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus-ring);
+  }
+
+  .lrow__icon {
+    flex: none;
+    width: var(--space-6);
+    height: var(--space-6);
+    border-radius: var(--radius-full);
+    display: grid;
+    place-items: center;
+    color: var(--portal-text-faint);
+    border: var(--border-width) var(--border-style)
+      color-mix(in oklab, var(--portal-text) 26%, transparent);
+  }
+
+  .lrow__icon--done {
+    background: var(--portal-ember);
+    border-color: var(--portal-ember);
+    color: var(--portal-ember-ink);
+  }
+
+  .lrow__icon--current {
+    border-color: var(--portal-ember);
+    color: var(--portal-ember);
+    box-shadow: 0 0 var(--space-2-5) calc(var(--border-width) * 1)
+      color-mix(in oklab, var(--portal-ember) 40%, transparent);
+  }
+
+  .lrow__dot {
+    width: var(--space-2);
+    height: var(--space-2);
+    border-radius: var(--radius-full);
+    background: var(--portal-ember);
+  }
+
+  .lrow__labels {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .lrow__title {
+    font-family: var(--font-heading);
     font-size: var(--text-base);
-    color: var(--color-heading);
+    line-height: var(--leading-snug);
+    color: var(--portal-text);
   }
 
-  .practice--done .practice__title {
-    color: var(--color-text-secondary);
+  .lrow--done .lrow__title {
+    color: var(--portal-text-dim);
   }
 
-  .practice__meta {
+  .lrow__meta {
+    margin-top: var(--space-0-5);
     font-size: var(--text-xs);
-    text-transform: var(--text-transform-meta);
-    color: var(--color-text-muted);
+    color: var(--portal-text-faint);
   }
 
-  .practice--done .practice__meta {
-    color: var(--color-success);
+  .lrow__go {
+    flex: none;
+    font-size: var(--text-sm);
+    color: var(--portal-ember);
+    opacity: 0;
+    transition: opacity var(--duration-fast) var(--ease-out);
+  }
+
+  .lrow:hover .lrow__go,
+  .lrow--current .lrow__go {
+    opacity: 1;
+  }
+
+  @media (--below-sm) {
+    .stage__gloss {
+      display: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .stage__chevron,
+    .lrow,
+    .lrow__go {
+      transition: none;
+    }
   }
 </style>

@@ -342,6 +342,12 @@ export interface JourneyCourseSummary {
   slug: string | null;
   title: string;
   organizationSlug: string | null;
+  /**
+   * One-line course framing (the sell lede), surfaced on the member dashboard
+   * header. Optional/additive: summary builders that don't need it (e.g. the
+   * gate's by-slug resolver) may omit it.
+   */
+  lede?: string | null;
 }
 
 /**

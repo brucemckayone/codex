@@ -1754,6 +1754,7 @@ export class CourseJourneyService extends BaseService {
         id: courses.id,
         slug: courses.slug,
         title: courses.title,
+        lede: courses.lede,
         organizationSlug: organizations.slug,
       })
       .from(courses)
@@ -1772,6 +1773,7 @@ export class CourseJourneyService extends BaseService {
       id: row.id,
       slug: row.slug,
       title: row.title,
+      lede: row.lede ?? null,
       organizationSlug: row.organizationSlug ?? null,
     };
   }
