@@ -6,9 +6,9 @@
   server load — the studio `+layout.server.ts` already gates creator/admin/owner,
   and the studio subtree is `ssr = false`.
 
-  AGGRESSIVE-MODE MOCKS: data comes from `journey-queries.mock` (the frozen
-  `ListJourneysQuery` shape). The conductor swaps it for the real remote after
-  WP-2 — the `.current` / `.loading` access stays identical.
+  Wired to the REAL `listJourneys` remote (Codex-isr02): `.current` / `.loading`
+  access is identical to the retired `journey-queries.mock`. Owner/admin only —
+  the content-api route enforces `requireOrgManagement`.
 -->
 <script lang="ts">
   import { page } from '$app/state';
@@ -16,7 +16,7 @@
   import type { PageStatus } from '@codex/shared-types';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { CompassIcon, PlusIcon } from '$lib/components/ui/Icon';
-  import { listJourneysMock } from '$lib/components/page-builder/journey-queries.mock.svelte';
+  import { listJourneys, listJourneyRevenue } from '$lib/remote/journeys.remote';
 
   const { data } = $props();
 
@@ -35,7 +35,7 @@
   });
 
   const journeysQuery = $derived(
-    listJourneysMock({
+    listJourneys({
       organizationId: data.org.id,
       ...(urlStatus !== 'all' && { status: urlStatus }),
     })
@@ -43,6 +43,14 @@
 
   const items = $derived(journeysQuery.current ?? []);
   const loading = $derived(journeysQuery.loading);
+
+  // Authoritative per-journey revenue, keyed by landing-page id. A SEPARATE
+  // query (independent of the status filter) so the row list paints immediately
+  // and the badge streams in — the figure `listJourneys` omits by design.
+  const revenueQuery = $derived(
+    listJourneyRevenue({ organizationId: data.org.id })
+  );
+  const revenue = $derived(revenueQuery.current ?? {});
 
   const gbp = new Intl.NumberFormat('en-GB', {
     style: 'currency',
@@ -76,14 +84,14 @@
 </script>
 
 <svelte:head>
-  <title>Journeys | {data.org.name}</title>
+  <title>Portals | {data.org.name}</title>
   <meta name="robots" content="noindex" />
 </svelte:head>
 
 <div class="journeys">
   <header class="journeys__bar">
     <div class="journeys__heading">
-      <h1 class="journeys__title">Journeys</h1>
+      <h1 class="journeys__title">Portals</h1>
       <p class="journeys__count" aria-live="polite">
         {loading ? 'Loading…' : `${items.length} ${items.length === 1 ? 'page' : 'pages'}`}
       </p>
@@ -104,7 +112,7 @@
 
     <a href="/studio/journeys/new" class="journeys__create">
       <PlusIcon size={16} />
-      New journey
+      New portal
     </a>
   </header>
 
@@ -118,6 +126,7 @@
     {:else if items.length > 0}
       <ol class="journeys__rows" role="list">
         {#each items as j (j.id)}
+          {@const rev = money(revenue[j.id] ?? null)}
           <li class="journey-row">
             <div class="journey-row__main">
               <div class="journey-row__title-line">
@@ -140,8 +149,8 @@
                   <span>{j.enrolledCount} enrolled</span>
                   <span aria-hidden="true">·</span>
                 {/if}
-                {#if money(j.revenueCents)}
-                  <span>{money(j.revenueCents)}</span>
+                {#if rev}
+                  <span>{rev} · 30d</span>
                   <span aria-hidden="true">·</span>
                 {/if}
                 <span class="journey-row__updated">Updated {when(j.updatedAt)}</span>
@@ -163,12 +172,12 @@
     {:else}
       <div class="journeys__empty">
         <EmptyState
-          title="No journeys yet"
+          title="No portals yet"
           description="Create a course landing page and start shaping its curriculum."
           icon={CompassIcon}
         >
           {#snippet action()}
-            <a href="/studio/journeys/new" class="journeys__empty-cta">New journey</a>
+            <a href="/studio/journeys/new" class="journeys__empty-cta">New portal</a>
           {/snippet}
         </EmptyState>
       </div>

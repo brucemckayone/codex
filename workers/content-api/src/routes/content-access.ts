@@ -8,6 +8,8 @@ import {
 import { RATE_LIMIT_PRESETS, rateLimit } from '@codex/security';
 import type { HonoEnv } from '@codex/shared-types';
 import {
+  canEnterCourseParamsSchema,
+  canViewParamsSchema,
   createIdParamsSchema,
   getStreamingUrlSchema,
   hlsProxyQuerySchema,
@@ -42,6 +44,66 @@ const hlsStreamingRateLimit = createMiddleware<HonoEnv>((c, next) =>
     kv: c.env.RATE_LIMIT_KV,
     ...RATE_LIMIT_PRESETS.streaming,
   })(c, next)
+);
+
+/**
+ * GET /api/access/courses/:courseId/can-enter
+ *
+ * Entitlement gate for a course DASHBOARD / journey (SPEC §6.3). Returns whether
+ * the authenticated user currently holds a LIVE course entitlement — a stored
+ * grant OR a derived tier grant, never a stale `course_enrollments` row — so a
+ * lapsed tier loses entry instantly (instant-revocation). Delegates to the
+ * frozen `EntitlementResolver.canEnterCourse` on the access service.
+ * @returns {{ canEnter: boolean }}
+ */
+app.get(
+  '/courses/:courseId/can-enter',
+  procedure({
+    policy: {
+      auth: 'required',
+      rateLimit: 'api', // 100 req/min - dashboard/library gate reads
+    },
+    input: {
+      params: canEnterCourseParamsSchema,
+    },
+    handler: async (ctx): Promise<{ canEnter: boolean }> => {
+      const canEnter = await ctx.services.access.canEnterCourse(
+        ctx.user.id,
+        ctx.input.params.courseId
+      );
+      return { canEnter };
+    },
+  })
+);
+
+/**
+ * GET /api/access/content/:contentId/can-view
+ *
+ * Entitlement check gating whether the user may open a piece of content
+ * ANYWHERE (SPEC §6.3) — the boolean the signed-stream gate is built on.
+ * `auth: 'optional'` so an anonymous visitor resolves as `userId = null` and the
+ * resolver decides public / free access; an authenticated caller resolves with
+ * their id. Delegates to the frozen `EntitlementResolver.canView`.
+ * @returns {{ canView: boolean }}
+ */
+app.get(
+  '/content/:contentId/can-view',
+  procedure({
+    policy: {
+      auth: 'optional',
+      rateLimit: 'api', // 100 req/min - public-facing gate read
+    },
+    input: {
+      params: canViewParamsSchema,
+    },
+    handler: async (ctx): Promise<{ canView: boolean }> => {
+      const canView = await ctx.services.access.canView(
+        ctx.user?.id ?? null,
+        ctx.input.params.contentId
+      );
+      return { canView };
+    },
+  })
 );
 
 /**

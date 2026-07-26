@@ -13,6 +13,7 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 import { content } from './content';
+import { courses } from './journeys';
 import { organizations } from './organizations';
 import { users } from './users';
 
@@ -421,9 +422,19 @@ export const purchases = pgTable(
     customerId: text('customer_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    contentId: uuid('content_id')
-      .notNull()
-      .references(() => content.id, { onDelete: 'restrict' }),
+    // Split purchase target (Codex-2pryk WP-6): a purchase pays for EITHER a
+    // piece of `content` OR a `course` — exactly one is set (CHECK below),
+    // mirroring the `entitlements` split-FK. `contentId` became nullable so a
+    // one-off COURSE purchase (`courses.priceCents`) reuses this exact revenue
+    // flow (fee split snapshot + payouts ledger) with a course target instead
+    // of content. Both keep `onDelete: 'restrict'` so a sold course/content
+    // can never be hard-deleted out from under its immutable purchase record.
+    contentId: uuid('content_id').references(() => content.id, {
+      onDelete: 'restrict',
+    }),
+    courseId: uuid('course_id').references(() => courses.id, {
+      onDelete: 'restrict',
+    }),
     // Nullable (Codex-69t7c WP1): orgless creator-direct purchases have no
     // organization. Org-scoped purchases still populate it; the Phase-1 gate
     // that required it is removed in WP5.
@@ -495,6 +506,7 @@ export const purchases = pgTable(
     // Indexes
     index('idx_purchases_customer_id').on(table.customerId),
     index('idx_purchases_content_id').on(table.contentId),
+    index('idx_purchases_course_id').on(table.courseId),
     index('idx_purchases_organization_id').on(table.organizationId),
     index('idx_purchases_stripe_payment_intent').on(
       table.stripePaymentIntentId
@@ -531,6 +543,14 @@ export const purchases = pgTable(
       table.organizationId,
       table.status,
       table.purchasedAt
+    ),
+
+    // Split purchase target: EXACTLY ONE of content / course is set (WP-6).
+    // Mirrors the entitlements split-FK invariant so a purchase always names a
+    // single resource its revenue snapshot + payouts ledger rows attribute to.
+    check(
+      'check_purchase_target_one',
+      sql`(CASE WHEN ${table.contentId} IS NULL THEN 0 ELSE 1 END) + (CASE WHEN ${table.courseId} IS NULL THEN 0 ELSE 1 END) = 1`
     ),
 
     // CHECK constraint for status enum values
@@ -584,6 +604,10 @@ export const purchasesRelations = relations(purchases, ({ one }) => ({
   content: one(content, {
     fields: [purchases.contentId],
     references: [content.id],
+  }),
+  course: one(courses, {
+    fields: [purchases.courseId],
+    references: [courses.id],
   }),
   organization: one(organizations, {
     fields: [purchases.organizationId],

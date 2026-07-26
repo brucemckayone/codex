@@ -1,106 +1,175 @@
 <!--
   @component HeroSection
 
-  The opening hero for a journey sales page (Codex-2pryk · WP-3/WP-5). Faithful
-  port of the prototype's hero renderer: breathing brand glow, rising motes,
-  vignette, kinetic serif headline with an italic accent ending, lede + emphasis
-  line, primary + quiet CTA, trust dot, scroll cue. Variants: centered · left ·
-  split (media) · minimal. Background treatment via `props.bg` (ember/blood/still).
-  Styling lives in `../journey-sections.css` (real Codex tokens).
+  Opening headline, kicker and primary CTA (SPEC §4.1 `hero`). Falls back to the
+  awaited course fields when a copy prop is absent, so an unconfigured hero still
+  renders a coherent first paint (SEO-critical). Atmosphere is purely decorative
+  and never load-bearing for legibility — the headline sits on `--color-heading`
+  over `--color-background`, which stays legible on any org brand (dark included).
 -->
 <script lang="ts">
-  import EditableText from '../EditableText.svelte';
-  import { has, type SectionComponentProps, text } from '../section-render';
+  import CtaLink from '../CtaLink.svelte';
+  import { asString } from '../coerce';
+  import type { HeroSectionProps, JourneySalesContext } from '../types';
+  import type { SectionProps } from '$lib/page-builder';
 
-  let { props, variant, editable = false, onEdit }: SectionComponentProps = $props();
+  interface Props {
+    config: SectionProps;
+    context: JourneySalesContext;
+  }
 
-  const edit = (key: string) => (value: string) => onEdit?.(key, value);
-  const motes = Array.from({ length: 12 }, (_, i) => i);
-  const bg = $derived(text(props, 'bg') || 'ember');
-  const showCue = $derived(variant !== 'split' && variant !== 'minimal');
+  const { config, context }: Props = $props();
+
+  const p: HeroSectionProps = $derived({
+    eyebrow: asString(config, 'eyebrow'),
+    headline: asString(config, 'headline'),
+    subheadline: asString(config, 'subheadline'),
+    ctaLabel: asString(config, 'ctaLabel'),
+    secondaryLabel: asString(config, 'secondaryLabel'),
+    secondaryHref: asString(config, 'secondaryHref'),
+    trust: asString(config, 'trust'),
+  });
+
+  const eyebrow = $derived(p.eyebrow ?? context.course.kicker ?? undefined);
+  const headline = $derived(p.headline ?? context.course.title);
+  const subheadline = $derived(p.subheadline ?? context.course.lede ?? undefined);
+
+  // CTA branches on the viewer's enrolment (the sales page is otherwise fully
+  // public): an enrolled member goes to their dashboard; everyone else is sent
+  // to the offer/checkout surface to join.
+  const ctaHref = $derived(
+    context.enrolled ? context.dashboardUrl : context.checkoutUrl
+  );
+  const ctaLabel = $derived(
+    context.enrolled
+      ? 'Go to your dashboard'
+      : (p.ctaLabel ?? 'Begin the journey')
+  );
 </script>
 
-{#snippet column()}
-  {#if has(props, 'eyebrow')}
-    <EditableText
-      tag="p"
-      class="jp-eyebrow"
-      field="eyebrow"
-      value={text(props, 'eyebrow')}
-      {editable}
-      onEdit={edit('eyebrow')}
-    />
-  {/if}
-  <h1 class="jp-hero__headline">
-    <EditableText
-      field="headline"
-      value={text(props, 'headline')}
-      {editable}
-      onEdit={edit('headline')}
-    />{#if has(props, 'accent')}&nbsp;<EditableText
-        class="jp-hero__soften"
-        field="accent"
-        value={text(props, 'accent')}
-        {editable}
-        onEdit={edit('accent')}
-      />{/if}
-  </h1>
-  <p class="jp-hero__lede">
-    <EditableText field="sub" value={text(props, 'sub')} {editable} onEdit={edit('sub')} />
-    {#if has(props, 'felt')}
-      <EditableText
-        class="jp-hero__lede-accent"
-        field="felt"
-        value={text(props, 'felt')}
-        {editable}
-        onEdit={edit('felt')}
-      />
+<div class="hero">
+  <div class="hero__glow" aria-hidden="true"></div>
+  <div class="hero__inner">
+    {#if eyebrow}
+      <p class="hero__eyebrow">{eyebrow}</p>
     {/if}
-  </p>
-  <div class="jp-hero__actions">
-    <span class="jp-cta">
-      <EditableText field="button" value={text(props, 'button')} {editable} onEdit={edit('button')} />
-      <span class="jp-arrow" aria-hidden="true">→</span>
-    </span>
-    {#if has(props, 'quiet')}
-      <span class="jp-hero__quiet">
-        <EditableText field="quiet" value={text(props, 'quiet')} {editable} onEdit={edit('quiet')} />
-        <span aria-hidden="true">↓</span>
-      </span>
+    <h1 class="hero__headline">{headline}</h1>
+    {#if subheadline}
+      <p class="hero__sub">{subheadline}</p>
+    {/if}
+    <div class="hero__actions">
+      <CtaLink href={ctaHref} variant="primary" size="lg">
+        {ctaLabel}
+      </CtaLink>
+      {#if p.secondaryLabel && p.secondaryHref}
+        <CtaLink href={p.secondaryHref} variant="secondary" size="lg">
+          {p.secondaryLabel}
+        </CtaLink>
+      {/if}
+    </div>
+    {#if p.trust}
+      <p class="hero__trust">
+        <span class="hero__trust-dot" aria-hidden="true"></span>
+        {p.trust}
+      </p>
     {/if}
   </div>
-  {#if has(props, 'trust')}
-    <p class="jp-hero__trust">
-      <span class="jp-hero__trust-dot" aria-hidden="true"></span>
-      <EditableText field="trust" value={text(props, 'trust')} {editable} onEdit={edit('trust')} />
-    </p>
-  {/if}
-{/snippet}
+</div>
 
-<header class="jp-hero jp-hero--{variant}" data-bg={bg}>
-  <div class="jp-hero__atmos" aria-hidden="true">
-    <div class="jp-hero__glow"></div>
-    <div class="jp-hero__motes">
-      {#each motes as m (m)}<span class="jp-hero__mote"></span>{/each}
-    </div>
-    <div class="jp-hero__vignette"></div>
-  </div>
+<style>
+  .hero {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: min(88svh, 45rem);
+    padding-block: var(--space-16);
+    overflow: hidden;
+    text-align: center;
+  }
 
-  {#if variant === 'split'}
-    <div class="jp-hero__inner">
-      <div class="jp-hero__col">{@render column()}</div>
-      <div class="jp-hero__media"><span class="jp-play-dot" aria-hidden="true">▶</span></div>
-    </div>
-  {:else}
-    <div class="jp-hero__inner">{@render column()}</div>
-  {/if}
+  /* Decorative warm core — subtle, never relied on for contrast. */
+  .hero__glow {
+    position: absolute;
+    z-index: -1;
+    left: 50%;
+    top: 42%;
+    width: min(90vw, 48.75rem);
+    aspect-ratio: 1;
+    transform: translate(-50%, -50%);
+    border-radius: var(--radius-full);
+    opacity: 0.5;
+    filter: blur(var(--blur-2xl));
+    pointer-events: none;
+    background: radial-gradient(
+      circle at 50% 46%,
+      color-mix(in oklab, var(--color-brand-primary) 22%, transparent),
+      color-mix(in oklab, var(--color-brand-accent) 12%, transparent) 46%,
+      transparent 70%
+    );
+  }
 
-  {#if showCue}
-    <span class="jp-hero__cue" aria-hidden="true">
-      <span class="jp-hero__cue-line"><span class="jp-hero__cue-spark"></span></span>
-      <svg width="16" height="10" viewBox="0 0 16 10" fill="none">
-        <path d="M1 1l7 7 7-7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
-    </span>
-  {/if}
-</header>
+  .hero__inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-5);
+    max-width: 56rem;
+    padding-inline: var(--space-5);
+  }
+
+  .hero__eyebrow {
+    margin: 0;
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+  }
+
+  .hero__headline {
+    margin: 0;
+    font-family: var(--font-heading);
+    font-size: var(--text-display);
+    line-height: var(--leading-tight);
+    letter-spacing: -0.02em;
+    color: var(--color-heading);
+    text-wrap: balance;
+  }
+
+  .hero__sub {
+    margin: 0;
+    max-width: 42ch;
+    font-size: var(--text-lg);
+    line-height: var(--leading-relaxed);
+    color: var(--color-text-secondary);
+    text-wrap: pretty;
+  }
+
+  .hero__actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+  }
+
+  .hero__trust {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: var(--space-3) 0 0;
+    font-size: var(--text-sm);
+    color: var(--color-text-tertiary);
+  }
+
+  .hero__trust-dot {
+    width: var(--space-2);
+    height: var(--space-2);
+    border-radius: var(--radius-full);
+    background: var(--color-brand-primary);
+    box-shadow: 0 0 0 var(--space-1)
+      color-mix(in oklab, var(--color-brand-primary) 22%, transparent);
+  }
+</style>

@@ -19,6 +19,15 @@
  * - Access control: Paid content requires purchase verification
  */
 
+// Entitlements read-resolution (Codex-2pryk.2.3 · WP-2). The frozen resolver
+// contract lives in @codex/shared-types; re-exported here for consumers that
+// already import @codex/access.
+export type {
+  Entitlement,
+  EntitlementResolver,
+  EntitlementSource,
+  ResourceType,
+} from '@codex/shared-types';
 // Re-export validation schemas for convenience
 export {
   type GetPlaybackProgressInput,
@@ -71,6 +80,21 @@ export {
   createContentAccessService,
   DEFAULT_STREAMING_URL_TTL_SECONDS,
 } from './services/ContentAccessService';
+// Course monetization: tier-access management (N1 guard) + offer read (WP-6).
+export { CourseAccessService } from './services/course-access-service';
+export type {
+  CourseEngagement,
+  InsightsPeriod,
+  JourneyInsightsData,
+  LiveFinancials,
+  MetricSample,
+  TrendPoint,
+} from './services/course-insights-service';
+// Course studio insights: financial + engagement aggregation (Round-D · WP-7).
+export { CourseInsightsService } from './services/course-insights-service';
+// Course member surfaces: dashboard + in-course player reads (Round-D · Codex-776gg).
+export { CourseJourneyService } from './services/course-journey-service';
+export { EntitlementsService } from './services/entitlements-service';
 export type {
   PlaybackProgressResponse,
   StreamingUrlResponse,

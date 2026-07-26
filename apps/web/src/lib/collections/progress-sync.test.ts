@@ -14,6 +14,11 @@ vi.mock('$app/environment', () => ({
 // Mock the progress module
 vi.mock('./progress', () => ({
   syncProgressToServer: vi.fn(() => Promise.resolve()),
+  // WP-4 (F19) added syncCompletionsToServer and wired it into forceSync's
+  // Promise.all; this full-replacement mock must stub it too, else forceSync
+  // throws "No syncCompletionsToServer export" (unhandled rejection → suite
+  // exits 1 even though every test passes).
+  syncCompletionsToServer: vi.fn(() => Promise.resolve()),
 }));
 
 describe('collections/progress-sync', () => {

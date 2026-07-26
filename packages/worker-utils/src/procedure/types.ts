@@ -8,7 +8,13 @@
  * - Procedure context with full typing
  */
 
-import type { ContentAccessService } from '@codex/access';
+import type {
+  ContentAccessService,
+  CourseAccessService,
+  CourseInsightsService,
+  CourseJourneyService,
+  EntitlementsService,
+} from '@codex/access';
 import type {
   AdminAnalyticsService,
   AdminContentManagementService,
@@ -43,6 +49,7 @@ import type {
 } from '@codex/shared-types';
 import type {
   ConnectAccountService,
+  CourseSubscriptionService,
   SubscriptionService,
   TierService,
 } from '@codex/subscription';
@@ -133,6 +140,12 @@ export interface ServiceRegistry {
    */
   categories: CategoriesService;
   access: ContentAccessService;
+  /**
+   * Read-resolution of stored `entitlements` grants (Codex-2pryk.2.3 · WP-2).
+   * READ-ONLY — the grant write path (purchase / course-subscription) is WP-6.
+   * The access DECISION (`canView` / `canEnterCourse`) lives on `access`.
+   */
+  entitlements: EntitlementsService;
   imageProcessing: ImageProcessingService;
 
   // Organization domain
@@ -164,6 +177,31 @@ export interface ServiceRegistry {
   subscription: SubscriptionService;
   tier: TierService;
   connect: ConnectAccountService;
+  /**
+   * Course-specific subscriptions (Codex-2pryk WP-6 · SPEC §7): plan Stripe
+   * sync, checkout, and the course-sub webhook lifecycle + payout fan-out.
+   * Stripe-backed, so lazily constructed with the deferred Stripe client.
+   */
+  courseSubscription: CourseSubscriptionService;
+  /**
+   * Course monetization access surface (Codex-2pryk WP-6): tier→course grant
+   * management (N1 guard) + the `getCourseOffer` read composing all three §7
+   * paths. Pure DB — no Stripe.
+   */
+  courseAccess: CourseAccessService;
+  /**
+   * Course MEMBER-surface reads (Codex-2pryk Round-D): the dashboard curriculum
+   * + progress rollup and the in-course practice/playlist projections (SPEC §11
+   * / §14). Pure DB — the entitlement decision + stream signing stay on `access`.
+   */
+  courseJourney: CourseJourneyService;
+  /**
+   * Course STUDIO-reporting reads (Codex-2pryk Round-D · WP-7): course-scoped
+   * financial (`live`) + engagement (`course`) aggregation for the owner/admin
+   * insights surface. Pure DB — owner/admin gated at the route via
+   * `requireOrgManagement`; the service re-scopes the course to the managed org.
+   */
+  courseInsights: CourseInsightsService;
 
   // Media & Processing domain
   transcoding: TranscodingService;

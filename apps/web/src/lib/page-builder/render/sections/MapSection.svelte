@@ -1,131 +1,279 @@
 <!--
   @component MapSection
 
-  The descent map — the journey's curriculum laid out (Codex-2pryk · WP-3/WP-5),
-  rendered in its lit end-state (the scroll choreography can't run in an
-  inner-scrolling canvas). Variants: descent (ember spine + gates, default) ·
-  list (compact stage rows) · grid (stage cards). Stages come from the course
-  (via `stages`), not the page draft — the builder supplies mock stages. Copy
-  (eyebrow/heading/sub/note) is page-editable. Styling in `../journey-sections.css`.
+  The descent map (SPEC §4.1 `map`): the course's ordered stages, each a gate on
+  a vertical spine with its concurrent pool of practices. This is the PUBLIC
+  sales view — it renders from the awaited `context.stages` and shows NO progress
+  and NO completion state (those belong to the member dashboard, WP-4). The
+  practice's `completed` field is omitted server-side on the public page.
+
+  CONTRACT GAP (flagged for the conductor): the prototype's free-taste door — a
+  single "free" practice badge on the map — has no field on the frozen
+  `JourneyPracticeView`. It is intentionally NOT rendered here to keep typecheck
+  clean; when WP-6/WP-2 add a public `isFree`/`preview` flag to the practice
+  read-model, add the badge here (additive).
 -->
 <script lang="ts">
-  import EditableText from '../EditableText.svelte';
-  import { has, type SectionComponentProps, text } from '../section-render';
+  import { asString } from '../coerce';
+  import type { MapSectionProps, JourneySalesContext } from '../types';
+  import type { JourneyContentType, SectionProps } from '$lib/page-builder';
 
-  let { props, variant, editable = false, onEdit, stages = [] }: SectionComponentProps =
-    $props();
-  const edit = (key: string) => (value: string) => onEdit?.(key, value);
+  interface Props {
+    config: SectionProps;
+    context: JourneySalesContext;
+  }
 
-  const ROMAN = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii'];
-  const TYPE_GLYPH: Record<string, string> = {
-    audio: '♪',
-    video: '▶',
-    written: '¶',
-    practice: '✎',
-    meditation: '☾',
-    reflection: '❋',
+  const { config, context }: Props = $props();
+
+  const p: MapSectionProps = $derived({
+    eyebrow: asString(config, 'eyebrow'),
+    title: asString(config, 'title'),
+    sub: asString(config, 'sub'),
+    foot: asString(config, 'foot'),
+  });
+
+  const stages = $derived(
+    [...context.stages].sort((a, b) => a.sortOrder - b.sortOrder)
+  );
+  const title = $derived(p.title ?? "Everything you'll walk.");
+
+  const CONTENT_TYPE_LABEL: Record<JourneyContentType, string> = {
+    video: 'Practice',
+    audio: 'Audio',
+    written: 'Reflection',
   };
-  const glyph = (t: string): string => TYPE_GLYPH[t] ?? '•';
-  const label = (t: string): string => (t ? t[0].toUpperCase() + t.slice(1) : 'Practice');
 
-  const practiceCount = $derived(
-    stages.reduce((sum, s) => sum + s.lessons.length, 0)
-  );
-  const totalMinutes = $derived(
-    stages.reduce(
-      (sum, s) => sum + s.lessons.reduce((m, l) => m + (l.minutes || 0), 0),
-      0
-    )
-  );
+  function typeLabel(type: string): string {
+    return CONTENT_TYPE_LABEL[type as JourneyContentType] ?? 'Practice';
+  }
 </script>
 
-{#snippet head(centred: boolean)}
-  <header class="jp-descent__head" class:jp-descent__head--tight={!centred}>
-    {#if has(props, 'eyebrow')}
-      <EditableText class="jp-eyebrow" field="eyebrow" value={text(props, 'eyebrow')} {editable} onEdit={edit('eyebrow')} />
-    {/if}
-    <EditableText tag="h2" class="jp-descent__title" field="heading" value={text(props, 'heading')} {editable} onEdit={edit('heading')} />
-    {#if has(props, 'sub')}
-      <EditableText tag="p" class="jp-descent__sub" field="sub" value={text(props, 'sub')} {editable} onEdit={edit('sub')} />
-    {/if}
-  </header>
-{/snippet}
+{#if stages.length > 0}
+  <div class="descent">
+    <div class="descent__inner">
+      <header class="descent__head">
+        {#if p.eyebrow}
+          <p class="descent__eyebrow">{p.eyebrow}</p>
+        {/if}
+        <h2 class="descent__title">{title}</h2>
+        {#if p.sub}
+          <p class="descent__sub">{p.sub}</p>
+        {/if}
+        <p class="descent__stats">
+          <span class="descent__stat">
+            <b>{context.course.stageCount}</b> stages
+          </span>
+          <span class="descent__stat">
+            <b>{context.course.practiceCount}</b> practices
+          </span>
+        </p>
+      </header>
 
-{#snippet foot()}
-  {#if has(props, 'note')}
-    <EditableText tag="p" class="jp-descent__foot" field="note" value={text(props, 'note')} {editable} onEdit={edit('note')} />
-  {/if}
-{/snippet}
+      <ol class="descent__stages">
+        {#each stages as stage, i (stage.id)}
+          <li class="descent__stage">
+            <div class="descent__node" aria-hidden="true">{i + 1}</div>
+            <div class="descent__stage-body">
+              <h3 class="descent__stage-name">{stage.name}</h3>
+              {#if stage.gloss}
+                <p class="descent__gloss">{stage.gloss}</p>
+              {/if}
+              {#if stage.practices.length > 0}
+                <ul class="descent__practices">
+                  {#each [...stage.practices].sort((a, b) => a.sortOrder - b.sortOrder) as practice (practice.contentId)}
+                    <li class="descent__practice">
+                      <span class="descent__practice-title">{practice.title}</span>
+                      <span class="descent__practice-type">{typeLabel(practice.contentType)}</span>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            </div>
+          </li>
+        {/each}
+      </ol>
 
-<section class="jp-descent jp-descent--{variant}">
-  <div class="jp-descent__inner">
-    {#if variant === 'list'}
-      {@render head(false)}
-      <div class="jp-stages">
-        {#each stages as stage, i (stage.name + i)}
-          <div class="jp-stage">
-            <span class="jp-rn">{ROMAN[i] ?? i + 1}</span>
-            <span class="jp-sn">{stage.name}</span>
-            <span class="jp-ct">{stage.lessons.length} practices</span>
-          </div>
-        {/each}
-      </div>
-      {@render foot()}
-    {:else if variant === 'grid'}
-      {@render head(true)}
-      <div class="jp-stagegrid">
-        {#each stages as stage, i (stage.name + i)}
-          <div class="jp-stagecard">
-            <span class="jp-rn">{ROMAN[i] ?? i + 1}</span>
-            <div class="jp-sn">{stage.name}</div>
-            <p class="jp-gl">{stage.gloss}</p>
-            <p class="jp-ct">{stage.lessons.length} practices</p>
-          </div>
-        {/each}
-      </div>
-      {@render foot()}
-    {:else}
-      {@render head(true)}
-      <div class="jp-descent__stats">
-        <span class="jp-descent__stat"><b>{stages.length}</b> gated depths</span>
-        <span class="jp-descent__stat"><b>{practiceCount}</b> practices</span>
-        <span class="jp-descent__stat">≈ <b>{totalMinutes}</b> min in all</span>
-      </div>
-      <div class="jp-descent__body">
-        <div class="jp-descent__spine" aria-hidden="true">
-          <span class="jp-descent__spine-track"></span>
-          <span class="jp-descent__spine-draw"></span>
-        </div>
-        <ol class="jp-descent__stages">
-          {#each stages as stage, i (stage.name + i)}
-            <li class="jp-descent-band">
-              <div class="jp-descent-gate">
-                <span class="jp-descent-gate__node"><span class="jp-descent-gate__rn">{ROMAN[i] ?? i + 1}</span></span>
-                <div class="jp-descent-gate__meta">
-                  <h3 class="jp-descent-gate__name">{stage.name}</h3>
-                  <p class="jp-descent-gate__gloss">{stage.gloss}</p>
-                </div>
-              </div>
-              <div class="jp-descent-practices">
-                {#each stage.lessons as lesson, li (lesson.title + li)}
-                  <article class="jp-descent-card" class:jp-descent-card--free={lesson.free}>
-                    {#if lesson.free}<span class="jp-descent-card__flag">free</span>{/if}
-                    <div class="jp-descent-card__top">
-                      <span class="jp-descent-card__type">
-                        <span class="jp-descent-card__glyph">{glyph(lesson.type)}</span>{label(lesson.type)}
-                      </span>
-                      <span class="jp-descent-card__lock">{lesson.free ? '▶' : '🔒'}</span>
-                    </div>
-                    <h4 class="jp-descent-card__title">{lesson.title}</h4>
-                    <p class="jp-descent-card__min">{lesson.minutes} min</p>
-                  </article>
-                {/each}
-              </div>
-            </li>
-          {/each}
-        </ol>
-      </div>
-      {@render foot()}
-    {/if}
+      {#if p.foot}
+        <p class="descent__foot">{p.foot}</p>
+      {/if}
+    </div>
   </div>
-</section>
+{/if}
+
+<style>
+  .descent {
+    padding-block: var(--space-20);
+    padding-inline: var(--space-5);
+  }
+
+  .descent__inner {
+    max-width: 60rem;
+    margin-inline: auto;
+  }
+
+  .descent__head {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-3);
+    max-width: 48rem;
+    margin: 0 auto var(--space-12);
+    text-align: center;
+  }
+
+  .descent__eyebrow {
+    margin: 0;
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+  }
+
+  .descent__title {
+    margin: 0;
+    font-family: var(--font-heading);
+    font-weight: var(--font-normal);
+    font-size: var(--text-4xl);
+    line-height: var(--leading-tight);
+    letter-spacing: -0.015em;
+    color: var(--color-heading);
+    text-wrap: balance;
+  }
+
+  .descent__sub {
+    margin: 0;
+    font-size: var(--text-lg);
+    line-height: var(--leading-relaxed);
+    color: var(--color-text-secondary);
+  }
+
+  .descent__stats {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-2);
+    margin: var(--space-3) 0 0;
+  }
+
+  .descent__stat {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-full);
+    border: var(--border-width) solid var(--color-border-subtle);
+    background: var(--color-surface-secondary);
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+
+  .descent__stat b {
+    font-weight: var(--font-semibold);
+    color: var(--color-brand-primary);
+  }
+
+  .descent__stages {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .descent__stage {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--space-5);
+    align-items: start;
+  }
+
+  /* The spine: a line descending from each node to the next. */
+  .descent__stage:not(:last-child) .descent__node::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    width: var(--border-width-thick);
+    height: calc(100% + var(--space-8));
+    transform: translateX(-50%);
+    background: var(--color-border-subtle);
+  }
+
+  .descent__node {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: var(--space-11);
+    height: var(--space-11);
+    border-radius: var(--radius-full);
+    border: var(--border-width-thick) solid var(--color-brand-primary);
+    background: var(--color-surface);
+    font-family: var(--font-heading);
+    font-size: var(--text-lg);
+    color: var(--color-brand-primary);
+  }
+
+  .descent__stage-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding-top: var(--space-1);
+  }
+
+  .descent__stage-name {
+    margin: 0;
+    font-family: var(--font-heading);
+    font-size: var(--text-xl);
+    line-height: var(--leading-snug);
+    color: var(--color-heading);
+  }
+
+  .descent__gloss {
+    margin: 0;
+    font-size: var(--text-base);
+    line-height: var(--leading-relaxed);
+    color: var(--color-text-secondary);
+  }
+
+  .descent__practices {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin: var(--space-2) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .descent__practice {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-2) 0;
+    border-top: var(--border-width) solid var(--color-border-subtle);
+    font-size: var(--text-sm);
+  }
+
+  .descent__practice-title {
+    color: var(--color-text);
+  }
+
+  .descent__practice-type {
+    flex-shrink: 0;
+    font-size: var(--text-xs);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-tertiary);
+  }
+
+  .descent__foot {
+    margin: var(--space-12) 0 0;
+    text-align: center;
+    font-size: var(--text-base);
+    line-height: var(--leading-relaxed);
+    color: var(--color-text-secondary);
+  }
+</style>

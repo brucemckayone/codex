@@ -9,6 +9,7 @@
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
+  import { deriveContentAccessKind } from '$lib/utils/content-access';
   import { Pagination } from '$lib/components/ui/Pagination';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { ArrowLeftIcon, SearchIcon, FileIcon } from '$lib/components/ui/Icon';
@@ -140,7 +141,7 @@
             amount: item.priceCents,
             currency: 'GBP',
           } : null}
-          contentAccessType={item.accessType}
+          contentAccessType={deriveContentAccessKind(item)}
         />
       {/each}
     </div>

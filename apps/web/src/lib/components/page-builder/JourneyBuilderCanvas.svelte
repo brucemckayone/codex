@@ -16,8 +16,8 @@
 -->
 <script lang="ts">
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
-  import { SectionRenderer } from '$lib/page-builder/render';
-  import type { JourneyStagePreview } from '$lib/page-builder/render';
+  import { SectionRenderer } from '$lib/page-builder/render-edit';
+  import type { JourneyStagePreview } from '$lib/page-builder/render-edit';
   import {
     ChevronDownIcon,
     ChevronUpIcon,

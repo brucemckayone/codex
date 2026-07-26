@@ -31,11 +31,11 @@
     SectionList,
   } from '$lib/components/page-builder';
   import {
-    getJourneyForBuilderMock,
-    MOCK_PREVIEW_STAGES,
-    saveJourneyPageMock,
-  } from '$lib/components/page-builder/journey-queries.mock.svelte';
+    getJourneyForBuilder,
+    saveJourneyPage,
+  } from '$lib/remote/journeys.remote';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
+  import type { JourneyStagePreview } from '$lib/page-builder/render-edit';
   import { toast } from '$lib/components/ui/Toast/toast-store';
 
   const { data } = $props();
@@ -44,10 +44,15 @@
   const orgName = $derived(data.org?.name ?? 'Studio');
   const orgDomain = $derived(data.org?.slug ?? 'your-space');
 
-  const draftQuery = $derived(pageId ? getJourneyForBuilderMock({ id: pageId }) : null);
+  // Load the page draft — the reactive query the conductor swaps for the real
+  // remote after WP-2 (identical `.current` access).
+  const draftQuery = $derived(pageId ? getJourneyForBuilder({ id: pageId }) : null);
 
-  // Curriculum stages the map/descent section previews (course-owned; mocked here).
-  const stages = MOCK_PREVIEW_STAGES;
+  // Curriculum stages feed the map/descent section previews (course-owned). The
+  // real curriculum wiring (getCourseCurriculumForEditor → JourneyStagePreview)
+  // is a follow-up now that the real backend has landed; until then the builder
+  // renders an empty stage preview rather than the retired mock fixture.
+  const stages: JourneyStagePreview[] = [];
 
   // ── Workspace view state ──────────────────────────────────────────────────
   type BuilderMode = 'design' | 'pricing' | 'brand' | 'seo';
@@ -141,7 +146,10 @@
     if (!payload || !record) return;
     saving = true;
     try {
-      await saveJourneyPageMock({ ...record, ...payload });
+      await saveJourneyPage({
+        ...record,
+        ...payload,
+      });
       pageBuilder.markSaved();
       toast.success('Page saved');
     } catch (err) {

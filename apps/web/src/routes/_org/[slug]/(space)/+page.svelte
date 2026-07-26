@@ -12,8 +12,10 @@
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
+  import { deriveContentAccessKind } from '$lib/utils/content-access';
   import { CreatorCarouselCard, SkeletonCreatorCard } from '$lib/components/ui/CreatorCard';
   import Carousel from '$lib/components/carousel/Carousel.svelte';
+  import JourneyCard from '$lib/components/journeys/JourneyCard.svelte';
   import FeatureCarousel from '$lib/components/carousel/FeatureCarousel.svelte';
   import type { FeatureItem } from '$lib/components/carousel/feature-carousel.types';
   import TopicGrid from '$lib/components/topic/TopicGrid.svelte';
@@ -28,7 +30,7 @@
   import SubscribeStickyBar from '$lib/components/subscription/SubscribeStickyBar.svelte';
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
-  import { buildContentUrl } from '$lib/utils/subdomain';
+  import { buildContentUrl, buildJourneyUrl } from '$lib/utils/subdomain';
   import { extractPlainText } from '@codex/validation';
   import {
     eq,
@@ -178,7 +180,7 @@
   // hides gracefully (the component checks `previewContent?.length > 0`).
   const subscribeGatedContent = $derived(
     data.allContent.filter(
-      (c) => c.accessType === 'subscribers' || c.accessType === 'followers'
+      (c) => c.includedInTierId != null || c.isFollowerGated === true
     )
   );
 
@@ -241,7 +243,7 @@
       category: c.category ?? null,
       categorySlugs: c.categorySlugs ?? [],
       featured: c.featured ?? false,
-      contentAccessType: c.accessType,
+      contentAccessType: deriveContentAccessKind(c),
       included: access.isIncluded(c),
       isFollower: access.isFollowing,
       tierName: access.getTierName(c),
@@ -587,6 +589,42 @@
     {/if}
   {/await}
 
+  <!-- Guided portals — published course-journeys for this org (Codex-oi2w4),
+       featured-first. Streamed; hidden when the org has none. -->
+  {#await data.journeys then journeys}
+    {#if journeys.length > 0}
+      <section class="section section--tight">
+        <header class="lede">
+          <p class="lede__eyebrow">Go deeper</p>
+          <div class="lede__title-row">
+            <h2 class="lede__title">Guided portals</h2>
+            <a href="/explore" class="lede__view-all">
+              Explore all
+              <span aria-hidden="true">→</span>
+            </a>
+          </div>
+        </header>
+        <Carousel
+          items={journeys}
+          itemMinWidth="20rem"
+          gap="var(--space-4)"
+          ariaLabel="Guided portals"
+        >
+          {#snippet renderItem(journey)}
+            <JourneyCard
+              {journey}
+              href={buildJourneyUrl(
+                page.url,
+                { slug: journey.slug, id: journey.pageId },
+                { surface: 'sales' }
+              )}
+            />
+          {/snippet}
+        </Carousel>
+      </section>
+    {/if}
+  {/await}
+
   <!-- Shared grid/carousel tile. `shape` drives the per-section aspect ratio
        (WP-7); chrome="transparent" lets a tile sit on the section background
        and earn chrome only on hover. -->
@@ -612,7 +650,7 @@
       price={c.priceCents != null
         ? { amount: c.priceCents, currency: 'GBP' }
         : null}
-      contentAccessType={c.accessType}
+      contentAccessType={deriveContentAccessKind(c)}
       included={access.isIncluded(c)}
       isFollower={access.isFollowing}
       tierName={access.getTierName(c)}

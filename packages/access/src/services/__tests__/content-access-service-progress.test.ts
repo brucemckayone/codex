@@ -59,6 +59,26 @@ interface StubDb {
   insertSpy: InsertSpy;
 }
 
+/**
+ * Chainable empty `.select()` stub. The collapsed resolver (Codex-2pryk.2.3)
+ * reads the `entitlements` / course tables via `db.select(...).from(...)` on the
+ * tier/paid deny paths; this mock seeds no such rows, so every additive read
+ * resolves to [] and the access-gate OUTCOME (deny → ForbiddenError) is
+ * unchanged.
+ */
+function emptySelect() {
+  const builder = {
+    from: () => builder,
+    innerJoin: () => builder,
+    leftJoin: () => builder,
+    where: () => builder,
+    limit: () => builder,
+    // biome-ignore lint/suspicious/noThenProperty: intentional thenable — mimics Drizzle's awaitable query builder so `await db.select()...` resolves to [].
+    then: (resolve: (rows: never[]) => unknown) => resolve([]),
+  };
+  return builder;
+}
+
 function createStubDb(): StubDb {
   const mocks: QueryMocks = {
     content: { findFirst: vi.fn() },
@@ -88,6 +108,7 @@ function buildService(stub: StubDb, revocation?: AccessRevocation) {
   const dbForService = {
     query: stub.mocks,
     insert: stub.insert,
+    select: emptySelect,
   } as unknown as ServiceDb;
 
   const verifyPurchase = vi.fn(async () => false);
@@ -130,12 +151,20 @@ const orgId = 'org_xyz';
 const contentId = 'content_123';
 const revocationKey = `revoked:user:${userId}:${orgId}`;
 
+// Subscriber-gating is ALWAYS a concrete tier in the flag model (no
+// "any-tier" state). Use the tier the active subscriber sits on (sortOrder
+// 10) so any active subscriber to this org qualifies.
+const tierId = 'tier_pro';
+
 const subscribersContent = {
   id: contentId,
   organizationId: orgId,
-  accessType: 'subscribers',
+  isFree: false,
+  isPurchasable: false,
   priceCents: null,
-  minimumTierId: null,
+  includedInTierId: tierId,
+  isFollowerGated: false,
+  isTeamOnly: false,
 };
 
 const progressInput: SavePlaybackProgressInput = {
@@ -165,8 +194,10 @@ describe('ContentAccessService.savePlaybackProgress — access gate', () => {
   it('allows a user with an active subscription to save progress', async () => {
     // content row — subscriber-gated, in org
     stub.mocks.content.findFirst.mockResolvedValue(subscribersContent);
-    // active subscription exists (any tier ok because minimumTierId = null)
+    // active subscription exists; the content's included tier resolves to
+    // sortOrder 10 (== the subscriber's tier), so access is granted.
     stub.mocks.subscriptions.findFirst.mockResolvedValue(activeSub);
+    stub.mocks.subscriptionTiers.findFirst.mockResolvedValue({ sortOrder: 10 });
 
     const { service } = buildService(stub);
 
@@ -299,9 +330,12 @@ describe('ContentAccessService.savePlaybackProgress — access gate', () => {
     const followersContent = {
       id: contentId,
       organizationId: orgId,
-      accessType: 'followers',
+      isFree: false,
+      isPurchasable: false,
       priceCents: null,
-      minimumTierId: null,
+      includedInTierId: null,
+      isFollowerGated: true,
+      isTeamOnly: false,
     };
 
     it('allows a subscriber who has NOT followed the org (new grant path)', async () => {

@@ -1,36 +1,45 @@
 <!--
   @component SectionRenderer
 
-  Renders ONE {@link PageSection} via the type→component registry, resolving its
-  variant and threading the edit seam (Codex-2pryk · WP-3/WP-5). Unknown types
-  render nothing (forward-compatible). Shared by the WYSIWYG builder canvas
-  (`editable`) and the public journey page (read-only).
+  The inert public section renderer (SPEC §4.1). Walks the page's ordered
+  `sections`, drops DISABLED sections and UNKNOWN types (forward-compatible — an
+  unrecognised `type` resolves to no component and is skipped), and renders each
+  known section inside a semantic `<section>` wrapper. Order is array position.
+
+  This is NOT the studio editor — it lives under `$lib/page-builder` (the CE-4
+  PUBLIC_LIB_ROOT) and never imports the editor UI. WP-5's live-preview iframe
+  reuses this same renderer via `JourneyRenderer`.
 -->
 <script lang="ts">
-  import type { PageSection } from '@codex/shared-types';
-  import { resolveVariant } from '../section-catalog';
-  import './journey-sections.css';
-  import { componentForType } from './section-registry';
-  import type { JourneyStagePreview } from './section-render';
+  import { selectRenderableSections } from './section-registry';
+  import type { JourneySalesContext } from './types';
+  import type { PageSection } from '$lib/page-builder';
 
   interface Props {
-    section: PageSection;
-    /** True inside the builder canvas — enables contenteditable text. */
-    editable?: boolean;
-    /** Write one prop key of a section (in-canvas inline edit → store). */
-    onEditProp?: (sectionId: string, key: string, value: string) => void;
-    /** Curriculum stages for the map/descent section. */
-    stages?: readonly JourneyStagePreview[];
+    sections: PageSection[];
+    context: JourneySalesContext;
   }
 
-  let { section, editable = false, onEditProp, stages }: Props = $props();
+  const { sections, context }: Props = $props();
 
-  const Component = $derived(componentForType(section.type));
-  const variant = $derived(resolveVariant(section));
-  const onEdit = (key: string, value: string): void =>
-    onEditProp?.(section.id, key, value);
+  const renderable = $derived(selectRenderableSections(sections));
 </script>
 
-{#if Component}
-  <Component props={section.props} {variant} {editable} {onEdit} {stages} />
-{/if}
+{#each renderable as { section, Component } (section.id)}
+  <!-- `id={type}` gives in-page anchors a stable target (e.g. the hero's
+       "See the descent" → #map, the scroll cue → #map). Section types are
+       unique within a page, so the type doubles as the anchor id. -->
+  <section id={section.type} class="jp-section" data-section-type={section.type}>
+    <Component config={section.props} {context} />
+  </section>
+{/each}
+
+<style>
+  .jp-section {
+    /* Each section owns its own vertical rhythm; the wrapper only establishes
+       a stacking/isolation context so decorative section atmosphere never
+       bleeds between sections. */
+    position: relative;
+    isolation: isolate;
+  }
+</style>

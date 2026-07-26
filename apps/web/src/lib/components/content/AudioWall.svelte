@@ -17,6 +17,7 @@
   import { MusicIcon } from '$lib/components/ui/Icon';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import { useAccessContext } from '$lib/utils/access-context.svelte';
+  import { deriveContentAccessKind } from '$lib/utils/content-access';
 
   interface AudioItem {
     id: string;
@@ -31,8 +32,15 @@
     } | null;
     creator?: { name?: string | null } | null;
     priceCents?: number | null;
-    accessType?: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | null;
+    // SPEC §6.1 policy flags (WP-1) — feed the access-context badge helpers
+    // (isIncluded / getTierName) and the derived display kind.
+    isFree?: boolean | null;
+    isPurchasable?: boolean | null;
+    includedInTierId?: string | null;
+    isFollowerGated?: boolean | null;
+    isTeamOnly?: boolean | null;
     category?: string | null;
+    featured?: boolean | null;
   }
 
   interface Props {
@@ -68,7 +76,7 @@
       price={item.priceCents != null
         ? { amount: item.priceCents, currency: 'GBP' }
         : null}
-      contentAccessType={item.accessType}
+      contentAccessType={deriveContentAccessKind(item)}
       included={access.isIncluded(item)}
       isFollower={access.isFollowing}
       tierName={access.getTierName(item)}

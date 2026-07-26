@@ -1,24 +1,49 @@
 /**
- * `$lib/page-builder/render` — the PUBLIC journey/course sales-page renderer
- * (Codex-2pryk · WP-3/WP-5).
+ * `$lib/page-builder/render` — the public/inert journey SECTION RENDERER
+ * (Codex-2pryk.3.1 · WP-3).
  *
- * Section components + the type→component registry + the inline-edit primitive.
- * Imported by the public journey route AND the studio's WYSIWYG builder canvas.
- * Deliberately SEPARATE from the inert `$lib/page-builder` barrel (which must stay
- * component-free) — import renderer surfaces from here.
+ * The counterpart to WP-0's inert contract surface: given a persisted page's
+ * `sections` + `brandOverrides` and the awaited course/stage/testimonial data,
+ * it renders the public sales page. It consumes ONLY DS primitives + the brand
+ * editor's pure token serialisers — never the studio editor UI — so it stays
+ * inside the CE-4 PUBLIC_LIB_ROOT boundary and is safe to load in the public
+ * bundle and in WP-5's same-origin preview iframe.
  */
-export { default as EditableText } from './EditableText.svelte';
-export { type EditableTextParams, editableText } from './editable-text';
-export { default as SectionRenderer } from './SectionRenderer.svelte';
+
 export {
-  componentForType,
+  brandOverrideLogo,
+  brandOverridesToCssVars,
+  brandOverridesToStyleAttr,
+} from './brand-overrides';
+export { default as CtaLink } from './CtaLink.svelte';
+export { default as JourneyRenderer } from './JourneyRenderer.svelte';
+export { default as SectionRenderer } from './SectionRenderer.svelte';
+
+export {
+  type RenderableSection,
+  resolveSectionComponent,
   SECTION_COMPONENTS,
   type SectionComponent,
-} from './section-registry';
-export {
-  has,
-  type JourneyLessonPreview,
-  type JourneyStagePreview,
   type SectionComponentProps,
-  text,
-} from './section-render';
+  selectRenderableSections,
+} from './section-registry';
+
+export type {
+  AcheSectionProps,
+  FaqEntry,
+  FaqSectionProps,
+  FeelInclusion,
+  FeelSectionProps,
+  GuideSectionProps,
+  HeroSectionProps,
+  IntroVideoSectionProps,
+  InviteOffer,
+  InviteSectionProps,
+  JourneySalesContext,
+  MapSectionProps,
+  PreviewMedia,
+  ProofSectionProps,
+  ReelSectionProps,
+  SellPreview,
+  TurnSectionProps,
+} from './types';

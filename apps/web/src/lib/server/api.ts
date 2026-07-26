@@ -88,7 +88,38 @@ import type {
 } from '@codex/validation';
 import type { Cookies } from '@sveltejs/kit';
 import { dev } from '$app/environment';
+// Studio journey-insights view shape (Codex-2pryk Round-D · WP-7). The FROZEN
+// FE contract from the metric-model; the content-api route serialises the
+// structurally-identical `@codex/access` twin. Type-only (erased).
+import type { JourneyInsightsData } from '$lib/components/studio/journey-insights/metric-model';
+// Journey member-surface view shapes (Codex-2pryk Round-D). Structurally
+// identical to @codex/shared-types' cross-worker mirror the content-api routes
+// serialise; imported from the FE $lib bag so callers get the exact FE types.
+import type {
+  CompletionSource,
+  ContentCourseLinks,
+  CourseCardSummary,
+  CourseDashboardData,
+  EnrolledCourseSummary,
+  InCoursePracticeData,
+  JourneyCourseSummary,
+  PracticeCompletionRecord,
+} from '$lib/journeys/types';
 import { logger } from '$lib/observability';
+// Journey PUBLIC sales-page shapes (Codex-2pryk Round-D · WP-3). Same FE-mirror
+// rationale as above: the content-api serialises the `@codex/shared-types`
+// twins (`JourneyCoursePage` / `CourseSellPreview`); these FE types are the
+// structurally-identical shapes the renderer consumes. Type-only (erased) — no
+// runtime import of the page-builder barrel.
+import type {
+  EditorCurriculum,
+  EnrolledJourneyCard,
+  JourneyCardView,
+  JourneyCoursePage,
+  JourneyListItem,
+  JourneyPageRecord,
+} from '$lib/page-builder';
+import type { SellPreview } from '$lib/page-builder/render';
 // Import local types that extend DB types with relations
 // OrgMemberItem is in $lib/types (not here) so components can import it
 // without triggering the vite server-only module guard.
@@ -114,14 +145,17 @@ import { ApiError } from './errors';
  * One item from `GET /api/content/public`, typed to match what the endpoint
  * ACTUALLY returns — not the raw DB row. The worker resolves R2 keys to CDN
  * URLs (`resolveR2Urls` adds `thumbnailUrl` + `hlsPreviewUrl` to `mediaItem`)
- * and `listPublic` attaches `categorySlugs`; `content_type` / `access_type`
- * are `varchar` columns (so `ContentWithRelations` widens them to `string`)
- * but are constrained to their enums, so we narrow them here. This is the
- * single source of truth for the landing/explore `ContentItem` shape.
+ * and `listPublic` attaches `categorySlugs`; `content_type` is a `varchar`
+ * column (so `ContentWithRelations` widens it to `string`) but is constrained
+ * to its enum, so we narrow it here. The SPEC §6.1 access-policy flags
+ * (`isFree` / `isPurchasable` + `priceCents` / `includedInTierId` /
+ * `isFollowerGated` / `isTeamOnly` / `courseOnly`) flow through unchanged from
+ * `ContentWithRelations` (WP-1 replaced the single `accessType` enum). This is
+ * the single source of truth for the landing/explore `ContentItem` shape.
  */
 export type PublicContentListItem = Omit<
   ContentWithRelations,
-  'mediaItem' | 'contentType' | 'accessType'
+  'mediaItem' | 'contentType'
 > & {
   mediaItem:
     | (MediaItem & {
@@ -130,7 +164,6 @@ export type PublicContentListItem = Omit<
       })
     | null;
   contentType: 'video' | 'audio' | 'written';
-  accessType: 'free' | 'paid' | 'followers' | 'subscribers' | 'team';
   categorySlugs: string[];
 };
 
@@ -683,7 +716,7 @@ export function createServerApi(
        * - limit: number (1-100, default: 20)
        * - status: 'draft' | 'published' | 'archived' (optional)
        * - contentType: 'video' | 'audio' | 'written' (optional)
-       * - accessType: 'free' | 'paid' | 'subscribers' | 'members' (optional)
+       * - accessType: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | 'course' (optional list filter — a query KIND label, not the stored flags)
        * - category: string filter (max 100 chars, optional)
        * - organizationId: UUID filter (optional)
        * - creatorId: UUID filter (optional)
@@ -1031,6 +1064,314 @@ export function createServerApi(
         request<UserLibraryResponse>(
           'access',
           `/api/access/user/library${params ? `?${params}` : ''}`
+        ),
+
+      // ── Course journeys (Codex-2pryk Round-D) ─────────────────────────────
+      // Journey reads/writes hit content-api (ServiceName 'access' → port 4001,
+      // same worker) via the /api/access + /api/journeys mounts. The worker
+      // derives the user from the forwarded session cookie, so these take no
+      // userId argument. Each maps 1:1 to a $lib/server/journeys/round-d-seam
+      // function the Phase-2 FE swaps its mock body for.
+
+      /**
+       * Entitlement gate for a course dashboard/journey (SPEC §6.3). Unwraps the
+       * `{ canEnter }` envelope to the bare boolean the seam expects.
+       */
+      canEnterCourse: (courseId: string) =>
+        request<{ canEnter: boolean }>(
+          'access',
+          `/api/access/courses/${courseId}/can-enter`
+        ).then((r) => r.canEnter),
+
+      /**
+       * Entitlement check gating a signed stream (SPEC §6.3). Works
+       * unauthenticated (public / free content resolves as userId=null).
+       */
+      canView: (contentId: string) =>
+        request<{ canView: boolean }>(
+          'access',
+          `/api/access/content/${contentId}/can-view`
+        ).then((r) => r.canView),
+
+      /** Resolve a course summary by its org-scoped slug (null if none). */
+      courseBySlug: (organizationId: string, slug: string) =>
+        request<JourneyCourseSummary | null>(
+          'access',
+          `/api/journeys/courses/by-slug?organizationId=${encodeURIComponent(
+            organizationId
+          )}&slug=${encodeURIComponent(slug)}`
+        ),
+
+      /**
+       * List an org's PUBLISHED courses for the /explore "Journeys" rail
+       * (SPEC §8.5). Fully public — no auth needed; returns `[]` when the org
+       * has no published courses.
+       */
+      listPublishedCourses: (organizationId: string) =>
+        request<CourseCardSummary[]>(
+          'access',
+          `/api/journeys/courses?organizationId=${encodeURIComponent(
+            organizationId
+          )}`
+        ),
+
+      /**
+       * Public: the PUBLISHED course(s) that include a content item as a
+       * practice — the standalone content page's journey cross-link (F19/F20).
+       * No auth needed (published-course public chrome only). `{ courses: [] }`
+       * when the item belongs to no published course.
+       */
+      contentCourses: (contentId: string) =>
+        request<ContentCourseLinks>(
+          'access',
+          `/api/journeys/content/${encodeURIComponent(contentId)}/courses`
+        ),
+
+      /**
+       * Public course SALES PAGE by org-scoped landing-page slug (null if no
+       * published page/course). Fully public — no auth needed (WP-3 shell).
+       */
+      coursePage: (organizationId: string, slug: string) =>
+        request<JourneyCoursePage | null>(
+          'access',
+          `/api/journeys/pages/by-slug?organizationId=${encodeURIComponent(
+            organizationId
+          )}&slug=${encodeURIComponent(slug)}`
+        ),
+
+      /**
+       * Public 30s sell-preview clips (intro + reel) for a course (null if the
+       * course is not published). Public preview manifest URLs — no signing.
+       */
+      courseSellPreview: (courseId: string) =>
+        request<SellPreview | null>(
+          'access',
+          `/api/journeys/courses/${courseId}/sell-preview`
+        ),
+
+      /**
+       * Public journey DISCOVERY list (Codex-oi2w4) — published course-journeys
+       * for the org home "featured" rail (`featured: true`) + the Explore grid.
+       * Fully public; carries no per-user state.
+       */
+      listPublishedJourneys: (
+        organizationId: string,
+        opts: { featured?: boolean; limit?: number } = {}
+      ) =>
+        request<JourneyCardView[]>(
+          'access',
+          `/api/journeys/published?organizationId=${encodeURIComponent(
+            organizationId
+          )}${opts.featured ? '&featured=true' : ''}${
+            opts.limit ? `&limit=${opts.limit}` : ''
+          }`
+        ),
+
+      /**
+       * The session user's ENROLLED journeys in this org, with a progress rollup
+       * (the library "Your journeys" shelf + continue rail). Auth-scoped — the
+       * content-api reads `userId` from the forwarded session; `organizationId`
+       * scopes results to the browsed space.
+       */
+      listEnrolledJourneys: (organizationId: string) =>
+        request<EnrolledJourneyCard[]>(
+          'access',
+          `/api/journeys/enrolled?organizationId=${encodeURIComponent(
+            organizationId
+          )}`
+        ),
+
+      /** Dashboard payload (enrollment + curriculum + progress rollup). */
+      courseDashboard: (courseId: string) =>
+        request<CourseDashboardData | null>(
+          'access',
+          `/api/journeys/courses/${courseId}/dashboard`
+        ),
+
+      /**
+       * The member LIBRARY "Your journeys" shelf: every course the caller is
+       * enrolled in within one org, each with a progress rollup. The worker
+       * derives the user from the session; `organizationId` only narrows scope.
+       */
+      listEnrolledCourses: (organizationId: string) =>
+        request<EnrolledCourseSummary[]>(
+          'access',
+          `/api/journeys/user/enrollments?organizationId=${encodeURIComponent(
+            organizationId
+          )}`
+        ),
+
+      /** In-course player payload (practice + playlist + signed stream URL). */
+      inCoursePractice: (courseId: string, contentSlug: string) =>
+        request<InCoursePracticeData | null>(
+          'access',
+          `/api/journeys/courses/${courseId}/practices/${encodeURIComponent(
+            contentSlug
+          )}`
+        ),
+
+      /** Record a practice completion (idempotent — repeat is a no-op). */
+      persistCompletion: (input: {
+        contentId: string;
+        source: CompletionSource;
+      }) =>
+        request<PracticeCompletionRecord>(
+          'access',
+          `/api/journeys/practices/completions`,
+          {
+            method: 'POST',
+            body: JSON.stringify(input),
+          }
+        ),
+
+      /**
+       * Studio journey INSIGHTS (Codex-2pryk Round-D · WP-7): course-scoped
+       * `live` (financial) + `course` (engagement) aggregation for one reporting
+       * period. Owner/admin only — the content-api route enforces
+       * `requireOrgManagement` and re-derives scope from the session, so the
+       * `organizationId` here is used only for org resolution, never as the
+       * authorization source. Money is GBP pence.
+       */
+      courseInsights: (
+        organizationId: string,
+        courseId: string,
+        period: string
+      ) =>
+        request<JourneyInsightsData>(
+          'access',
+          `/api/journeys/insights?organizationId=${encodeURIComponent(
+            organizationId
+          )}&courseId=${encodeURIComponent(courseId)}&period=${encodeURIComponent(
+            period
+          )}`
+        ),
+
+      /**
+       * Studio index BATCH revenue (Codex-9p47t): authoritative gross revenue
+       * per journey (30d default), keyed by landing-page id — the figure
+       * `listJourneys` omits (revenueCents null) to avoid drift. Owner/admin
+       * only; `organizationId` is for org resolution only. Money is GBP pence;
+       * journeys with no revenue are omitted from the map.
+       */
+      listJourneyRevenue: (organizationId: string, period?: string) =>
+        request<Record<string, number>>(
+          'access',
+          `/api/journeys/insights/org-revenue?organizationId=${encodeURIComponent(
+            organizationId
+          )}${period ? `&period=${encodeURIComponent(period)}` : ''}`
+        ),
+
+      // ── Studio journey MANAGEMENT (Codex-isr02 · page-builder write path) ──
+      // Owner/admin only — the content-api routes enforce `requireOrgManagement`
+      // and re-derive scope from the session; `organizationId` here is used ONLY
+      // for org resolution, never as the authorization source.
+
+      /** Studio index — the org's journeys, newest-edited first (optional status). */
+      listJourneys: (organizationId: string, status?: string) =>
+        request<JourneyListItem[]>(
+          'access',
+          `/api/journeys/studio/journeys?organizationId=${encodeURIComponent(
+            organizationId
+          )}${status ? `&status=${encodeURIComponent(status)}` : ''}`
+        ),
+
+      /** Create a journey (draft). Returns the new page id + slug. */
+      createJourney: (
+        organizationId: string,
+        input: { title: string; pageType: string }
+      ) =>
+        request<{ id: string; slug: string }>(
+          'access',
+          `/api/journeys/studio/journeys?organizationId=${encodeURIComponent(
+            organizationId
+          )}`,
+          { method: 'POST', body: JSON.stringify(input) }
+        ),
+
+      /** Load a page draft into the builder (null if foreign/missing). */
+      getJourneyForBuilder: (organizationId: string, pageId: string) =>
+        request<JourneyPageRecord | null>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}?organizationId=${encodeURIComponent(organizationId)}`
+        ),
+
+      /**
+       * STUDIO curriculum read (Codex-03cwh) — the two-pane editor's admin
+       * curriculum for a journey (resolved from the landing-page id to its
+       * subject course), INCLUDING draft-content practices + picker metadata.
+       * Owner/admin only; `organizationId` is for org resolution only.
+       */
+      getCourseCurriculum: (organizationId: string, pageId: string) =>
+        request<EditorCurriculum>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}/curriculum?organizationId=${encodeURIComponent(organizationId)}`
+        ),
+
+      /**
+       * STUDIO curriculum bulk-save (Codex-03cwh) — persist the whole desired
+       * curriculum (stages + practice joins) for the journey's subject course in
+       * one transaction; returns the freshly-persisted curriculum.
+       */
+      saveCourseCurriculum: (
+        organizationId: string,
+        pageId: string,
+        body: {
+          stages: Array<{
+            id: string | null;
+            name: string;
+            gloss: string | null;
+            practices: Array<{ contentId: string }>;
+          }>;
+        }
+      ) =>
+        request<EditorCurriculum>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}/curriculum?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'PUT', body: JSON.stringify(body) }
+        ),
+
+      /**
+       * Studio LIVE-PREVIEW read (Codex-isr02 P0b-2) — the sell-page envelope
+       * for ANY status (drafts included), management-gated (owner/admin; the
+       * worker authorizes the client-supplied org against the session's
+       * membership). Powers the builder iframe rendering an unpublished draft;
+       * null for a foreign/missing/non-managed page so the public load
+       * fail-closes to 404.
+       */
+      coursePagePreview: (organizationId: string, slug: string) =>
+        request<JourneyCoursePage | null>(
+          'access',
+          `/api/journeys/studio/journeys/preview/by-slug?organizationId=${encodeURIComponent(
+            organizationId
+          )}&slug=${encodeURIComponent(slug)}`
+        ),
+
+      /**
+       * Persist the builder's draft (sections/brand/title/slug/status). The param
+       * is the editable subset the save touches; `brandOverrides` is optional to
+       * stay assignable from SvelteKit's `command()`-inferred record (which infers
+       * `.nullable()` fields as optional). The full record is still serialised —
+       * the worker's Zod schema validates/strips it.
+       */
+      saveJourneyPage: (
+        organizationId: string,
+        record: Pick<
+          JourneyPageRecord,
+          'id' | 'title' | 'slug' | 'status' | 'sections'
+        > & { brandOverrides?: JourneyPageRecord['brandOverrides'] }
+      ) =>
+        request<null>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            record.id
+          )}?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'PUT', body: JSON.stringify(record) }
         ),
     },
 

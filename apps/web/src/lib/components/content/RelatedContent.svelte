@@ -16,6 +16,7 @@
 <script lang="ts">
   import * as m from '$paraglide/messages';
   import { ContentCard } from '$lib/components/ui/ContentCard';
+  import { deriveContentAccessKind } from '$lib/utils/content-access';
   import type { ContentWithRelations } from '$lib/types';
 
   // Same "mediaItem with resolved URLs" shape used by ContentDetailView — the
@@ -59,7 +60,7 @@
           price={item.priceCents != null
             ? { amount: item.priceCents, currency: 'GBP' }
             : null}
-          contentAccessType={item.accessType as 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | null}
+          contentAccessType={deriveContentAccessKind(item)}
           featured={item.featured ?? false}
         />
       {/each}

@@ -461,10 +461,10 @@ describe('TierService', () => {
       ).rejects.toThrow(TierNotFoundError);
     });
 
-    it('should clear content.minimum_tier_id on soft-delete (X1 regression)', async () => {
-      // FK content.minimum_tier_id -> subscription_tiers.id is ON DELETE SET
-      // NULL, but that never fires for soft-deletes (deletedAt). Without this
-      // sweep, deleting a tier would leave content silently unreachable.
+    it('should clear content.included_in_tier_id on soft-delete (X1 regression)', async () => {
+      // FK content.included_in_tier_id -> subscription_tiers.id is ON DELETE
+      // SET NULL, but that never fires for soft-deletes (deletedAt). Without
+      // this sweep, deleting a tier would leave content silently unreachable.
       const org = await createOrgWithConnect('delete-sweep');
       const tier = await service.createTier(org.id, {
         name: 'Gated',
@@ -478,7 +478,7 @@ describe('TierService', () => {
         .values(
           createTestContentInput(creatorId, {
             organizationId: org.id,
-            minimumTierId: tier.id,
+            includedInTierId: tier.id,
           })
         )
         .returning();
@@ -487,7 +487,7 @@ describe('TierService', () => {
         .values(
           createTestContentInput(creatorId, {
             organizationId: org.id,
-            minimumTierId: tier.id,
+            includedInTierId: tier.id,
           })
         )
         .returning();
@@ -496,7 +496,7 @@ describe('TierService', () => {
         .values(
           createTestContentInput(creatorId, {
             organizationId: org.id,
-            minimumTierId: null,
+            includedInTierId: null,
           })
         )
         .returning();
@@ -504,16 +504,16 @@ describe('TierService', () => {
       await service.deleteTier(tier.id, org.id);
 
       const rows = await db
-        .select({ id: content.id, minimumTierId: content.minimumTierId })
+        .select({ id: content.id, includedInTierId: content.includedInTierId })
         .from(content)
         .where(eq(content.organizationId, org.id));
-      const byId = new Map(rows.map((r) => [r.id, r.minimumTierId]));
+      const byId = new Map(rows.map((r) => [r.id, r.includedInTierId]));
       expect(byId.get(gatedA.id)).toBeNull();
       expect(byId.get(gatedB.id)).toBeNull();
       expect(byId.get(ungated.id)).toBeNull();
     });
 
-    it('should only clear minimum_tier_id for content within the same org (scoping)', async () => {
+    it('should only clear included_in_tier_id for content within the same org (scoping)', async () => {
       // A different org with its own tier accidentally sharing an id would
       // still be scoped out by the WHERE organizationId clause.
       const orgA = await createOrgWithConnect('delete-scope-a');
@@ -525,14 +525,14 @@ describe('TierService', () => {
         priceAnnual: 4990,
       });
 
-      // Content in org B that shares minimumTierId = tierA.id (contrived,
+      // Content in org B that shares includedInTierId = tierA.id (contrived,
       // would not happen normally but guards against the sweep over-reaching).
       const [orgBContent] = await db
         .insert(content)
         .values(
           createTestContentInput(creatorId, {
             organizationId: orgB.id,
-            minimumTierId: tierA.id,
+            includedInTierId: tierA.id,
           })
         )
         .returning();
@@ -540,10 +540,10 @@ describe('TierService', () => {
       await service.deleteTier(tierA.id, orgA.id);
 
       const [row] = await db
-        .select({ minimumTierId: content.minimumTierId })
+        .select({ includedInTierId: content.includedInTierId })
         .from(content)
         .where(eq(content.id, orgBContent.id));
-      expect(row.minimumTierId).toBe(tierA.id);
+      expect(row.includedInTierId).toBe(tierA.id);
     });
   });
 
