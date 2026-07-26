@@ -121,6 +121,9 @@
     color: var(--color-text-secondary);
   }
 
+  /* A candlelit poster frame: warm firelight rising from lower-centre + a clay
+     presence upper-left over a deep body — atmosphere derived from the org
+     brand, never a flat box. A real poster (`--poster`) layers over the top. */
   .intro__stage {
     position: relative;
     isolation: isolate;
@@ -128,15 +131,32 @@
     aspect-ratio: 16 / 9;
     border-radius: var(--radius-card);
     overflow: hidden;
-    border: var(--border-width) solid var(--color-border-subtle);
+    border: var(--border-width) solid
+      color-mix(in oklab, var(--color-brand-primary) 24%, transparent);
     background:
       var(--poster, none) center / cover no-repeat,
-      var(--color-surface-secondary);
+      radial-gradient(
+        58% 66% at 50% 64%,
+        color-mix(in oklab, var(--color-brand-primary) 42%, transparent),
+        transparent 68%
+      ),
+      radial-gradient(
+        92% 76% at 30% 24%,
+        color-mix(in oklab, var(--color-brand-accent, var(--color-brand-primary)) 22%, transparent),
+        transparent 66%
+      ),
+      var(--color-surface);
+    box-shadow:
+      0 var(--space-8) var(--space-16) calc(-1 * var(--space-10))
+        color-mix(in oklab, var(--color-brand-primary) 55%, #000),
+      inset 0 var(--border-width) 0
+        color-mix(in oklab, var(--color-heading) 10%, transparent);
     display: grid;
     place-items: center;
   }
 
   .intro__play {
+    position: relative;
     display: inline-grid;
     place-items: center;
     width: var(--space-16);
@@ -146,9 +166,33 @@
     cursor: pointer;
     color: var(--color-text-on-brand);
     background: var(--color-brand-primary);
+    box-shadow: 0 0 var(--space-8)
+      color-mix(in oklab, var(--color-brand-primary) 60%, transparent);
     transition:
       transform var(--duration-fast) var(--ease-default),
       background-color var(--duration-fast) var(--ease-default);
+  }
+
+  /* a slow breathing pulse ring — the ember, waiting to be watched */
+  .intro__play::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border: var(--border-width) solid
+      color-mix(in oklab, var(--color-brand-primary) 60%, transparent);
+    animation: intro-pulse 3.2s var(--ease-default) infinite;
+  }
+
+  @keyframes intro-pulse {
+    0% {
+      transform: scale(1);
+      opacity: 0.7;
+    }
+    100% {
+      transform: scale(1.9);
+      opacity: 0;
+    }
   }
 
   .intro__play:hover {
@@ -176,6 +220,10 @@
   @media (prefers-reduced-motion: reduce) {
     .intro__play {
       transition: none;
+    }
+    .intro__play::after {
+      animation: none;
+      opacity: 0;
     }
     .intro__play:hover {
       transform: none;

@@ -20,6 +20,7 @@
  */
 import { error } from '@sveltejs/kit';
 import { CACHE_HEADERS } from '$lib/server/cache';
+import { resolveCanEnterCourse } from '$lib/server/journeys/round-d-seam';
 import type { PageServerLoad } from './$types';
 import {
   getCoursePage,
@@ -27,16 +28,12 @@ import {
   resolveSellPreview,
 } from './journey-data';
 
-export const load: PageServerLoad = async ({
-  params,
-  parent,
-  setHeaders,
-  depends,
-  locals,
-}) => {
+export const load: PageServerLoad = async (event) => {
+  const { params, parent, setHeaders, depends, locals } = event;
+
   // Ensure the org layout (auth + branding + org resolution) has resolved before
   // we commit cache headers — mirrors the org-landing precedent.
-  await parent();
+  const { user } = await parent();
 
   // AWAIT: the SEO-critical, first-paint envelope. Null → no PUBLISHED page.
   let coursePage = await getCoursePage({ slug: params.journeySlug });
@@ -55,6 +52,20 @@ export const load: PageServerLoad = async ({
   if (!coursePage) {
     throw error(404, 'This portal could not be found.');
   }
+
+  // AWAIT the enrolment flag: it flips the ABOVE-THE-FOLD hero CTA (anon/
+  // not-enrolled → "join" → checkout; enrolled → "go to your dashboard" →
+  // dashboard), so it belongs on the first-paint path, not streamed. The sales
+  // page itself stays fully PUBLIC (no `canView` gate) — this only re-targets
+  // the CTA. We skip the worker round-trip entirely for anonymous visitors (the
+  // SEO-critical common case): no session ⇒ definitionally not enrolled. The
+  // check is `.catch()`-guarded so an entitlement-resolver hiccup degrades to
+  // the public/join CTA rather than throwing.
+  const enrolled = user
+    ? await resolveCanEnterCourse(event, user.id, coursePage.course.id).catch(
+        () => false
+      )
+    : false;
 
   // Version-keyed invalidation dependency. NOTE (flagged for the conductor):
   // the page/course payload should cache under new `CacheType.PAGE_CONFIG` /
@@ -83,6 +94,7 @@ export const load: PageServerLoad = async ({
   return {
     coursePage,
     orgSlug: params.slug,
+    enrolled,
     // STREAM: public sell previews (no auth). `.catch()` → null on any failure.
     sellPreview: resolveSellPreview({
       pageId: coursePage.page.id,

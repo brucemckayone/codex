@@ -171,13 +171,11 @@ describe('Member discovery (Codex-oi2w4)', () => {
         )
         .returning({ id: content.id });
       if (!p) throw new Error('draft practice insert failed');
-      await db
-        .insert(stagePractices)
-        .values({
-          stageId: stage.id,
-          contentId: p.id,
-          sortOrder: publishedCount + i,
-        });
+      await db.insert(stagePractices).values({
+        stageId: stage.id,
+        contentId: p.id,
+        sortOrder: publishedCount + i,
+      });
     }
 
     return { pageId, slug, courseId, practiceIds };
