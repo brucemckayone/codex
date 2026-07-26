@@ -345,6 +345,23 @@ export interface JourneyCourseSummary {
 }
 
 /**
+ * The PUBLISHED course(s) that include a given content item as a practice —
+ * resolved via `stage_practices → course_stages → courses` (Codex-2pryk.3.10,
+ * standalone content viewer). Powers the journey cross-link on the standalone
+ * content page: the breadcrumb signpost (F19), the "part of a journey" context,
+ * and the free-content upsell (F20).
+ *
+ * Fully PUBLIC read — scoped to PUBLISHED, non-deleted courses (via non-deleted
+ * stages), so it never leaks a draft/archived course. `courses` is empty when
+ * the item belongs to no published course (→ the cross-link is omitted
+ * gracefully). A content item can sit in more than one course; the FE renders
+ * the primary (first) one.
+ */
+export interface ContentCourseLinks {
+  courses: JourneyCourseSummary[];
+}
+
+/**
  * One practice (a `content` row inside a stage), as the member surfaces read it.
  * `durationSeconds` is present for media (drives the resume + finish signal).
  */

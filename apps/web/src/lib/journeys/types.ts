@@ -32,6 +32,17 @@ export interface JourneyCourseSummary {
 }
 
 /**
+ * The PUBLISHED course(s) that include a content item as a practice — the
+ * standalone content page's journey cross-link (Codex-2pryk.3.10, F19/F20).
+ * FE mirror of `@codex/shared-types`' `ContentCourseLinks` (must stay equal).
+ * `courses` is empty when the item belongs to no published course (the
+ * cross-link is then omitted); the FE renders the primary (first) course.
+ */
+export interface ContentCourseLinks {
+  courses: JourneyCourseSummary[];
+}
+
+/**
  * One practice (a `content` row inside a stage), as the member surfaces read it.
  * `durationSeconds` is present for media (drives the resume + finish signal).
  */

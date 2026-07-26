@@ -42,6 +42,7 @@ export type {
   BrandTokenOverrides,
   CompletionSource,
   ContentAccessPolicy,
+  ContentCourseLinks,
   CourseAccessPath,
   CourseDashboardData,
   CourseOffer,

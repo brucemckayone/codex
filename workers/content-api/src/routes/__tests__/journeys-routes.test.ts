@@ -46,6 +46,7 @@ const accessSpies = {
 
 const journeySpies = {
   getCourseBySlug: vi.fn(),
+  getContentCourses: vi.fn(),
   getCoursePage: vi.fn(),
   getCourseSellPreview: vi.fn(),
   getCourseDashboard: vi.fn(),
@@ -85,6 +86,9 @@ const COURSE_SUMMARY = {
   title: 'Rootwork',
   organizationSlug: 'studio-alpha',
 };
+
+// The `getContentCourses` projection (standalone content viewer cross-link).
+const CONTENT_COURSES = { courses: [COURSE_SUMMARY] };
 
 const DASHBOARD = {
   course: COURSE_SUMMARY,
@@ -249,6 +253,7 @@ beforeEach(() => {
   accessSpies.canView.mockResolvedValue(true);
   accessSpies.getStreamingUrl.mockResolvedValue(STREAM_RESULT);
   journeySpies.getCourseBySlug.mockResolvedValue(COURSE_SUMMARY);
+  journeySpies.getContentCourses.mockResolvedValue(CONTENT_COURSES);
   journeySpies.getCoursePage.mockResolvedValue(COURSE_PAGE);
   journeySpies.getCourseSellPreview.mockResolvedValue(SELL_PREVIEW);
   journeySpies.getCourseDashboard.mockResolvedValue(DASHBOARD);
@@ -378,6 +383,49 @@ describe('GET /api/journeys/courses/by-slug — resolve summary', () => {
     );
     expect(res.status).toBe(400);
     expect(journeySpies.getCourseBySlug).not.toHaveBeenCalled();
+  });
+});
+
+// ─── GET /api/journeys/content/:contentId/courses ────────────────────────────
+
+describe('GET /api/journeys/content/:contentId/courses — cross-link (public)', () => {
+  it('found → 200 { data: links }, service called with contentId', async () => {
+    const res = await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/content/${CONTENT_ID}/courses`)
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: CONTENT_COURSES });
+    expect(journeySpies.getContentCourses).toHaveBeenCalledWith(CONTENT_ID);
+  });
+
+  it('anonymous (no session) → 200 — the cross-link is fully public', async () => {
+    const res = await dispatch(
+      buildApp(null),
+      getReq(`/api/journeys/content/${CONTENT_ID}/courses`)
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: CONTENT_COURSES });
+    expect(journeySpies.getContentCourses).toHaveBeenCalledWith(CONTENT_ID);
+  });
+
+  it('no parent course → 200 { data: { courses: [] } }', async () => {
+    journeySpies.getContentCourses.mockResolvedValueOnce({ courses: [] });
+    const res = await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/content/${CONTENT_ID}/courses`)
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: { courses: [] } });
+  });
+
+  it('non-uuid contentId → 400, service NOT called', async () => {
+    const res = await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/content/not-a-uuid/courses`)
+    );
+    expect(res.status).toBe(400);
+    expect(journeySpies.getContentCourses).not.toHaveBeenCalled();
   });
 });
 

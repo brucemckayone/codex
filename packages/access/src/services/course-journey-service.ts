@@ -42,6 +42,7 @@ import { BaseService } from '@codex/service-errors';
 import type {
   BrandTokenOverrides,
   CompletionSource,
+  ContentCourseLinks,
   CourseDashboardData,
   CourseSellPreview,
   CourseSellPreviewClip,
@@ -110,6 +111,60 @@ export class CourseJourneyService extends BaseService {
       };
     } catch (error) {
       this.handleError(error, 'getCourseBySlug');
+    }
+  }
+
+  /**
+   * Resolve the PUBLISHED course(s) that include a content item as a practice —
+   * the standalone content page's journey cross-link (Codex-2pryk.3.10, F19/F20).
+   *
+   * Walks `stage_practices → course_stages → courses` for `contentId`, scoped to
+   * PUBLISHED, non-deleted courses whose stage is non-deleted. Fully PUBLIC: NO
+   * `canView` / entitlement gate — it reveals only published-course public chrome
+   * (title/slug/org), never body or stream, so it is safe to serve anonymously
+   * (mirrors {@link getCourseBySlug} / the public sales-page reads). A practice
+   * can appear in several stages of the same course, so rows are deduped by
+   * course id. Returns `{ courses: [] }` when the item belongs to no published
+   * course (→ the FE omits the cross-link).
+   */
+  async getContentCourses(contentId: string): Promise<ContentCourseLinks> {
+    try {
+      const rows = await this.db
+        .select({
+          id: courses.id,
+          slug: courses.slug,
+          title: courses.title,
+          organizationSlug: organizations.slug,
+        })
+        .from(stagePractices)
+        .innerJoin(courseStages, eq(courseStages.id, stagePractices.stageId))
+        .innerJoin(courses, eq(courses.id, courseStages.courseId))
+        .leftJoin(organizations, eq(organizations.id, courses.organizationId))
+        .where(
+          and(
+            eq(stagePractices.contentId, contentId),
+            isNull(courseStages.deletedAt),
+            eq(courses.status, CONTENT_STATUS.PUBLISHED),
+            isNull(courses.deletedAt)
+          )
+        )
+        .orderBy(asc(courses.title));
+
+      // Dedup by course id (a practice may sit in >1 stage of one course),
+      // preserving the first title-ordered occurrence for deterministic output.
+      const byId = new Map<string, JourneyCourseSummary>();
+      for (const row of rows) {
+        if (byId.has(row.id)) continue;
+        byId.set(row.id, {
+          id: row.id,
+          slug: row.slug,
+          title: row.title,
+          organizationSlug: row.organizationSlug ?? null,
+        });
+      }
+      return { courses: [...byId.values()] };
+    } catch (error) {
+      this.handleError(error, 'getContentCourses');
     }
   }
 

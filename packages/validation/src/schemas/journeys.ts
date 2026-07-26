@@ -8,6 +8,7 @@ import { createSlugSchema, uuidSchema } from '../primitives';
  * calls (SPEC §11 / §14):
  *   - `/api/access/courses/:courseId/can-enter`      → {@link canEnterCourseParamsSchema}
  *   - `/api/access/content/:contentId/can-view`      → {@link canViewParamsSchema}
+ *   - `/api/journeys/content/:contentId/courses`     → {@link contentCoursesParamsSchema}
  *   - `/api/journeys/courses/by-slug`                → {@link courseBySlugQuerySchema}
  *   - `/api/journeys/courses/:courseId/dashboard`    → {@link courseParamsSchema}
  *   - `/api/journeys/courses/:courseId/practices/:contentSlug`
@@ -35,6 +36,15 @@ export const canViewParamsSchema = z.object({
   contentId: uuidSchema,
 });
 export type CanViewParams = z.infer<typeof canViewParamsSchema>;
+
+/**
+ * `contentId` path param (uuid) — the PUBLIC "which published course(s) contain
+ * this content" cross-link read (Codex-2pryk.3.10, standalone content viewer).
+ */
+export const contentCoursesParamsSchema = z.object({
+  contentId: uuidSchema,
+});
+export type ContentCoursesParams = z.infer<typeof contentCoursesParamsSchema>;
 
 /** `(organizationId, slug)` query — resolve a course summary by its slug. */
 export const courseBySlugQuerySchema = z.object({
