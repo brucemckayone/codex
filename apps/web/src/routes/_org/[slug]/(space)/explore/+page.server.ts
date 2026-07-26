@@ -7,6 +7,7 @@
  */
 import type { KVNamespace } from '@cloudflare/workers-types';
 import { CacheType, VersionedCache } from '@codex/cache';
+import type { CourseCardSummary } from '$lib/journeys/types';
 import { getPublicContent } from '$lib/remote/content.remote';
 import { getPublicCreators } from '$lib/remote/org.remote';
 import { createServerApi } from '$lib/server/api';
@@ -206,11 +207,26 @@ export const load: PageServerLoad = async ({
     setHeaders(CACHE_HEADERS.PRIVATE);
   }
 
+  // Journeys rail (SPEC §8.5) — the org's PUBLISHED courses as public discovery
+  // cards. A SEPARATE public read from the content grid: it's SEO-relevant on
+  // this public page so it's awaited, but resilient — a failure degrades to an
+  // empty rail and NEVER interferes with the content-path cache headers above
+  // (which own the poisoning guard). Runs AFTER the content fetch/setHeaders, so
+  // it cannot reorder or gate them.
+  let journeys: CourseCardSummary[] = [];
+  try {
+    const journeysApi = createServerApi(platform, cookies);
+    journeys = (await journeysApi.access.listPublishedCourses(org.id)) ?? [];
+  } catch {
+    journeys = [];
+  }
+
   return {
     content: {
       items: contentResult?.items ?? [],
       total: contentResult?.pagination?.total ?? 0,
     },
+    journeys,
     creator,
     filters: {
       q: q ?? '',
