@@ -53,6 +53,8 @@ export type {
   EditorCurriculum,
   EditorPracticeView,
   EditorStageView,
+  EnrolledCourseProgress,
+  EnrolledCourseSummary,
   EnrolledJourneyCard,
   Entitlement,
   EntitlementResolver,

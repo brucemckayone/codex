@@ -5,6 +5,7 @@ import type {
   CourseDashboardData,
   CourseSellPreview,
   EditorCurriculum,
+  EnrolledCourseSummary,
   EnrolledJourneyCard,
   HonoEnv,
   InCoursePracticeData,
@@ -28,6 +29,7 @@ import {
   recordCompletionBodySchema,
   saveCurriculumBodySchema,
   saveJourneyPageBodySchema,
+  userEnrollmentsQuerySchema,
 } from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
@@ -204,6 +206,37 @@ app.get(
       if (!canEnter) return null;
 
       return ctx.services.courseJourney.getCourseDashboard(userId, courseId);
+    },
+  })
+);
+
+/**
+ * GET /api/journeys/user/enrollments?organizationId=
+ *
+ * The member LIBRARY "Your journeys" shelf (SPEC §8.4): every course the CALLER
+ * is enrolled in within one org, each with its progress rollup. The user is
+ * derived from the session (`auth: 'required'`) — NEVER a query param — so the
+ * read is strictly scoped to `(session user, organizationId)`; another user's
+ * enrollments can never be requested. Returns `[]` when the caller has none.
+ * @returns {EnrolledCourseSummary[]}
+ */
+app.get(
+  '/user/enrollments',
+  procedure({
+    policy: {
+      auth: 'required',
+      rateLimit: 'api', // 100 req/min
+    },
+    input: {
+      query: userEnrollmentsQuerySchema,
+    },
+    handler: async (ctx): Promise<EnrolledCourseSummary[]> => {
+      const userId = ctx.user.id;
+      const { organizationId } = ctx.input.query;
+      return ctx.services.courseJourney.listEnrolledCourses(
+        userId,
+        organizationId
+      );
     },
   })
 );

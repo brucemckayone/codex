@@ -454,6 +454,65 @@ export interface InCoursePracticeData {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Member library "Your journeys" shelf (SPEC §8.4 — the WP-11 enrolled-courses read)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Per-course progress rollup for the member library "Your journeys" shelf
+ * (SPEC §8.4 / §11). The SAME `practice_completions ⋈ stage_practices` rollup the
+ * dashboard computes, summarised to the numbers a journey card renders.
+ */
+export interface EnrolledCourseProgress {
+  /** Completed practices across the whole course. */
+  done: number;
+  /** Total published practices in the course. */
+  total: number;
+  /** Integer 0–100; `0` when the course has no practices. */
+  percent: number;
+  /**
+   * Card status: no practices done (or none exist) → `not-started`; every
+   * practice done → `completed`; otherwise `in-progress`.
+   */
+  status: 'not-started' | 'in-progress' | 'completed';
+  /** Most recent completion timestamp (ISO), or `null` when nothing is done. */
+  lastCompletedAt: string | null;
+  /**
+   * First incomplete practice in course order (stage → practice sortOrder) — the
+   * "Continue" / resume target. `null` when the course is complete or empty.
+   */
+  nextPracticeSlug: string | null;
+  /** Title of {@link nextPracticeSlug} — the "Next · …" resume label. */
+  nextPracticeTitle: string | null;
+}
+
+/**
+ * One enrolled course as the member LIBRARY "Your journeys" shelf reads it
+ * (SPEC §8.4): the course chrome, the caller's enrollment, the enrollment
+ * `source` (drives the access-source badge), and the progress rollup. Returned by
+ * `CourseJourneyService.listEnrolledCourses`, STRICTLY scoped to
+ * `(userId, organizationId)` — never another user's enrollments.
+ */
+export interface EnrolledCourseSummary {
+  course: {
+    id: string;
+    slug: string | null;
+    title: string;
+    organizationSlug: string | null;
+    kicker: string | null;
+    lede: string | null;
+    /** The course guide's display name (`courses.guide.name`), or `null`. */
+    guideName: string | null;
+  };
+  enrollment: JourneyEnrollment;
+  /**
+   * The `course_enrollments.source` (e.g. `course_purchase`, `course_subscription`,
+   * `tier_subscription`, `first_access`) — mapped to the card's access badge.
+   */
+  enrollmentSource: string;
+  progress: EnrolledCourseProgress;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Public sales-page read-model (SPEC §4/§5/§10 — the WP-3 course-sell surface)
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -54,6 +54,16 @@ export const courseBySlugQuerySchema = z.object({
 });
 export type CourseBySlugQuery = z.infer<typeof courseBySlugQuerySchema>;
 
+/**
+ * `organizationId` query — list the caller's enrolled courses in ONE org for the
+ * member library "Your journeys" shelf. The user is derived from the session,
+ * NEVER a query param (IDOR); `organizationId` only narrows the scope.
+ */
+export const userEnrollmentsQuerySchema = z.object({
+  organizationId: uuidSchema,
+});
+export type UserEnrollmentsQuery = z.infer<typeof userEnrollmentsQuerySchema>;
+
 /** `(courseId, contentSlug)` path params — resolve one in-course practice. */
 export const inCoursePracticeParamsSchema = z.object({
   courseId: uuidSchema,
