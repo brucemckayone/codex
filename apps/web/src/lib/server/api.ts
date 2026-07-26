@@ -109,6 +109,7 @@ import { logger } from '$lib/observability';
 // structurally-identical shapes the renderer consumes. Type-only (erased) — no
 // runtime import of the page-builder barrel.
 import type {
+  EditorCurriculum,
   EnrolledJourneyCard,
   JourneyCardView,
   JourneyCoursePage,
@@ -1253,6 +1254,45 @@ export function createServerApi(
           `/api/journeys/studio/journeys/${encodeURIComponent(
             pageId
           )}?organizationId=${encodeURIComponent(organizationId)}`
+        ),
+
+      /**
+       * STUDIO curriculum read (Codex-03cwh) — the two-pane editor's admin
+       * curriculum for a journey (resolved from the landing-page id to its
+       * subject course), INCLUDING draft-content practices + picker metadata.
+       * Owner/admin only; `organizationId` is for org resolution only.
+       */
+      getCourseCurriculum: (organizationId: string, pageId: string) =>
+        request<EditorCurriculum>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}/curriculum?organizationId=${encodeURIComponent(organizationId)}`
+        ),
+
+      /**
+       * STUDIO curriculum bulk-save (Codex-03cwh) — persist the whole desired
+       * curriculum (stages + practice joins) for the journey's subject course in
+       * one transaction; returns the freshly-persisted curriculum.
+       */
+      saveCourseCurriculum: (
+        organizationId: string,
+        pageId: string,
+        body: {
+          stages: Array<{
+            id: string | null;
+            name: string;
+            gloss: string | null;
+            practices: Array<{ contentId: string }>;
+          }>;
+        }
+      ) =>
+        request<EditorCurriculum>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}/curriculum?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'PUT', body: JSON.stringify(body) }
         ),
 
       /**

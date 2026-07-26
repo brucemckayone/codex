@@ -32,6 +32,10 @@ export type {
 } from '@codex/shared-types';
 // Remote-function contracts — signatures + read-model return types.
 export type {
+  CurriculumContentOption,
+  EditorCurriculum,
+  EditorPracticeView,
+  EditorStageView,
   EnrolledJourneyCard,
   GetCourseDashboardQuery,
   GetCoursePageQuery,

@@ -54,6 +54,54 @@ export interface JourneyStageView {
   practices: JourneyPracticeView[];
 }
 
+/**
+ * STUDIO curriculum-editor mirror (Codex-03cwh) — the structural twin of the BE
+ * `EditorPracticeView` (`@codex/shared-types`). A SUPERSET of
+ * {@link JourneyPracticeView}: the editor inspector's media-slot needs the
+ * linked content's picker metadata (title/type/thumbnail/publish status) the
+ * public view omits, and the editor shows DRAFT-content practices too.
+ */
+export interface EditorPracticeView {
+  contentId: string;
+  slug: string | null;
+  title: string;
+  contentType: JourneyContentType;
+  /** Publish status of the LINKED CONTENT (draft ⇒ not yet member-visible). */
+  status: PageStatus;
+  thumbnailUrl: string | null;
+  sortOrder: number;
+}
+
+/** An ordered stage with its practice pool, as the studio editor reads it. */
+export interface EditorStageView {
+  id: string;
+  name: string;
+  gloss: string | null;
+  sortOrder: number;
+  practices: EditorPracticeView[];
+}
+
+/** The full admin curriculum the studio editor loads for one course. */
+export interface EditorCurriculum {
+  courseId: string;
+  stages: EditorStageView[];
+}
+
+/**
+ * One "Choose from your library" PICKER option (Codex-03cwh). A projection of
+ * the org's existing content the editor can attach as a practice — sourced from
+ * the reused content-list read, NOT a new endpoint. Shaped so a picked option
+ * drops straight into an {@link EditorPracticeView} (by `contentId`).
+ */
+export interface CurriculumContentOption {
+  contentId: string;
+  title: string;
+  contentType: JourneyContentType;
+  /** Publish status — the picker flags drafts (attachable, but not yet live). */
+  status: PageStatus;
+  thumbnailUrl: string | null;
+}
+
 export interface JourneyCourseView {
   id: string;
   slug: string;

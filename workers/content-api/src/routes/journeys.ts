@@ -3,6 +3,7 @@ import { ValidationError } from '@codex/service-errors';
 import type {
   CourseDashboardData,
   CourseSellPreview,
+  EditorCurriculum,
   EnrolledJourneyCard,
   HonoEnv,
   InCoursePracticeData,
@@ -23,6 +24,7 @@ import {
   journeyStudioListQuerySchema,
   listPublishedJourneysQuerySchema,
   recordCompletionBodySchema,
+  saveCurriculumBodySchema,
   saveJourneyPageBodySchema,
 } from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
@@ -490,6 +492,81 @@ app.put(
         ctx.input.body
       );
       return null;
+    },
+  })
+);
+
+/**
+ * GET /api/journeys/studio/journeys/:pageId/curriculum?organizationId=
+ *
+ * The admin CURRICULUM read for the two-pane editor (Codex-03cwh): the journey's
+ * subject-course stages + practice joins, INCLUDING practices whose linked
+ * content is still a draft (unlike the public/member reads), each with the
+ * picker metadata the inspector needs (title/type/thumbnail/status). The course
+ * is resolved from the landing-page `:pageId` (org-scoped) — a foreign, missing,
+ * or non-course page 404s. The 4-segment path cannot collide with the 3-segment
+ * `:pageId` route.
+ * @returns {EditorCurriculum}
+ */
+app.get(
+  '/studio/journeys/:pageId/curriculum',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    handler: async (ctx): Promise<EditorCurriculum> => {
+      const courseId = await ctx.services.courseJourney.resolveCourseIdForPage(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
+      return ctx.services.courseJourney.getCourseCurriculumForEditor(
+        ctx.organizationId,
+        courseId
+      );
+    },
+  })
+);
+
+/**
+ * PUT /api/journeys/studio/journeys/:pageId/curriculum?organizationId=  { stages }
+ *
+ * Bulk-save the whole curriculum (stages + practice joins) for the journey's
+ * subject course in ONE transaction — diff against the persisted state and
+ * reconcile (insert/rename/reorder/soft-delete stages; insert/remove/reorder
+ * practice joins), space-guarding every practice's content to the course's org.
+ * The stage reorder respects the `(courseId, sortOrder)` unique index. Returns
+ * the freshly-persisted curriculum (server ids for newly-added stages).
+ * @returns {EditorCurriculum}
+ */
+app.put(
+  '/studio/journeys/:pageId/curriculum',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+      body: saveCurriculumBodySchema,
+    },
+    handler: async (ctx): Promise<EditorCurriculum> => {
+      const courseId = await ctx.services.courseJourney.resolveCourseIdForPage(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
+      return ctx.services.courseJourney.saveCurriculum(
+        ctx.organizationId,
+        courseId,
+        ctx.input.body
+      );
     },
   })
 );

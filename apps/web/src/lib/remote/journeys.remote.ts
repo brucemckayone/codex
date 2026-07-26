@@ -16,6 +16,7 @@
 
 import {
   createJourneyBodySchema,
+  saveCurriculumBodySchema,
   saveJourneyPageBodySchema,
 } from '@codex/validation';
 import { error } from '@sveltejs/kit';
@@ -24,6 +25,8 @@ import { command, getRequestEvent, query } from '$app/server';
 import type { PracticeCompletionRecord } from '$lib/journeys/types';
 import { logger } from '$lib/observability';
 import type {
+  CurriculumContentOption,
+  EditorCurriculum,
   EnrolledJourneyCard,
   JourneyCardView,
   JourneyCoursePage,
@@ -317,5 +320,97 @@ export const getCoursePagePreview = query(
       }
       return null;
     }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Codex-03cwh · Studio curriculum editor (two-pane tree + inspector + picker)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const curriculumPageSchema = z.object({ pageId: z.string().uuid() });
+
+/**
+ * The admin curriculum for the two-pane editor. Org resolved from the request
+ * HOST via `resolveStudioOrg`; the worker's `requireOrgManagement` is the
+ * authority + resolves the subject course from the page id (a foreign/missing/
+ * non-course page 404s → this rejects). `null` only off a non-org host.
+ */
+export const getCourseCurriculum = query(
+  curriculumPageSchema,
+  async ({ pageId }): Promise<EditorCurriculum | null> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) return null;
+    return ctx.api.access.getCourseCurriculum(ctx.orgId, pageId);
+  }
+);
+
+const listCurriculumContentSchema = z.object({
+  contentType: z.enum(['video', 'audio', 'written']).optional(),
+  search: z.string().trim().max(200).optional(),
+});
+
+/**
+ * "Choose from your library" PICKER options — the org's existing content the
+ * editor can attach as a practice. REUSES the studio content-list read
+ * (`api.content.list`, scope = the signed-in creator's own content, org-scoped)
+ * rather than a new endpoint; drafts are included (a curriculum is built before
+ * its media publishes). `[]` off a non-org host. The space guard on save is the
+ * authority — this is only the UI candidate list.
+ */
+export const listCurriculumContentOptions = query(
+  listCurriculumContentSchema,
+  async ({ contentType, search }): Promise<CurriculumContentOption[]> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) return [];
+    const params = new URLSearchParams();
+    params.set('organizationId', ctx.orgId);
+    params.set('limit', '100');
+    if (contentType) params.set('contentType', contentType);
+    if (search) params.set('search', search);
+    const res = await ctx.api.content.list(params);
+    return (res?.items ?? []).map((c) => ({
+      contentId: c.id,
+      title: c.title,
+      contentType:
+        c.contentType === 'audio' || c.contentType === 'written'
+          ? c.contentType
+          : 'video',
+      status:
+        c.status === 'published' || c.status === 'archived'
+          ? c.status
+          : 'draft',
+      thumbnailUrl: c.thumbnailUrl ?? null,
+    }));
+  }
+);
+
+const saveCurriculumSchema = saveCurriculumBodySchema.extend({
+  pageId: z.string().uuid(),
+});
+
+/**
+ * Bulk-save the whole curriculum (stages + practice joins) for the journey's
+ * subject course. The worker reconciles in one transaction (space-guarding
+ * every practice's content to the org) and returns the freshly-persisted
+ * curriculum — the editor swaps its optimistic state for this on success.
+ */
+export const saveCourseCurriculum = command(
+  saveCurriculumSchema,
+  async ({ pageId, stages }): Promise<EditorCurriculum> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'Curriculum can only be saved within an organization');
+    }
+    // `command()` infers the schema's `.nullable()` fields as OPTIONAL (dropping
+    // `null`), so normalise `id`/`gloss` back to `T | null` for the api client —
+    // an absent/undefined `id` is a new stage the server will assign.
+    return ctx.api.access.saveCourseCurriculum(ctx.orgId, pageId, {
+      stages: stages.map((s) => ({
+        id: s.id ?? null,
+        name: s.name,
+        gloss: s.gloss ?? null,
+        practices: s.practices,
+      })),
+    });
   }
 );
