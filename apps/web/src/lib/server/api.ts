@@ -98,6 +98,7 @@ import type { JourneyInsightsData } from '$lib/components/studio/journey-insight
 import type {
   CompletionSource,
   ContentCourseLinks,
+  CourseCardSummary,
   CourseDashboardData,
   EnrolledCourseSummary,
   InCoursePracticeData,
@@ -1099,6 +1100,19 @@ export function createServerApi(
           `/api/journeys/courses/by-slug?organizationId=${encodeURIComponent(
             organizationId
           )}&slug=${encodeURIComponent(slug)}`
+        ),
+
+      /**
+       * List an org's PUBLISHED courses for the /explore "Journeys" rail
+       * (SPEC §8.5). Fully public — no auth needed; returns `[]` when the org
+       * has no published courses.
+       */
+      listPublishedCourses: (organizationId: string) =>
+        request<CourseCardSummary[]>(
+          'access',
+          `/api/journeys/courses?organizationId=${encodeURIComponent(
+            organizationId
+          )}`
         ),
 
       /**

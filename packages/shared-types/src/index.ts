@@ -44,6 +44,7 @@ export type {
   ContentAccessPolicy,
   ContentCourseLinks,
   CourseAccessPath,
+  CourseCardSummary,
   CourseDashboardData,
   CourseOffer,
   CourseSectionType,

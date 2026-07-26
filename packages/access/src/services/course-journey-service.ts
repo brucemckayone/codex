@@ -49,6 +49,7 @@ import type {
   BrandTokenOverrides,
   CompletionSource,
   ContentCourseLinks,
+  CourseCardSummary,
   CourseDashboardData,
   CourseSellPreview,
   CourseSellPreviewClip,
@@ -818,6 +819,54 @@ export class CourseJourneyService extends BaseService {
       return summaries;
     } catch (error) {
       this.handleError(error, 'listEnrolledCourses');
+    }
+  }
+
+  /**
+   * List an org's PUBLISHED, non-deleted courses as discovery card summaries —
+   * the /explore "Journeys" rail (SPEC §8.5). Fully PUBLIC: no entitlement, no
+   * `canView` (HARDENING §E course-sell row) — the same public-chrome surface as
+   * {@link getCoursePage}, just the list shape. Ordered most-recently-published
+   * first (`publishedAt DESC`), with `createdAt DESC` as a stable tiebreaker for
+   * courses published in the same instant (or with a null `publishedAt`). Backed
+   * by `idx_courses_org_status (organizationId, status, publishedAt)`. Returns
+   * `[]` when the org has no published courses.
+   */
+  async listPublishedCourses(
+    organizationId: string
+  ): Promise<CourseCardSummary[]> {
+    try {
+      const rows = await this.db
+        .select({
+          id: courses.id,
+          slug: courses.slug,
+          title: courses.title,
+          kicker: courses.kicker,
+          lede: courses.lede,
+          guide: courses.guide,
+          priceCents: courses.priceCents,
+        })
+        .from(courses)
+        .where(
+          and(
+            eq(courses.organizationId, organizationId),
+            eq(courses.status, CONTENT_STATUS.PUBLISHED),
+            isNull(courses.deletedAt)
+          )
+        )
+        .orderBy(desc(courses.publishedAt), desc(courses.createdAt));
+
+      return rows.map((row) => ({
+        id: row.id,
+        slug: row.slug,
+        title: row.title,
+        kicker: row.kicker,
+        lede: row.lede,
+        guideName: row.guide?.name ?? null,
+        priceCents: row.priceCents,
+      }));
+    } catch (error) {
+      this.handleError(error, 'listPublishedCourses');
     }
   }
 

@@ -23,6 +23,8 @@
   import { filterContentItemsByOrg } from '$lib/content/filter-by-org';
   import { followingStore } from '$lib/client/following.svelte';
   import { buildContentUrl, buildJourneyUrl } from '$lib/utils/subdomain';
+  import JourneyRailCard from '$lib/components/explore/JourneyRailCard.svelte';
+  import type { CourseCardSummary } from '$lib/journeys/types';
   import { SearchXIcon, FileIcon } from '$lib/components/ui/Icon';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { ViewToggle } from '$lib/components/ui/ViewToggle';
@@ -141,6 +143,40 @@
   const filters = $derived(data.filters);
   const limit = $derived(data.limit ?? 12);
   const isAuthenticated = $derived(!!data.user);
+
+  // ── Journeys rail (SPEC §8.5) ─────────────────────────────────────
+  // The org's PUBLISHED courses, loaded server-side (public read). A distinct
+  // discovery surface ABOVE the content grid. `viewScope` toggles between
+  // browsing everything and journeys only — the prototype's All / Journeys row.
+  const journeys = $derived<CourseCardSummary[]>(data.journeys ?? []);
+
+  // Client-only view toggle between browsing everything and journeys only.
+  let viewScope = $state<'all' | 'journeys'>('all');
+
+  // Search narrows journeys client-side by title/kicker/lede (mirrors the
+  // prototype's title match); the content grid is narrowed server-side.
+  const filteredJourneys = $derived.by(() => {
+    const q = filters.q?.trim().toLowerCase();
+    if (!q) return journeys;
+    return journeys.filter(
+      (j) =>
+        j.title.toLowerCase().includes(q) ||
+        (j.kicker?.toLowerCase().includes(q) ?? false) ||
+        (j.lede?.toLowerCase().includes(q) ?? false)
+    );
+  });
+
+  const hasJourneys = $derived(journeys.length > 0);
+  const showJourneysRail = $derived(filteredJourneys.length > 0);
+  const showContent = $derived(viewScope !== 'journeys');
+
+  function journeyHref(journey: CourseCardSummary): string {
+    return buildJourneyUrl(
+      page.url,
+      { slug: journey.slug, id: journey.id },
+      { surface: 'sales' }
+    );
+  }
 
   // Category extraction from loaded items (before type filtering, so all categories show)
   const categories = $derived(
@@ -468,6 +504,64 @@
     </div>
   </StickyToolbar>
 
+  <!-- Scope chips: All / Journeys — the prototype's discovery row. Only shown
+       when the org has published journeys, so a journey-less org is unchanged. -->
+  {#if hasJourneys}
+    <nav class="explore__scope" aria-label="Browse scope">
+      <button
+        type="button"
+        class="explore__scope-chip"
+        class:explore__scope-chip--active={viewScope === 'all'}
+        onclick={() => { viewScope = 'all'; }}
+        aria-pressed={viewScope === 'all'}
+      >
+        All
+      </button>
+      <button
+        type="button"
+        class="explore__scope-chip"
+        class:explore__scope-chip--active={viewScope === 'journeys'}
+        onclick={() => { viewScope = 'journeys'; }}
+        aria-pressed={viewScope === 'journeys'}
+      >
+        Journeys
+      </button>
+    </nav>
+  {/if}
+
+  <!-- Journeys rail (SPEC §8.5) — the org's published courses as sales-linked
+       discovery cards, above the content grid. -->
+  {#if showJourneysRail}
+    <section class="explore__journeys" aria-labelledby="journeys-heading">
+      <div class="explore__journeys-head">
+        <h2 id="journeys-heading" class="explore__journeys-title">Journeys</h2>
+        <span class="explore__journeys-count">
+          {filteredJourneys.length}
+          {filteredJourneys.length === 1 ? 'guided journey' : 'guided journeys'}
+        </span>
+      </div>
+      {#if filteredJourneys.length > 1}
+        <p class="explore__journeys-pathline">
+          Each journey stands on its own — begin wherever you feel the pull.
+        </p>
+      {/if}
+      <div class="content-grid">
+        {#each filteredJourneys as journey, i (journey.id)}
+          <JourneyRailCard {journey} href={journeyHref(journey)} index={i} />
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  <!-- Content section ("Browse everything") — hidden when the scope is
+       narrowed to journeys only. -->
+  {#if showContent}
+    {#if hasJourneys}
+      <div class="explore__browse-head">
+        <h2 class="explore__browse-title">Browse everything</h2>
+      </div>
+    {/if}
+
   <!-- Category Strip -->
   {#if categories.length >= 2}
     <nav class="explore__categories" aria-label="Filter by category">
@@ -555,6 +649,16 @@
   {:else}
     <EmptyState title={m.explore_no_content()} description={m.explore_no_content_description()} icon={FileIcon} />
   {/if}
+  {:else if !showJourneysRail}
+    <!-- Scope is journeys-only but a search emptied the rail. -->
+    <EmptyState title={m.explore_no_results()} icon={SearchXIcon}>
+      {#snippet action()}
+        <button class="explore__clear-btn" onclick={clearFilters}>
+          {m.explore_clear_filters()}
+        </button>
+      {/snippet}
+    </EmptyState>
+  {/if}
 </div>
 
 <ExploreFilterDrawer
@@ -572,15 +676,116 @@
 <BackToTop />
 
 <style>
-  /* ── Layout ── */
+  /* ── Layout ──
+     Full-bleed browsing surface: fills the org-main content area (no centered
+     max-width column). The page inherits the semantic theme tokens, so it
+     respects the org's light OR dark theme — no per-page palette override. */
   .explore {
-    max-width: 1200px;
     width: 100%;
-    margin: 0 auto;
-    padding: var(--space-8) var(--space-6);
+    padding: var(--space-8) var(--space-8) var(--space-16);
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
+  }
+
+  /* ── Scope chips (All / Journeys) ── */
+  .explore__scope {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .explore__scope-chip {
+    padding: var(--space-1-5) var(--space-4);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: var(--border-width) var(--border-style) var(--color-border-subtle);
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    transition:
+      background-color var(--duration-fast) var(--ease-default),
+      color var(--duration-fast) var(--ease-default),
+      border-color var(--duration-fast) var(--ease-default);
+  }
+
+  .explore__scope-chip:hover {
+    color: var(--color-text);
+    background: var(--color-surface-secondary);
+  }
+
+  .explore__scope-chip:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--focus-offset, 1px);
+  }
+
+  .explore__scope-chip--active {
+    color: var(--color-text-on-brand);
+    background: var(--color-brand-primary);
+    border-color: var(--color-brand-primary);
+  }
+
+  .explore__scope-chip--active:hover {
+    background: var(--color-brand-primary);
+  }
+
+  /* ── Journeys rail ── */
+  .explore__journeys {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .explore__journeys-head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  .explore__journeys-title {
+    margin: 0;
+    font-family: var(--font-heading);
+    font-size: var(--text-2xl);
+    font-weight: var(--font-medium);
+    /* Match the page h1 (.explore__title) — consistent heading colour in the
+       org's theme, whatever it is. */
+    color: var(--color-text-primary);
+    line-height: var(--leading-tight);
+  }
+
+  .explore__journeys-count {
+    font-size: var(--text-sm);
+    color: var(--color-text-tertiary);
+  }
+
+  .explore__journeys-pathline {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    max-width: 60ch;
+  }
+
+  /* The journeys rail reuses the shared `.content-grid` utility so journey
+     cards share the exact column rhythm of the content cards below. */
+
+  /* ── Browse-everything section heading (only when journeys present) ── */
+  .explore__browse-head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    margin-top: var(--space-2);
+  }
+
+  .explore__browse-title {
+    margin: 0;
+    font-family: var(--font-heading);
+    font-size: var(--text-2xl);
+    font-weight: var(--font-medium);
+    color: var(--color-text-primary);
+    line-height: var(--leading-tight);
   }
 
   /* ── Header ── */

@@ -49,6 +49,28 @@ export interface ContentCourseLinks {
 }
 
 /**
+ * A published course as it surfaces in DISCOVERY — the /explore "Journeys" rail
+ * (SPEC §8.5). The minimal PUBLIC card projection: cover chrome (kicker + title
+ * + tagline), a price/access badge, and the slug to link the sales page. No
+ * curriculum, no entitlement — fully public. Structurally identical to the
+ * `@codex/shared-types` `CourseCardSummary` the content-api serialises.
+ */
+export interface CourseCardSummary {
+  id: string;
+  /** Org-scoped slug — the sales-page URL basis (`/journeys/{slug}`). */
+  slug: string;
+  title: string;
+  /** Eyebrow line above the title, or null. */
+  kicker: string | null;
+  /** Short tagline / lede, or null. */
+  lede: string | null;
+  /** The guide's display name, or null. */
+  guideName: string | null;
+  /** One-off purchase price in GBP pence; null = not sold standalone. */
+  priceCents: number | null;
+}
+
+/**
  * One practice (a `content` row inside a stage), as the member surfaces read it.
  * `durationSeconds` is present for media (drives the resume + finish signal).
  */

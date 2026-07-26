@@ -55,6 +55,19 @@ export const courseBySlugQuerySchema = z.object({
 export type CourseBySlugQuery = z.infer<typeof courseBySlugQuerySchema>;
 
 /**
+ * `organizationId` query — list an org's PUBLISHED courses for the /explore
+ * discovery rail (`GET /api/journeys/courses`). Fully public; the org id is the
+ * only scope. No pagination: an org's published-course count is small and the
+ * rail renders them all.
+ */
+export const listPublishedCoursesQuerySchema = z.object({
+  organizationId: uuidSchema,
+});
+export type ListPublishedCoursesQuery = z.infer<
+  typeof listPublishedCoursesQuerySchema
+>;
+
+/**
  * `organizationId` query — list the caller's enrolled courses in ONE org for the
  * member library "Your journeys" shelf. The user is derived from the session,
  * NEVER a query param (IDOR); `organizationId` only narrows the scope.

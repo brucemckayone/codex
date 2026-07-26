@@ -368,6 +368,29 @@ export interface ContentCourseLinks {
 }
 
 /**
+ * A published course as it surfaces in DISCOVERY — the /explore "Journeys" rail
+ * (SPEC §8.5). The minimal PUBLIC projection needed to render a journey card and
+ * link to its sales page: no curriculum, no entitlement, no signed media. Same
+ * public-chrome surface as {@link JourneyCoursePage} (NO `canView`; HARDENING §E
+ * course-sell row), just the list shape. Returned by
+ * `CourseJourneyService.listPublishedCourses`.
+ */
+export interface CourseCardSummary {
+  id: string;
+  /** Org-scoped slug — the sales-page URL basis (`/journeys/{slug}`). */
+  slug: string;
+  title: string;
+  /** Eyebrow line above the title (`courses.kicker`), or null. */
+  kicker: string | null;
+  /** Short tagline / lede (`courses.lede`), or null. */
+  lede: string | null;
+  /** The guide's display name (`courses.guide.name`), or null. */
+  guideName: string | null;
+  /** One-off purchase price in GBP pence (`courses.priceCents`); null = not sold standalone. */
+  priceCents: number | null;
+}
+
+/**
  * One practice (a `content` row inside a stage), as the member surfaces read it.
  * `durationSeconds` is present for media (drives the resume + finish signal).
  */

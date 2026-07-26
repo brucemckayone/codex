@@ -45,6 +45,7 @@ const accessSpies = {
 };
 
 const journeySpies = {
+  listPublishedCourses: vi.fn(),
   getCourseBySlug: vi.fn(),
   getContentCourses: vi.fn(),
   getCoursePage: vi.fn(),
@@ -278,11 +279,25 @@ function postReq(path: string, body?: unknown) {
   });
 }
 
+// Discovery card summaries (SPEC §8.5) — the `listPublishedCourses` projection.
+const COURSE_CARDS = [
+  {
+    id: COURSE_ID,
+    slug: SLUG,
+    title: 'Rootwork',
+    kicker: 'A guided five-practice descent',
+    lede: 'Return to the body you have been carrying.',
+    guideName: 'Alex Creator',
+    priceCents: 4900,
+  },
+];
+
 beforeEach(() => {
   vi.clearAllMocks();
   accessSpies.canEnterCourse.mockResolvedValue(true);
   accessSpies.canView.mockResolvedValue(true);
   accessSpies.getStreamingUrl.mockResolvedValue(STREAM_RESULT);
+  journeySpies.listPublishedCourses.mockResolvedValue(COURSE_CARDS);
   journeySpies.getCourseBySlug.mockResolvedValue(COURSE_SUMMARY);
   journeySpies.getContentCourses.mockResolvedValue(CONTENT_COURSES);
   journeySpies.getCoursePage.mockResolvedValue(COURSE_PAGE);
@@ -442,6 +457,54 @@ describe('GET /api/access/content/:contentId/can-view — view gate (optional au
     );
     expect(res.status).toBe(400);
     expect(accessSpies.canView).not.toHaveBeenCalled();
+  });
+});
+
+// ─── GET /api/journeys/courses ───────────────────────────────────────────────
+
+describe('GET /api/journeys/courses — list published courses (public)', () => {
+  it('found → 200 { data: cards }, service called with organizationId', async () => {
+    const res = await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/courses?organizationId=${ORG_ID}`)
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: COURSE_CARDS });
+    expect(journeySpies.listPublishedCourses).toHaveBeenCalledWith(ORG_ID);
+  });
+
+  it('anonymous (no session) → 200 — the discovery rail is fully public', async () => {
+    const res = await dispatch(
+      buildApp(null),
+      getReq(`/api/journeys/courses?organizationId=${ORG_ID}`)
+    );
+    expect(res.status).toBe(200);
+    expect(journeySpies.listPublishedCourses).toHaveBeenCalledWith(ORG_ID);
+  });
+
+  it('no published courses → 200 { data: [] }', async () => {
+    journeySpies.listPublishedCourses.mockResolvedValue([]);
+    const res = await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/courses?organizationId=${ORG_ID}`)
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: [] });
+  });
+
+  it('missing organizationId → 400, service NOT called', async () => {
+    const res = await dispatch(buildApp(USER), getReq('/api/journeys/courses'));
+    expect(res.status).toBe(400);
+    expect(journeySpies.listPublishedCourses).not.toHaveBeenCalled();
+  });
+
+  it('non-uuid organizationId → 400, service NOT called', async () => {
+    const res = await dispatch(
+      buildApp(USER),
+      getReq('/api/journeys/courses?organizationId=not-a-uuid')
+    );
+    expect(res.status).toBe(400);
+    expect(journeySpies.listPublishedCourses).not.toHaveBeenCalled();
   });
 });
 

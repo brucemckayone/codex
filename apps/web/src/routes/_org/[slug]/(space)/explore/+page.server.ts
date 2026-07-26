@@ -7,8 +7,8 @@
  */
 import type { KVNamespace } from '@cloudflare/workers-types';
 import { CacheType, VersionedCache } from '@codex/cache';
+import type { CourseCardSummary } from '$lib/journeys/types';
 import { getPublicContent } from '$lib/remote/content.remote';
-import { listPublishedJourneys } from '$lib/remote/journeys.remote';
 import { getPublicCreators } from '$lib/remote/org.remote';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
@@ -138,18 +138,6 @@ export const load: PageServerLoad = async ({
 
   const page = pageParam ? Math.max(1, parseInt(pageParam, 10) || 1) : 1;
 
-  // Journeys discovery rail — only on the DEFAULT browse view (no search / type /
-  // category / creator / featured filter, first page). A filtered or searched
-  // view is about content, so the rail is omitted. Fire the query HERE so it
-  // runs CONCURRENTLY with the content fetch below (this page awaits all its
-  // data — not shell+stream — so it's awaited at the return); a single capped,
-  // indexed read that degrades to an empty rail on any error.
-  const isDefaultBrowse =
-    !q && !contentType && !category && !creator && !featured && page === 1;
-  const journeysPromise = isDefaultBrowse
-    ? listPublishedJourneys({ limit: 12 }).catch(() => [])
-    : Promise.resolve([]);
-
   // Fork API call: authenticated endpoint for popularity/sales sort, public otherwise
   let contentResult: {
     items?: unknown[];
@@ -219,15 +207,27 @@ export const load: PageServerLoad = async ({
     setHeaders(CACHE_HEADERS.PRIVATE);
   }
 
+  // Journeys rail (SPEC §8.5) — the org's PUBLISHED courses as public discovery
+  // cards. A SEPARATE public read from the content grid: it's SEO-relevant on
+  // this public page so it's awaited, but resilient — a failure degrades to an
+  // empty rail and NEVER interferes with the content-path cache headers above
+  // (which own the poisoning guard). Runs AFTER the content fetch/setHeaders, so
+  // it cannot reorder or gate them.
+  let journeys: CourseCardSummary[] = [];
+  try {
+    const journeysApi = createServerApi(platform, cookies);
+    journeys = (await journeysApi.access.listPublishedCourses(org.id)) ?? [];
+  } catch {
+    journeys = [];
+  }
+
   return {
     content: {
       items: contentResult?.items ?? [],
       total: contentResult?.pagination?.total ?? 0,
     },
+    journeys,
     creator,
-    // Awaited here, but the query was fired above so it overlapped the content
-    // fetch rather than adding serial latency.
-    journeys: await journeysPromise,
     filters: {
       q: q ?? '',
       type: contentType ?? '',
