@@ -419,18 +419,18 @@
     {/if}
   </header>
 
-  <!-- Guided journeys rail (Codex-oi2w4) — shown only on the default browse view
+  <!-- Guided portals rail (Codex-oi2w4) — shown only on the default browse view
        (the server omits it under any active filter/search). Journeys read
        differently from content (SPEC §8.5): a distinct discovery affordance
        above the content grid. -->
   {#if data.journeys.length > 0}
     <section class="explore__journeys">
       <Carousel
-        title="Guided journeys"
+        title="Guided portals"
         items={data.journeys}
         itemMinWidth="20rem"
         gap="var(--space-4)"
-        ariaLabel="Guided journeys"
+        ariaLabel="Guided portals"
       >
         {#snippet renderItem(journey)}
           <JourneyCard

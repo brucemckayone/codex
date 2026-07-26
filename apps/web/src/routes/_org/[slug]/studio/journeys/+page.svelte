@@ -76,14 +76,14 @@
 </script>
 
 <svelte:head>
-  <title>Journeys | {data.org.name}</title>
+  <title>Portals | {data.org.name}</title>
   <meta name="robots" content="noindex" />
 </svelte:head>
 
 <div class="journeys">
   <header class="journeys__bar">
     <div class="journeys__heading">
-      <h1 class="journeys__title">Journeys</h1>
+      <h1 class="journeys__title">Portals</h1>
       <p class="journeys__count" aria-live="polite">
         {loading ? 'Loading…' : `${items.length} ${items.length === 1 ? 'page' : 'pages'}`}
       </p>
@@ -104,7 +104,7 @@
 
     <a href="/studio/journeys/new" class="journeys__create">
       <PlusIcon size={16} />
-      New journey
+      New portal
     </a>
   </header>
 
@@ -163,12 +163,12 @@
     {:else}
       <div class="journeys__empty">
         <EmptyState
-          title="No journeys yet"
+          title="No portals yet"
           description="Create a course landing page and start shaping its curriculum."
           icon={CompassIcon}
         >
           {#snippet action()}
-            <a href="/studio/journeys/new" class="journeys__empty-cta">New journey</a>
+            <a href="/studio/journeys/new" class="journeys__empty-cta">New portal</a>
           {/snippet}
         </EmptyState>
       </div>

@@ -53,7 +53,7 @@ export const load: PageServerLoad = async ({
   }
 
   if (!coursePage) {
-    throw error(404, 'This journey could not be found.');
+    throw error(404, 'This portal could not be found.');
   }
 
   // Version-keyed invalidation dependency. NOTE (flagged for the conductor):
