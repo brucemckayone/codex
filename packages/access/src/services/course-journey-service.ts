@@ -50,13 +50,16 @@ import type {
   CourseDashboardData,
   CourseSellPreview,
   CourseSellPreviewClip,
+  EnrolledJourneyCard,
   InCoursePracticeData,
+  JourneyCardView,
   JourneyCoursePage,
   JourneyCourseSummary,
   JourneyEnrollment,
   JourneyListItem,
   JourneyPageRecord,
   JourneyPractice,
+  JourneyProgressStatus,
   JourneyStage,
   JourneyStageView,
   JourneyTestimonialView,
@@ -499,6 +502,222 @@ export class CourseJourneyService extends BaseService {
       };
     } catch (error) {
       this.handleError(error, 'recordPracticeCompletion');
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // MEMBER DISCOVERY (Codex-oi2w4 · home / explore / library surfacing)
+  //
+  // The public browse reads that make journeys REACHABLE from the member space.
+  // `listPublishedJourneys` is a fully PUBLIC read (no per-user state, no
+  // `canView`) for the home "featured" rail + the Explore grid.
+  // `listEnrolledJourneys` is a PER-USER read (the library "Your journeys" shelf
+  // + continue rail) — the route supplies the SESSION `userId`; the org scopes
+  // the results to the space being browsed. Both count only the MEMBER-visible
+  // (published) curriculum so the surfaced counts match the public sell page.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * List the org's PUBLISHED course-journeys as public discovery cards (SPEC
+   * §8.5). Scoped to non-deleted, PUBLISHED `course`-type landing pages whose
+   * subject is a PUBLISHED, non-deleted course in the SAME org (a journey with a
+   * missing/unpublished subject never surfaces). `opts.featured` narrows to the
+   * creator-featured rail (home); ordering is featured-first, then `sortOrder`,
+   * then newest-published, so both surfaces get a stable, curated sequence.
+   * Fully PUBLIC — carries no per-user state.
+   */
+  async listPublishedJourneys(
+    organizationId: string,
+    opts: { featured?: boolean; limit?: number } = {}
+  ): Promise<JourneyCardView[]> {
+    try {
+      const rows = await this.db
+        .select({
+          pageId: landingPages.id,
+          slug: landingPages.slug,
+          title: landingPages.title,
+          featured: landingPages.featured,
+          courseId: courses.id,
+          courseSlug: courses.slug,
+          kicker: courses.kicker,
+          lede: courses.lede,
+          priceCents: courses.priceCents,
+        })
+        .from(landingPages)
+        // Inner join guards the polymorphic subject (HARDENING §C): only a
+        // journey bound to a live course in this org can surface.
+        .innerJoin(
+          courses,
+          and(
+            eq(courses.id, landingPages.subjectId),
+            eq(courses.organizationId, organizationId),
+            eq(courses.status, CONTENT_STATUS.PUBLISHED),
+            isNull(courses.deletedAt)
+          )
+        )
+        .where(
+          and(
+            eq(landingPages.organizationId, organizationId),
+            eq(landingPages.subjectType, 'course'),
+            eq(landingPages.status, CONTENT_STATUS.PUBLISHED),
+            isNull(landingPages.deletedAt),
+            opts.featured ? eq(landingPages.featured, true) : undefined
+          )
+        )
+        .orderBy(
+          desc(landingPages.featured),
+          asc(landingPages.sortOrder),
+          desc(landingPages.publishedAt)
+        )
+        .limit(opts.limit ?? 24);
+
+      // Dedupe by courseId — one card per subject course. The create path binds
+      // one landing page per course (1:1), but nothing enforces it; guard against
+      // >1 published page for the same course surfacing as duplicate cards
+      // (mirrors listEnrolledJourneys' dedupe). Ordering above keeps the leading
+      // (featured / earliest-sorted) page as the survivor.
+      const seen = new Set<string>();
+      const unique = rows.filter((r) => {
+        if (seen.has(r.courseId)) return false;
+        seen.add(r.courseId);
+        return true;
+      });
+
+      const counts = await this.loadPublishedCurriculumCounts(
+        unique.map((r) => r.courseId)
+      );
+
+      return unique.map((r) => {
+        const count = counts.get(r.courseId);
+        return {
+          pageId: r.pageId,
+          slug: r.slug,
+          title: r.title,
+          kicker: r.kicker,
+          tagline: r.lede,
+          courseId: r.courseId,
+          courseSlug: r.courseSlug,
+          priceCents: r.priceCents,
+          stageCount: count?.stageCount ?? 0,
+          practiceCount: count?.practiceCount ?? 0,
+          featured: r.featured,
+        };
+      });
+    } catch (error) {
+      this.handleError(error, 'listPublishedJourneys');
+    }
+  }
+
+  /**
+   * List the journeys the given user is ENROLLED in, within `organizationId`,
+   * as enrolled cards with a progress rollup (SPEC §8.4 / §11). Scoped to the
+   * user's `course_enrollments` whose course is a PUBLISHED, non-deleted course
+   * in the org with a PUBLISHED landing page. Progress = completed vs total
+   * PUBLISHED practices; `status` derives from the enrollment's `completedAt`
+   * (authoritative) then the completion count. Newest activity first.
+   *
+   * `userId` is the SESSION user (the route never trusts a client id); the org
+   * scopes the shelf to the space being browsed. Returns `[]` for a user with no
+   * enrollments in the org.
+   */
+  async listEnrolledJourneys(
+    userId: string,
+    organizationId: string
+  ): Promise<EnrolledJourneyCard[]> {
+    try {
+      const rows = await this.db
+        .select({
+          pageId: landingPages.id,
+          slug: landingPages.slug,
+          title: landingPages.title,
+          featured: landingPages.featured,
+          courseId: courses.id,
+          courseSlug: courses.slug,
+          kicker: courses.kicker,
+          lede: courses.lede,
+          priceCents: courses.priceCents,
+          enrolledAt: courseEnrollments.enrolledAt,
+          lastActivityAt: courseEnrollments.lastActivityAt,
+          completedAt: courseEnrollments.completedAt,
+        })
+        .from(courseEnrollments)
+        .innerJoin(
+          courses,
+          and(
+            eq(courses.id, courseEnrollments.courseId),
+            eq(courses.organizationId, organizationId),
+            eq(courses.status, CONTENT_STATUS.PUBLISHED),
+            isNull(courses.deletedAt)
+          )
+        )
+        .innerJoin(
+          landingPages,
+          and(
+            eq(landingPages.subjectId, courses.id),
+            eq(landingPages.subjectType, 'course'),
+            eq(landingPages.organizationId, organizationId),
+            eq(landingPages.status, CONTENT_STATUS.PUBLISHED),
+            isNull(landingPages.deletedAt)
+          )
+        )
+        .where(eq(courseEnrollments.userId, userId))
+        .orderBy(desc(courseEnrollments.lastActivityAt));
+
+      // Dedupe by courseId — a course is expected to have ONE journey page, but
+      // guard against >1 published page pointing at the same course (keep the
+      // first, i.e. the most-recently-active by the ORDER BY above).
+      const seen = new Set<string>();
+      const unique = rows.filter((r) => {
+        if (seen.has(r.courseId)) return false;
+        seen.add(r.courseId);
+        return true;
+      });
+      if (unique.length === 0) return [];
+
+      const courseIds = unique.map((r) => r.courseId);
+      const [counts, completedByCourse] = await Promise.all([
+        this.loadPublishedCurriculumCounts(courseIds),
+        this.loadCompletedPracticeCounts(userId, courseIds),
+      ]);
+
+      return unique.map((r) => {
+        const total = counts.get(r.courseId)?.practiceCount ?? 0;
+        const stageCount = counts.get(r.courseId)?.stageCount ?? 0;
+        // Clamp: a completion of a since-unpublished practice must never push the
+        // numerator past the (published) denominator.
+        const completed = Math.min(
+          completedByCourse.get(r.courseId) ?? 0,
+          total
+        );
+        const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+        const status: JourneyProgressStatus = r.completedAt
+          ? 'completed'
+          : completed > 0
+            ? 'in-progress'
+            : 'not-started';
+        return {
+          pageId: r.pageId,
+          slug: r.slug,
+          title: r.title,
+          kicker: r.kicker,
+          tagline: r.lede,
+          courseId: r.courseId,
+          courseSlug: r.courseSlug,
+          priceCents: r.priceCents,
+          stageCount,
+          practiceCount: total,
+          featured: r.featured,
+          completedPractices: completed,
+          totalPractices: total,
+          percent,
+          status,
+          enrolledAt: r.enrolledAt.toISOString(),
+          lastActivityAt: r.lastActivityAt?.toISOString() ?? null,
+          completedAt: r.completedAt?.toISOString() ?? null,
+        };
+      });
+    } catch (error) {
+      this.handleError(error, 'listEnrolledJourneys');
     }
   }
 
@@ -956,6 +1175,111 @@ export class CourseJourneyService extends BaseService {
       if (entry) entry.enrolledCount = Number(e.enrolledCount);
     }
 
+    return map;
+  }
+
+  /**
+   * Batched MEMBER-visible curriculum counts for a set of courses (no N+1):
+   * non-deleted stages and their PUBLISHED, non-deleted practices. This is the
+   * count a member actually sees (matches the public sales page + the progress
+   * denominator) — distinct from {@link loadCourseRollups}, whose `practiceCount`
+   * counts ALL stage→practice associations for the studio view regardless of the
+   * content's publish state. Courses with no matching stage simply don't appear.
+   */
+  private async loadPublishedCurriculumCounts(
+    courseIds: string[]
+  ): Promise<Map<string, { stageCount: number; practiceCount: number }>> {
+    const map = new Map<
+      string,
+      { stageCount: number; practiceCount: number }
+    >();
+    if (courseIds.length === 0) return map;
+
+    const rows = await this.db
+      .select({
+        courseId: courseStages.courseId,
+        stageCount: sql<number>`count(distinct ${courseStages.id})`,
+        // count(content.id) counts only the rows where the published-content
+        // join matched — i.e. member-visible practices.
+        practiceCount: sql<number>`count(${content.id})`,
+      })
+      .from(courseStages)
+      .leftJoin(stagePractices, eq(stagePractices.stageId, courseStages.id))
+      .leftJoin(
+        content,
+        and(
+          eq(content.id, stagePractices.contentId),
+          eq(content.status, CONTENT_STATUS.PUBLISHED),
+          isNull(content.deletedAt)
+        )
+      )
+      .where(
+        and(
+          inArray(courseStages.courseId, courseIds),
+          isNull(courseStages.deletedAt)
+        )
+      )
+      .groupBy(courseStages.courseId);
+
+    for (const r of rows) {
+      map.set(r.courseId, {
+        stageCount: Number(r.stageCount),
+        practiceCount: Number(r.practiceCount),
+      });
+    }
+    return map;
+  }
+
+  /**
+   * Batched count of a user's completed practices per course (no N+1). A
+   * completion counts only when its content is a PUBLISHED, non-deleted practice
+   * of a non-deleted stage in one of `courseIds` — so the numerator can never
+   * exceed {@link loadPublishedCurriculumCounts}'s denominator. Keyed by courseId;
+   * a course with no completions simply doesn't appear.
+   */
+  private async loadCompletedPracticeCounts(
+    userId: string,
+    courseIds: string[]
+  ): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    if (courseIds.length === 0) return map;
+
+    const rows = await this.db
+      .select({
+        courseId: courseStages.courseId,
+        completed: sql<number>`count(distinct ${practiceCompletions.contentId})`,
+      })
+      .from(practiceCompletions)
+      .innerJoin(
+        stagePractices,
+        eq(stagePractices.contentId, practiceCompletions.contentId)
+      )
+      .innerJoin(
+        courseStages,
+        and(
+          eq(courseStages.id, stagePractices.stageId),
+          isNull(courseStages.deletedAt)
+        )
+      )
+      .innerJoin(
+        content,
+        and(
+          eq(content.id, practiceCompletions.contentId),
+          eq(content.status, CONTENT_STATUS.PUBLISHED),
+          isNull(content.deletedAt)
+        )
+      )
+      .where(
+        and(
+          eq(practiceCompletions.userId, userId),
+          inArray(courseStages.courseId, courseIds)
+        )
+      )
+      .groupBy(courseStages.courseId);
+
+    for (const r of rows) {
+      map.set(r.courseId, Number(r.completed));
+    }
     return map;
   }
 

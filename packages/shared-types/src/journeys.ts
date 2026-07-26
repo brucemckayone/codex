@@ -517,6 +517,65 @@ export interface JourneyListItem {
   updatedAt: string;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Member-facing DISCOVERY read-model (Codex-oi2w4 — home / explore / library)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Progress state of an enrolled journey (library shelf + continue rail). */
+export type JourneyProgressStatus = 'not-started' | 'in-progress' | 'completed';
+
+/**
+ * A journey as a PUBLIC discovery card (Codex-oi2w4 — the org home "featured
+ * journeys" rail + the Explore grid). A PUBLISHED, course-type landing page
+ * joined to its PUBLISHED subject course, plus the member-visible curriculum
+ * rollups. Fully PUBLIC: carries no per-user state and no `canView`. Mirrored
+ * FE-side in `apps/web/.../page-builder/journey-queries.ts` (structurally
+ * identical by design — the same dual-home pattern as {@link JourneyListItem}).
+ */
+export interface JourneyCardView {
+  /** The landing-page (journey portal) id. */
+  pageId: string;
+  /** Org-scoped landing-page slug → the public sell page (`/journeys/:slug`). */
+  slug: string;
+  title: string;
+  /** Course eyebrow above the title (e.g. "Foundation course"). */
+  kicker: string | null;
+  /** Course lede — the one-line invitation under the title. */
+  tagline: string | null;
+  /** Subject course id + slug (build the dashboard / enrol URL). */
+  courseId: string;
+  courseSlug: string;
+  /** One-off purchase price in GBP pence; null = membership-only / not sold standalone. */
+  priceCents: number | null;
+  stageCount: number;
+  /** MEMBER-visible (published, non-deleted) practice count — matches the sell page. */
+  practiceCount: number;
+  /** Creator-flagged for the home "featured" rail (`landing_pages.featured`). */
+  featured: boolean;
+}
+
+/**
+ * A journey the CURRENT USER is enrolled in (Codex-oi2w4 — the library "Your
+ * journeys" shelf + "Jump back in" continue rail). The discovery card plus the
+ * user's progress rollup and status. Per-user: the route reads `userId` from the
+ * session, never the client. `percent`/`completedPractices` are scoped to the
+ * SAME published curriculum as {@link JourneyCardView.practiceCount}, so the
+ * numerator can never exceed the denominator.
+ */
+export interface EnrolledJourneyCard extends JourneyCardView {
+  /** Completed practices (from `practice_completions`) for this user. */
+  completedPractices: number;
+  /** Total published, non-deleted practices in the course. */
+  totalPractices: number;
+  /** 0–100, integer; 0 when the course has no published practices yet. */
+  percent: number;
+  status: JourneyProgressStatus;
+  enrolledAt: string;
+  lastActivityAt: string | null;
+  /** Stamped when the enrollment is complete (drives the `completed` status). */
+  completedAt: string | null;
+}
+
 /** Public sales/landing page envelope (SSR shell+stream). No `canView` on the shell. */
 export interface JourneyCoursePage {
   page: JourneyPageRecord;

@@ -16,8 +16,16 @@
   } from '$lib/collections';
   import type { LibraryItem } from '$lib/collections';
   import { filterLibraryItemsByOrg } from '$lib/library/filter-by-org';
-  import { buildContentUrl, buildPlatformUrl } from '$lib/utils/subdomain';
+  import {
+    buildContentUrl,
+    buildJourneyUrl,
+    buildPlatformUrl,
+  } from '$lib/utils/subdomain';
+  import Carousel from '$lib/components/carousel/Carousel.svelte';
+  import JourneyCard from '$lib/components/journeys/JourneyCard.svelte';
   import LibraryPageView from '$lib/components/library/LibraryPageView.svelte';
+  import { listEnrolledJourneys } from '$lib/remote/journeys.remote';
+  import type { EnrolledJourneyCard } from '$lib/page-builder';
   import * as m from '$paraglide/messages';
 
   let { data } = $props();
@@ -37,6 +45,12 @@
   // Track loading state for initial fetch
   let isLoadingFromServer = $state(false);
   let loadError = $state(false);
+
+  // Enrolled journeys — the "Your journeys" shelf (Codex-oi2w4). Fetched
+  // client-side via the remote (self-scoped to the session user + this org);
+  // guests / errors resolve to an empty shelf (hidden). Independent of the
+  // owned-content load so one failing never blanks the other.
+  let enrolledJourneys = $state<EnrolledJourneyCard[]>([]);
 
   // Live query over library collection
   const libraryQuery = useLiveQuery(
@@ -67,6 +81,14 @@
       if (!hasData) loadError = true;
     } finally {
       isLoadingFromServer = false;
+    }
+
+    // Independent of the owned-content load above — a failure here just hides
+    // the shelf, and a library-load failure never blocks the journeys fetch.
+    try {
+      enrolledJourneys = await listEnrolledJourneys();
+    } catch {
+      enrolledJourneys = [];
     }
   });
 
@@ -251,9 +273,44 @@
       View full library &rarr;
     </a>
   {/snippet}
+
+  {#snippet journeysRail()}
+    {#if enrolledJourneys.length > 0}
+      <section class="library-journeys">
+        <Carousel
+          title="Your journeys"
+          items={enrolledJourneys}
+          itemMinWidth="20rem"
+          gap="var(--space-4)"
+          ariaLabel="Your journeys"
+        >
+          {#snippet renderItem(journey)}
+            <JourneyCard
+              {journey}
+              href={buildJourneyUrl(
+                page.url,
+                { slug: journey.courseSlug, id: journey.courseId },
+                { surface: 'dashboard' }
+              )}
+              progress={{
+                percent: journey.percent,
+                status: journey.status,
+                completedPractices: journey.completedPractices,
+                totalPractices: journey.totalPractices,
+              }}
+            />
+          {/snippet}
+        </Carousel>
+      </section>
+    {/if}
+  {/snippet}
 </LibraryPageView>
 
 <style>
+  .library-journeys {
+    margin-bottom: var(--space-8);
+  }
+
   .full-library-link {
     font-size: var(--text-sm);
     font-weight: var(--font-medium);

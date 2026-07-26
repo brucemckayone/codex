@@ -20,6 +20,10 @@
   @prop {string} browseHref - Link for the "browse" action in empty state
   @prop {string} browseLabel - Label for the browse action
   @prop {Snippet} [headerExtra] - Optional extra header content (e.g. "view full library" link)
+  @prop {Snippet} [journeysRail] - Optional shelf rendered under the header, above the content
+    branches (e.g. the org library's "Your journeys" enrolled rail). Rendered
+    independently of the empty/error state so it shows even when the owned-content
+    grid is empty.
   @prop {(value: string | undefined) => void} onSortChange - Sort change handler
   @prop {(filters: any) => void} onFilterChange - Filter change handler
   @prop {() => void} onClearFilters - Clear all filters handler
@@ -68,6 +72,7 @@
     browseHref: string;
     browseLabel: string;
     headerExtra?: Snippet;
+    journeysRail?: Snippet;
     onSortChange: (value: string | undefined) => void;
     onFilterChange: (filters: { contentType: string; progressStatus: string; accessType?: string; search: string }) => void;
     onClearFilters: () => void;
@@ -93,6 +98,7 @@
     browseHref,
     browseLabel,
     headerExtra,
+    journeysRail,
     onSortChange,
     onFilterChange,
     onClearFilters,
@@ -162,6 +168,10 @@
       {@render headerExtra()}
     {/if}
   </div>
+
+  {#if journeysRail}
+    {@render journeysRail()}
+  {/if}
 
   {#if error}
     <ErrorBanner

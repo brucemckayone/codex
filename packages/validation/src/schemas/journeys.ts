@@ -65,6 +65,24 @@ export const recordCompletionBodySchema = z.object({
 export type RecordCompletionBody = z.infer<typeof recordCompletionBodySchema>;
 
 /**
+ * Public journey DISCOVERY list query (Codex-oi2w4) —
+ * `GET /api/journeys/published`. Fully PUBLIC (`auth: 'optional'`): lists
+ * PUBLISHED course-journeys for the org home "featured" rail + the Explore grid.
+ * `organizationId` is resolved web-side from the request host and passed here
+ * (same as the sales-page reads). `featured` (accepted only as the literal
+ * `'true'`, so no boolean-coercion ambiguity) narrows to the creator-featured
+ * rail; `limit` caps the page size (1–50).
+ */
+export const listPublishedJourneysQuerySchema = z.object({
+  organizationId: uuidSchema,
+  featured: z.literal('true').optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional(),
+});
+export type ListPublishedJourneysQuery = z.infer<
+  typeof listPublishedJourneysQuerySchema
+>;
+
+/**
  * Studio journey-insights query (Codex-2pryk · Round-D · Codex-776gg · WP-7) —
  * `GET /api/journeys/insights`. Owner/admin only via `requireOrgManagement`.
  *

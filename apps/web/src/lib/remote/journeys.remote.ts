@@ -23,6 +23,8 @@ import { z } from 'zod';
 import { command, getRequestEvent, query } from '$app/server';
 import type { PracticeCompletionRecord } from '$lib/journeys/types';
 import type {
+  EnrolledJourneyCard,
+  JourneyCardView,
   JourneyCoursePage,
   JourneyListItem,
   JourneyPageRecord,
@@ -106,6 +108,67 @@ export const markPracticeCompleted = command(
     if (!userId) error(401, 'Sign in to record progress');
 
     return persistPracticeCompletion(event, userId, { contentId, source });
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Codex-oi2w4 · Member discovery (home / explore / library surfacing)
+//
+// `listPublishedJourneys` is PUBLIC (org from host, no auth); `listEnrolledJourneys`
+// is per-user (the forwarded session cookie → the worker's `userId`; guests get an
+// empty shelf). Both resolve the org from the request host, mirroring
+// `getCoursePage`; on a non-org host they return []. Streamed callers add a
+// `.catch(() => [])` at the load (apps/web CLAUDE.md "Shell + Stream").
+// ─────────────────────────────────────────────────────────────────────────────
+
+const discoverJourneysSchema = z
+  .object({
+    featured: z.boolean().optional(),
+    limit: z.number().int().min(1).max(50).optional(),
+  })
+  .optional();
+
+/**
+ * Public discovery list — PUBLISHED course-journeys for the org home "featured"
+ * rail (`{ featured: true }`) + the Explore grid (`{}` / `{ limit }`). Returns
+ * [] off a non-org host.
+ */
+export const listPublishedJourneys = query(
+  discoverJourneysSchema,
+  async (input): Promise<JourneyCardView[]> => {
+    const { platform, cookies, url } = getRequestEvent();
+    const context = getSubdomainContext(url.hostname);
+    if (context.type !== 'organization') return [];
+
+    const api = createServerApi(platform, cookies);
+    const org = await api.org.getPublicInfo(context.slug);
+    if (!org || typeof org !== 'object' || !('id' in org)) return [];
+
+    return api.access.listPublishedJourneys((org as { id: string }).id, {
+      featured: input?.featured,
+      limit: input?.limit,
+    });
+  }
+);
+
+/**
+ * The session user's ENROLLED journeys in the current org (library "Your
+ * journeys" shelf + continue rail). Self-scoped: the worker derives `userId`
+ * from the forwarded session, so guests get []; a non-org host also returns [].
+ */
+export const listEnrolledJourneys = query(
+  async (): Promise<EnrolledJourneyCard[]> => {
+    const { platform, cookies, url, locals } = getRequestEvent();
+    if (!locals.user) return [];
+
+    const context = getSubdomainContext(url.hostname);
+    if (context.type !== 'organization') return [];
+
+    const api = createServerApi(platform, cookies);
+    const org = await api.org.getPublicInfo(context.slug);
+    if (!org || typeof org !== 'object' || !('id' in org)) return [];
+
+    return api.access.listEnrolledJourneys((org as { id: string }).id);
   }
 );
 
