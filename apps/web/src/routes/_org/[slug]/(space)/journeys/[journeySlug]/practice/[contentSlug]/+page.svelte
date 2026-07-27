@@ -210,6 +210,10 @@
     position: sticky;
     top: 0;
     align-self: start;
+    /* Pin to exactly viewport height so the border-right + surface fill the
+       whole column even when the journey map is shorter than the viewport
+       (otherwise the box is content-height and the rail stops mid-page). */
+    min-height: 100dvh;
     max-height: 100dvh;
     overflow-y: auto;
     display: flex;

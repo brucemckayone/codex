@@ -18,6 +18,7 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { buildJourneyUrl } from '@codex/urls';
+  import FloatingCta from './FloatingCta.svelte';
   import SectionRenderer from './SectionRenderer.svelte';
   import { brandOverridesToStyleAttr } from './brand-overrides';
   import type { JourneySalesContext, SellPreview } from './types';
@@ -71,6 +72,11 @@
 >
   <div class="journey-page__atmos" aria-hidden="true"></div>
   <SectionRenderer sections={coursePage.page.sections} {context} />
+  <FloatingCta
+    href={enrolled ? dashboardUrl : checkoutUrl}
+    label={coursePage.course.title}
+    ctaText={enrolled ? 'Continue →' : 'Begin →'}
+  />
 </div>
 
 <style>

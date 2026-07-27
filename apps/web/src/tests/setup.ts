@@ -48,6 +48,30 @@ if (typeof Element !== 'undefined') {
   });
 }
 
+// JSDOM shim: window.matchMedia is not implemented in jsdom. Components read
+// motion/theme preferences via `window.matchMedia('(prefers-reduced-motion: reduce)')`
+// inside onMount (e.g. the journey sales-page sections), which would throw when
+// those components are mounted in unit tests. Provide a minimal non-matching stub
+// (matches:false = the full-motion default). Real reduced-motion / responsive
+// behaviour is covered by E2E / in-browser verification.
+if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: (query: string): MediaQueryList =>
+      ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+      }) as MediaQueryList,
+  });
+}
+
 // Clean up DOM after each test (only if running in DOM environment)
 afterEach(() => {
   if (typeof document !== 'undefined' && document.body) {
