@@ -45,8 +45,15 @@ export const load: PageServerLoad = async (event) => {
   // never reaches this branch) gets null → 404 (fail-closed). This shell is
   // minimal for a fresh draft; the builder streams live sections/brand over the
   // page-preview bridge, which +page.svelte overlays on top.
+  //
+  // Which of the two reads served the page is the ONLY signal that separates a
+  // draft preview from the live page, and the creator could not see it — "I am
+  // not sure if live pages are preview pages" (Codex-xzwl5). It is threaded to
+  // the view so it can say so, and so a draft is never indexed.
+  let draftPreview = false;
   if (!coursePage && locals.user) {
     coursePage = await getCoursePagePreview({ slug: params.journeySlug });
+    draftPreview = coursePage !== null;
   }
 
   if (!coursePage) {
@@ -95,6 +102,7 @@ export const load: PageServerLoad = async (event) => {
     coursePage,
     orgSlug: params.slug,
     enrolled,
+    draftPreview,
     // STREAM: public sell previews (no auth). `.catch()` → null on any failure.
     sellPreview: resolveSellPreview({
       pageId: coursePage.page.id,

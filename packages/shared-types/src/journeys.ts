@@ -426,7 +426,7 @@ export interface ContentCourseLinks {
  */
 export interface CourseCardSummary {
   id: string;
-  /** Org-scoped slug — the sales-page URL basis (`/journeys/{slug}`). */
+  /** Org-scoped COURSE slug (`courses.slug`) — not the sales-page URL basis. */
   slug: string;
   title: string;
   /** Eyebrow line above the title (`courses.kicker`), or null. */
@@ -437,6 +437,16 @@ export interface CourseCardSummary {
   guideName: string | null;
   /** One-off purchase price in GBP pence (`courses.priceCents`); null = not sold standalone. */
   priceCents: number | null;
+  /**
+   * The published landing page that SELLS this course (`landing_pages.id`), or
+   * null when none was found. The sales-page URL basis is the PAGE
+   * (`/journeys/{pageSlug}` resolves `landing_pages.slug`), so link builders MUST
+   * prefer these over `slug`/`id` — linking by the course slug is what made
+   * /explore and the org-landing rail resolve to different URLs (Codex-xzwl5).
+   */
+  pageId: string | null;
+  /** Org-scoped PAGE slug — the sales-page URL basis (`/journeys/{pageSlug}`). */
+  pageSlug: string | null;
 }
 
 /**

@@ -10,6 +10,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { extractPlainText } from '@codex/validation';
+  import DraftPreviewBanner from '$lib/components/journeys/DraftPreviewBanner.svelte';
   import { StructuredData } from '$lib/components/seo';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import { initPagePreviewBridge } from '$lib/page-builder/page-preview-bridge';
@@ -44,6 +45,15 @@
 
   const course = $derived(data.coursePage.course);
 
+  // Served by the management-gated draft read, not the published one — the ONLY
+  // difference between a preview and the live page, and previously invisible
+  // (Codex-xzwl5). Only a manager can ever get here (a non-manager 404s), so the
+  // builder deep-link is safe to offer.
+  const draftPreview = $derived(data.draftPreview === true);
+  const builderHref = $derived(
+    `/studio/journeys/${data.coursePage.page.id}/page`
+  );
+
   const description = $derived(
     course.lede
       ? extractPlainText(course.lede)
@@ -70,12 +80,20 @@
 </script>
 
 <svelte:head>
-  <title>{course.title}</title>
+  <title>{draftPreview ? `Draft · ${course.title}` : course.title}</title>
   <meta name="description" content={description} />
   <meta property="og:title" content={course.title} />
   <meta property="og:description" content={description} />
   <meta property="og:type" content="website" />
+  <!-- A draft is manager-only; it must never be indexed or shared as if live. -->
+  {#if draftPreview}
+    <meta name="robots" content="noindex, nofollow" />
+  {/if}
 </svelte:head>
+
+{#if draftPreview}
+  <DraftPreviewBanner status={data.coursePage.page.status} {builderHref} />
+{/if}
 
 <StructuredData data={structuredData} />
 

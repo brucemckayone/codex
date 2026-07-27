@@ -78,7 +78,7 @@ import type {
   PracticeCompletionRecord,
   PracticeContentType,
 } from '@codex/shared-types';
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 
 /**
  * Narrow a stored `content.contentType` varchar to the practice union. The DB
@@ -832,6 +832,17 @@ export class CourseJourneyService extends BaseService {
    * courses published in the same instant (or with a null `publishedAt`). Backed
    * by `idx_courses_org_status (organizationId, status, publishedAt)`. Returns
    * `[]` when the org has no published courses.
+   *
+   * Each row also carries the SELL PAGE identity — `pageId`/`pageSlug` from the
+   * published `course`-type landing page that presents it (Codex-xzwl5). The
+   * public journey URL resolves `landing_pages.slug`, so a caller linking by
+   * `courses.slug` builds a DIFFERENT url than the org-landing rail (which links
+   * by the page) whenever the two have drifted. Callers building a sales-page
+   * link MUST prefer `pageSlug`/`pageId`. The join is a LEFT join: it reconciles
+   * the link, it deliberately does NOT filter the list — a course staying
+   * published without a live page is prevented at the WRITE path instead (see
+   * {@link cascadeCourseFromPage}) — so `null` means "no published page found"
+   * and the course's own slug stays the only thing to link by.
    */
   async listPublishedCourses(
     organizationId: string
@@ -846,8 +857,20 @@ export class CourseJourneyService extends BaseService {
           lede: courses.lede,
           guide: courses.guide,
           priceCents: courses.priceCents,
+          pageId: landingPages.id,
+          pageSlug: landingPages.slug,
         })
         .from(courses)
+        .leftJoin(
+          landingPages,
+          and(
+            eq(landingPages.subjectId, courses.id),
+            eq(landingPages.subjectType, 'course'),
+            eq(landingPages.organizationId, organizationId),
+            eq(landingPages.status, CONTENT_STATUS.PUBLISHED),
+            isNull(landingPages.deletedAt)
+          )
+        )
         .where(
           and(
             eq(courses.organizationId, organizationId),
@@ -855,17 +878,35 @@ export class CourseJourneyService extends BaseService {
             isNull(courses.deletedAt)
           )
         )
-        .orderBy(desc(courses.publishedAt), desc(courses.createdAt));
+        .orderBy(
+          desc(courses.publishedAt),
+          desc(courses.createdAt),
+          // Deterministic winner when >1 published page sells one course (1:1 is
+          // the create path's convention, not a constraint).
+          asc(landingPages.sortOrder),
+          asc(landingPages.id)
+        );
 
-      return rows.map((row) => ({
-        id: row.id,
-        slug: row.slug,
-        title: row.title,
-        kicker: row.kicker,
-        lede: row.lede,
-        guideName: row.guide?.name ?? null,
-        priceCents: row.priceCents,
-      }));
+      // One card per course — the left join fans out for a course fronted by
+      // several published pages; the ordering above fixes which one survives.
+      const seen = new Set<string>();
+      return rows
+        .filter((row) => {
+          if (seen.has(row.id)) return false;
+          seen.add(row.id);
+          return true;
+        })
+        .map((row) => ({
+          id: row.id,
+          slug: row.slug,
+          title: row.title,
+          kicker: row.kicker,
+          lede: row.lede,
+          guideName: row.guide?.name ?? null,
+          priceCents: row.priceCents,
+          pageId: row.pageId,
+          pageSlug: row.pageSlug,
+        }));
     } catch (error) {
       this.handleError(error, 'listPublishedCourses');
     }
@@ -1322,10 +1363,14 @@ export class CourseJourneyService extends BaseService {
    * Persist the builder's draft (the frozen save command). Scoped to `(id, org)`
    * among non-deleted pages — a foreign/missing id throws `NotFoundError` (never a
    * silent cross-org write). A changed slug is collision-checked against the org's
-   * other non-deleted pages first, so it surfaces as a `ConflictError` (409)
-   * rather than a raw unique-violation. Publishing a COURSE page ALSO publishes
-   * its subject course, so the public sales page — `getCoursePage` requires BOTH
-   * page and course published — goes live in one action.
+   * other non-deleted pages AND courses first (they share one org slug-space), so
+   * it surfaces as a `ConflictError` (409) rather than a raw unique-violation.
+   *
+   * For a COURSE page the subject course is kept in LOCKSTEP with the page
+   * (Codex-xzwl5) — see {@link cascadeCourseFromPage}. Publishing the page
+   * publishes the course (so the public sales page, which requires BOTH, goes
+   * live in one action), unpublishing it unpublishes the course, and the course's
+   * `slug`/`title` follow the page's.
    */
   async saveJourneyPage(
     organizationId: string,
@@ -1374,8 +1419,15 @@ export class CourseJourneyService extends BaseService {
           throw new NotFoundError('Journey page not found');
         }
 
+        const subjectCourseId =
+          existing.subjectType === 'course' ? existing.subjectId : null;
+
         // A slug change must respect the org-unique slug-space → 409, not a raw
-        // constraint error.
+        // constraint error. That space spans BOTH tables (`createJourney`
+        // resolves against both), and the cascade below now writes the subject
+        // course's slug too, so a rename is checked against courses as well —
+        // otherwise a collision with an unrelated course would escape this guard
+        // and surface as a raw `uq_courses_org_slug` violation.
         if (nextSlug !== existing.slug) {
           const [clash] = await tx
             .select({ id: landingPages.id })
@@ -1389,6 +1441,21 @@ export class CourseJourneyService extends BaseService {
             )
             .limit(1);
           if (clash && clash.id !== record.id) {
+            throw new ConflictError(`The slug "${nextSlug}" is already in use`);
+          }
+
+          const [courseClash] = await tx
+            .select({ id: courses.id })
+            .from(courses)
+            .where(
+              and(
+                eq(courses.organizationId, organizationId),
+                eq(courses.slug, nextSlug),
+                isNull(courses.deletedAt)
+              )
+            )
+            .limit(1);
+          if (courseClash && courseClash.id !== subjectCourseId) {
             throw new ConflictError(`The slug "${nextSlug}" is already in use`);
           }
         }
@@ -1414,30 +1481,108 @@ export class CourseJourneyService extends BaseService {
             )
           );
 
-        // Publishing a course page publishes its subject course too (getCoursePage
-        // requires BOTH published), so one "Publish" makes the sales page live.
-        if (
-          publishing &&
-          existing.subjectType === 'course' &&
-          existing.subjectId
-        ) {
-          await tx
-            .update(courses)
-            .set({
-              status: 'published',
-              ...(nowPublishedAt ? { publishedAt: nowPublishedAt } : {}),
-            })
-            .where(
-              and(
-                eq(courses.id, existing.subjectId),
-                eq(courses.organizationId, organizationId),
-                isNull(courses.deletedAt)
-              )
-            );
+        if (subjectCourseId) {
+          await this.cascadeCourseFromPage(tx, {
+            organizationId,
+            pageId: record.id,
+            courseId: subjectCourseId,
+            status,
+            slug: nextSlug,
+            title: record.title,
+            publishedAt: nowPublishedAt,
+          });
         }
       });
     } catch (error) {
       this.handleError(error, 'saveJourneyPage');
+    }
+  }
+
+  /**
+   * Bring a course page's SUBJECT COURSE into lockstep with the page it is sold
+   * through (Codex-xzwl5). Runs inside {@link saveJourneyPage}'s transaction, so
+   * page and course move together or not at all.
+   *
+   * STATUS — the page's status is mirrored onto the course. Publish already
+   * cascaded (`getCoursePage` requires BOTH rows published, so one "Publish" has
+   * to move both); the missing reverse is what made a journey impossible to take
+   * down. `courses.status` is the ONLY gate on `listPublishedCourses` (the
+   * /explore rail), `getCourseBySlug` (the public by-slug read),
+   * `getContentCourses`, `getCourseSellPreview` and the enrolled shelves — so an
+   * unpublished page whose course stayed `published` left the journey listed and
+   * reachable everywhere except its own sales page, which 404'd. Cascading the
+   * course status fixes all of those at once; filtering any single listing on
+   * "has a published landing page" would have fixed exactly one.
+   *
+   * Nothing else in the codebase ever writes `courses.status`, so this cascade
+   * makes "the course is published ⟺ a page sells it" a real invariant rather
+   * than a per-read filter.
+   *
+   * A course MAY be fronted by more than one page (nothing enforces 1:1 — see
+   * {@link listPublishedJourneys}' dedupe), so unpublishing one page only takes
+   * the course down when no OTHER published page still sells it.
+   *
+   * SLUG/TITLE — the page is the journey's public identity (`/journeys/:slug`
+   * resolves `landing_pages.slug`), so the course follows it. A course keeping
+   * its creation-time slug is what let the /explore link (course slug) and the
+   * org-landing link (page slug) resolve to different URLs after a rename.
+   *
+   * A zero-row update means the subject course is soft-deleted or foreign: the
+   * page would then claim a subject whose status/slug it cannot govern, which is
+   * the divergence this method exists to close, so it throws (mirrors
+   * {@link updateJourneyOffer}'s zero-row guard) and rolls the save back.
+   */
+  private async cascadeCourseFromPage(
+    tx: Parameters<Parameters<typeof this.txDb.transaction>[0]>[0],
+    input: {
+      organizationId: string;
+      pageId: string;
+      courseId: string;
+      status: PageStatus;
+      slug: string;
+      title: string;
+      publishedAt: Date | undefined;
+    }
+  ): Promise<void> {
+    let courseStatus: PageStatus = input.status;
+
+    if (input.status !== CONTENT_STATUS.PUBLISHED) {
+      const [otherLivePage] = await tx
+        .select({ id: landingPages.id })
+        .from(landingPages)
+        .where(
+          and(
+            eq(landingPages.organizationId, input.organizationId),
+            eq(landingPages.subjectType, 'course'),
+            eq(landingPages.subjectId, input.courseId),
+            eq(landingPages.status, CONTENT_STATUS.PUBLISHED),
+            isNull(landingPages.deletedAt),
+            ne(landingPages.id, input.pageId)
+          )
+        )
+        .limit(1);
+      if (otherLivePage) courseStatus = CONTENT_STATUS.PUBLISHED;
+    }
+
+    const updated = await tx
+      .update(courses)
+      .set({
+        slug: input.slug,
+        title: input.title,
+        status: courseStatus,
+        ...(input.publishedAt ? { publishedAt: input.publishedAt } : {}),
+      })
+      .where(
+        and(
+          eq(courses.id, input.courseId),
+          eq(courses.organizationId, input.organizationId),
+          isNull(courses.deletedAt)
+        )
+      )
+      .returning({ id: courses.id });
+
+    if (updated.length === 0) {
+      throw new NotFoundError('Journey course not found');
     }
   }
 
