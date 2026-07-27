@@ -27,6 +27,7 @@ import {
   courseStages,
   courses,
   landingPages,
+  mediaItems,
   organizations,
   stagePractices,
 } from '@codex/database/schema';
@@ -268,6 +269,72 @@ describe('CourseJourneyService curriculum editor (Codex-03cwh)', () => {
         contentType: 'written',
         status: 'draft',
         sortOrder: 1,
+      });
+    });
+
+    it('projects the linked media duration (and null for a practice with no media)', async () => {
+      // The builder map's "≈ N min in all" cue read a flat 0 while
+      // `EditorPracticeView` carried no duration, under-claiming every course.
+      const courseId = await createCourse(db, orgAId, creatorId);
+
+      // `status: 'ready'` is guarded by the `status_ready_requires_keys` CHECK, so
+      // the HLS master + thumbnail keys are supplied too — a real ready video.
+      const mediaKey = randomUUID();
+      const [media] = await db
+        .insert(mediaItems)
+        .values({
+          creatorId,
+          title: 'Womb Awakening Movement',
+          mediaType: 'video',
+          status: 'ready',
+          r2Key: `originals/${mediaKey}/video.mp4`,
+          hlsMasterPlaylistKey: `hls/${mediaKey}/master.m3u8`,
+          thumbnailKey: `thumbnails/${mediaKey}/thumb.jpg`,
+          durationSeconds: 420,
+        })
+        .returning({ id: mediaItems.id });
+      if (!media) throw new Error('failed to create media item');
+
+      const [withMedia] = await db
+        .insert(content)
+        .values(
+          createTestContentInput(creatorId, {
+            organizationId: orgAId,
+            status: 'published',
+            contentType: 'video',
+            mediaItemId: media.id,
+          })
+        )
+        .returning({ id: content.id });
+      if (!withMedia) throw new Error('failed to create content');
+
+      // A written practice links NO media — 0 minutes is the honest answer.
+      const writtenId = await createContent(db, {
+        creatorId,
+        orgId: orgAId,
+        contentType: 'written',
+      });
+
+      const stage = await seedStage(db, courseId, {
+        name: 'Arriving',
+        sortOrder: 0,
+      });
+      await seedPractice(db, stage, withMedia.id, 0);
+      await seedPractice(db, stage, writtenId, 1);
+
+      const result = await service.getCourseCurriculumForEditor(
+        orgAId,
+        courseId
+      );
+      const practices = result.stages[0]?.practices ?? [];
+
+      expect(practices[0]).toMatchObject({
+        contentId: withMedia.id,
+        durationSeconds: 420,
+      });
+      expect(practices[1]).toMatchObject({
+        contentId: writtenId,
+        durationSeconds: null,
       });
     });
 

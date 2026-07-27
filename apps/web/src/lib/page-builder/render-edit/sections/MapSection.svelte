@@ -5,7 +5,8 @@
   rendered in its lit end-state (the scroll choreography can't run in an
   inner-scrolling canvas). Variants: descent (ember spine + gates, default) ·
   list (compact stage rows) · grid (stage cards). Stages come from the course
-  (via `stages`), not the page draft — the builder supplies mock stages. Copy
+  (via `stages`), not the page draft — the builder reads the real admin curriculum
+  (`getCourseCurriculum`), not a mock fixture. Copy
   (eyebrow/heading/sub/note) is page-editable. Styling in `../journey-sections.css`.
 -->
 <script lang="ts">

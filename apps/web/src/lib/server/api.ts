@@ -118,6 +118,7 @@ import type {
   JourneyCoursePage,
   JourneyListItem,
   JourneyPageRecord,
+  PageOffer,
 } from '$lib/page-builder';
 import type { SellPreview } from '$lib/page-builder/render';
 // Import local types that extend DB types with relations
@@ -1372,6 +1373,35 @@ export function createServerApi(
             record.id
           )}?organizationId=${encodeURIComponent(organizationId)}`,
           { method: 'PUT', body: JSON.stringify(record) }
+        ),
+
+      /**
+       * Set the journey's ways-in + prices (pence, GBP). The ONLY write path to a
+       * course's price — the worker persists the page's offer presentation and the
+       * authoritative `courses.price_cents` in one transaction, so the sales page
+       * and the checkout can never disagree about whether the journey is buyable.
+       * Separate from `saveJourneyPage` so a price change needs no republish.
+       */
+      updateJourneyOffer: (
+        organizationId: string,
+        pageId: string,
+        // The TOTAL offer bag (every path explicitly on/off). Declared inline
+        // rather than as `PageOffer` — whose fields are all optional for the
+        // render side — so a caller cannot omit a toggle and leave it ambiguous.
+        offer: {
+          tiersEnabled: boolean;
+          subscriptionEnabled: boolean;
+          subscriptionPriceCents: number | null;
+          oneOffEnabled: boolean;
+          oneOffPriceCents: number | null;
+        }
+      ) =>
+        request<PageOffer>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}/offer?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'PATCH', body: JSON.stringify(offer) }
         ),
     },
 

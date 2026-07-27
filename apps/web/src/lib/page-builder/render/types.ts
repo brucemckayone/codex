@@ -125,7 +125,15 @@ export interface AcheSectionProps {
   beats?: string[];
 }
 
-/** `turn` — the pivot from pain to promise. */
+/**
+ * `turn` — the pivot from pain to promise.
+ *
+ * NOTE: there is deliberately no `stages` field. `TurnSection` derives its roman
+ * -numeralled stage list FROM `points` by splitting each entry on an en/em dash
+ * ("Regulation — finding the ground"), so the authored shape stays one flat string
+ * array. A separate `stages` prop would be a second, divergent source for the same
+ * list.
+ */
 export interface TurnSectionProps {
   eyebrow?: string;
   statement?: string;
@@ -139,6 +147,15 @@ export interface ReelSectionProps {
   heading?: string;
   sub?: string;
   posterUrl?: string;
+  /**
+   * The whispered caption under the letterboxed frame. `captions` takes
+   * precedence and cross-fades on a slow cycle; `caption` is the single-line
+   * form. Absent ⇒ no caption line renders.
+   */
+  caption?: string;
+  captions?: string[];
+  /** Corner tag label above the frame. Defaults to `Preview` when absent. */
+  tag?: string;
 }
 
 /** `map` — the descent map (public, no progress); renders from context.stages. */
@@ -161,12 +178,30 @@ export interface FeelSectionProps {
   heading?: string;
   body?: string;
   inclusions?: FeelInclusion[];
+  /**
+   * The "free-taste" preview player. `previewTitle` is the switch — absent ⇒ the
+   * player self-hides. `previewDuration` is in seconds and drives the playhead.
+   *
+   * The transport is currently a VISUAL taste (an animated equaliser + playhead),
+   * not real playback: it is not yet wired to `context.sellPreview.reel`'s HLS
+   * manifest. These props describe the authored copy either way.
+   */
+  previewTitle?: string;
+  previewSub?: string;
+  previewDuration?: number;
 }
 
 /** `proof` — testimonials; renders from context.testimonials. */
 export interface ProofSectionProps {
   eyebrow?: string;
   heading?: string;
+  /**
+   * The quiet aggregate trust line beside the testimonials ("2,400+ practising").
+   * `ProofSection` also accepts the legacy key `trust` for pages authored before
+   * this name settled, so both are declared.
+   */
+  trustLabel?: string;
+  trust?: string;
 }
 
 /** `guide` — the maker's bio. */
@@ -177,6 +212,8 @@ export interface GuideSectionProps {
   bio?: string[];
   portraitUrl?: string;
   credentials?: string[];
+  /** The pull-quote climax under the bio. Omitted entirely when absent. */
+  quote?: string;
 }
 
 /** One FAQ entry. */

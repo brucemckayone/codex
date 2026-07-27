@@ -1,4 +1,8 @@
-import type { BrandTokenOverrides, PageSection } from '@codex/shared-types';
+import type {
+  BrandTokenOverrides,
+  PageOffer,
+  PageSection,
+} from '@codex/shared-types';
 import { relations, sql } from 'drizzle-orm';
 import {
   boolean,
@@ -74,6 +78,14 @@ export const landingPages = pgTable(
     // inside the jsonb, NOT a CHECK enum (forward-compat — WP-0 interp C).
     brandOverrides: jsonb('brand_overrides').$type<BrandTokenOverrides>(),
     sections: jsonb('sections').$type<PageSection[]>().notNull().default([]),
+
+    // The page's PRESENTATION of the journey's ways-in (§7 "one course, three
+    // ways in") — which paths the sales page shows + their teaser prices in
+    // pence, GBP. NOT the source of truth for access or for what a buyer is
+    // charged: the authoritative one-off price is `courses.price_cents`, which
+    // `updateJourneyOffer` writes in the SAME transaction that writes this bag.
+    // Nullable — a page authored before pricing was set has no offer.
+    offer: jsonb('offer').$type<PageOffer>(),
 
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()

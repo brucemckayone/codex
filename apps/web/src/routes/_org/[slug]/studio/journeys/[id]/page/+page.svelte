@@ -9,13 +9,15 @@
   outline+inspector for a single settings panel beside the canvas.
 
   It OWNS the `pageBuilder` store: open() on load → edit via rail/canvas → Save
-  (saveJourneyPageMock + markSaved) → close() on destroy. Every control mutates the
-  store; the canvas renders the store's pending draft directly, so edits are live.
+  (saveJourneyPage + updateJourneyOffer + markSaved) → close() on destroy. Every
+  control mutates the store; the canvas renders the store's pending draft directly,
+  so edits are live.
 
-  AGGRESSIVE-MODE MOCKS: `getJourneyForBuilderMock` / `saveJourneyPageMock` stand in
-  for the real remote fns; the conductor wires them after WP-2. Admin/owner gate
-  lives in +page.server.ts. Per-page brand overrides tint the canvas via the org
-  brand OKLCH layer (`data-org-brand` + brand vars on the canvas wrapper).
+  The remotes are REAL (`getJourneyForBuilder` / `saveJourneyPage` /
+  `updateJourneyOffer` — no mocks). Save drives two endpoints because pricing is a
+  separate resource from page copy; see `handleSave`. Admin/owner gate lives in
+  +page.server.ts. Per-page brand overrides tint the canvas via the org brand OKLCH
+  layer (`data-org-brand` + brand vars on the canvas wrapper).
 -->
 <script lang="ts">
   import { onDestroy } from 'svelte';
@@ -34,6 +36,7 @@
     getCourseCurriculum,
     getJourneyForBuilder,
     saveJourneyPage,
+    updateJourneyOffer,
   } from '$lib/remote/journeys.remote';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import type { JourneyStagePreview } from '$lib/page-builder/render-edit';
@@ -55,9 +58,10 @@
   // ones — the builder looked broken next to its own live page. Now reads the same
   // admin curriculum the two-pane editor uses.
   //
-  // `minutes` is 0 because `EditorPracticeView` carries no duration; the visible
-  // stats (practice counts, stage names/glosses, depth count) are all accurate,
-  // and the total-minutes cue reads 0 until durations reach this read model.
+  // `minutes` comes from the practice's linked media duration. It read a flat 0
+  // while `EditorPracticeView` carried no duration, so the map's "≈ N min in all"
+  // cue under-claimed every course; a written practice (or media with no probed
+  // duration) still contributes 0, which is the honest answer for it.
   const curriculumQuery = $derived(
     pageId ? getCourseCurriculum({ pageId }) : null
   );
@@ -69,7 +73,7 @@
       lessons: stage.practices.map((practice) => ({
         title: practice.title,
         type: practice.contentType,
-        minutes: 0,
+        minutes: Math.round((practice.durationSeconds ?? 0) / 60),
       })),
     }))
   );
@@ -160,6 +164,36 @@
     return parts.length ? parts.join(';') : undefined;
   });
 
+  /**
+   * Pull the human message out of a failed remote call. A `command()` that failed
+   * via SvelteKit's `error(status, message)` arrives as `{ body: { message } }`,
+   * NOT as `err.message` — reading only the latter is why a precise service
+   * message ("Set a one-off price…") shows up as a blank/generic failure.
+   */
+  function remoteErrorMessage(err: unknown): string | undefined {
+    if (err && typeof err === 'object' && 'body' in err) {
+      const body = (err as { body?: unknown }).body;
+      if (body && typeof body === 'object' && 'message' in body) {
+        const message = (body as { message?: unknown }).message;
+        if (typeof message === 'string' && message) return message;
+      }
+    }
+    return err instanceof Error && err.message ? err.message : undefined;
+  }
+
+  /**
+   * The page draft and the journey's OFFER are two resources with two endpoints —
+   * page copy via `saveJourneyPage`, pricing via `updateJourneyOffer` (which also
+   * writes the authoritative `courses.price_cents`). One Save button drives both so
+   * the creator has one mental model; `markSaved()` runs only once BOTH have
+   * landed, so a failed leg leaves the draft dirty and retryable.
+   *
+   * The page payload is built from NAMED fields rather than spread wholesale: the
+   * save schema is `.strict()`, so a stray key (`offer`, `organizationId`,
+   * `publishedAt`) must be a visible error here, not silently dropped server-side.
+   * That silent strip is exactly what made the pricing panel swallow input while
+   * reporting "Page saved".
+   */
   async function handleSave(): Promise<void> {
     const payload = pageBuilder.getSavePayload();
     const record = draftQuery?.current;
@@ -167,9 +201,47 @@
     saving = true;
     try {
       await saveJourneyPage({
-        ...record,
-        ...payload,
+        id: record.id,
+        pageType: payload.pageType,
+        slug: payload.slug,
+        title: payload.title,
+        status: payload.status,
+        subjectType: payload.subjectType,
+        subjectId: payload.subjectId,
+        brandOverrides: payload.brandOverrides,
+        sections: payload.sections,
       });
+
+      // Only when the offer actually changed — pricing is a commerce mutation
+      // under a `strict` rate limit, not something every copy edit should spend.
+      const offer = payload.offer;
+      if (offer && JSON.stringify(offer) !== JSON.stringify(pageBuilder.saved?.offer)) {
+        try {
+          await updateJourneyOffer({
+            pageId: record.id,
+            offer: {
+              tiersEnabled: offer.tiersEnabled ?? false,
+              subscriptionEnabled: offer.subscriptionEnabled ?? false,
+              subscriptionPriceCents: offer.subscriptionPriceCents ?? null,
+              oneOffEnabled: offer.oneOffEnabled ?? false,
+              oneOffPriceCents: offer.oneOffPriceCents ?? null,
+            },
+          });
+        } catch (err) {
+          // The page copy DID save; only pricing was refused (e.g. an enabled path
+          // with no price). Say exactly that — a bare "Failed to save page" would be
+          // false. `markSaved()` is skipped, so the draft stays dirty and a retry
+          // re-sends both legs.
+          const why = remoteErrorMessage(err);
+          toast.error(
+            why
+              ? `Page saved, but the pricing was not: ${why}`
+              : 'Page saved, but the pricing could not be saved.'
+          );
+          return;
+        }
+      }
+
       pageBuilder.markSaved();
       // The PUBLIC sales load `depends('cache:versions')` precisely so a save can
       // mark it stale; without this the client reuses its cached load data and the

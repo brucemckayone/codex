@@ -4,24 +4,61 @@
   The "Access & pricing" page-mode panel (Codex-2pryk.3.3 · WP-5). Presents the
   journey's ways-in — membership tiers, a course subscription, a one-off purchase —
   as independent toggles + price fields, written to `PageBuilderState.offer` via
-  the store. Prices are GBP (£), stored in pence. NOTE: the AUTHORITATIVE access
-  rule lives on the course/content policy (SPEC §6.1); this panel is the sales
-  page's PRESENTATION of the offer.
+  the store. Prices are GBP (£), stored in pence.
+
+  The one-off price is not decoration: the route's Save persists this offer through
+  `updateJourneyOffer`, which writes the authoritative `courses.price_cents` in the
+  same transaction. A course with no price shows "isn't open for enrolment just
+  now" at checkout, so an ENABLED path with an empty price is flagged here (and
+  rejected by the service) rather than saved as an unsellable offer.
+
+  NOTE: the AUTHORITATIVE access RULE (who may enter) still lives on the
+  course/content policy (SPEC §6.1) — this panel owns what the journey COSTS.
 -->
 <script lang="ts">
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
 
   const offer = $derived(pageBuilder.pending?.offer ?? {});
+  const isCoursePage = $derived(pageBuilder.pending?.subjectType === 'course');
 
   const poundsOf = (cents: number | null | undefined): string =>
     cents == null ? '' : (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);
 
-  function setPounds(key: 'subscriptionPriceCents' | 'oneOffPriceCents', value: string): void {
+  // Price fields hold a LOCAL draft string while focused. Binding the input
+  // straight to `poundsOf(cents)` made decimals untypeable: "12." parses to 12 →
+  // 1200 pence → re-derives "12", so the DOM value snapped back and ate the ".".
+  // The draft is authoritative during editing; blur clears it so the field falls
+  // back to the canonical (normalised) pence value.
+  type PriceKey = 'subscriptionPriceCents' | 'oneOffPriceCents';
+  let drafts = $state<Partial<Record<PriceKey, string>>>({});
+
+  const shown = (key: PriceKey): string => drafts[key] ?? poundsOf(offer[key]);
+
+  function setPounds(key: PriceKey, value: string): void {
+    drafts[key] = value;
     const pounds = Number.parseFloat(value);
     pageBuilder.updateOffer({
+      // Round to whole pence — a price is an integer of the smallest unit, and
+      // fractional pence would fail the service's integer validation.
       [key]: Number.isFinite(pounds) ? Math.round(pounds * 100) : null,
     });
   }
+
+  function commitPounds(key: PriceKey): void {
+    delete drafts[key];
+  }
+
+  /** An enabled path with no price is unsellable — warn before the save 400s. */
+  const priceless = $derived.by<string[]>(() => {
+    const gaps: string[] = [];
+    if (offer.subscriptionEnabled && offer.subscriptionPriceCents == null) {
+      gaps.push('the course subscription');
+    }
+    if (offer.oneOffEnabled && offer.oneOffPriceCents == null) {
+      gaps.push('the one-off purchase');
+    }
+    return gaps;
+  });
 </script>
 
 <div class="panel">
@@ -62,8 +99,10 @@
       £<input
         class="way__input"
         inputmode="decimal"
-        value={poundsOf(offer.subscriptionPriceCents)}
+        aria-label="Monthly course subscription price in pounds"
+        value={shown('subscriptionPriceCents')}
         oninput={(e) => setPounds('subscriptionPriceCents', e.currentTarget.value)}
+        onblur={() => commitPounds('subscriptionPriceCents')}
       />/mo
     </span>
   </div>
@@ -81,14 +120,34 @@
       £<input
         class="way__input"
         inputmode="decimal"
-        value={poundsOf(offer.oneOffPriceCents)}
+        aria-label="One-off purchase price in pounds"
+        value={shown('oneOffPriceCents')}
         oninput={(e) => setPounds('oneOffPriceCents', e.currentTarget.value)}
+        onblur={() => commitPounds('oneOffPriceCents')}
       />
     </span>
   </div>
 
+  {#if priceless.length > 0}
+    <p class="panel__warn" role="status">
+      Set a price for {priceless.join(' and ')} — an enabled way in with no price can’t be
+      bought, so the checkout shows nothing.
+    </p>
+  {/if}
+
+  {#if offer.oneOffEnabled && !isCoursePage}
+    <p class="panel__warn" role="status">
+      Only a course journey can be sold as a one-off purchase.
+    </p>
+  {/if}
+
   <p class="panel__callout">
     <b>Membership</b> unlocks every journey — the buyer should feel it’s more than this one course.
+  </p>
+
+  <p class="panel__callout">
+    Pricing saves with the page’s <b>Save</b> — the one-off price becomes the course’s real
+    price, so the checkout can take it.
   </p>
 </div>
 
@@ -142,6 +201,17 @@
 
   .panel__callout b {
     color: var(--color-text-secondary);
+  }
+
+  .panel__warn {
+    margin: 0;
+    padding: var(--space-3);
+    border: var(--border-width) var(--border-style) var(--color-warning-200);
+    border-radius: var(--radius-md);
+    background-color: var(--color-warning-50);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--color-warning-700);
   }
 
   .way {

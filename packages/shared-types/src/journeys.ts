@@ -696,6 +696,12 @@ export interface EditorPracticeView {
   status: PageStatus;
   /** Poster/thumbnail for the media-slot; null when the content has none. */
   thumbnailUrl: string | null;
+  /**
+   * Runtime of the linked media, or `null` for a written practice / media with no
+   * probed duration. Drives the builder map's "≈ N min in all" cue, which read a
+   * flat 0 while this field was absent — an under-claim on every course.
+   */
+  durationSeconds: number | null;
   sortOrder: number;
 }
 

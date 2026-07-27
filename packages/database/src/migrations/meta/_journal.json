@@ -568,6 +568,13 @@
       "when": 1784857425980,
       "tag": "0080_clumsy_forge",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1785156849152,
+      "tag": "0081_opposite_natasha_romanoff",
+      "breakpoints": true
     }
   ]
 }

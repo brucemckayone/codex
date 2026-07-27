@@ -3,8 +3,17 @@
 
   The INLINE WYSIWYG canvas for the journey sales-page builder
   (Codex-2pryk.3.3 · WP-5). Renders the store's enabled sections directly via the
-  shared {@link SectionRenderer} (the SAME components the public page uses), so
-  the canvas IS the page. Each block is:
+  EDITABLE {@link SectionRenderer} from `$lib/page-builder/render-edit`, so the
+  canvas IS the page — structurally, not pixel-for-pixel.
+
+  NOT the public components. `render-edit/` holds 8 static, contenteditable
+  sections; the public page renders 11 animated ones from `render/`. The canvas
+  therefore cannot show real motion, and a section with no `render-edit` twin does
+  not appear here at all. The route's "View live ↗" (which saves first) is the way
+  to see the true page. Unifying the two sets behind one `editable` flag is filed
+  as a follow-up.
+
+  Each block is:
     · selectable  — mousedown selects it (without stealing caret from text)
     · inline-editable — contenteditable copy writes straight to the store
     · block-toolbarred — move ↑/↓, duplicate, add-after, delete (on selection)

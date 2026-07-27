@@ -15,6 +15,7 @@ import type {
   JourneyCourseSummary,
   JourneyListItem,
   JourneyPageRecord,
+  PageOffer,
   PracticeCompletionRecord,
 } from '@codex/shared-types';
 import {
@@ -31,6 +32,7 @@ import {
   recordCompletionBodySchema,
   saveCurriculumBodySchema,
   saveJourneyPageBodySchema,
+  updateJourneyOfferBodySchema,
   userEnrollmentsQuerySchema,
 } from '@codex/validation';
 import { procedure } from '@codex/worker-utils';
@@ -585,6 +587,45 @@ app.put(
         ctx.input.body
       );
       return null;
+    },
+  })
+);
+
+/**
+ * PATCH /api/journeys/studio/journeys/:pageId/offer?organizationId=  { ...offer }
+ *
+ * Set the journey's ways-in + prices (pence, GBP). The ONLY write path to a
+ * course's price: it persists the page's offer presentation AND the authoritative
+ * `courses.price_cents` in one transaction, so the sales page and the checkout can
+ * never disagree about whether the journey is buyable.
+ *
+ * Separate from the page save (`PUT :pageId`) deliberately — pricing is a commerce
+ * mutation with a different blast radius than page copy, and a creator must be able
+ * to change a price without republishing the page body. `strict` rate limit for the
+ * same reason (matching the checkout/sensitive-mutation preset).
+ *
+ * The 4-segment path cannot collide with the 3-segment `:pageId` route.
+ * @returns {PageOffer}
+ */
+app.patch(
+  '/studio/journeys/:pageId/offer',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'strict',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+      body: updateJourneyOfferBodySchema,
+    },
+    handler: async (ctx): Promise<PageOffer> => {
+      return ctx.services.courseJourney.updateJourneyOffer(
+        ctx.organizationId,
+        ctx.input.params.pageId,
+        ctx.input.body
+      );
     },
   })
 );

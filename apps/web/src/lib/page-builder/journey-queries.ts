@@ -69,6 +69,11 @@ export interface EditorPracticeView {
   /** Publish status of the LINKED CONTENT (draft ⇒ not yet member-visible). */
   status: PageStatus;
   thumbnailUrl: string | null;
+  /**
+   * Runtime of the linked media; `null` for a written practice or unprobed media.
+   * Feeds the builder map's "≈ N min in all" cue.
+   */
+  durationSeconds: number | null;
   sortOrder: number;
 }
 

@@ -50,9 +50,11 @@
   const heading = $derived(p.heading ?? 'This is what a descent looks like.');
 
   /**
-   * Whispered subtitle(s). Read defensively from config (not yet in the shared
-   * `ReelSectionProps` type — see desiredSharedChanges): `captions` (an array)
-   * takes precedence, else a single `caption`. Absent ⇒ no caption line renders.
+   * Whispered subtitle(s) — `caption` / `captions` / `tag` are now declared on
+   * `ReelSectionProps`. Still read through the coerce guards rather than `p.*`
+   * because `props` is org-authored jsonb (the type states intent; the guard is
+   * what survives a malformed value). `captions` (an array) takes precedence,
+   * else a single `caption`. Absent ⇒ no caption line renders.
    */
   const captions = $derived(
     asStringArray(config, 'captions') ??

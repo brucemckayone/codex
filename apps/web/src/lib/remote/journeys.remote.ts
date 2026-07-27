@@ -18,6 +18,7 @@ import {
   createJourneyBodySchema,
   saveCurriculumBodySchema,
   saveJourneyPageBodySchema,
+  updateJourneyOfferBodySchema,
 } from '@codex/validation';
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
@@ -35,6 +36,7 @@ import type {
 } from '$lib/page-builder';
 import type { SellPreview } from '$lib/page-builder/render';
 import { createServerApi } from '$lib/server/api';
+import { ApiError } from '$lib/server/errors';
 import { persistPracticeCompletion } from '$lib/server/journeys/round-d-seam';
 import { getSubdomainContext } from '$lib/utils/subdomain';
 
@@ -287,6 +289,50 @@ export const saveJourneyPage = command(
       error(400, 'Journeys can only be saved within an organization');
     }
     await ctx.api.access.saveJourneyPage(ctx.orgId, record);
+  }
+);
+
+/**
+ * Set the journey's ways-in + prices (pence, GBP) — the pricing panel's write.
+ * Distinct from {@link saveJourneyPage}: the worker persists the offer AND the
+ * authoritative `courses.price_cents` in one transaction, so a price change makes
+ * the journey buyable without republishing the page body.
+ */
+export const updateJourneyOffer = command(
+  z.object({
+    pageId: z.string().uuid(),
+    offer: updateJourneyOfferBodySchema,
+  }),
+  async ({ pageId, offer }) => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'Journey pricing can only be set within an organization');
+    }
+    try {
+      // `command()` infers a `.nullable()` field as OPTIONAL (the same quirk the
+      // save schema's slug comment documents), so the parsed prices arrive as
+      // `number | undefined`. The worker's `priceCentsSchema` is nullable but NOT
+      // optional — an absent key 400s — so restore the explicit nulls here rather
+      // than let "no price" travel as a missing key.
+      return await ctx.api.access.updateJourneyOffer(ctx.orgId, pageId, {
+        tiersEnabled: offer.tiersEnabled,
+        subscriptionEnabled: offer.subscriptionEnabled,
+        subscriptionPriceCents: offer.subscriptionPriceCents ?? null,
+        oneOffEnabled: offer.oneOffEnabled,
+        oneOffPriceCents: offer.oneOffPriceCents ?? null,
+      });
+    } catch (err) {
+      // A 4xx here is the service's own pricing guidance ("Set a one-off price,
+      // or turn the one-off path off") — user-actionable, so forward it through
+      // `error()` where SvelteKit will deliver the text to the client toast. A
+      // bare throw would surface only a generic failure, which is how an
+      // unsellable offer could look like a mystery instead of a fixable mistake.
+      // 5xx is NOT forwarded: it may carry internals, so it propagates as-is.
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        error(err.status, err.message);
+      }
+      throw err;
+    }
   }
 );
 

@@ -11,8 +11,10 @@ import type { SectionProps } from '@codex/shared-types';
 
 /**
  * A curriculum stage as the map/descent section previews it. Sourced from the
- * course (not the page draft), so the builder supplies mock stages and the public
- * page supplies the real course outline.
+ * COURSE, not the page draft — so both surfaces supply real data: the builder maps
+ * the admin curriculum read (`getCourseCurriculum`), the public page the published
+ * course outline. `minutes` is 0 for a written practice or media with no probed
+ * duration.
  */
 export interface JourneyStagePreview {
   readonly name: string;
@@ -37,7 +39,7 @@ export interface SectionComponentProps {
   editable?: boolean;
   /** Write one `props` key (in-canvas inline edit → store). */
   onEdit?: (key: string, value: string) => void;
-  /** Curriculum stages for the map/descent section (builder supplies mocks). */
+  /** Curriculum stages for the map/descent section (course-sourced, never mocked). */
   stages?: readonly JourneyStagePreview[];
 }
 

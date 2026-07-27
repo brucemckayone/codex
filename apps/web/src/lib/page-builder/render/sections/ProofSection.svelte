@@ -38,9 +38,10 @@
     heading: asString(config, 'heading'),
   });
 
-  // Optional aggregate trust cue — read defensively from config so the shared
-  // ProofSectionProps type needn't change to render it, and absent → omitted.
-  // (`trust` is the builder's key for the same field.)
+  // Optional aggregate trust cue — both keys are now declared on
+  // `ProofSectionProps`; absent → omitted. (`trust` is the legacy key for the same
+  // field, kept for pages authored before `trustLabel` settled.) Read through the
+  // coerce guard because `props` is org-authored jsonb.
   const trustLabel = $derived(asStringFrom(config, ['trustLabel', 'trust']));
 
   type Testimonial = JourneySalesContext['testimonials'][number];

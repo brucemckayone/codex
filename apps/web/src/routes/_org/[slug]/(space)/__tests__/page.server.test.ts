@@ -21,6 +21,7 @@ const {
   getPublicCreatorsMock,
   getPublicStatsMock,
   listTiersMock,
+  listPublishedJourneysMock,
 } = vi.hoisted(() => ({
   getPublicContentMock: vi.fn(),
   getPublicCategoriesMock: vi.fn(),
@@ -28,6 +29,7 @@ const {
   getPublicCreatorsMock: vi.fn(),
   getPublicStatsMock: vi.fn(),
   listTiersMock: vi.fn(),
+  listPublishedJourneysMock: vi.fn(),
 }));
 
 vi.mock('$lib/remote/content.remote', () => ({
@@ -49,6 +51,15 @@ vi.mock('$lib/remote/org.remote', () => ({
 
 vi.mock('$lib/remote/subscription.remote', () => ({
   listTiers: listTiersMock,
+}));
+
+// The guided-journeys rail. This mock is not optional decoration: an UNMOCKED
+// remote `query()` resolves to SvelteKit's CLIENT implementation under vitest,
+// which dereferences `app.hooks.transport` — undefined outside a real client
+// runtime — so the load threw before returning and all six tests failed. Every
+// remote the load touches must be mocked here.
+vi.mock('$lib/remote/journeys.remote', () => ({
+  listPublishedJourneys: listPublishedJourneysMock,
 }));
 
 vi.mock('$lib/server/cache', () => ({
@@ -111,6 +122,7 @@ describe('org landing +page.server.ts — load shape', () => {
     });
     getPublicStatsMock.mockResolvedValue({ content: { total: 4 } });
     listTiersMock.mockResolvedValue([]);
+    listPublishedJourneysMock.mockResolvedValue([]);
   });
 
   it('awaits the catalogue fetch and returns it as allContent', async () => {

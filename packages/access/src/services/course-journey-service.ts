@@ -71,6 +71,7 @@ import type {
   JourneyStage,
   JourneyStageView,
   JourneyTestimonialView,
+  PageOffer,
   PageSection,
   PageStatus,
   PlaylistEntry,
@@ -1175,6 +1176,7 @@ export class CourseJourneyService extends BaseService {
           subjectId: landingPages.subjectId,
           brandOverrides: landingPages.brandOverrides,
           sections: landingPages.sections,
+          offer: landingPages.offer,
         })
         .from(landingPages)
         .where(
@@ -1199,6 +1201,9 @@ export class CourseJourneyService extends BaseService {
         subjectId: row.subjectId,
         brandOverrides: (row.brandOverrides as BrandTokenOverrides) ?? null,
         sections: (row.sections as PageSection[]) ?? [],
+        // `offer` is optional on the draft; an unpriced page has no bag yet, so
+        // the pricing panel opens with every path off rather than a stale guess.
+        ...(row.offer ? { offer: row.offer as PageOffer } : {}),
       };
     } catch (error) {
       this.handleError(error, 'getJourneyForBuilder');
@@ -1433,6 +1438,131 @@ export class CourseJourneyService extends BaseService {
       });
     } catch (error) {
       this.handleError(error, 'saveJourneyPage');
+    }
+  }
+
+  /**
+   * Persist the journey's OFFER — which ways-in the sales page presents and what
+   * they cost (pence, GBP). This is the ONLY write path to a course's price.
+   *
+   * Two rows move together in ONE transaction, and that pairing is the point:
+   *   - `landing_pages.offer` — the page's PRESENTATION of the ways-in (which
+   *     toggles are on, the teaser prices the sell page shows).
+   *   - `courses.price_cents` — the AUTHORITATIVE one-off price. It is what
+   *     `deriveCheckoutOffers` reads, so a journey whose page says "£12 one-off"
+   *     while this column is NULL renders "not open for enrolment just now".
+   *     Writing them apart is what allowed that divergence, hence one transaction.
+   *
+   * Turning the one-off path OFF nulls `price_cents` — "not sold standalone" (§5),
+   * the same state a never-priced course is in.
+   *
+   * Scoped to `(pageId, organizationId, deletedAt IS NULL)` — a foreign or missing
+   * page throws `NotFoundError`, never a silent cross-org write (mirrors
+   * {@link saveJourneyPage}'s guard). The subject course is re-checked inside the
+   * transaction: a soft-deleted or foreign course would make the price update
+   * match zero rows, re-opening the very divergence this method closes, so it
+   * throws instead.
+   *
+   * @returns the persisted offer (the caller's saved baseline).
+   */
+  async updateJourneyOffer(
+    organizationId: string,
+    pageId: string,
+    // Declared inline (not `PageOffer`) because the persisted bag is TOTAL —
+    // every path explicitly on or off — while `PageOffer`'s fields are all
+    // optional for the render side. The validated body satisfies this.
+    offer: {
+      tiersEnabled: boolean;
+      subscriptionEnabled: boolean;
+      subscriptionPriceCents: number | null;
+      oneOffEnabled: boolean;
+      oneOffPriceCents: number | null;
+    }
+  ): Promise<PageOffer> {
+    try {
+      // An ENABLED path with no price is the silent-failure shape: the sales page
+      // advertises a way in that the checkout cannot price, so it shows nothing.
+      // Reject it at the boundary rather than persisting an unsellable offer.
+      if (offer.oneOffEnabled && offer.oneOffPriceCents === null) {
+        throw new ValidationError(
+          'Set a one-off price, or turn the one-off path off'
+        );
+      }
+      if (offer.subscriptionEnabled && offer.subscriptionPriceCents === null) {
+        throw new ValidationError(
+          'Set a monthly price, or turn the course subscription off'
+        );
+      }
+
+      return await this.txDb.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({
+            id: landingPages.id,
+            subjectType: landingPages.subjectType,
+            subjectId: landingPages.subjectId,
+          })
+          .from(landingPages)
+          .where(
+            and(
+              eq(landingPages.id, pageId),
+              eq(landingPages.organizationId, organizationId),
+              isNull(landingPages.deletedAt)
+            )
+          )
+          .limit(1);
+
+        if (!existing) {
+          throw new NotFoundError('Journey page not found');
+        }
+
+        const isCoursePage =
+          existing.subjectType === 'course' && existing.subjectId !== null;
+
+        // A plain landing page has no course to sell, so a one-off purchase has
+        // nowhere authoritative to live. Fail loudly rather than persist a toggle
+        // no checkout can honour.
+        if (offer.oneOffEnabled && !isCoursePage) {
+          throw new ValidationError(
+            'Only a course journey can be sold as a one-off purchase'
+          );
+        }
+
+        await tx
+          .update(landingPages)
+          .set({ offer })
+          .where(
+            and(
+              eq(landingPages.id, pageId),
+              eq(landingPages.organizationId, organizationId)
+            )
+          );
+
+        if (isCoursePage && existing.subjectId) {
+          const updated = await tx
+            .update(courses)
+            .set({
+              priceCents: offer.oneOffEnabled ? offer.oneOffPriceCents : null,
+            })
+            .where(
+              and(
+                eq(courses.id, existing.subjectId),
+                eq(courses.organizationId, organizationId),
+                isNull(courses.deletedAt)
+              )
+            )
+            .returning({ id: courses.id });
+
+          // Zero rows ⇒ the subject course is gone or foreign. The offer bag
+          // would then claim a price the checkout can never read — roll back.
+          if (updated.length === 0) {
+            throw new NotFoundError('Journey course not found');
+          }
+        }
+
+        return offer;
+      });
+    } catch (error) {
+      this.handleError(error, 'updateJourneyOffer');
     }
   }
 
@@ -1731,6 +1861,7 @@ export class CourseJourneyService extends BaseService {
         status: content.status,
         thumbnailUrl: content.thumbnailUrl,
         mediaThumbnailKey: mediaItems.thumbnailKey,
+        mediaDurationSeconds: mediaItems.durationSeconds,
       })
       .from(stagePractices)
       .innerJoin(content, eq(content.id, stagePractices.contentId))
@@ -1753,6 +1884,9 @@ export class CourseJourneyService extends BaseService {
         contentType: toPracticeContentType(row.contentType),
         status: toPageStatus(row.status),
         thumbnailUrl: row.thumbnailUrl ?? row.mediaThumbnailKey ?? null,
+        // From the already-joined media item — null for a written practice, or
+        // media whose duration was never probed.
+        durationSeconds: row.mediaDurationSeconds ?? null,
         sortOrder: row.sortOrder,
       };
       const list = byStage.get(row.stageId);
