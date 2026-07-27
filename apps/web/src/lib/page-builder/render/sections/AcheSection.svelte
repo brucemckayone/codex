@@ -19,7 +19,7 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { asString, asStringArray } from '../coerce';
+  import { asStringArray, asStringFrom, asStringsFrom } from '../coerce';
   import type { AcheSectionProps, JourneySalesContext } from '../types';
   import type { SectionProps } from '$lib/page-builder';
 
@@ -31,9 +31,14 @@
 
   const { config }: Props = $props();
 
+  // `beats[]` is the authored shape; the builder's flat `{kicker, heading, body}`
+  // is the fallback so a builder-filled ache still renders (see coerce.ts's
+  // BUILDER-SHAPE BRIDGE note). Absent both → `beats` stays undefined → self-hide.
   const p: AcheSectionProps = $derived({
-    eyebrow: asString(config, 'eyebrow'),
-    beats: asStringArray(config, 'beats'),
+    eyebrow: asStringFrom(config, ['eyebrow', 'kicker']),
+    beats:
+      asStringArray(config, 'beats') ??
+      asStringsFrom(config, ['heading', 'body']),
   });
 
   const beats = $derived(p.beats ?? []);

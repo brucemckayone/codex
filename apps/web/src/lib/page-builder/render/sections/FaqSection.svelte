@@ -22,7 +22,12 @@
   self-hide-when-unconfigured guard.
 -->
 <script lang="ts">
-  import { asString, asObjectArray, fieldString } from '../coerce';
+  import {
+    asString,
+    asObjectArray,
+    asNumberedGroups,
+    fieldString,
+  } from '../coerce';
   import { reveal } from '../reveal';
   import type { FaqSectionProps, FaqEntry, JourneySalesContext } from '../types';
   import type { SectionProps } from '$lib/page-builder';
@@ -38,12 +43,21 @@
   const p: FaqSectionProps = $derived({
     eyebrow: asString(config, 'eyebrow'),
     heading: asString(config, 'heading'),
-    items: asObjectArray<FaqEntry>(config, 'items', (entry) => {
-      const question = fieldString(entry, 'question');
-      const answer = fieldString(entry, 'answer');
-      if (!question || !answer) return null;
-      return { question, answer };
-    }),
+    // `items[]` is the authored shape; the builder writes numbered `q1/a1, q2/a2…`
+    // pairs, which are the fallback (see coerce.ts's BUILDER-SHAPE BRIDGE note).
+    items:
+      asObjectArray<FaqEntry>(config, 'items', (entry) => {
+        const question = fieldString(entry, 'question');
+        const answer = fieldString(entry, 'answer');
+        if (!question || !answer) return null;
+        return { question, answer };
+      }) ??
+      asNumberedGroups<FaqEntry>(
+        config,
+        { question: 'q', answer: 'a' },
+        ({ question, answer }) =>
+          question && answer ? { question, answer } : null
+      ),
   });
 
   const heading = $derived(p.heading ?? 'The honest answers.');

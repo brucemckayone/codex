@@ -21,7 +21,7 @@
   fall back to the composed static state.
 -->
 <script lang="ts">
-  import { asString } from '../coerce';
+  import { asNumberedGroups, asString, asStringFrom } from '../coerce';
   import { reveal } from '../reveal';
   import type { ProofSectionProps, JourneySalesContext } from '../types';
   import type { SectionProps } from '$lib/page-builder';
@@ -40,10 +40,39 @@
 
   // Optional aggregate trust cue — read defensively from config so the shared
   // ProofSectionProps type needn't change to render it, and absent → omitted.
-  const trustLabel = $derived(asString(config, 'trustLabel'));
+  // (`trust` is the builder's key for the same field.)
+  const trustLabel = $derived(asStringFrom(config, ['trustLabel', 'trust']));
+
+  type Testimonial = JourneySalesContext['testimonials'][number];
+
+  /**
+   * Testimonials are COURSE-owned data (`course_testimonials`), so the real rows
+   * always win. But the builder also exposes numbered `q1/n1/c1…` fields for this
+   * section, and nothing read them — a creator could type three testimonials,
+   * publish, and get an empty section because the course had no rows. Those
+   * authored fields are now the fallback (coerce.ts's BUILDER-SHAPE BRIDGE note).
+   */
+  const authored: Testimonial[] = $derived(
+    asNumberedGroups<Testimonial>(
+      config,
+      { quote: 'q', authorName: 'n', authorContext: 'c' },
+      ({ quote, authorName, authorContext }, index) =>
+        quote
+          ? {
+              id: `authored-${index}`,
+              sortOrder: index,
+              quote,
+              authorName: authorName ?? '',
+              authorContext,
+            }
+          : null
+    ) ?? []
+  );
 
   const testimonials = $derived(
-    [...context.testimonials].sort((a, b) => a.sortOrder - b.sortOrder)
+    context.testimonials.length > 0
+      ? [...context.testimonials].sort((a, b) => a.sortOrder - b.sortOrder)
+      : authored
   );
   const heading = $derived(p.heading ?? 'What the ground gives back.');
 

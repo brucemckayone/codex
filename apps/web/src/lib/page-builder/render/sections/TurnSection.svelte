@@ -23,7 +23,7 @@
   reduced-motion / no-JS clients get the composed state with no armed hiding.
 -->
 <script lang="ts">
-  import { asString, asStringArray } from '../coerce';
+  import { asStringArray, asStringFrom } from '../coerce';
   import { reveal } from '../reveal';
   import type { TurnSectionProps, JourneySalesContext } from '../types';
   import type { SectionProps } from '$lib/page-builder';
@@ -36,10 +36,13 @@
 
   const { config }: Props = $props();
 
+  // The builder authors this section as flat `{kicker, heading, body}`, which maps
+  // 1:1 onto eyebrow/statement/lede (see coerce.ts's BUILDER-SHAPE BRIDGE note).
+  // The section's own key names still win when present.
   const p: TurnSectionProps = $derived({
-    eyebrow: asString(config, 'eyebrow'),
-    statement: asString(config, 'statement'),
-    lede: asString(config, 'lede'),
+    eyebrow: asStringFrom(config, ['eyebrow', 'kicker']),
+    statement: asStringFrom(config, ['statement', 'heading']),
+    lede: asStringFrom(config, ['lede', 'body']),
     points: asStringArray(config, 'points'),
   });
 

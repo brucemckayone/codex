@@ -19,7 +19,7 @@
 -->
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { beforeNavigate } from '$app/navigation';
+  import { beforeNavigate, invalidate } from '$app/navigation';
   import { page } from '$app/state';
   import type { PageStatus } from '@codex/shared-types';
   import {
@@ -31,6 +31,7 @@
     SectionList,
   } from '$lib/components/page-builder';
   import {
+    getCourseCurriculum,
     getJourneyForBuilder,
     saveJourneyPage,
   } from '$lib/remote/journeys.remote';
@@ -48,11 +49,30 @@
   // remote after WP-2 (identical `.current` access).
   const draftQuery = $derived(pageId ? getJourneyForBuilder({ id: pageId }) : null);
 
-  // Curriculum stages feed the map/descent section previews (course-owned). The
-  // real curriculum wiring (getCourseCurriculumForEditor → JourneyStagePreview)
-  // is a follow-up now that the real backend has landed; until then the builder
-  // renders an empty stage preview rather than the retired mock fixture.
-  const stages: JourneyStagePreview[] = [];
+  // Curriculum stages feed the map/descent section previews (course-owned). This
+  // was a hardcoded `[]` awaiting "real curriculum wiring", which meant the map
+  // showed ZERO stages in the builder while the public page rendered the real
+  // ones — the builder looked broken next to its own live page. Now reads the same
+  // admin curriculum the two-pane editor uses.
+  //
+  // `minutes` is 0 because `EditorPracticeView` carries no duration; the visible
+  // stats (practice counts, stage names/glosses, depth count) are all accurate,
+  // and the total-minutes cue reads 0 until durations reach this read model.
+  const curriculumQuery = $derived(
+    pageId ? getCourseCurriculum({ pageId }) : null
+  );
+
+  const stages: JourneyStagePreview[] = $derived(
+    (curriculumQuery?.current?.stages ?? []).map((stage) => ({
+      name: stage.name,
+      gloss: stage.gloss ?? '',
+      lessons: stage.practices.map((practice) => ({
+        title: practice.title,
+        type: practice.contentType,
+        minutes: 0,
+      })),
+    }))
+  );
 
   // ── Workspace view state ──────────────────────────────────────────────────
   type BuilderMode = 'design' | 'pricing' | 'brand' | 'seo';
@@ -151,12 +171,31 @@
         ...payload,
       });
       pageBuilder.markSaved();
+      // The PUBLIC sales load `depends('cache:versions')` precisely so a save can
+      // mark it stale; without this the client reuses its cached load data and the
+      // live page keeps showing pre-save content until a hard reload.
+      await invalidate('cache:versions');
       toast.success('Page saved');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save page');
     } finally {
       saving = false;
     }
+  }
+
+  /**
+   * Open the REAL public sales page in a new tab — the only surface that renders
+   * the cinematic motion (the canvas mounts the static editable components; see
+   * the toolbar comment). Saves first when dirty so the live page matches what is
+   * on screen rather than silently showing the last-saved version.
+   */
+  async function handleViewLive(): Promise<void> {
+    if (pageBuilder.isDirty) await handleSave();
+    if (!slug) {
+      toast.error('Give the page a slug and save it before viewing live');
+      return;
+    }
+    window.open(`/journeys/${slug}`, '_blank', 'noopener');
   }
 
   async function handlePublish(): Promise<void> {
@@ -240,13 +279,30 @@
         >↷</button>
       </div>
 
+      <!--
+        "Full width" only hides the editor rails — the canvas still renders the
+        EDITABLE section components (`render-edit/`), which are deliberately static
+        so click-to-edit stays reliable. The cinematic motion (pinned ache, kinetic
+        hero, scroll reveals) lives in the PUBLIC renderer (`render/`), so seeing it
+        means opening the real page — hence the separate "View live" below.
+      -->
       <button
         type="button"
         class="jb__btn"
         class:jb__btn--on={previewMode}
+        title="Hide the editor rails (still the editable canvas, not the animated page)"
         onclick={() => (previewMode = !previewMode)}
       >
-        {previewMode ? 'Editing' : 'Preview'}
+        {previewMode ? 'Editing' : 'Full width'}
+      </button>
+      <button
+        type="button"
+        class="jb__btn"
+        title="Open the real sales page in a new tab — full animations, saves first"
+        disabled={saving}
+        onclick={handleViewLive}
+      >
+        View live ↗
       </button>
       <button type="button" class="jb__btn" disabled={!isDirty || saving} onclick={handleSave}>
         {saving ? 'Saving…' : 'Save'}
