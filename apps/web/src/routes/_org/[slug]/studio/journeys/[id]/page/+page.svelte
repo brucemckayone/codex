@@ -27,6 +27,7 @@
   import {
     JourneyBuilderCanvas,
     PageBrandPanel,
+    PageMediaPanel,
     PagePricingPanel,
     PageSeoPanel,
     SectionEditor,
@@ -38,8 +39,12 @@
     saveJourneyPage,
     updateJourneyOffer,
   } from '$lib/remote/journeys.remote';
-  import { saveBuilderDraft } from '$lib/page-builder/builder-save';
+  import {
+    remoteErrorMessage,
+    saveBuilderDraft,
+  } from '$lib/page-builder/builder-save';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
+  import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
   import type { JourneyStagePreview } from '$lib/page-builder/render-edit';
   import { toast } from '$lib/components/ui/Toast/toast-store';
 
@@ -80,7 +85,7 @@
   );
 
   // ── Workspace view state ──────────────────────────────────────────────────
-  type BuilderMode = 'design' | 'pricing' | 'brand' | 'seo';
+  type BuilderMode = 'design' | 'pricing' | 'media' | 'brand' | 'seo';
   let mode = $state<BuilderMode>('design');
   let device = $state<'desktop' | 'tablet' | 'mobile'>('desktop');
   let railCollapsed = $state(false);
@@ -90,6 +95,7 @@
   const MODES: readonly { id: BuilderMode; label: string }[] = [
     { id: 'design', label: 'Design' },
     { id: 'pricing', label: 'Pricing' },
+    { id: 'media', label: 'Media' },
     { id: 'brand', label: 'Brand' },
     { id: 'seo', label: 'SEO' },
   ];
@@ -142,13 +148,23 @@
     // the editable draft only (id/orgId/publishedAt live on the row).
     const { id: _id, organizationId: _org, publishedAt: _pub, ...editable } = draft;
     pageBuilder.open(pageId, editable);
+    // Sell media + cover live on the SUBJECT COURSE, not the page row, so they
+    // load from their own endpoint alongside the draft (Codex-eqh0z). Fire-and-
+    // forget: `open()` already fails soft per-read, and a media-library hiccup
+    // must not stop the creator editing copy.
+    void sellMedia.open(pageId);
   });
 
-  onDestroy(() => pageBuilder.close());
+  onDestroy(() => {
+    pageBuilder.close();
+    sellMedia.close();
+  });
 
   const pending = $derived(pageBuilder.pending);
   const selected = $derived(pageBuilder.selectedSection);
-  const isDirty = $derived(pageBuilder.isDirty);
+  // Media is part of "unsaved work" too — otherwise picking a clip and navigating
+  // away would lose it with no warning, and Save would appear to have nothing to do.
+  const isDirty = $derived(pageBuilder.isDirty || sellMedia.isDirty);
   const slug = $derived(pending?.slug ?? '');
 
   // Per-page brand overrides → tint the canvas via the org brand OKLCH layer.
@@ -211,6 +227,32 @@
         toast.warning(result.staleWarning);
         return true;
       }
+
+      // Sell media is a THIRD resource (it writes `courses.*MediaId`, not the page
+      // row) and only sends when a slot actually changed. Same partial-success
+      // discipline as pricing: on refusal, say what DID save and report NOT saved
+      // so `handlePublish`/`handleViewLive` do not proceed on a half-written page.
+      // A foreign media id lands here as a 403 carrying the service's own message.
+      //
+      // `markSaved()` and the `cache:versions` invalidation already happened inside
+      // `saveBuilderDraft`, so they are deliberately NOT repeated here. That does
+      // not lose the retry: `sellMedia` owns its own `isDirty`, independent of the
+      // page-builder draft state, so a failed media write stays dirty and re-sends
+      // on the next save.
+      if (sellMedia.isDirty) {
+        try {
+          await sellMedia.save();
+        } catch (err) {
+          const why = remoteErrorMessage(err);
+          toast.error(
+            why
+              ? `Page saved, but the media was not: ${why}`
+              : 'Page saved, but the media could not be saved.'
+          );
+          return false;
+        }
+      }
+
       toast.success('Page saved');
       return true;
     } finally {
@@ -383,6 +425,8 @@
         <aside class="jb__settings">
           {#if mode === 'pricing'}
             <PagePricingPanel />
+          {:else if mode === 'media'}
+            <PageMediaPanel />
           {:else if mode === 'brand'}
             <PageBrandPanel />
           {:else}

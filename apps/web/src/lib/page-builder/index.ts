@@ -56,6 +56,7 @@ export type {
   JourneyPracticeView,
   JourneyProgress,
   JourneyProgressStatus,
+  JourneySellMedia,
   JourneyStageView,
   JourneyTestimonialView,
   LibraryAccessSource,

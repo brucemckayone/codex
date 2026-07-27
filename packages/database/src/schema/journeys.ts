@@ -142,6 +142,14 @@ export const courses = pgTable(
     // { name, bio, portraitMediaId, quote }
     guide: jsonb('guide').$type<CourseGuide>(),
 
+    // Still-image COVER — the base R2 key, NOT a `media_items` ref (Codex-eqh0z).
+    // `media_items` is CHECK-constrained to ('video','audio'), so a poster image
+    // cannot live there; this reuses the `categories.cover_image_key` convention
+    // (`ImageProcessingService.processCourseCover` writes {sm,md,lg}.webp under
+    // the key, cards serve `md`). Deterministic per course id ⇒ a re-upload
+    // overwrites in place, so replacing a cover never orphans an object.
+    coverImageKey: varchar('cover_image_key', { length: 500 }),
+
     // Sell media — media-item refs (reuse the transcoding pipeline; §10).
     introVideoMediaId: uuid('intro_video_media_id').references(
       () => mediaItems.id,

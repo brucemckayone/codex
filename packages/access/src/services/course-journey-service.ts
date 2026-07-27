@@ -25,6 +25,7 @@
  */
 
 import { CONTENT_STATUS } from '@codex/constants';
+import type { CourseGuide } from '@codex/database/schema';
 import {
   content,
   courseEnrollments,
@@ -33,6 +34,7 @@ import {
   courseTestimonials,
   landingPages,
   mediaItems,
+  organizationMemberships,
   organizations,
   practiceCompletions,
   stagePractices,
@@ -68,6 +70,7 @@ import type {
   JourneyPageRecord,
   JourneyPractice,
   JourneyProgressStatus,
+  JourneySellMedia,
   JourneyStage,
   JourneyStageView,
   JourneyTestimonialView,
@@ -97,6 +100,28 @@ function toPracticeContentType(value: string | null): PracticeContentType {
  */
 function toPageStatus(value: string | null): PageStatus {
   return value === 'published' || value === 'archived' ? value : 'draft';
+}
+
+/**
+ * Resolve a stored `courses.coverImageKey` to its public CDN URL (Codex-eqh0z).
+ *
+ * Same raw-key → CDN-URL convention as `resolveCategoryCoverUrl` in
+ * `content-api/routes/category-cover-url.ts`: `ImageProcessingService.
+ * processCourseCover` writes `{sm,md,lg}.webp` under the base key, and cards
+ * serve the `md` variant. The base is env-owned, so the ROUTE supplies it and
+ * the service resolves — the same split `getCourseSellPreview` already uses.
+ *
+ * Returns null when there is no cover OR no configured base, so a client never
+ * receives a raw R2 key and never receives a half-formed URL. A null cover is a
+ * legitimate state: the card renders its typographic fallback.
+ */
+function resolveCourseCoverUrl(
+  coverImageKey: string | null | undefined,
+  r2PublicUrlBase: string | undefined
+): string | null {
+  return coverImageKey && r2PublicUrlBase
+    ? `${r2PublicUrlBase}/${coverImageKey}/md.webp`
+    : null;
 }
 
 /**
@@ -843,9 +868,14 @@ export class CourseJourneyService extends BaseService {
    * published without a live page is prevented at the WRITE path instead (see
    * {@link cascadeCourseFromPage}) — so `null` means "no published page found"
    * and the course's own slug stays the only thing to link by.
+   *
+   * `r2PublicUrlBase` (env-owned, supplied by the route) resolves each course's
+   * `coverImageKey` to a CDN URL; omit it and every card reports `null` and
+   * renders its typographic fallback.
    */
   async listPublishedCourses(
-    organizationId: string
+    organizationId: string,
+    r2PublicUrlBase?: string
   ): Promise<CourseCardSummary[]> {
     try {
       const rows = await this.db
@@ -859,6 +889,7 @@ export class CourseJourneyService extends BaseService {
           priceCents: courses.priceCents,
           pageId: landingPages.id,
           pageSlug: landingPages.slug,
+          coverImageKey: courses.coverImageKey,
         })
         .from(courses)
         .leftJoin(
@@ -889,6 +920,9 @@ export class CourseJourneyService extends BaseService {
 
       // One card per course — the left join fans out for a course fronted by
       // several published pages; the ordering above fixes which one survives.
+      // The dedupe is REQUIRED here even though the cover work did not need it:
+      // that branch had no landing-page join, so its map could not fan out.
+      // Combining the two without this emits a duplicate card per extra page.
       const seen = new Set<string>();
       return rows
         .filter((row) => {
@@ -906,6 +940,10 @@ export class CourseJourneyService extends BaseService {
           priceCents: row.priceCents,
           pageId: row.pageId,
           pageSlug: row.pageSlug,
+          coverImageUrl: resolveCourseCoverUrl(
+            row.coverImageKey,
+            r2PublicUrlBase
+          ),
         }));
     } catch (error) {
       this.handleError(error, 'listPublishedCourses');
@@ -920,10 +958,18 @@ export class CourseJourneyService extends BaseService {
    * creator-featured rail (home); ordering is featured-first, then `sortOrder`,
    * then newest-published, so both surfaces get a stable, curated sequence.
    * Fully PUBLIC — carries no per-user state.
+   *
+   * `opts.r2PublicUrlBase` (env-owned, supplied by the route) resolves each
+   * subject course's `coverImageKey` to a CDN URL; omit it and every card
+   * reports `null` and renders its typographic fallback.
    */
   async listPublishedJourneys(
     organizationId: string,
-    opts: { featured?: boolean; limit?: number } = {}
+    opts: {
+      featured?: boolean;
+      limit?: number;
+      r2PublicUrlBase?: string;
+    } = {}
   ): Promise<JourneyCardView[]> {
     try {
       const rows = await this.db
@@ -937,6 +983,7 @@ export class CourseJourneyService extends BaseService {
           kicker: courses.kicker,
           lede: courses.lede,
           priceCents: courses.priceCents,
+          coverImageKey: courses.coverImageKey,
         })
         .from(landingPages)
         // Inner join guards the polymorphic subject (HARDENING §C): only a
@@ -996,6 +1043,10 @@ export class CourseJourneyService extends BaseService {
           stageCount: count?.stageCount ?? 0,
           practiceCount: count?.practiceCount ?? 0,
           featured: r.featured,
+          coverImageUrl: resolveCourseCoverUrl(
+            r.coverImageKey,
+            opts.r2PublicUrlBase
+          ),
         };
       });
     } catch (error) {
@@ -1014,10 +1065,15 @@ export class CourseJourneyService extends BaseService {
    * `userId` is the SESSION user (the route never trusts a client id); the org
    * scopes the shelf to the space being browsed. Returns `[]` for a user with no
    * enrollments in the org.
+   *
+   * `r2PublicUrlBase` (env-owned, supplied by the route) resolves each subject
+   * course's `coverImageKey` to a CDN URL; omit it and every card reports `null`
+   * and renders its typographic fallback.
    */
   async listEnrolledJourneys(
     userId: string,
-    organizationId: string
+    organizationId: string,
+    r2PublicUrlBase?: string
   ): Promise<EnrolledJourneyCard[]> {
     try {
       const rows = await this.db
@@ -1031,6 +1087,7 @@ export class CourseJourneyService extends BaseService {
           kicker: courses.kicker,
           lede: courses.lede,
           priceCents: courses.priceCents,
+          coverImageKey: courses.coverImageKey,
           enrolledAt: courseEnrollments.enrolledAt,
           lastActivityAt: courseEnrollments.lastActivityAt,
           completedAt: courseEnrollments.completedAt,
@@ -1102,6 +1159,10 @@ export class CourseJourneyService extends BaseService {
           stageCount,
           practiceCount: total,
           featured: r.featured,
+          coverImageUrl: resolveCourseCoverUrl(
+            r.coverImageKey,
+            r2PublicUrlBase
+          ),
           completedPractices: completed,
           totalPractices: total,
           percent,
@@ -1708,6 +1769,288 @@ export class CourseJourneyService extends BaseService {
       });
     } catch (error) {
       this.handleError(error, 'updateJourneyOffer');
+    }
+  }
+
+  // ── Sell media + cover (Codex-eqh0z — the media WRITE path) ────────────────
+  //
+  // Before this, `courses.introVideoMediaId` / `previewVideoMediaId` /
+  // `guideVideoMediaId` / `guide.portraitMediaId` were READ-ONLY codebase-wide:
+  // `getCourseSellPreview` projected them, but nothing could ever set them, so
+  // the `introVideo`, `reel` and `guide` sections could never show their primary
+  // content. These three methods are that missing write path.
+
+  /**
+   * Read the journey's SELL MEDIA — the four `media_items` refs the sales page's
+   * `introVideo` / `reel` / `guide` sections resolve, plus the still cover URL.
+   *
+   * Org-scoped through {@link resolveCourseIdForPage} (a foreign, missing, or
+   * non-course page 404s), then re-scoped on the course row itself as
+   * defence-in-depth. `r2PublicUrlBase` is env-owned and supplied by the route.
+   */
+  async getJourneySellMedia(
+    organizationId: string,
+    pageId: string,
+    r2PublicUrlBase?: string
+  ): Promise<JourneySellMedia> {
+    try {
+      const courseId = await this.resolveCourseIdForPage(
+        organizationId,
+        pageId
+      );
+
+      const [row] = await this.db
+        .select({
+          introVideoMediaId: courses.introVideoMediaId,
+          previewVideoMediaId: courses.previewVideoMediaId,
+          guideVideoMediaId: courses.guideVideoMediaId,
+          guide: courses.guide,
+          coverImageKey: courses.coverImageKey,
+        })
+        .from(courses)
+        .where(
+          and(
+            eq(courses.id, courseId),
+            eq(courses.organizationId, organizationId),
+            isNull(courses.deletedAt)
+          )
+        )
+        .limit(1);
+
+      if (!row) {
+        throw new NotFoundError('Journey course not found');
+      }
+
+      return {
+        courseId,
+        introVideoMediaId: row.introVideoMediaId,
+        previewVideoMediaId: row.previewVideoMediaId,
+        guideVideoMediaId: row.guideVideoMediaId,
+        guidePortraitMediaId: row.guide?.portraitMediaId ?? null,
+        coverImageUrl: resolveCourseCoverUrl(
+          row.coverImageKey,
+          r2PublicUrlBase
+        ),
+      };
+    } catch (error) {
+      this.handleError(error, 'getJourneySellMedia');
+    }
+  }
+
+  /**
+   * Persist the journey's SELL MEDIA — a TOTAL write of the four media slots.
+   *
+   * Total, not merge: every slot is set to exactly what the caller sends, so
+   * `null` CLEARS. A merge shape could only ever set a video, never unset one,
+   * which is why the validated body defaults each absent slot to `null`.
+   *
+   * SCOPING — every non-null id is verified BEFORE the write (see
+   * {@link assertMediaItemsInOrg}): the media must exist, be non-deleted, and
+   * belong to a creator holding an ACTIVE membership in this org. A foreign id
+   * throws `ForbiddenError` and NOTHING is written — `media_items` carries no
+   * `organization_id`, so creator-membership is the org boundary, and the FK
+   * alone would happily accept another org's media.
+   *
+   * `guide.portraitMediaId` lives inside the `guide` jsonb, so it is merged into
+   * the existing bag rather than replacing it — writing a bare
+   * `{ portraitMediaId }` would silently destroy the guide's name/bio/quote.
+   * The read-then-merge runs INSIDE the transaction so a concurrent guide edit
+   * cannot interleave.
+   *
+   * @returns the persisted shape (the caller's saved baseline).
+   */
+  async updateJourneySellMedia(
+    organizationId: string,
+    pageId: string,
+    input: {
+      introVideoMediaId: string | null;
+      previewVideoMediaId: string | null;
+      guideVideoMediaId: string | null;
+      guidePortraitMediaId: string | null;
+    }
+  ): Promise<JourneySellMedia> {
+    try {
+      const courseId = await this.resolveCourseIdForPage(
+        organizationId,
+        pageId
+      );
+
+      // Validate the ids BEFORE opening the transaction — a rejected write must
+      // leave no trace, and a ForbiddenError here is cheaper than a rollback.
+      await this.assertMediaItemsInOrg(organizationId, [
+        input.introVideoMediaId,
+        input.previewVideoMediaId,
+        input.guideVideoMediaId,
+        input.guidePortraitMediaId,
+      ]);
+
+      return await this.txDb.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({ guide: courses.guide })
+          .from(courses)
+          .where(
+            and(
+              eq(courses.id, courseId),
+              eq(courses.organizationId, organizationId),
+              isNull(courses.deletedAt)
+            )
+          )
+          .limit(1);
+
+        if (!existing) {
+          throw new NotFoundError('Journey course not found');
+        }
+
+        // Merge the portrait into the existing guide bag. A portrait with no
+        // guide at all still needs somewhere to live, so seed a minimal bag
+        // (`name: ''`) rather than dropping the creator's selection silently.
+        const guide: CourseGuide | null =
+          input.guidePortraitMediaId === null && !existing.guide
+            ? null
+            : {
+                ...(existing.guide ?? { name: '' }),
+                ...(input.guidePortraitMediaId === null
+                  ? { portraitMediaId: undefined }
+                  : { portraitMediaId: input.guidePortraitMediaId }),
+              };
+
+        const updated = await tx
+          .update(courses)
+          .set({
+            introVideoMediaId: input.introVideoMediaId,
+            previewVideoMediaId: input.previewVideoMediaId,
+            guideVideoMediaId: input.guideVideoMediaId,
+            guide,
+          })
+          .where(
+            and(
+              eq(courses.id, courseId),
+              eq(courses.organizationId, organizationId),
+              isNull(courses.deletedAt)
+            )
+          )
+          .returning({
+            introVideoMediaId: courses.introVideoMediaId,
+            previewVideoMediaId: courses.previewVideoMediaId,
+            guideVideoMediaId: courses.guideVideoMediaId,
+            guide: courses.guide,
+            coverImageKey: courses.coverImageKey,
+          });
+
+        // Zero rows ⇒ the course was soft-deleted between the resolve and the
+        // write. Reporting success would tell the builder its media persisted
+        // when it did not, so roll back and 404 instead.
+        const [row] = updated;
+        if (!row) {
+          throw new NotFoundError('Journey course not found');
+        }
+
+        return {
+          courseId,
+          introVideoMediaId: row.introVideoMediaId,
+          previewVideoMediaId: row.previewVideoMediaId,
+          guideVideoMediaId: row.guideVideoMediaId,
+          guidePortraitMediaId: row.guide?.portraitMediaId ?? null,
+          // The cover is written by its own multipart endpoint; echo the stored
+          // key unresolved-to-null here rather than inventing a base URL.
+          coverImageUrl: null,
+        };
+      });
+    } catch (error) {
+      this.handleError(error, 'updateJourneySellMedia');
+    }
+  }
+
+  /**
+   * Persist (or clear) the subject course's cover R2 key, org-scoped.
+   *
+   * The DB half of the cover upload: `ImageProcessingService.processCourseCover`
+   * owns the R2 variants and returns the base key, and this owns the scoped
+   * write — the same split `categories` uses, so no scope logic is duplicated in
+   * the image layer. Pass `null` to clear (the R2 objects are left in place;
+   * keys are deterministic per course, so a later re-upload overwrites them).
+   *
+   * @returns the persisted key (null when cleared).
+   */
+  async setCourseCoverImageKey(
+    organizationId: string,
+    pageId: string,
+    coverImageKey: string | null
+  ): Promise<{ courseId: string; coverImageKey: string | null }> {
+    try {
+      const courseId = await this.resolveCourseIdForPage(
+        organizationId,
+        pageId
+      );
+
+      const updated = await this.db
+        .update(courses)
+        .set({ coverImageKey })
+        .where(
+          and(
+            eq(courses.id, courseId),
+            eq(courses.organizationId, organizationId),
+            isNull(courses.deletedAt)
+          )
+        )
+        // Bare `.returning()` — `BaseService.db`'s HTTP-client type does not
+        // expose the projected overload (only the tx client does).
+        .returning();
+
+      const [row] = updated;
+      if (!row) {
+        throw new NotFoundError('Journey course not found');
+      }
+      return { courseId, coverImageKey: row.coverImageKey };
+    } catch (error) {
+      this.handleError(error, 'setCourseCoverImageKey');
+    }
+  }
+
+  /**
+   * Guard: every non-null media id exists, is non-deleted, and belongs to a
+   * creator with an ACTIVE membership in `organizationId`. Throws
+   * `ForbiddenError` naming the offending id otherwise.
+   *
+   * `media_items` has NO `organization_id` column — its only link to an org is
+   * `creatorId → organization_memberships`. So creator-membership IS the org
+   * boundary here, and it has to be checked explicitly: the FK on
+   * `courses.intro_video_media_id` references `media_items(id)` with no org
+   * predicate, so without this check a manager of org A could attach org B's
+   * private media to org A's public sales page and the database would accept it.
+   *
+   * Nulls are skipped (clearing a slot needs no ownership) and duplicates are
+   * de-duplicated, so one id used in two slots costs one row.
+   */
+  private async assertMediaItemsInOrg(
+    organizationId: string,
+    mediaIds: readonly (string | null)[]
+  ): Promise<void> {
+    const wanted = [...new Set(mediaIds.filter((id): id is string => !!id))];
+    if (wanted.length === 0) return;
+
+    const rows = await this.db
+      .selectDistinct({ id: mediaItems.id })
+      .from(mediaItems)
+      .innerJoin(
+        organizationMemberships,
+        and(
+          eq(organizationMemberships.userId, mediaItems.creatorId),
+          eq(organizationMemberships.organizationId, organizationId),
+          eq(organizationMemberships.status, 'active')
+        )
+      )
+      .where(and(inArray(mediaItems.id, wanted), isNull(mediaItems.deletedAt)));
+
+    const allowed = new Set(rows.map((r) => r.id));
+    const rejected = wanted.find((id) => !allowed.has(id));
+    if (rejected) {
+      // ForbiddenError, not NotFoundError: the caller IS authenticated and IS an
+      // org manager — the media simply is not theirs to attach. A 404 would read
+      // as "bad id" and invite a retry loop against another org's id space.
+      throw new ForbiddenError('Media item does not belong to this space', {
+        mediaItemId: rejected,
+      });
     }
   }
 

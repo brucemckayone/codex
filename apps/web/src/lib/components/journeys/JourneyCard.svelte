@@ -7,9 +7,16 @@
 
   Journeys read DIFFERENTLY from content cards (SPEC §8.5: price · lessons ·
   "journey" affordance). The distinction is carried by LAYOUT + typography, not a
-  per-type colour: no cover image, no hardcoded tone gradient (which would vanish
-  on dark org brands). Transparent-by-default; the accent badge + hover border are
-  the only brand touch, via theme-/brand-aware semantic tokens.
+  per-type colour — no hardcoded tone gradient (which would vanish on dark org
+  brands). Transparent-by-default; the accent badge + hover border are the only
+  brand touch, via theme-/brand-aware semantic tokens.
+
+  COVER (Codex-eqh0z): `journey.coverImageUrl` renders a fixed-ratio cover band.
+  The band reserves its space with `aspect-ratio` whether or not there is an
+  image, so a cover-less journey shows the typographic fallback — a quiet
+  surface-tinted plate carrying the kicker's initial — at EXACTLY the same height.
+  A rail of mixed covered/uncovered cards therefore never jumps, and the fallback
+  is neutral: no per-journey accent, no tone palette.
 
   Presentational: the caller builds `href` (cross-org-aware via `buildJourneyUrl`)
   and supplies the resolved card. `progress` (present → the enrolled variant)
@@ -64,9 +71,35 @@
     if (progress.status === 'not-started') return 'Not started yet';
     return `${progress.completedPractices} of ${progress.totalPractices} practices`;
   });
+
+  // The fallback plate's glyph — the title's first character. Purely decorative
+  // (the title is read out right below it), so the plate is aria-hidden.
+  const fallbackGlyph = $derived(
+    (journey.kicker?.trim() || journey.title.trim()).charAt(0).toUpperCase()
+  );
 </script>
 
 <a class="journey-card" {href} class:journey-card--enrolled={Boolean(progress)}>
+  <!--
+    The band is ALWAYS rendered so its reserved height is identical with and
+    without a cover — that is what keeps a mixed rail from shifting.
+  -->
+  <div class="journey-card__cover">
+    {#if journey.coverImageUrl}
+      <img
+        class="journey-card__cover-img"
+        src={journey.coverImageUrl}
+        alt=""
+        loading="lazy"
+        decoding="async"
+      />
+    {:else}
+      <span class="journey-card__cover-glyph" aria-hidden="true">
+        {fallbackGlyph}
+      </span>
+    {/if}
+  </div>
+
   <div class="journey-card__head">
     <span class="journey-card__badge">Portal</span>
     {#if journey.kicker}
@@ -136,6 +169,36 @@
   .journey-card:focus-visible {
     outline: var(--border-width-thick) var(--border-style) var(--color-focus);
     outline-offset: var(--space-0-5);
+  }
+
+  /* ── Cover band ───────────────────────────────────────────────────────────
+     `aspect-ratio` (not a fixed height) reserves the band's space in BOTH
+     states, so the covered and cover-less variants are exactly the same height
+     and a mixed rail never shifts. Neutral surface tint only — no per-journey
+     accent (a `color-mix(brand, transparent)` plate disappears on dark orgs). */
+  .journey-card__cover {
+    display: grid;
+    place-items: center;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    background-color: var(--color-surface-secondary);
+    border-bottom: var(--border-width) var(--border-style)
+      var(--color-border-subtle);
+  }
+
+  .journey-card__cover-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .journey-card__cover-glyph {
+    font-family: var(--font-heading);
+    font-size: var(--text-3xl);
+    font-weight: var(--font-semibold, var(--font-medium));
+    line-height: 1;
+    color: var(--color-text-muted);
   }
 
   .journey-card__head {

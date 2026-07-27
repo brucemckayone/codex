@@ -76,6 +76,12 @@ export interface CourseCardSummary {
   pageId: string | null;
   /** Org-scoped PAGE slug — the sales-page URL basis. */
   pageSlug: string | null;
+  /**
+   * Public CDN URL for the course cover, or null when the creator has not
+   * uploaded one. Never a raw R2 key. The rail card MUST render its typographic
+   * fallback on null, with no layout shift (Codex-eqh0z).
+   */
+  coverImageUrl: string | null;
 }
 
 /**

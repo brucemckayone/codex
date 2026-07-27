@@ -280,6 +280,40 @@ export type UpdateJourneyOfferBody = z.infer<
 >;
 
 /**
+ * Journey SELL-MEDIA body — the four `media_items` refs the sales page's
+ * `introVideo` / `reel` / `guide` sections resolve their primary content from
+ * (`PATCH /api/journeys/studio/journeys/:pageId/media`; Codex-eqh0z).
+ *
+ * A TOTAL write, mirroring {@link updateJourneyOfferBodySchema}: every slot
+ * carries `.nullable().default(null)`, so an omitted slot CLEARS rather than
+ * being ambiguously absent, and the persisted row always says exactly which
+ * slots are filled. This is what makes "clear a video" expressible at all — a
+ * PATCH-merge shape could only ever set, never unset.
+ *
+ * `.strict()` for the same reason the offer body is: a key this endpoint cannot
+ * honour is a client bug that must 400, not be silently dropped (the failure
+ * mode that had the builder's `media` control writing a decorative string).
+ *
+ * The cover is deliberately NOT here — it is a still image, uploaded as
+ * multipart to `POST …/cover`, not a `media_items` id.
+ *
+ * NOTE for callers: SvelteKit's `command()` infers a `.nullable()` field as
+ * OPTIONAL, so the remote wrapper must re-supply `?? null` per slot (the same
+ * quirk `updateJourneyOffer`'s remote documents).
+ */
+export const updateJourneySellMediaBodySchema = z
+  .object({
+    introVideoMediaId: uuidSchema.nullable().default(null),
+    previewVideoMediaId: uuidSchema.nullable().default(null),
+    guideVideoMediaId: uuidSchema.nullable().default(null),
+    guidePortraitMediaId: uuidSchema.nullable().default(null),
+  })
+  .strict();
+export type UpdateJourneySellMediaBody = z.infer<
+  typeof updateJourneySellMediaBodySchema
+>;
+
+/**
  * ── STUDIO curriculum-editor inputs (Codex-03cwh · admin two-pane editor) ──
  *
  * The two-pane curriculum editor is owner/admin (`requireOrgManagement`). The

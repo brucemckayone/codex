@@ -447,6 +447,12 @@ export interface CourseCardSummary {
   pageId: string | null;
   /** Org-scoped PAGE slug — the sales-page URL basis (`/journeys/{pageSlug}`). */
   pageSlug: string | null;
+  /**
+   * Public CDN URL for the course cover (`courses.coverImageKey` → `md.webp`),
+   * or null when the creator has not uploaded one. Never the raw R2 key. The
+   * card MUST render its typographic fallback on null (Codex-eqh0z).
+   */
+  coverImageUrl: string | null;
 }
 
 /**
@@ -770,6 +776,37 @@ export interface JourneyCardView {
   practiceCount: number;
   /** Creator-flagged for the home "featured" rail (`landing_pages.featured`). */
   featured: boolean;
+  /**
+   * Public CDN URL for the course cover (`courses.coverImageKey` → `md.webp`),
+   * or null when the creator has not uploaded one. Never the raw R2 key. The
+   * card MUST render its typographic fallback on null (Codex-eqh0z).
+   */
+  coverImageUrl: string | null;
+}
+
+/**
+ * The journey's SELL MEDIA — the four media refs the sales page's `introVideo`,
+ * `reel` and `guide` sections resolve their primary content from, plus the still
+ * cover (Codex-eqh0z). All five are creator-owned and independently clearable.
+ *
+ * The three video ids and the guide portrait are `media_items` refs (they reuse
+ * the transcoding pipeline; SPEC §10). The cover is NOT a `media_items` ref —
+ * `media_items` is CHECK-constrained to ('video','audio'), so a still image
+ * cannot live there; it is an R2 key on `courses`, resolved to a CDN URL here.
+ */
+export interface JourneySellMedia {
+  /** The subject course these refs live on (`landing_pages.subjectId`). */
+  courseId: string;
+  /** 30s intro film — the `introVideo` section's clip. */
+  introVideoMediaId: string | null;
+  /** Practice reel — the `reel` section's clip. */
+  previewVideoMediaId: string | null;
+  /** The guide's talking-head clip. */
+  guideVideoMediaId: string | null;
+  /** The guide's portrait still (`courses.guide.portraitMediaId`). */
+  guidePortraitMediaId: string | null;
+  /** Cover CDN URL (`md.webp`), or null when no cover is uploaded. */
+  coverImageUrl: string | null;
 }
 
 /**
