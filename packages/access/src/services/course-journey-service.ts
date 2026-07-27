@@ -1792,6 +1792,48 @@ export class CourseJourneyService extends BaseService {
             }
           }
         }
+
+        // 5. GATE the linked practices (Codex-0biug — paywall bypass).
+        //
+        // A practice created in the studio carries the DEFAULT access policy,
+        // and `ContentService.create` derives `isFree: true` whenever no other
+        // flag is set. That flag set lands on the terminal `return grant('free')`
+        // in `content-access/access-decision.ts`, so the practice was streamable
+        // by an ANONYMOUS visitor at its standalone `/content/[slug]` URL — the
+        // course gate gave no protection because it guards the JOURNEY routes,
+        // not this second door to the same media.
+        //
+        // `courseOnly` is the existing fix that was never applied: the resolver
+        // checks it FIRST and suppresses every standalone path regardless of the
+        // other flags (schema/content.ts:270), so setting it alone is sufficient
+        // — `isFree` is deliberately left untouched (it still drives display
+        // badges, and it can no longer grant access once `courseOnly` wins).
+        //
+        // SURGICAL BY DESIGN — the predicate gates ONLY content with no
+        // deliberately-configured standalone path. Content that is independently
+        // purchasable, tier-gated, follower-gated or team-only already has its
+        // own paywall, and selling it both standalone AND inside a course is a
+        // legitimate creator choice this must not silently revoke. Filtering on
+        // `courseOnly = false` also keeps the write idempotent, so re-saving an
+        // existing curriculum heals practices linked before this landed without
+        // re-writing rows that are already gated.
+        if (desiredContentIds.length > 0) {
+          await tx
+            .update(content)
+            .set({ courseOnly: true })
+            .where(
+              and(
+                inArray(content.id, desiredContentIds),
+                eq(content.organizationId, organizationId),
+                isNull(content.deletedAt),
+                eq(content.courseOnly, false),
+                eq(content.isPurchasable, false),
+                isNull(content.includedInTierId),
+                eq(content.isFollowerGated, false),
+                eq(content.isTeamOnly, false)
+              )
+            );
+        }
       });
 
       return await this.getCourseCurriculumForEditor(organizationId, courseId);

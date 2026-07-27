@@ -44,6 +44,7 @@ import type {
   BrandingSettingsResponse,
   CheckSlugResponse,
   ContactSettingsResponse,
+  CourseOffer,
   FeatureSettingsResponse,
   MyMembershipResponse,
   OrganizationPublicStatsResponse,
@@ -1793,6 +1794,40 @@ export function createServerApi(
         }),
 
       /**
+       * Create a Stripe Checkout session for a ONE-OFF course purchase
+       * (SPEC §7 path 1 — `POST /checkout/course`, auth required).
+       *
+       * The price, org and payout recipient are all resolved SERVER-SIDE from
+       * the course row — the client supplies only the id and its redirect URLs,
+       * so a tampered client can never influence what is charged.
+       */
+      course: (data: {
+        courseId: string;
+        successUrl: string;
+        cancelUrl: string;
+      }) =>
+        request<CheckoutResponse>('ecom', '/checkout/course', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+
+      /**
+       * Create a Stripe Checkout session for a COURSE-SPECIFIC subscription
+       * (SPEC §7 path 3 — `POST /checkout/course-subscription`, auth required).
+       * The plan + Stripe Price are resolved server-side from the courseId.
+       */
+      courseSubscription: (data: {
+        courseId: string;
+        billingInterval: 'monthly' | 'annual';
+        successUrl: string;
+        cancelUrl: string;
+      }) =>
+        request<CheckoutResponse>('ecom', '/checkout/course-subscription', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
+
+      /**
        * Verify Stripe checkout session status
        *
        * Called on the checkout success page to confirm payment.
@@ -1818,6 +1853,31 @@ export function createServerApi(
         }>(
           'ecom',
           `/checkout/verify?session_id=${encodeURIComponent(sessionId)}`
+        ),
+    },
+
+    /**
+     * Course monetization reads (ecom-api `/courses`).
+     */
+    courses: {
+      /**
+       * The AUTHORITATIVE offer for a course — every acquisition path that is
+       * actually available, composed from real DB state (SPEC §7):
+       * `purchase` from `courses.price_cents`, `subscription` from the active
+       * `course_subscription_plans` row, `tiers` from
+       * `course_tier_access ⋈ subscription_tiers`, plus `entitled` for the
+       * viewer.
+       *
+       * This is what the journey sell page + checkout MUST read. The landing
+       * page's `offer` bag and the `invite` section's authored `offers` are
+       * PRESENTATION only — they may tease a path, but they can neither create
+       * one nor set its price. Auth is optional: anonymous callers get the same
+       * paths with `entitled: false`.
+       */
+      offer: (courseId: string) =>
+        request<CourseOffer>(
+          'ecom',
+          `/courses/${encodeURIComponent(courseId)}/offer`
         ),
     },
 
