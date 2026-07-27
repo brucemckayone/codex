@@ -575,6 +575,13 @@
       "when": 1785156849152,
       "tag": "0081_opposite_natasha_romanoff",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1785181120674,
+      "tag": "0082_gate_existing_course_practices",
+      "breakpoints": true
     }
   ]
 }
