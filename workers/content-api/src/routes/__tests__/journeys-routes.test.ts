@@ -470,7 +470,12 @@ describe('GET /api/journeys/courses — list published courses (public)', () => 
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ data: COURSE_CARDS });
-    expect(journeySpies.listPublishedCourses).toHaveBeenCalledWith(ORG_ID);
+    // The CDN base is env-owned and forwarded by the route so the service can
+    // resolve each course's cover key to a URL (Codex-eqh0z).
+    expect(journeySpies.listPublishedCourses).toHaveBeenCalledWith(
+      ORG_ID,
+      R2_PUBLIC_URL_BASE
+    );
   });
 
   it('anonymous (no session) → 200 — the discovery rail is fully public', async () => {
@@ -479,7 +484,10 @@ describe('GET /api/journeys/courses — list published courses (public)', () => 
       getReq(`/api/journeys/courses?organizationId=${ORG_ID}`)
     );
     expect(res.status).toBe(200);
-    expect(journeySpies.listPublishedCourses).toHaveBeenCalledWith(ORG_ID);
+    expect(journeySpies.listPublishedCourses).toHaveBeenCalledWith(
+      ORG_ID,
+      R2_PUBLIC_URL_BASE
+    );
   });
 
   it('no published courses → 200 { data: [] }', async () => {

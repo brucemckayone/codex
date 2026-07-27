@@ -24,8 +24,9 @@ export {
   type JourneyPreviewThemeMode,
   resolveJourneyPreviewPath,
 } from './journey-preview-canvas';
-// Page-mode settings panels (Pricing / Brand / SEO).
+// Page-mode settings panels (Pricing / Media / Brand / SEO).
 export { default as PageBrandPanel } from './PageBrandPanel.svelte';
+export { default as PageMediaPanel } from './PageMediaPanel.svelte';
 export { default as PagePricingPanel } from './PagePricingPanel.svelte';
 export { default as PageSeoPanel } from './PageSeoPanel.svelte';
 export {

@@ -11,6 +11,12 @@
   stays free of routing concerns. The per-card `index` rotates the cover hue
   off the org brand so a rail of journeys reads as a set of distinct tones
   without any hardcoded colour.
+
+  COVER (Codex-eqh0z): when `journey.coverImageUrl` is set it renders as the
+  cover band's backdrop, and the existing brand gradient becomes a SCRIM over it
+  so the near-white kicker/title/tagline stay legible on any photograph. With no
+  cover the gradient is the band, exactly as before — the band's reserved height
+  is unchanged either way, so a rail of mixed cards never shifts.
 -->
 <script lang="ts">
   import type { CourseCardSummary } from '$lib/journeys/types';
@@ -33,7 +39,16 @@
 </script>
 
 <a class="jcard" {href} style="--jcard-hue-shift: {index * 34}deg">
-  <div class="jcard__cover">
+  <div class="jcard__cover" class:jcard__cover--imaged={!!journey.coverImageUrl}>
+    {#if journey.coverImageUrl}
+      <img
+        class="jcard__cover-img"
+        src={journey.coverImageUrl}
+        alt=""
+        loading="lazy"
+        decoding="async"
+      />
+    {/if}
     <div class="jcard__text">
       {#if journey.kicker}
         <span class="jcard__kicker">{journey.kicker}</span>
@@ -91,6 +106,7 @@
 
   /* Cover — a brand-toned band; hue rotates per card off the org brand. */
   .jcard__cover {
+    position: relative;
     display: grid;
     align-content: end;
     min-height: 10.5rem;
@@ -117,7 +133,37 @@
       );
   }
 
+  /* The real cover paints over the band's brand gradient (which is then only the
+     no-cover fallback), and `--media-scrim` — the brand-aware token the other
+     media cover treatments use — goes over the image so the near-white
+     kicker/title/tagline stay legible on an arbitrary photograph. */
+  .jcard__cover-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* Same scrim ramp `ContentCard`'s title-in-cover variant uses, so a journey
+     cover and a content cover read as one system on the same page. */
+  .jcard__cover--imaged::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      to top,
+      var(--media-scrim),
+      color-mix(in srgb, var(--media-scrim) 70%, transparent) 45%,
+      color-mix(in srgb, var(--media-scrim) 35%, transparent) 75%,
+      transparent 100%
+    );
+  }
+
   .jcard__text {
+    /* Above both the image and the scrim (both are earlier in paint order). */
+    position: relative;
+    z-index: 1;
     display: flex;
     flex-direction: column;
     gap: var(--space-2);

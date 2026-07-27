@@ -15,6 +15,7 @@ import type {
   JourneyCourseSummary,
   JourneyListItem,
   JourneyPageRecord,
+  JourneySellMedia,
   PageOffer,
   PracticeCompletionRecord,
 } from '@codex/shared-types';
@@ -29,13 +30,16 @@ import {
   journeyStudioListQuerySchema,
   listPublishedCoursesQuerySchema,
   listPublishedJourneysQuerySchema,
+  MAX_IMAGE_SIZE_BYTES,
   recordCompletionBodySchema,
+  SUPPORTED_IMAGE_MIME_TYPES,
   saveCurriculumBodySchema,
   saveJourneyPageBodySchema,
   updateJourneyOfferBodySchema,
+  updateJourneySellMediaBodySchema,
   userEnrollmentsQuerySchema,
 } from '@codex/validation';
-import { procedure } from '@codex/worker-utils';
+import { multipartProcedure, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 
 /**
@@ -84,7 +88,10 @@ app.get(
     },
     handler: async (ctx): Promise<CourseCardSummary[]> => {
       const { organizationId } = ctx.input.query;
-      return ctx.services.courseJourney.listPublishedCourses(organizationId);
+      return ctx.services.courseJourney.listPublishedCourses(
+        organizationId,
+        ctx.env.R2_PUBLIC_URL_BASE
+      );
     },
   })
 );
@@ -392,6 +399,7 @@ app.get(
       return ctx.services.courseJourney.listPublishedJourneys(organizationId, {
         featured: featured === 'true',
         limit,
+        r2PublicUrlBase: ctx.env.R2_PUBLIC_URL_BASE,
       });
     },
   })
@@ -420,7 +428,8 @@ app.get(
     handler: async (ctx): Promise<EnrolledJourneyCard[]> => {
       return ctx.services.courseJourney.listEnrolledJourneys(
         ctx.user.id,
-        ctx.input.query.organizationId
+        ctx.input.query.organizationId,
+        ctx.env.R2_PUBLIC_URL_BASE
       );
     },
   })
@@ -626,6 +635,187 @@ app.patch(
         ctx.input.params.pageId,
         ctx.input.body
       );
+    },
+  })
+);
+
+/**
+ * GET /api/journeys/studio/journeys/:pageId/media?organizationId=
+ *
+ * The journey's SELL MEDIA (Codex-eqh0z): the four `media_items` refs the sales
+ * page's `introVideo` / `reel` / `guide` sections resolve their primary content
+ * from, plus the still cover URL. The builder's media panel opens on this.
+ *
+ * Separate from `GET :pageId` (the page draft) because these columns live on the
+ * subject COURSE, not the landing page, and because the page-save body is
+ * `.strict()` — folding them into that record would make every save 400.
+ * @returns {JourneySellMedia}
+ */
+app.get(
+  '/studio/journeys/:pageId/media',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    handler: async (ctx): Promise<JourneySellMedia> => {
+      return ctx.services.courseJourney.getJourneySellMedia(
+        ctx.organizationId,
+        ctx.input.params.pageId,
+        ctx.env.R2_PUBLIC_URL_BASE
+      );
+    },
+  })
+);
+
+/**
+ * PATCH /api/journeys/studio/journeys/:pageId/media?organizationId=  { ...ids }
+ *
+ * Set the journey's sell media — the write path that did not exist before
+ * Codex-eqh0z, which is why `introVideo`, `reel` and `guide` could never show
+ * their primary content.
+ *
+ * A TOTAL write: an omitted slot is `null` and CLEARS. Every non-null id is
+ * org-scoped in the service (the media's creator must hold an active membership
+ * in this org) and a foreign id is rejected with 403 BEFORE anything is written
+ * — `media_items` has no `organization_id`, so the FK alone would accept another
+ * org's media onto this org's public sales page.
+ *
+ * The 4-segment path cannot collide with the 3-segment `:pageId` route.
+ * @returns {JourneySellMedia}
+ */
+app.patch(
+  '/studio/journeys/:pageId/media',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+      body: updateJourneySellMediaBodySchema,
+    },
+    handler: async (ctx): Promise<JourneySellMedia> => {
+      const persisted = await ctx.services.courseJourney.updateJourneySellMedia(
+        ctx.organizationId,
+        ctx.input.params.pageId,
+        ctx.input.body
+      );
+      // The write path does not touch the cover, so re-read the stored key
+      // through the env-owned base rather than reporting `null` and making the
+      // panel appear to have lost the cover it still has.
+      const { coverImageUrl } =
+        await ctx.services.courseJourney.getJourneySellMedia(
+          ctx.organizationId,
+          ctx.input.params.pageId,
+          ctx.env.R2_PUBLIC_URL_BASE
+        );
+      return { ...persisted, coverImageUrl };
+    },
+  })
+);
+
+/**
+ * POST /api/journeys/studio/journeys/:pageId/cover?organizationId=
+ *
+ * Upload (or replace) the journey's still COVER image — the poster the journey
+ * card renders (Codex-eqh0z). `courses` had three VIDEO refs and no poster
+ * column at all, which is why `JourneyCard` was typographic-only.
+ *
+ * Content-Type: multipart/form-data. Form field: `cover` (file).
+ *
+ * The cover is NOT a `media_items` ref: `media_items` is CHECK-constrained to
+ * ('video','audio'), so a still image cannot live there. It reuses the category
+ * cover pipeline instead — sm/md/lg WebP variants under a deterministic
+ * per-course key, so a re-upload overwrites in place and never orphans an
+ * object. The page is resolved (and org-scoped) BEFORE R2 is written, so an
+ * out-of-org id can never seed an orphaned cover.
+ * @returns {{ coverImageUrl: string }}
+ */
+app.post(
+  '/studio/journeys/:pageId/cover',
+  multipartProcedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    files: {
+      cover: {
+        required: true,
+        maxSize: MAX_IMAGE_SIZE_BYTES,
+        allowedMimeTypes: Array.from(SUPPORTED_IMAGE_MIME_TYPES),
+      },
+    },
+    handler: async (ctx): Promise<{ coverImageUrl: string }> => {
+      // Resolve (and org-scope) the subject course FIRST — a foreign or
+      // non-course page must 404 before any R2 object exists.
+      const courseId = await ctx.services.courseJourney.resolveCourseIdForPage(
+        ctx.organizationId,
+        ctx.input.params.pageId
+      );
+
+      const processed = await ctx.services.imageProcessing.processCourseCover(
+        courseId,
+        new File([ctx.files.cover.buffer], ctx.files.cover.name, {
+          type: ctx.files.cover.type,
+        })
+      );
+
+      // The org-aware service owns the DB write (same split as categories).
+      await ctx.services.courseJourney.setCourseCoverImageKey(
+        ctx.organizationId,
+        ctx.input.params.pageId,
+        processed.coverImageKey
+      );
+
+      return { coverImageUrl: processed.url };
+    },
+  })
+);
+
+/**
+ * DELETE /api/journeys/studio/journeys/:pageId/cover?organizationId=
+ *
+ * Clear the journey's cover — the card falls back to its typographic form.
+ *
+ * Clears the DB key only; the R2 variants are left in place. Keys are
+ * deterministic per course id, so a later re-upload overwrites them rather than
+ * accumulating orphans, and the objects are unreachable in the meantime (no
+ * client is ever handed a raw key).
+ * @returns {null} 204
+ */
+app.delete(
+  '/studio/journeys/:pageId/cover',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+    },
+    successStatus: 204,
+    handler: async (ctx): Promise<null> => {
+      await ctx.services.courseJourney.setCourseCoverImageKey(
+        ctx.organizationId,
+        ctx.input.params.pageId,
+        null
+      );
+      return null;
     },
   })
 );

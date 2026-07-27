@@ -16,9 +16,12 @@
 
 import {
   createJourneyBodySchema,
+  MAX_IMAGE_SIZE_BYTES,
+  SUPPORTED_IMAGE_MIME_TYPES,
   saveCurriculumBodySchema,
   saveJourneyPageBodySchema,
   updateJourneyOfferBodySchema,
+  updateJourneySellMediaBodySchema,
 } from '@codex/validation';
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
@@ -33,6 +36,7 @@ import type {
   JourneyCoursePage,
   JourneyListItem,
   JourneyPageRecord,
+  JourneySellMedia,
 } from '$lib/page-builder';
 import type { SellPreview } from '$lib/page-builder/render';
 import { createServerApi } from '$lib/server/api';
@@ -253,6 +257,14 @@ export const listJourneyRevenue = query(
 const journeyIdSchema = z.object({ id: z.string().uuid() });
 
 /**
+ * `{ pageId }` — the landing-page id, for the sell-media + cover remotes. Named
+ * `pageId` (not `id`) to match the worker's `:pageId` path param and to keep the
+ * caller honest that this addresses the PAGE, while the media it sets lives on
+ * the subject course.
+ */
+const journeyPageIdSchema = z.object({ pageId: z.string().uuid() });
+
+/**
  * Load a page draft into the builder (frozen `GetJourneyForBuilderQuery`).
  * Org-scoped by the worker → `null` for a foreign/missing page (IDOR-safe).
  */
@@ -333,6 +345,122 @@ export const updateJourneyOffer = command(
       }
       throw err;
     }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sell media + cover (Codex-eqh0z)
+//
+// The write path for `courses.introVideoMediaId` / `previewVideoMediaId` /
+// `guideVideoMediaId` / `guide.portraitMediaId` and the new cover column. Before
+// this, all four media refs were READ-ONLY codebase-wide, so the sales page's
+// `introVideo`, `reel` and `guide` sections could never show their content.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Read the journey's sell media + cover URL — the builder media panel's load.
+ * Org-scoped and management-gated by the worker; `null` off a non-org host.
+ */
+export const getJourneySellMedia = query(
+  journeyPageIdSchema,
+  async ({ pageId }): Promise<JourneySellMedia | null> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) return null;
+    return ctx.api.access.getJourneySellMedia(ctx.orgId, pageId);
+  }
+);
+
+/**
+ * Set the journey's sell media — a TOTAL write, so an unset slot CLEARS.
+ *
+ * The worker org-scopes every non-null id (the media's creator must be an active
+ * member of this org) and rejects a foreign id with 403 before writing anything.
+ * A 4xx is forwarded through `error()` so the panel can show the service's own
+ * message ("Media item does not belong to this space") rather than a generic
+ * failure — the same rationale as {@link updateJourneyOffer}.
+ */
+export const updateJourneySellMedia = command(
+  z.object({
+    pageId: z.string().uuid(),
+    media: updateJourneySellMediaBodySchema,
+  }),
+  async ({ pageId, media }): Promise<JourneySellMedia> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'Journey media can only be set within an organization');
+    }
+    try {
+      // `command()` infers each `.nullable()` slot as OPTIONAL, so a cleared slot
+      // would travel as a MISSING key. The worker's schema defaults an absent key
+      // to null, which happens to agree — but relying on that would make "clear"
+      // depend on a default rather than on an explicit value, so restore the
+      // nulls here and keep the wire payload total.
+      return await ctx.api.access.updateJourneySellMedia(ctx.orgId, pageId, {
+        introVideoMediaId: media.introVideoMediaId ?? null,
+        previewVideoMediaId: media.previewVideoMediaId ?? null,
+        guideVideoMediaId: media.guideVideoMediaId ?? null,
+        guidePortraitMediaId: media.guidePortraitMediaId ?? null,
+      });
+    } catch (err) {
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        error(err.status, err.message);
+      }
+      throw err;
+    }
+  }
+);
+
+/**
+ * Upload (or replace) the journey's still cover.
+ *
+ * A `command()` rather than a `form()` because the builder's media panel is
+ * already a JS-driven surface inside the `ssr = false` studio, and the panel
+ * needs the resolved URL back to update the preview in place. Client-side size /
+ * MIME bounds mirror the server's so an unsupported file (iPhone HEIC, most
+ * commonly) is rejected with actionable text BEFORE the round-trip; the worker
+ * re-validates by magic bytes regardless.
+ */
+export const uploadJourneyCover = command(
+  z.object({
+    pageId: z.string().uuid(),
+    cover: z
+      .instanceof(File)
+      .refine(
+        (file) => !file.type || SUPPORTED_IMAGE_MIME_TYPES.has(file.type),
+        'Use a JPG, PNG, WebP, or GIF image — HEIC and other formats are not supported.'
+      )
+      .refine(
+        (file) => file.size <= MAX_IMAGE_SIZE_BYTES,
+        `Cover must be ${Math.round(
+          MAX_IMAGE_SIZE_BYTES / 1024 / 1024
+        )}MB or smaller.`
+      ),
+  }),
+  async ({ pageId, cover }): Promise<{ coverImageUrl: string }> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'Journey covers can only be set within an organization');
+    }
+    try {
+      return await ctx.api.access.uploadJourneyCover(ctx.orgId, pageId, cover);
+    } catch (err) {
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        error(err.status, err.message);
+      }
+      throw err;
+    }
+  }
+);
+
+/** Clear the journey's cover — the card falls back to its typographic form. */
+export const deleteJourneyCover = command(
+  journeyPageIdSchema,
+  async ({ pageId }): Promise<void> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'Journey covers can only be cleared within an organization');
+    }
+    await ctx.api.access.deleteJourneyCover(ctx.orgId, pageId);
   }
 );
 

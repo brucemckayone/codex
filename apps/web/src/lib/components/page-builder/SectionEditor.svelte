@@ -7,11 +7,22 @@
   (`section-fields.ts`), then per-section actions (duplicate / hide / delete /
   reset). Every edit writes straight into the `pageBuilder` store's pending draft,
   so it streams to the live canvas immediately (two-way with in-canvas typing).
+
+  MEDIA (Codex-eqh0z): a `control: 'media'` field is a REAL `MediaPicker` bound to
+  the org media library, and it writes the `courses` sell-media COLUMN named by
+  the field's `mediaSlot` — not `section.props`. That indirection is the whole
+  point: the live sections resolve their clip from `sellPreview.intro` / `.reel` /
+  `portraitUrl`, i.e. from those columns, so a picker that wrote into `props`
+  could never change what renders (which is why the old control was a decorative
+  text input). Slot edits land in the `sellMedia` store and persist on Save,
+  alongside (but separately from) the page body.
 -->
 <script lang="ts">
   import type { PageSection } from '@codex/shared-types';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
+  import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
   import { findSectionDefinition, resolveVariant, variantsForType } from '$lib/page-builder';
+  import MediaPicker from '$lib/components/studio/MediaPicker.svelte';
   import { fieldsForSectionType } from './section-fields';
   import VariantPicker from './VariantPicker.svelte';
 
@@ -82,6 +93,27 @@
       <p class="section-editor__group-label">Content</p>
     {/if}
     {#each fields as field (field.key)}
+      <!--
+        Hoist the narrowed slot BEFORE the handler closure: Svelte 5 does not
+        carry `field.mediaSlot`'s non-null narrowing into a callback, so the
+        `{@const}` is what keeps `setSlot` typed without a cast.
+      -->
+      {#if field.control === 'media' && field.mediaSlot}
+        {@const slot = field.mediaSlot}
+        <div class="section-editor__field">
+          <span class="section-editor__field-label">{field.label}</span>
+          <MediaPicker
+            mediaItems={sellMedia.options}
+            value={sellMedia.slot(slot)}
+            name={`section-media-${slot}`}
+            showLibraryLink
+            onchange={(mediaItemId) => sellMedia.setSlot(slot, mediaItemId)}
+          />
+          {#if field.hint}
+            <span class="section-editor__hint">{field.hint}</span>
+          {/if}
+        </div>
+      {:else}
       <label class="section-editor__field">
         <span class="section-editor__field-label">{field.label}</span>
         {#if field.control === 'textarea'}
@@ -102,17 +134,6 @@
               <option value={opt.value}>{opt.label}</option>
             {/each}
           </select>
-        {:else if field.control === 'media'}
-          <span class="section-editor__media">
-            <span class="section-editor__media-thumb" aria-hidden="true">▶</span>
-            <input
-              type="text"
-              class="section-editor__input section-editor__input--media"
-              placeholder="On-frame label"
-              value={valueOf(field.key)}
-              oninput={(e) => onInput(field.key, e)}
-            />
-          </span>
         {:else}
           <input
             type="text"
@@ -126,6 +147,7 @@
           <span class="section-editor__hint">{field.hint}</span>
         {/if}
       </label>
+      {/if}
     {/each}
   </div>
 
@@ -280,28 +302,6 @@
     outline: none;
     border-color: var(--color-interactive);
     box-shadow: var(--shadow-focus-ring);
-  }
-
-  .section-editor__media {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-  }
-
-  .section-editor__media-thumb {
-    display: grid;
-    place-items: center;
-    width: var(--space-11, 2.75rem);
-    height: var(--space-8);
-    flex-shrink: 0;
-    border-radius: var(--radius-sm);
-    background: color-mix(in oklab, var(--color-interactive) 30%, var(--color-surface-secondary));
-    color: var(--color-text-on-brand, var(--color-background));
-    font-size: var(--text-xs);
-  }
-
-  .section-editor__input--media {
-    flex: 1;
   }
 
   .section-editor__hint {

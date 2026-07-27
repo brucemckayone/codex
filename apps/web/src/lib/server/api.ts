@@ -119,6 +119,7 @@ import type {
   JourneyCoursePage,
   JourneyListItem,
   JourneyPageRecord,
+  JourneySellMedia,
   PageOffer,
 } from '$lib/page-builder';
 import type { SellPreview } from '$lib/page-builder/render';
@@ -1403,6 +1404,81 @@ export function createServerApi(
             pageId
           )}/offer?organizationId=${encodeURIComponent(organizationId)}`,
           { method: 'PATCH', body: JSON.stringify(offer) }
+        ),
+
+      // ── Sell media + cover (Codex-eqh0z) ──────────────────────────────────
+
+      /**
+       * Read the journey's sell media — the four `media_items` refs the sales
+       * page's `introVideo` / `reel` / `guide` sections resolve, plus the cover
+       * URL. Separate from `getJourneyForBuilder` because these columns live on
+       * the subject COURSE and the page-save body is `.strict()`.
+       */
+      getJourneySellMedia: (organizationId: string, pageId: string) =>
+        request<JourneySellMedia>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}/media?organizationId=${encodeURIComponent(organizationId)}`
+        ),
+
+      /**
+       * Set the journey's sell media. A TOTAL write — every slot is sent, so a
+       * `null` CLEARS that slot. The worker org-scopes each non-null id (the
+       * media's creator must be an active member of this org) and rejects a
+       * foreign id with 403 before writing anything.
+       */
+      updateJourneySellMedia: (
+        organizationId: string,
+        pageId: string,
+        media: {
+          introVideoMediaId: string | null;
+          previewVideoMediaId: string | null;
+          guideVideoMediaId: string | null;
+          guidePortraitMediaId: string | null;
+        }
+      ) =>
+        request<JourneySellMedia>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}/media?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'PATCH', body: JSON.stringify(media) }
+        ),
+
+      /**
+       * Upload (or replace) the journey's still cover (multipart). Mirrors
+       * `categories.uploadCover` — re-forwards the File via
+       * `forwardMultipartUpload` with a deterministic filename so workerd never
+       * drops it (a plain re-forward loses the filename and the worker 400s).
+       */
+      uploadJourneyCover: (
+        organizationId: string,
+        pageId: string,
+        file: File
+      ): Promise<{ coverImageUrl: string }> =>
+        forwardMultipartUpload<{ coverImageUrl: string }>({
+          url: `${serverApiUrl(
+            platform,
+            'access'
+          )}/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}/cover?organizationId=${encodeURIComponent(organizationId)}`,
+          fieldName: 'cover',
+          file,
+          fallbackFilename: 'cover',
+          sessionCookie,
+          failureMessage: 'Cover upload failed',
+        }),
+
+      /** Clear the journey's cover — the card falls back to its typographic form. */
+      deleteJourneyCover: (organizationId: string, pageId: string) =>
+        request<void>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}/cover?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'DELETE' }
         ),
     },
 

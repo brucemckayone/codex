@@ -197,6 +197,30 @@ export interface JourneyCardView {
   stageCount: number;
   practiceCount: number;
   featured: boolean;
+  /**
+   * Public CDN URL for the course cover, or null when the creator has not
+   * uploaded one. Never a raw R2 key. `JourneyCard` MUST render its typographic
+   * fallback on null, with no layout shift (Codex-eqh0z).
+   */
+  coverImageUrl: string | null;
+}
+
+/**
+ * The journey's SELL MEDIA — the four media refs the sales page's `introVideo` /
+ * `reel` / `guide` sections resolve their primary content from, plus the still
+ * cover (Codex-eqh0z). FE mirror of `@codex/shared-types` `JourneySellMedia`.
+ *
+ * The three video ids and the guide portrait are `media_items` refs; the cover is
+ * NOT (`media_items` is CHECK-constrained to video/audio, so a still image
+ * cannot live there) — it arrives already resolved to a CDN URL.
+ */
+export interface JourneySellMedia {
+  courseId: string;
+  introVideoMediaId: string | null;
+  previewVideoMediaId: string | null;
+  guideVideoMediaId: string | null;
+  guidePortraitMediaId: string | null;
+  coverImageUrl: string | null;
 }
 
 /**

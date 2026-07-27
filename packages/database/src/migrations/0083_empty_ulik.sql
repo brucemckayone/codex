@@ -1,0 +1,1 @@
+ALTER TABLE "courses" ADD COLUMN "cover_image_key" varchar(500);
