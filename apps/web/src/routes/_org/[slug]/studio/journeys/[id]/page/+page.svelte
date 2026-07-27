@@ -38,6 +38,7 @@
     saveJourneyPage,
     updateJourneyOffer,
   } from '$lib/remote/journeys.remote';
+  import { saveBuilderDraft } from '$lib/page-builder/builder-save';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import type { JourneyStagePreview } from '$lib/page-builder/render-edit';
   import { toast } from '$lib/components/ui/Toast/toast-store';
@@ -165,91 +166,53 @@
   });
 
   /**
-   * Pull the human message out of a failed remote call. A `command()` that failed
-   * via SvelteKit's `error(status, message)` arrives as `{ body: { message } }`,
-   * NOT as `err.message` — reading only the latter is why a precise service
-   * message ("Set a one-off price…") shows up as a blank/generic failure.
-   */
-  function remoteErrorMessage(err: unknown): string | undefined {
-    if (err && typeof err === 'object' && 'body' in err) {
-      const body = (err as { body?: unknown }).body;
-      if (body && typeof body === 'object' && 'message' in body) {
-        const message = (body as { message?: unknown }).message;
-        if (typeof message === 'string' && message) return message;
-      }
-    }
-    return err instanceof Error && err.message ? err.message : undefined;
-  }
-
-  /**
    * The page draft and the journey's OFFER are two resources with two endpoints —
    * page copy via `saveJourneyPage`, pricing via `updateJourneyOffer` (which also
    * writes the authoritative `courses.price_cents`). One Save button drives both so
-   * the creator has one mental model; `markSaved()` runs only once BOTH have
-   * landed, so a failed leg leaves the draft dirty and retryable.
+   * the creator has one mental model. The orchestration lives in
+   * `$lib/page-builder/builder-save` so it is unit-testable; this wrapper only
+   * turns its explicit result into toasts.
    *
-   * The page payload is built from NAMED fields rather than spread wholesale: the
-   * save schema is `.strict()`, so a stray key (`offer`, `organizationId`,
-   * `publishedAt`) must be a visible error here, not silently dropped server-side.
-   * That silent strip is exactly what made the pricing panel swallow input while
-   * reporting "Page saved".
+   * RETURNS whether the write landed (Codex-xzwl5). It used to swallow its own
+   * errors and return normally, which made a failed save indistinguishable from a
+   * successful one — `handlePublish` then reported "Page published" over content
+   * that was never persisted, and `handleViewLive` opened a page showing stale
+   * content. Every caller MUST gate on this boolean.
    */
-  async function handleSave(): Promise<void> {
+  async function handleSave(): Promise<boolean> {
     const payload = pageBuilder.getSavePayload();
     const record = draftQuery?.current;
-    if (!payload || !record) return;
+    // Nothing loaded ⇒ nothing to save. Reported as NOT saved so callers can
+    // never treat "there was no draft" as "the draft was persisted".
+    if (!payload || !record) {
+      toast.error('The page draft is still loading — try again in a moment');
+      return false;
+    }
     saving = true;
     try {
-      await saveJourneyPage({
-        id: record.id,
-        pageType: payload.pageType,
-        slug: payload.slug,
-        title: payload.title,
-        status: payload.status,
-        subjectType: payload.subjectType,
-        subjectId: payload.subjectId,
-        brandOverrides: payload.brandOverrides,
-        sections: payload.sections,
+      const result = await saveBuilderDraft({
+        pageId: record.id,
+        payload,
+        savedOffer: pageBuilder.saved?.offer,
+        savePage: saveJourneyPage,
+        saveOffer: updateJourneyOffer,
+        markSaved: () => pageBuilder.markSaved(),
+        // The PUBLIC sales load `depends('cache:versions')` precisely so a save
+        // can mark it stale; without this the client reuses its cached load data
+        // and the live page keeps showing pre-save content until a hard reload.
+        refresh: () => invalidate('cache:versions'),
       });
 
-      // Only when the offer actually changed — pricing is a commerce mutation
-      // under a `strict` rate limit, not something every copy edit should spend.
-      const offer = payload.offer;
-      if (offer && JSON.stringify(offer) !== JSON.stringify(pageBuilder.saved?.offer)) {
-        try {
-          await updateJourneyOffer({
-            pageId: record.id,
-            offer: {
-              tiersEnabled: offer.tiersEnabled ?? false,
-              subscriptionEnabled: offer.subscriptionEnabled ?? false,
-              subscriptionPriceCents: offer.subscriptionPriceCents ?? null,
-              oneOffEnabled: offer.oneOffEnabled ?? false,
-              oneOffPriceCents: offer.oneOffPriceCents ?? null,
-            },
-          });
-        } catch (err) {
-          // The page copy DID save; only pricing was refused (e.g. an enabled path
-          // with no price). Say exactly that — a bare "Failed to save page" would be
-          // false. `markSaved()` is skipped, so the draft stays dirty and a retry
-          // re-sends both legs.
-          const why = remoteErrorMessage(err);
-          toast.error(
-            why
-              ? `Page saved, but the pricing was not: ${why}`
-              : 'Page saved, but the pricing could not be saved.'
-          );
-          return;
-        }
+      if (result.outcome === 'failed') {
+        toast.error(result.message);
+        return false;
       }
-
-      pageBuilder.markSaved();
-      // The PUBLIC sales load `depends('cache:versions')` precisely so a save can
-      // mark it stale; without this the client reuses its cached load data and the
-      // live page keeps showing pre-save content until a hard reload.
-      await invalidate('cache:versions');
+      if (result.staleWarning) {
+        toast.warning(result.staleWarning);
+        return true;
+      }
       toast.success('Page saved');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save page');
+      return true;
     } finally {
       saving = false;
     }
@@ -258,11 +221,14 @@
   /**
    * Open the REAL public sales page in a new tab — the only surface that renders
    * the cinematic motion (the canvas mounts the static editable components; see
-   * the toolbar comment). Saves first when dirty so the live page matches what is
-   * on screen rather than silently showing the last-saved version.
+   * the toolbar comment). Saves first when dirty, and ABORTS when that save fails
+   * (Codex-xzwl5): opening the live page after a failed save showed stale content
+   * next to a builder showing the new content — an intermittent builder-vs-live
+   * discrepancy the creator has no way to explain. The save's own toast already
+   * says what went wrong.
    */
   async function handleViewLive(): Promise<void> {
-    if (pageBuilder.isDirty) await handleSave();
+    if (pageBuilder.isDirty && !(await handleSave())) return;
     if (!slug) {
       toast.error('Give the page a slug and save it before viewing live');
       return;
@@ -270,9 +236,18 @@
     window.open(`/journeys/${slug}`, '_blank', 'noopener');
   }
 
+  /**
+   * Publish = flip the status and save. The success toast fires ONLY when the
+   * write landed; on failure the status is rolled back to what it was so the
+   * builder does not sit there claiming "Published" over an unpublished page.
+   */
   async function handlePublish(): Promise<void> {
+    const previousStatus = pageBuilder.pending?.status;
     pageBuilder.updateMeta('status', 'published');
-    await handleSave();
+    if (!(await handleSave())) {
+      if (previousStatus) pageBuilder.updateMeta('status', previousStatus);
+      return;
+    }
     toast.success('Page published');
   }
 
@@ -379,7 +354,14 @@
       <button type="button" class="jb__btn" disabled={!isDirty || saving} onclick={handleSave}>
         {saving ? 'Saving…' : 'Save'}
       </button>
-      <button type="button" class="jb__btn jb__btn--primary" onclick={handlePublish}>Publish</button>
+      <button
+        type="button"
+        class="jb__btn jb__btn--primary"
+        disabled={saving}
+        onclick={handlePublish}
+      >
+        {saving ? 'Publishing…' : 'Publish'}
+      </button>
     </header>
 
     <!-- ── mode tabs ── -->

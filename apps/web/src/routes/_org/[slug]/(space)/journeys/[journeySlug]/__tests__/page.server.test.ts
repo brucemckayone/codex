@@ -65,15 +65,21 @@ const MOCK_SELL_PREVIEW = {
   },
 } satisfies SellPreview;
 
-const { getCoursePageMock, resolveSellPreviewMock, resolveCanEnterCourseMock } =
-  vi.hoisted(() => ({
-    getCoursePageMock: vi.fn(),
-    resolveSellPreviewMock: vi.fn(),
-    resolveCanEnterCourseMock: vi.fn(),
-  }));
+const {
+  getCoursePageMock,
+  getCoursePagePreviewMock,
+  resolveSellPreviewMock,
+  resolveCanEnterCourseMock,
+} = vi.hoisted(() => ({
+  getCoursePageMock: vi.fn(),
+  getCoursePagePreviewMock: vi.fn(),
+  resolveSellPreviewMock: vi.fn(),
+  resolveCanEnterCourseMock: vi.fn(),
+}));
 
 vi.mock('../journey-data', () => ({
   getCoursePage: getCoursePageMock,
+  getCoursePagePreview: getCoursePagePreviewMock,
   resolveSellPreview: resolveSellPreviewMock,
 }));
 
@@ -110,7 +116,9 @@ function makeEvent(journeySlug: string, user: { id: string } | null = null) {
     // Present so the load can build a round-d-seam context (the seam is mocked).
     platform: {},
     cookies: {},
-    locals: {},
+    // The draft-preview fallback gates on `locals.user`, not the parent's — keep
+    // them in step so a signed-in event exercises that branch.
+    locals: user ? { user } : {},
   } as unknown as LoadInput;
   return { event, setHeaders, depends };
 }
@@ -119,6 +127,7 @@ describe('journey sales +page.server load', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getCoursePageMock.mockResolvedValue(MOCK_COURSE_PAGE);
+    getCoursePagePreviewMock.mockResolvedValue(null);
     resolveSellPreviewMock.mockResolvedValue(MOCK_SELL_PREVIEW);
     resolveCanEnterCourseMock.mockResolvedValue(false);
   });
@@ -225,5 +234,62 @@ describe('journey sales +page.server load', () => {
     // A resolver hiccup must never throw the SEO-critical load — it degrades to
     // the public/join CTA.
     expect(data.enrolled).toBe(false);
+  });
+
+  // ── Draft preview vs LIVE (Codex-xzwl5) ───────────────────────────────────
+  // A manager viewing an unpublished journey got an apparently live page with
+  // nothing saying otherwise ("I am not sure if live pages are preview pages").
+  // Which read served the page is the only signal, so the load must publish it.
+  describe('draft-preview flag', () => {
+    const DRAFT_COURSE_PAGE = {
+      ...MOCK_COURSE_PAGE,
+      page: { ...MOCK_COURSE_PAGE.page, status: 'draft', publishedAt: null },
+    } satisfies JourneyCoursePage;
+
+    it('marks the page as a draft preview when the management read served it', async () => {
+      getCoursePageMock.mockResolvedValueOnce(null);
+      getCoursePagePreviewMock.mockResolvedValueOnce(DRAFT_COURSE_PAGE);
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork', { id: 'manager-1' });
+
+      const data = (await load(event)) as LoadData;
+
+      expect(getCoursePagePreviewMock).toHaveBeenCalledWith({
+        slug: 'rootwork',
+      });
+      expect(data.draftPreview).toBe(true);
+      // The view keys its banner + noindex off the page status it carries.
+      expect(data.coursePage.page.status).toBe('draft');
+    });
+
+    it('does NOT mark the live page as a preview (the published read served it)', async () => {
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork', { id: 'manager-1' });
+
+      const data = (await load(event)) as LoadData;
+
+      // Preview and live must be distinguishable in BOTH directions — a banner
+      // on the live page would be as confusing as none on the draft.
+      expect(data.draftPreview).toBe(false);
+      expect(getCoursePagePreviewMock).not.toHaveBeenCalled();
+    });
+
+    it('stays false (and 404s) when the preview read denies a non-manager', async () => {
+      getCoursePageMock.mockResolvedValueOnce(null);
+      getCoursePagePreviewMock.mockResolvedValueOnce(null);
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork', { id: 'outsider-1' });
+
+      await expect(load(event)).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('never reaches the preview read for an anonymous visitor', async () => {
+      getCoursePageMock.mockResolvedValueOnce(null);
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork'); // no session
+
+      await expect(load(event)).rejects.toMatchObject({ status: 404 });
+      expect(getCoursePagePreviewMock).not.toHaveBeenCalled();
+    });
   });
 });

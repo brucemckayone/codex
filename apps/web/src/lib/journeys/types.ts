@@ -57,7 +57,7 @@ export interface ContentCourseLinks {
  */
 export interface CourseCardSummary {
   id: string;
-  /** Org-scoped slug — the sales-page URL basis (`/journeys/{slug}`). */
+  /** Org-scoped COURSE slug — not the sales-page URL basis. */
   slug: string;
   title: string;
   /** Eyebrow line above the title, or null. */
@@ -68,6 +68,14 @@ export interface CourseCardSummary {
   guideName: string | null;
   /** One-off purchase price in GBP pence; null = not sold standalone. */
   priceCents: number | null;
+  /**
+   * The published landing page that SELLS this course, or null when none was
+   * found. `/journeys/{slug}` resolves the PAGE slug, so link builders MUST
+   * prefer these over `slug`/`id` (Codex-xzwl5).
+   */
+  pageId: string | null;
+  /** Org-scoped PAGE slug — the sales-page URL basis. */
+  pageSlug: string | null;
 }
 
 /**

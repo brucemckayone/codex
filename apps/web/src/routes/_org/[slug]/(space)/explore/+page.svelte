@@ -180,10 +180,19 @@
   const showJourneysRail = $derived(filteredJourneys.length > 0);
   const showContent = $derived(viewScope !== 'journeys');
 
+  // Link by the SELL PAGE, not the course (Codex-xzwl5). `/journeys/:slug`
+  // resolves `landing_pages.slug`, so linking by `courses.slug` — which drifts
+  // from the page's after a rename — resolved to a different URL than the
+  // org-landing rail (which links by the page). Both surfaces now derive the
+  // same identity; the course slug/id stay only as the last-resort fallback for
+  // a published course with no published page found.
   function journeyHref(journey: CourseCardSummary): string {
     return buildJourneyUrl(
       page.url,
-      { slug: journey.slug, id: journey.id },
+      {
+        slug: journey.pageSlug ?? journey.slug,
+        id: journey.pageId ?? journey.id,
+      },
       { surface: 'sales' }
     );
   }
