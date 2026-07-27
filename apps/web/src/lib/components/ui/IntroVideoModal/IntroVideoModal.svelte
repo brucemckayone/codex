@@ -167,6 +167,27 @@
     hlsInstance?.destroy();
     hlsInstance = null;
   });
+
+  /**
+   * Portal the modal root out of the section subtree.
+   *
+   * The sales-page section renderer wraps every section in `.jp-section`
+   * (`position: relative; isolation: isolate`) and the intro/reel stages add a
+   * second `isolation: isolate`. A `position: fixed` overlay mounted inside that
+   * subtree has its `z-index` ranked only WITHIN the section, so later sections
+   * paint their text OVER the fullscreen video. Re-parenting to `.org-layout`
+   * (NOT raw `<body>` — it carries the org-brand + `--color-player-*` cascade
+   * this modal styles against) lets the modal stack against the root instead.
+   */
+  function portal(node: HTMLElement) {
+    const target = document.querySelector('.org-layout') ?? document.body;
+    target.appendChild(node);
+    return {
+      destroy() {
+        node.remove();
+      },
+    };
+  }
 </script>
 
 {#if open}
@@ -178,6 +199,7 @@
     aria-modal="true"
     aria-label={title || 'Intro video'}
     bind:this={dialogEl}
+    use:portal
     onclick={handleOverlayClick}
     onkeydown={handleKey}
   >
