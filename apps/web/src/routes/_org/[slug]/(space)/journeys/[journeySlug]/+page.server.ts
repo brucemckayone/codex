@@ -19,6 +19,7 @@
  * for AGGRESSIVE-MODE today; rewired to the real remote functions post-WP-2).
  */
 import { error } from '@sveltejs/kit';
+import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import { resolveCanEnterCourse } from '$lib/server/journeys/round-d-seam';
 import type { PageServerLoad } from './$types';
@@ -29,7 +30,8 @@ import {
 } from './journey-data';
 
 export const load: PageServerLoad = async (event) => {
-  const { params, parent, setHeaders, depends, locals } = event;
+  const { params, parent, setHeaders, depends, locals, platform, cookies } =
+    event;
 
   // Ensure the org layout (auth + branding + org resolution) has resolved before
   // we commit cache headers — mirrors the org-landing precedent.
@@ -68,11 +70,24 @@ export const load: PageServerLoad = async (event) => {
   // SEO-critical common case): no session ⇒ definitionally not enrolled. The
   // check is `.catch()`-guarded so an entitlement-resolver hiccup degrades to
   // the public/join CTA rather than throwing.
-  const enrolled = user
-    ? await resolveCanEnterCourse(event, user.id, coursePage.course.id).catch(
-        () => false
-      )
-    : false;
+  //
+  // AWAIT the offer alongside it (Codex-2pryk.2.4.3): the `invite` section's
+  // prices and the paths it offers are now read from the authoritative
+  // `getCourseOffer` rather than from the authored `priceLabel` a creator typed
+  // into the builder. It runs in PARALLEL with the enrolment check, so this adds
+  // no wall-clock to the critical path. `.catch(() => null)` because a pricing
+  // hiccup must not 500 an SEO-critical sales page — the section degrades to a
+  // price-less CTA and never falls back to authored numbers.
+  const [enrolled, offer] = await Promise.all([
+    user
+      ? resolveCanEnterCourse(event, user.id, coursePage.course.id).catch(
+          () => false
+        )
+      : Promise.resolve(false),
+    createServerApi(platform, cookies)
+      .courses.offer(coursePage.course.id)
+      .catch(() => null),
+  ]);
 
   // Version-keyed invalidation dependency. NOTE (flagged for the conductor):
   // the page/course payload should cache under new `CacheType.PAGE_CONFIG` /
@@ -102,6 +117,9 @@ export const load: PageServerLoad = async (event) => {
     coursePage,
     orgSlug: params.slug,
     enrolled,
+    // The authoritative offer the `invite` section prices itself from. Null when
+    // the read failed — sections show no price rather than a wrong one.
+    offer,
     draftPreview,
     // STREAM: public sell previews (no auth). `.catch()` → null on any failure.
     sellPreview: resolveSellPreview({

@@ -101,4 +101,5 @@
   coursePage={renderCoursePage}
   sellPreview={data.sellPreview}
   enrolled={data.enrolled}
+  offer={data.offer}
 />

@@ -16,6 +16,7 @@
  * to the awaited course/stage/testimonial data when a prop is absent.
  */
 import type {
+  CourseOffer,
   JourneyCoursePage,
   JourneyCourseView,
   JourneyStageView,
@@ -87,6 +88,20 @@ export interface JourneySalesContext {
    * so the studio builder's live preview always shows the pre-purchase state.
    */
   enrolled: boolean;
+  /**
+   * The AUTHORITATIVE monetization offer for this course (SPEC §7) — which ways
+   * in exist and what each charges, composed from real plan/tier/price rows by
+   * `getCourseOffer`. The `invite` section renders THIS, decorated by authored
+   * copy; before Codex-2pryk.2.4.3 it rendered the authored copy's own
+   * `priceLabel`, so a page could advertise a price and a path that did not
+   * exist.
+   *
+   * `null` when the offer read was unavailable (it is `.catch()`-guarded — the
+   * sales page is SEO-critical and must not 500 over a pricing hiccup). Sections
+   * MUST degrade to a price-less CTA on null and never fall back to authored
+   * numbers.
+   */
+  offer: CourseOffer | null;
   /**
    * The streamed sell-preview. Sections consume it via `{#await}` with a
    * poster skeleton so a slow/failed media resolution degrades gracefully and
@@ -230,20 +245,26 @@ export interface FaqSectionProps {
 }
 
 /**
- * One offer path shown on the `invite` section (SPEC §7 — the 3-path model:
- * tier / course-subscription / course-purchase). CONTRACT GAP: the frozen
- * {@link JourneyCoursePage} carries only `course.priceCents` (the one-off), not
- * the full offer set — the tier/subscription paths are owned by WP-6
- * monetization and surfaced on the checkout route. This optional prop lets the
- * builder tease paths on the sell page; when absent the invite renders the
- * one-off price + a CTA to `/journeys/[slug]/checkout`.
+ * Authored DECORATION for one offer path on the `invite` section (SPEC §7 —
+ * tier / course-subscription / course-purchase).
+ *
+ * `id` must name a CANONICAL path id (`purchase`, `subscription-monthly`,
+ * `subscription-annual`, `tier:<tierId>`); an entry naming anything else
+ * decorates nothing and is dropped. The rest is copy.
+ *
+ * NOTE the field that is gone: `priceLabel`. Until Codex-2pryk.2.4.3 the invite
+ * section (and the checkout) took its prices from this authored string, so a
+ * page could advertise "£12 a month" for a tier that cost £15 and for a course
+ * subscription that did not exist at all. Prices now come only from
+ * {@link JourneySalesContext.offer}. `cadenceLabel` is likewise derived — it
+ * follows from which canonical path the entry names.
  */
 export interface InviteOffer {
   id: string;
-  name: string;
-  priceLabel: string;
-  cadenceLabel?: string;
+  name?: string;
+  who?: string;
   blurb?: string;
+  bullets?: string[];
   best?: boolean;
 }
 
@@ -254,6 +275,7 @@ export interface InviteSectionProps {
   sub?: string;
   ctaLabel?: string;
   priceNote?: string;
+  /** Authored copy that DECORATES real paths — never creates or prices one. */
   offers?: InviteOffer[];
 }
 

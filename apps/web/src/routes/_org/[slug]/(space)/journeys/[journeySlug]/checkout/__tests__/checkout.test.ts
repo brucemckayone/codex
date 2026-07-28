@@ -1,62 +1,31 @@
 /**
- * Journey checkout — offer model + server-load contract (Codex-2pryk.3.6).
+ * Journey checkout — order summary + server-load contract (Codex-2pryk.3.6;
+ * offer rewire Codex-2pryk.2.4.3).
  *
  * Two suites, both Neon-free:
- *   1. the PURE offer/summary derivation (`../checkout-offer-model`) — the
- *      load-bearing logic that turns the frozen `getCoursePage` envelope into the
- *      presentational catalogue. Locks the WP-6 provenance split: the one-off
- *      price is ALWAYS server-authoritative (`course.priceCents`), recurring
- *      prices are page-builder-authored teasers, and a course with no authored
- *      offers still yields a single one-off path.
+ *   1. the order-summary derivation (`../checkout-offer-model`) — the factual,
+ *      DB-derived "what's inside" lines.
  *   2. the server `load` shell — mocks the `../journey-data` seam (mirrors the
- *      sell page test) to lock: 404 on a missing page, the PRIVATE (never
- *      shared-cacheable) header, guest ⇒ not-enrolled without a worker hit, and
- *      an enrolled resolver hiccup degrading to the pre-purchase view.
+ *      sell page test) AND the offer read, to lock: the offer is the source of
+ *      every price, `entitled` comes from that same read, a failed read does NOT
+ *      render a pay page, 404 on a missing page, and the PRIVATE (never
+ *      shared-cacheable) header.
+ *
+ * The OFFER DERIVATION itself is tested at `$lib/page-builder/offer-paths.test.ts`
+ * — it is shared with the sell page's `invite` section, which had the same bug.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
+  CourseOffer,
   JourneyCoursePage,
   JourneyCourseView,
   JourneyPageRecord,
 } from '$lib/page-builder';
 import { CACHE_HEADERS } from '$lib/server/cache';
-import {
-  buildHeadNote,
-  deriveCheckoutOffers,
-  deriveCourseSummary,
-  resolvePreselectedOffer,
-} from '../checkout-offer-model';
+import { ApiError } from '$lib/server/errors';
+import { deriveCourseSummary } from '../checkout-offer-model';
 
-const AUTHORED_OFFERS = [
-  {
-    id: 'membership',
-    name: 'Full membership',
-    priceLabel: '£12',
-    per: 'month',
-    best: true,
-    who: 'All-in on the whole path',
-    blurb: 'Every journey, every practice.',
-    bullets: ['All courses & journeys', 'Cancel anytime'],
-  },
-  {
-    id: 'course-sub',
-    name: 'Rootwork monthly',
-    priceLabel: '£6',
-    per: 'month',
-    who: 'Just here for Rootwork',
-    blurb: 'Just this course.',
-    bullets: ['Rootwork only', 'Cancel anytime'],
-  },
-  // No authored priceLabel → the one-off price is derived from course.priceCents.
-  {
-    id: 'one-off',
-    name: 'Own Rootwork',
-    per: 'once',
-    who: 'Prefer to own, not subscribe',
-    blurb: 'Buy it outright.',
-    bullets: ['Yours forever', 'No subscription'],
-  },
-];
+const TIER_ID = '33f6c1a1-bb69-4902-b24a-4365170c022c';
 
 const COURSE: JourneyCourseView = {
   id: '00000000-0000-4000-8000-0000000000c0',
@@ -69,6 +38,51 @@ const COURSE: JourneyCourseView = {
   stageCount: 2,
   practiceCount: 5,
 };
+
+/**
+ * The offer as the ecom read returns it. Note `purchase.priceCents` (2499)
+ * deliberately DISAGREES with the stale `course.priceCents` (4900) carried by the
+ * page envelope: the checkout must price from the offer, and this fixture makes
+ * a regression to `course.priceCents` visible rather than coincidentally right.
+ */
+const OFFER: CourseOffer = {
+  courseId: COURSE.id,
+  organizationId: '00000000-0000-4000-8000-000000000001',
+  paths: ['purchase', 'subscription', 'tier'],
+  purchase: { priceCents: 2499 },
+  subscription: {
+    planId: '00000000-0000-4000-8000-0000000000f1',
+    priceMonthly: 2700,
+    priceAnnual: 27000,
+  },
+  tiers: [
+    {
+      tierId: TIER_ID,
+      tierName: 'Soul Path',
+      priceMonthly: 1500,
+      priceAnnual: 14400,
+    },
+  ],
+  entitled: false,
+};
+
+/** The authored copy that used to BE the catalogue — now decoration at most. */
+const AUTHORED_OFFERS = [
+  {
+    id: 'membership',
+    name: 'Full membership',
+    priceLabel: '£12',
+    per: 'month',
+    best: true,
+  },
+  {
+    id: 'course-sub',
+    name: 'Rootwork monthly',
+    priceLabel: '£6',
+    per: 'month',
+  },
+  { id: 'one-off', name: 'Own Rootwork', per: 'once' },
+];
 
 function pageWith(sections: JourneyPageRecord['sections']): JourneyPageRecord {
   return {
@@ -100,77 +114,6 @@ const STAGES = [
   { practices: [{ contentType: 'video' }, { contentType: 'audio' }] },
 ];
 
-describe('checkout-offer-model · deriveCheckoutOffers', () => {
-  it('reads the invite section offers, deriving the one-off price from course.priceCents', () => {
-    const offers = deriveCheckoutOffers(inviteWithOffers, COURSE);
-
-    expect(offers.map((o) => o.id)).toEqual([
-      'membership',
-      'course-sub',
-      'one-off',
-    ]);
-
-    const membership = offers[0];
-    expect(membership.priceLabel).toBe('£12'); // authored teaser (WP-6 replaces)
-    expect(membership.recurring).toBe(true);
-    expect(membership.cadenceLabel).toBe('per month');
-    expect(membership.best).toBe(true);
-    expect(membership.bullets).toContain('Cancel anytime');
-
-    const oneOff = offers[2];
-    expect(oneOff.priceLabel).toBe('£49'); // SERVER-authoritative, not authored
-    expect(oneOff.recurring).toBe(false);
-    expect(oneOff.cadenceLabel).toBe('one-off');
-  });
-
-  it('falls back to a single one-off offer (from course.priceCents) when none are authored', () => {
-    const offers = deriveCheckoutOffers(pageWith([]), COURSE);
-
-    expect(offers).toHaveLength(1);
-    expect(offers[0].id).toBe('one-off');
-    expect(offers[0].priceLabel).toBe('£49');
-    expect(offers[0].recurring).toBe(false);
-    expect(offers[0].best).toBe(true);
-  });
-
-  it('returns no offers when the course has no authored offers and no standalone price', () => {
-    const free = { ...COURSE, priceCents: null };
-    expect(deriveCheckoutOffers(pageWith([]), free)).toEqual([]);
-  });
-
-  it('drops a half-authored recurring offer that has no price to show', () => {
-    const page = pageWith([
-      {
-        id: 'sec-invite',
-        type: 'invite',
-        enabled: true,
-        props: { offers: [{ id: 'x', name: 'No price', per: 'month' }] },
-      },
-    ]);
-    // The bad recurring entry is dropped; the model degrades to the one-off.
-    const offers = deriveCheckoutOffers(page, COURSE);
-    expect(offers).toHaveLength(1);
-    expect(offers[0].id).toBe('one-off');
-  });
-});
-
-describe('checkout-offer-model · resolvePreselectedOffer', () => {
-  const offers = deriveCheckoutOffers(inviteWithOffers, COURSE);
-
-  it('honours ?offer= when it names a real path', () => {
-    expect(resolvePreselectedOffer(offers, 'course-sub')).toBe('course-sub');
-  });
-
-  it('falls back to the best path when the query names nothing real', () => {
-    expect(resolvePreselectedOffer(offers, 'bogus')).toBe('membership');
-    expect(resolvePreselectedOffer(offers, null)).toBe('membership');
-  });
-
-  it('is empty when there are no offers', () => {
-    expect(resolvePreselectedOffer([], 'membership')).toBe('');
-  });
-});
-
 describe('checkout-offer-model · deriveCourseSummary', () => {
   it('builds DB-derived facts: counts, content mix, and an invitation', () => {
     const summary = deriveCourseSummary(COURSE, STAGES);
@@ -196,19 +139,6 @@ describe('checkout-offer-model · deriveCourseSummary', () => {
   });
 });
 
-describe('checkout-offer-model · buildHeadNote', () => {
-  it('summarises the number of ways in when more than one', () => {
-    const offers = deriveCheckoutOffers(inviteWithOffers, COURSE);
-    expect(buildHeadNote(offers)).toBe('One course. Three ways in.');
-  });
-
-  it('is undefined for a single path', () => {
-    expect(
-      buildHeadNote(deriveCheckoutOffers(pageWith([]), COURSE))
-    ).toBeUndefined();
-  });
-});
-
 // ── server load shell ────────────────────────────────────────────────────────
 
 const MOCK_COURSE_PAGE = {
@@ -226,15 +156,26 @@ const MOCK_COURSE_PAGE = {
   ],
 } as unknown as JourneyCoursePage;
 
-const { getCoursePageMock, resolveCanEnterCourseMock } = vi.hoisted(() => ({
-  getCoursePageMock: vi.fn(),
-  resolveCanEnterCourseMock: vi.fn(),
-}));
+const { getCoursePageMock, offerMock, resolveCanEnterCourseMock } = vi.hoisted(
+  () => ({
+    getCoursePageMock: vi.fn(),
+    offerMock: vi.fn(),
+    resolveCanEnterCourseMock: vi.fn(),
+  })
+);
 
 vi.mock('../../journey-data', () => ({
   getCoursePage: getCoursePageMock,
 }));
 
+// The authoritative offer read. Mocked at the API-client boundary so the load's
+// error handling (404 vs unavailable) is exercised against real `ApiError`s.
+vi.mock('$lib/server/api', () => ({
+  createServerApi: () => ({ courses: { offer: offerMock } }),
+}));
+
+// Still mocked so the assertion that it is NO LONGER CALLED can fail loudly if
+// the round-trip comes back — `offer.entitled` resolves the same entitlement.
 vi.mock('$lib/server/journeys/round-d-seam', () => ({
   resolveCanEnterCourse: resolveCanEnterCourseMock,
 }));
@@ -262,6 +203,8 @@ function makeEvent(
     parent: async () => ({ user }),
     setHeaders,
     url,
+    platform: {},
+    cookies: {},
   } as unknown as LoadInput;
   return { event, setHeaders };
 }
@@ -270,30 +213,91 @@ describe('journey checkout +page.server load', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getCoursePageMock.mockResolvedValue(MOCK_COURSE_PAGE);
+    offerMock.mockResolvedValue(OFFER);
     resolveCanEnterCourseMock.mockResolvedValue(false);
   });
 
-  it('derives offers + summary + testimonial and resolves ?offer= for a guest', async () => {
+  it('prices every way in from the offer read, never from authored copy', async () => {
     const { load } = await import('../+page.server');
-    const { event } = makeEvent('rootwork', { offer: 'course-sub' });
+    const { event } = makeEvent('rootwork');
+
+    const data = (await load(event)) as LoadData;
+
+    expect(offerMock).toHaveBeenCalledWith(COURSE.id);
+    expect(data.offers.map((o) => o.id)).toEqual([
+      'purchase',
+      'subscription-monthly',
+      'subscription-annual',
+      `tier:${TIER_ID}`,
+    ]);
+    expect(data.offers.map((o) => o.priceCents)).toEqual([
+      2499, 2700, 27000, 1500,
+    ]);
+    // The authored teasers that used to BE this catalogue are gone: none of them
+    // names a canonical path, and their hand-typed prices never applied anyway.
+    const rendered = JSON.stringify(data.offers);
+    expect(rendered).not.toContain('£12');
+    expect(rendered).not.toContain('Full membership');
+    // The stale one-off on the page envelope must not leak in either.
+    expect(rendered).not.toContain('£49');
+  });
+
+  it('returns the summary, head note, price note, proof and preselection', async () => {
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork', { offer: 'subscription-annual' });
 
     const data = (await load(event)) as LoadData;
 
     expect(getCoursePageMock).toHaveBeenCalledWith({ slug: 'rootwork' });
     expect(data.orgSlug).toBe('acme');
-    expect(data.offers.map((o) => o.id)).toEqual([
-      'membership',
-      'course-sub',
-      'one-off',
-    ]);
     expect(data.summary.bullets[0]).toBe('5 practices across 2 stages');
+    // Three PATHS, four cards — the note counts ways in.
     expect(data.headNote).toBe('One course. Three ways in.');
     expect(data.priceNote).toBe('VAT included');
     expect(data.testimonial?.authorName).toBe('A member');
-    expect(data.preselectedOfferId).toBe('course-sub');
-    // Guest ⇒ definitionally not enrolled; no worker round-trip.
-    expect(data.enrolled).toBe(false);
+    expect(data.preselectedOfferId).toBe('subscription-annual');
+  });
+
+  it('reads `enrolled` from the offer and never round-trips the resolver', async () => {
+    offerMock.mockResolvedValueOnce({ ...OFFER, entitled: true });
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork', { user: { id: 'u1' } });
+
+    const data = (await load(event)) as LoadData;
+
+    expect(data.enrolled).toBe(true);
+    // `getCourseOffer` resolves entitlement through the SAME
+    // `hasCourseEntitlement` the seam called — a second call would be pure cost,
+    // and its `.catch(() => false)` used to demote an entitled viewer.
     expect(resolveCanEnterCourseMock).not.toHaveBeenCalled();
+  });
+
+  it('reports an anonymous viewer as not entitled', async () => {
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork');
+
+    const data = (await load(event)) as LoadData;
+
+    expect(data.enrolled).toBe(false);
+  });
+
+  it('offers nothing when the course has no purchasable path', async () => {
+    offerMock.mockResolvedValueOnce({
+      ...OFFER,
+      paths: [],
+      purchase: null,
+      subscription: null,
+      tiers: [],
+    });
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork');
+
+    const data = (await load(event)) as LoadData;
+
+    // The view renders "isn't open for enrolment" — NOT a fabricated price.
+    expect(data.offers).toEqual([]);
+    expect(data.headNote).toBeUndefined();
+    expect(data.preselectedOfferId).toBe('');
   });
 
   it('locks the PRIVATE (never shared-cacheable) header', async () => {
@@ -315,30 +319,26 @@ describe('journey checkout +page.server load', () => {
     const { event } = makeEvent('does-not-exist');
 
     await expect(load(event)).rejects.toMatchObject({ status: 404 });
+    expect(offerMock).not.toHaveBeenCalled();
   });
 
-  it('re-targets an enrolled viewer (resolver consulted) via the enrolled flag', async () => {
-    resolveCanEnterCourseMock.mockResolvedValueOnce(true);
+  it('refuses to render a pay page when the offer read is unavailable', async () => {
+    offerMock.mockRejectedValueOnce(new Error('ecom down'));
     const { load } = await import('../+page.server');
-    const { event } = makeEvent('rootwork', { user: { id: 'u1' } });
+    const { event } = makeEvent('rootwork');
 
-    const data = (await load(event)) as LoadData;
+    // Degrading to "no ways in" here would tell a buyer the course is closed;
+    // degrading to authored copy would quote a price we cannot honour. 503.
+    await expect(load(event)).rejects.toMatchObject({ status: 503 });
+  });
 
-    expect(resolveCanEnterCourseMock).toHaveBeenCalledWith(
-      expect.anything(),
-      'u1',
-      COURSE.id
+  it('surfaces a missing course behind a published page as a 404, not a 503', async () => {
+    offerMock.mockRejectedValueOnce(
+      new ApiError(404, 'Course not found', 'NOT_FOUND')
     );
-    expect(data.enrolled).toBe(true);
-  });
-
-  it('degrades to the pre-purchase view when the enrolment resolver throws', async () => {
-    resolveCanEnterCourseMock.mockRejectedValueOnce(new Error('seam down'));
     const { load } = await import('../+page.server');
-    const { event } = makeEvent('rootwork', { user: { id: 'u1' } });
+    const { event } = makeEvent('rootwork');
 
-    const data = (await load(event)) as LoadData;
-
-    expect(data.enrolled).toBe(false);
+    await expect(load(event)).rejects.toMatchObject({ status: 404 });
   });
 });

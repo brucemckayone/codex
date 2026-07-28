@@ -4,13 +4,17 @@
   The offer/pay step — "one course, three ways in" (SPEC §7, FRONTEND-MAP §1
   checkout; prototype `docs/design/course-journeys/prototype/checkout.html`).
 
-  A PRESENTATIONAL order-summary + payment SHELL: the course, its order summary
-  and the offer catalogue are real DB-backed data (resolved in `+page.server.ts`
-  via the frozen `getCoursePage` seam); the offer selection is fully interactive
-  (radio-group → live fine print). The one thing this shell does NOT do is settle
-  a payment: the Stripe checkout action + the `entitlements` write on success are
-  owned by WP-6 monetization. Clicking "Continue" therefore surfaces the honest
-  connect-in-progress seam rather than faking a purchase confirmation.
+  An order-summary + payment SHELL over REAL data: the course and its order
+  summary come from the frozen `getCoursePage` seam, and every offer — which
+  ways in exist and what each one charges — comes from the authoritative
+  `GET /courses/:id/offer` read (Codex-2pryk.2.4.3). Authored page-builder copy
+  can only decorate a path that read returns; it can never invent one or set a
+  price. The offer selection is fully interactive (radio-group → live fine print).
+
+  The one thing this shell does NOT do yet is settle a payment: the Stripe
+  session + the `entitlements` write on success are Codex-2pryk.2.4.4. Clicking
+  "Continue" therefore surfaces the honest connect-in-progress seam rather than
+  faking a purchase confirmation.
 
   IMMERSIVE PALETTE (D6 · the `.jp` pattern): this surface mirrors the sales
   page's candlelit reading — the semantic `--color-*` tokens are re-pointed to
@@ -61,12 +65,19 @@
     offers.find((offer) => offer.id === selectedId) ?? offers[0]
   );
 
-  // Live fine print follows the chosen path's cadence (NN/g explicit terms).
+  // Live fine print follows the chosen path's KIND, not just its cadence — a
+  // tier is a whole-org membership that happens to include this course, so
+  // describing it as a course subscription would misstate what is being bought.
   const fineText = $derived.by(() => {
     if (!selectedOffer) return '';
-    return selectedOffer.recurring
-      ? `Billed ${selectedOffer.priceLabel} ${selectedOffer.cadenceLabel}. Cancel anytime from your account.`
-      : `One payment. ${course.title} stays in your library for good.`;
+    switch (selectedOffer.kind) {
+      case 'tier':
+        return `Billed ${selectedOffer.priceLabel} ${selectedOffer.cadenceLabel} for ${selectedOffer.name} — ${course.title} plus everything else it includes. Cancel anytime from your account.`;
+      case 'subscription':
+        return `Billed ${selectedOffer.priceLabel} ${selectedOffer.cadenceLabel} for ${course.title}. Cancel anytime from your account.`;
+      default:
+        return `One payment. ${course.title} stays in your library for good.`;
+    }
   });
 
   // The pay CTA is wired only up to the WP-6 seam: clicking it reveals the

@@ -15,7 +15,7 @@
  * those); mirrors the explore page-load test precedent.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { JourneyCoursePage } from '$lib/page-builder';
+import type { CourseOffer, JourneyCoursePage } from '$lib/page-builder';
 import type { SellPreview } from '$lib/page-builder/render';
 import { CACHE_HEADERS } from '$lib/server/cache';
 
@@ -65,22 +65,42 @@ const MOCK_SELL_PREVIEW = {
   },
 } satisfies SellPreview;
 
+/**
+ * The authoritative offer the `invite` section prices itself from
+ * (Codex-2pryk.2.4.3). Read in parallel with the enrolment check.
+ */
+const MOCK_OFFER = {
+  courseId: MOCK_COURSE_PAGE.course.id,
+  organizationId: MOCK_COURSE_PAGE.page.organizationId,
+  paths: ['purchase'],
+  purchase: { priceCents: 2499 },
+  subscription: null,
+  tiers: [],
+  entitled: false,
+} satisfies CourseOffer;
+
 const {
   getCoursePageMock,
   getCoursePagePreviewMock,
   resolveSellPreviewMock,
   resolveCanEnterCourseMock,
+  offerMock,
 } = vi.hoisted(() => ({
   getCoursePageMock: vi.fn(),
   getCoursePagePreviewMock: vi.fn(),
   resolveSellPreviewMock: vi.fn(),
   resolveCanEnterCourseMock: vi.fn(),
+  offerMock: vi.fn(),
 }));
 
 vi.mock('../journey-data', () => ({
   getCoursePage: getCoursePageMock,
   getCoursePagePreview: getCoursePagePreviewMock,
   resolveSellPreview: resolveSellPreviewMock,
+}));
+
+vi.mock('$lib/server/api', () => ({
+  createServerApi: () => ({ courses: { offer: offerMock } }),
 }));
 
 // The enrolment check that flips the hero/invite CTA (anon → checkout; enrolled
@@ -130,6 +150,46 @@ describe('journey sales +page.server load', () => {
     getCoursePagePreviewMock.mockResolvedValue(null);
     resolveSellPreviewMock.mockResolvedValue(MOCK_SELL_PREVIEW);
     resolveCanEnterCourseMock.mockResolvedValue(false);
+    offerMock.mockResolvedValue(MOCK_OFFER);
+  });
+
+  // ── the authoritative offer (Codex-2pryk.2.4.3) ────────────────────────────
+  // The `invite` section used to price itself from the authored `priceLabel` a
+  // creator typed into the builder, so a page could advertise a price and a path
+  // that did not exist. It now renders THIS.
+
+  it('awaits the offer and returns it for the invite section to price from', async () => {
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork');
+
+    const data = (await load(event)) as LoadData;
+
+    expect(offerMock).toHaveBeenCalledWith(MOCK_COURSE_PAGE.course.id);
+    expect(data.offer).toEqual(MOCK_OFFER);
+  });
+
+  it('degrades the offer to null (never a wrong price) when the read fails', async () => {
+    offerMock.mockRejectedValueOnce(new Error('ecom down'));
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork');
+
+    // The sell page is SEO-critical and must not 500 over a pricing hiccup; the
+    // section shows a price-less CTA and the checkout states the terms.
+    const data = (await load(event)) as LoadData;
+    expect(data.offer).toBeNull();
+    expect(data.coursePage).toBe(MOCK_COURSE_PAGE);
+  });
+
+  it('reads the offer for an anonymous visitor too (prices are public)', async () => {
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork'); // no user
+
+    const data = (await load(event)) as LoadData;
+
+    // Unlike the enrolment check, the offer is NOT skipped for a guest — an
+    // anonymous visitor is exactly who the prices are for.
+    expect(offerMock).toHaveBeenCalledTimes(1);
+    expect(data.offer?.paths).toEqual(['purchase']);
   });
 
   it('awaits the course page and returns it for first paint / SEO', async () => {

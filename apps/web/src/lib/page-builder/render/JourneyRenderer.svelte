@@ -22,7 +22,7 @@
   import SectionRenderer from './SectionRenderer.svelte';
   import { brandOverridesToStyleAttr } from './brand-overrides';
   import type { JourneySalesContext, SellPreview } from './types';
-  import type { JourneyCoursePage } from '$lib/page-builder';
+  import type { CourseOffer, JourneyCoursePage } from '$lib/page-builder';
 
   interface Props {
     coursePage: JourneyCoursePage;
@@ -34,9 +34,21 @@
      * a viewer) renders the pre-purchase state by default.
      */
     enrolled?: boolean;
+    /**
+     * The authoritative offer (SPEC §7) the `invite` section prices itself from.
+     * Optional + `null`-defaulted so a preview host that has no offer read still
+     * renders — sections degrade to a price-less CTA rather than showing authored
+     * numbers (Codex-2pryk.2.4.3).
+     */
+    offer?: CourseOffer | null;
   }
 
-  const { coursePage, sellPreview, enrolled = false }: Props = $props();
+  const {
+    coursePage,
+    sellPreview,
+    enrolled = false,
+    offer = null,
+  }: Props = $props();
 
   const brandStyle = $derived(
     brandOverridesToStyleAttr(coursePage.page.brandOverrides)
@@ -61,6 +73,7 @@
     checkoutUrl,
     dashboardUrl,
     enrolled,
+    offer,
     sellPreview,
   });
 </script>

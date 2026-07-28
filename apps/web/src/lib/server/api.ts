@@ -1895,10 +1895,16 @@ export function createServerApi(
        * Create a Stripe Checkout session for a COURSE-SPECIFIC subscription
        * (SPEC §7 path 3 — `POST /checkout/course-subscription`, auth required).
        * The plan + Stripe Price are resolved server-side from the courseId.
+       *
+       * `billingInterval` is `'month' | 'year'` — the route validates against
+       * `billingIntervalEnum`, so the plan-row vocabulary (`priceMonthly` /
+       * `priceAnnual`, and `OfferPath.billingInterval`) must be MAPPED here, not
+       * forwarded. This was typed `'monthly' | 'annual'` when the method was
+       * added with no callers; its first real call would have been a 400.
        */
       courseSubscription: (data: {
         courseId: string;
-        billingInterval: 'monthly' | 'annual';
+        billingInterval: 'month' | 'year';
         successUrl: string;
         cancelUrl: string;
       }) =>

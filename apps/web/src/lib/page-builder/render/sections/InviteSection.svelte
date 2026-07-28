@@ -1,12 +1,20 @@
 <!--
   @component InviteSection
 
-  The offer and pricing (SPEC §4.1 `invite`) — the primary conversion moment. The
-  frozen `JourneyCoursePage` carries only the one-off `course.priceCents`; the
-  full 3-path offer model (tier / course-subscription / course-purchase, SPEC §7)
-  lives on the checkout route (WP-6). When the builder teases offer paths via the
-  `offers` prop they render as cards; otherwise the invite shows the one-off
-  price. Every path funnels to `context.checkoutUrl`. Currency is GBP.
+  The offer and pricing (SPEC §4.1 `invite`) — the primary conversion moment.
+
+  Every path and every price comes from `context.offer` — the AUTHORITATIVE
+  `getCourseOffer` read (Codex-2pryk.2.4.3). Authored `offers` copy may decorate
+  a real path (name / who / blurb / bullets / which is recommended) and can
+  neither invent a path nor state a price: this section used to render the
+  authored `priceLabel` directly, which is how a dev page came to advertise
+  "Included with membership · £12 a month" against a real £15 tier and a real
+  £27 course subscription.
+
+  When `context.offer` is null the offer read was unavailable. The section then
+  shows the CTA with NO price rather than falling back to authored numbers —
+  a price-less invitation is honest, a wrong one is not. Each card deep-links
+  into the checkout with its own path pre-selected (`?offer=`). Currency is GBP.
 
   TWO renderings, progressively enhanced (SPEC §6: CSS-first motion, always
   degradable):
@@ -26,11 +34,14 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { formatPrice } from '$lib/utils/format';
+  import {
+    checkoutUrlForPath,
+    deriveOfferPaths,
+  } from '$lib/page-builder/offer-paths';
   import CtaLink from '../CtaLink.svelte';
-  import { asString, asObjectArray, fieldString, fieldBool } from '../coerce';
+  import { asString } from '../coerce';
   import { reveal } from '../reveal';
-  import type { InviteSectionProps, InviteOffer, JourneySalesContext } from '../types';
+  import type { JourneySalesContext } from '../types';
   import type { SectionProps } from '$lib/page-builder';
 
   interface Props {
@@ -40,41 +51,35 @@
 
   const { config, context }: Props = $props();
 
-  const p: InviteSectionProps = $derived({
-    eyebrow: asString(config, 'eyebrow'),
-    heading: asString(config, 'heading'),
-    sub: asString(config, 'sub'),
-    ctaLabel: asString(config, 'ctaLabel'),
-    priceNote: asString(config, 'priceNote'),
-    offers: asObjectArray<InviteOffer>(config, 'offers', (entry) => {
-      const id = fieldString(entry, 'id');
-      const name = fieldString(entry, 'name');
-      const priceLabel = fieldString(entry, 'priceLabel');
-      if (!id || !name || !priceLabel) return null;
-      return {
-        id,
-        name,
-        priceLabel,
-        cadenceLabel: fieldString(entry, 'cadenceLabel'),
-        blurb: fieldString(entry, 'blurb'),
-        best: fieldBool(entry, 'best'),
-      };
-    }),
-  });
+  const eyebrow = $derived(asString(config, 'eyebrow'));
+  const sub = $derived(asString(config, 'sub'));
+  const priceNote = $derived(asString(config, 'priceNote'));
+  const heading = $derived(asString(config, 'heading') ?? 'Begin the work.');
 
-  const heading = $derived(p.heading ?? 'Begin the work.');
+  // The real ways in, decorated by this section's authored copy. Empty when the
+  // offer read was unavailable, or when the course has no purchasable path.
+  const paths = $derived(
+    deriveOfferPaths(context.offer, context.course, config)
+  );
+
   // CTA branches on enrolment: an enrolled member is sent to their dashboard;
   // everyone else funnels to checkout to join.
-  const ctaHref = $derived(
-    context.enrolled ? context.dashboardUrl : context.checkoutUrl
-  );
   const ctaLabel = $derived(
-    context.enrolled ? 'Go to your dashboard' : (p.ctaLabel ?? 'Join now')
+    context.enrolled
+      ? 'Go to your dashboard'
+      : (asString(config, 'ctaLabel') ?? 'Join now')
   );
-  // One-off price fallback when no offer paths are teased on the sell page.
-  const oneOffPrice = $derived(
-    context.course.priceCents !== null ? formatPrice(context.course.priceCents) : null
-  );
+  /**
+   * Where one card's CTA goes. An enrolled viewer has nothing to buy, so every
+   * card points at their dashboard; everyone else lands on the checkout with
+   * THAT path pre-selected, so the choice made here survives the navigation.
+   */
+  function hrefFor(pathId: string | null): string {
+    if (context.enrolled) return context.dashboardUrl;
+    return pathId
+      ? checkoutUrlForPath(context.checkoutUrl, pathId)
+      : context.checkoutUrl;
+  }
 
   let mounted = $state(false);
   let reduced = $state(false);
@@ -104,37 +109,36 @@
 
   <div class="invite__inner">
     <header class="invite__head">
-      {#if p.eyebrow}
-        <p class="invite__eyebrow invite__reveal" use:reveal>{p.eyebrow}</p>
+      {#if eyebrow}
+        <p class="invite__eyebrow invite__reveal" use:reveal>{eyebrow}</p>
       {/if}
       <h2 class="invite__heading invite__reveal invite__reveal--d1" use:reveal>
         {heading}
       </h2>
-      {#if p.sub}
-        <p class="invite__sub invite__reveal invite__reveal--d2" use:reveal>{p.sub}</p>
+      {#if sub}
+        <p class="invite__sub invite__reveal invite__reveal--d2" use:reveal>{sub}</p>
       {/if}
     </header>
 
-    {#if p.offers}
+    {#if paths.length > 0}
       <ul class="invite__offers invite__reveal invite__reveal--d3" use:reveal>
-        {#each p.offers as offer (offer.id)}
-          <li class="invite__offer" data-best={offer.best ? 'true' : undefined}>
-            {#if offer.best}
+        {#each paths as path (path.id)}
+          {@const href = hrefFor(path.id)}
+          <li class="invite__offer" data-best={path.best ? 'true' : undefined}>
+            {#if path.best}
               <span class="invite__badge">Recommended</span>
             {/if}
-            <p class="invite__offer-name">{offer.name}</p>
+            <p class="invite__offer-name">{path.name}</p>
             <p class="invite__price">
-              <span class="invite__price-amount">{offer.priceLabel}</span>
-              {#if offer.cadenceLabel}
-                <span class="invite__price-cadence">{offer.cadenceLabel}</span>
-              {/if}
+              <span class="invite__price-amount">{path.priceLabel}</span>
+              <span class="invite__price-cadence">{path.cadenceLabel}</span>
             </p>
-            {#if offer.blurb}
-              <p class="invite__offer-blurb">{offer.blurb}</p>
+            {#if path.blurb}
+              <p class="invite__offer-blurb">{path.blurb}</p>
             {/if}
             <CtaLink
-              href={ctaHref}
-              variant={offer.best ? 'primary' : 'secondary'}
+              {href}
+              variant={path.best ? 'primary' : 'secondary'}
               size="md"
             >
               {ctaLabel}
@@ -145,17 +149,16 @@
     {:else}
       <div class="invite__single invite__reveal invite__reveal--d3" use:reveal>
         <!-- The threshold: a warm doorway seated on its own ember pool so
-             beginning feels contained, safe, inevitable. -->
+             beginning feels contained, safe, inevitable.
+
+             NO price here by design. This branch is reached when the offer read
+             was unavailable or the course has no purchasable path, and in both
+             cases the checkout is the only surface that can state the terms. -->
         <div class="invite__pool" aria-hidden="true"></div>
-        {#if oneOffPrice}
-          <p class="invite__price">
-            <span class="invite__price-amount">{oneOffPrice}</span>
-          </p>
+        {#if priceNote}
+          <p class="invite__note">{priceNote}</p>
         {/if}
-        {#if p.priceNote}
-          <p class="invite__note">{p.priceNote}</p>
-        {/if}
-        <CtaLink href={ctaHref} variant="primary" size="lg">
+        <CtaLink href={hrefFor(null)} variant="primary" size="lg">
           {ctaLabel}
         </CtaLink>
       </div>
