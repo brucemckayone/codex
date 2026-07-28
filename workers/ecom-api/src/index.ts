@@ -31,6 +31,7 @@ import { verifyStripeSignature } from './middleware/verify-signature';
 import agreements from './routes/agreements';
 import checkout from './routes/checkout';
 import connect from './routes/connect';
+import courseMonetisation from './routes/course-monetisation';
 import courses from './routes/courses';
 import purchases from './routes/purchases';
 import sales from './routes/sales';
@@ -140,6 +141,14 @@ app.route('/subscriptions', subscriptions);
  * Public course offer read (three §7 access paths + viewer entitlement).
  */
 app.route('/courses', courses);
+
+/**
+ * Studio course-monetisation routes (Codex-2pryk.2.4.1)
+ * Org-guarded WRITE side of the §7 paths: subscription-plan upsert/withdraw and
+ * the exact tier-access set. Mounted on a prefix of its own — NOT under
+ * `/courses`, which is the public `auth: 'optional'` offer read.
+ */
+app.route('/studio/courses', courseMonetisation);
 
 /**
  * Connect routes

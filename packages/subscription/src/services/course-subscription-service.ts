@@ -100,22 +100,49 @@ export class CourseSubscriptionService extends BaseService {
   // ─── Plan management (Stripe Product + 2 Prices, per course) ─────────────────
 
   /**
+   * Resolve a course inside `organizationId`, or throw.
+   *
+   * Every plan mutation routes through here. Callers hold org management over
+   * `organizationId` only; the course id arrives from an untrusted client path
+   * segment, so resolving by `(id, organizationId)` is what stops an org-A admin
+   * from attaching a Stripe product — or changing prices — on org B's course.
+   * A foreign course reads as `NotFoundError`, never `ForbiddenError`, so this
+   * never confirms that a course in another org exists.
+   */
+  private async getCourseInOrgOrThrow(
+    organizationId: string,
+    courseId: string
+  ) {
+    const course = await this.db.query.courses.findFirst({
+      where: and(
+        eq(courses.id, courseId),
+        eq(courses.organizationId, organizationId),
+        isNull(courses.deletedAt)
+      ),
+      columns: { id: true, title: true, organizationId: true },
+    });
+    if (!course) {
+      throw new NotFoundError('Course not found', { courseId, organizationId });
+    }
+    return course;
+  }
+
+  /**
    * Create the course's subscription plan: a Stripe Product + monthly/annual
    * Prices (on the PLATFORM account — the platform-charge model, same as tiers)
    * plus the `course_subscription_plans` row. One live plan per course.
+   *
+   * Prefer {@link upsertPlan} from a management surface — this throws
+   * {@link CourseSubscriptionPlanExistsError} on a second call, which makes it
+   * unusable directly behind a "save" button.
    */
   async createPlan(
+    organizationId: string,
     courseId: string,
     input: { priceMonthly: number; priceAnnual: number }
   ): Promise<typeof courseSubscriptionPlans.$inferSelect> {
     try {
-      const course = await this.db.query.courses.findFirst({
-        where: and(eq(courses.id, courseId), isNull(courses.deletedAt)),
-        columns: { id: true, title: true, organizationId: true },
-      });
-      if (!course) {
-        throw new NotFoundError('Course not found', { courseId });
-      }
+      const course = await this.getCourseInOrgOrThrow(organizationId, courseId);
 
       // A course sub pays out to the org/creator, so the org Connect account
       // must be ready before a plan can be sold (mirrors TierService).
@@ -224,6 +251,309 @@ export class CourseSubscriptionService extends BaseService {
       ),
     });
     return plan ?? null;
+  }
+
+  /**
+   * The course's plan row whatever its state — including one withdrawn by
+   * {@link deactivatePlan}.
+   *
+   * Distinct from {@link getPlanForCourse}, which answers "what is on sale" and
+   * so filters `isActive`. Write paths must use THIS one: `courseId` is unique
+   * among non-deleted rows (`uq_course_sub_plans_course`), so an `isActive`-filtered
+   * lookup would report "no plan" for a course that cannot accept a new row.
+   */
+  private async findPlanRow(courseId: string) {
+    const plan = await this.db.query.courseSubscriptionPlans.findFirst({
+      where: and(
+        eq(courseSubscriptionPlans.courseId, courseId),
+        isNull(courseSubscriptionPlans.deletedAt)
+      ),
+    });
+    return plan ?? null;
+  }
+
+  /**
+   * Create the plan if the course has never had one, otherwise save the prices
+   * onto the existing row (re-listing it if it had been withdrawn).
+   *
+   * The management surface's single entry point. A "save" button must be
+   * idempotent — {@link createPlan} alone throws
+   * {@link CourseSubscriptionPlanExistsError} on the second press, so the
+   * create/update decision belongs here in the service rather than in a route
+   * (or, worse, in each caller).
+   *
+   * The existence check deliberately uses {@link findPlanRow}, not
+   * {@link getPlanForCourse}: a WITHDRAWN plan still occupies the course's unique
+   * row, so routing that case to `createPlan` would raise
+   * `CourseSubscriptionPlanExistsError` and leave the creator permanently unable
+   * to put the subscription back on sale.
+   */
+  async upsertPlan(
+    organizationId: string,
+    courseId: string,
+    input: { priceMonthly: number; priceAnnual: number }
+  ): Promise<typeof courseSubscriptionPlans.$inferSelect> {
+    const existing = await this.findPlanRow(courseId);
+    return existing
+      ? this.savePlanPrices(organizationId, courseId, input)
+      : this.createPlan(organizationId, courseId, input);
+  }
+
+  /**
+   * Save prices onto the course's existing plan and make sure it is on sale.
+   *
+   * Stripe `Price` objects are IMMUTABLE in `unit_amount`, so a price change
+   * means: create a new Price on the SAME Product, point the row at it, and
+   * archive the old one. This mirrors `TierService.updateTier` exactly, including
+   * the compensating rollback — if the DB write fails after Stripe succeeded, the
+   * new Prices are archived and the old ones un-archived, so Stripe and the DB
+   * cannot silently diverge (a diverged row would sell at a price the creator
+   * never set).
+   *
+   * Existing subscribers are deliberately NOT migrated: their subscription keeps
+   * billing the archived Price it was created with (grandfathering, same as org
+   * tiers). Only new checkouts see the new amount.
+   *
+   * RE-LISTS a withdrawn plan (`isActive` back to true, Stripe Product
+   * un-archived). Saving an offer is the creator asserting "this is what I sell",
+   * and since the withdrawn row is the only one the course can have, reuse is the
+   * only way back on sale — it also keeps every `course_subscriptions.planId` FK
+   * pointing at the same plan across a withdraw/re-list cycle.
+   *
+   * Unchanged prices on an already-live plan are a complete no-op, so repeated
+   * saves create no Stripe Price churn.
+   */
+  async savePlanPrices(
+    organizationId: string,
+    courseId: string,
+    input: { priceMonthly: number; priceAnnual: number }
+  ): Promise<typeof courseSubscriptionPlans.$inferSelect> {
+    try {
+      await this.getCourseInOrgOrThrow(organizationId, courseId);
+
+      const existing = await this.findPlanRow(courseId);
+      if (!existing) {
+        throw new CourseSubscriptionPlanNotFoundError(courseId);
+      }
+
+      const monthlyChanged = input.priceMonthly !== existing.priceMonthly;
+      const annualChanged = input.priceAnnual !== existing.priceAnnual;
+      const needsRelist = !existing.isActive;
+      if (!monthlyChanged && !annualChanged && !needsRelist) {
+        return existing;
+      }
+
+      // The three Stripe id columns are nullable, so the row type permits a live
+      // plan with nothing behind it in Stripe. `createPlan` always writes all
+      // three, so this is unreachable by design — but it IS reachable by a bad
+      // manual row or a future partial write, and a re-price is impossible
+      // without a Product to hang the new Price on. Fail loudly: a plan the DB
+      // advertises as sellable with no Stripe object is corrupt, and silently
+      // updating only the pence columns would make the row lie about what a buyer
+      // is actually charged.
+      const { stripeProductId, stripePriceMonthlyId, stripePriceAnnualId } =
+        existing;
+      if (
+        !stripeProductId ||
+        (monthlyChanged && !stripePriceMonthlyId) ||
+        (annualChanged && !stripePriceAnnualId)
+      ) {
+        throw new InternalServiceError(
+          'Course subscription plan is missing its Stripe product/price ids',
+          { courseId, organizationId, planId: existing.id }
+        );
+      }
+
+      let newMonthlyPriceId = stripePriceMonthlyId;
+      let newAnnualPriceId = stripePriceAnnualId;
+      const createdPriceIds: string[] = [];
+      const archivedPriceIds: string[] = [];
+
+      const idempotencyBase = crypto.randomUUID();
+
+      // Re-list first: `deactivatePlan` archived the Product, and Stripe refuses
+      // to bill a subscription against an inactive Product. Do it BEFORE the new
+      // Prices so we never attach a Price to a Product that is still archived.
+      if (needsRelist) {
+        await this.stripe.products.update(stripeProductId, { active: true });
+      }
+
+      if (monthlyChanged && stripePriceMonthlyId) {
+        const price = await this.stripe.prices.create(
+          {
+            product: stripeProductId,
+            unit_amount: input.priceMonthly,
+            currency: CURRENCY.GBP,
+            recurring: { interval: 'month' },
+            metadata: { codex_course_id: courseId, interval: 'month' },
+          },
+          { idempotencyKey: `course-plan-reprice-monthly-${idempotencyBase}` }
+        );
+        newMonthlyPriceId = price.id;
+        createdPriceIds.push(price.id);
+        await this.stripe.prices.update(stripePriceMonthlyId, {
+          active: false,
+        });
+        archivedPriceIds.push(stripePriceMonthlyId);
+      }
+
+      if (annualChanged && stripePriceAnnualId) {
+        const price = await this.stripe.prices.create(
+          {
+            product: stripeProductId,
+            unit_amount: input.priceAnnual,
+            currency: CURRENCY.GBP,
+            recurring: { interval: 'year' },
+            metadata: { codex_course_id: courseId, interval: 'year' },
+          },
+          { idempotencyKey: `course-plan-reprice-annual-${idempotencyBase}` }
+        );
+        newAnnualPriceId = price.id;
+        createdPriceIds.push(price.id);
+        await this.stripe.prices.update(stripePriceAnnualId, {
+          active: false,
+        });
+        archivedPriceIds.push(stripePriceAnnualId);
+      }
+
+      try {
+        const [updated] = await this.db
+          .update(courseSubscriptionPlans)
+          .set({
+            priceMonthly: input.priceMonthly,
+            priceAnnual: input.priceAnnual,
+            stripePriceMonthlyId: newMonthlyPriceId,
+            stripePriceAnnualId: newAnnualPriceId,
+            // Saving an offer puts it on sale — this is what re-lists a plan the
+            // creator had withdrawn.
+            isActive: true,
+            updatedAt: new Date(),
+          })
+          .where(eq(courseSubscriptionPlans.id, existing.id))
+          .returning();
+        if (!updated) {
+          throw new InternalServiceError(
+            'Failed to update course plan prices',
+            {
+              courseId,
+              planId: existing.id,
+            }
+          );
+        }
+        return updated;
+      } catch (dbError) {
+        this.obs.warn(
+          'DB update failed during savePlanPrices, rolling back Stripe price changes',
+          {
+            courseId,
+            organizationId,
+            planId: existing.id,
+            dbError:
+              dbError instanceof Error ? dbError.message : String(dbError),
+          }
+        );
+        await this.rollbackPriceChanges(
+          createdPriceIds,
+          archivedPriceIds,
+          courseId
+        );
+        throw dbError;
+      }
+    } catch (error) {
+      this.handleError(error, 'savePlanPrices');
+    }
+  }
+
+  /**
+   * Best-effort undo of a Stripe price swap after the DB write failed: archive
+   * what we created, un-archive what we archived.
+   *
+   * Deliberately swallows its own failures — it runs on an error path where the
+   * caller is about to rethrow the real cause, and a cleanup failure must not
+   * mask it. Each failure is logged individually so a genuinely diverged plan is
+   * still discoverable, and one bad call does not abort the rest of the undo.
+   */
+  private async rollbackPriceChanges(
+    createdPriceIds: string[],
+    archivedPriceIds: string[],
+    courseId: string
+  ): Promise<void> {
+    await Promise.all([
+      ...createdPriceIds.map((id) =>
+        this.stripe.prices.update(id, { active: false }).catch((err) =>
+          this.obs.error('Failed to archive new course price during rollback', {
+            courseId,
+            stripePriceId: id,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        )
+      ),
+      ...archivedPriceIds.map((id) =>
+        this.stripe.prices.update(id, { active: true }).catch((err) =>
+          this.obs.error(
+            'Failed to restore archived course price during rollback',
+            {
+              courseId,
+              stripePriceId: id,
+              error: err instanceof Error ? err.message : String(err),
+            }
+          )
+        )
+      ),
+    ]);
+  }
+
+  /**
+   * Withdraw the course subscription as a way in: flip `isActive` false so
+   * `getCourseOffer` stops offering it and `createCheckoutSession` refuses.
+   *
+   * The Stripe Product + Prices are archived but the ROW IS KEPT (no soft
+   * delete): live `course_subscriptions` carry a `planId` FK to it, and existing
+   * subscribers must keep renewing and keep their entitlement. This turns off
+   * NEW sales only — cancelling current subscribers is a separate, explicit act.
+   *
+   * Idempotent: deactivating a course with no live plan is a no-op, so the
+   * panel's toggle can be pressed twice without a 404.
+   */
+  async deactivatePlan(
+    organizationId: string,
+    courseId: string
+  ): Promise<void> {
+    try {
+      await this.getCourseInOrgOrThrow(organizationId, courseId);
+
+      const existing = await this.getPlanForCourse(courseId);
+      if (!existing) {
+        return;
+      }
+
+      await this.db
+        .update(courseSubscriptionPlans)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(eq(courseSubscriptionPlans.id, existing.id));
+
+      // Stripe cleanup is best-effort AFTER the authoritative DB flip: the offer
+      // is already withdrawn, and an archive failure must not resurrect it. A row
+      // with no product id (nullable column) simply has nothing to archive —
+      // unlike a re-price, deactivation is complete without Stripe.
+      if (existing.stripeProductId) {
+        await this.stripe.products
+          .update(existing.stripeProductId, { active: false })
+          .catch((err) =>
+            this.obs.error(
+              'Failed to archive course plan product on deactivate',
+              {
+                courseId,
+                organizationId,
+                stripeProductId: existing.stripeProductId,
+                error: err instanceof Error ? err.message : String(err),
+              }
+            )
+          );
+      }
+    } catch (error) {
+      this.handleError(error, 'deactivatePlan');
+    }
   }
 
   // ─── Checkout ────────────────────────────────────────────────────────────────
