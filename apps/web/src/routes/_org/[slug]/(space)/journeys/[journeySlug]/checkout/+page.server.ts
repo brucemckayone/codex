@@ -28,9 +28,11 @@
  * fails we surface an error rather than render a pay page with no or partial
  * prices — a checkout that silently drops a way in is the bug this rewire fixes.
  *
- * STILL OUT OF SCOPE → Codex-2pryk.2.4.4: the submit itself (Stripe session
- * creation + redirect). The button still only reveals the honest
- * connect-in-progress notice.
+ * The SUBMIT lives in `$lib/remote/journey-checkout.remote.ts` (a `form()`, so
+ * the pay step works with JS off). This load deliberately sends it NOTHING but
+ * `signedIn`: the form re-resolves the course from the slug and the price from
+ * the offer server-side, so no price or plan/tier id is ever round-tripped
+ * through the browser (Codex-2pryk.2.4.4).
  */
 import { error } from '@sveltejs/kit';
 import type { CourseOffer } from '$lib/page-builder';
@@ -51,7 +53,7 @@ export const load: PageServerLoad = async (event) => {
   const { params, parent, url, setHeaders, platform, cookies } = event;
 
   // Let the org layout (auth + branding + org resolution) settle first.
-  await parent();
+  const { user } = await parent();
 
   const coursePage = await getCoursePage({ slug: params.journeySlug });
   if (!coursePage) {
@@ -106,6 +108,10 @@ export const load: PageServerLoad = async (event) => {
     testimonial: testimonials[0] ?? null,
     // Already holds access ⇒ nothing to buy; the CTA re-targets to the journey.
     enrolled: offer.entitled,
+    // Labels the pay CTA honestly for an anonymous buyer ("Sign in to continue").
+    // The submit works either way — it redirects to login and back with the same
+    // `?offer=` — but an unexplained detour mid-payment loses people.
+    signedIn: Boolean(user),
     // `?offer=` pre-selects one of the paths (deep-link from the sell page).
     preselectedOfferId: resolvePreselectedOffer(
       offers,

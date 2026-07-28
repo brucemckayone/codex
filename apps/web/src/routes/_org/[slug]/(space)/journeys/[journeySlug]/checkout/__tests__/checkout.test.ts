@@ -272,13 +272,25 @@ describe('journey checkout +page.server load', () => {
     expect(resolveCanEnterCourseMock).not.toHaveBeenCalled();
   });
 
-  it('reports an anonymous viewer as not entitled', async () => {
+  it('reports an anonymous viewer as not entitled, and not signed in', async () => {
     const { load } = await import('../+page.server');
     const { event } = makeEvent('rootwork');
 
     const data = (await load(event)) as LoadData;
 
     expect(data.enrolled).toBe(false);
+    // Labels the pay CTA "Sign in to continue" rather than sending them into an
+    // unexplained login detour mid-payment (Codex-2pryk.2.4.4).
+    expect(data.signedIn).toBe(false);
+  });
+
+  it('reports a signed-in viewer as signed in', async () => {
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork', { user: { id: 'u1' } });
+
+    const data = (await load(event)) as LoadData;
+
+    expect(data.signedIn).toBe(true);
   });
 
   it('offers nothing when the course has no purchasable path', async () => {

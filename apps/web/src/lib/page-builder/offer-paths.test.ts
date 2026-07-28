@@ -24,7 +24,9 @@ import {
   checkoutUrlForPath,
   deriveOfferPaths,
   deriveOfferPathsForPage,
+  resolveOfferTarget,
   resolvePreselectedOffer,
+  toWireInterval,
 } from './offer-paths';
 
 const TIER_ID = '33f6c1a1-bb69-4902-b24a-4365170c022c';
@@ -465,6 +467,74 @@ describe('buildHeadNote', () => {
       )
     ).toBeUndefined();
     expect(buildHeadNote(null)).toBeUndefined();
+  });
+});
+
+describe('resolveOfferTarget · the pay step gate', () => {
+  it('projects the payload the submit needs for each kind', () => {
+    expect(resolveOfferTarget(FULL_OFFER, 'purchase')).toEqual({
+      id: 'purchase',
+      kind: 'purchase',
+      priceCents: 2499,
+      tierId: undefined,
+      billingInterval: undefined,
+    });
+    expect(resolveOfferTarget(FULL_OFFER, 'subscription-annual')).toEqual({
+      id: 'subscription-annual',
+      kind: 'subscription',
+      priceCents: 27000,
+      tierId: undefined,
+      billingInterval: 'annual',
+    });
+    expect(resolveOfferTarget(FULL_OFFER, `tier:${TIER_ID}`)).toEqual({
+      id: `tier:${TIER_ID}`,
+      kind: 'tier',
+      priceCents: 1500,
+      tierId: TIER_ID,
+      billingInterval: 'monthly',
+    });
+  });
+
+  it('accepts exactly the ids the cards offer — no more, no fewer', () => {
+    // The submit gate and the display derivation MUST agree, or a card could be
+    // selectable but unbuyable (or an unlisted path quietly chargeable).
+    const cardIds = deriveOfferPaths(FULL_OFFER, COURSE).map((p) => p.id);
+    for (const id of cardIds) {
+      expect(resolveOfferTarget(FULL_OFFER, id), id).not.toBeNull();
+    }
+    expect(cardIds).toHaveLength(4);
+  });
+
+  it('refuses an id for a path that does not exist', () => {
+    expect(resolveOfferTarget(FULL_OFFER, 'tier:nope')).toBeNull();
+    expect(resolveOfferTarget(FULL_OFFER, 'subscription-weekly')).toBeNull();
+    expect(resolveOfferTarget(FULL_OFFER, '')).toBeNull();
+  });
+
+  it('refuses a WITHDRAWN path whose id is still well-formed', () => {
+    // The buyer's page was rendered while the plan existed. Between render and
+    // submit the creator withdrew it — the stale id must not start a checkout.
+    const withdrawn = offerWith({
+      paths: ['purchase'],
+      subscription: null,
+      tiers: [],
+    });
+    expect(resolveOfferTarget(withdrawn, 'subscription-monthly')).toBeNull();
+    expect(resolveOfferTarget(withdrawn, `tier:${TIER_ID}`)).toBeNull();
+    expect(resolveOfferTarget(withdrawn, 'purchase')).not.toBeNull();
+  });
+
+  it('refuses everything when there is no offer to check against', () => {
+    expect(resolveOfferTarget(null, 'purchase')).toBeNull();
+  });
+});
+
+describe('toWireInterval', () => {
+  it('maps the plan-row vocabulary to the vocabulary the routes validate', () => {
+    // Every checkout schema is `billingIntervalEnum = z.enum(['month','year'])`,
+    // while the columns are price_monthly / price_annual. Forwarding is a 400.
+    expect(toWireInterval('monthly')).toBe('month');
+    expect(toWireInterval('annual')).toBe('year');
   });
 });
 

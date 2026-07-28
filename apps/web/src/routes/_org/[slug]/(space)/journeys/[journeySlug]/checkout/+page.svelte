@@ -11,10 +11,13 @@
   can only decorate a path that read returns; it can never invent one or set a
   price. The offer selection is fully interactive (radio-group → live fine print).
 
-  The one thing this shell does NOT do yet is settle a payment: the Stripe
-  session + the `entitlements` write on success are Codex-2pryk.2.4.4. Clicking
-  "Continue" therefore surfaces the honest connect-in-progress seam rather than
-  faking a purchase confirmation.
+  The pay step is REAL (Codex-2pryk.2.4.4). The offer group + submit live inside a
+  `form()` remote POST, so a purchase works with JavaScript off; the checked radio
+  posts its canonical offer id and NOTHING else. No price, plan id, tier id or
+  course id leaves this markup — the handler re-resolves the course from the slug
+  and the amount from the offer, so a tampered payload cannot change what is
+  charged. Stripe returns the buyer to `./success`, which waits for the webhook's
+  entitlement write and then forwards to the journey dashboard.
 
   IMMERSIVE PALETTE (D6 · the `.jp` pattern): this surface mirrors the sales
   page's candlelit reading — the semantic `--color-*` tokens are re-pointed to
@@ -28,6 +31,7 @@
   import { page } from '$app/state';
   import { buildJourneyUrl } from '@codex/urls';
   import { brandOverridesToStyleAttr } from '$lib/page-builder/render/brand-overrides';
+  import { startJourneyCheckout } from '$lib/remote/journey-checkout.remote';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -80,10 +84,12 @@
     }
   });
 
-  // The pay CTA is wired only up to the WP-6 seam: clicking it reveals the
-  // honest connect-in-progress note (no fake settlement). An already-enrolled
-  // viewer skips it entirely — they're linked straight to the journey.
-  let initiated = $state(false);
+  // The pay CTA. An anonymous buyer can still press it — the form redirects them
+  // to sign in and back here with this selection intact — but saying so up front
+  // is better than an unexplained detour mid-payment.
+  const ctaLabel = $derived(
+    data.signedIn ? 'Continue' : 'Sign in to continue'
+  );
 </script>
 
 <svelte:head>
@@ -154,17 +160,30 @@
       <!-- RIGHT: the ways in -->
       <div class="ways">
         {#if offers.length > 0}
-          <div
-            class="offers"
-            role="radiogroup"
-            aria-label="Choose how to join {course.title}"
-          >
+          <!--
+            A REAL form POST (`form()` remote), not a click handler: the pay step
+            must work with JS off. The checked radio supplies `offerId`; the
+            server re-resolves it against the authoritative offer and resolves
+            the PRICE from the course/plan/tier row, so nothing in this markup
+            can influence what is charged.
+          -->
+          <form {...startJourneyCheckout} class="co-form">
+            <input
+              type="hidden"
+              name="journeySlug"
+              value={page.params.journeySlug}
+            />
+            <div
+              class="offers"
+              role="radiogroup"
+              aria-label="Choose how to join {course.title}"
+            >
             {#each offers as offer (offer.id)}
               <label class="offer" class:offer--selected={selectedId === offer.id}>
                 <input
                   class="offer__input"
                   type="radio"
-                  name="offer"
+                  name="offerId"
                   value={offer.id}
                   checked={selectedId === offer.id}
                   onchange={() => (override = offer.id)}
@@ -195,37 +214,37 @@
                 </div>
               </label>
             {/each}
-          </div>
+            </div>
 
-          <div class="co-actions">
-            {#if data.enrolled}
-              <a class="co-cta" href={dashboardUrl}>
-                Enter the journey <span aria-hidden="true">→</span>
-              </a>
-              <span class="co-actions__fine">
-                You already have access to {course.title}.
-              </span>
-            {:else}
-              <button
-                type="button"
-                class="co-cta"
-                onclick={() => (initiated = true)}
-              >
-                Continue <span aria-hidden="true">→</span>
-              </button>
-              <span class="co-actions__fine">{fineText}</span>
+            <div class="co-actions">
+              {#if data.enrolled}
+                <a class="co-cta" href={dashboardUrl}>
+                  Enter the journey <span aria-hidden="true">→</span>
+                </a>
+                <span class="co-actions__fine">
+                  You already have access to {course.title}.
+                </span>
+              {:else}
+                <button
+                  type="submit"
+                  class="co-cta"
+                  disabled={startJourneyCheckout.pending > 0}
+                >
+                  {startJourneyCheckout.pending > 0
+                    ? 'Taking you to checkout…'
+                    : ctaLabel}
+                  <span aria-hidden="true">→</span>
+                </button>
+                <span class="co-actions__fine">{fineText}</span>
+              {/if}
+            </div>
+
+            {#if startJourneyCheckout.result?.success === false}
+              <p class="co-error" role="alert">
+                {startJourneyCheckout.result.error}
+              </p>
             {/if}
-          </div>
-
-          {#if initiated && !data.enrolled}
-            <p class="co-seam" role="status">
-              Secure checkout is being connected. Your choice — <b
-                >{selectedOffer?.name}</b
-              >
-              ({selectedOffer?.priceLabel}) — is ready; payment goes live with the
-              monetization release.
-            </p>
-          {/if}
+          </form>
 
           {#if data.priceNote}
             <p class="co-note">{data.priceNote}</p>
@@ -710,25 +729,39 @@
     outline-offset: var(--focus-offset);
   }
 
+  /* In flight to Stripe — a second submit would open a second session. */
+  .co-cta:disabled {
+    opacity: var(--opacity-60);
+    cursor: wait;
+  }
+
+  .co-cta:disabled:active {
+    transform: none;
+  }
+
   .co-actions__fine {
     font-size: var(--text-sm);
     color: var(--color-text-tertiary);
     max-width: 34ch;
   }
 
-  .co-seam {
+  /* The pay form owns the radio group AND the submit, so the checked radio is
+     what gets posted. It contributes no layout of its own — the `ways` column
+     already spaces its children. */
+  .co-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  .co-error {
     margin: 0;
     padding: var(--space-3) var(--space-4);
     border-radius: var(--radius-md);
-    border: var(--border-width) solid var(--color-border-subtle);
-    background: color-mix(in oklab, var(--color-surface) 60%, transparent);
+    border: var(--border-width) solid var(--color-error);
+    background: color-mix(in oklab, var(--color-error) 14%, transparent);
     font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-  }
-
-  .co-seam b {
     color: var(--color-text);
-    font-weight: var(--font-semibold);
   }
 
   .co-note {

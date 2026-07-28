@@ -191,25 +191,24 @@ export function tierPathId(tierId: string): string {
 }
 
 /**
- * The selectable ways into the course, in `offer.paths` order (purchase →
- * subscription → tiers). Empty when the course has no available path at all —
- * the caller renders "not open for enrolment", never a fabricated price.
+ * THE enumeration of ways into a course — the single place the canonical id set
+ * is defined. Both the display derivation and the submit-target resolver go
+ * through here, so the ids a card offers and the ids the pay step accepts cannot
+ * drift apart.
  *
- * A course subscription contributes TWO cards (monthly + annual): that plan
+ * Order follows `offer.paths` (purchase → subscription → tiers).
+ *
+ * A course subscription contributes TWO entries (monthly + annual): that plan
  * exists only for this course, so if this surface does not offer both intervals
- * the annual price the creator set is unreachable. A tier contributes ONE card
+ * the annual price the creator set is unreachable. A tier contributes ONE entry
  * at its monthly price: a tier is a whole-org subscription and the org's own
  * pricing page owns its interval choice — here the card's job is to say "this
  * course is included in <Tier>".
  */
-export function deriveOfferPaths(
-  offer: CourseOffer | null,
-  course: OfferCourseLike,
-  inviteProps?: SectionProps
+function enumerateOfferPaths(
+  offer: CourseOffer,
+  course: OfferCourseLike
 ): OfferPath[] {
-  if (!offer) return [];
-
-  const decorations = readDecorations(inviteProps);
   const paths: OfferPath[] = [];
 
   for (const kind of offer.paths) {
@@ -298,10 +297,86 @@ export function deriveOfferPaths(
     }
   }
 
-  const decorated = paths.map((path) =>
+  return paths;
+}
+
+/**
+ * The selectable ways into the course, decorated by the authored `invite` copy.
+ * Empty when the course has no available path at all — the caller renders "not
+ * open for enrolment", never a fabricated price.
+ */
+export function deriveOfferPaths(
+  offer: CourseOffer | null,
+  course: OfferCourseLike,
+  inviteProps?: SectionProps
+): OfferPath[] {
+  if (!offer) return [];
+
+  const decorations = readDecorations(inviteProps);
+  const decorated = enumerateOfferPaths(offer, course).map((path) =>
     decorate(path, decorations.get(path.id))
   );
   return applyRecommendation(decorated);
+}
+
+/**
+ * What the pay step needs to charge for one path — and NOTHING a client could
+ * use to influence the amount.
+ *
+ * `priceCents` is here for logging/assertion only; it is never sent to a
+ * checkout endpoint. All three endpoints re-resolve the amount server-side from
+ * the course row / plan row / tier row, which is why the submit can accept an
+ * opaque `offerId` from the client and stay safe.
+ */
+export interface OfferTarget {
+  id: string;
+  kind: OfferPathKind;
+  priceCents: number;
+  /** Only on `kind: 'tier'`. */
+  tierId?: string;
+  /** Only on the recurring kinds. */
+  billingInterval?: OfferBillingInterval;
+}
+
+/**
+ * Resolve a client-supplied path id against the AUTHORITATIVE offer.
+ *
+ * This is the pay step's gate: an id that names no currently-available path
+ * returns null and the submit refuses, so a tampered or stale `?offer=` token
+ * cannot start a checkout for a way in that has been withdrawn. Copy is
+ * irrelevant here, hence the empty title — only the payload is projected.
+ */
+export function resolveOfferTarget(
+  offer: CourseOffer | null,
+  pathId: string
+): OfferTarget | null {
+  if (!offer) return null;
+  const path = enumerateOfferPaths(offer, { title: '' }).find(
+    (p) => p.id === pathId
+  );
+  if (!path) return null;
+  return {
+    id: path.id,
+    kind: path.kind,
+    priceCents: path.priceCents,
+    tierId: path.tierId,
+    billingInterval: path.billingInterval,
+  };
+}
+
+/**
+ * Map the plan-row interval vocabulary to the WIRE vocabulary every checkout
+ * route validates (`billingIntervalEnum = z.enum(['month','year'])`).
+ *
+ * Two vocabularies exist because the columns are `price_monthly`/`price_annual`
+ * while the Stripe-facing schemas say `month`/`year`. Forwarding instead of
+ * mapping is a 400 — `api.checkout.courseSubscription` shipped that way with no
+ * callers and it went unnoticed until this seam was wired.
+ */
+export function toWireInterval(
+  interval: OfferBillingInterval
+): 'month' | 'year' {
+  return interval === 'annual' ? 'year' : 'month';
 }
 
 /**
