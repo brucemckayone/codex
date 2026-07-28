@@ -4,9 +4,11 @@
  * Extracted out of `studio/journeys/[id]/page/+page.svelte` so the gating logic
  * is unit-testable in isolation (same reason `preview-wiring.ts` was extracted).
  *
- * WHY IT EXISTS: the save drives TWO endpoints — page copy via `saveJourneyPage`
- * and pricing via `updateJourneyOffer` (which owns the authoritative
- * `courses.price_cents`). The component used to `try/catch` both inline and
+ * WHY IT EXISTS: the save drives THREE endpoints — page copy via
+ * `saveJourneyPage`, the course's subscription plan + tier access via
+ * `updateCourseMonetisation` (Codex-2pryk.2.4.2), and the page's offer row via
+ * `updateJourneyOffer` (which owns the authoritative `courses.price_cents`).
+ * The component used to `try/catch` both inline and
  * `toast.error(...)` on failure, then RETURN NORMALLY — so `handlePublish`'s
  * `await handleSave(); toast.success('Page published')` fired on a save that had
  * persisted nothing, and `handleViewLive` opened the live page showing stale
@@ -56,17 +58,55 @@ export interface SavePagePayload {
 }
 
 /**
- * Which leg failed. `page` = nothing persisted at all. `offer` = the copy landed
- * but the pricing was refused, so the two messages must differ — a bare "failed
- * to save" would be false for the copy, and "saved" would be false for pricing.
+ * Which leg failed. `page` = nothing persisted at all. `monetisation` = the copy
+ * landed but the subscription plan / tier access was refused. `offer` = both
+ * landed but the page's own offer row was refused. The three messages must
+ * differ — a bare "failed to save" would be false for the copy, and "saved"
+ * would be false for pricing.
  */
-export type BuilderSaveFailureStage = 'page' | 'offer';
+export type BuilderSaveFailureStage = 'page' | 'monetisation' | 'offer';
+
+/**
+ * The page's jsonb `offer` mirror as DERIVED from the authoritative monetisation
+ * tables (Codex-2pryk.2.4.2). Structurally identical to
+ * `MonetisationPresentation` in the monetisation store, redeclared here so this
+ * module stays a pure, store-free orchestrator (it is unit-tested with plain
+ * objects, and importing a `.svelte.ts` would drag the rune runtime in).
+ */
+export interface DerivedOfferPresentation {
+  tiersEnabled: boolean;
+  subscriptionEnabled: boolean;
+  subscriptionPriceCents: number | null;
+}
+
+/**
+ * The monetisation leg: the two ways-in that live on the COURSE, not the page —
+ * the subscription plan (a Stripe Product + Prices) and the tier-access set.
+ *
+ * Injected as a narrow port rather than by importing the store, so the whole
+ * sequencing is testable with plain fakes.
+ */
+export interface MonetisationLeg {
+  /** Skip the write when the creator changed nothing. */
+  isDirty: boolean;
+  /** Persist the plan + tier set. Rejects on refusal; must not swallow. */
+  save(): Promise<unknown>;
+  /**
+   * The presentation to mirror into the page's `offer` bag, derived from the
+   * PERSISTED state — `null` when no authoritative baseline is loaded (a page
+   * with no subject course, or a failed read), in which case the bag's existing
+   * values are left alone rather than overwritten with a derived "all off".
+   */
+  presentation(): DerivedOfferPresentation | null;
+}
 
 export type BuilderSaveResult =
   | {
       outcome: 'saved';
       /** True when the offer leg actually ran (it is skipped when unchanged). */
       offerSaved: boolean;
+      /** True when the plan / tier-access leg actually ran. */
+      monetisationSaved: boolean;
       /**
        * Set when everything PERSISTED but the post-save cache invalidation
        * failed: the writes landed, so this is not a failure, but the studio's
@@ -92,7 +132,21 @@ export interface BuilderSaveDeps {
     pageId: string;
     offer: PersistedPageOffer;
   }): Promise<unknown>;
-  /** Promote pending → saved. Runs only once BOTH legs have landed. */
+  /**
+   * The course's plan + tier-access leg. Optional: a plain landing page has no
+   * subject course, so there is nothing to monetise.
+   */
+  monetisation?: MonetisationLeg;
+  /**
+   * Write the offer bag that was actually persisted back into the draft, so the
+   * saved baseline includes the DERIVED presentation fields.
+   *
+   * Without this the derivation would be recomputed on every save and always
+   * differ from a baseline that never carried it — re-sending the offer write on
+   * every press, under a `strict` rate limit, forever.
+   */
+  syncOffer?(offer: PersistedPageOffer): void;
+  /** Promote pending → saved. Runs only once EVERY leg has landed. */
   markSaved(): void;
   /** Post-save cache invalidation. A rejection degrades to `staleWarning`. */
   refresh?(): Promise<unknown>;
@@ -127,16 +181,53 @@ export function toPersistedOffer(offer: PageOffer): PersistedPageOffer {
 }
 
 /**
+ * Mirror the authoritative monetisation state into the offer bag.
+ *
+ * The three overwritten fields are PRESENTATION — which ways-in the sales page
+ * teases. Their authority is `course_subscription_plans` / `course_tier_access`,
+ * so they are derived here rather than read from the panel's own toggles: that is
+ * what makes a bag advertising a subscription with no plan behind it
+ * unrepresentable instead of merely unlikely.
+ *
+ * `oneOff*` is untouched — it mirrors `courses.price_cents`, which the offer
+ * endpoint itself writes, so the bag IS its presentation and its authority moves
+ * in the same transaction.
+ */
+function withDerivedPresentation(
+  offer: PersistedPageOffer,
+  derived: DerivedOfferPresentation | null
+): PersistedPageOffer {
+  if (!derived) return offer;
+  return {
+    ...offer,
+    tiersEnabled: derived.tiersEnabled,
+    subscriptionEnabled: derived.subscriptionEnabled,
+    subscriptionPriceCents: derived.subscriptionPriceCents,
+  };
+}
+
+/**
  * Has the offer changed against the saved baseline? Pricing is a commerce
  * mutation under a `strict` rate limit, not something every copy edit should
  * spend — so the offer leg only runs when the creator actually changed it.
+ *
+ * Compares NORMALISED bags field by field. The previous `JSON.stringify`
+ * comparison was key-order sensitive and compared a partial {@link PageOffer}
+ * against a total one, so a semantically identical offer could re-send (or, worse,
+ * a real change could compare equal) purely on key order.
  */
 function offerChanged(
-  offer: PageOffer | undefined,
+  offer: PersistedPageOffer,
   savedOffer: PageOffer | undefined
 ): boolean {
-  if (!offer) return false;
-  return JSON.stringify(offer) !== JSON.stringify(savedOffer);
+  const saved = toPersistedOffer(savedOffer ?? {});
+  return (
+    offer.tiersEnabled !== saved.tiersEnabled ||
+    offer.subscriptionEnabled !== saved.subscriptionEnabled ||
+    offer.subscriptionPriceCents !== saved.subscriptionPriceCents ||
+    offer.oneOffEnabled !== saved.oneOffEnabled ||
+    offer.oneOffPriceCents !== saved.oneOffPriceCents
+  );
 }
 
 /**
@@ -172,13 +263,39 @@ export async function saveBuilderDraft(
     };
   }
 
-  let offerSaved = false;
-  if (payload.offer && offerChanged(payload.offer, deps.savedOffer)) {
+  // The monetisation leg goes BEFORE the offer leg, and that order is
+  // load-bearing. It is the leg that talks to Stripe, and the offer bag it feeds
+  // is derived from what it PERSISTED — so if the plan is refused (no Connect
+  // account, a price below £1), the bag is never updated to advertise a
+  // subscription that has no Stripe Product behind it.
+  let monetisationSaved = false;
+  if (deps.monetisation?.isDirty) {
     try {
-      await deps.saveOffer({
-        pageId: deps.pageId,
-        offer: toPersistedOffer(payload.offer),
-      });
+      await deps.monetisation.save();
+      monetisationSaved = true;
+    } catch (err) {
+      const why = remoteErrorMessage(err);
+      return {
+        outcome: 'failed',
+        stage: 'monetisation',
+        message: why
+          ? `Page saved, but the pricing was not: ${why}`
+          : 'Page saved, but the subscription and tier access could not be saved.',
+      };
+    }
+  }
+
+  // One bag, assembled from two authorities: the panel's own one-off fields plus
+  // the derived mirror of the plan + tier state that just landed.
+  const nextOffer = withDerivedPresentation(
+    toPersistedOffer(payload.offer ?? {}),
+    deps.monetisation?.presentation() ?? null
+  );
+
+  let offerSaved = false;
+  if (offerChanged(nextOffer, deps.savedOffer)) {
+    try {
+      await deps.saveOffer({ pageId: deps.pageId, offer: nextOffer });
       offerSaved = true;
     } catch (err) {
       // The page copy DID save; only pricing was refused (e.g. an enabled path
@@ -194,6 +311,9 @@ export async function saveBuilderDraft(
     }
   }
 
+  // Fold the persisted bag (derivation included) back into the draft BEFORE
+  // promoting it, so the new baseline is what the server actually holds.
+  deps.syncOffer?.(nextOffer);
   deps.markSaved();
 
   if (deps.refresh) {
@@ -203,6 +323,7 @@ export async function saveBuilderDraft(
       return {
         outcome: 'saved',
         offerSaved,
+        monetisationSaved,
         staleWarning:
           remoteErrorMessage(err) ??
           'Saved, but the live page may still show the previous version.',
@@ -210,5 +331,5 @@ export async function saveBuilderDraft(
     }
   }
 
-  return { outcome: 'saved', offerSaved };
+  return { outcome: 'saved', offerSaved, monetisationSaved };
 }

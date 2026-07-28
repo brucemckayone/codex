@@ -223,6 +223,38 @@ export interface JourneySellMedia {
   coverImageUrl: string | null;
 }
 
+/** One org tier the pricing panel offers as a way into the course. */
+export interface JourneyTierOption {
+  id: string;
+  name: string;
+  /** GBP pence. */
+  priceMonthly: number;
+  priceAnnual: number;
+}
+
+/**
+ * The journey's AUTHORITATIVE monetisation state (Codex-2pryk.2.4.2) — read back
+ * from the two tables that actually decide what a buyer can do, never from
+ * `landing_pages.offer`.
+ *
+ * `subscription` mirrors the live `course_subscription_plans` row (null when the
+ * subscription is not on sale, including when it has been withdrawn) and
+ * `tierIds` mirrors `course_tier_access`. The pricing panel loads THIS as its
+ * baseline, so an offer bag that disagrees with the product cannot survive a
+ * round trip — the panel would immediately show the real state.
+ *
+ * The one-off price is deliberately absent: it lives on `courses.price_cents`,
+ * which the page-save path already owns through `updateJourneyOffer`. Adding it
+ * here would give one column two write paths.
+ */
+export interface JourneyMonetisation {
+  courseId: string;
+  subscription: { priceMonthly: number; priceAnnual: number } | null;
+  tierIds: string[];
+  /** Every live org tier, for the picker — not just the selected ones. */
+  tierOptions: JourneyTierOption[];
+}
+
 /**
  * A journey the current user is enrolled in (Codex-oi2w4 — the library "Your
  * journeys" shelf + continue rail). FE mirror of `@codex/shared-types`

@@ -31,7 +31,11 @@ import type {
   CreatorOrganizationAgreement,
 } from '@codex/agreements';
 import { COOKIES, HEADERS, MIME_TYPES } from '@codex/constants';
-import type { Category, MediaItem } from '@codex/database/schema';
+import type {
+  Category,
+  CourseSubscriptionPlan,
+  MediaItem,
+} from '@codex/database/schema';
 import type { AvatarUploadResponse } from '@codex/identity';
 import type { NotificationPreferencesResponse } from '@codex/notifications';
 import type {
@@ -1954,6 +1958,84 @@ export function createServerApi(
         request<CourseOffer>(
           'ecom',
           `/courses/${encodeURIComponent(courseId)}/offer`
+        ),
+
+      // ── Studio monetisation WRITES (Codex-2pryk.2.4.1 routes) ─────────────
+      //
+      // The three mutations that make `offer` above return more than
+      // `paths: ['purchase']`. They live on ecom-api (not content-api, where the
+      // sibling journey-studio writes are) because plan creation calls Stripe and
+      // only ecom-api is given `STRIPE_SECRET_KEY` in production.
+      //
+      // Each is org-guarded by `requireOrgManagement` on `?organizationId=`, and
+      // each service method re-resolves the course by `(id, organizationId)` — so
+      // `courseId` may safely come from the builder's loaded draft: the worst a
+      // tampered value can do is address another course in an org the caller
+      // already manages (no escalation), and a foreign course 404s.
+
+      /**
+       * Create or re-price the course's subscription plan (GBP pence). Idempotent
+       * — a save button must survive a double press, so the first call creates the
+       * Stripe Product + monthly/annual Prices and later calls re-price the same
+       * plan row (and RE-LIST it if it had been withdrawn).
+       *
+       * 422 `CONNECT_ACCOUNT_NOT_READY` when the org has no onboarded Connect
+       * account: a course subscription pays out to the org, so it cannot be sold
+       * before payouts work. Callers must render that as payout guidance, not as a
+       * generic failure.
+       */
+      upsertSubscriptionPlan: (
+        organizationId: string,
+        courseId: string,
+        prices: { priceMonthly: number; priceAnnual: number }
+      ) =>
+        request<CourseSubscriptionPlan>(
+          'ecom',
+          `/studio/courses/${encodeURIComponent(
+            courseId
+          )}/subscription-plan?organizationId=${encodeURIComponent(
+            organizationId
+          )}`,
+          { method: 'PUT', body: JSON.stringify(prices) }
+        ),
+
+      /**
+       * Withdraw the subscription as a way in. `getCourseOffer` stops offering it
+       * and new checkouts are refused; EXISTING subscribers keep renewing and keep
+       * their entitlement (only `isActive` flips — the row is retained because
+       * their `course_subscriptions.planId` FK points at it).
+       *
+       * Idempotent: no live plan is a 204, not a 404.
+       */
+      withdrawSubscriptionPlan: (organizationId: string, courseId: string) =>
+        request<null>(
+          'ecom',
+          `/studio/courses/${encodeURIComponent(
+            courseId
+          )}/subscription-plan?organizationId=${encodeURIComponent(
+            organizationId
+          )}`,
+          { method: 'DELETE' }
+        ),
+
+      /**
+       * Set the EXACT set of org tiers that unlock this course (SPEC §7, "not just
+       * min-tier"). A TOTAL write: tiers absent from `tierIds` lose access and
+       * `[]` clears tier access entirely — so the panel's checkbox group has one
+       * unambiguous meaning and two concurrent saves cannot interleave into a set
+       * neither creator chose. 403 if any tier belongs to another org.
+       */
+      setTierAccess: (
+        organizationId: string,
+        courseId: string,
+        tierIds: string[]
+      ) =>
+        request<null>(
+          'ecom',
+          `/studio/courses/${encodeURIComponent(
+            courseId
+          )}/tier-access?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'PUT', body: JSON.stringify({ tierIds }) }
         ),
     },
 

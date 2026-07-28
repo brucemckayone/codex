@@ -20,6 +20,7 @@ import {
   SUPPORTED_IMAGE_MIME_TYPES,
   saveCurriculumBodySchema,
   saveJourneyPageBodySchema,
+  updateCourseMonetisationInputSchema,
   updateJourneyOfferBodySchema,
   updateJourneySellMediaBodySchema,
 } from '@codex/validation';
@@ -35,6 +36,7 @@ import type {
   JourneyCardView,
   JourneyCoursePage,
   JourneyListItem,
+  JourneyMonetisation,
   JourneyPageRecord,
   JourneySellMedia,
 } from '$lib/page-builder';
@@ -345,6 +347,193 @@ export const updateJourneyOffer = command(
       }
       throw err;
     }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Course MONETISATION — the authoritative subscription plan + tier-access write
+// (Codex-2pryk.2.4.2).
+//
+// WHY THIS EXISTS: the pricing panel used to write `subscriptionEnabled` /
+// `tiersEnabled` into `landing_pages.offer` and nowhere else. That jsonb bag is
+// PRESENTATION — no authoritative read consults it — so turning either path on
+// had NO effect on what a buyer could purchase. `getCourseOffer` composes the
+// real offer from `course_subscription_plans` and `course_tier_access`, and with
+// nothing able to write those two tables it could only ever return
+// `paths: ['purchase']`. That is why a creator who configured a membership tier,
+// a course subscription AND a one-off saw only the one-off at checkout.
+//
+// The two writes are one COMMAND rather than two so the panel has one save and
+// one error to render. Both underlying routes are idempotent, so a retry after a
+// partial failure converges rather than duplicating.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Read the course's AUTHORITATIVE monetisation state — the live plan's prices,
+ * the exact tier-access set, and every live org tier for the picker.
+ *
+ * Composed from `getCourseOffer` (the same read the public sell page and the
+ * checkout use) rather than from `landing_pages.offer`, so the panel's baseline
+ * IS the product. A bag that disagrees shows up immediately as the panel
+ * rendering the real state instead of the authored one.
+ *
+ * Returns `null` off a non-org host OR when either read fails — deliberately NOT
+ * an empty shape. An empty baseline is indistinguishable from "no plan, no
+ * tiers", and saving it would WITHDRAW a live plan and CLEAR real tier grants
+ * the creator never touched. The caller must treat `null` as "not loaded" and
+ * refuse to save.
+ */
+const monetisationSchema = z.object({ courseId: z.string().uuid() });
+
+async function readCourseMonetisation(
+  ctx: { api: ReturnType<typeof createServerApi>; orgId: string },
+  courseId: string
+): Promise<JourneyMonetisation | null> {
+  // Independent reads, but BOTH are required: the offer supplies the current
+  // selection and the tier list supplies what can be selected. A picker missing
+  // its options would silently render "no tiers to choose", which reads as
+  // "this org has no tiers" — so a half-load is reported as no load.
+  const [offer, tiers] = await Promise.all([
+    ctx.api.courses.offer(courseId).catch(() => null),
+    ctx.api.tiers.list(ctx.orgId).catch(() => null),
+  ]);
+  if (!offer || !tiers) return null;
+
+  return {
+    courseId: offer.courseId,
+    subscription: offer.subscription
+      ? {
+          priceMonthly: offer.subscription.priceMonthly,
+          priceAnnual: offer.subscription.priceAnnual,
+        }
+      : null,
+    tierIds: offer.tiers.map((t) => t.tierId),
+    tierOptions: tiers.map((tier) => ({
+      id: tier.id,
+      name: tier.name,
+      priceMonthly: tier.priceMonthly,
+      priceAnnual: tier.priceAnnual,
+    })),
+  };
+}
+
+export const getCourseMonetisation = query(
+  monetisationSchema,
+  async ({ courseId }): Promise<JourneyMonetisation | null> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) return null;
+    return readCourseMonetisation(ctx, courseId);
+  }
+);
+
+/**
+ * Persist the course's ways-in that live OUTSIDE the page row: the subscription
+ * plan and the tier-access set. A TOTAL write — `subscriptionEnabled: false`
+ * withdraws the plan and `tierIds: []` clears tier access, because an
+ * add-only shape could never express the panel's "off" position (which is
+ * exactly what made "off" a no-op before).
+ *
+ * ORDER: the SUBSCRIPTION PLAN goes first because it is the leg that talks to
+ * Stripe. Tier access is pure DB and the offer bag is written by a later leg, so
+ * a Stripe failure leaves the creator's previous, coherent state intact rather
+ * than a page advertising a subscription that has no Product behind it.
+ *
+ * `courseId` arrives from the builder's loaded draft. It is safe to trust: the
+ * ecom-api routes are `requireOrgManagement` on the resolved org AND each
+ * service method re-resolves the course by `(id, organizationId)`, so a tampered
+ * id can only ever address a course in an org the caller already manages, and a
+ * foreign one 404s.
+ *
+ * @returns the authoritative state read back after the writes — the caller's new
+ *   saved baseline. Read back rather than echoed so a save can never report a
+ *   state the DB does not hold.
+ */
+export const updateCourseMonetisation = command(
+  updateCourseMonetisationInputSchema,
+  async (input): Promise<JourneyMonetisation> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'Journey pricing can only be set within an organization');
+    }
+
+    // `command()` infers a `.nullable()` field as OPTIONAL (the quirk
+    // `updateJourneyOffer` documents), so restore the explicit nulls.
+    const priceMonthly = input.subscriptionPriceMonthly ?? null;
+    const priceAnnual = input.subscriptionPriceAnnual ?? null;
+
+    // An enabled subscription with a missing price is the silent-failure shape
+    // this whole task exists to remove: the sales page would advertise a monthly
+    // way in that no Stripe Price backs. Named per field so the panel can point
+    // at the empty box.
+    if (input.subscriptionEnabled && priceMonthly === null) {
+      error(400, 'Set a monthly price, or turn the course subscription off');
+    }
+    if (input.subscriptionEnabled && priceAnnual === null) {
+      error(400, 'Set an annual price, or turn the course subscription off');
+    }
+
+    try {
+      if (
+        input.subscriptionEnabled &&
+        priceMonthly !== null &&
+        priceAnnual !== null
+      ) {
+        await ctx.api.courses.upsertSubscriptionPlan(
+          ctx.orgId,
+          input.courseId,
+          {
+            priceMonthly,
+            priceAnnual,
+          }
+        );
+      } else {
+        await ctx.api.courses.withdrawSubscriptionPlan(
+          ctx.orgId,
+          input.courseId
+        );
+      }
+
+      await ctx.api.courses.setTierAccess(
+        ctx.orgId,
+        input.courseId,
+        input.tierIds
+      );
+    } catch (err) {
+      // A course subscription pays out to the org, so Stripe refuses to sell one
+      // before Connect onboarding completes. The service says "Stripe Connect
+      // account is not fully onboarded", which tells a creator nothing about what
+      // to DO — replace it with the action and where to take it.
+      if (
+        ApiError.isApiError(err) &&
+        err.details &&
+        typeof err.details === 'object' &&
+        (err.details as { code?: unknown }).code === 'CONNECT_ACCOUNT_NOT_READY'
+      ) {
+        error(
+          422,
+          'Connect a payout account before selling a course subscription — finish Stripe onboarding in Studio → Monetisation.'
+        );
+      }
+      // Everything else 4xx is the service's own guidance (a price below £1, an
+      // annual price worse than 12× monthly, a tier from another org). Forward
+      // the text; 5xx may carry internals, so it propagates untouched.
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        error(err.status, err.message);
+      }
+      throw err;
+    }
+
+    const persisted = await readCourseMonetisation(ctx, input.courseId);
+    if (!persisted) {
+      // The writes landed but the read-back did not. Reporting success with a
+      // guessed shape is how a stale baseline gets promoted to "saved", so fail
+      // loudly and leave the draft dirty.
+      error(
+        502,
+        'Pricing saved, but reading it back failed — reload to see the current offer.'
+      );
+    }
+    return persisted;
   }
 );
 

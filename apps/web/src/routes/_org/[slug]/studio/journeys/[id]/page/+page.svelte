@@ -14,8 +14,10 @@
   so edits are live.
 
   The remotes are REAL (`getJourneyForBuilder` / `saveJourneyPage` /
-  `updateJourneyOffer` — no mocks). Save drives two endpoints because pricing is a
-  separate resource from page copy; see `handleSave`. Admin/owner gate lives in
+  `updateJourneyOffer` / `updateCourseMonetisation` — no mocks). Save drives four
+  endpoints because the page copy, the course's plan + tier access, the page's
+  offer row and the sell media are four separate resources; see `handleSave`
+  and `$lib/page-builder/builder-save`. Admin/owner gate lives in
   +page.server.ts. Per-page brand overrides tint the canvas via the org brand OKLCH
   layer (`data-org-brand` + brand vars on the canvas wrapper).
 -->
@@ -43,6 +45,7 @@
     remoteErrorMessage,
     saveBuilderDraft,
   } from '$lib/page-builder/builder-save';
+  import { monetisation } from '$lib/page-builder/monetisation-store.svelte';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
   import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
   import type { JourneyStagePreview } from '$lib/page-builder/render-edit';
@@ -153,18 +156,29 @@
     // forget: `open()` already fails soft per-read, and a media-library hiccup
     // must not stop the creator editing copy.
     void sellMedia.open(pageId);
+    // The subscription plan + tier-access set live on the SUBJECT COURSE too, and
+    // their baseline is read back from the tables that actually gate access
+    // (Codex-2pryk.2.4.2) — never from the page's `offer` bag. A page with no
+    // subject course has nothing to monetise, so it opens with `null`.
+    void monetisation.open(
+      draft.subjectType === 'course' ? draft.subjectId : null
+    );
   });
 
   onDestroy(() => {
     pageBuilder.close();
     sellMedia.close();
+    monetisation.close();
   });
 
   const pending = $derived(pageBuilder.pending);
   const selected = $derived(pageBuilder.selectedSection);
-  // Media is part of "unsaved work" too — otherwise picking a clip and navigating
-  // away would lose it with no warning, and Save would appear to have nothing to do.
-  const isDirty = $derived(pageBuilder.isDirty || sellMedia.isDirty);
+  // Media and monetisation are part of "unsaved work" too — otherwise picking a
+  // clip or a tier and navigating away would lose it with no warning, and Save
+  // would appear to have nothing to do.
+  const isDirty = $derived(
+    pageBuilder.isDirty || sellMedia.isDirty || monetisation.isDirty
+  );
   const slug = $derived(pending?.slug ?? '');
 
   // Per-page brand overrides → tint the canvas via the org brand OKLCH layer.
@@ -182,10 +196,12 @@
   });
 
   /**
-   * The page draft and the journey's OFFER are two resources with two endpoints —
-   * page copy via `saveJourneyPage`, pricing via `updateJourneyOffer` (which also
-   * writes the authoritative `courses.price_cents`). One Save button drives both so
-   * the creator has one mental model. The orchestration lives in
+   * The page draft, the course's MONETISATION and the journey's OFFER are separate
+   * resources with separate endpoints — page copy via `saveJourneyPage`, the
+   * subscription plan + tier access via `updateCourseMonetisation`, and the offer
+   * row via `updateJourneyOffer` (which also writes the authoritative
+   * `courses.price_cents`). One Save button drives all of them so the creator has
+   * one mental model. The orchestration lives in
    * `$lib/page-builder/builder-save` so it is unit-testable; this wrapper only
    * turns its explicit result into toasts.
    *
@@ -212,6 +228,19 @@
         savedOffer: pageBuilder.saved?.offer,
         savePage: saveJourneyPage,
         saveOffer: updateJourneyOffer,
+        // The two course-owned ways in (subscription plan + tier access). This
+        // leg runs BEFORE the offer leg because it is the one that talks to
+        // Stripe, and the offer bag's tier/subscription fields are DERIVED from
+        // what it persisted — so a refused plan never leaves the sales page
+        // advertising a subscription with no Stripe Product behind it.
+        monetisation: {
+          isDirty: monetisation.isDirty,
+          save: () => monetisation.save(),
+          presentation: () => monetisation.presentationOffer,
+        },
+        // Fold the persisted bag back into the draft so the saved baseline carries
+        // the derived fields; without it every save would re-send the offer write.
+        syncOffer: (offer) => pageBuilder.updateOffer(offer),
         markSaved: () => pageBuilder.markSaved(),
         // The PUBLIC sales load `depends('cache:versions')` precisely so a save
         // can mark it stale; without this the client reuses its cached load data

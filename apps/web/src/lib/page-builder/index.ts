@@ -52,6 +52,7 @@ export type {
   JourneyLibraryContentItem,
   JourneyLibraryCourse,
   JourneyListItem,
+  JourneyMonetisation,
   JourneyPageRecord,
   JourneyPracticeView,
   JourneyProgress,
@@ -59,6 +60,7 @@ export type {
   JourneySellMedia,
   JourneyStageView,
   JourneyTestimonialView,
+  JourneyTierOption,
   LibraryAccessSource,
   ListJourneysQuery,
 } from './journey-queries';

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { uuidSchema } from '../primitives';
+import { priceCentsSchema, uuidSchema } from '../primitives';
 import { checkoutRedirectUrlSchema } from './purchase';
 import { billingIntervalEnum } from './subscription';
 
@@ -84,6 +84,42 @@ export const setCourseTierAccessSchema = z.object({
     .max(50, 'Cannot grant more than 50 tiers to one course'),
 });
 
+/**
+ * INPUT of the studio pricing panel's monetisation write (Codex-2pryk.2.4.2) —
+ * the builder-side composite that fans out to the two `/studio/courses/:courseId`
+ * mutations: the subscription plan and the tier-access set.
+ *
+ * A TOTAL write, like the journey sell-media body: `tierIds` is the
+ * exact set (`[]` clears), and `subscriptionEnabled: false` WITHDRAWS the plan
+ * rather than leaving the previous one silently on sale. An incremental shape
+ * could only ever add a way in, never remove one — which is the whole reason the
+ * panel's "off" position did nothing before.
+ *
+ * FLAT rather than nested (`subscription: { … } | null`) on purpose: SvelteKit's
+ * `command()` infers a `.nullable()` field as OPTIONAL, so a nested nullable
+ * object arrives as `undefined` and every consumer has to re-derive "was it off,
+ * or was the key just missing?". Flat nullable prices make that unambiguous.
+ *
+ * The PRICE RULES are deliberately NOT here — `min(100)` and
+ * `priceAnnual <= priceMonthly * 12` live in
+ * {@link upsertCourseSubscriptionPlanSchema}, which the ecom-api route validates
+ * on the way in. Restating them would mean two places to change one rule, and
+ * the worker is the authority. This schema's only cross-field concern (an enabled
+ * subscription needs both prices) is enforced by the caller so it can name which
+ * field is missing.
+ */
+export const updateCourseMonetisationInputSchema = z
+  .object({
+    courseId: uuidSchema,
+    subscriptionEnabled: z.boolean().default(false),
+    subscriptionPriceMonthly: priceCentsSchema,
+    subscriptionPriceAnnual: priceCentsSchema,
+    tierIds: z
+      .array(uuidSchema)
+      .max(50, 'Cannot grant more than 50 tiers to one course'),
+  })
+  .strict();
+
 export type CourseOfferParams = z.infer<typeof courseOfferParamsSchema>;
 export type CourseMonetisationOrgQuery = z.infer<
   typeof courseMonetisationOrgQuerySchema
@@ -96,4 +132,7 @@ export type CreateCourseSubscriptionCheckoutInput = z.infer<
 >;
 export type SetCourseTierAccessInput = z.infer<
   typeof setCourseTierAccessSchema
+>;
+export type UpdateCourseMonetisationInput = z.infer<
+  typeof updateCourseMonetisationInputSchema
 >;

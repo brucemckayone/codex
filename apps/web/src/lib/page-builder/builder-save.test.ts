@@ -17,6 +17,7 @@ import type { PageBuilderState } from '@codex/shared-types';
 import { describe, expect, it, vi } from 'vitest';
 import {
   type BuilderSaveResult,
+  type DerivedOfferPresentation,
   remoteErrorMessage,
   saveBuilderDraft,
   toPersistedOffer,
@@ -56,6 +57,9 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     saveOffer: vi
       .fn<(input: unknown) => Promise<unknown>>()
       .mockResolvedValue(undefined),
+    // Always present, as the real caller always passes it: the derived offer bag
+    // must land in the draft before the baseline is promoted.
+    syncOffer: vi.fn<(offer: unknown) => void>(),
     markSaved: vi.fn<() => void>(),
     refresh: vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
     ...overrides,
@@ -68,7 +72,11 @@ describe('saveBuilderDraft', () => {
 
     const result = await saveBuilderDraft(deps);
 
-    expect(result).toEqual({ outcome: 'saved', offerSaved: false });
+    expect(result).toEqual({
+      outcome: 'saved',
+      offerSaved: false,
+      monetisationSaved: false,
+    });
     expect(deps.savePage).toHaveBeenCalledWith({
       id: PAGE_ID,
       pageType: 'course',
@@ -134,7 +142,11 @@ describe('saveBuilderDraft', () => {
 
     const result = await saveBuilderDraft(deps);
 
-    expect(result).toEqual({ outcome: 'saved', offerSaved: true });
+    expect(result).toEqual({
+      outcome: 'saved',
+      offerSaved: true,
+      monetisationSaved: false,
+    });
     expect(deps.saveOffer).toHaveBeenCalledWith({
       pageId: PAGE_ID,
       offer: {
@@ -156,7 +168,11 @@ describe('saveBuilderDraft', () => {
 
     const result = await saveBuilderDraft(deps);
 
-    expect(result).toEqual({ outcome: 'saved', offerSaved: false });
+    expect(result).toEqual({
+      outcome: 'saved',
+      offerSaved: false,
+      monetisationSaved: false,
+    });
     expect(deps.saveOffer).not.toHaveBeenCalled();
     expect(deps.markSaved).toHaveBeenCalledTimes(1);
   });
@@ -214,6 +230,231 @@ describe('saveBuilderDraft', () => {
       stage: 'page',
       message: 'network down',
     });
+  });
+});
+
+/**
+ * The MONETISATION leg (Codex-2pryk.2.4.2) — the course's subscription plan and
+ * tier-access set, which live on the course rather than the page row.
+ *
+ * The bug these lock out: the panel's "Membership tiers" and "Course subscription"
+ * controls wrote only into `landing_pages.offer`, a presentational jsonb bag no
+ * authoritative read consults. Turning either on could not change what a buyer was
+ * able to purchase, yet the save reported success — so the tests here assert that
+ * the real write is ATTEMPTED, that a refusal is not reported as success, and that
+ * the bag can only ever mirror state that actually persisted.
+ */
+describe('saveBuilderDraft · monetisation leg', () => {
+  function makeMonetisation(overrides: Record<string, unknown> = {}) {
+    return {
+      isDirty: true,
+      save: vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
+      presentation: vi
+        .fn<() => DerivedOfferPresentation | null>()
+        .mockReturnValue({
+          tiersEnabled: true,
+          subscriptionEnabled: true,
+          subscriptionPriceCents: 1200,
+        }),
+      ...overrides,
+    };
+  }
+
+  it('persists the plan + tier access, and mirrors what persisted into the offer bag', async () => {
+    const monetisation = makeMonetisation();
+    const deps = makeDeps({
+      payload: makePayload({
+        offer: { oneOffEnabled: true, oneOffPriceCents: 4900 },
+      }),
+      monetisation,
+    });
+
+    const result = await saveBuilderDraft(deps);
+
+    expect(result).toEqual({
+      outcome: 'saved',
+      offerSaved: true,
+      monetisationSaved: true,
+    });
+    expect(monetisation.save).toHaveBeenCalledTimes(1);
+    expect(deps.saveOffer).toHaveBeenCalledWith({
+      pageId: PAGE_ID,
+      offer: {
+        tiersEnabled: true,
+        subscriptionEnabled: true,
+        subscriptionPriceCents: 1200,
+        oneOffEnabled: true,
+        oneOffPriceCents: 4900,
+      },
+    });
+  });
+
+  it('runs BEFORE the offer leg, so the bag can only mirror a plan that landed', async () => {
+    const order: string[] = [];
+    const monetisation = makeMonetisation({
+      save: vi.fn<() => Promise<unknown>>().mockImplementation(async () => {
+        order.push('monetisation');
+      }),
+    });
+    const deps = makeDeps({
+      monetisation,
+      saveOffer: vi
+        .fn<(input: unknown) => Promise<unknown>>()
+        .mockImplementation(async () => {
+          order.push('offer');
+        }),
+    });
+
+    await saveBuilderDraft(deps);
+
+    expect(order).toEqual(['monetisation', 'offer']);
+  });
+
+  it('a refused plan does NOT write the offer bag and does NOT mark the draft saved', async () => {
+    const monetisation = makeMonetisation({
+      save: vi
+        .fn<() => Promise<unknown>>()
+        .mockRejectedValue(
+          remoteError(
+            'Connect a payout account before selling a course subscription — finish Stripe onboarding in Studio → Monetisation.'
+          )
+        ),
+    });
+    const deps = makeDeps({ monetisation });
+
+    const result = await saveBuilderDraft(deps);
+
+    expect(result).toEqual({
+      outcome: 'failed',
+      stage: 'monetisation',
+      message:
+        'Page saved, but the pricing was not: Connect a payout account before selling a course subscription — finish Stripe onboarding in Studio → Monetisation.',
+    });
+    // The bag must never advertise a subscription with no Stripe Product behind it.
+    expect(deps.saveOffer).not.toHaveBeenCalled();
+    // Not marked saved ⇒ the draft stays dirty and a retry re-sends the leg.
+    expect(deps.markSaved).not.toHaveBeenCalled();
+    expect(deps.refresh).not.toHaveBeenCalled();
+  });
+
+  it('names the leg when the refusal carries no message', async () => {
+    const deps = makeDeps({
+      monetisation: makeMonetisation({
+        save: vi
+          .fn<() => Promise<unknown>>()
+          .mockRejectedValue({ status: 500 }),
+      }),
+    });
+
+    await expect(saveBuilderDraft(deps)).resolves.toEqual({
+      outcome: 'failed',
+      stage: 'monetisation',
+      message:
+        'Page saved, but the subscription and tier access could not be saved.',
+    });
+  });
+
+  it('still mirrors the derived presentation when the leg itself was NOT dirty', async () => {
+    // A creator who edits only copy must not silently blank the tier/subscription
+    // fields in the bag — the mirror is derived from the persisted baseline, which
+    // exists whether or not this save changed it.
+    const monetisation = makeMonetisation({ isDirty: false });
+    const deps = makeDeps({ monetisation });
+
+    const result = await saveBuilderDraft(deps);
+
+    expect(monetisation.save).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      monetisationSaved: false,
+      offerSaved: true,
+    });
+    expect(deps.saveOffer).toHaveBeenCalledWith({
+      pageId: PAGE_ID,
+      offer: {
+        tiersEnabled: true,
+        subscriptionEnabled: true,
+        subscriptionPriceCents: 1200,
+        oneOffEnabled: false,
+        oneOffPriceCents: null,
+      },
+    });
+  });
+
+  it('leaves the bag ALONE when no authoritative baseline is loaded', async () => {
+    // `presentation()` returns null for a page with no subject course, or when the
+    // read failed. Deriving "everything off" from that would withdraw ways in the
+    // panel never managed to see.
+    const deps = makeDeps({
+      payload: makePayload({
+        offer: { tiersEnabled: true, subscriptionEnabled: true },
+      }),
+      monetisation: makeMonetisation({
+        isDirty: false,
+        presentation: vi
+          .fn<() => DerivedOfferPresentation | null>()
+          .mockReturnValue(null),
+      }),
+    });
+
+    await saveBuilderDraft(deps);
+
+    expect(deps.saveOffer).toHaveBeenCalledWith({
+      pageId: PAGE_ID,
+      offer: {
+        tiersEnabled: true,
+        subscriptionEnabled: true,
+        subscriptionPriceCents: null,
+        oneOffEnabled: false,
+        oneOffPriceCents: null,
+      },
+    });
+  });
+
+  it('syncs the persisted bag into the draft BEFORE promoting it', async () => {
+    // Without this the derivation is recomputed every save and always differs from
+    // a baseline that never carried it — re-sending the rate-limited offer write on
+    // every press.
+    const order: string[] = [];
+    const deps = makeDeps({
+      monetisation: makeMonetisation({ isDirty: false }),
+      syncOffer: vi.fn<(offer: unknown) => void>().mockImplementation(() => {
+        order.push('syncOffer');
+      }),
+      markSaved: vi.fn<() => void>().mockImplementation(() => {
+        order.push('markSaved');
+      }),
+    });
+
+    await saveBuilderDraft(deps);
+
+    expect(order).toEqual(['syncOffer', 'markSaved']);
+    expect(deps.syncOffer).toHaveBeenCalledWith({
+      tiersEnabled: true,
+      subscriptionEnabled: true,
+      subscriptionPriceCents: 1200,
+      oneOffEnabled: false,
+      oneOffPriceCents: null,
+    });
+  });
+
+  it('does not re-send the offer write once the baseline carries the derivation', async () => {
+    // The second press of Save, simulated: the baseline is what the first press
+    // synced, so nothing changed and no rate-limited mutation is spent.
+    const deps = makeDeps({
+      monetisation: makeMonetisation({ isDirty: false }),
+      savedOffer: {
+        tiersEnabled: true,
+        subscriptionEnabled: true,
+        subscriptionPriceCents: 1200,
+        oneOffEnabled: false,
+        oneOffPriceCents: null,
+      },
+    });
+
+    const result = await saveBuilderDraft(deps);
+
+    expect(deps.saveOffer).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ offerSaved: false });
   });
 });
 
