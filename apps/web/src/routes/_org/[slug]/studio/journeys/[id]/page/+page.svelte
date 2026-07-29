@@ -370,6 +370,13 @@
         <span class="jb__art-on" aria-current="page">Sales page</span>
       </nav>
 
+      <!--
+        The device switch, history and the four actions share one wrapper so the
+        whole right-hand cluster wraps to a second line AS A UNIT and stays
+        right-aligned. Wrapped individually, Save/Publish stranded themselves
+        bottom-left while the rest of the row stayed put.
+      -->
+      <div class="jb__actions">
       <div class="jb__seg" role="group" aria-label="Device">
         {#each DEVICES as d (d.id)}
           <button type="button" aria-pressed={device === d.id} onclick={() => (device = d.id)}>
@@ -433,6 +440,7 @@
       >
         {saving ? 'Publishing…' : 'Publish'}
       </button>
+      </div>
     </header>
 
     <!-- ── mode tabs ── -->
@@ -497,28 +505,51 @@
 {/if}
 
 <style>
+  /*
+    `minmax(0, 1fr)` on the implicit column is load-bearing: the default `auto`
+    track is sized to its item's max-content, so the top bar's min-content width
+    would push the whole workspace wider than the viewport and give the page a
+    horizontal scrollbar. Capping the track lets the bar wrap instead.
+  */
   .jb {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto auto minmax(0, 1fr);
     height: 100dvh;
     background-color: var(--color-background);
   }
 
-  /* ── top bar ── */
+  /*
+    ── top bar ──
+    Nine controls, so the row is allowed to wrap onto a second line rather than
+    overflow: below roughly 1330px of bar width the right-hand cluster drops
+    whole (its `margin-left: auto` keeps it right-aligned on the new line). The
+    height is a MIN, not a fixed value — a fixed height is what clipped the
+    wrapped action labels before. With one line the bar is still 48px tall.
+  */
   .jb__top {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-3);
-    padding: 0 var(--space-4);
-    height: var(--space-12);
+    align-content: center;
+    gap: var(--space-1) var(--space-3);
+    padding: var(--space-1) var(--space-4);
+    min-height: var(--space-12);
     border-bottom: var(--border-width) var(--border-style) var(--color-border);
     background-color: var(--color-surface);
   }
 
+  /*
+    The identity block is the ONLY negotiable item in the bar. Every sibling is
+    `flex: none` (below), so when the row runs short the title yields instead of
+    the whole row squashing — which is what used to clip the action labels.
+  */
   .jb__doc {
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
+    flex: 0 1 auto;
+    min-width: 0;
     font-size: var(--text-sm);
     color: var(--color-text-muted);
     white-space: nowrap;
@@ -531,9 +562,11 @@
     font-family: var(--font-heading);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
-    min-width: 8rem;
+    flex: 0 1 auto;
+    min-width: var(--space-32);
     padding: var(--space-1);
     border-radius: var(--radius-sm);
+    text-overflow: ellipsis;
   }
 
   .jb__doc-title:hover {
@@ -545,7 +578,16 @@
     box-shadow: var(--shadow-focus-ring);
   }
 
+  /*
+    `width: max-content` is load-bearing. A bare <select> resolves `width: auto`
+    to fill-available (measured: 1800px basis for 100px of content), and since
+    every flex child defaults to `flex-shrink: 1` the algorithm handed this
+    control ~565px of a 1688px bar while clipping the buttons. Sizing it to its
+    own content — and taking it out of the negotiation — is the actual fix.
+  */
   .jb__status {
+    flex: none;
+    width: max-content;
     padding: var(--space-1) var(--space-2);
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-md);
@@ -557,6 +599,7 @@
 
   .jb__art {
     display: flex;
+    flex: none;
     gap: var(--space-1);
     padding: var(--space-1);
     border-radius: var(--radius-full);
@@ -570,6 +613,7 @@
     font-size: var(--text-xs);
     color: var(--color-text-secondary);
     text-decoration: none;
+    white-space: nowrap;
   }
 
   .jb__art a:hover {
@@ -581,10 +625,26 @@
     color: var(--color-text);
   }
 
+  /*
+    The right-hand cluster. `margin-left: auto` lives HERE rather than on
+    `.jb__seg` so that when the bar wraps, the whole group moves to the new line
+    together and `justify-content: flex-end` keeps it right-aligned. It wraps
+    internally too, so it degrades to any width without overflowing.
+  */
+  .jb__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-1) var(--space-3);
+    margin-left: auto;
+    min-width: 0;
+  }
+
   .jb__seg {
     display: flex;
+    flex: none;
     gap: var(--space-1);
-    margin-left: auto;
     padding: var(--space-1);
     border-radius: var(--radius-full);
     background-color: var(--color-surface-secondary);
@@ -598,6 +658,7 @@
     color: var(--color-text-secondary);
     font-family: var(--font-sans);
     font-size: var(--text-xs);
+    white-space: nowrap;
     cursor: pointer;
     transition: var(--transition-colors);
   }
@@ -608,6 +669,7 @@
   }
 
   .jb__btn {
+    flex: none;
     padding: var(--space-2) var(--space-3);
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-md);
@@ -616,6 +678,7 @@
     font-family: var(--font-sans);
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
+    white-space: nowrap;
     cursor: pointer;
     transition: var(--transition-colors);
   }
@@ -649,11 +712,13 @@
 
   .jb__history {
     display: flex;
+    flex: none;
     gap: var(--space-0-5);
   }
 
   .jb__icon-btn {
     display: grid;
+    flex: none;
     place-items: center;
     width: var(--space-8);
     height: var(--space-8);
