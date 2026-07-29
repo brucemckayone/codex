@@ -9,13 +9,17 @@
   outline+inspector for a single settings panel beside the canvas.
 
   It OWNS the `pageBuilder` store: open() on load → edit via rail/canvas → Save
-  (saveJourneyPageMock + markSaved) → close() on destroy. Every control mutates the
-  store; the canvas renders the store's pending draft directly, so edits are live.
+  (saveJourneyPage + updateJourneyOffer + markSaved) → close() on destroy. Every
+  control mutates the store; the canvas renders the store's pending draft directly,
+  so edits are live.
 
-  AGGRESSIVE-MODE MOCKS: `getJourneyForBuilderMock` / `saveJourneyPageMock` stand in
-  for the real remote fns; the conductor wires them after WP-2. Admin/owner gate
-  lives in +page.server.ts. Per-page brand overrides tint the canvas via the org
-  brand OKLCH layer (`data-org-brand` + brand vars on the canvas wrapper).
+  The remotes are REAL (`getJourneyForBuilder` / `saveJourneyPage` /
+  `updateJourneyOffer` / `updateCourseMonetisation` — no mocks). Save drives four
+  endpoints because the page copy, the course's plan + tier access, the page's
+  offer row and the sell media are four separate resources; see `handleSave`
+  and `$lib/page-builder/builder-save`. Admin/owner gate lives in
+  +page.server.ts. Per-page brand overrides tint the canvas via the org brand OKLCH
+  layer (`data-org-brand` + brand vars on the canvas wrapper).
 -->
 <script lang="ts">
   import { onDestroy } from 'svelte';
@@ -25,6 +29,7 @@
   import {
     JourneyBuilderCanvas,
     PageBrandPanel,
+    PageMediaPanel,
     PagePricingPanel,
     PageSeoPanel,
     SectionEditor,
@@ -34,8 +39,15 @@
     getCourseCurriculum,
     getJourneyForBuilder,
     saveJourneyPage,
+    updateJourneyOffer,
   } from '$lib/remote/journeys.remote';
+  import {
+    remoteErrorMessage,
+    saveBuilderDraft,
+  } from '$lib/page-builder/builder-save';
+  import { monetisation } from '$lib/page-builder/monetisation-store.svelte';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
+  import { sellMedia } from '$lib/page-builder/sell-media-store.svelte';
   import type { JourneyStagePreview } from '$lib/page-builder/render-edit';
   import { toast } from '$lib/components/ui/Toast/toast-store';
 
@@ -55,9 +67,10 @@
   // ones — the builder looked broken next to its own live page. Now reads the same
   // admin curriculum the two-pane editor uses.
   //
-  // `minutes` is 0 because `EditorPracticeView` carries no duration; the visible
-  // stats (practice counts, stage names/glosses, depth count) are all accurate,
-  // and the total-minutes cue reads 0 until durations reach this read model.
+  // `minutes` comes from the practice's linked media duration. It read a flat 0
+  // while `EditorPracticeView` carried no duration, so the map's "≈ N min in all"
+  // cue under-claimed every course; a written practice (or media with no probed
+  // duration) still contributes 0, which is the honest answer for it.
   const curriculumQuery = $derived(
     pageId ? getCourseCurriculum({ pageId }) : null
   );
@@ -69,13 +82,13 @@
       lessons: stage.practices.map((practice) => ({
         title: practice.title,
         type: practice.contentType,
-        minutes: 0,
+        minutes: Math.round((practice.durationSeconds ?? 0) / 60),
       })),
     }))
   );
 
   // ── Workspace view state ──────────────────────────────────────────────────
-  type BuilderMode = 'design' | 'pricing' | 'brand' | 'seo';
+  type BuilderMode = 'design' | 'pricing' | 'media' | 'brand' | 'seo';
   let mode = $state<BuilderMode>('design');
   let device = $state<'desktop' | 'tablet' | 'mobile'>('desktop');
   let railCollapsed = $state(false);
@@ -85,6 +98,7 @@
   const MODES: readonly { id: BuilderMode; label: string }[] = [
     { id: 'design', label: 'Design' },
     { id: 'pricing', label: 'Pricing' },
+    { id: 'media', label: 'Media' },
     { id: 'brand', label: 'Brand' },
     { id: 'seo', label: 'SEO' },
   ];
@@ -137,13 +151,34 @@
     // the editable draft only (id/orgId/publishedAt live on the row).
     const { id: _id, organizationId: _org, publishedAt: _pub, ...editable } = draft;
     pageBuilder.open(pageId, editable);
+    // Sell media + cover live on the SUBJECT COURSE, not the page row, so they
+    // load from their own endpoint alongside the draft (Codex-eqh0z). Fire-and-
+    // forget: `open()` already fails soft per-read, and a media-library hiccup
+    // must not stop the creator editing copy.
+    void sellMedia.open(pageId);
+    // The subscription plan + tier-access set live on the SUBJECT COURSE too, and
+    // their baseline is read back from the tables that actually gate access
+    // (Codex-2pryk.2.4.2) — never from the page's `offer` bag. A page with no
+    // subject course has nothing to monetise, so it opens with `null`.
+    void monetisation.open(
+      draft.subjectType === 'course' ? draft.subjectId : null
+    );
   });
 
-  onDestroy(() => pageBuilder.close());
+  onDestroy(() => {
+    pageBuilder.close();
+    sellMedia.close();
+    monetisation.close();
+  });
 
   const pending = $derived(pageBuilder.pending);
   const selected = $derived(pageBuilder.selectedSection);
-  const isDirty = $derived(pageBuilder.isDirty);
+  // Media and monetisation are part of "unsaved work" too — otherwise picking a
+  // clip or a tier and navigating away would lose it with no warning, and Save
+  // would appear to have nothing to do.
+  const isDirty = $derived(
+    pageBuilder.isDirty || sellMedia.isDirty || monetisation.isDirty
+  );
   const slug = $derived(pending?.slug ?? '');
 
   // Per-page brand overrides → tint the canvas via the org brand OKLCH layer.
@@ -160,24 +195,95 @@
     return parts.length ? parts.join(';') : undefined;
   });
 
-  async function handleSave(): Promise<void> {
+  /**
+   * The page draft, the course's MONETISATION and the journey's OFFER are separate
+   * resources with separate endpoints — page copy via `saveJourneyPage`, the
+   * subscription plan + tier access via `updateCourseMonetisation`, and the offer
+   * row via `updateJourneyOffer` (which also writes the authoritative
+   * `courses.price_cents`). One Save button drives all of them so the creator has
+   * one mental model. The orchestration lives in
+   * `$lib/page-builder/builder-save` so it is unit-testable; this wrapper only
+   * turns its explicit result into toasts.
+   *
+   * RETURNS whether the write landed (Codex-xzwl5). It used to swallow its own
+   * errors and return normally, which made a failed save indistinguishable from a
+   * successful one — `handlePublish` then reported "Page published" over content
+   * that was never persisted, and `handleViewLive` opened a page showing stale
+   * content. Every caller MUST gate on this boolean.
+   */
+  async function handleSave(): Promise<boolean> {
     const payload = pageBuilder.getSavePayload();
     const record = draftQuery?.current;
-    if (!payload || !record) return;
+    // Nothing loaded ⇒ nothing to save. Reported as NOT saved so callers can
+    // never treat "there was no draft" as "the draft was persisted".
+    if (!payload || !record) {
+      toast.error('The page draft is still loading — try again in a moment');
+      return false;
+    }
     saving = true;
     try {
-      await saveJourneyPage({
-        ...record,
-        ...payload,
+      const result = await saveBuilderDraft({
+        pageId: record.id,
+        payload,
+        savedOffer: pageBuilder.saved?.offer,
+        savePage: saveJourneyPage,
+        saveOffer: updateJourneyOffer,
+        // The two course-owned ways in (subscription plan + tier access). This
+        // leg runs BEFORE the offer leg because it is the one that talks to
+        // Stripe, and the offer bag's tier/subscription fields are DERIVED from
+        // what it persisted — so a refused plan never leaves the sales page
+        // advertising a subscription with no Stripe Product behind it.
+        monetisation: {
+          isDirty: monetisation.isDirty,
+          save: () => monetisation.save(),
+          presentation: () => monetisation.presentationOffer,
+        },
+        // Fold the persisted bag back into the draft so the saved baseline carries
+        // the derived fields; without it every save would re-send the offer write.
+        syncOffer: (offer) => pageBuilder.updateOffer(offer),
+        markSaved: () => pageBuilder.markSaved(),
+        // The PUBLIC sales load `depends('cache:versions')` precisely so a save
+        // can mark it stale; without this the client reuses its cached load data
+        // and the live page keeps showing pre-save content until a hard reload.
+        refresh: () => invalidate('cache:versions'),
       });
-      pageBuilder.markSaved();
-      // The PUBLIC sales load `depends('cache:versions')` precisely so a save can
-      // mark it stale; without this the client reuses its cached load data and the
-      // live page keeps showing pre-save content until a hard reload.
-      await invalidate('cache:versions');
+
+      if (result.outcome === 'failed') {
+        toast.error(result.message);
+        return false;
+      }
+      if (result.staleWarning) {
+        toast.warning(result.staleWarning);
+        return true;
+      }
+
+      // Sell media is a THIRD resource (it writes `courses.*MediaId`, not the page
+      // row) and only sends when a slot actually changed. Same partial-success
+      // discipline as pricing: on refusal, say what DID save and report NOT saved
+      // so `handlePublish`/`handleViewLive` do not proceed on a half-written page.
+      // A foreign media id lands here as a 403 carrying the service's own message.
+      //
+      // `markSaved()` and the `cache:versions` invalidation already happened inside
+      // `saveBuilderDraft`, so they are deliberately NOT repeated here. That does
+      // not lose the retry: `sellMedia` owns its own `isDirty`, independent of the
+      // page-builder draft state, so a failed media write stays dirty and re-sends
+      // on the next save.
+      if (sellMedia.isDirty) {
+        try {
+          await sellMedia.save();
+        } catch (err) {
+          const why = remoteErrorMessage(err);
+          toast.error(
+            why
+              ? `Page saved, but the media was not: ${why}`
+              : 'Page saved, but the media could not be saved.'
+          );
+          return false;
+        }
+      }
+
       toast.success('Page saved');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save page');
+      return true;
     } finally {
       saving = false;
     }
@@ -186,11 +292,14 @@
   /**
    * Open the REAL public sales page in a new tab — the only surface that renders
    * the cinematic motion (the canvas mounts the static editable components; see
-   * the toolbar comment). Saves first when dirty so the live page matches what is
-   * on screen rather than silently showing the last-saved version.
+   * the toolbar comment). Saves first when dirty, and ABORTS when that save fails
+   * (Codex-xzwl5): opening the live page after a failed save showed stale content
+   * next to a builder showing the new content — an intermittent builder-vs-live
+   * discrepancy the creator has no way to explain. The save's own toast already
+   * says what went wrong.
    */
   async function handleViewLive(): Promise<void> {
-    if (pageBuilder.isDirty) await handleSave();
+    if (pageBuilder.isDirty && !(await handleSave())) return;
     if (!slug) {
       toast.error('Give the page a slug and save it before viewing live');
       return;
@@ -198,9 +307,18 @@
     window.open(`/journeys/${slug}`, '_blank', 'noopener');
   }
 
+  /**
+   * Publish = flip the status and save. The success toast fires ONLY when the
+   * write landed; on failure the status is rolled back to what it was so the
+   * builder does not sit there claiming "Published" over an unpublished page.
+   */
   async function handlePublish(): Promise<void> {
+    const previousStatus = pageBuilder.pending?.status;
     pageBuilder.updateMeta('status', 'published');
-    await handleSave();
+    if (!(await handleSave())) {
+      if (previousStatus) pageBuilder.updateMeta('status', previousStatus);
+      return;
+    }
     toast.success('Page published');
   }
 
@@ -307,7 +425,14 @@
       <button type="button" class="jb__btn" disabled={!isDirty || saving} onclick={handleSave}>
         {saving ? 'Saving…' : 'Save'}
       </button>
-      <button type="button" class="jb__btn jb__btn--primary" onclick={handlePublish}>Publish</button>
+      <button
+        type="button"
+        class="jb__btn jb__btn--primary"
+        disabled={saving}
+        onclick={handlePublish}
+      >
+        {saving ? 'Publishing…' : 'Publish'}
+      </button>
     </header>
 
     <!-- ── mode tabs ── -->
@@ -329,6 +454,8 @@
         <aside class="jb__settings">
           {#if mode === 'pricing'}
             <PagePricingPanel />
+          {:else if mode === 'media'}
+            <PageMediaPanel />
           {:else if mode === 'brand'}
             <PageBrandPanel />
           {:else}

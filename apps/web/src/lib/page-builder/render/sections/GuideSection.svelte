@@ -39,9 +39,11 @@
     credentials: asStringArray(config, 'credentials'),
   });
 
-  // The prototype's emotional climax is a pull-quote. It is not yet part of the
-  // shared GuideSectionProps contract, so read it defensively from config and
-  // simply omit the quote when absent (see desiredSharedChanges for the lead).
+  // The prototype's emotional climax is a pull-quote — now declared on
+  // `GuideSectionProps`. Still read through `asString` rather than `p.quote`
+  // because `props` is org-authored jsonb: the declared type describes intent, the
+  // coerce guard is what makes a malformed value degrade instead of throwing
+  // during SSR. Absent ⇒ the quote is omitted entirely.
   const quote = $derived(asString(config, 'quote'));
 
   // A single-glyph mark for the decorative candlelit poster when no portrait is

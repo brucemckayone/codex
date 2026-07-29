@@ -1,27 +1,110 @@
 <!--
   @component PagePricingPanel
 
-  The "Access & pricing" page-mode panel (Codex-2pryk.3.3 · WP-5). Presents the
-  journey's ways-in — membership tiers, a course subscription, a one-off purchase —
-  as independent toggles + price fields, written to `PageBuilderState.offer` via
-  the store. Prices are GBP (£), stored in pence. NOTE: the AUTHORITATIVE access
-  rule lives on the course/content policy (SPEC §6.1); this panel is the sales
-  page's PRESENTATION of the offer.
+  The "Access & pricing" page-mode panel (Codex-2pryk.3.3 · WP-5, rewired by
+  Codex-2pryk.2.4.2). Presents the journey's three ways-in — membership tiers, a
+  course subscription, a one-off purchase. Prices are GBP (£), stored in pence.
+
+  WHAT CHANGED AND WHY (Codex-2pryk.2.4.2): every control here used to write into
+  `PageBuilderState.offer` — the page's jsonb PRESENTATION bag — and nothing else.
+  No authoritative read consults that bag, so turning "Membership tiers" or
+  "Course subscription" on had NO effect on what a buyer could purchase: the
+  checkout composes its offer from `course_subscription_plans` and
+  `course_tier_access`, and nothing could write either table. The panel validated
+  the price, said "Page saved", and changed nothing about the product.
+
+  So the two course-owned paths now edit the `monetisation` store, whose baseline
+  is READ BACK from those tables — "on" means a plan row exists, "off" means it
+  does not. The offer bag is still written, but DERIVED from that state by
+  `builder-save`, so the sales page's teaser can no longer contradict the product.
+
+  The one-off price stays on the page-builder store: `updateJourneyOffer` writes
+  the authoritative `courses.price_cents` in the same transaction as the bag, so
+  for that path the bag genuinely IS the presentation of its own authority.
+
+  MEMBERSHIP TIERS ARE A PICKER, NOT A TOGGLE. Tier access is an exact set (SPEC
+  §7, "not just min-tier"), so a boolean could never express which tiers include
+  the course — it was unrepresentable state, which is the deeper reason the old
+  toggle could not have worked even if it had been wired up.
+
+  NOTE: the AUTHORITATIVE access RULE (who may enter) still lives on the
+  course/content policy (SPEC §6.1) — this panel owns what the journey COSTS.
 -->
 <script lang="ts">
+  import { monetisation } from '$lib/page-builder/monetisation-store.svelte';
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
 
   const offer = $derived(pageBuilder.pending?.offer ?? {});
+  const isCoursePage = $derived(pageBuilder.pending?.subjectType === 'course');
+
+  const draft = $derived(monetisation.draft);
+  const tierOptions = $derived(monetisation.tierOptions);
+  // A course page whose authoritative state failed to read must not offer edits:
+  // the store reports `loaded: false` rather than an empty draft precisely so a
+  // save cannot withdraw a live plan the panel never managed to see.
+  const locked = $derived(isCoursePage && !monetisation.loaded);
 
   const poundsOf = (cents: number | null | undefined): string =>
     cents == null ? '' : (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);
 
-  function setPounds(key: 'subscriptionPriceCents' | 'oneOffPriceCents', value: string): void {
+  // Price fields hold a LOCAL draft string while focused. Binding the input
+  // straight to `poundsOf(cents)` made decimals untypeable: "12." parses to 12 →
+  // 1200 pence → re-derives "12", so the DOM value snapped back and ate the ".".
+  // The draft is authoritative during editing; blur clears it so the field falls
+  // back to the canonical (normalised) pence value.
+  type PriceKey = 'monthly' | 'annual' | 'oneOff';
+  let drafts = $state<Partial<Record<PriceKey, string>>>({});
+
+  const centsFor = (key: PriceKey): number | null => {
+    if (key === 'monthly') return draft.priceMonthlyCents;
+    if (key === 'annual') return draft.priceAnnualCents;
+    return offer.oneOffPriceCents ?? null;
+  };
+
+  const shown = (key: PriceKey): string => drafts[key] ?? poundsOf(centsFor(key));
+
+  function setPounds(key: PriceKey, value: string): void {
+    drafts[key] = value;
     const pounds = Number.parseFloat(value);
-    pageBuilder.updateOffer({
-      [key]: Number.isFinite(pounds) ? Math.round(pounds * 100) : null,
-    });
+    // Round to whole pence — a price is an integer of the smallest unit, and
+    // fractional pence would fail the service's integer validation.
+    const cents = Number.isFinite(pounds) ? Math.round(pounds * 100) : null;
+    if (key === 'monthly') monetisation.setPriceMonthly(cents);
+    else if (key === 'annual') monetisation.setPriceAnnual(cents);
+    else pageBuilder.updateOffer({ oneOffPriceCents: cents });
   }
+
+  function commitPounds(key: PriceKey): void {
+    delete drafts[key];
+  }
+
+  /**
+   * Everything that would make the save fail, checked here so the creator sees it
+   * before spending a rate-limited commerce mutation. Each rule MIRRORS a server
+   * rule (the worker remains the authority): `min(100)` and
+   * `priceAnnual <= priceMonthly * 12` come from `upsertCourseSubscriptionPlanSchema`,
+   * the enabled-needs-a-price rule from the monetisation command.
+   */
+  const problems = $derived.by<string[]>(() => {
+    const out: string[] = [];
+    if (draft.subscriptionEnabled) {
+      if (draft.priceMonthlyCents == null) out.push('Set a monthly price for the course subscription.');
+      if (draft.priceAnnualCents == null) out.push('Set an annual price for the course subscription.');
+      if (draft.priceMonthlyCents != null && draft.priceMonthlyCents < 100)
+        out.push('The monthly price must be at least £1.00.');
+      if (draft.priceAnnualCents != null && draft.priceAnnualCents < 100)
+        out.push('The annual price must be at least £1.00.');
+      if (
+        draft.priceMonthlyCents != null &&
+        draft.priceAnnualCents != null &&
+        draft.priceAnnualCents > draft.priceMonthlyCents * 12
+      )
+        out.push('The annual price must be no more than 12× the monthly price.');
+    }
+    if (offer.oneOffEnabled && offer.oneOffPriceCents == null)
+      out.push('Set a price for the one-off purchase.');
+    return out;
+  });
 </script>
 
 <div class="panel">
@@ -35,39 +118,114 @@
     wherever the course appears.
   </p>
 
+  {#if monetisation.loadError}
+    <p class="panel__warn" role="alert">{monetisation.loadError}</p>
+  {:else if monetisation.loading}
+    <p class="panel__callout" role="status">Reading this journey’s current pricing…</p>
+  {/if}
+
   <p class="panel__group">Ways in · turn on any combination</p>
 
-  <div class="way" class:way--on={offer.tiersEnabled}>
-    <button
-      type="button"
-      class="way__sw"
-      aria-pressed={!!offer.tiersEnabled}
-      aria-label="Toggle membership tiers"
-      onclick={() => pageBuilder.updateOffer({ tiersEnabled: !offer.tiersEnabled })}
-    ></button>
-    <span class="way__copy">Membership tiers<small>which tiers include this</small></span>
-    <span class="way__price">included</span>
+  <!-- ── Membership tiers: an exact SET, so a picker rather than a toggle ──── -->
+  <div class="way way--stacked" class:way--on={draft.tierIds.length > 0}>
+    <div class="way__row">
+      <span class="way__copy">
+        Membership tiers
+        <small>
+          {#if draft.tierIds.length > 0}
+            {draft.tierIds.length} of {tierOptions.length} include this journey
+          {:else}
+            pick which tiers include this journey
+          {/if}
+        </small>
+      </span>
+      <span class="way__price">included</span>
+    </div>
+
+    {#if !isCoursePage}
+      <p class="way__note">Only a course journey can be included in a membership tier.</p>
+    {:else if tierOptions.length === 0 && monetisation.loaded}
+      <p class="way__note">
+        This space has no membership tiers yet — create one in Studio → Monetisation, then choose
+        it here.
+      </p>
+    {:else}
+      <ul class="tiers">
+        {#each tierOptions as tier (tier.id)}
+          {@const checked = draft.tierIds.includes(tier.id)}
+          <li>
+            <button
+              type="button"
+              class="tier"
+              class:tier--on={checked}
+              aria-pressed={checked}
+              disabled={locked}
+              onclick={() => monetisation.toggleTier(tier.id)}
+            >
+              <span class="tier__box" aria-hidden="true"></span>
+              <span class="tier__name">{tier.name}</span>
+              <span class="tier__price">£{poundsOf(tier.priceMonthly)}/mo</span>
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
   </div>
 
-  <div class="way" class:way--on={offer.subscriptionEnabled}>
-    <button
-      type="button"
-      class="way__sw"
-      aria-pressed={!!offer.subscriptionEnabled}
-      aria-label="Toggle course subscription"
-      onclick={() => pageBuilder.updateOffer({ subscriptionEnabled: !offer.subscriptionEnabled })}
-    ></button>
-    <span class="way__copy">Course subscription<small>a gentler monthly entry</small></span>
-    <span class="way__price">
-      £<input
-        class="way__input"
-        inputmode="decimal"
-        value={poundsOf(offer.subscriptionPriceCents)}
-        oninput={(e) => setPounds('subscriptionPriceCents', e.currentTarget.value)}
-      />/mo
-    </span>
+  <!-- ── Course subscription: a real Stripe plan, monthly + annual ─────────── -->
+  <div class="way way--stacked" class:way--on={draft.subscriptionEnabled}>
+    <div class="way__row">
+      <button
+        type="button"
+        class="way__sw"
+        aria-pressed={draft.subscriptionEnabled}
+        aria-label="Toggle course subscription"
+        disabled={locked || !isCoursePage}
+        onclick={() => monetisation.setSubscriptionEnabled(!draft.subscriptionEnabled)}
+      ></button>
+      <span class="way__copy">Course subscription<small>a gentler monthly entry</small></span>
+    </div>
+
+    {#if !isCoursePage}
+      <p class="way__note">Only a course journey can be sold as a subscription.</p>
+    {:else}
+      <div class="way__fields">
+        <label class="field">
+          <span class="field__label">Monthly</span>
+          <span class="field__input">
+            £<input
+              inputmode="decimal"
+              aria-label="Monthly course subscription price in pounds"
+              disabled={locked}
+              value={shown('monthly')}
+              oninput={(e) => setPounds('monthly', e.currentTarget.value)}
+              onblur={() => commitPounds('monthly')}
+            />
+          </span>
+        </label>
+        <label class="field">
+          <span class="field__label">Annual</span>
+          <span class="field__input">
+            £<input
+              inputmode="decimal"
+              aria-label="Annual course subscription price in pounds"
+              disabled={locked}
+              value={shown('annual')}
+              oninput={(e) => setPounds('annual', e.currentTarget.value)}
+              onblur={() => commitPounds('annual')}
+            />
+          </span>
+        </label>
+      </div>
+      <p class="way__note">
+        Both prices are needed — Stripe bills against a monthly and an annual price. A subscription
+        pays out to this space, so it needs a
+        <a href="/studio/monetisation">connected payout account</a>.
+      </p>
+    {/if}
   </div>
 
+  <!-- ── One-off: `courses.price_cents`, written by the offer endpoint ─────── -->
   <div class="way" class:way--on={offer.oneOffEnabled}>
     <button
       type="button"
@@ -81,14 +239,36 @@
       £<input
         class="way__input"
         inputmode="decimal"
-        value={poundsOf(offer.oneOffPriceCents)}
-        oninput={(e) => setPounds('oneOffPriceCents', e.currentTarget.value)}
+        aria-label="One-off purchase price in pounds"
+        value={shown('oneOff')}
+        oninput={(e) => setPounds('oneOff', e.currentTarget.value)}
+        onblur={() => commitPounds('oneOff')}
       />
     </span>
   </div>
 
+  {#if problems.length > 0}
+    <ul class="panel__warn" role="status">
+      {#each problems as problem (problem)}
+        <li>{problem}</li>
+      {/each}
+    </ul>
+  {/if}
+
+  {#if offer.oneOffEnabled && !isCoursePage}
+    <p class="panel__warn" role="status">
+      Only a course journey can be sold as a one-off purchase.
+    </p>
+  {/if}
+
   <p class="panel__callout">
     <b>Membership</b> unlocks every journey — the buyer should feel it’s more than this one course.
+  </p>
+
+  <p class="panel__callout">
+    Pricing saves with the page’s <b>Save</b>. The tier and subscription choices become real
+    access rules, and the one-off price becomes the course’s real price — so the checkout can
+    take all three.
   </p>
 </div>
 
@@ -144,6 +324,22 @@
     color: var(--color-text-secondary);
   }
 
+  .panel__warn {
+    margin: 0;
+    padding: var(--space-3);
+    border: var(--border-width) var(--border-style) var(--color-warning-200);
+    border-radius: var(--radius-md);
+    background-color: var(--color-warning-50);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--color-warning-700);
+  }
+
+  ul.panel__warn {
+    padding-inline-start: var(--space-6);
+    list-style: disc;
+  }
+
   .way {
     display: flex;
     align-items: center;
@@ -151,6 +347,18 @@
     padding: var(--space-3);
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-md);
+  }
+
+  .way--stacked {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2-5);
+  }
+
+  .way__row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
   }
 
   .way--on {
@@ -167,6 +375,11 @@
     background-color: var(--color-surface-tertiary, var(--color-surface-secondary));
     cursor: pointer;
     transition: var(--transition-colors);
+  }
+
+  .way__sw:disabled {
+    cursor: not-allowed;
+    opacity: var(--opacity-50);
   }
 
   .way__sw::after {
@@ -217,8 +430,46 @@
     white-space: nowrap;
   }
 
-  .way__input {
-    width: 3.4rem;
+  .way__note {
+    margin: 0;
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--color-text-muted);
+  }
+
+  .way__note a {
+    color: var(--color-interactive);
+  }
+
+  .way__fields {
+    display: flex;
+    gap: var(--space-3);
+  }
+
+  .field {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .field__label {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .field__input {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  .way__input,
+  .field__input input {
+    width: 100%;
+    min-width: 0;
     padding: var(--space-1) var(--space-1-5);
     border: var(--border-width) var(--border-style) var(--color-border);
     border-radius: var(--radius-sm);
@@ -229,8 +480,90 @@
     text-align: right;
   }
 
-  .way__input:focus-visible {
+  .way__input {
+    width: 3.4rem;
+  }
+
+  .way__input:focus-visible,
+  .field__input input:focus-visible {
     outline: none;
     border-color: var(--color-interactive);
+  }
+
+  .tiers {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .tier {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2-5);
+    width: 100%;
+    padding: var(--space-2) var(--space-2-5);
+    border: var(--border-width) var(--border-style) var(--color-border-subtle);
+    border-radius: var(--radius-sm);
+    background-color: var(--color-surface);
+    cursor: pointer;
+    text-align: left;
+    transition: var(--transition-colors);
+  }
+
+  .tier:disabled {
+    cursor: not-allowed;
+    opacity: var(--opacity-50);
+  }
+
+  .tier--on {
+    border-color: color-mix(in oklab, var(--color-interactive) 45%, var(--color-border));
+    background-color: color-mix(in oklab, var(--color-interactive) 8%, var(--color-surface));
+  }
+
+  .tier:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus-ring);
+  }
+
+  .tier__box {
+    position: relative;
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border: var(--border-width) var(--border-style) var(--color-border);
+    border-radius: var(--radius-xs);
+    background-color: var(--color-surface);
+  }
+
+  .tier--on .tier__box {
+    border-color: var(--color-interactive);
+    background-color: var(--color-interactive);
+  }
+
+  .tier--on .tier__box::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 5px;
+    width: 4px;
+    height: 8px;
+    border: solid var(--color-surface);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+
+  .tier__name {
+    flex: 1;
+    font-size: var(--text-sm);
+    color: var(--color-text);
+  }
+
+  .tier__price {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    white-space: nowrap;
   }
 </style>

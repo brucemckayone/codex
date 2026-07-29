@@ -565,10 +565,17 @@ export class AdminAnalyticsService extends BaseService {
       const effectiveStart = options?.startDate ?? defaultStart;
       const effectiveEnd = options?.endDate ?? new Date();
 
+      // Correlates on `content.id`, NOT `purchases.contentId`. The two are equal
+      // through the inner join, but only `content.id` is in the GROUP BY — and a
+      // correlated subquery may reference only grouped columns, so the
+      // `purchases.contentId` form made Postgres reject the whole statement with
+      // "subquery uses ungrouped column". That regressed when WP-6 moved the
+      // SELECT/GROUP BY to `content.id` (purchases.contentId became nullable for
+      // course purchases) and left this correlation behind.
       const viewsInPeriod = sql<number>`(
         SELECT COUNT(DISTINCT ${schema.videoPlayback.userId})::int
         FROM ${schema.videoPlayback}
-        WHERE ${schema.videoPlayback.contentId} = ${schema.purchases.contentId}
+        WHERE ${schema.videoPlayback.contentId} = ${schema.content.id}
           AND ${schema.videoPlayback.updatedAt} >= ${effectiveStart}
           AND ${schema.videoPlayback.updatedAt} <= ${effectiveEnd}
       )::int`;

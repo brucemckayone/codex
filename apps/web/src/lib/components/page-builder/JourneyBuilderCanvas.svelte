@@ -3,8 +3,17 @@
 
   The INLINE WYSIWYG canvas for the journey sales-page builder
   (Codex-2pryk.3.3 · WP-5). Renders the store's enabled sections directly via the
-  shared {@link SectionRenderer} (the SAME components the public page uses), so
-  the canvas IS the page. Each block is:
+  EDITABLE {@link SectionRenderer} from `$lib/page-builder/render-edit`, so the
+  canvas IS the page — structurally, not pixel-for-pixel.
+
+  NOT the public components. `render-edit/` holds 8 static, contenteditable
+  sections; the public page renders 11 animated ones from `render/`. The canvas
+  therefore cannot show real motion, and a section with no `render-edit` twin does
+  not appear here at all. The route's "View live ↗" (which saves first) is the way
+  to see the true page. Unifying the two sets behind one `editable` flag is filed
+  as a follow-up.
+
+  Each block is:
     · selectable  — mousedown selects it (without stealing caret from text)
     · inline-editable — contenteditable copy writes straight to the store
     · block-toolbarred — move ↑/↓, duplicate, add-after, delete (on selection)
@@ -108,7 +117,17 @@
   </div>
 
   <div class="jbc__stage">
-    <div class="jbc-page jp" class:jbc-page--editable={editable} data-device={device}>
+    <!-- `journey-palette` supplies the colour ladder `.jp` styles read; it is the
+         same file the live sales page and checkout derive from, so the canvas and
+         the real page cannot drift apart again (Codex-gfg50). The canvas takes
+         the BASE class only — `--page` would re-point `--color-surface*` /
+         `--color-border*`, which the in-canvas block affordances below read and
+         need to keep studio-neutral against any page palette. -->
+    <div
+      class="jbc-page jp journey-palette"
+      class:jbc-page--editable={editable}
+      data-device={device}
+    >
       {#each enabled as section (section.id)}
         {@const i = indexOf(section.id)}
         {@const isSel = editable && selectedId === section.id}

@@ -57,7 +57,7 @@ export interface ContentCourseLinks {
  */
 export interface CourseCardSummary {
   id: string;
-  /** Org-scoped slug — the sales-page URL basis (`/journeys/{slug}`). */
+  /** Org-scoped COURSE slug — not the sales-page URL basis. */
   slug: string;
   title: string;
   /** Eyebrow line above the title, or null. */
@@ -68,6 +68,20 @@ export interface CourseCardSummary {
   guideName: string | null;
   /** One-off purchase price in GBP pence; null = not sold standalone. */
   priceCents: number | null;
+  /**
+   * The published landing page that SELLS this course, or null when none was
+   * found. `/journeys/{slug}` resolves the PAGE slug, so link builders MUST
+   * prefer these over `slug`/`id` (Codex-xzwl5).
+   */
+  pageId: string | null;
+  /** Org-scoped PAGE slug — the sales-page URL basis. */
+  pageSlug: string | null;
+  /**
+   * Public CDN URL for the course cover, or null when the creator has not
+   * uploaded one. Never a raw R2 key. The rail card MUST render its typographic
+   * fallback on null, with no layout shift (Codex-eqh0z).
+   */
+  coverImageUrl: string | null;
 }
 
 /**

@@ -15,7 +15,7 @@
  * those); mirrors the explore page-load test precedent.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { JourneyCoursePage } from '$lib/page-builder';
+import type { CourseOffer, JourneyCoursePage } from '$lib/page-builder';
 import type { SellPreview } from '$lib/page-builder/render';
 import { CACHE_HEADERS } from '$lib/server/cache';
 
@@ -65,16 +65,42 @@ const MOCK_SELL_PREVIEW = {
   },
 } satisfies SellPreview;
 
-const { getCoursePageMock, resolveSellPreviewMock, resolveCanEnterCourseMock } =
-  vi.hoisted(() => ({
-    getCoursePageMock: vi.fn(),
-    resolveSellPreviewMock: vi.fn(),
-    resolveCanEnterCourseMock: vi.fn(),
-  }));
+/**
+ * The authoritative offer the `invite` section prices itself from
+ * (Codex-2pryk.2.4.3). Read in parallel with the enrolment check.
+ */
+const MOCK_OFFER = {
+  courseId: MOCK_COURSE_PAGE.course.id,
+  organizationId: MOCK_COURSE_PAGE.page.organizationId,
+  paths: ['purchase'],
+  purchase: { priceCents: 2499 },
+  subscription: null,
+  tiers: [],
+  entitled: false,
+} satisfies CourseOffer;
+
+const {
+  getCoursePageMock,
+  getCoursePagePreviewMock,
+  resolveSellPreviewMock,
+  resolveCanEnterCourseMock,
+  offerMock,
+} = vi.hoisted(() => ({
+  getCoursePageMock: vi.fn(),
+  getCoursePagePreviewMock: vi.fn(),
+  resolveSellPreviewMock: vi.fn(),
+  resolveCanEnterCourseMock: vi.fn(),
+  offerMock: vi.fn(),
+}));
 
 vi.mock('../journey-data', () => ({
   getCoursePage: getCoursePageMock,
+  getCoursePagePreview: getCoursePagePreviewMock,
   resolveSellPreview: resolveSellPreviewMock,
+}));
+
+vi.mock('$lib/server/api', () => ({
+  createServerApi: () => ({ courses: { offer: offerMock } }),
 }));
 
 // The enrolment check that flips the hero/invite CTA (anon → checkout; enrolled
@@ -110,7 +136,9 @@ function makeEvent(journeySlug: string, user: { id: string } | null = null) {
     // Present so the load can build a round-d-seam context (the seam is mocked).
     platform: {},
     cookies: {},
-    locals: {},
+    // The draft-preview fallback gates on `locals.user`, not the parent's — keep
+    // them in step so a signed-in event exercises that branch.
+    locals: user ? { user } : {},
   } as unknown as LoadInput;
   return { event, setHeaders, depends };
 }
@@ -119,8 +147,49 @@ describe('journey sales +page.server load', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getCoursePageMock.mockResolvedValue(MOCK_COURSE_PAGE);
+    getCoursePagePreviewMock.mockResolvedValue(null);
     resolveSellPreviewMock.mockResolvedValue(MOCK_SELL_PREVIEW);
     resolveCanEnterCourseMock.mockResolvedValue(false);
+    offerMock.mockResolvedValue(MOCK_OFFER);
+  });
+
+  // ── the authoritative offer (Codex-2pryk.2.4.3) ────────────────────────────
+  // The `invite` section used to price itself from the authored `priceLabel` a
+  // creator typed into the builder, so a page could advertise a price and a path
+  // that did not exist. It now renders THIS.
+
+  it('awaits the offer and returns it for the invite section to price from', async () => {
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork');
+
+    const data = (await load(event)) as LoadData;
+
+    expect(offerMock).toHaveBeenCalledWith(MOCK_COURSE_PAGE.course.id);
+    expect(data.offer).toEqual(MOCK_OFFER);
+  });
+
+  it('degrades the offer to null (never a wrong price) when the read fails', async () => {
+    offerMock.mockRejectedValueOnce(new Error('ecom down'));
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork');
+
+    // The sell page is SEO-critical and must not 500 over a pricing hiccup; the
+    // section shows a price-less CTA and the checkout states the terms.
+    const data = (await load(event)) as LoadData;
+    expect(data.offer).toBeNull();
+    expect(data.coursePage).toBe(MOCK_COURSE_PAGE);
+  });
+
+  it('reads the offer for an anonymous visitor too (prices are public)', async () => {
+    const { load } = await import('../+page.server');
+    const { event } = makeEvent('rootwork'); // no user
+
+    const data = (await load(event)) as LoadData;
+
+    // Unlike the enrolment check, the offer is NOT skipped for a guest — an
+    // anonymous visitor is exactly who the prices are for.
+    expect(offerMock).toHaveBeenCalledTimes(1);
+    expect(data.offer?.paths).toEqual(['purchase']);
   });
 
   it('awaits the course page and returns it for first paint / SEO', async () => {
@@ -225,5 +294,62 @@ describe('journey sales +page.server load', () => {
     // A resolver hiccup must never throw the SEO-critical load — it degrades to
     // the public/join CTA.
     expect(data.enrolled).toBe(false);
+  });
+
+  // ── Draft preview vs LIVE (Codex-xzwl5) ───────────────────────────────────
+  // A manager viewing an unpublished journey got an apparently live page with
+  // nothing saying otherwise ("I am not sure if live pages are preview pages").
+  // Which read served the page is the only signal, so the load must publish it.
+  describe('draft-preview flag', () => {
+    const DRAFT_COURSE_PAGE = {
+      ...MOCK_COURSE_PAGE,
+      page: { ...MOCK_COURSE_PAGE.page, status: 'draft', publishedAt: null },
+    } satisfies JourneyCoursePage;
+
+    it('marks the page as a draft preview when the management read served it', async () => {
+      getCoursePageMock.mockResolvedValueOnce(null);
+      getCoursePagePreviewMock.mockResolvedValueOnce(DRAFT_COURSE_PAGE);
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork', { id: 'manager-1' });
+
+      const data = (await load(event)) as LoadData;
+
+      expect(getCoursePagePreviewMock).toHaveBeenCalledWith({
+        slug: 'rootwork',
+      });
+      expect(data.draftPreview).toBe(true);
+      // The view keys its banner + noindex off the page status it carries.
+      expect(data.coursePage.page.status).toBe('draft');
+    });
+
+    it('does NOT mark the live page as a preview (the published read served it)', async () => {
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork', { id: 'manager-1' });
+
+      const data = (await load(event)) as LoadData;
+
+      // Preview and live must be distinguishable in BOTH directions — a banner
+      // on the live page would be as confusing as none on the draft.
+      expect(data.draftPreview).toBe(false);
+      expect(getCoursePagePreviewMock).not.toHaveBeenCalled();
+    });
+
+    it('stays false (and 404s) when the preview read denies a non-manager', async () => {
+      getCoursePageMock.mockResolvedValueOnce(null);
+      getCoursePagePreviewMock.mockResolvedValueOnce(null);
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork', { id: 'outsider-1' });
+
+      await expect(load(event)).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('never reaches the preview read for an anonymous visitor', async () => {
+      getCoursePageMock.mockResolvedValueOnce(null);
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork'); // no session
+
+      await expect(load(event)).rejects.toMatchObject({ status: 404 });
+      expect(getCoursePagePreviewMock).not.toHaveBeenCalled();
+    });
   });
 });

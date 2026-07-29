@@ -69,6 +69,11 @@ export interface EditorPracticeView {
   /** Publish status of the LINKED CONTENT (draft ⇒ not yet member-visible). */
   status: PageStatus;
   thumbnailUrl: string | null;
+  /**
+   * Runtime of the linked media; `null` for a written practice or unprobed media.
+   * Feeds the builder map's "≈ N min in all" cue.
+   */
+  durationSeconds: number | null;
   sortOrder: number;
 }
 
@@ -192,6 +197,62 @@ export interface JourneyCardView {
   stageCount: number;
   practiceCount: number;
   featured: boolean;
+  /**
+   * Public CDN URL for the course cover, or null when the creator has not
+   * uploaded one. Never a raw R2 key. `JourneyCard` MUST render its typographic
+   * fallback on null, with no layout shift (Codex-eqh0z).
+   */
+  coverImageUrl: string | null;
+}
+
+/**
+ * The journey's SELL MEDIA — the four media refs the sales page's `introVideo` /
+ * `reel` / `guide` sections resolve their primary content from, plus the still
+ * cover (Codex-eqh0z). FE mirror of `@codex/shared-types` `JourneySellMedia`.
+ *
+ * The three video ids and the guide portrait are `media_items` refs; the cover is
+ * NOT (`media_items` is CHECK-constrained to video/audio, so a still image
+ * cannot live there) — it arrives already resolved to a CDN URL.
+ */
+export interface JourneySellMedia {
+  courseId: string;
+  introVideoMediaId: string | null;
+  previewVideoMediaId: string | null;
+  guideVideoMediaId: string | null;
+  guidePortraitMediaId: string | null;
+  coverImageUrl: string | null;
+}
+
+/** One org tier the pricing panel offers as a way into the course. */
+export interface JourneyTierOption {
+  id: string;
+  name: string;
+  /** GBP pence. */
+  priceMonthly: number;
+  priceAnnual: number;
+}
+
+/**
+ * The journey's AUTHORITATIVE monetisation state (Codex-2pryk.2.4.2) — read back
+ * from the two tables that actually decide what a buyer can do, never from
+ * `landing_pages.offer`.
+ *
+ * `subscription` mirrors the live `course_subscription_plans` row (null when the
+ * subscription is not on sale, including when it has been withdrawn) and
+ * `tierIds` mirrors `course_tier_access`. The pricing panel loads THIS as its
+ * baseline, so an offer bag that disagrees with the product cannot survive a
+ * round trip — the panel would immediately show the real state.
+ *
+ * The one-off price is deliberately absent: it lives on `courses.price_cents`,
+ * which the page-save path already owns through `updateJourneyOffer`. Adding it
+ * here would give one column two write paths.
+ */
+export interface JourneyMonetisation {
+  courseId: string;
+  subscription: { priceMonthly: number; priceAnnual: number } | null;
+  tierIds: string[];
+  /** Every live org tier, for the picker — not just the selected ones. */
+  tierOptions: JourneyTierOption[];
 }
 
 /**

@@ -385,7 +385,15 @@ function updateBrandOverrides(
   };
 }
 
-/** Merge a partial SEO patch into `pending.seo` (SEO builder mode). */
+/**
+ * Merge a partial SEO patch into `pending.seo` (SEO builder mode).
+ *
+ * CURRENTLY NO CONSUMER — `landing_pages` has no `seo` column and the `.strict()`
+ * save schema has no `seo` key, so `PageSeoPanel` disables those fields rather than
+ * accept keystrokes the save would discard. Kept as the seam persistence will wire
+ * back into (NOT dead code): re-enabling the panel needs a migration + save-schema
+ * field + service write, at which point this is the store-side write again.
+ */
 function updateSeo(patch: Partial<PageSeo>): void {
   if (!state.pending) return;
   state.pending.seo = { ...(state.pending.seo ?? {}), ...patch };

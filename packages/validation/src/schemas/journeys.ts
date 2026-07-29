@@ -1,6 +1,6 @@
 import type { BrandTokenOverrides, PageSection } from '@codex/shared-types';
 import { z } from 'zod';
-import { createSlugSchema, uuidSchema } from '../primitives';
+import { createSlugSchema, priceCentsSchema, uuidSchema } from '../primitives';
 
 /**
  * Journey member-surface route inputs (Codex-2pryk · Round-D · Codex-776gg).
@@ -211,32 +211,107 @@ export const pageSectionSchema = z.custom<PageSection>(
  * minus the server-owned `organizationId`/`publishedAt`, which the service
  * derives). `sections`/`brandOverrides` carry their FE types via `z.custom` so
  * the inferred type is assignable to the service input with no boundary cast.
+ *
+ * `.strict()` because this endpoint does NOT own the whole builder draft. The
+ * pricing panel's `offer` belongs to `updateJourneyOfferBodySchema`, and `seo` has
+ * no persistence yet — under Zod's default strip both were accepted, discarded,
+ * and reported as "Page saved". A key this endpoint cannot honour must 400.
  */
-export const saveJourneyPageBodySchema = z.object({
-  id: uuidSchema,
-  pageType: z.string().min(1).max(30),
-  // A plain (transform-free) required slug validator — NOT `createSlugSchema`,
-  // whose `.transform().pipe()` makes SvelteKit's `command()` infer the field as
-  // OPTIONAL, breaking assignability to the (required-slug) service input. Same
-  // format rule, validated not rewritten (the builder sends an already-slugified
-  // value); a malformed slug is rejected rather than silently coerced.
-  slug: z
-    .string()
-    .trim()
-    .min(1)
-    .max(160)
-    .regex(
-      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
-      'Slug must be lowercase letters, numbers and hyphens (no leading/trailing hyphen)'
-    ),
-  title: z.string().trim().min(1).max(500),
-  status: journeyPageStatusSchema,
-  subjectType: z.string().max(30).nullable(),
-  subjectId: uuidSchema.nullable(),
-  brandOverrides: z.custom<BrandTokenOverrides>().nullable(),
-  sections: z.array(pageSectionSchema),
-});
+export const saveJourneyPageBodySchema = z
+  .object({
+    id: uuidSchema,
+    pageType: z.string().min(1).max(30),
+    // A plain (transform-free) required slug validator — NOT `createSlugSchema`,
+    // whose `.transform().pipe()` makes SvelteKit's `command()` infer the field as
+    // OPTIONAL, breaking assignability to the (required-slug) service input. Same
+    // format rule, validated not rewritten (the builder sends an already-slugified
+    // value); a malformed slug is rejected rather than silently coerced.
+    slug: z
+      .string()
+      .trim()
+      .min(1)
+      .max(160)
+      .regex(
+        /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+        'Slug must be lowercase letters, numbers and hyphens (no leading/trailing hyphen)'
+      ),
+    title: z.string().trim().min(1).max(500),
+    status: journeyPageStatusSchema,
+    subjectType: z.string().max(30).nullable(),
+    subjectId: uuidSchema.nullable(),
+    brandOverrides: z.custom<BrandTokenOverrides>().nullable(),
+    sections: z.array(pageSectionSchema),
+  })
+  .strict();
 export type SaveJourneyPageBody = z.infer<typeof saveJourneyPageBodySchema>;
+
+/**
+ * Journey OFFER body — the page's ways-in + their prices (`PATCH
+ * /api/journeys/studio/journeys/:pageId/offer`). Prices are pence, GBP
+ * (`priceCentsSchema`); `null` means "no price set".
+ *
+ * Deliberately `.strict()`: pricing is a commerce mutation, so an unrecognised
+ * key is a client bug that must 400 rather than be silently dropped (the failure
+ * mode that made the pricing panel swallow input while reporting success).
+ *
+ * The toggles carry `.default(false)` so the persisted bag is always TOTAL —
+ * every path is explicitly on or off, never absent-and-therefore-ambiguous.
+ * `.default()` only widens the INPUT type (the field becomes optional for the
+ * caller) while the output stays required, so the inferred body is still
+ * assignable to the service input with no boundary cast.
+ *
+ * The cross-field rule — an ENABLED path needs a price — lives in
+ * `CourseJourneyService.updateJourneyOffer` as a typed `ValidationError`, not
+ * here: it is a business invariant (an enabled-but-priceless path silently
+ * collapses the checkout to "not open for enrolment"), and keeping it out of Zod
+ * avoids wrapping the object in a `ZodEffects` that `command()` mis-infers.
+ */
+export const updateJourneyOfferBodySchema = z
+  .object({
+    tiersEnabled: z.boolean().default(false),
+    subscriptionEnabled: z.boolean().default(false),
+    subscriptionPriceCents: priceCentsSchema,
+    oneOffEnabled: z.boolean().default(false),
+    oneOffPriceCents: priceCentsSchema,
+  })
+  .strict();
+export type UpdateJourneyOfferBody = z.infer<
+  typeof updateJourneyOfferBodySchema
+>;
+
+/**
+ * Journey SELL-MEDIA body — the four `media_items` refs the sales page's
+ * `introVideo` / `reel` / `guide` sections resolve their primary content from
+ * (`PATCH /api/journeys/studio/journeys/:pageId/media`; Codex-eqh0z).
+ *
+ * A TOTAL write, mirroring {@link updateJourneyOfferBodySchema}: every slot
+ * carries `.nullable().default(null)`, so an omitted slot CLEARS rather than
+ * being ambiguously absent, and the persisted row always says exactly which
+ * slots are filled. This is what makes "clear a video" expressible at all — a
+ * PATCH-merge shape could only ever set, never unset.
+ *
+ * `.strict()` for the same reason the offer body is: a key this endpoint cannot
+ * honour is a client bug that must 400, not be silently dropped (the failure
+ * mode that had the builder's `media` control writing a decorative string).
+ *
+ * The cover is deliberately NOT here — it is a still image, uploaded as
+ * multipart to `POST …/cover`, not a `media_items` id.
+ *
+ * NOTE for callers: SvelteKit's `command()` infers a `.nullable()` field as
+ * OPTIONAL, so the remote wrapper must re-supply `?? null` per slot (the same
+ * quirk `updateJourneyOffer`'s remote documents).
+ */
+export const updateJourneySellMediaBodySchema = z
+  .object({
+    introVideoMediaId: uuidSchema.nullable().default(null),
+    previewVideoMediaId: uuidSchema.nullable().default(null),
+    guideVideoMediaId: uuidSchema.nullable().default(null),
+    guidePortraitMediaId: uuidSchema.nullable().default(null),
+  })
+  .strict();
+export type UpdateJourneySellMediaBody = z.infer<
+  typeof updateJourneySellMediaBodySchema
+>;
 
 /**
  * ── STUDIO curriculum-editor inputs (Codex-03cwh · admin two-pane editor) ──

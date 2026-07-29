@@ -39,6 +39,8 @@ function baseContext(
     checkoutUrl: 'http://lvh.me:3000/journeys/demo/checkout',
     dashboardUrl: 'http://lvh.me:3000/journeys/demo/dashboard',
     enrolled: false,
+    // No offer read in this harness — this section shows no prices anyway.
+    offer: null,
     sellPreview,
   };
 }

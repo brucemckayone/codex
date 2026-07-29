@@ -27,8 +27,10 @@ import {
   courseStages,
   courses,
   landingPages,
+  mediaItems,
   organizations,
   stagePractices,
+  subscriptionTiers,
 } from '@codex/database/schema';
 import { ForbiddenError, NotFoundError } from '@codex/service-errors';
 import {
@@ -150,6 +152,22 @@ async function seedPractice(
   await db.insert(stagePractices).values({ stageId, contentId, sortOrder });
 }
 
+/** An org tier, so a practice can carry a DELIBERATE tier-gated access path. */
+async function createTier(db: Database, orgId: string): Promise<string> {
+  const [row] = await db
+    .insert(subscriptionTiers)
+    .values({
+      organizationId: orgId,
+      name: 'Inner Circle',
+      sortOrder: 1, // `check_tier_sort_order_positive` requires > 0
+      priceMonthly: 1200,
+      priceAnnual: 12000,
+    })
+    .returning({ id: subscriptionTiers.id });
+  if (!row) throw new Error('failed to create tier');
+  return row.id;
+}
+
 /** Read the persisted stage sort orders directly (index-safety assertions). */
 async function readStageSortOrders(
   db: Database,
@@ -268,6 +286,72 @@ describe('CourseJourneyService curriculum editor (Codex-03cwh)', () => {
         contentType: 'written',
         status: 'draft',
         sortOrder: 1,
+      });
+    });
+
+    it('projects the linked media duration (and null for a practice with no media)', async () => {
+      // The builder map's "≈ N min in all" cue read a flat 0 while
+      // `EditorPracticeView` carried no duration, under-claiming every course.
+      const courseId = await createCourse(db, orgAId, creatorId);
+
+      // `status: 'ready'` is guarded by the `status_ready_requires_keys` CHECK, so
+      // the HLS master + thumbnail keys are supplied too — a real ready video.
+      const mediaKey = randomUUID();
+      const [media] = await db
+        .insert(mediaItems)
+        .values({
+          creatorId,
+          title: 'Womb Awakening Movement',
+          mediaType: 'video',
+          status: 'ready',
+          r2Key: `originals/${mediaKey}/video.mp4`,
+          hlsMasterPlaylistKey: `hls/${mediaKey}/master.m3u8`,
+          thumbnailKey: `thumbnails/${mediaKey}/thumb.jpg`,
+          durationSeconds: 420,
+        })
+        .returning({ id: mediaItems.id });
+      if (!media) throw new Error('failed to create media item');
+
+      const [withMedia] = await db
+        .insert(content)
+        .values(
+          createTestContentInput(creatorId, {
+            organizationId: orgAId,
+            status: 'published',
+            contentType: 'video',
+            mediaItemId: media.id,
+          })
+        )
+        .returning({ id: content.id });
+      if (!withMedia) throw new Error('failed to create content');
+
+      // A written practice links NO media — 0 minutes is the honest answer.
+      const writtenId = await createContent(db, {
+        creatorId,
+        orgId: orgAId,
+        contentType: 'written',
+      });
+
+      const stage = await seedStage(db, courseId, {
+        name: 'Arriving',
+        sortOrder: 0,
+      });
+      await seedPractice(db, stage, withMedia.id, 0);
+      await seedPractice(db, stage, writtenId, 1);
+
+      const result = await service.getCourseCurriculumForEditor(
+        orgAId,
+        courseId
+      );
+      const practices = result.stages[0]?.practices ?? [];
+
+      expect(practices[0]).toMatchObject({
+        contentId: withMedia.id,
+        durationSeconds: 420,
+      });
+      expect(practices[1]).toMatchObject({
+        contentId: writtenId,
+        durationSeconds: null,
       });
     });
 
@@ -521,6 +605,210 @@ describe('CourseJourneyService curriculum editor (Codex-03cwh)', () => {
 
       const persisted = await readStageSortOrders(db, courseId);
       expect(persisted).toHaveLength(0);
+    });
+  });
+
+  // ── Practice gating (Codex-0biug — paywall bypass) ─────────────────────────
+
+  /**
+   * Overwrite a content row's access policy. `createTestContentInput` seeds the
+   * DEFAULT policy, which is precisely the vulnerable shape, so a test that
+   * needs a DELIBERATE standalone path has to say so explicitly.
+   */
+  async function setAccessFlags(
+    db: Database,
+    contentId: string,
+    flags: Partial<{
+      isFree: boolean;
+      isPurchasable: boolean;
+      priceCents: number | null;
+      includedInTierId: string | null;
+      isFollowerGated: boolean;
+      isTeamOnly: boolean;
+      courseOnly: boolean;
+    }>
+  ): Promise<void> {
+    await db.update(content).set(flags).where(eq(content.id, contentId));
+  }
+
+  async function readPolicy(
+    db: Database,
+    contentId: string
+  ): Promise<{ courseOnly: boolean; isPurchasable: boolean }> {
+    const row = await db.query.content.findFirst({
+      where: eq(content.id, contentId),
+      columns: { courseOnly: true, isPurchasable: true },
+    });
+    if (!row) throw new Error('content not found');
+    return row;
+  }
+
+  /** Link `contentIds` into a single new stage on `courseId` via the service. */
+  async function linkPractices(
+    orgId: string,
+    courseId: string,
+    contentIds: string[]
+  ): Promise<void> {
+    await service.saveCurriculum(orgId, courseId, {
+      stages: [
+        {
+          id: null,
+          name: 'Arriving',
+          gloss: null,
+          practices: contentIds.map((contentId) => ({ contentId })),
+        },
+      ],
+    });
+  }
+
+  describe('saveCurriculum gates linked practices (Codex-0biug)', () => {
+    it('gates a DEFAULT-policy practice — without this it is anonymously streamable at its standalone URL', async () => {
+      const courseId = await createCourse(db, orgAId, creatorId);
+      const practice = await createContent(db, {
+        creatorId,
+        orgId: orgAId,
+      });
+
+      // The pre-state IS the vulnerability: default flags, so the resolver falls
+      // through to `grant('free')` for an anonymous caller.
+      expect((await readPolicy(db, practice)).courseOnly).toBe(false);
+
+      await linkPractices(orgAId, courseId, [practice]);
+
+      expect((await readPolicy(db, practice)).courseOnly).toBe(true);
+    });
+
+    it('leaves an independently PURCHASABLE practice standalone — it has its own paywall, and revoking that would delete a real product', async () => {
+      const courseId = await createCourse(db, orgAId, creatorId);
+      const practice = await createContent(db, { creatorId, orgId: orgAId });
+      await setAccessFlags(db, practice, {
+        isFree: false,
+        isPurchasable: true,
+        priceCents: 4999,
+      });
+
+      await linkPractices(orgAId, courseId, [practice]);
+
+      const policy = await readPolicy(db, practice);
+      expect(policy.courseOnly).toBe(false);
+      expect(policy.isPurchasable).toBe(true);
+    });
+
+    it('leaves a TIER-GATED practice standalone', async () => {
+      const courseId = await createCourse(db, orgAId, creatorId);
+      const tierId = await createTier(db, orgAId);
+      const practice = await createContent(db, { creatorId, orgId: orgAId });
+      await setAccessFlags(db, practice, {
+        isFree: false,
+        includedInTierId: tierId,
+      });
+
+      await linkPractices(orgAId, courseId, [practice]);
+
+      expect((await readPolicy(db, practice)).courseOnly).toBe(false);
+    });
+
+    it('leaves FOLLOWER-gated and TEAM-only practices standalone', async () => {
+      const courseId = await createCourse(db, orgAId, creatorId);
+      const follower = await createContent(db, { creatorId, orgId: orgAId });
+      const team = await createContent(db, { creatorId, orgId: orgAId });
+      await setAccessFlags(db, follower, {
+        isFree: false,
+        isFollowerGated: true,
+      });
+      await setAccessFlags(db, team, { isFree: false, isTeamOnly: true });
+
+      await linkPractices(orgAId, courseId, [follower, team]);
+
+      expect((await readPolicy(db, follower)).courseOnly).toBe(false);
+      expect((await readPolicy(db, team)).courseOnly).toBe(false);
+    });
+
+    it('gates a mixed curriculum selectively in one save', async () => {
+      const courseId = await createCourse(db, orgAId, creatorId);
+      const free = await createContent(db, { creatorId, orgId: orgAId });
+      const sold = await createContent(db, { creatorId, orgId: orgAId });
+      await setAccessFlags(db, sold, {
+        isFree: false,
+        isPurchasable: true,
+        priceCents: 999,
+      });
+
+      await linkPractices(orgAId, courseId, [free, sold]);
+
+      expect((await readPolicy(db, free)).courseOnly).toBe(true);
+      expect((await readPolicy(db, sold)).courseOnly).toBe(false);
+    });
+
+    it('HEALS a curriculum linked before this landed, and is idempotent on re-save', async () => {
+      const courseId = await createCourse(db, orgAId, creatorId);
+      const practice = await createContent(db, { creatorId, orgId: orgAId });
+
+      // Seed the join DIRECTLY, bypassing the service — the exact state every
+      // pre-existing curriculum is in.
+      const stageId = await seedStage(db, courseId, {
+        name: 'Legacy',
+        sortOrder: 0,
+      });
+      await seedPractice(db, stageId, practice, 0);
+      expect((await readPolicy(db, practice)).courseOnly).toBe(false);
+
+      await service.saveCurriculum(orgAId, courseId, {
+        stages: [
+          {
+            id: stageId,
+            name: 'Legacy',
+            gloss: null,
+            practices: [{ contentId: practice }],
+          },
+        ],
+      });
+      expect((await readPolicy(db, practice)).courseOnly).toBe(true);
+
+      // Re-saving must not churn or regress it.
+      await service.saveCurriculum(orgAId, courseId, {
+        stages: [
+          {
+            id: stageId,
+            name: 'Legacy',
+            gloss: null,
+            practices: [{ contentId: practice }],
+          },
+        ],
+      });
+      expect((await readPolicy(db, practice)).courseOnly).toBe(true);
+    });
+
+    it('org isolation: a rejected foreign-org save gates NOTHING', async () => {
+      const courseId = await createCourse(db, orgAId, creatorId);
+      const foreign = await createContent(db, { creatorId, orgId: orgBId });
+
+      await expect(
+        linkPractices(orgAId, courseId, [foreign])
+      ).rejects.toBeInstanceOf(ForbiddenError);
+
+      // The space guard runs before the transaction, so the foreign row must be
+      // untouched — a gate written across an org boundary would be its own bug.
+      expect((await readPolicy(db, foreign)).courseOnly).toBe(false);
+    });
+
+    it('unlinking does NOT strand the practice gated with no course to reach it through', async () => {
+      const courseId = await createCourse(db, orgAId, creatorId);
+      const practice = await createContent(db, { creatorId, orgId: orgAId });
+
+      await linkPractices(orgAId, courseId, [practice]);
+      expect((await readPolicy(db, practice)).courseOnly).toBe(true);
+
+      // Remove it from the curriculum entirely.
+      await service.saveCurriculum(orgAId, courseId, {
+        stages: [{ id: null, name: 'Arriving', gloss: null, practices: [] }],
+      });
+
+      // KNOWN GAP (Codex-0biug scope item): the gate is not lifted on unlink, so
+      // the content is now unreachable by ANY path — gated, but in no course.
+      // Asserting the CURRENT behaviour so the follow-up fix has a failing test
+      // to flip rather than discovering this in production.
+      expect((await readPolicy(db, practice)).courseOnly).toBe(true);
     });
   });
 });

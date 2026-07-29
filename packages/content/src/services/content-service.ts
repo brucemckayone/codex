@@ -926,6 +926,13 @@ export class ContentService extends BaseService {
           ? [
               isNull(content.deletedAt),
               eq(content.status, CONTENT_STATUS.PUBLISHED),
+              // Course-only practices are reachable ONLY through a course
+              // entitlement (SPEC §6.1), so they must not appear in a public
+              // browse catalogue. Omitting this listed a paid course's whole
+              // curriculum as free, browsable content (Codex-0biug). The STUDIO
+              // scope deliberately still shows them — a creator must be able to
+              // see and manage their own gated practices.
+              eq(content.courseOnly, false),
             ]
           : [scopedNotDeleted(content, creatorId)];
 
@@ -1067,6 +1074,20 @@ export class ContentService extends BaseService {
       // Optional slug filter (exact match for content detail page)
       if (params.slug) {
         whereConditions.push(eq(content.slug, params.slug));
+      } else {
+        // CATALOGUE reads only: a course-only practice is reachable solely via a
+        // course entitlement (SPEC §6.1) and must never be advertised in a
+        // public listing — that is how a paid curriculum came to be listed as
+        // free, browsable content (Codex-0biug).
+        //
+        // The by-slug branch above is deliberately EXEMPT. That read backs the
+        // content DETAIL page, which needs the row in order to render the
+        // "part of a course" state that the resolver's `deny('course_only')`
+        // implies. Excluding it here would turn a correct paywall into a 404 and
+        // would break any deep link into a practice. Access is decided by the
+        // entitlement resolver, not by this projection — hiding the row from a
+        // catalogue is a discovery concern, not the access control itself.
+        whereConditions.push(eq(content.courseOnly, false));
       }
 
       // Optional content type filter

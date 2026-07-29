@@ -17,6 +17,7 @@
  * and cheap to bundle in the editor chunk.
  */
 import type { CourseSectionType } from '@codex/shared-types';
+import type { JourneySellMediaSlot } from '$lib/page-builder/sell-media-store.svelte';
 
 /** The control a field renders as in the config editor. */
 export type SectionFieldControl = 'text' | 'textarea' | 'select' | 'media';
@@ -27,7 +28,11 @@ export interface SectionFieldOption {
 }
 
 export interface SectionFieldDef {
-  /** The `PageSection.props` key this field reads/writes. */
+  /**
+   * The `PageSection.props` key this field reads/writes — EXCEPT when
+   * {@link SectionFieldDef.mediaSlot} is set, in which case the control writes
+   * the course sell-media column instead and `key` is only the `{#each}` key.
+   */
   readonly key: string;
   readonly label: string;
   readonly control: SectionFieldControl;
@@ -36,6 +41,19 @@ export interface SectionFieldDef {
   readonly hint?: string;
   /** Choices for a `select` control. */
   readonly options?: readonly SectionFieldOption[];
+  /**
+   * For `control: 'media'` — which `courses` sell-media column this picker sets
+   * (Codex-eqh0z).
+   *
+   * This is what makes the media control REAL. The live sections do not read a
+   * clip out of `props`: `introVideo` reads `sellPreview.intro`, `reel` reads
+   * `sellPreview.reel`, and the guide reads `portraitUrl` — all projected from
+   * `courses.*MediaId`. So a picker that wrote into `props` could never affect
+   * what renders, which is exactly why the old control was a decorative text
+   * input. Naming the slot here points the picker at the column the section
+   * actually reads.
+   */
+  readonly mediaSlot?: JourneySellMediaSlot;
 }
 
 const GENERIC_FIELDS: readonly SectionFieldDef[] = [
@@ -54,14 +72,39 @@ const PROSE_FIELDS: readonly SectionFieldDef[] = [
   { key: 'body', label: 'Body', control: 'textarea' },
 ];
 
-/** Shared "video" field set — the prototype's cinematic frame (introVideo/reel). */
-const VIDEO_FIELDS: readonly SectionFieldDef[] = [
-  { key: 'kicker', label: 'Kicker', control: 'text' },
-  { key: 'heading', label: 'Heading', control: 'text' },
-  { key: 'sub', label: 'Sub-line', control: 'textarea' },
-  { key: 'clip', label: 'Video', control: 'media' },
-  { key: 'duration', label: 'Duration', control: 'text' },
-];
+/**
+ * The prototype's cinematic frame (introVideo/reel). A FACTORY rather than a
+ * shared constant because the two sections render DIFFERENT course columns —
+ * `introVideo` the intro film, `reel` the practice reel — so their pickers must
+ * target different slots even though every copy field is identical.
+ *
+ * `clip` stays a plain text field: it is the on-frame LABEL (what the prototype
+ * overlays on the frame), and it already carries authored copy in stored drafts.
+ * The picker is a separate, additional control so no existing label is orphaned.
+ */
+function videoFields(
+  mediaSlot: JourneySellMediaSlot
+): readonly SectionFieldDef[] {
+  return [
+    { key: 'kicker', label: 'Kicker', control: 'text' },
+    { key: 'heading', label: 'Heading', control: 'text' },
+    { key: 'sub', label: 'Sub-line', control: 'textarea' },
+    {
+      key: 'clipMedia',
+      label: 'Video',
+      control: 'media',
+      mediaSlot,
+      hint: 'Pick a ready video from your media library. This is what the section plays.',
+    },
+    {
+      key: 'clip',
+      label: 'On-frame label',
+      control: 'text',
+      hint: 'Small caption shown over the frame. Optional.',
+    },
+    { key: 'duration', label: 'Duration', control: 'text' },
+  ];
+}
 
 /**
  * Field sets per course-section type, grounded in the prototype's inspector
@@ -111,10 +154,10 @@ export const SECTION_FIELDS: Readonly<
       ],
     },
   ],
-  introVideo: VIDEO_FIELDS,
+  introVideo: videoFields('introVideoMediaId'),
   ache: PROSE_FIELDS,
   turn: PROSE_FIELDS,
-  reel: VIDEO_FIELDS,
+  reel: videoFields('previewVideoMediaId'),
   map: [
     { key: 'eyebrow', label: 'Eyebrow', control: 'text' },
     { key: 'heading', label: 'Heading', control: 'textarea' },
@@ -156,7 +199,26 @@ export const SECTION_FIELDS: Readonly<
       control: 'textarea',
       hint: 'Big italic quote. Optional.',
     },
-    { key: 'clip', label: 'Video', control: 'media' },
+    {
+      key: 'portraitMedia',
+      label: 'Portrait',
+      control: 'media',
+      mediaSlot: 'guidePortraitMediaId',
+      hint: 'The still the guide section shows beside the bio.',
+    },
+    {
+      key: 'clipMedia',
+      label: 'Video',
+      control: 'media',
+      mediaSlot: 'guideVideoMediaId',
+      hint: 'A talking-head clip. Optional.',
+    },
+    {
+      key: 'clip',
+      label: 'On-frame label',
+      control: 'text',
+      hint: 'Small caption shown over the frame. Optional.',
+    },
     { key: 'duration', label: 'Duration', control: 'text' },
   ],
   faq: [

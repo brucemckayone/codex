@@ -16,8 +16,13 @@
 
 import {
   createJourneyBodySchema,
+  MAX_IMAGE_SIZE_BYTES,
+  SUPPORTED_IMAGE_MIME_TYPES,
   saveCurriculumBodySchema,
   saveJourneyPageBodySchema,
+  updateCourseMonetisationInputSchema,
+  updateJourneyOfferBodySchema,
+  updateJourneySellMediaBodySchema,
 } from '@codex/validation';
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
@@ -31,10 +36,13 @@ import type {
   JourneyCardView,
   JourneyCoursePage,
   JourneyListItem,
+  JourneyMonetisation,
   JourneyPageRecord,
+  JourneySellMedia,
 } from '$lib/page-builder';
 import type { SellPreview } from '$lib/page-builder/render';
 import { createServerApi } from '$lib/server/api';
+import { ApiError } from '$lib/server/errors';
 import { persistPracticeCompletion } from '$lib/server/journeys/round-d-seam';
 import { getSubdomainContext } from '$lib/utils/subdomain';
 
@@ -251,6 +259,14 @@ export const listJourneyRevenue = query(
 const journeyIdSchema = z.object({ id: z.string().uuid() });
 
 /**
+ * `{ pageId }` — the landing-page id, for the sell-media + cover remotes. Named
+ * `pageId` (not `id`) to match the worker's `:pageId` path param and to keep the
+ * caller honest that this addresses the PAGE, while the media it sets lives on
+ * the subject course.
+ */
+const journeyPageIdSchema = z.object({ pageId: z.string().uuid() });
+
+/**
  * Load a page draft into the builder (frozen `GetJourneyForBuilderQuery`).
  * Org-scoped by the worker → `null` for a foreign/missing page (IDOR-safe).
  */
@@ -287,6 +303,353 @@ export const saveJourneyPage = command(
       error(400, 'Journeys can only be saved within an organization');
     }
     await ctx.api.access.saveJourneyPage(ctx.orgId, record);
+  }
+);
+
+/**
+ * Set the journey's ways-in + prices (pence, GBP) — the pricing panel's write.
+ * Distinct from {@link saveJourneyPage}: the worker persists the offer AND the
+ * authoritative `courses.price_cents` in one transaction, so a price change makes
+ * the journey buyable without republishing the page body.
+ */
+export const updateJourneyOffer = command(
+  z.object({
+    pageId: z.string().uuid(),
+    offer: updateJourneyOfferBodySchema,
+  }),
+  async ({ pageId, offer }) => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'Journey pricing can only be set within an organization');
+    }
+    try {
+      // `command()` infers a `.nullable()` field as OPTIONAL (the same quirk the
+      // save schema's slug comment documents), so the parsed prices arrive as
+      // `number | undefined`. The worker's `priceCentsSchema` is nullable but NOT
+      // optional — an absent key 400s — so restore the explicit nulls here rather
+      // than let "no price" travel as a missing key.
+      return await ctx.api.access.updateJourneyOffer(ctx.orgId, pageId, {
+        tiersEnabled: offer.tiersEnabled,
+        subscriptionEnabled: offer.subscriptionEnabled,
+        subscriptionPriceCents: offer.subscriptionPriceCents ?? null,
+        oneOffEnabled: offer.oneOffEnabled,
+        oneOffPriceCents: offer.oneOffPriceCents ?? null,
+      });
+    } catch (err) {
+      // A 4xx here is the service's own pricing guidance ("Set a one-off price,
+      // or turn the one-off path off") — user-actionable, so forward it through
+      // `error()` where SvelteKit will deliver the text to the client toast. A
+      // bare throw would surface only a generic failure, which is how an
+      // unsellable offer could look like a mystery instead of a fixable mistake.
+      // 5xx is NOT forwarded: it may carry internals, so it propagates as-is.
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        error(err.status, err.message);
+      }
+      throw err;
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Course MONETISATION — the authoritative subscription plan + tier-access write
+// (Codex-2pryk.2.4.2).
+//
+// WHY THIS EXISTS: the pricing panel used to write `subscriptionEnabled` /
+// `tiersEnabled` into `landing_pages.offer` and nowhere else. That jsonb bag is
+// PRESENTATION — no authoritative read consults it — so turning either path on
+// had NO effect on what a buyer could purchase. `getCourseOffer` composes the
+// real offer from `course_subscription_plans` and `course_tier_access`, and with
+// nothing able to write those two tables it could only ever return
+// `paths: ['purchase']`. That is why a creator who configured a membership tier,
+// a course subscription AND a one-off saw only the one-off at checkout.
+//
+// The two writes are one COMMAND rather than two so the panel has one save and
+// one error to render. Both underlying routes are idempotent, so a retry after a
+// partial failure converges rather than duplicating.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Read the course's AUTHORITATIVE monetisation state — the live plan's prices,
+ * the exact tier-access set, and every live org tier for the picker.
+ *
+ * Composed from `getCourseOffer` (the same read the public sell page and the
+ * checkout use) rather than from `landing_pages.offer`, so the panel's baseline
+ * IS the product. A bag that disagrees shows up immediately as the panel
+ * rendering the real state instead of the authored one.
+ *
+ * Returns `null` off a non-org host OR when either read fails — deliberately NOT
+ * an empty shape. An empty baseline is indistinguishable from "no plan, no
+ * tiers", and saving it would WITHDRAW a live plan and CLEAR real tier grants
+ * the creator never touched. The caller must treat `null` as "not loaded" and
+ * refuse to save.
+ */
+const monetisationSchema = z.object({ courseId: z.string().uuid() });
+
+async function readCourseMonetisation(
+  ctx: { api: ReturnType<typeof createServerApi>; orgId: string },
+  courseId: string
+): Promise<JourneyMonetisation | null> {
+  // Independent reads, but BOTH are required: the offer supplies the current
+  // selection and the tier list supplies what can be selected. A picker missing
+  // its options would silently render "no tiers to choose", which reads as
+  // "this org has no tiers" — so a half-load is reported as no load.
+  const [offer, tiers] = await Promise.all([
+    ctx.api.courses.offer(courseId).catch(() => null),
+    ctx.api.tiers.list(ctx.orgId).catch(() => null),
+  ]);
+  if (!offer || !tiers) return null;
+
+  return {
+    courseId: offer.courseId,
+    subscription: offer.subscription
+      ? {
+          priceMonthly: offer.subscription.priceMonthly,
+          priceAnnual: offer.subscription.priceAnnual,
+        }
+      : null,
+    tierIds: offer.tiers.map((t) => t.tierId),
+    tierOptions: tiers.map((tier) => ({
+      id: tier.id,
+      name: tier.name,
+      priceMonthly: tier.priceMonthly,
+      priceAnnual: tier.priceAnnual,
+    })),
+  };
+}
+
+export const getCourseMonetisation = query(
+  monetisationSchema,
+  async ({ courseId }): Promise<JourneyMonetisation | null> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) return null;
+    return readCourseMonetisation(ctx, courseId);
+  }
+);
+
+/**
+ * Persist the course's ways-in that live OUTSIDE the page row: the subscription
+ * plan and the tier-access set. A TOTAL write — `subscriptionEnabled: false`
+ * withdraws the plan and `tierIds: []` clears tier access, because an
+ * add-only shape could never express the panel's "off" position (which is
+ * exactly what made "off" a no-op before).
+ *
+ * ORDER: the SUBSCRIPTION PLAN goes first because it is the leg that talks to
+ * Stripe. Tier access is pure DB and the offer bag is written by a later leg, so
+ * a Stripe failure leaves the creator's previous, coherent state intact rather
+ * than a page advertising a subscription that has no Product behind it.
+ *
+ * `courseId` arrives from the builder's loaded draft. It is safe to trust: the
+ * ecom-api routes are `requireOrgManagement` on the resolved org AND each
+ * service method re-resolves the course by `(id, organizationId)`, so a tampered
+ * id can only ever address a course in an org the caller already manages, and a
+ * foreign one 404s.
+ *
+ * @returns the authoritative state read back after the writes — the caller's new
+ *   saved baseline. Read back rather than echoed so a save can never report a
+ *   state the DB does not hold.
+ */
+export const updateCourseMonetisation = command(
+  updateCourseMonetisationInputSchema,
+  async (input): Promise<JourneyMonetisation> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'Journey pricing can only be set within an organization');
+    }
+
+    // `command()` infers a `.nullable()` field as OPTIONAL (the quirk
+    // `updateJourneyOffer` documents), so restore the explicit nulls.
+    const priceMonthly = input.subscriptionPriceMonthly ?? null;
+    const priceAnnual = input.subscriptionPriceAnnual ?? null;
+
+    // An enabled subscription with a missing price is the silent-failure shape
+    // this whole task exists to remove: the sales page would advertise a monthly
+    // way in that no Stripe Price backs. Named per field so the panel can point
+    // at the empty box.
+    if (input.subscriptionEnabled && priceMonthly === null) {
+      error(400, 'Set a monthly price, or turn the course subscription off');
+    }
+    if (input.subscriptionEnabled && priceAnnual === null) {
+      error(400, 'Set an annual price, or turn the course subscription off');
+    }
+
+    try {
+      if (
+        input.subscriptionEnabled &&
+        priceMonthly !== null &&
+        priceAnnual !== null
+      ) {
+        await ctx.api.courses.upsertSubscriptionPlan(
+          ctx.orgId,
+          input.courseId,
+          {
+            priceMonthly,
+            priceAnnual,
+          }
+        );
+      } else {
+        await ctx.api.courses.withdrawSubscriptionPlan(
+          ctx.orgId,
+          input.courseId
+        );
+      }
+
+      await ctx.api.courses.setTierAccess(
+        ctx.orgId,
+        input.courseId,
+        input.tierIds
+      );
+    } catch (err) {
+      // A course subscription pays out to the org, so Stripe refuses to sell one
+      // before Connect onboarding completes. The service says "Stripe Connect
+      // account is not fully onboarded", which tells a creator nothing about what
+      // to DO — replace it with the action and where to take it.
+      if (
+        ApiError.isApiError(err) &&
+        err.details &&
+        typeof err.details === 'object' &&
+        (err.details as { code?: unknown }).code === 'CONNECT_ACCOUNT_NOT_READY'
+      ) {
+        error(
+          422,
+          'Connect a payout account before selling a course subscription — finish Stripe onboarding in Studio → Monetisation.'
+        );
+      }
+      // Everything else 4xx is the service's own guidance (a price below £1, an
+      // annual price worse than 12× monthly, a tier from another org). Forward
+      // the text; 5xx may carry internals, so it propagates untouched.
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        error(err.status, err.message);
+      }
+      throw err;
+    }
+
+    const persisted = await readCourseMonetisation(ctx, input.courseId);
+    if (!persisted) {
+      // The writes landed but the read-back did not. Reporting success with a
+      // guessed shape is how a stale baseline gets promoted to "saved", so fail
+      // loudly and leave the draft dirty.
+      error(
+        502,
+        'Pricing saved, but reading it back failed — reload to see the current offer.'
+      );
+    }
+    return persisted;
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sell media + cover (Codex-eqh0z)
+//
+// The write path for `courses.introVideoMediaId` / `previewVideoMediaId` /
+// `guideVideoMediaId` / `guide.portraitMediaId` and the new cover column. Before
+// this, all four media refs were READ-ONLY codebase-wide, so the sales page's
+// `introVideo`, `reel` and `guide` sections could never show their content.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Read the journey's sell media + cover URL — the builder media panel's load.
+ * Org-scoped and management-gated by the worker; `null` off a non-org host.
+ */
+export const getJourneySellMedia = query(
+  journeyPageIdSchema,
+  async ({ pageId }): Promise<JourneySellMedia | null> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) return null;
+    return ctx.api.access.getJourneySellMedia(ctx.orgId, pageId);
+  }
+);
+
+/**
+ * Set the journey's sell media — a TOTAL write, so an unset slot CLEARS.
+ *
+ * The worker org-scopes every non-null id (the media's creator must be an active
+ * member of this org) and rejects a foreign id with 403 before writing anything.
+ * A 4xx is forwarded through `error()` so the panel can show the service's own
+ * message ("Media item does not belong to this space") rather than a generic
+ * failure — the same rationale as {@link updateJourneyOffer}.
+ */
+export const updateJourneySellMedia = command(
+  z.object({
+    pageId: z.string().uuid(),
+    media: updateJourneySellMediaBodySchema,
+  }),
+  async ({ pageId, media }): Promise<JourneySellMedia> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'Journey media can only be set within an organization');
+    }
+    try {
+      // `command()` infers each `.nullable()` slot as OPTIONAL, so a cleared slot
+      // would travel as a MISSING key. The worker's schema defaults an absent key
+      // to null, which happens to agree — but relying on that would make "clear"
+      // depend on a default rather than on an explicit value, so restore the
+      // nulls here and keep the wire payload total.
+      return await ctx.api.access.updateJourneySellMedia(ctx.orgId, pageId, {
+        introVideoMediaId: media.introVideoMediaId ?? null,
+        previewVideoMediaId: media.previewVideoMediaId ?? null,
+        guideVideoMediaId: media.guideVideoMediaId ?? null,
+        guidePortraitMediaId: media.guidePortraitMediaId ?? null,
+      });
+    } catch (err) {
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        error(err.status, err.message);
+      }
+      throw err;
+    }
+  }
+);
+
+/**
+ * Upload (or replace) the journey's still cover.
+ *
+ * A `command()` rather than a `form()` because the builder's media panel is
+ * already a JS-driven surface inside the `ssr = false` studio, and the panel
+ * needs the resolved URL back to update the preview in place. Client-side size /
+ * MIME bounds mirror the server's so an unsupported file (iPhone HEIC, most
+ * commonly) is rejected with actionable text BEFORE the round-trip; the worker
+ * re-validates by magic bytes regardless.
+ */
+export const uploadJourneyCover = command(
+  z.object({
+    pageId: z.string().uuid(),
+    cover: z
+      .instanceof(File)
+      .refine(
+        (file) => !file.type || SUPPORTED_IMAGE_MIME_TYPES.has(file.type),
+        'Use a JPG, PNG, WebP, or GIF image — HEIC and other formats are not supported.'
+      )
+      .refine(
+        (file) => file.size <= MAX_IMAGE_SIZE_BYTES,
+        `Cover must be ${Math.round(
+          MAX_IMAGE_SIZE_BYTES / 1024 / 1024
+        )}MB or smaller.`
+      ),
+  }),
+  async ({ pageId, cover }): Promise<{ coverImageUrl: string }> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'Journey covers can only be set within an organization');
+    }
+    try {
+      return await ctx.api.access.uploadJourneyCover(ctx.orgId, pageId, cover);
+    } catch (err) {
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        error(err.status, err.message);
+      }
+      throw err;
+    }
+  }
+);
+
+/** Clear the journey's cover — the card falls back to its typographic form. */
+export const deleteJourneyCover = command(
+  journeyPageIdSchema,
+  async ({ pageId }): Promise<void> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'Journey covers can only be cleared within an organization');
+    }
+    await ctx.api.access.deleteJourneyCover(ctx.orgId, pageId);
   }
 );
 

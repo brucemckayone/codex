@@ -38,6 +38,9 @@ const context: JourneySalesContext = {
   checkoutUrl: 'http://lvh.me:3000/journeys/demo/checkout',
   dashboardUrl: 'http://lvh.me:3000/journeys/demo/dashboard',
   enrolled: false,
+  // No offer read in this harness — sections must degrade to a price-less CTA
+  // rather than falling back to authored numbers (Codex-2pryk.2.4.3).
+  offer: null,
   sellPreview: Promise.resolve(null),
 };
 

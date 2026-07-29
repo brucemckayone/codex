@@ -1,4 +1,8 @@
-import type { BrandTokenOverrides, PageSection } from '@codex/shared-types';
+import type {
+  BrandTokenOverrides,
+  PageOffer,
+  PageSection,
+} from '@codex/shared-types';
 import { relations, sql } from 'drizzle-orm';
 import {
   boolean,
@@ -75,6 +79,14 @@ export const landingPages = pgTable(
     brandOverrides: jsonb('brand_overrides').$type<BrandTokenOverrides>(),
     sections: jsonb('sections').$type<PageSection[]>().notNull().default([]),
 
+    // The page's PRESENTATION of the journey's ways-in (§7 "one course, three
+    // ways in") — which paths the sales page shows + their teaser prices in
+    // pence, GBP. NOT the source of truth for access or for what a buyer is
+    // charged: the authoritative one-off price is `courses.price_cents`, which
+    // `updateJourneyOffer` writes in the SAME transaction that writes this bag.
+    // Nullable — a page authored before pricing was set has no offer.
+    offer: jsonb('offer').$type<PageOffer>(),
+
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -129,6 +141,14 @@ export const courses = pgTable(
 
     // { name, bio, portraitMediaId, quote }
     guide: jsonb('guide').$type<CourseGuide>(),
+
+    // Still-image COVER — the base R2 key, NOT a `media_items` ref (Codex-eqh0z).
+    // `media_items` is CHECK-constrained to ('video','audio'), so a poster image
+    // cannot live there; this reuses the `categories.cover_image_key` convention
+    // (`ImageProcessingService.processCourseCover` writes {sm,md,lg}.webp under
+    // the key, cards serve `md`). Deterministic per course id ⇒ a re-upload
+    // overwrites in place, so replacing a cover never orphans an object.
+    coverImageKey: varchar('cover_image_key', { length: 500 }),
 
     // Sell media — media-item refs (reuse the transcoding pipeline; §10).
     introVideoMediaId: uuid('intro_video_media_id').references(

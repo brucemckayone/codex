@@ -2,9 +2,16 @@
   @component PageSeoPanel
 
   The "SEO & web address" page-mode panel (Codex-2pryk.3.3 · WP-5). Edits the web
-  address (slug, real `PageBuilderState.slug`), meta title + description
-  (`PageBuilderState.seo`), and a share-image slot (stub). Writes through the
-  `pageBuilder` store so the address read-out + public head reflect immediately.
+  address (slug, real `PageBuilderState.slug`) — persisted by the page save and
+  live in the address read-out immediately.
+
+  META TITLE / DESCRIPTION ARE NOT YET PERSISTED. `landing_pages` has no `seo`
+  column (the `PageSeo` doc comment claiming "Backs landing_pages.seo jsonb" is
+  aspirational), and the save schema is `.strict()`, so `seo` has nowhere to go.
+  The fields are therefore DISABLED rather than accepting keystrokes the save
+  would discard while the toast said "Page saved" — the same silent swallow the
+  pricing panel had before `updateJourneyOffer` landed. Enabling them needs a
+  migration + save-schema + service field (bead filed).
 -->
 <script lang="ts">
   import { pageBuilder } from '$lib/page-builder/page-builder-store.svelte';
@@ -45,14 +52,19 @@
       <span class="panel__hint">{orgDomain} / journeys / <b>{pending.slug || 'draft'}</b></span>
     </label>
 
+    <p class="panel__note">
+      Meta title, description and share image land with page metadata. Until then the
+      page’s own title is used, so nothing here is silently dropped.
+    </p>
+
     <label class="panel__field">
       <span class="panel__label">Meta title</span>
       <input
         type="text"
         class="panel__input"
+        disabled
         placeholder={pending.title}
         value={pending.seo?.title ?? ''}
-        oninput={(e) => pageBuilder.updateSeo({ title: e.currentTarget.value })}
       />
       <span class="panel__hint">Shown in search results &amp; the browser tab. Unset → the page title.</span>
     </label>
@@ -62,8 +74,8 @@
       <textarea
         class="panel__input panel__input--area"
         rows="3"
+        disabled
         value={pending.seo?.description ?? ''}
-        oninput={(e) => pageBuilder.updateSeo({ description: e.currentTarget.value })}
       ></textarea>
     </label>
 
@@ -133,6 +145,23 @@
   .panel__input--area {
     resize: vertical;
     line-height: var(--leading-normal);
+  }
+
+  .panel__input:disabled {
+    background-color: var(--color-surface-secondary);
+    color: var(--color-text-muted);
+    cursor: not-allowed;
+  }
+
+  .panel__note {
+    margin: 0;
+    padding: var(--space-3);
+    border: var(--border-width) var(--border-style) var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    background-color: var(--color-surface-secondary);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--color-text-muted);
   }
 
   .panel__input:focus-visible {

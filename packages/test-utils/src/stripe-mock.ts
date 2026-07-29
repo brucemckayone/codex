@@ -4,8 +4,14 @@
  * Provides a factory for creating mock Stripe client instances with
  * vi.fn() spies on all methods used by subscription services.
  *
- * Each method returns a sensible default that matches the Stripe v19 API
- * shape. Auto-incrementing IDs ensure unique references per test.
+ * Each method returns a PROMISE of a sensible default matching the Stripe v19
+ * API shape. Auto-incrementing IDs ensure unique references per test.
+ *
+ * The async-ness matters: the real SDK returns promises, so service code chains
+ * `.catch()` / `.then()` on these calls (e.g. the orphaned-product cleanup in
+ * CourseSubscriptionService). A mock that returned a bare object made every such
+ * error-handling path crash with "…is not a function" the moment a test reached
+ * it — which silently kept those paths untested (fixed in Codex-2pryk.2.4.1).
  *
  * Usage:
  * ```typescript
@@ -47,67 +53,79 @@ function nextId(prefix: string): string {
 export function createMockStripe(): Stripe {
   const mock = {
     products: {
-      create: vi.fn().mockImplementation((params: Record<string, unknown>) => ({
-        id: nextId('prod'),
-        name: params.name ?? 'Test Product',
-        active: true,
-        metadata: params.metadata ?? {},
-      })),
-      update: vi
+      create: vi
         .fn()
-        .mockImplementation((_id: string, params: Record<string, unknown>) => ({
-          id: _id,
-          name: params.name ?? 'Updated Product',
-          active: params.active ?? true,
+        .mockImplementation(async (params: Record<string, unknown>) => ({
+          id: nextId('prod'),
+          name: params.name ?? 'Test Product',
+          active: true,
           metadata: params.metadata ?? {},
         })),
+      update: vi
+        .fn()
+        .mockImplementation(
+          async (_id: string, params: Record<string, unknown>) => ({
+            id: _id,
+            name: params.name ?? 'Updated Product',
+            active: params.active ?? true,
+            metadata: params.metadata ?? {},
+          })
+        ),
     },
 
     prices: {
-      create: vi.fn().mockImplementation((params: Record<string, unknown>) => ({
-        id: nextId('price'),
-        unit_amount: params.unit_amount ?? 999,
-        currency: params.currency ?? 'gbp',
-        recurring: params.recurring ?? { interval: 'month' },
-        product: params.product ?? 'prod_test_1',
-        active: true,
-      })),
+      create: vi
+        .fn()
+        .mockImplementation(async (params: Record<string, unknown>) => ({
+          id: nextId('price'),
+          unit_amount: params.unit_amount ?? 999,
+          currency: params.currency ?? 'gbp',
+          recurring: params.recurring ?? { interval: 'month' },
+          product: params.product ?? 'prod_test_1',
+          active: true,
+        })),
       update: vi
         .fn()
-        .mockImplementation((_id: string, params: Record<string, unknown>) => ({
-          id: _id,
-          active: params.active ?? true,
-        })),
+        .mockImplementation(
+          async (_id: string, params: Record<string, unknown>) => ({
+            id: _id,
+            active: params.active ?? true,
+          })
+        ),
     },
 
     accounts: {
-      create: vi.fn().mockImplementation((params: Record<string, unknown>) => ({
-        id: nextId('acct'),
-        charges_enabled: false,
-        payouts_enabled: false,
-        country: (params as { country?: string }).country ?? 'GB',
-        metadata:
-          (params as { metadata?: Record<string, string> }).metadata ?? {},
-        requirements: {
-          currently_due: [],
-          disabled_reason: null,
-        },
-        controller: (params as { controller?: unknown }).controller ?? {},
-      })),
-      createLoginLink: vi.fn().mockImplementation((_accountId: string) => ({
-        url: `https://connect.stripe.com/express/login/${_accountId}`,
-      })),
+      create: vi
+        .fn()
+        .mockImplementation(async (params: Record<string, unknown>) => ({
+          id: nextId('acct'),
+          charges_enabled: false,
+          payouts_enabled: false,
+          country: (params as { country?: string }).country ?? 'GB',
+          metadata:
+            (params as { metadata?: Record<string, string> }).metadata ?? {},
+          requirements: {
+            currently_due: [],
+            disabled_reason: null,
+          },
+          controller: (params as { controller?: unknown }).controller ?? {},
+        })),
+      createLoginLink: vi
+        .fn()
+        .mockImplementation(async (_accountId: string) => ({
+          url: `https://connect.stripe.com/express/login/${_accountId}`,
+        })),
     },
 
     accountLinks: {
-      create: vi.fn().mockImplementation(() => ({
+      create: vi.fn().mockImplementation(async () => ({
         url: `https://connect.stripe.com/setup/${nextId('al')}`,
       })),
     },
 
     checkout: {
       sessions: {
-        create: vi.fn().mockImplementation(() => {
+        create: vi.fn().mockImplementation(async () => {
           const id = nextId('cs');
           return {
             id,
@@ -120,7 +138,7 @@ export function createMockStripe(): Stripe {
     subscriptions: {
       retrieve: vi
         .fn()
-        .mockImplementation((_subId: string) =>
+        .mockImplementation(async (_subId: string) =>
           createDefaultStripeSubscription({ id: _subId })
         ),
       update: vi
@@ -136,26 +154,28 @@ export function createMockStripe(): Stripe {
       // active subscription so the service's downstream DB flip matches
       // a realistic response shape (status='active'). See
       // SubscriptionResumeParams in stripe-node types.
-      resume: vi.fn().mockImplementation((_subId: string) => ({
+      resume: vi.fn().mockImplementation(async (_subId: string) => ({
         ...createDefaultStripeSubscription({ id: _subId }),
         status: 'active',
       })),
     },
 
     transfers: {
-      create: vi.fn().mockImplementation((params: Record<string, unknown>) => ({
-        id: nextId('tr'),
-        amount: params.amount ?? 0,
-        currency: params.currency ?? 'gbp',
-        destination: params.destination ?? 'acct_test_1',
-        source_transaction: params.source_transaction ?? null,
-        transfer_group: params.transfer_group ?? null,
-        metadata: params.metadata ?? {},
-      })),
+      create: vi
+        .fn()
+        .mockImplementation(async (params: Record<string, unknown>) => ({
+          id: nextId('tr'),
+          amount: params.amount ?? 0,
+          currency: params.currency ?? 'gbp',
+          destination: params.destination ?? 'acct_test_1',
+          source_transaction: params.source_transaction ?? null,
+          transfer_group: params.transfer_group ?? null,
+          metadata: params.metadata ?? {},
+        })),
     },
 
     paymentIntents: {
-      retrieve: vi.fn().mockImplementation((_piId: string) => ({
+      retrieve: vi.fn().mockImplementation(async (_piId: string) => ({
         id: _piId,
         latest_charge: nextId('ch'),
       })),
@@ -166,14 +186,14 @@ export function createMockStripe(): Stripe {
     // subscription-service.ts. Default returns an empty payments array so
     // tests that don't override see the "no charge resolvable" branch.
     invoices: {
-      retrieve: vi.fn().mockImplementation((_id: string) => ({
+      retrieve: vi.fn().mockImplementation(async (_id: string) => ({
         id: _id,
         payments: { data: [] },
       })),
     },
 
     charges: {
-      list: vi.fn().mockImplementation(() => ({
+      list: vi.fn().mockImplementation(async () => ({
         object: 'list',
         data: [],
         has_more: false,

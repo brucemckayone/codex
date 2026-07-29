@@ -44,18 +44,36 @@ export class CourseAccessService extends BaseService {
    * Replace the set of org tiers that grant access to `courseId` with `tierIds`
    * (exact grants, SPEC §7). Passing an empty array clears all tier access.
    *
-   * N1 GUARD: every tier MUST belong to the course's organization. This is the
+   * ORG SCOPE (`organizationId` first, the codebase's scoping idiom): the course
+   * is resolved by `(id, organizationId)`, so a caller who manages org A can
+   * never reach org B's course. Callers hold org management over
+   * `organizationId` ONLY — the course id arrives from a client path segment and
+   * is therefore untrusted. A course in another org reads as `NotFoundError`,
+   * not `ForbiddenError`, so this never confirms that a foreign course exists.
+   *
+   * N1 GUARD: every tier MUST belong to that same organization. This is the
    * write-path defence; the `course_tier_access` composite FKs are the durable
    * DB backstop (a cross-org row is rejected at INSERT regardless of caller).
    */
-  async setTierAccess(courseId: string, tierIds: string[]): Promise<void> {
+  async setTierAccess(
+    organizationId: string,
+    courseId: string,
+    tierIds: string[]
+  ): Promise<void> {
     try {
       const course = await this.db.query.courses.findFirst({
-        where: and(eq(courses.id, courseId), isNull(courses.deletedAt)),
-        columns: { id: true, organizationId: true },
+        where: and(
+          eq(courses.id, courseId),
+          eq(courses.organizationId, organizationId),
+          isNull(courses.deletedAt)
+        ),
+        columns: { id: true },
       });
       if (!course) {
-        throw new NotFoundError('Course not found', { courseId });
+        throw new NotFoundError('Course not found', {
+          courseId,
+          organizationId,
+        });
       }
 
       const uniqueTierIds = [...new Set(tierIds)];
@@ -68,14 +86,14 @@ export class CourseAccessService extends BaseService {
           .where(
             and(
               inArray(subscriptionTiers.id, uniqueTierIds),
-              eq(subscriptionTiers.organizationId, course.organizationId),
+              eq(subscriptionTiers.organizationId, organizationId),
               isNull(subscriptionTiers.deletedAt)
             )
           );
         if (validTiers.length !== uniqueTierIds.length) {
           throw new ForbiddenError(
             'Tier access grants must reference tiers in the same organization as the course',
-            { courseId, organizationId: course.organizationId }
+            { courseId, organizationId }
           );
         }
       }
@@ -91,7 +109,7 @@ export class CourseAccessService extends BaseService {
               uniqueTierIds.map((tierId) => ({
                 courseId,
                 tierId,
-                organizationId: course.organizationId,
+                organizationId,
               }))
             )
             .onConflictDoNothing();

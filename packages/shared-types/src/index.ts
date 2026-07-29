@@ -71,6 +71,7 @@ export type {
   JourneyPractice,
   JourneyPracticeView,
   JourneyProgressStatus,
+  JourneySellMedia,
   JourneyStage,
   JourneyStageView,
   JourneyTestimonialView,

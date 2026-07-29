@@ -46,6 +46,9 @@ import {
   revokeCourseSubscriptionEntitlement,
   writeCourseSubscriptionEntitlement,
 } from '@codex/purchase';
+// Imported from the DEFINING package, not a re-export: `toBeInstanceOf` compares
+// class identity, and the service throws this exact class.
+import { NotFoundError } from '@codex/service-errors';
 import {
   createTestConnectAccountInput,
   createTestContentInput,
@@ -272,7 +275,7 @@ describe('Course monetization round-trip (WP-6)', () => {
     });
     const svc = new CourseAccessService({ db, environment: 'test' });
 
-    await svc.setTierAccess(courseId, [tierAId]);
+    await svc.setTierAccess(orgAId, courseId, [tierAId]);
 
     // No subscription yet → no derived access.
     expect(await hasCourseEntitlement(db, tierSubUserId, courseId)).toBe(false);
@@ -292,9 +295,9 @@ describe('Course monetization round-trip (WP-6)', () => {
     const svc = new CourseAccessService({ db, environment: 'test' });
 
     // Service guard: tier B (org B) cannot unlock a course in org A.
-    await expect(svc.setTierAccess(courseId, [tierBId])).rejects.toBeInstanceOf(
-      ForbiddenError
-    );
+    await expect(
+      svc.setTierAccess(orgAId, courseId, [tierBId])
+    ).rejects.toBeInstanceOf(ForbiddenError);
 
     // Durable DB backstop: a direct cross-org insert violates the composite FK.
     await expect(
@@ -304,6 +307,42 @@ describe('Course monetization round-trip (WP-6)', () => {
         organizationId: orgAId,
       })
     ).rejects.toThrow();
+  });
+
+  it('4b. setTierAccess is org-scoped: org A cannot touch org B’s course (Codex-2pryk.2.4.1)', async () => {
+    // The route proves the caller manages org A; `courseId` arrives from an
+    // untrusted path segment, so without the org predicate on the course lookup
+    // an org-A admin could rewrite org B's tier access.
+    const orgBCourseId = await createCourse(db, orgBId, creatorId, {
+      priceCents: null,
+    });
+    const svc = new CourseAccessService({ db, environment: 'test' });
+
+    // Seed a REAL grant in org B so absence below means "untouched", not "empty".
+    await svc.setTierAccess(orgBId, orgBCourseId, [tierBId]);
+
+    // Acting as org A against org B's course: NotFoundError, never Forbidden —
+    // a Forbidden would confirm the foreign course exists.
+    await expect(
+      svc.setTierAccess(orgAId, orgBCourseId, [])
+    ).rejects.toBeInstanceOf(NotFoundError);
+
+    // Org B's grant survived the attempt.
+    const surviving = await db
+      .select({ tierId: courseTierAccess.tierId })
+      .from(courseTierAccess)
+      .where(eq(courseTierAccess.courseId, orgBCourseId));
+    expect(surviving.map((r) => r.tierId)).toEqual([tierBId]);
+
+    // The legitimate owner CAN clear it — proving the rejection above was the
+    // org scope and not an unrelated failure.
+    await svc.setTierAccess(orgBId, orgBCourseId, []);
+    expect(
+      await db
+        .select({ tierId: courseTierAccess.tierId })
+        .from(courseTierAccess)
+        .where(eq(courseTierAccess.courseId, orgBCourseId))
+    ).toHaveLength(0);
   });
 
   it('5. content purchase writes a content entitlement the resolver reads', async () => {
@@ -346,7 +385,7 @@ describe('Course monetization round-trip (WP-6)', () => {
       priceCents: 7500,
     });
     const svc = new CourseAccessService({ db, environment: 'test' });
-    await svc.setTierAccess(courseId, [tierAId]);
+    await svc.setTierAccess(orgAId, courseId, [tierAId]);
 
     const anonOffer = await svc.getCourseOffer(courseId, null);
     expect(anonOffer.purchase).toEqual({ priceCents: 7500 });

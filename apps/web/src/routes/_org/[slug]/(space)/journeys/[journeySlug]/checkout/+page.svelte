@@ -4,26 +4,35 @@
   The offer/pay step — "one course, three ways in" (SPEC §7, FRONTEND-MAP §1
   checkout; prototype `docs/design/course-journeys/prototype/checkout.html`).
 
-  A PRESENTATIONAL order-summary + payment SHELL: the course, its order summary
-  and the offer catalogue are real DB-backed data (resolved in `+page.server.ts`
-  via the frozen `getCoursePage` seam); the offer selection is fully interactive
-  (radio-group → live fine print). The one thing this shell does NOT do is settle
-  a payment: the Stripe checkout action + the `entitlements` write on success are
-  owned by WP-6 monetization. Clicking "Continue" therefore surfaces the honest
-  connect-in-progress seam rather than faking a purchase confirmation.
+  An order-summary + payment SHELL over REAL data: the course and its order
+  summary come from the frozen `getCoursePage` seam, and every offer — which
+  ways in exist and what each one charges — comes from the authoritative
+  `GET /courses/:id/offer` read (Codex-2pryk.2.4.3). Authored page-builder copy
+  can only decorate a path that read returns; it can never invent one or set a
+  price. The offer selection is fully interactive (radio-group → live fine print).
 
-  IMMERSIVE PALETTE (D6 · the `.jp` pattern): this surface mirrors the sales
-  page's candlelit reading — the semantic `--color-*` tokens are re-pointed to
-  warm, low-chroma values DERIVED from the org's own `--color-brand-primary` via
-  OKLCH relative colour, so it reads warm/dark on ANY brand and re-themes with
-  the org brand + any per-page `brandOverrides`. Re-pointing `--color-heading`
-  here is also what tames org-brand.css's heading override (it reads the same
-  custom property). No hardcoded hex/px. Kept in sync with `JourneyRenderer`.
+  The pay step is REAL (Codex-2pryk.2.4.4). The offer group + submit live inside a
+  `form()` remote POST, so a purchase works with JavaScript off; the checked radio
+  posts its canonical offer id and NOTHING else. No price, plan id, tier id or
+  course id leaves this markup — the handler re-resolves the course from the slug
+  and the amount from the offer, so a tampered payload cannot change what is
+  charged. Stripe returns the buyer to `./success`, which waits for the webhook's
+  entitlement write and then forwards to the journey dashboard.
+
+  PALETTE (D6 · the `.jp` pattern): this surface takes the SHARED journey palette
+  (`$lib/page-builder/journey-palette.css`) — the same derivation the sales page
+  and the builder canvas use, so there is no longer a hand-synced copy here to
+  drift. It follows the background the creator chose (`--brand-bg`, i.e. the
+  per-page `brandOverrides` else the org brand) and auto-contrasts text off that
+  background's lightness, so light and dark both read correctly. No hardcoded
+  hex/px.
 -->
 <script lang="ts">
   import { page } from '$app/state';
   import { buildJourneyUrl } from '@codex/urls';
+  import '$lib/page-builder/journey-palette.css';
   import { brandOverridesToStyleAttr } from '$lib/page-builder/render/brand-overrides';
+  import { startJourneyCheckout } from '$lib/remote/journey-checkout.remote';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -61,18 +70,27 @@
     offers.find((offer) => offer.id === selectedId) ?? offers[0]
   );
 
-  // Live fine print follows the chosen path's cadence (NN/g explicit terms).
+  // Live fine print follows the chosen path's KIND, not just its cadence — a
+  // tier is a whole-org membership that happens to include this course, so
+  // describing it as a course subscription would misstate what is being bought.
   const fineText = $derived.by(() => {
     if (!selectedOffer) return '';
-    return selectedOffer.recurring
-      ? `Billed ${selectedOffer.priceLabel} ${selectedOffer.cadenceLabel}. Cancel anytime from your account.`
-      : `One payment. ${course.title} stays in your library for good.`;
+    switch (selectedOffer.kind) {
+      case 'tier':
+        return `Billed ${selectedOffer.priceLabel} ${selectedOffer.cadenceLabel} for ${selectedOffer.name} — ${course.title} plus everything else it includes. Cancel anytime from your account.`;
+      case 'subscription':
+        return `Billed ${selectedOffer.priceLabel} ${selectedOffer.cadenceLabel} for ${course.title}. Cancel anytime from your account.`;
+      default:
+        return `One payment. ${course.title} stays in your library for good.`;
+    }
   });
 
-  // The pay CTA is wired only up to the WP-6 seam: clicking it reveals the
-  // honest connect-in-progress note (no fake settlement). An already-enrolled
-  // viewer skips it entirely — they're linked straight to the journey.
-  let initiated = $state(false);
+  // The pay CTA. An anonymous buyer can still press it — the form redirects them
+  // to sign in and back here with this selection intact — but saying so up front
+  // is better than an unexplained detour mid-payment.
+  const ctaLabel = $derived(
+    data.signedIn ? 'Continue' : 'Sign in to continue'
+  );
 </script>
 
 <svelte:head>
@@ -98,13 +116,19 @@
 {/snippet}
 
 <section
-  class="checkout"
+  class="checkout journey-palette"
   data-org-brand={brandStyle ? '' : undefined}
   style={brandStyle}
 >
   <div class="checkout__atmos" aria-hidden="true"></div>
 
-  <div class="checkout__inner">
+  <!--
+    `journey-palette--page` MUST sit on this inner element, not on `.checkout`
+    itself: `--jp-ink` falls back to `--color-background`, so re-pointing
+    `--color-background` on the element that derives the ladder would be a
+    custom-property cycle. See `$lib/page-builder/journey-palette.css`.
+  -->
+  <div class="checkout__inner journey-palette--page">
     <a class="checkout__back" href={salesUrl}>← Back to {course.title}</a>
 
     <header class="co-head">
@@ -143,17 +167,30 @@
       <!-- RIGHT: the ways in -->
       <div class="ways">
         {#if offers.length > 0}
-          <div
-            class="offers"
-            role="radiogroup"
-            aria-label="Choose how to join {course.title}"
-          >
+          <!--
+            A REAL form POST (`form()` remote), not a click handler: the pay step
+            must work with JS off. The checked radio supplies `offerId`; the
+            server re-resolves it against the authoritative offer and resolves
+            the PRICE from the course/plan/tier row, so nothing in this markup
+            can influence what is charged.
+          -->
+          <form {...startJourneyCheckout} class="co-form">
+            <input
+              type="hidden"
+              name="journeySlug"
+              value={page.params.journeySlug}
+            />
+            <div
+              class="offers"
+              role="radiogroup"
+              aria-label="Choose how to join {course.title}"
+            >
             {#each offers as offer (offer.id)}
               <label class="offer" class:offer--selected={selectedId === offer.id}>
                 <input
                   class="offer__input"
                   type="radio"
-                  name="offer"
+                  name="offerId"
                   value={offer.id}
                   checked={selectedId === offer.id}
                   onchange={() => (override = offer.id)}
@@ -184,37 +221,37 @@
                 </div>
               </label>
             {/each}
-          </div>
+            </div>
 
-          <div class="co-actions">
-            {#if data.enrolled}
-              <a class="co-cta" href={dashboardUrl}>
-                Enter the journey <span aria-hidden="true">→</span>
-              </a>
-              <span class="co-actions__fine">
-                You already have access to {course.title}.
-              </span>
-            {:else}
-              <button
-                type="button"
-                class="co-cta"
-                onclick={() => (initiated = true)}
-              >
-                Continue <span aria-hidden="true">→</span>
-              </button>
-              <span class="co-actions__fine">{fineText}</span>
+            <div class="co-actions">
+              {#if data.enrolled}
+                <a class="co-cta" href={dashboardUrl}>
+                  Enter the journey <span aria-hidden="true">→</span>
+                </a>
+                <span class="co-actions__fine">
+                  You already have access to {course.title}.
+                </span>
+              {:else}
+                <button
+                  type="submit"
+                  class="co-cta"
+                  disabled={startJourneyCheckout.pending > 0}
+                >
+                  {startJourneyCheckout.pending > 0
+                    ? 'Taking you to checkout…'
+                    : ctaLabel}
+                  <span aria-hidden="true">→</span>
+                </button>
+                <span class="co-actions__fine">{fineText}</span>
+              {/if}
+            </div>
+
+            {#if startJourneyCheckout.result?.success === false}
+              <p class="co-error" role="alert">
+                {startJourneyCheckout.result.error}
+              </p>
             {/if}
-          </div>
-
-          {#if initiated && !data.enrolled}
-            <p class="co-seam" role="status">
-              Secure checkout is being connected. Your choice — <b
-                >{selectedOffer?.name}</b
-              >
-              ({selectedOffer?.priceLabel}) — is ready; payment goes live with the
-              monetization release.
-            </p>
-          {/if}
+          </form>
 
           {#if data.priceNote}
             <p class="co-note">{data.priceNote}</p>
@@ -265,48 +302,21 @@
 </section>
 
 <style>
-  /* ── Candlelit palette (mirrors JourneyRenderer `.journey-page`) ─────────── */
+  /* ── Layout only — the palette comes from `journey-palette.css` ──────────────
+     This block used to declare its own copy of the sales page's ~15-token
+     palette, "kept in sync with JourneyRenderer" by hand. Both copies derived
+     from `--color-brand-primary` at a hardcoded dark lightness with no light
+     branch, so a creator on a light theme got a dark red checkout (Codex-gfg50).
+     Both surfaces now share ONE derivation, so there is nothing left to keep in
+     sync. */
   .checkout {
     position: relative;
     isolation: isolate;
-
-    /* Surfaces — deep, warm, ascending in lightness. */
-    --color-background: oklch(from var(--color-brand-primary) 0.16 calc(c * 0.5) h);
-    --color-surface: oklch(from var(--color-brand-primary) 0.21 calc(c * 0.45) h);
-    --color-surface-secondary: oklch(
-      from var(--color-brand-primary) 0.25 calc(c * 0.42) h
-    );
-    --color-surface-tertiary: oklch(
-      from var(--color-brand-primary) 0.29 calc(c * 0.4) h
-    );
-
-    /* Text — warm bone → dim, high contrast on the deep surfaces. */
-    --color-heading: oklch(from var(--color-brand-primary) 0.96 calc(c * 0.12) h);
-    --color-text: oklch(from var(--color-brand-primary) 0.9 calc(c * 0.08) h);
-    --color-text-secondary: oklch(
-      from var(--color-brand-primary) 0.76 calc(c * 0.07) h
-    );
-    --color-text-tertiary: oklch(
-      from var(--color-brand-primary) 0.62 calc(c * 0.07) h
-    );
-
-    /* Hairlines — faint warm embers. */
-    --color-border-subtle: oklch(
-      from var(--color-brand-primary) 0.3 calc(c * 0.3) h
-    );
-    --color-border: oklch(from var(--color-brand-primary) 0.36 calc(c * 0.32) h);
-    --color-border-strong: oklch(
-      from var(--color-brand-primary) 0.44 calc(c * 0.34) h
-    );
-    --color-border-hover: oklch(
-      from var(--color-brand-primary) 0.54 calc(c * 0.36) h
-    );
-
     min-height: 100%;
     padding-block: var(--space-16) var(--space-24);
     padding-inline: var(--space-5);
-    background: var(--color-background);
-    color: var(--color-text);
+    background: var(--jp-ink);
+    color: var(--jp-text);
     overflow: clip;
   }
 
@@ -317,11 +327,15 @@
     inset: 0 0 auto 0;
     height: min(70svh, 44rem);
     pointer-events: none;
-    background: radial-gradient(
-      60% 50% at 50% 0%,
-      color-mix(in oklab, var(--color-brand-primary) 20%, transparent),
-      transparent 70%
-    );
+    /* Veil first = topmost: the ink's own colour, so it is invisible outside the
+       bloom and washes the bloom back on a light page. See journey-palette.css. */
+    background:
+      linear-gradient(var(--jp-atmos-veil), var(--jp-atmos-veil)),
+      radial-gradient(
+        60% 50% at 50% 0%,
+        color-mix(in oklab, var(--jp-ember) 20%, transparent),
+        transparent 70%
+      );
   }
 
   .checkout__inner {
@@ -699,25 +713,39 @@
     outline-offset: var(--focus-offset);
   }
 
+  /* In flight to Stripe — a second submit would open a second session. */
+  .co-cta:disabled {
+    opacity: var(--opacity-60);
+    cursor: wait;
+  }
+
+  .co-cta:disabled:active {
+    transform: none;
+  }
+
   .co-actions__fine {
     font-size: var(--text-sm);
     color: var(--color-text-tertiary);
     max-width: 34ch;
   }
 
-  .co-seam {
+  /* The pay form owns the radio group AND the submit, so the checked radio is
+     what gets posted. It contributes no layout of its own — the `ways` column
+     already spaces its children. */
+  .co-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+
+  .co-error {
     margin: 0;
     padding: var(--space-3) var(--space-4);
     border-radius: var(--radius-md);
-    border: var(--border-width) solid var(--color-border-subtle);
-    background: color-mix(in oklab, var(--color-surface) 60%, transparent);
+    border: var(--border-width) solid var(--color-error);
+    background: color-mix(in oklab, var(--color-error) 14%, transparent);
     font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-  }
-
-  .co-seam b {
     color: var(--color-text);
-    font-weight: var(--font-semibold);
   }
 
   .co-note {

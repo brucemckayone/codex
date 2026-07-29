@@ -15,45 +15,21 @@
    column exactly, desktop→mobile.
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* The colour ladder (`--jp-ink*`, `--jp-heading`, `--jp-text/dim/faint`,
+   `--jp-ember/blood/rose`, `--jp-on-ember`) and the semantic text re-points now
+   live in ONE place, shared with the live sales page and the checkout:
+   `../journey-palette.css`. They used to be declared here AND again, differently,
+   on the live page — the builder derived from the brand BACKGROUND with
+   auto-contrast while the live page derived from the brand PRIMARY at a hardcoded
+   dark lightness, which is why the two never matched (Codex-gfg50). Elements
+   carrying `.jp` must therefore also carry `.journey-palette`. */
+@import '../journey-palette.css';
+
 .jp {
-  /* Self-derived page palette (single tuning point). The sales page has an
-     intentional dark-warm aesthetic, so it derives its OWN surface + text ladder
-     straight from the BRAND tokens (`--brand-bg` / `--brand-color` — the per-page
-     override, else the inherited org brand, else a neutral fallback) using the
-     same OKLCH auto-contrast the org-brand.css layer uses. Result: dark-warm on a
-     dark brand, light on a light brand — independent of the studio's own theme,
-     and never a hardcoded colour. */
-  --jp-ink: var(--brand-bg, var(--color-background));
-  /* cards/insets lift toward the contrast colour, so the direction is correct in
-     both dark (lighter cards) and light (subtly darker cards). */
-  --jp-ink-2: color-mix(in oklab, var(--jp-ink) 94%, var(--jp-heading) 6%);
-  --jp-ink-3: color-mix(in oklab, var(--jp-ink) 88%, var(--jp-heading) 12%);
-  /* auto-contrast text off the surface lightness (mirrors org-brand.css). */
-  --jp-heading: oklch(from var(--jp-ink) clamp(0.05, (0.62 - l) * 100, 0.96) calc(c * 0.25) h);
-  --jp-text: color-mix(in oklab, var(--jp-heading) 82%, var(--jp-ink));
-  --jp-dim: color-mix(in oklab, var(--jp-heading) 70%, var(--jp-ink));
-  --jp-faint: color-mix(in oklab, var(--jp-heading) 50%, var(--jp-ink));
-  --jp-ember: var(--brand-color, var(--color-brand-primary, var(--color-interactive)));
-  --jp-blood: var(--brand-secondary, var(--jp-ember));
-  --jp-blood-deep: oklch(from var(--jp-blood) calc(l - 0.08) c h);
-  --jp-rose: var(--brand-accent, var(--jp-ember));
-  /* legible label colour on the ember/brand fill. */
-  --jp-on-ember: oklch(from var(--jp-ember) clamp(0.05, (0.6 - l) * 100, 0.98) 0 0);
+  /* Typography + motion only — the palette arrives via `.journey-palette`. */
   --jp-serif: var(--font-heading);
   --jp-sans: var(--font-body, var(--font-sans));
   --jp-ease: var(--ease-out);
-
-  /* Re-point the SEMANTIC text tokens to the page palette so inherited base
-     rules resolve to it — notably org-brand.css's
-     `[data-org-brand] :is(h1..h6), [class*="__title"], [class*="-title"]`
-     (specificity 0,1,1) which would otherwise force headings to the neutral
-     `--color-heading`. Cleaner than a per-heading specificity war. */
-  --color-heading: var(--jp-heading);
-  --color-text: var(--jp-text);
-  --color-text-primary: var(--jp-heading);
-  --color-text-secondary: var(--jp-dim);
-  --color-text-muted: var(--jp-faint);
-  --color-text-tertiary: var(--jp-faint);
 
   container-type: inline-size;
   width: 100%;

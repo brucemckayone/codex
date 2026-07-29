@@ -16,6 +16,7 @@
  * to the awaited course/stage/testimonial data when a prop is absent.
  */
 import type {
+  CourseOffer,
   JourneyCoursePage,
   JourneyCourseView,
   JourneyStageView,
@@ -88,6 +89,20 @@ export interface JourneySalesContext {
    */
   enrolled: boolean;
   /**
+   * The AUTHORITATIVE monetization offer for this course (SPEC §7) — which ways
+   * in exist and what each charges, composed from real plan/tier/price rows by
+   * `getCourseOffer`. The `invite` section renders THIS, decorated by authored
+   * copy; before Codex-2pryk.2.4.3 it rendered the authored copy's own
+   * `priceLabel`, so a page could advertise a price and a path that did not
+   * exist.
+   *
+   * `null` when the offer read was unavailable (it is `.catch()`-guarded — the
+   * sales page is SEO-critical and must not 500 over a pricing hiccup). Sections
+   * MUST degrade to a price-less CTA on null and never fall back to authored
+   * numbers.
+   */
+  offer: CourseOffer | null;
+  /**
    * The streamed sell-preview. Sections consume it via `{#await}` with a
    * poster skeleton so a slow/failed media resolution degrades gracefully and
    * never blocks the section's text (SEO-critical) from rendering.
@@ -125,7 +140,15 @@ export interface AcheSectionProps {
   beats?: string[];
 }
 
-/** `turn` — the pivot from pain to promise. */
+/**
+ * `turn` — the pivot from pain to promise.
+ *
+ * NOTE: there is deliberately no `stages` field. `TurnSection` derives its roman
+ * -numeralled stage list FROM `points` by splitting each entry on an en/em dash
+ * ("Regulation — finding the ground"), so the authored shape stays one flat string
+ * array. A separate `stages` prop would be a second, divergent source for the same
+ * list.
+ */
 export interface TurnSectionProps {
   eyebrow?: string;
   statement?: string;
@@ -139,6 +162,15 @@ export interface ReelSectionProps {
   heading?: string;
   sub?: string;
   posterUrl?: string;
+  /**
+   * The whispered caption under the letterboxed frame. `captions` takes
+   * precedence and cross-fades on a slow cycle; `caption` is the single-line
+   * form. Absent ⇒ no caption line renders.
+   */
+  caption?: string;
+  captions?: string[];
+  /** Corner tag label above the frame. Defaults to `Preview` when absent. */
+  tag?: string;
 }
 
 /** `map` — the descent map (public, no progress); renders from context.stages. */
@@ -161,12 +193,30 @@ export interface FeelSectionProps {
   heading?: string;
   body?: string;
   inclusions?: FeelInclusion[];
+  /**
+   * The "free-taste" preview player. `previewTitle` is the switch — absent ⇒ the
+   * player self-hides. `previewDuration` is in seconds and drives the playhead.
+   *
+   * The transport is currently a VISUAL taste (an animated equaliser + playhead),
+   * not real playback: it is not yet wired to `context.sellPreview.reel`'s HLS
+   * manifest. These props describe the authored copy either way.
+   */
+  previewTitle?: string;
+  previewSub?: string;
+  previewDuration?: number;
 }
 
 /** `proof` — testimonials; renders from context.testimonials. */
 export interface ProofSectionProps {
   eyebrow?: string;
   heading?: string;
+  /**
+   * The quiet aggregate trust line beside the testimonials ("2,400+ practising").
+   * `ProofSection` also accepts the legacy key `trust` for pages authored before
+   * this name settled, so both are declared.
+   */
+  trustLabel?: string;
+  trust?: string;
 }
 
 /** `guide` — the maker's bio. */
@@ -177,6 +227,8 @@ export interface GuideSectionProps {
   bio?: string[];
   portraitUrl?: string;
   credentials?: string[];
+  /** The pull-quote climax under the bio. Omitted entirely when absent. */
+  quote?: string;
 }
 
 /** One FAQ entry. */
@@ -193,20 +245,26 @@ export interface FaqSectionProps {
 }
 
 /**
- * One offer path shown on the `invite` section (SPEC §7 — the 3-path model:
- * tier / course-subscription / course-purchase). CONTRACT GAP: the frozen
- * {@link JourneyCoursePage} carries only `course.priceCents` (the one-off), not
- * the full offer set — the tier/subscription paths are owned by WP-6
- * monetization and surfaced on the checkout route. This optional prop lets the
- * builder tease paths on the sell page; when absent the invite renders the
- * one-off price + a CTA to `/journeys/[slug]/checkout`.
+ * Authored DECORATION for one offer path on the `invite` section (SPEC §7 —
+ * tier / course-subscription / course-purchase).
+ *
+ * `id` must name a CANONICAL path id (`purchase`, `subscription-monthly`,
+ * `subscription-annual`, `tier:<tierId>`); an entry naming anything else
+ * decorates nothing and is dropped. The rest is copy.
+ *
+ * NOTE the field that is gone: `priceLabel`. Until Codex-2pryk.2.4.3 the invite
+ * section (and the checkout) took its prices from this authored string, so a
+ * page could advertise "£12 a month" for a tier that cost £15 and for a course
+ * subscription that did not exist at all. Prices now come only from
+ * {@link JourneySalesContext.offer}. `cadenceLabel` is likewise derived — it
+ * follows from which canonical path the entry names.
  */
 export interface InviteOffer {
   id: string;
-  name: string;
-  priceLabel: string;
-  cadenceLabel?: string;
+  name?: string;
+  who?: string;
   blurb?: string;
+  bullets?: string[];
   best?: boolean;
 }
 
@@ -217,6 +275,7 @@ export interface InviteSectionProps {
   sub?: string;
   ctaLabel?: string;
   priceNote?: string;
+  /** Authored copy that DECORATES real paths — never creates or prices one. */
   offers?: InviteOffer[];
 }
 

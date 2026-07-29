@@ -6,10 +6,10 @@
  * plus, for an authenticated viewer, whether they already hold access. Backs
  * the sales-page + course-landing pricing surfaces.
  *
- * The management mutations (create subscription plan, set tier access) live on
- * `ctx.services.courseSubscription` / `ctx.services.courseAccess` and are wired
- * into the studio builder surface (WP-5) with its org-management auth context —
- * they are intentionally not exposed here, where there is no org guard.
+ * This router is PUBLIC (`auth: 'optional'`, no org guard). The management
+ * mutations (subscription-plan upsert/withdraw, tier access) are org-guarded and
+ * live in the sibling `course-monetisation.ts`, mounted at `/studio/courses`.
+ * Do not add a mutation here.
  */
 
 import type { CourseOffer, HonoEnv } from '@codex/shared-types';
