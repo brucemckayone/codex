@@ -157,9 +157,18 @@
               </p>
             </div>
             <div class="journey-row__actions">
+              <!--
+                Curriculum and Insights are both COURSE artifacts (each resolves
+                the page to its subject course server-side), so both sit behind
+                the same subject-type guard — a non-course journey has neither,
+                and an ungated link would 404.
+              -->
               {#if j.subjectType === 'course'}
                 <a class="journey-row__action" href="/studio/journeys/{j.id}/curriculum">
                   Curriculum
+                </a>
+                <a class="journey-row__action" href="/studio/journeys/{j.id}/insights">
+                  Insights
                 </a>
               {/if}
               <a class="journey-row__action journey-row__action--primary" href="/studio/journeys/{j.id}/page">

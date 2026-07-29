@@ -123,10 +123,20 @@ export type ListPublishedJourneysQuery = z.infer<
  * re-derives the authoritative scope from `ctx.organizationId` (session
  * membership) and never trusts this value for authorization. `period` selects
  * the reporting window (defaults to 30 days).
+ *
+ * The journey key is the LANDING-PAGE id, not the course id (Codex-xo3bl). Every
+ * studio journey surface addresses a journey by its landing-page id — that is
+ * what `/studio/journeys/[id]/…` carries and what `listJourneys` returns — so
+ * the route resolves `pageId → courses.id` via `resolveCourseIdForPage` before
+ * the course-keyed aggregation runs, exactly as the curriculum routes do. This
+ * field previously read `courseId`, and the client dutifully sent the page id
+ * into a `courses.id` lookup: every insights request 404'd as
+ * `NotFoundError('Course not found')`. Both are UUIDs, so no validation caught
+ * it — the ONLY guard against re-confusing them is the parameter name.
  */
 export const journeyInsightsQuerySchema = z.object({
   organizationId: uuidSchema,
-  courseId: uuidSchema,
+  pageId: uuidSchema,
   period: z.enum(['7d', '30d', '90d', 'all']).default('30d'),
 });
 export type JourneyInsightsQuery = z.infer<typeof journeyInsightsQuerySchema>;

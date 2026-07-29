@@ -53,7 +53,7 @@
     PayoutWithCreator,
   } from '@codex/subscription';
   import type { DateRange } from '@codex/shared-types';
-  import type { QueryResult } from '$lib/remote/query-result';
+  import { queryErrorMessage, type QueryResult } from '$lib/remote/query-result';
 
   type PayoutsPage = {
     items: PayoutWithCreator[];
@@ -169,8 +169,11 @@
     (summaryQuery as QueryResult<PayoutSummary> | null)?.loading ?? true
   );
 
+  // Via `queryErrorMessage` — SvelteKit rejects with `HttpError`, whose text is
+  // at `.body.message`, so the `.error?.message` this replaces was `undefined`
+  // for every real failure and this branch never fired (Codex-xo3bl).
   const queryError = $derived(
-    (payoutsQuery as QueryResult<PayoutsPage> | null)?.error?.message ?? null
+    queryErrorMessage((payoutsQuery as QueryResult<PayoutsPage> | null)?.error)
   );
 
   const items = $derived(payoutsData?.items ?? []);

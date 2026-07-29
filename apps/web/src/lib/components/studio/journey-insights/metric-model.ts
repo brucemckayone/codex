@@ -83,8 +83,11 @@ export type InsightsPeriod = '7d' | '30d' | '90d' | 'all';
 
 /**
  * The seam's return contract — everything the insights surface needs for one
- * course/journey in one period. Produced by `getJourneyInsights` (mocked today,
- * real aggregation at Round-D).
+ * course/journey in one period. Produced by `getJourneyInsights`, which is wired
+ * to the real Round-D aggregation (`CourseInsightsService.getInsights`).
+ *
+ * `courseId` is the SUBJECT COURSE the worker resolved, not the landing-page id
+ * the query was keyed by — the request carries `pageId` (Codex-xo3bl).
  */
 export interface JourneyInsightsData {
   courseId: string;

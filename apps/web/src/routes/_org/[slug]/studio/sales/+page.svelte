@@ -32,7 +32,7 @@
   import { downloadCsv } from '$lib/utils/csv-export';
   import type { SaleListItem, SalesStats } from '@codex/purchase';
   import type { DateRange } from '@codex/shared-types';
-  import type { QueryResult } from '$lib/remote/query-result';
+  import { queryErrorMessage, type QueryResult } from '$lib/remote/query-result';
 
   type SalesPage = {
     items: SaleListItem[];
@@ -126,8 +126,11 @@
     (statsQuery as QueryResult<SalesStats> | null)?.loading ?? true
   );
 
+  // Via `queryErrorMessage` — SvelteKit rejects with `HttpError`, whose text is
+  // at `.body.message`, so the `.error?.message` this replaces was `undefined`
+  // for every real failure and this branch never fired (Codex-xo3bl).
   const queryError = $derived(
-    (salesQuery as QueryResult<SalesPage> | null)?.error?.message ?? null
+    queryErrorMessage((salesQuery as QueryResult<SalesPage> | null)?.error)
   );
 
   const items = $derived(salesData?.items ?? []);
