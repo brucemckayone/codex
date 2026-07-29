@@ -213,12 +213,12 @@
   .stage--done .stage__numeral {
     background: color-mix(in oklab, var(--portal-ember) 20%, transparent);
     border-color: transparent;
-    color: var(--portal-ember);
+    color: var(--portal-ember-text);
   }
 
   .stage--current .stage__numeral {
     border-color: var(--portal-ember);
-    color: var(--portal-ember);
+    color: var(--portal-ember-text);
     box-shadow: 0 0 var(--space-3) calc(var(--border-width) * 1)
       color-mix(in oklab, var(--portal-ember) 35%, transparent);
   }
@@ -314,7 +314,7 @@
 
   .lrow__icon--current {
     border-color: var(--portal-ember);
-    color: var(--portal-ember);
+    color: var(--portal-ember-text);
     box-shadow: 0 0 var(--space-2-5) calc(var(--border-width) * 1)
       color-mix(in oklab, var(--portal-ember) 40%, transparent);
   }
@@ -353,7 +353,7 @@
   .lrow__go {
     flex: none;
     font-size: var(--text-sm);
-    color: var(--portal-ember);
+    color: var(--portal-ember-text);
     opacity: 0;
     transition: opacity var(--duration-fast) var(--ease-out);
   }

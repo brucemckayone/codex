@@ -63,8 +63,12 @@
   /* ── the ink: the page's own background ──────────────────────────────────
      The per-page override (`brandOverrides.backgroundColor` → `--brand-bg` on a
      nested `[data-org-brand]`), else the inherited org brand background, else
-     the neutral design token. This is the ONE input the whole ladder hangs off,
-     which is what makes light and dark both correct with no branch. */
+     the neutral design token. This is the ONE input the whole ladder hangs off:
+     every rung below is auto-contrasted from it, so a light ink and a dark ink
+     are both correct without any rung needing its own branch.
+
+     This declaration is the LIGHT pole. The dark pole re-points this single
+     property and nothing else — see THE DARK POLE below. */
   --jp-ink: var(--brand-bg, var(--color-background));
 
   /* ── auto-contrast ───────────────────────────────────────────────────────
@@ -105,6 +109,21 @@
   --jp-rose: var(--brand-accent, var(--jp-ember));
   --jp-on-ember: oklch(from var(--jp-ember) clamp(0.05, (0.6 - l) * 100, 0.98) 0 0);
 
+  /* ── the ember AS TEXT ───────────────────────────────────────────────────
+     `--jp-ember` is tuned to be a FILL, with `--jp-on-ember` written on top of
+     it. Used directly as small text ON the page it is a legibility bug in both
+     directions: measured on a mid-lightness brand orange it lands at 2.98:1
+     against a dark ink and 2.46:1 against a light one, where AA needs 4.5.
+
+     Pulling it toward `--jp-heading` fixes both readings at once with no branch,
+     because the heading is already auto-contrasted to the ink — so this mix
+     lightens the ember on a dark ink and darkens it on a light one. 60% keeps
+     the hue unmistakably brand while clearing AA on both poles. Chroma rides
+     along with the mix, which is why it stays a warm accent and not grey.
+
+     Use this for accent TEXT. Keep `--jp-ember` for fills, borders and glows. */
+  --jp-ember-text: color-mix(in oklab, var(--jp-ember) 60%, var(--jp-heading));
+
   /* ── atmosphere ─────────────────────────────────────────────────────────
      The ember bloom is a fixed-strength gradient; this veil is what makes its
      APPARENT strength track the ink's darkness. It is the ink's own colour, so
@@ -139,6 +158,50 @@
   --color-text-tertiary: var(--jp-faint);
 }
 
+/* ── THE DARK POLE ──────────────────────────────────────────────────────────
+   (Codex-a1tz6) The rule above delivers the CREATOR's chosen background. It did
+   NOT deliver the VISITOR's light/dark choice: it reads `--brand-bg`, which is
+   only the LIGHT pole, so a journey stayed cream for a visitor in dark mode.
+   Those are two independent axes and both are satisfiable — a creator's cream
+   brand has a dark companion, and dark-mode visitors should get it.
+
+   This is not new infrastructure. `tokens/org-brand.css` already carries a
+   two-pole brand background and switches on theme:
+
+     [data-org-bg]                     → --color-background: var(--brand-bg)
+     [data-theme='dark'] [data-org-bg] → --color-background: var(--brand-bg-dark, var(--brand-bg, …))
+
+   `--brand-bg-dark` is injected by the org layout alongside `--brand-bg`. The
+   chain below is deliberately IDENTICAL to org-brand.css's, so a journey surface
+   resolves its background exactly like every other org surface.
+
+   Re-pointing `--jp-ink` ALONE is sufficient for the whole page. Every rung
+   above — heading, the text ladder, the three insets, all four hairlines, and
+   the atmosphere veil's alpha — is derived from `--jp-ink`'s OWN lightness, so
+   they all invert from this single input with no further branching. The veil in
+   particular returns to alpha 0 on a dark ink, which is what restores the full
+   candlelight bloom.
+
+   ── WHY BOTH SELECTOR FORMS ────────────────────────────────────────────────
+   The theme-init script in `app.html` sets `data-theme` on <html> AND adds a
+   matching `.dark`/`.light` CLASS, and org-brand.css keys its dark branches on
+   BOTH forms. A rule written against only one of them is beaten by the
+   org-brand rule written against the other. Both are required.
+
+   Specificity: `.dark` + three classes = (0,4,0), clearing the (0,3,0) base
+   above and org-brand.css's `[data-theme='dark'] [data-org-brand]` (0,2,0).
+
+   NOTE (known limitation, deliberately not papered over): a page whose
+   `brandOverrides` sets `backgroundColor` injects only `--brand-bg`, so in dark
+   mode `--brand-bg-dark` — inherited from the org — wins and the per-page
+   background applies in light mode only. Deriving a dark companion from the
+   override would be guesswork about the creator's intent; it needs a real
+   decision (and probably a dark-background control in the brand editor). */
+.dark .journey-palette.journey-palette.journey-palette,
+[data-theme='dark'] .journey-palette.journey-palette.journey-palette {
+  --jp-ink: var(--brand-bg-dark, var(--brand-bg, var(--color-background)));
+}
+
 /* ── background / surface / border ──────────────────────────────────────────
    MUST be applied to a DESCENDANT of `.journey-palette`, never the same element
    (see CYCLE SAFETY above). These are the tokens the live sales sections and the
@@ -147,8 +210,22 @@
 
    `--color-brand-*`, `--color-text-on-brand`, `--color-focus` and
    `--color-text-inverse` are deliberately NOT re-pointed anywhere in this file —
-   they are the brand accent and its companions, and they read correctly against
-   either ink. */
+   they are the brand accent and its companions, owned by org-brand.css.
+
+   CAVEAT, measured 2026-07-29 (Codex-a1tz6): the claim that once stood here —
+   that they "read correctly against either ink" — is FALSE for
+   `--color-text-on-brand` in dark mode, and not because of anything in this file.
+   org-brand.css swaps `--color-brand-primary` to `--brand-color-dark` in its dark
+   branch but derives `--color-text-on-brand` from `--brand-color` and never
+   re-derives it, so a primary button paints its background with the DARK brand
+   while contrasting its label against the LIGHT one. Measured on
+   `of-blood-and-bones`: background `#FB923C`, label auto-contrasted against
+   `#552e8e` → white → 2.26:1, where AA needs 4.5.
+
+   This is platform-wide (every org primary button in dark mode whose two brand
+   colours differ in lightness), not journey-specific — it was simply invisible on
+   journeys until they started honouring dark mode. Fixing it belongs in
+   org-brand.css's dark branch, not here. */
 .journey-palette--page {
   --color-background: var(--jp-ink);
   --color-surface: var(--jp-ink-2);

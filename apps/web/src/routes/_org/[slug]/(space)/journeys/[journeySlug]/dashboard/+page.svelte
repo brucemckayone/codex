@@ -10,14 +10,17 @@
   server's known completions, and completing a practice in the player updates it
   reactively here (cross-tab + cross-device via `initProgressSync`).
 
-  Surface (prototype `course-dashboard.html`): a warm/dark "descent" portal.
-  Its palette is SELF-DERIVED from the org brand via OKLCH on `.journey-portal`
-  (anchored on `--brand-color`), and the semantic heading/text tokens are
-  RE-POINTED there so the org-brand.css `[data-org-brand] :is(h1..h6)` backstop
-  resolves to the portal palette instead of the neutral org heading colour.
+  Surface (prototype `course-dashboard.html`): the "descent" portal. Its palette
+  comes from the SHARED journey palette (`$lib/page-builder/journey-palette.css`,
+  Codex-gfg50) — the same derivation the sales page and the checkout use — so the
+  member area follows the creator's background AND the visitor's light/dark
+  choice. The `--portal-*` names survive as aliases over that ladder; see the
+  `<style>` block. It previously carried a third private derivation anchored on
+  the brand PRIMARY at forced lightnesses, which honoured neither (Codex-4i8x5).
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
+  import '$lib/page-builder/journey-palette.css';
   import CurriculumMap from '$lib/components/journeys/CurriculumMap.svelte';
   import JourneyContinueCard from '$lib/components/journeys/JourneyContinueCard.svelte';
   import {
@@ -123,8 +126,16 @@
   <title>{dashboard.course.title} · Your journey</title>
 </svelte:head>
 
-<div class="journey-portal">
-  <div class="journey-portal__inner">
+<div class="journey-portal journey-palette">
+  <!--
+    `journey-palette--page` MUST sit on this inner element, not on
+    `.journey-portal`. `--jp-ink` falls back to `--color-background`, so
+    re-pointing `--color-background: var(--jp-ink)` on the SAME element is a
+    custom-property cycle and the page paints nothing. A descendant merely
+    inherits an already-resolved `--jp-ink`.
+    See `$lib/page-builder/journey-palette.css`.
+  -->
+  <div class="journey-portal__inner journey-palette--page">
     <header class="portal-head">
       <p class="portal-head__eyebrow">Your journey</p>
       <h1 class="portal-head__title">{dashboard.course.title}</h1>
@@ -182,34 +193,61 @@
 
 <style>
   .journey-portal {
-    /* ── Warm/dark "descent" portal, self-derived from the org brand ──────────
-       Anchor the whole palette on the brand primary hue, then FORCE lightness
-       for guaranteed contrast on any org colour (light-brand orgs still get a
-       focused dark space; the hue keeps it on-brand). Chroma is scaled down so
-       surfaces read as warm near-neutrals, not saturated blocks. */
-    --portal-anchor: var(--brand-color, var(--color-primary-600));
+    /* ── The `--portal-*` names are now ALIASES over the shared journey palette ─
+       (Codex-a1tz6, closing Codex-4i8x5.) This block used to be a THIRD private
+       derivation: it anchored on the brand PRIMARY and then FORCED lightness
+       (0.15 bg / 0.94 text) for a guaranteed dark space on any org colour. Two
+       consequences made that wrong:
 
-    --portal-bg: oklch(from var(--portal-anchor) 0.15 calc(c * 0.3) h);
-    --portal-bg-deep: oklch(from var(--portal-anchor) 0.1 calc(c * 0.3) h);
-    --portal-surface: oklch(from var(--portal-anchor) 0.2 calc(c * 0.35) h);
-    --portal-surface-2: oklch(from var(--portal-anchor) 0.24 calc(c * 0.42) h);
+         1. It ignored the visitor's light/dark choice — the values were
+            identical in both themes, so a dark-mode-off visitor still got a
+            dark member area. Worse, it was DISCARDING a per-theme background
+            that already resolves correctly one element up: on this very page
+            `[data-org-bg]` gives #FFFBEB in light and #1A1207 in dark.
+         2. It anchored on `--brand-color` (the org PRIMARY) where the sales page
+            anchors on the brand BACKGROUND, so one journey rendered purple on
+            its sales page and orange once you were inside it.
 
-    --portal-text: oklch(from var(--portal-anchor) 0.94 calc(c * 0.08) h);
-    --portal-text-dim: oklch(from var(--portal-anchor) 0.82 calc(c * 0.07) h);
-    --portal-text-faint: oklch(from var(--portal-anchor) 0.64 calc(c * 0.07) h);
+       `journey-palette.css` is the ONE derivation (Codex-gfg50) and already
+       auto-contrasts every rung off the ink's own lightness, in either theme.
+       The token NAMES are kept because `CurriculumMap.svelte` and
+       `JourneyContinueCard.svelte` read them ~30 times between them; only the
+       derivation changes, so no consumer moves.
 
-    /* The glowing accent ("ember") + its dark ink for text on the accent. */
-    --portal-ember: oklch(from var(--portal-anchor) 0.72 calc(c * 0.9) h);
-    --portal-ember-soft: oklch(from var(--portal-anchor) 0.6 calc(c * 0.9) h);
-    --portal-ember-ink: oklch(from var(--portal-anchor) 0.18 calc(c * 0.5) h);
+       Surface ladder: the palette's insets lift TOWARD the contrast colour, so
+       they go lighter on a dark ink and subtly darker on a light one — which is
+       the direction "deeper / raised" wants in BOTH themes. `--portal-bg-deep`
+       therefore means "one step off the paper" rather than the old literal
+       "darker"; that reversal is exactly what makes it theme-correct. */
+    --portal-bg: var(--jp-ink);
+    --portal-bg-deep: var(--jp-ink-2);
+    --portal-surface: var(--jp-ink-3);
+    --portal-surface-2: var(--jp-ink-4);
 
-    /* Re-point the semantic tokens so descendants — and the org-brand.css
-       `[data-org-brand] :is(h1..h6){color:var(--color-heading)}` backstop —
-       resolve to the portal palette instead of fighting its specificity. */
-    --color-heading: var(--portal-text);
-    --color-text: var(--portal-text-dim);
-    --color-text-secondary: var(--portal-text-dim);
-    --color-text-muted: var(--portal-text-faint);
+    /* Text ladder, most → least prominent, all measured off the shared anchors
+       so they follow the ink in either theme.
+
+       The faint rung is NOT `--jp-faint`: it carries 13px meta text
+       (`.lrow__meta`), and both `--jp-faint` (50%) and `--jp-dim` (70%) measure
+       under AA there — 70% lands at 4.41:1 on the dark ink. 76% is the weakest
+       mix that clears 4.5 on both poles, so the rung is pinned there rather than
+       borrowed from a shared name that is tuned for larger text. */
+    --portal-text: var(--jp-heading);
+    --portal-text-dim: var(--jp-text);
+    --portal-text-faint: color-mix(in oklab, var(--jp-heading) 76%, var(--jp-ink));
+
+    /* The accent, its on-accent ink, and the accent AS TEXT. The last is a
+       separate token because the raw ember measured 2.98:1 (dark) / 2.46:1
+       (light) behind `Resume →` and the eyebrows — a pre-existing failure that
+       enabling light mode would otherwise have deepened. */
+    --portal-ember: var(--jp-ember);
+    --portal-ember-soft: oklch(from var(--jp-ember) calc(l - 0.1) c h);
+    --portal-ember-ink: var(--jp-on-ember);
+    --portal-ember-text: var(--jp-ember-text);
+
+    /* The semantic TEXT tokens are re-pointed by `.journey-palette` itself, at
+       (0,3,0) — higher than this rule — so restating them here would be dead
+       weight that could silently drift out of step with the shared ladder. */
 
     min-height: 100dvh;
     background: var(--portal-bg);
@@ -243,7 +281,7 @@
     font-size: var(--text-xs);
     letter-spacing: 0.22em;
     text-transform: uppercase;
-    color: var(--portal-ember);
+    color: var(--portal-ember-text);
   }
 
   .portal-head__title {
