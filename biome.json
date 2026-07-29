@@ -67,7 +67,8 @@
       "!**/migrations/meta",
       "!**/.venv*",
       "!**/test-media",
-      "!**/src/paraglide"
+      "!**/src/paraglide",
+      "!**/docs/**/prototype"
     ]
   }
 }
