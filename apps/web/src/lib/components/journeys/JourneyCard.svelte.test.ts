@@ -135,3 +135,158 @@ describe('JourneyCard cover band', () => {
     ).toContain('The Practice of Stillness');
   });
 });
+
+/**
+ * Prototype-conformance structure (Codex-ycsd8).
+ *
+ * Reference: `.jcard` in docs/design/course-journeys/prototype/explore.html — the
+ * file where that card's anatomy is DEFINED (1-threshold.html only consumes it).
+ *
+ * These assert STRUCTURE, deliberately not computed CSS. jsdom does not implement
+ * `color-mix()` / `oklch()` / `backdrop-filter` and hands custom properties back
+ * as their raw declared string, so a "computed style" assertion here would pass
+ * against a still-broken card. Typography and the scrim were verified instead by
+ * reading computed styles in a real browser (recorded on the bead); what is
+ * mechanised here is the wiring those styles hang off.
+ *
+ * Falsifiability, per test:
+ *   • badge-in-cover — moving the badge back into `__head` fails it.
+ *   • featured — deleting the `class:journey-card--featured` directive fails it,
+ *     and the false-case fails if the class is applied unconditionally.
+ *   • stat segments — reverting to the old single joined `statsLabel` string
+ *     removes `.journey-card__stat-value` and fails it.
+ *   • kicker/tagline — dropping either `{#if}` branch fails it.
+ */
+describe('JourneyCard prototype conformance', () => {
+  let component: ReturnType<typeof mount> | null = null;
+
+  /** Tear the current mount down so the next case starts from a clean document. */
+  function reset() {
+    if (component) unmount(component);
+    component = null;
+    document.body.innerHTML = '';
+  }
+
+  afterEach(reset);
+
+  function render(overrides: Partial<JourneyCardView> = {}) {
+    component = mount(JourneyCard, {
+      target: document.body,
+      props: { journey: cardView(overrides), href: '/journeys/stillness' },
+    });
+    flushSync();
+  }
+
+  test('the badge is an overlay INSIDE the cover band, not a row above the kicker', () => {
+    render();
+
+    const badge = document.querySelector('.journey-card__badge');
+    expect(badge).not.toBeNull();
+    // The prototype places `.jcard__tag` absolutely on the cover. Structurally
+    // that means the badge is a child of the cover band, not of the head.
+    expect(
+      document.querySelector('.journey-card__cover .journey-card__badge')
+    ).toBe(badge);
+    expect(
+      document.querySelector('.journey-card__head .journey-card__badge')
+    ).toBeNull();
+  });
+
+  test('a featured journey earns card chrome; a browsing tile does not', () => {
+    render({ featured: true });
+    expect(
+      document
+        .querySelector('.journey-card')
+        ?.classList.contains('journey-card--featured')
+    ).toBe(true);
+
+    // Reset between the two halves so the negative case is a fresh mount.
+    reset();
+
+    render({ featured: false });
+    expect(
+      document
+        .querySelector('.journey-card')
+        ?.classList.contains('journey-card--featured')
+    ).toBe(false);
+  });
+
+  test('stats render as segments with the numeral carried separately', () => {
+    render({ stageCount: 4, practiceCount: 24 });
+
+    const values = [
+      ...document.querySelectorAll('.journey-card__stat-value'),
+    ].map((el) => el.textContent?.trim());
+    // Prototype `.jcard__stats b` — the number is its own element so it can take
+    // the weight while the noun stays quiet. A single joined string cannot.
+    expect(values).toEqual(['4', '24']);
+
+    const segments = [...document.querySelectorAll('.journey-card__stat')].map(
+      (el) => el.textContent?.replace(/\s+/g, ' ').trim()
+    );
+    expect(segments).toEqual(['4 stages', '24 practices']);
+  });
+
+  test('stats stay singular-aware and drop a stageless segment entirely', () => {
+    render({ stageCount: 1, practiceCount: 1 });
+    expect(
+      [...document.querySelectorAll('.journey-card__stat')].map((el) =>
+        el.textContent?.replace(/\s+/g, ' ').trim()
+      )
+    ).toEqual(['1 stage', '1 practice']);
+
+    reset();
+
+    // A stageless journey shows practices only — no empty leading segment.
+    render({ stageCount: 0, practiceCount: 7 });
+    expect(
+      [...document.querySelectorAll('.journey-card__stat')].map((el) =>
+        el.textContent?.replace(/\s+/g, ' ').trim()
+      )
+    ).toEqual(['7 practices']);
+  });
+
+  test('kicker and tagline render when present and are omitted when null', () => {
+    render({ kicker: 'Foundation course', tagline: 'Eight weeks of sitting.' });
+    expect(
+      document.querySelector('.journey-card__kicker')?.textContent?.trim()
+    ).toBe('Foundation course');
+    expect(
+      document.querySelector('.journey-card__tagline')?.textContent?.trim()
+    ).toBe('Eight weeks of sitting.');
+
+    reset();
+
+    render({ kicker: null, tagline: null });
+    expect(document.querySelector('.journey-card__kicker')).toBeNull();
+    expect(document.querySelector('.journey-card__tagline')).toBeNull();
+  });
+
+  test('the foot shows price + CTA, and swaps to progress when enrolled', () => {
+    render();
+    expect(document.querySelector('.journey-card__cta')).not.toBeNull();
+    expect(document.querySelector('.journey-card__progress')).toBeNull();
+
+    reset();
+
+    component = mount(JourneyCard, {
+      target: document.body,
+      props: {
+        journey: cardView(),
+        href: '/journeys/stillness',
+        progress: {
+          percent: 50,
+          status: 'in-progress' as const,
+          completedPractices: 12,
+          totalPractices: 24,
+        },
+      },
+    });
+    flushSync();
+    expect(document.querySelector('.journey-card__progress')).not.toBeNull();
+    expect(document.querySelector('.journey-card__cta')).toBeNull();
+    expect(
+      document.querySelector('.journey-card__status')?.textContent?.trim()
+    ).toBe('12 of 24 practices');
+  });
+});
