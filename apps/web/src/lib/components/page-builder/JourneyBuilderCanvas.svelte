@@ -117,7 +117,17 @@
   </div>
 
   <div class="jbc__stage">
-    <div class="jbc-page jp" class:jbc-page--editable={editable} data-device={device}>
+    <!-- `journey-palette` supplies the colour ladder `.jp` styles read; it is the
+         same file the live sales page and checkout derive from, so the canvas and
+         the real page cannot drift apart again (Codex-gfg50). The canvas takes
+         the BASE class only — `--page` would re-point `--color-surface*` /
+         `--color-border*`, which the in-canvas block affordances below read and
+         need to keep studio-neutral against any page palette. -->
+    <div
+      class="jbc-page jp journey-palette"
+      class:jbc-page--editable={editable}
+      data-device={device}
+    >
       {#each enabled as section (section.id)}
         {@const i = indexOf(section.id)}
         {@const isSel = editable && selectedId === section.id}

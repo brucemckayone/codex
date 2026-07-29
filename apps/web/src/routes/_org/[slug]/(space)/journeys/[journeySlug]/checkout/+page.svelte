@@ -19,17 +19,18 @@
   charged. Stripe returns the buyer to `./success`, which waits for the webhook's
   entitlement write and then forwards to the journey dashboard.
 
-  IMMERSIVE PALETTE (D6 · the `.jp` pattern): this surface mirrors the sales
-  page's candlelit reading — the semantic `--color-*` tokens are re-pointed to
-  warm, low-chroma values DERIVED from the org's own `--color-brand-primary` via
-  OKLCH relative colour, so it reads warm/dark on ANY brand and re-themes with
-  the org brand + any per-page `brandOverrides`. Re-pointing `--color-heading`
-  here is also what tames org-brand.css's heading override (it reads the same
-  custom property). No hardcoded hex/px. Kept in sync with `JourneyRenderer`.
+  PALETTE (D6 · the `.jp` pattern): this surface takes the SHARED journey palette
+  (`$lib/page-builder/journey-palette.css`) — the same derivation the sales page
+  and the builder canvas use, so there is no longer a hand-synced copy here to
+  drift. It follows the background the creator chose (`--brand-bg`, i.e. the
+  per-page `brandOverrides` else the org brand) and auto-contrasts text off that
+  background's lightness, so light and dark both read correctly. No hardcoded
+  hex/px.
 -->
 <script lang="ts">
   import { page } from '$app/state';
   import { buildJourneyUrl } from '@codex/urls';
+  import '$lib/page-builder/journey-palette.css';
   import { brandOverridesToStyleAttr } from '$lib/page-builder/render/brand-overrides';
   import { startJourneyCheckout } from '$lib/remote/journey-checkout.remote';
   import type { PageData } from './$types';
@@ -115,13 +116,19 @@
 {/snippet}
 
 <section
-  class="checkout"
+  class="checkout journey-palette"
   data-org-brand={brandStyle ? '' : undefined}
   style={brandStyle}
 >
   <div class="checkout__atmos" aria-hidden="true"></div>
 
-  <div class="checkout__inner">
+  <!--
+    `journey-palette--page` MUST sit on this inner element, not on `.checkout`
+    itself: `--jp-ink` falls back to `--color-background`, so re-pointing
+    `--color-background` on the element that derives the ladder would be a
+    custom-property cycle. See `$lib/page-builder/journey-palette.css`.
+  -->
+  <div class="checkout__inner journey-palette--page">
     <a class="checkout__back" href={salesUrl}>← Back to {course.title}</a>
 
     <header class="co-head">
@@ -295,48 +302,21 @@
 </section>
 
 <style>
-  /* ── Candlelit palette (mirrors JourneyRenderer `.journey-page`) ─────────── */
+  /* ── Layout only — the palette comes from `journey-palette.css` ──────────────
+     This block used to declare its own copy of the sales page's ~15-token
+     palette, "kept in sync with JourneyRenderer" by hand. Both copies derived
+     from `--color-brand-primary` at a hardcoded dark lightness with no light
+     branch, so a creator on a light theme got a dark red checkout (Codex-gfg50).
+     Both surfaces now share ONE derivation, so there is nothing left to keep in
+     sync. */
   .checkout {
     position: relative;
     isolation: isolate;
-
-    /* Surfaces — deep, warm, ascending in lightness. */
-    --color-background: oklch(from var(--color-brand-primary) 0.16 calc(c * 0.5) h);
-    --color-surface: oklch(from var(--color-brand-primary) 0.21 calc(c * 0.45) h);
-    --color-surface-secondary: oklch(
-      from var(--color-brand-primary) 0.25 calc(c * 0.42) h
-    );
-    --color-surface-tertiary: oklch(
-      from var(--color-brand-primary) 0.29 calc(c * 0.4) h
-    );
-
-    /* Text — warm bone → dim, high contrast on the deep surfaces. */
-    --color-heading: oklch(from var(--color-brand-primary) 0.96 calc(c * 0.12) h);
-    --color-text: oklch(from var(--color-brand-primary) 0.9 calc(c * 0.08) h);
-    --color-text-secondary: oklch(
-      from var(--color-brand-primary) 0.76 calc(c * 0.07) h
-    );
-    --color-text-tertiary: oklch(
-      from var(--color-brand-primary) 0.62 calc(c * 0.07) h
-    );
-
-    /* Hairlines — faint warm embers. */
-    --color-border-subtle: oklch(
-      from var(--color-brand-primary) 0.3 calc(c * 0.3) h
-    );
-    --color-border: oklch(from var(--color-brand-primary) 0.36 calc(c * 0.32) h);
-    --color-border-strong: oklch(
-      from var(--color-brand-primary) 0.44 calc(c * 0.34) h
-    );
-    --color-border-hover: oklch(
-      from var(--color-brand-primary) 0.54 calc(c * 0.36) h
-    );
-
     min-height: 100%;
     padding-block: var(--space-16) var(--space-24);
     padding-inline: var(--space-5);
-    background: var(--color-background);
-    color: var(--color-text);
+    background: var(--jp-ink);
+    color: var(--jp-text);
     overflow: clip;
   }
 
@@ -347,11 +327,15 @@
     inset: 0 0 auto 0;
     height: min(70svh, 44rem);
     pointer-events: none;
-    background: radial-gradient(
-      60% 50% at 50% 0%,
-      color-mix(in oklab, var(--color-brand-primary) 20%, transparent),
-      transparent 70%
-    );
+    /* Veil first = topmost: the ink's own colour, so it is invisible outside the
+       bloom and washes the bloom back on a light page. See journey-palette.css. */
+    background:
+      linear-gradient(var(--jp-atmos-veil), var(--jp-atmos-veil)),
+      radial-gradient(
+        60% 50% at 50% 0%,
+        color-mix(in oklab, var(--jp-ember) 20%, transparent),
+        transparent 70%
+      );
   }
 
   .checkout__inner {
