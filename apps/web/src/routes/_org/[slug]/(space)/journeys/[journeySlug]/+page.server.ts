@@ -127,9 +127,19 @@ export const load: PageServerLoad = async (event) => {
 
   // ── Already hold it ⇒ this is the wrong surface (Codex-aectb) ───────────────
   // A user who owns the course was still served the marketing page, with only
-  // the hero CTA relabelled. Send them to their dashboard instead. Placed AFTER
-  // the header commit so the 303 inherits `private, no-cache` — correct for a
-  // per-user redirect, and never shared-cacheable.
+  // the hero CTA relabelled. Send them to their dashboard instead.
+  //
+  // ON THE ORDERING — this sits after `setHeaders` because that call has to run
+  // before any throw or it never runs at all; the redirect must not be able to
+  // skip it. It does NOT mean the 303 carries those headers. Verified against the
+  // installed SvelteKit 2.55.0 source: a `Redirect` thrown from a load unwinds to
+  // the outer catch in `runtime/server/respond.js:514`, which builds the response
+  // with `redirect_response()` (`runtime/server/utils.js:136` —
+  // `new Response(undefined, { status, headers: { location } })`) and then adds
+  // ONLY cookies. The `setHeaders` bag is applied in the `resolve()` SUCCESS
+  // continuation (`respond.js:441`), which a thrown redirect never reaches. So the
+  // 303 carries `location` alone. Harmless: it has no body and a 303 is not
+  // heuristically cacheable by shared caches, so there is nothing to leak.
   //
   // ONE DECISION FUNCTION, BOTH DIRECTIONS: the dashboard load redirects HERE
   // when `evaluateCourseGate` returns anything but `ok`; this page redirects
@@ -149,13 +159,19 @@ export const load: PageServerLoad = async (event) => {
   // That asymmetry is what makes the pair provably loop-free — the failure mode
   // of BOTH surfaces is "land on sales and stay there".
   //
-  // BYPASS: `?preview=1` (the builder's View-live link) and `draftPreview` —
-  // which can only be true when the management-gated preview read succeeded, so
-  // it is already proof the viewer is an org manager. A creator inspecting their
-  // own page must see the page, not their dashboard. No role or membership read
-  // is needed: the sell page is fully public to anonymous visitors, so this
-  // redirect is a UX convenience, not a security boundary, and the bypass
-  // discloses nothing.
+  // BYPASS: a `preview` query param (the builder's View-live link sends
+  // `?preview=1`) or `draftPreview` — which can only be true when the
+  // management-gated preview read succeeded, so it is already proof the viewer is
+  // an org manager. A creator inspecting their own page must see the page, not
+  // their dashboard, and no role or membership read is needed to tell.
+  //
+  // The test is `.has()`, so ANY value bypasses — `?preview=0` and
+  // `?preview=false` included. Deliberate: PRESENCE is the signal, matching the
+  // `searchParams.has('session_id')` idiom in checkout/success/+page.server.ts.
+  // Being loose costs nothing here — the sell page is fully public to anonymous
+  // visitors, so this redirect is a UX convenience and not a security boundary.
+  // The most a hand-typed `?preview=anything` earns is the marketing page the
+  // same person could already read while signed out.
   if (!(url.searchParams.has('preview') || draftPreview)) {
     const gate = evaluateCourseGate({
       // A slug with no page/course already threw 404 above.
@@ -163,7 +179,30 @@ export const load: PageServerLoad = async (event) => {
       isAuthenticated: Boolean(user),
       canEnterCourse: enrolled,
     });
-    if (gate.kind === 'ok') {
+    // A course with no slug has NO reachable dashboard URL, so there is nowhere
+    // confident to send anyone: `buildJourneyUrl` would fall back to
+    // `journey.id`, and the dashboard resolves its course by SLUG only
+    // (`resolveCourseBySlug`), so `/journeys/<uuid>/dashboard` is a guaranteed 404
+    // the visitor cannot escape — every retry of the sell page would 303 them
+    // straight back into it. Treated as doubt, and doubt means render where you
+    // are, exactly as a failed entitlement lookup does.
+    //
+    // Currently unreachable: `courses.slug` is `.notNull()`
+    // (packages/database/src/schema/journeys.ts:134) and `JourneyCourseView.slug`
+    // is `string` (packages/shared-types/src/journeys.ts:650). The guard is here
+    // because `apps/web` has `strictNullChecks` OFF, so if that DTO were ever
+    // relaxed — as the sibling `JourneyCourseSummary.slug` (`string | null`,
+    // :391) already is — nothing would warn and this would silently become a
+    // dead-end redirect.
+    //
+    // NOTE this does NOT mirror the dashboard's `course?.id ?? params.journeySlug`
+    // fallback, and deliberately so. The dashboard can fall back because its
+    // target — the sell page — resolves by PAGE slug, which is exactly what
+    // `params.journeySlug` holds, so the fallback URL genuinely works. Going the
+    // other way the key changes (page slug → course slug), so the mirrored
+    // fallback would build a URL that resolves to nothing. Not redirecting is the
+    // only option here that keeps a way back.
+    if (gate.kind === 'ok' && coursePage.course.slug) {
       redirect(
         303,
         buildJourneyUrl(

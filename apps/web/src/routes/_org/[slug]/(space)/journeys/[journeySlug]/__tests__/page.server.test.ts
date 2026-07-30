@@ -408,6 +408,30 @@ describe('journey sales +page.server load', () => {
       });
     });
 
+    it('renders the sales page when the course has no slug (no reachable target)', async () => {
+      // `buildJourneyUrl` would fall back to the course id, and the dashboard
+      // resolves by slug only — so `/journeys/<uuid>/dashboard` is a 404 the
+      // visitor could not escape, since every retry of this page would 303 them
+      // back into it. No confident target ⇒ render, same as a failed lookup.
+      //
+      // Deliberately not `satisfies JourneyCoursePage`: `JourneyCourseView.slug`
+      // is typed `string`, so this fixture models a FUTURE relaxation of that DTO
+      // — which is the whole reason the guard exists, `apps/web` having
+      // strictNullChecks off and no warning to give.
+      getCoursePageMock.mockResolvedValueOnce({
+        ...MOCK_COURSE_PAGE,
+        course: { ...MOCK_COURSE_PAGE.course, slug: null },
+      });
+      resolveCanEnterCourseMock.mockResolvedValueOnce(true);
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork', { id: 'user-1' });
+
+      const data = (await load(event)) as LoadData;
+
+      expect(data.enrolled).toBe(true);
+      expect(data.coursePage.course.slug).toBeNull();
+    });
+
     it('renders the sales page for an anonymous visitor (never redirects)', async () => {
       const { load } = await import('../+page.server');
       const { event } = makeEvent('rootwork'); // no session
