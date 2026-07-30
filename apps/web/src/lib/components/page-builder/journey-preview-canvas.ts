@@ -52,10 +52,15 @@ export const JOURNEY_PREVIEW_DEVICES: readonly JourneyPreviewDevice[] = [
  * the {@link ../../page-builder/page-preview-bridge} applier and re-renders the
  * builder's pending draft — so an unpublished draft still previews live.
  *
+ * Carries `?preview=1` because the sales page now redirects an entitled viewer
+ * to the course dashboard (Codex-aectb). An owner previewing a PUBLISHED journey
+ * they are enrolled in would otherwise watch the frame bounce to the dashboard.
+ * Unpublished drafts were never at risk — those resolve through `draftPreview`.
+ *
  * @param slug the page's slug (`PageBuilderState.slug`).
  */
 export function resolveJourneyPreviewPath(slug: string): string {
-  return `/journeys/${encodeURIComponent(slug)}`;
+  return `/journeys/${encodeURIComponent(slug)}?preview=1`;
 }
 
 /**

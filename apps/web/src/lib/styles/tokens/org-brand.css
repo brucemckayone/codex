@@ -261,6 +261,18 @@
   --color-primary-100: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) 0.25 calc(c * 0.3) h);
   --color-primary-50: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) 0.18 calc(c * 0.2) h);
 
+  /* ─── RE-DERIVED FROM THE DARK BRAND (Codex-5wgwf) ─────────────────
+     These three are derived from --brand-color in the light block above but
+     were never re-derived here, so in dark mode they kept resolving through
+     the LIGHT brand while the surfaces they describe had already switched to
+     --brand-color-dark. For --color-text-on-brand that meant auto-contrasting
+     the label against a colour no longer being painted: a #FB923C button
+     wearing a label picked for #EA580C = 2.26:1, under the 4.5:1 AA floor.
+     The step function is unchanged — only its input is corrected. */
+  --color-text-on-brand: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) clamp(0, (0.62 - l) * 1000, 1) 0 0);
+  --color-border-focus: var(--brand-color-dark, var(--brand-color, var(--color-primary-400)));
+  --color-primary-600: oklch(from var(--brand-color-dark, var(--brand-color, var(--color-primary-400))) calc(l + 0.08) c h);
+
   /* Dark secondary/accent overrides */
   --color-brand-secondary: var(--brand-secondary-dark, var(--brand-secondary, var(--color-neutral-400)));
   --color-brand-accent: var(--brand-accent-dark, var(--brand-accent, var(--color-warning)));
