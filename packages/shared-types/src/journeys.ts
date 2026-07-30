@@ -590,6 +590,16 @@ export interface EnrolledCourseSummary {
     lede: string | null;
     /** The course guide's display name (`courses.guide.name`), or `null`. */
     guideName: string | null;
+    /**
+     * Public CDN URL for the course cover (`courses.coverImageKey` resolved
+     * against `R2_PUBLIC_URL_BASE`), or `null` when the creator uploaded none or
+     * the worker has no configured CDN base. Never a raw R2 key.
+     *
+     * Added by Codex-tnwnu: the library's journey cards had no cover field at
+     * all, so they were the only journey surface structurally unable to render a
+     * photo and were permanently stuck on the typographic fallback.
+     */
+    coverImageUrl: string | null;
   };
   enrollment: JourneyEnrollment;
   /**

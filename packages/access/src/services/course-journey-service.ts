@@ -783,10 +783,17 @@ export class CourseJourneyService extends BaseService {
    * the SAME `practice_completions ⋈ stage_practices` rollup the dashboard uses
    * (reusing {@link loadStages} + {@link loadCompletions}). One rollup pair of
    * bounded reads per enrolled course; enrollment counts are small in practice.
+   *
+   * `r2PublicUrlBase` (env-owned, supplied by the route) resolves each course's
+   * `coverImageKey` to a CDN URL — the same treatment
+   * {@link listPublishedCourses} and {@link listEnrolledJourneys} already give
+   * their cards. Omit it and every card reports `null` and renders the shared
+   * brand cover (Codex-tnwnu).
    */
   async listEnrolledCourses(
     userId: string,
-    organizationId: string
+    organizationId: string,
+    r2PublicUrlBase?: string
   ): Promise<EnrolledCourseSummary[]> {
     try {
       const rows = await this.db
@@ -797,6 +804,7 @@ export class CourseJourneyService extends BaseService {
           kicker: courses.kicker,
           lede: courses.lede,
           guide: courses.guide,
+          coverImageKey: courses.coverImageKey,
           organizationSlug: organizations.slug,
           enrolledAt: courseEnrollments.enrolledAt,
           lastActivityAt: courseEnrollments.lastActivityAt,
@@ -831,6 +839,10 @@ export class CourseJourneyService extends BaseService {
             kicker: row.kicker ?? null,
             lede: row.lede ?? null,
             guideName: row.guide?.name ?? null,
+            coverImageUrl: resolveCourseCoverUrl(
+              row.coverImageKey,
+              r2PublicUrlBase
+            ),
           },
           enrollment: {
             courseId: row.courseId,

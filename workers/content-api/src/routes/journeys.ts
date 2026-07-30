@@ -273,7 +273,12 @@ app.get(
       const { organizationId } = ctx.input.query;
       return ctx.services.courseJourney.listEnrolledCourses(
         userId,
-        organizationId
+        organizationId,
+        // Resolves each course's cover key to a CDN URL, exactly as `/enrolled`
+        // and the public course list already do. Without it every library
+        // journey card would report `coverImageUrl: null` and the DTO field
+        // would be dead weight (Codex-tnwnu).
+        ctx.env.R2_PUBLIC_URL_BASE
       );
     },
   })
