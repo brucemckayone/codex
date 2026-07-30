@@ -303,6 +303,10 @@
    * next to a builder showing the new content — an intermittent builder-vs-live
    * discrepancy the creator has no way to explain. The save's own toast already
    * says what went wrong.
+   *
+   * `?preview=1` (Codex-aectb) opts out of the sell page's entitled→dashboard
+   * redirect. A creator who also holds the course would otherwise land on their
+   * own dashboard and never see the page they just edited.
    */
   async function handleViewLive(): Promise<void> {
     if (pageBuilder.isDirty && !(await handleSave())) return;
@@ -310,7 +314,7 @@
       toast.error('Give the page a slug and save it before viewing live');
       return;
     }
-    window.open(`/journeys/${slug}`, '_blank', 'noopener');
+    window.open(`/journeys/${slug}?preview=1`, '_blank', 'noopener');
   }
 
   /**

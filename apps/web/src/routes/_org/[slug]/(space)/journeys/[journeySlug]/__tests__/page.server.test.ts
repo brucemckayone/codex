@@ -124,7 +124,13 @@ type LoadData = Extract<
   object
 >;
 
-function makeEvent(journeySlug: string, user: { id: string } | null = null) {
+function makeEvent(
+  journeySlug: string,
+  user: { id: string } | null = null,
+  // Query string (no leading `?`). `preview=1` is the builder's View-live opt-out
+  // from the entitled→dashboard redirect (Codex-aectb).
+  search = ''
+) {
   const setHeaders = vi.fn();
   const depends = vi.fn();
   const event = {
@@ -132,7 +138,9 @@ function makeEvent(journeySlug: string, user: { id: string } | null = null) {
     parent: async () => ({ user }),
     setHeaders,
     depends,
-    url: new URL(`http://acme.lvh.me:3000/journeys/${journeySlug}`),
+    url: new URL(
+      `http://acme.lvh.me:3000/journeys/${journeySlug}${search ? `?${search}` : ''}`
+    ),
     // Present so the load can build a round-d-seam context (the seam is mocked).
     platform: {},
     cookies: {},
@@ -269,10 +277,13 @@ describe('journey sales +page.server load', () => {
     expect(resolveCanEnterCourseMock).not.toHaveBeenCalled();
   });
 
-  it('resolves enrolled=true for an enrolled member (CTA → dashboard)', async () => {
+  it('resolves enrolled=true for an entitled member (CTA → dashboard)', async () => {
     resolveCanEnterCourseMock.mockResolvedValueOnce(true);
     const { load } = await import('../+page.server');
-    const { event } = makeEvent('rootwork', { id: 'user-1' });
+    // `preview=1` so the load RETURNS rather than 303-ing to the dashboard
+    // (Codex-aectb) — this case is about the flag the CTA reads, and the preview
+    // bypass is the one path on which an entitled viewer still sees the page.
+    const { event } = makeEvent('rootwork', { id: 'user-1' }, 'preview=1');
 
     const data = (await load(event)) as LoadData;
 
@@ -350,6 +361,122 @@ describe('journey sales +page.server load', () => {
 
       await expect(load(event)).rejects.toMatchObject({ status: 404 });
       expect(getCoursePagePreviewMock).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Entitled → dashboard redirect (Codex-aectb) ─────────────────────────────
+  // Owning the course used to earn you the marketing page with a relabelled CTA.
+  // It now 303s to the dashboard.
+  //
+  // NOTE ON THE MOCKING: `@sveltejs/kit` is deliberately NOT mocked, so these
+  // assertions run against the REAL `redirect()`, which THROWS. A hand-rolled
+  // `redirect` spy that merely records its arguments would let the guarded code
+  // run on to the `return`, and every case below would pass vacuously.
+  describe('entitled → dashboard redirect', () => {
+    /** The location the sell page must send an entitled viewer to. */
+    const DASHBOARD_URL = '/journeys/rootwork/dashboard';
+
+    it('303s an entitled viewer to their course dashboard', async () => {
+      resolveCanEnterCourseMock.mockResolvedValueOnce(true);
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork', { id: 'user-1' });
+
+      // Root-relative: the org slug lives in the hostname (we are already on
+      // acme.lvh.me), so `buildJourneyUrl` must not emit an absolute URL.
+      await expect(load(event)).rejects.toMatchObject({
+        status: 303,
+        location: DASHBOARD_URL,
+      });
+    });
+
+    it('targets the COURSE slug, not the landing-page slug', async () => {
+      // The two are authored independently and can diverge. The dashboard
+      // resolves its course by the COURSE slug (`resolveCourseBySlug`), so a
+      // redirect built from the page slug would 404 on arrival.
+      getCoursePageMock.mockResolvedValueOnce({
+        ...MOCK_COURSE_PAGE,
+        page: { ...MOCK_COURSE_PAGE.page, slug: 'rootwork-landing' },
+        course: { ...MOCK_COURSE_PAGE.course, slug: 'rootwork-course' },
+      } satisfies JourneyCoursePage);
+      resolveCanEnterCourseMock.mockResolvedValueOnce(true);
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork-landing', { id: 'user-1' });
+
+      await expect(load(event)).rejects.toMatchObject({
+        status: 303,
+        location: '/journeys/rootwork-course/dashboard',
+      });
+    });
+
+    it('renders the sales page for an anonymous visitor (never redirects)', async () => {
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork'); // no session
+
+      // Resolving at all proves no redirect — the real `redirect()` throws.
+      const data = (await load(event)) as LoadData;
+
+      expect(data.coursePage).toBe(MOCK_COURSE_PAGE);
+      expect(data.enrolled).toBe(false);
+      // The SEO-critical anonymous path never pays for the worker round-trip.
+      expect(resolveCanEnterCourseMock).not.toHaveBeenCalled();
+    });
+
+    it('renders the sales page for a signed-in visitor who is NOT entitled', async () => {
+      resolveCanEnterCourseMock.mockResolvedValueOnce(false);
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork', { id: 'window-shopper' });
+
+      const data = (await load(event)) as LoadData;
+
+      expect(data.enrolled).toBe(false);
+      expect(data.coursePage).toBe(MOCK_COURSE_PAGE);
+    });
+
+    it('renders the sales page for an entitled viewer when ?preview=1 is set', async () => {
+      resolveCanEnterCourseMock.mockResolvedValueOnce(true);
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork', { id: 'creator-1' }, 'preview=1');
+
+      // The builder's View-live link carries this. A creator who also holds the
+      // course must see the page they just edited, not their own dashboard.
+      const data = (await load(event)) as LoadData;
+
+      expect(data.enrolled).toBe(true);
+      expect(data.coursePage).toBe(MOCK_COURSE_PAGE);
+    });
+
+    it('renders the sales page for an entitled viewer previewing a DRAFT', async () => {
+      // `draftPreview` is only ever true when the management-gated preview read
+      // succeeded, so it is already proof the viewer is an org manager — it
+      // bypasses the redirect without any extra role query.
+      getCoursePageMock.mockResolvedValueOnce(null);
+      getCoursePagePreviewMock.mockResolvedValueOnce({
+        ...MOCK_COURSE_PAGE,
+        page: { ...MOCK_COURSE_PAGE.page, status: 'draft', publishedAt: null },
+      } satisfies JourneyCoursePage);
+      resolveCanEnterCourseMock.mockResolvedValueOnce(true);
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork', { id: 'manager-1' }); // no ?preview
+
+      const data = (await load(event)) as LoadData;
+
+      expect(data.draftPreview).toBe(true);
+      expect(data.enrolled).toBe(true);
+    });
+
+    it('renders the sales page when the entitlement resolver THROWS', async () => {
+      resolveCanEnterCourseMock.mockRejectedValueOnce(new Error('access down'));
+      const { load } = await import('../+page.server');
+      const { event } = makeEvent('rootwork', { id: 'user-1' });
+
+      // Only redirect on a positive, confident signal; on doubt, render where you
+      // are. This is the half of the invariant that makes the sell↔dashboard pair
+      // loop-free: a flaky resolver leaves the user ON the sales page, so nothing
+      // can bounce them around a cycle.
+      const data = (await load(event)) as LoadData;
+
+      expect(data.enrolled).toBe(false);
+      expect(data.coursePage).toBe(MOCK_COURSE_PAGE);
     });
   });
 });

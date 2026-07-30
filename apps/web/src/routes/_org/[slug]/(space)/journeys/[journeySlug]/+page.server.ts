@@ -18,10 +18,12 @@
  * Data comes exclusively through the `./journey-data` INTEGRATION SEAM (mocked
  * for AGGRESSIVE-MODE today; rewired to the real remote functions post-WP-2).
  */
-import { error } from '@sveltejs/kit';
+import { error, redirect } from '@sveltejs/kit';
+import { evaluateCourseGate } from '$lib/journeys/gate';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import { resolveCanEnterCourse } from '$lib/server/journeys/round-d-seam';
+import { buildJourneyUrl } from '$lib/utils/subdomain';
 import type { PageServerLoad } from './$types';
 import {
   getCoursePage,
@@ -30,8 +32,16 @@ import {
 } from './journey-data';
 
 export const load: PageServerLoad = async (event) => {
-  const { params, parent, setHeaders, depends, locals, platform, cookies } =
-    event;
+  const {
+    params,
+    parent,
+    setHeaders,
+    depends,
+    locals,
+    platform,
+    cookies,
+    url,
+  } = event;
 
   // Ensure the org layout (auth + branding + org resolution) has resolved before
   // we commit cache headers — mirrors the org-landing precedent.
@@ -62,11 +72,13 @@ export const load: PageServerLoad = async (event) => {
     throw error(404, 'This portal could not be found.');
   }
 
-  // AWAIT the enrolment flag: it flips the ABOVE-THE-FOLD hero CTA (anon/
-  // not-enrolled → "join" → checkout; enrolled → "go to your dashboard" →
-  // dashboard), so it belongs on the first-paint path, not streamed. The sales
-  // page itself stays fully PUBLIC (no `canView` gate) — this only re-targets
-  // the CTA. We skip the worker round-trip entirely for anonymous visitors (the
+  // AWAIT the entitlement flag: it now DECIDES THE REDIRECT below (Codex-aectb)
+  // — an entitled viewer is sent to their dashboard rather than sold the course
+  // again — and, on the preview bypass where no redirect fires, still flips the
+  // ABOVE-THE-FOLD hero CTA (anon/not-entitled → "join" → checkout; entitled →
+  // "go to your dashboard"). Either way it is first-paint, never streamed. The
+  // sales page itself stays fully PUBLIC (no `canView` gate). We skip the worker
+  // round-trip entirely for anonymous visitors (the
   // SEO-critical common case): no session ⇒ definitionally not enrolled. The
   // check is `.catch()`-guarded so an entitlement-resolver hiccup degrades to
   // the public/join CTA rather than throwing.
@@ -112,6 +124,63 @@ export const load: PageServerLoad = async (event) => {
   // serve THAT `public, s-maxage` — is a deliberate shell-split refactor, out of
   // WP-3 scope. See docs/caching-strategy.md §HTTP/CDN caching.
   setHeaders(CACHE_HEADERS.PRIVATE);
+
+  // ── Already hold it ⇒ this is the wrong surface (Codex-aectb) ───────────────
+  // A user who owns the course was still served the marketing page, with only
+  // the hero CTA relabelled. Send them to their dashboard instead. Placed AFTER
+  // the header commit so the 303 inherits `private, no-cache` — correct for a
+  // per-user redirect, and never shared-cacheable.
+  //
+  // ONE DECISION FUNCTION, BOTH DIRECTIONS: the dashboard load redirects HERE
+  // when `evaluateCourseGate` returns anything but `ok`; this page redirects
+  // THERE when the same pure gate returns `ok`. The two conditions partition the
+  // gate's outcome space, so for any one set of inputs exactly one of the two
+  // surfaces renders — the pair cannot ping-pong.
+  //
+  // ENTITLEMENT, NOT ENROLMENT: `resolveCanEnterCourse` asks
+  // `hasCourseEntitlement` (a live grant or a granting subscription tier), and
+  // deliberately NOT for a `course_enrollments` row. A refunded user KEEPS their
+  // enrollment row after the entitlement is revoked, so triggering on enrolment
+  // would bounce them sell→dashboard→sell forever. Entitlement is the only
+  // loop-free choice because it is the exact predicate the dashboard gates on.
+  //
+  // NEVER REDIRECT ON UNCERTAINTY: `enrolled` is `.catch(() => false)`-guarded
+  // above, so a resolver hiccup RENDERS the sales page rather than redirecting.
+  // That asymmetry is what makes the pair provably loop-free — the failure mode
+  // of BOTH surfaces is "land on sales and stay there".
+  //
+  // BYPASS: `?preview=1` (the builder's View-live link) and `draftPreview` —
+  // which can only be true when the management-gated preview read succeeded, so
+  // it is already proof the viewer is an org manager. A creator inspecting their
+  // own page must see the page, not their dashboard. No role or membership read
+  // is needed: the sell page is fully public to anonymous visitors, so this
+  // redirect is a UX convenience, not a security boundary, and the bypass
+  // discloses nothing.
+  if (!(url.searchParams.has('preview') || draftPreview)) {
+    const gate = evaluateCourseGate({
+      // A slug with no page/course already threw 404 above.
+      courseExists: true,
+      isAuthenticated: Boolean(user),
+      canEnterCourse: enrolled,
+    });
+    if (gate.kind === 'ok') {
+      redirect(
+        303,
+        buildJourneyUrl(
+          url,
+          {
+            // The COURSE slug, not the landing-page slug — the dashboard
+            // resolves its course by that (`resolveCourseBySlug`) and the two
+            // are independently authored, so they can differ.
+            slug: coursePage.course.slug,
+            id: coursePage.course.id,
+            organizationSlug: params.slug,
+          },
+          { surface: 'dashboard' }
+        )
+      );
+    }
+  }
 
   return {
     coursePage,
