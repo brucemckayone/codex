@@ -75,6 +75,12 @@
     pageId ? getCourseCurriculum({ pageId }) : null
   );
 
+  // Curriculum and Insights are both COURSE artifacts — each resolves this page
+  // to its subject course server-side — so the artifact switch only offers them
+  // for a course journey. The Curriculum tab was ungated, which pointed a
+  // non-course journey at a guaranteed 404.
+  const isCourse = $derived(draftQuery?.current?.subjectType === 'course');
+
   const stages: JourneyStagePreview[] = $derived(
     (curriculumQuery?.current?.stages ?? []).map((stage) => ({
       name: stage.name,
@@ -366,7 +372,10 @@
       </select>
 
       <nav class="jb__art" aria-label="Journey artifacts">
-        <a href="/studio/journeys/{pageId}/curriculum">Curriculum</a>
+        {#if isCourse}
+          <a href="/studio/journeys/{pageId}/curriculum">Curriculum</a>
+          <a href="/studio/journeys/{pageId}/insights">Insights</a>
+        {/if}
         <span class="jb__art-on" aria-current="page">Sales page</span>
       </nav>
 

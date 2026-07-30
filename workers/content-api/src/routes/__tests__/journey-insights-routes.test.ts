@@ -9,9 +9,15 @@
  *     NEVER the client-supplied `query.organizationId` — a client cannot
  *     redirect the money query to another org's course (the money-scoping IDOR
  *     is the key risk this route guards).
+ *   - The route is keyed by LANDING-PAGE id and resolves it to the subject
+ *     course before aggregating (Codex-xo3bl). `PAGE_ID` and `COURSE_ID` are
+ *     DELIBERATELY different UUIDs so the forwarding assertion can fail: the
+ *     shipped bug was the route treating the page id AS the course id, which a
+ *     fixture reusing one id for both would have waved straight through.
  *   - Response envelope is `{ data }`.
  *   - Service-layer errors propagate through `mapErrorToResponse` — e.g. the
- *     cross-org course guard's `NotFoundError` → 404, no revenue leak.
+ *     cross-org course guard's `NotFoundError` → 404, no revenue leak, and the
+ *     resolver's own `NotFoundError` short-circuits before any aggregation.
  *
  * Harness mirrors the procedure() shim from `sales-routes.test.ts` (the sibling
  * requireOrgManagement studio route): the shim simulates the real policy phases
@@ -137,6 +143,9 @@ import journeyInsights from '../journey-insights';
 
 const MANAGED_ORG_ID = '32300000-0000-4000-8000-000000000002';
 const ROGUE_ORG_ID = '99900000-0000-4000-8000-000000000999';
+/** The landing-page id the studio URL carries — what the client sends. */
+const PAGE_ID = '1a000000-0000-4000-8000-0000000000aa';
+/** The subject course the resolver returns — what `getInsights` must receive. */
 const COURSE_ID = '2c000000-0000-4000-8000-000000000001';
 
 const INSIGHTS_FIXTURE = {
@@ -160,23 +169,41 @@ interface InsightsServiceMock {
   getInsights: ReturnType<typeof vi.fn>;
 }
 
-function createInsightsServiceMock(): InsightsServiceMock {
+interface JourneyServiceMock {
+  resolveCourseIdForPage: ReturnType<typeof vi.fn>;
+}
+
+interface ServicesMock {
+  courseInsights: InsightsServiceMock;
+  courseJourney: JourneyServiceMock;
+}
+
+/**
+ * Both services the route composes. The resolver returns COURSE_ID for any page
+ * id — the org-scoping of that lookup is proven against live Postgres in
+ * `course-curriculum-editor.integration.test.ts`; what this file pins is that
+ * the route calls it and forwards its RESULT.
+ */
+function createServicesMock(): ServicesMock {
   return {
-    getInsights: vi.fn().mockResolvedValue(INSIGHTS_FIXTURE),
+    courseInsights: {
+      getInsights: vi.fn().mockResolvedValue(INSIGHTS_FIXTURE),
+    },
+    courseJourney: {
+      resolveCourseIdForPage: vi.fn().mockResolvedValue(COURSE_ID),
+    },
   };
 }
 
 interface BuildAppArgs {
   user?: { id: string } | null;
-  services?: { courseInsights: InsightsServiceMock };
+  services?: ServicesMock;
   orgRole?: 'owner' | 'admin' | 'member' | undefined;
   organizationId?: string | undefined;
 }
 
 function buildApp(args: BuildAppArgs = {}) {
-  const services = args.services ?? {
-    courseInsights: createInsightsServiceMock(),
-  };
+  const services = args.services ?? createServicesMock();
   const app = new Hono<{ Variables: Record<string, unknown> }>();
   app.use('*', async (c, next) => {
     c.set('__testUser', args.user === undefined ? { id: 'user_1' } : args.user);
@@ -195,14 +222,14 @@ function buildApp(args: BuildAppArgs = {}) {
   return { app, services };
 }
 
-/** A fully-valid query string (org resolver value + validated course/period). */
+/** A fully-valid query string (org resolver value + validated page/period). */
 function insightsReq(
   orgId: string = MANAGED_ORG_ID,
-  courseId: string = COURSE_ID,
+  pageId: string = PAGE_ID,
   period = '30d'
 ): Request {
   return new Request(
-    `http://content-api.test/api/journeys/insights?organizationId=${orgId}&courseId=${courseId}&period=${period}`,
+    `http://content-api.test/api/journeys/insights?organizationId=${orgId}&pageId=${pageId}&period=${period}`,
     { method: 'GET' }
   );
 }
@@ -210,8 +237,8 @@ function insightsReq(
 describe('GET /api/journeys/insights — route → service contract', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('positive: owner GET → 200, getInsights called with ctx.organizationId + courseId + period', async () => {
-    const services = { courseInsights: createInsightsServiceMock() };
+  it('positive: owner GET → 200, getInsights called with ctx.organizationId + RESOLVED courseId + period', async () => {
+    const services = createServicesMock();
     const bundle = buildApp({ services });
     const res = await bundle.app.request(insightsReq());
     expect(res.status).toBe(200);
@@ -233,45 +260,94 @@ describe('GET /api/journeys/insights — route → service contract', () => {
     expect(periodArg).toBe('30d');
   });
 
+  // ── Codex-xo3bl regression: page id → course id ───────────────────────────
+  it('resolves the LANDING-PAGE id to its subject course and aggregates on the COURSE id, never the page id', async () => {
+    const services = createServicesMock();
+    const bundle = buildApp({ services });
+    const res = await bundle.app.request(insightsReq());
+    expect(res.status).toBe(200);
+
+    // The resolver is called with the org-scoped page id from the query.
+    expect(services.courseJourney.resolveCourseIdForPage).toHaveBeenCalledTimes(
+      1
+    );
+    const [resolverOrg, resolverPage] =
+      services.courseJourney.resolveCourseIdForPage.mock.calls[0] ?? [];
+    expect(resolverOrg).toBe(MANAGED_ORG_ID);
+    expect(resolverPage).toBe(PAGE_ID);
+
+    // ...and the aggregation receives its RESULT. The shipped bug passed
+    // PAGE_ID straight through here, so `courses.id` matched nothing and every
+    // request 404'd `Course not found`.
+    const [, courseArg] =
+      services.courseInsights.getInsights.mock.calls[0] ?? [];
+    expect(courseArg).toBe(COURSE_ID);
+    expect(courseArg).not.toBe(PAGE_ID);
+  });
+
+  it('resolver NotFoundError (foreign or non-course page) → 404 BEFORE any aggregation runs', async () => {
+    const services = createServicesMock();
+    services.courseJourney.resolveCourseIdForPage.mockRejectedValueOnce(
+      new NotFoundError('Journey course not found')
+    );
+    const bundle = buildApp({ services });
+    const res = await bundle.app.request(insightsReq());
+    expect(res.status).toBe(404);
+    // Short-circuits: no revenue is aggregated for an unresolvable page.
+    expect(services.courseInsights.getInsights).not.toHaveBeenCalled();
+  });
+
   it('positive: admin GET → 200 (requireOrgManagement = owner OR admin)', async () => {
-    const services = { courseInsights: createInsightsServiceMock() };
+    const services = createServicesMock();
     const bundle = buildApp({ orgRole: 'admin', services });
     const res = await bundle.app.request(insightsReq());
     expect(res.status).toBe(200);
     expect(services.courseInsights.getInsights).toHaveBeenCalledTimes(1);
   });
 
-  it('negative auth: no session → 401, service NOT called', async () => {
-    const services = { courseInsights: createInsightsServiceMock() };
+  it('negative auth: no session → 401, neither service called', async () => {
+    const services = createServicesMock();
     const bundle = buildApp({ user: null, services });
     const res = await bundle.app.request(insightsReq());
     expect(res.status).toBe(401);
+    expect(
+      services.courseJourney.resolveCourseIdForPage
+    ).not.toHaveBeenCalled();
     expect(services.courseInsights.getInsights).not.toHaveBeenCalled();
   });
 
-  it('negative role: member on the org → 403, service NOT called', async () => {
-    const services = { courseInsights: createInsightsServiceMock() };
+  it('negative role: member on the org → 403, neither service called', async () => {
+    const services = createServicesMock();
     const bundle = buildApp({ orgRole: 'member', services });
     const res = await bundle.app.request(insightsReq());
     expect(res.status).toBe(403);
+    expect(
+      services.courseJourney.resolveCourseIdForPage
+    ).not.toHaveBeenCalled();
     expect(services.courseInsights.getInsights).not.toHaveBeenCalled();
   });
 
   it('cross-org safety: a manager of org A cannot query with org B — ctx.organizationId wins over query.organizationId', async () => {
-    const services = { courseInsights: createInsightsServiceMock() };
+    const services = createServicesMock();
     // Caller manages MANAGED_ORG_ID (set as ctx org); the client injects a
-    // ROGUE org id in the query. The handler MUST forward ctx.organizationId so
-    // no other org's course revenue can ever be aggregated.
+    // ROGUE org id in the query. BOTH the page resolution and the aggregation
+    // MUST use ctx.organizationId so no other org's revenue is ever reachable.
     const bundle = buildApp({ services });
     const res = await bundle.app.request(insightsReq(ROGUE_ORG_ID));
     expect(res.status).toBe(200);
+
+    const [resolverOrg] =
+      services.courseJourney.resolveCourseIdForPage.mock.calls[0] ?? [];
+    expect(resolverOrg).toBe(MANAGED_ORG_ID);
+    expect(resolverOrg).not.toBe(ROGUE_ORG_ID);
+
     const [orgArg] = services.courseInsights.getInsights.mock.calls[0] ?? [];
     expect(orgArg).toBe(MANAGED_ORG_ID);
     expect(orgArg).not.toBe(ROGUE_ORG_ID);
   });
 
   it('cross-org guard: service NotFoundError (course not in managed org) → 404, redacted body', async () => {
-    const services = { courseInsights: createInsightsServiceMock() };
+    const services = createServicesMock();
     services.courseInsights.getInsights.mockRejectedValueOnce(
       new NotFoundError('Course not found')
     );
@@ -282,13 +358,16 @@ describe('GET /api/journeys/insights — route → service contract', () => {
     expect(payload.error?.code).toBeTruthy();
   });
 
-  it('validation: a non-UUID courseId → 400, service NOT called', async () => {
-    const services = { courseInsights: createInsightsServiceMock() };
+  it('validation: a non-UUID pageId → 400, neither service called', async () => {
+    const services = createServicesMock();
     const bundle = buildApp({ services });
     const res = await bundle.app.request(
       insightsReq(MANAGED_ORG_ID, 'not-a-uuid')
     );
     expect(res.status).toBe(400);
+    expect(
+      services.courseJourney.resolveCourseIdForPage
+    ).not.toHaveBeenCalled();
     expect(services.courseInsights.getInsights).not.toHaveBeenCalled();
   });
 });

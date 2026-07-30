@@ -26,13 +26,21 @@ import { Hono } from 'hono';
  * the session membership and sets `ctx.organizationId`. The `organizationId` in
  * the query string is consumed ONLY by the procedure org resolver — the handler
  * forwards `ctx.organizationId`, NEVER the client value, so a client cannot
- * redirect the query to another org. Defence in depth: the service additionally
- * scopes the course to the managed org (a foreign courseId → 404, never a leak).
+ * redirect the query to another org. Defence in depth: both the page→course
+ * resolution and the service additionally scope to the managed org (a foreign
+ * pageId or courseId → 404, never a leak).
  */
 const app = new Hono<HonoEnv>();
 
 /**
- * GET /api/journeys/insights?organizationId=&courseId=&period=
+ * GET /api/journeys/insights?organizationId=&pageId=&period=
+ *
+ * Keyed by LANDING-PAGE id, like every other studio journey route — the studio
+ * URL `/studio/journeys/[id]/insights` carries the page id, and `listJourneys`
+ * returns page ids. The course-keyed aggregation therefore needs one resolution
+ * hop first (Codex-xo3bl): before this, the route took the page id AS a
+ * `courseId` and every request 404'd `Course not found`.
+ *
  * @returns {JourneyInsightsData}
  */
 app.get(
@@ -47,7 +55,16 @@ app.get(
       query: journeyInsightsQuerySchema,
     },
     handler: async (ctx): Promise<JourneyInsightsData> => {
-      const { courseId, period } = ctx.input.query;
+      const { pageId, period } = ctx.input.query;
+
+      // Resolve (and org-scope) the subject course FIRST — the same two-service
+      // composition the curriculum routes use. A foreign, missing or non-course
+      // page throws NotFoundError here, before any aggregation runs.
+      const courseId = await ctx.services.courseJourney.resolveCourseIdForPage(
+        ctx.organizationId,
+        pageId
+      );
+
       return ctx.services.courseInsights.getInsights(
         ctx.organizationId,
         courseId,

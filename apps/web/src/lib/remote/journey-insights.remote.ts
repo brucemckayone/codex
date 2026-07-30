@@ -22,30 +22,33 @@ import { createServerApi } from '$lib/server/api';
 
 const insightsQueryArgsSchema = z.object({
   organizationId: z.string().uuid(),
-  courseId: z.string().uuid(),
+  /**
+   * The journey's LANDING-PAGE id — `page.params.id` on every
+   * `/studio/journeys/[id]/…` route (Codex-xo3bl). The worker resolves it to the
+   * subject course. Named `courseId` originally, which read correctly at the call
+   * site and was wrong on the wire: both ids are UUIDs, so the schema passed and
+   * the aggregation 404'd `Course not found` on every single request.
+   */
+  pageId: z.string().uuid(),
   period: z.enum(['7d', '30d', '90d', 'all']).default('30d'),
 });
 
 /**
- * Studio journey insights for one course in one period.
+ * Studio journey insights for one journey in one period.
  *
  * @example
  * const insights = getJourneyInsights({
  *   organizationId: data.org.id,
- *   courseId: page.params.id,
+ *   pageId: page.params.id,
  *   period: '30d',
  * });
  * // insights.current → JourneyInsightsData
  */
 export const getJourneyInsights = query(
   insightsQueryArgsSchema,
-  async ({
-    organizationId,
-    courseId,
-    period,
-  }): Promise<JourneyInsightsData> => {
+  async ({ organizationId, pageId, period }): Promise<JourneyInsightsData> => {
     const { platform, cookies } = getRequestEvent();
     const api = createServerApi(platform, cookies);
-    return api.access.courseInsights(organizationId, courseId, period);
+    return api.access.courseInsights(organizationId, pageId, period);
   }
 );

@@ -6,23 +6,25 @@
   client-side via the `getJourneyInsights` remote query and mirrors the
   studio/analytics auth-guard + URL-param pattern.
 
-  `[id]` is the course id. The reporting window is driven by `?period=`.
-  Data is provenance-tagged: `live` (financial) + `course` (engagement). The
-  data source is the single Round-D seam — see journey-insights.remote.ts.
+  `[id]` is the journey's LANDING-PAGE id — the same id `page/` and `curriculum/`
+  bind under this route segment, and the id the studio index links with. The
+  worker resolves it to the subject course. The reporting window is driven by
+  `?period=`. Data is provenance-tagged: `live` (financial) + `course`
+  (engagement). The data source is the single Round-D seam — see
+  journey-insights.remote.ts.
 
   @prop data - Inherited studio layout data: { org, userRole, ... }.
 -->
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { Alert } from '$lib/components/ui';
   import {
     JourneyInsightsPanel,
     type InsightsPeriod,
     type JourneyInsightsData,
   } from '$lib/components/studio/journey-insights';
   import { getJourneyInsights } from '$lib/remote/journey-insights.remote';
-  import type { QueryResult } from '$lib/remote/query-result';
+  import { queryErrorMessage, type QueryResult } from '$lib/remote/query-result';
 
   let { data } = $props();
 
@@ -44,7 +46,10 @@
     data.userRole === 'admin' || data.userRole === 'owner'
   );
 
-  const courseId = $derived(page.params.id ?? '');
+  // The LANDING-PAGE id, not the course id. This was named `courseId` and passed
+  // straight through as one (Codex-xo3bl): both are UUIDs, so validation passed
+  // and the worker's `courses.id` lookup 404'd on every single request.
+  const pageId = $derived(page.params.id ?? '');
 
   // ─── URL → period ─────────────────────────────────────────────────────
   const VALID_PERIODS: InsightsPeriod[] = ['7d', '30d', '90d', 'all'];
@@ -56,12 +61,12 @@
   });
 
   // ─── Remote query ─────────────────────────────────────────────────────
-  // Re-keys off (orgId, courseId, period) so period changes refetch.
+  // Re-keys off (orgId, pageId, period) so period changes refetch.
   const insightsQuery = $derived(
-    isAuthorized && courseId
+    isAuthorized && pageId
       ? getJourneyInsights({
           organizationId: data.org.id,
-          courseId,
+          pageId,
           period,
         })
       : null
@@ -70,12 +75,18 @@
   const insights = $derived(
     (insightsQuery as QueryResult<JourneyInsightsData> | null)?.current
   );
-  // Deferred error branch: a failed insights fetch renders an error state
-  // rather than crashing the surface (the query rejects on a 4xx/5xx from the
-  // studio route — e.g. a course that no longer resolves in this org).
+  // A failed insights fetch renders an error state rather than sitting on the
+  // loading skeletons (the query rejects on a 4xx/5xx from the studio route —
+  // e.g. a journey that no longer resolves in this org).
+  //
+  // MUST go through `queryErrorMessage`: SvelteKit rejects with `HttpError`,
+  // whose text lives at `.body.message`. This read was `.error?.message`, which
+  // is `undefined` on every HttpError ever thrown — so the branch below was
+  // unreachable and the panel showed 7 skeletons forever (Codex-xo3bl).
   const insightsError = $derived(
-    (insightsQuery as QueryResult<JourneyInsightsData> | null)?.error?.message ??
-      null
+    queryErrorMessage(
+      (insightsQuery as QueryResult<JourneyInsightsData> | null)?.error
+    )
   );
 
   function setPeriod(next: InsightsPeriod) {
@@ -86,9 +97,10 @@
 </script>
 
 {#if isAuthorized}
-  {#if insightsError}
-    <Alert variant="error">Could not load insights: {insightsError}</Alert>
-  {:else}
-    <JourneyInsightsPanel data={insights} {period} onPeriodChange={setPeriod} />
-  {/if}
+  <JourneyInsightsPanel
+    data={insights}
+    {period}
+    onPeriodChange={setPeriod}
+    error={insightsError}
+  />
 {/if}

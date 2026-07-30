@@ -35,7 +35,7 @@
   import { formatDate, formatPrice, getInitials } from '$lib/utils/format';
   import { downloadCsv } from '$lib/utils/csv-export';
   import type { SubscriberListItem } from '@codex/subscription';
-  import type { QueryResult } from '$lib/remote/query-result';
+  import { queryErrorMessage, type QueryResult } from '$lib/remote/query-result';
   import {
     isConnectReady,
     type ConnectReadinessStatus,
@@ -135,9 +135,13 @@
         false) ||
       ((tiersQuery as QueryResult<TierRow[]> | null)?.loading ?? false)
   );
+  // Via `queryErrorMessage` — SvelteKit rejects with `HttpError`, whose text is
+  // at `.body.message`, so the `.error?.message` this replaces was `undefined`
+  // for every real failure and this branch never fired (Codex-xo3bl).
   const queryError = $derived(
-    (subscribersQuery as QueryResult<SubscribersPage> | null)?.error?.message ??
-      null
+    queryErrorMessage(
+      (subscribersQuery as QueryResult<SubscribersPage> | null)?.error
+    )
   );
 
   const items = $derived(subsData?.items ?? []);

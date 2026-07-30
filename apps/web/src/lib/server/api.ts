@@ -1232,23 +1232,28 @@ export function createServerApi(
         ),
 
       /**
-       * Studio journey INSIGHTS (Codex-2pryk Round-D · WP-7): course-scoped
-       * `live` (financial) + `course` (engagement) aggregation for one reporting
-       * period. Owner/admin only — the content-api route enforces
-       * `requireOrgManagement` and re-derives scope from the session, so the
-       * `organizationId` here is used only for org resolution, never as the
-       * authorization source. Money is GBP pence.
+       * Studio journey INSIGHTS (Codex-2pryk Round-D · WP-7): `live` (financial)
+       * + `course` (engagement) aggregation for one reporting period. Owner/admin
+       * only — the content-api route enforces `requireOrgManagement` and
+       * re-derives scope from the session, so the `organizationId` here is used
+       * only for org resolution, never as the authorization source. Money is GBP
+       * pence.
+       *
+       * Keyed by LANDING-PAGE id (Codex-xo3bl) — the id the studio URL and
+       * `listJourneys` both carry. The worker resolves it to the subject course.
+       * This parameter was named `courseId`, so callers passed `page.params.id`
+       * straight into a `courses.id` lookup and every read 404'd.
        */
       courseInsights: (
         organizationId: string,
-        courseId: string,
+        pageId: string,
         period: string
       ) =>
         request<JourneyInsightsData>(
           'access',
           `/api/journeys/insights?organizationId=${encodeURIComponent(
             organizationId
-          )}&courseId=${encodeURIComponent(courseId)}&period=${encodeURIComponent(
+          )}&pageId=${encodeURIComponent(pageId)}&period=${encodeURIComponent(
             period
           )}`
         ),
