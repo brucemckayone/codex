@@ -212,20 +212,27 @@
    `--color-text-inverse` are deliberately NOT re-pointed anywhere in this file —
    they are the brand accent and its companions, owned by org-brand.css.
 
-   CAVEAT, measured 2026-07-29 (Codex-a1tz6): the claim that once stood here —
-   that they "read correctly against either ink" — is FALSE for
-   `--color-text-on-brand` in dark mode, and not because of anything in this file.
-   org-brand.css swaps `--color-brand-primary` to `--brand-color-dark` in its dark
-   branch but derives `--color-text-on-brand` from `--brand-color` and never
-   re-derives it, so a primary button paints its background with the DARK brand
-   while contrasting its label against the LIGHT one. Measured on
-   `of-blood-and-bones`: background `#FB923C`, label auto-contrasted against
-   `#552e8e` → white → 2.26:1, where AA needs 4.5.
+   HISTORY, corrected 2026-07-30 (Codex-5wgwf): a caveat here used to report that
+   `--color-text-on-brand` was broken in dark mode and measured 2.26:1 on
+   `of-blood-and-bones`. Both halves of that are now out of date.
 
-   This is platform-wide (every org primary button in dark mode whose two brand
-   colours differ in lightness), not journey-specific — it was simply invisible on
-   journeys until they started honouring dark mode. Fixing it belongs in
-   org-brand.css's dark branch, not here. */
+   The structural defect was real and is FIXED — org-brand.css's dark branch now
+   re-derives `--color-text-on-brand` (and its two same-shape siblings
+   `--color-border-focus` and `--color-primary-600`) from `--brand-color-dark`
+   rather than leaving them resolving through the light brand. Do not re-fix it.
+
+   The 2.26:1 measurement, however, was never reproducible. `#EA580C` measures
+   OKLCH L = 0.646079 — ABOVE the token's 0.62 step threshold — so the light brand
+   already yielded a black label. Verified by re-injecting the pre-fix declaration
+   inline: pre and post both resolve `#000000` at 9.28:1. The fix changes behaviour
+   only where an org's light and dark brands straddle L 0.62.
+
+   What DOES fail AA on brand surfaces is a different token: the surfaces painting
+   `--color-brand-primary` mostly consume `--color-text-inverse` (see
+   `Button.svelte`'s primary variant) or `--media-glyph`, neither of which
+   auto-contrasts. That is tracked separately, and repointing them is not a
+   one-liner — `--color-text-on-brand` is only auto-contrasting under
+   `[data-org-brand]`; on the platform path it is a static `#ffffff`. */
 .journey-palette--page {
   --color-background: var(--jp-ink);
   --color-surface: var(--jp-ink-2);
