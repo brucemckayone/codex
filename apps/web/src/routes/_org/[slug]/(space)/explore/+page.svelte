@@ -538,8 +538,8 @@
         </p>
       {/if}
       <div class="content-grid">
-        {#each filteredJourneys as journey, i (journey.id)}
-          <JourneyRailCard {journey} href={journeyHref(journey)} index={i} />
+        {#each filteredJourneys as journey (journey.id)}
+          <JourneyRailCard {journey} href={journeyHref(journey)} />
         {/each}
       </div>
     </section>

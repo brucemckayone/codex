@@ -604,9 +604,12 @@
             </a>
           </div>
         </header>
+        <!-- 15rem, not the 20rem this carried when the tile was 16/9: the shared
+             journey card is a 3:4 portrait now (matching the content tiles it
+             shares pages with), so a 20rem track made a ~34rem-tall rail. -->
         <Carousel
           items={journeys}
-          itemMinWidth="20rem"
+          itemMinWidth="15rem"
           gap="var(--space-4)"
           ariaLabel="Guided portals"
         >

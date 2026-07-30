@@ -27,10 +27,14 @@
     loadLibraryFromServer,
     useLiveQuery,
   } from '$lib/collections';
-  import ProgressRing from '$lib/components/journeys/ProgressRing.svelte';
+  import JourneyEntryCard from '$lib/components/journeys/JourneyEntryCard.svelte';
+  import {
+    enrolledCourseRowEntry,
+    enrolledCourseTileEntry,
+  } from '$lib/components/journeys/journey-entry-card';
   import type { EnrolledCourseSummary } from '$lib/journeys/types';
   import { filterLibraryItemsByOrg } from '$lib/library/filter-by-org';
-  import { buildContentUrl } from '$lib/utils/subdomain';
+  import { buildContentUrl, buildJourneyUrl } from '$lib/utils/subdomain';
 
   let { data } = $props();
 
@@ -156,14 +160,24 @@
     return 'Free';
   };
 
+  // Routed through `buildJourneyUrl` rather than hand-built, so the slug→id
+  // fallback and the cross-org absolute form live in one place.
+  const journeyUrlTarget = (c: EnrolledCourseSummary) => ({
+    slug: c.course.slug,
+    id: c.course.id,
+    organizationSlug: c.course.organizationSlug,
+  });
   const journeyDashboardHref = (c: EnrolledCourseSummary) =>
-    `/journeys/${c.course.slug ?? c.course.id}/dashboard`;
-  const journeyResumeHref = (c: EnrolledCourseSummary) => {
-    const slug = c.course.slug ?? c.course.id;
-    return c.progress.nextPracticeSlug
-      ? `/journeys/${slug}/practice/${c.progress.nextPracticeSlug}`
-      : `/journeys/${slug}/dashboard`;
-  };
+    buildJourneyUrl(page.url, journeyUrlTarget(c), { surface: 'dashboard' });
+  // The deep `practice/[contentSlug]` surface is deliberately NOT one of
+  // `buildJourneyUrl`'s surfaces (`sales | checkout | dashboard`) — it takes a
+  // SECOND slug and is always same-origin from inside the course, so its own
+  // routes compose it. Composed onto the helper's org-resolved sales root so
+  // the org resolution still is not duplicated here.
+  const journeyResumeHref = (c: EnrolledCourseSummary) =>
+    c.progress.nextPracticeSlug
+      ? `${buildJourneyUrl(page.url, journeyUrlTarget(c))}/practice/${c.progress.nextPracticeSlug}`
+      : journeyDashboardHref(c);
 
   // ── Filter state ─────────────────────────────────────────────────────────
   let facetKind = $state<'all' | 'inprogress' | 'journeys' | 'type'>('all');
@@ -292,8 +306,10 @@
   <meta name="robots" content="noindex, follow" />
 </svelte:head>
 
-{#snippet motif(title: string, glyph: string, big = false)}
-  <span class="thumb {toneFor(title)}" class:thumb--big={big}>
+<!-- The owned-content ROWS' small type motif. The `big` variant went with the
+     resume strip, which now renders real covers via `JourneyEntryCard`. -->
+{#snippet motif(title: string, glyph: string)}
+  <span class="thumb {toneFor(title)}">
     <span class="thumb__art"></span>
     <span class="thumb__glyph">{glyph}</span>
   </span>
@@ -382,47 +398,39 @@
           <h2>Jump back in</h2>
           <span class="sec__ct">across your journeys &amp; practices</span>
         </div>
+        <!--
+          Journeys AND standalone practices render through the SAME card
+          (Codex-tnwnu). They sit in one rail, so componentising only the
+          journey half would have left two different-looking things side by
+          side — the exact inconsistency this closes, just relocated. The card
+          is a resume card, not a journey-only card: a cover, a kicker, a title,
+          a meta line and a determinate progress bar describe both.
+        -->
         <div class="cont">
           {#each continueJourneys as c (c.course.id)}
-            <a class="contcard" href={journeyResumeHref(c)}>
-              {@render motif(c.course.title, '❋', true)}
-              <span class="contcard__m">
-                <span class="contcard__kk"
-                  >{c.course.kicker ?? 'Journey'}</span
-                >
-                <span class="contcard__h">{c.course.title}</span>
-                <span class="contcard__next"
-                  >Next · {c.progress.nextPracticeTitle ?? 'Continue'}</span
-                >
-                <span class="track"
-                  ><i style="width:{c.progress.percent}%"></i></span
-                >
-                <span class="contcard__resume">Resume →</span>
-              </span>
-            </a>
+            <JourneyEntryCard
+              {...enrolledCourseRowEntry(c, journeyResumeHref(c))}
+            />
           {/each}
           {#each continueMedia as item (item.content?.id)}
             {@const m = typeMeta(item.content?.contentType)}
             {@const pos = item.progress?.positionSeconds ?? 0}
             {@const dur = item.progress?.durationSeconds ?? 0}
-            <a class="contcard" href={buildContentUrl(page.url, item.content)}>
-              {@render motif(item.content?.title ?? '', m.glyph, true)}
-              <span class="contcard__m">
-                <span class="contcard__kk">{m.label}</span>
-                <span class="contcard__h">{item.content?.title}</span>
-                <span class="contcard__next"
-                  >{fmtTime(pos)}{dur > 0 ? ` of ${fmtTime(dur)}` : ''}</span
-                >
-                <span class="track"
-                  ><i
-                    style="width:{dur > 0
-                      ? Math.min(100, Math.round((pos / dur) * 100))
-                      : 0}%"
-                  ></i></span
-                >
-                <span class="contcard__resume">Resume →</span>
-              </span>
-            </a>
+            {@const href = buildContentUrl(page.url, item.content)}
+            <JourneyEntryCard
+              {href}
+              title={item.content?.title ?? ''}
+              kicker={m.label}
+              meta={`${fmtTime(pos)}${dur > 0 ? ` of ${fmtTime(dur)}` : ''}`}
+              coverImageUrl={item.content?.thumbnailUrl ?? null}
+              layout="row"
+              cta="Resume"
+              progress={{
+                percent:
+                  dur > 0 ? Math.min(100, Math.round((pos / dur) * 100)) : 0,
+                label: null,
+              }}
+            />
           {/each}
         </div>
       </section>
@@ -438,44 +446,12 @@
         {#if journeysShown.length > 0}
           <div class="rail">
             {#each journeysShown as c (c.course.id)}
-              {@const done = c.progress.status === 'completed'}
               {@const badge = badgeFor(c.enrollmentSource)}
-              <a class="jc" href={journeyDashboardHref(c)}>
-                <span class="jc__cover {toneFor(c.course.title)}">
-                  <span class="jc__ring">
-                    <ProgressRing
-                      percent={c.progress.percent}
-                      size="var(--space-10)"
-                      ariaLabel="{c.course.title} progress: {c.progress
-                        .percent}%"
-                    />
-                  </span>
-                  <span class="jc__title">{c.course.title}</span>
-                </span>
-                <span class="jc__body">
-                  <span class="jc__status">
-                    {#if c.progress.status === 'completed'}
-                      Completed
-                    {:else if c.progress.status === 'not-started'}
-                      Not started yet
-                    {:else}
-                      {c.progress.done} of {c.progress.total} practices
-                    {/if}
-                  </span>
-                  {#if badge}
-                    <span class="badge badge--{badge.cls}">{badge.label}</span>
-                  {/if}
-                  <span class="jc__foot">
-                    <span class="jc__go">
-                      {done
-                        ? 'Revisit'
-                        : c.progress.status === 'not-started'
-                          ? 'Begin'
-                          : 'Continue'} →
-                    </span>
-                  </span>
-                </span>
-              </a>
+              <JourneyEntryCard
+                {...enrolledCourseTileEntry(c, journeyDashboardHref(c), {
+                  accessLabel: badge?.label ?? null,
+                })}
+              />
             {/each}
           </div>
         {:else}
@@ -739,11 +715,6 @@
     border-radius: var(--radius-md);
     overflow: hidden;
   }
-  .thumb--big {
-    width: var(--space-16);
-    height: var(--space-16);
-    border-radius: var(--radius-lg);
-  }
   .thumb__art {
     position: absolute;
     inset: 0;
@@ -780,90 +751,19 @@
     --tone: var(--tone-3);
   }
 
-  /* ── Continue rail ── */
-  .cont {
-    display: flex;
-    gap: var(--space-4);
-    overflow-x: auto;
-    padding: var(--space-1) 2px var(--space-4);
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none;
-  }
-  .cont::-webkit-scrollbar {
-    display: none;
-  }
-  .contcard {
-    flex: 0 0 clamp(17rem, 82vw, 22rem);
-    scroll-snap-align: start;
-    display: flex;
-    gap: var(--space-4);
-    align-items: flex-start;
-    padding: var(--space-4);
-    border-radius: var(--radius-lg);
-    border: var(--border-width) solid var(--lib-hair);
-    background: color-mix(in oklab, var(--lib-ink-2) 55%, transparent);
-    text-decoration: none;
-    transition:
-      border-color var(--duration-fast, 0.18s) ease,
-      transform var(--duration-fast, 0.15s) ease;
-  }
-  .contcard:hover {
-    transform: translateY(-2px);
-    border-color: var(--lib-hair-strong);
-  }
-  .contcard__m {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    flex: 1;
-  }
-  .contcard__kk {
-    font-size: var(--text-xs);
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: var(--color-text-tertiary);
-  }
-  .contcard__h {
-    font-family: var(--font-heading);
-    font-weight: 400;
-    font-size: var(--text-lg);
-    line-height: var(--leading-tight);
-    color: var(--color-text);
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-  .contcard__next {
-    margin-top: var(--space-1);
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .track {
-    display: block;
-    margin-top: var(--space-2);
-    height: 5px;
-    border-radius: var(--radius-full, 999px);
-    background: color-mix(in oklab, var(--lib-bone) 12%, transparent);
-    overflow: hidden;
-  }
-  .track i {
-    display: block;
-    height: 100%;
-    background: var(--lib-accent);
-  }
-  .contcard__resume {
-    margin-top: var(--space-2);
-    font-size: var(--text-sm);
-    font-weight: var(--font-semibold);
-    color: var(--lib-accent);
-  }
+  /*
+    Both rails now hold `JourneyEntryCard`s, so the per-rail CARD styling that
+    used to live here is gone (Codex-tnwnu): `.contcard*` + `.track` (the resume
+    strip) and `.jc*` (the journeys shelf, including its title-hash tone
+    gradient). What remains is the SCROLLER — a rail owns its own overflow and
+    snap behaviour; a card never does.
 
-  /* ── Journeys rail ── */
+    Both scrollers set the card track width, since only the page knows how wide a
+    card should be in ITS rail. The journeys shelf is narrower than it looks
+    relative to the old 16.5rem: the shared card is a 3:4 portrait, so the track
+    had to come down or the shelf would be ~26rem tall.
+  */
+  .cont,
   .rail {
     display: flex;
     gap: var(--space-4);
@@ -872,71 +772,17 @@
     scroll-snap-type: x mandatory;
     scrollbar-width: none;
   }
+  .cont::-webkit-scrollbar,
   .rail::-webkit-scrollbar {
     display: none;
   }
-  .jc {
+  .cont > :global(*) {
+    flex: 0 0 clamp(17rem, 82vw, 22rem);
     scroll-snap-align: start;
-    flex: 0 0 16.5rem;
-    display: flex;
-    flex-direction: column;
-    border-radius: var(--radius-xl, 1.25rem);
-    overflow: hidden;
-    border: var(--border-width) solid var(--lib-hair);
-    background: color-mix(in oklab, var(--lib-ink-2) 55%, transparent);
-    text-decoration: none;
-    transition:
-      border-color var(--duration-fast, 0.18s) ease,
-      transform var(--duration-fast, 0.15s) ease;
   }
-  .jc:hover {
-    transform: translateY(-3px);
-    border-color: var(--lib-hair-strong);
-  }
-  .jc__cover {
-    position: relative;
-    height: 6.75rem;
-    display: grid;
-    align-content: end;
-    padding: var(--space-3) var(--space-4);
-    background: radial-gradient(
-      130% 130% at 25% 0%,
-      color-mix(in oklab, var(--tone) 55%, var(--lib-ink-2)),
-      var(--lib-ink)
-    );
-  }
-  .jc__ring {
-    position: absolute;
-    top: var(--space-3);
-    right: var(--space-3);
-  }
-  .jc__title {
-    font-family: var(--font-heading);
-    font-weight: 400;
-    font-size: var(--text-lg);
-    color: var(--lib-bone);
-  }
-  .jc__body {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    padding: var(--space-3) var(--space-4) var(--space-4);
-    flex: 1;
-  }
-  .jc__status {
-    font-size: var(--text-sm);
-    color: var(--color-text-tertiary);
-  }
-  .jc__foot {
-    margin-top: auto;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .jc__go {
-    font-size: var(--text-sm);
-    font-weight: var(--font-semibold);
-    color: var(--lib-accent);
+  .rail > :global(*) {
+    flex: 0 0 13rem;
+    scroll-snap-align: start;
   }
 
   /* ── Group-by segmented control ── */
