@@ -130,7 +130,7 @@
 
   // ── Landing sections derived from the single catalogue fetch ──────────
   // Editor's picks: creator-flagged items → full-bleed feature slides.
-  const featureItems = $derived<FeatureItem[]>(
+  const featureContentItems = $derived<FeatureItem[]>(
     data.allContent
       .filter((c) => c.featured)
       .map((c) => ({
@@ -144,6 +144,58 @@
         href: buildContentUrl(page.url, c),
         image: c.mediaItem?.thumbnailUrl ?? c.thumbnailUrl ?? null,
       }))
+  );
+
+  /*
+    Featured PORTALS take slides in the SAME carousel, rather than getting a rail
+    of their own — a promoted journey is an editorial pick, and the page already
+    has a "Guided portals" rail for the un-promoted ones. Splitting promotion
+    across two surfaces would leave "Editor's picks" meaning "picked content"
+    rather than "picked".
+
+    The slide id is namespaced. Content ids come from `content` and portal ids
+    from `landing_pages`, so the carousel's `(item.id)` key would be mixing two
+    tables' primary keys in one keyspace; a prefix makes a collision impossible
+    instead of merely improbable.
+  */
+  const featurePortalItems = $derived<FeatureItem[]>(
+    (data.featuredJourneys ?? []).map((j) => ({
+      id: `portal:${j.pageId}`,
+      title: j.title,
+      kind: "Editor's pick",
+      contentType: 'portal',
+      description: j.tagline,
+      href: buildJourneyUrl(
+        page.url,
+        { slug: j.slug, id: j.pageId },
+        { surface: 'sales' }
+      ),
+      image: j.coverImageUrl,
+    }))
+  );
+
+  /*
+    Portals lead. This is a merchandising call, not a technical one: a journey is
+    the larger commitment and the higher-value offer, so it gets the first slide.
+    Flip the concat order to reverse it.
+  */
+  const featureItems = $derived<FeatureItem[]>([
+    ...featurePortalItems,
+    ...featureContentItems,
+  ]);
+
+  /*
+    A promoted portal appears ONCE. This mirrors what featured CONTENT already
+    does — `newThisWeek` below filters `!c.featured` so a pick never doubles as a
+    new release — and without it the same journey would show as a full-bleed
+    slide and again in the rail directly beneath it, which reads as a bug however
+    defensible it is.
+
+    Keyed off `data.featuredJourneys`, not off `featurePortalItems`, so it stays
+    correct independently of the slide-id namespacing above.
+  */
+  const featuredPortalIds = $derived(
+    new Set((data.featuredJourneys ?? []).map((j) => j.pageId))
   );
 
   // New this week: most-recent items minus anything already promoted in
@@ -589,10 +641,14 @@
     {/if}
   {/await}
 
-  <!-- Guided portals — published course-journeys for this org (Codex-oi2w4),
-       featured-first. Streamed; hidden when the org has none. -->
+  <!-- Guided portals — published course-journeys for this org (Codex-oi2w4).
+       Streamed; hidden when the org has none LEFT to show: anything the creator
+       promoted is already a slide in "Editor's picks" above and is filtered out
+       here, so an org whose only portal is featured shows this rail not at all
+       rather than showing the same journey twice on one page. -->
   {#await data.journeys then journeys}
-    {#if journeys.length > 0}
+    {@const shelf = journeys.filter((j) => !featuredPortalIds.has(j.pageId))}
+    {#if shelf.length > 0}
       <section class="section section--tight">
         <header class="lede">
           <p class="lede__eyebrow">Go deeper</p>
@@ -608,7 +664,7 @@
              journey card is a 3:4 portrait now (matching the content tiles it
              shares pages with), so a 20rem track made a ~34rem-tall rail. -->
         <Carousel
-          items={journeys}
+          items={shelf}
           itemMinWidth="15rem"
           gap="var(--space-4)"
           ariaLabel="Guided portals"

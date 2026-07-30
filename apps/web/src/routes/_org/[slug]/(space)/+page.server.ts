@@ -34,6 +34,17 @@ import type { ContentItem } from './feed-types';
 // truncation at the bottom grid.
 const MAX_CATALOGUE_ITEMS = 50;
 
+/**
+ * How many featured portals may take a slide in "Editor's picks".
+ *
+ * Capped where featured CONTENT is not, because the two are bounded differently:
+ * content picks are already limited by whatever is featured inside the 50-item
+ * catalogue window, whereas `listPublishedJourneys({ featured: true })` would
+ * return every promoted journey in the org. Four keeps the carousel a curated
+ * set rather than a second catalogue.
+ */
+const MAX_FEATURED_PORTALS = 4;
+
 export const load: PageServerLoad = async ({
   params: routeParams,
   setHeaders,
@@ -45,6 +56,25 @@ export const load: PageServerLoad = async ({
     slug: routeParams.slug,
     limit: 12,
   });
+  /*
+    Featured PORTALS — the journeys a creator has promoted
+    (`landing_pages.featured`), which join the content picks as slides in
+    "Editor's picks" below.
+
+    AWAITED, unlike the `journeys` rail further down, and that difference is
+    deliberate. The picks carousel is built from awaited data; feeding it a
+    streamed source would grow the slide count after hydration, which shifts
+    layout, changes the dot count under the user, and re-runs the carousel's
+    IntersectionObserver effect. A carousel may not gain slides late.
+
+    Awaiting costs nothing here: `listPublishedJourneys` resolves the org from
+    the request hostname itself (it does not take an org id), so it rides in this
+    pre-`parent()` parallel group rather than adding a serial round trip.
+  */
+  const featuredJourneysPromise = listPublishedJourneys({
+    featured: true,
+    limit: MAX_FEATURED_PORTALS,
+  }).catch(() => []);
 
   const { org } = await parent();
 
@@ -58,6 +88,9 @@ export const load: PageServerLoad = async ({
   const allContent: ContentItem[] = catalogueResult?.items ?? [];
 
   const statsResult = await statsPromise.catch(() => null);
+  // Already in flight since before `parent()` — this await resolves an existing
+  // promise rather than starting a request.
+  const featuredJourneys = await featuredJourneysPromise;
 
   // Set cache headers only after the critical awaits. If `parent()` throws
   // (e.g. an auth/branding load failure), the resulting error response
@@ -114,6 +147,9 @@ export const load: PageServerLoad = async ({
 
   return {
     allContent,
+    // Awaited — see MAX_FEATURED_PORTALS. These become "Editor's picks" slides
+    // alongside featured content, so they must be present in the SSR HTML.
+    featuredJourneys,
     stats: statsResult,
     feedCategories,
     // Streamed: curated topic taxonomy for "Browse by topic" + browse chip.

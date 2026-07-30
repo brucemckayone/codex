@@ -329,3 +329,98 @@ describe('FeatureCarousel — degenerate item counts', () => {
     expect(document.querySelector('.feature-carousel')).toBeNull();
   });
 });
+
+describe('FeatureCarousel — portal slides', () => {
+  const portal: FeatureItem = {
+    id: 'portal:p-1',
+    title: 'Rootwork',
+    kind: "Editor's pick",
+    contentType: 'portal',
+    description: 'Bone, breath and smoke.',
+    href: '/journeys/rootwork',
+    image: 'https://example.test/rootwork.jpg',
+  };
+
+  test('a portal renders as a full slide, badged and CTA-ed as a journey', () => {
+    component = mount(FeatureCarousel, {
+      target: document.body,
+      props: { items: [portal, threeItems[0]] },
+    });
+    flushSync();
+
+    expect(document.querySelectorAll('.feature-carousel__slide').length).toBe(
+      2
+    );
+
+    const badges = Array.from(
+      document.querySelectorAll('.feature-carousel__badge')
+    ).map((el) => el.textContent?.trim());
+    expect(badges[0]).toBe('Portal');
+
+    // The CTA names the destination, not an action on a file — a journey is not
+    // something you "Watch".
+    const ctas = Array.from(
+      document.querySelectorAll('.feature-carousel__cta')
+    ).map((el) => el.textContent?.replace(/\s+/g, ' ').trim());
+    expect(ctas[0]).toBe('See the journey →');
+
+    const link = document.querySelector<HTMLAnchorElement>(
+      '.feature-carousel__title a'
+    );
+    expect(link?.getAttribute('href')).toBe('/journeys/rootwork');
+    expect(link?.textContent?.trim()).toBe('Rootwork');
+  });
+
+  test('a portal gets no audio waveform — that treatment is audio-only', () => {
+    component = mount(FeatureCarousel, {
+      target: document.body,
+      props: { items: [portal] },
+    });
+    flushSync();
+
+    expect(document.querySelector('.feature-carousel__waveform')).toBeNull();
+  });
+
+  /*
+    THE CRASH GUARD, and it is the highest-value assertion in this file.
+
+    The slide template resolves its per-type presentation through one lookup. That
+    lookup used to be unguarded (`TYPE_META[item.contentType].Icon`), which is a
+    TypeError rather than a soft `undefined` — so a single item bearing a type the
+    map does not know took down the ENTIRE org landing page, for every org with a
+    featured item. `apps/web` has strictNullChecks OFF, so the compiler does not
+    flag the missing key either.
+
+    Not hypothetical: the landing page builds slides by mapping
+    `content.contentType` through a single `'written' → 'article'` rename, so the
+    day that DB enum gains a value it arrives here unmapped.
+
+    The cast is the point of the test — it manufactures exactly the state the type
+    system forbids but the database can produce.
+  */
+  test('an UNKNOWN type renders a neutral slide instead of throwing', () => {
+    const rogue = {
+      ...portal,
+      id: 'rogue',
+      contentType: 'livestream',
+    } as unknown as FeatureItem;
+
+    expect(() => {
+      component = mount(FeatureCarousel, {
+        target: document.body,
+        props: { items: [rogue, threeItems[0]] },
+      });
+      flushSync();
+    }).not.toThrow();
+
+    // It renders, and it does NOT claim to be something it isn't.
+    expect(document.querySelectorAll('.feature-carousel__slide').length).toBe(
+      2
+    );
+    const badge = document
+      .querySelector('.feature-carousel__badge')
+      ?.textContent?.trim();
+    expect(badge).toBe('Featured');
+    expect(badge).not.toBe('Article');
+  });
+});

@@ -25,7 +25,13 @@
 <script lang="ts">
   import { browser } from '$app/environment';
   import AudioWaveform from '$lib/components/ui/ContentCard/AudioWaveform.svelte';
-  import { FileTextIcon, MusicIcon, PlayIcon } from '$lib/components/ui/Icon';
+  import {
+    CircleIcon,
+    CompassIcon,
+    FileTextIcon,
+    MusicIcon,
+    PlayIcon,
+  } from '$lib/components/ui/Icon';
   import type { FeatureItem } from './feature-carousel.types';
 
   interface Props {
@@ -39,11 +45,52 @@
   // CTA replaces the old generic "Explore" so the pick reads as its medium
   // ("Watch/Listen/Read"). Article picks are static; video/audio picks carry a
   // play affordance (preview playback wired separately).
-  const TYPE_META = {
+  //
+  // `portal` is a whole guided journey rather than a medium, so its CTA names
+  // the destination instead of an action on a file. `CompassIcon` because that
+  // is already the portal glyph in the studio journeys list — the vocabulary is
+  // shared, not invented here.
+  /** The three things a slide needs to know about its own kind. */
+  interface SlideMeta {
+    label: string;
+    Icon: typeof PlayIcon;
+    cta: string;
+  }
+
+  const TYPE_META: Record<FeatureItem['contentType'], SlideMeta> = {
     video: { label: 'Video', Icon: PlayIcon, cta: 'Watch now' },
     audio: { label: 'Audio', Icon: MusicIcon, cta: 'Listen now' },
     article: { label: 'Article', Icon: FileTextIcon, cta: 'Read' },
-  } as const;
+    portal: { label: 'Portal', Icon: CompassIcon, cta: 'See the journey' },
+  };
+
+  /*
+    A RENDER SAFETY NET, and it is load-bearing rather than defensive padding.
+
+    The template used to read `TYPE_META[item.contentType].Icon` unguarded. That
+    is a TypeError, not a soft `undefined`, so any item whose type is not a key
+    of this map takes down the ENTIRE org landing page — every org with a
+    featured item, not just the one bad row. And `apps/web` has strictNullChecks
+    OFF, so the compiler will not flag the missing key.
+
+    The gap is real and future-facing: the landing page builds slides by mapping
+    `content.contentType` through a single `'written' → 'article'` rename, so the
+    day that DB enum gains a value it flows straight through unmapped.
+
+    The fallback is deliberately NEUTRAL — a generic label and a plain glyph —
+    because a wrong-but-confident badge ("Article · Read" over a video) is worse
+    than an unopinionated one. It says "featured thing, open it", which is true
+    of anything that can reach this carousel.
+  */
+  const UNKNOWN_TYPE_META: SlideMeta = {
+    label: 'Featured',
+    Icon: CircleIcon,
+    cta: 'Open',
+  };
+
+  function metaFor(contentType: FeatureItem['contentType']): SlideMeta {
+    return TYPE_META[contentType] ?? UNKNOWN_TYPE_META;
+  }
 
   let trackEl = $state<HTMLDivElement | null>(null);
   let activeIndex = $state(0);
@@ -108,7 +155,7 @@
   >
     <div class="feature-carousel__track" bind:this={trackEl}>
       {#each items as item, index (item.id)}
-        {@const typeMeta = TYPE_META[item.contentType]}
+        {@const typeMeta = metaFor(item.contentType)}
         {@const TypeIcon = typeMeta.Icon}
         <article
           class="feature-carousel__slide"
@@ -320,6 +367,26 @@
     gap: var(--space-3);
     max-width: min(92%, 38rem);
     padding: var(--space-8);
+    /*
+      RESERVE THE BADGE'S BAND. The badge is absolutely positioned at
+      `top: var(--space-4)` and stands ~26px tall, so its box ends around 42px
+      from the slide top — past this block's `--space-8` (32px) top padding.
+
+      That matters because the slide is `align-items: flex-end` over a
+      `min-height`: this block is anchored to the BOTTOM and grows UPWARD, so a
+      tall title walks its own first child (the "Editor's pick" eyebrow) up into
+      the badge. Measured on the dev org's homepage: every 3-line title overlapped
+      the badge by 11px — two pre-existing content picks as well as the new portal
+      slide — which quietly broke the invariant the badge's comment above claims
+      ("distinct from the eyebrow in the body so the two never collide").
+
+      Expressed as the badge's own offset plus clearance rather than a magic rung,
+      so it stays correct if the badge moves. Costs nothing visually on short
+      titles: the block is bottom-anchored, so extra top padding only enlarges an
+      invisible box. Clamping the title was the alternative and it truncates real
+      titles to buy the same space.
+    */
+    padding-top: calc(var(--space-4) + var(--space-10));
     /* Overlaid text uses --media-glyph (near-white, brand-tinted) so it never
        renders dark-on-dark over the scrim on a light org. */
     color: var(--media-glyph);

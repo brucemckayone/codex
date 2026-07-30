@@ -694,6 +694,18 @@ export interface JourneyListItem {
   enrolledCount: number | null;
   /** `live` provenance (completed one-off purchases for the subject course). */
   revenueCents: number | null;
+  /**
+   * Creator-flagged for the org-homepage "featured" rail (`landing_pages.featured`
+   * — the same column {@link JourneyCardView.featured} carries on the public side).
+   * Surfaced on the studio index so the featured toggle can render its CURRENT
+   * state; without it the control would have to guess, and every studio render
+   * would show an un-featured portal as off.
+   *
+   * Orthogonal to `status`: `listPublishedJourneys` filters `status = 'published'`
+   * independently, so a featured DRAFT is a harmless stored intent with no public
+   * effect until the page publishes.
+   */
+  featured: boolean;
   updatedAt: string;
 }
 

@@ -1208,6 +1208,11 @@ export class CourseJourneyService extends BaseService {
    * accurate, disjoint course revenue is the per-journey Insights read
    * (`CourseInsightsService`), never duplicated across the index (a heavy per-row
    * money join that would risk drifting from the authoritative figure).
+   *
+   * `featured` is selected so the studio's feature-on-homepage toggle can render its
+   * CURRENT state — {@link setJourneyFeatured} is the write, this is the read that
+   * makes it visible. Carried for EVERY status, since the flag is orthogonal to
+   * publish state (a featured draft is stored intent with no public effect).
    */
   async listJourneysForOrg(
     organizationId: string,
@@ -1223,6 +1228,7 @@ export class CourseJourneyService extends BaseService {
           slug: landingPages.slug,
           title: landingPages.title,
           status: landingPages.status,
+          featured: landingPages.featured,
           updatedAt: landingPages.updatedAt,
         })
         .from(landingPages)
@@ -1258,6 +1264,7 @@ export class CourseJourneyService extends BaseService {
           practiceCount: roll?.practiceCount ?? null,
           enrolledCount: roll?.enrolledCount ?? null,
           revenueCents: null,
+          featured: p.featured,
           updatedAt: p.updatedAt.toISOString(),
         };
       });
@@ -1781,6 +1788,75 @@ export class CourseJourneyService extends BaseService {
       });
     } catch (error) {
       this.handleError(error, 'updateJourneyOffer');
+    }
+  }
+
+  /**
+   * Feature (or un-feature) a journey portal on the org homepage — the ONLY write
+   * path to `landing_pages.featured`.
+   *
+   * {@link listPublishedJourneys} has READ this column since it shipped: it filters
+   * on it for the home rail (`opts.featured`) and orders featured-first for both
+   * surfaces. Nothing ever wrote it, so the column was reachable only by raw SQL or
+   * a seed and the rail could not be curated from the studio at all — every org's
+   * "featured" rail was permanently whatever the seed happened to set.
+   *
+   * A SEPARATE route from the page save (`PUT :pageId`) deliberately, for the
+   * reason `saveJourneyPageBodySchema`'s own doc-comment records: that body is
+   * `.strict()` and shared with the builder's AUTOSAVE. Folding `featured` in would
+   * either 400 every existing save (which omits the key) or — under a non-strict
+   * widening — accept the value, discard it, and report "Page saved", which is the
+   * silent-drop failure `offer` and `seo` already caused there. Curation is also a
+   * different gesture from authoring: a creator features a finished portal from the
+   * studio index without reopening or republishing its body.
+   *
+   * ORTHOGONAL TO PUBLISH STATUS (mirrors how `content.featured` is documented):
+   * `listPublishedJourneys` filters `status = 'published'` independently of this
+   * flag, so featuring a draft is harmless — it stores intent and has no public
+   * effect until the page publishes. This method therefore does NOT gate on status;
+   * refusing to feature a draft would only force creators into a publish-then-
+   * feature ordering the read side does not require.
+   *
+   * Scoped to `(pageId, organizationId, deletedAt IS NULL)` — all three predicates
+   * are load-bearing. Without the org clause any authenticated creator who manages
+   * ANY org could feature another org's portal onto their own homepage rail, so the
+   * update is scoped rather than the read pre-checked. `.returning()` + a zero-row
+   * guard is the only way to tell "no such page in this org" from "updated": an
+   * UPDATE without it reports success for zero matched rows, which would report a
+   * cross-tenant or soft-deleted target as a successful feature (mirrors
+   * {@link updateJourneyOffer}'s zero-row guard).
+   *
+   * `updatedAt` is NOT set here — `landing_pages.updatedAt` carries
+   * `.$onUpdate(() => new Date())`, so Drizzle stamps it on every update. Setting it
+   * by hand is what the sibling mutations deliberately avoid.
+   */
+  async setJourneyFeatured(
+    organizationId: string,
+    pageId: string,
+    featured: boolean
+  ): Promise<void> {
+    try {
+      const updated = await this.db
+        .update(landingPages)
+        .set({ featured })
+        .where(
+          and(
+            eq(landingPages.id, pageId),
+            eq(landingPages.organizationId, organizationId),
+            isNull(landingPages.deletedAt)
+          )
+        )
+        // Bare `.returning()` — `BaseService.db`'s HTTP-client type does not
+        // expose the projected overload (only the tx client does), exactly as
+        // `setCourseCoverImageKey` documents. The ROW COUNT is what this guard
+        // needs, and a bare returning still carries it.
+        .returning();
+
+      if (updated.length === 0) {
+        throw new NotFoundError('Journey page not found');
+      }
+    } catch (error) {
+      this.handleError(error, 'setJourneyFeatured');
     }
   }
 

@@ -1415,6 +1415,29 @@ export function createServerApi(
           { method: 'PATCH', body: JSON.stringify(offer) }
         ),
 
+      /**
+       * Promote or demote the journey on the org homepage
+       * (`landing_pages.featured`) — the studio journeys list's toggle.
+       *
+       * A route of its own rather than a field on the page save, because
+       * `saveJourneyPageBodySchema` is `.strict()` and shared with the builder's
+       * autosave: folding a merchandising flag into it would make every save
+       * 400, and quietly widening that schema is how a silently-dropped value
+       * ships. Returns 204 — the caller already knows the value it set.
+       */
+      setJourneyFeatured: (
+        organizationId: string,
+        pageId: string,
+        featured: boolean
+      ) =>
+        request<null>(
+          'access',
+          `/api/journeys/studio/journeys/${encodeURIComponent(
+            pageId
+          )}/featured?organizationId=${encodeURIComponent(organizationId)}`,
+          { method: 'PATCH', body: JSON.stringify({ featured }) }
+        ),
+
       // ── Sell media + cover (Codex-eqh0z) ──────────────────────────────────
 
       /**

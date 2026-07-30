@@ -35,6 +35,7 @@ import {
   SUPPORTED_IMAGE_MIME_TYPES,
   saveCurriculumBodySchema,
   saveJourneyPageBodySchema,
+  setJourneyFeaturedBodySchema,
   updateJourneyOfferBodySchema,
   updateJourneySellMediaBodySchema,
   userEnrollmentsQuerySchema,
@@ -723,6 +724,57 @@ app.patch(
           ctx.env.R2_PUBLIC_URL_BASE
         );
       return { ...persisted, coverImageUrl };
+    },
+  })
+);
+
+/**
+ * PATCH /api/journeys/studio/journeys/:pageId/featured?organizationId=  { featured }
+ *
+ * Feature (or un-feature) a journey portal on the ORG HOMEPAGE — the write path to
+ * `landing_pages.featured` that did not exist before. `GET /published?featured=true`
+ * has filtered on this column since it shipped, so the home rail was readable but
+ * never curatable: it showed whatever a seed happened to set.
+ *
+ * Separate from the page save (`PUT :pageId`) deliberately — that body is `.strict()`
+ * AND shared with the builder's autosave, so folding `featured` in would either 400
+ * every existing save or silently drop the value while reporting "Page saved" (the
+ * failure `offer` and `seo` already caused there). Curation is also a different
+ * gesture from authoring: the creator features a finished portal from the studio
+ * index without reopening its body.
+ *
+ * `rateLimit: 'api'` (100/min), NOT the sibling offer route's `strict` (20/min) — the
+ * divergence is deliberate: featuring is a cheap, reversible curation toggle, and a
+ * creator arranging the homepage rail flips several portals in one sitting. `strict`
+ * would lock them out mid-curation. Pricing earns `strict` because it moves money;
+ * this does not.
+ *
+ * Orthogonal to publish status — the published-journeys read filters `status` on its
+ * own, so featuring a draft stores intent with no public effect.
+ *
+ * The 4-segment path cannot collide with the 3-segment `:pageId` route.
+ * @returns 204 No Content
+ */
+app.patch(
+  '/studio/journeys/:pageId/featured',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgManagement: true,
+      rateLimit: 'api',
+    },
+    input: {
+      params: journeyPageParamsSchema,
+      query: journeyOrgQuerySchema,
+      body: setJourneyFeaturedBodySchema,
+    },
+    handler: async (ctx): Promise<null> => {
+      await ctx.services.courseJourney.setJourneyFeatured(
+        ctx.organizationId,
+        ctx.input.params.pageId,
+        ctx.input.body.featured
+      );
+      return null;
     },
   })
 );
