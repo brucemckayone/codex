@@ -474,7 +474,13 @@
     border-radius: var(--radius-full);
     border: var(--border-width) var(--border-style)
       color-mix(in srgb, var(--media-glyph) 38%, transparent);
-    background-color: color-mix(in srgb, var(--media-scrim) 72%, transparent);
+    /* 82%, not 72%. The badge is the one element whose backdrop is NOT the plate
+       — it carries its own wash, so a photograph shows through it. Bounded
+       against the two extremes a photo can be: at 72% the worst case (a
+       pure-white region under the badge) measured 4.38:1 for 13px/600 text,
+       marginally under the 4.5 that size needs. At 82% the worst case clears it,
+       and the best case (black photo) is unaffected at ~13:1. */
+    background-color: color-mix(in srgb, var(--media-scrim) 82%, transparent);
     backdrop-filter: blur(var(--blur-md));
     color: var(--media-glyph);
     font-size: var(--text-xs);
