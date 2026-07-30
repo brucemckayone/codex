@@ -101,25 +101,77 @@ describe('JourneyEntryCard', () => {
     expect(cover()?.querySelector('.jec__cover-img')).toBeNull();
   });
 
-  test('the flair dropcap renders in both cover states, not only as a fallback', () => {
-    render({ coverImageUrl: 'http://localhost:4100/c/cover/md.webp' });
+  test('a TILE flair dropcap renders in both cover states, not only as a fallback', () => {
+    render({
+      layout: 'tile',
+      coverImageUrl: 'http://localhost:4100/c/cover/md.webp',
+    });
     expect(document.querySelector('.jec__dropcap')).not.toBeNull();
 
     reset();
 
-    render({ coverImageUrl: null });
+    render({ layout: 'tile', coverImageUrl: null });
     expect(document.querySelector('.jec__dropcap')).not.toBeNull();
   });
 
-  test('the flair character is the KICKER initial, falling back to the title initial', () => {
-    render({ kicker: 'Foundation course' });
+  /*
+    A ROW inverts that, and the two cases below are the whole reason the layouts
+    differ rather than an inconsistency.
+
+    A tile's dropcap has a 3:4 cover to itself and reads as a type signature. A
+    row's cover is a fraction of that and the badge occupies the SAME top-left
+    corner, so over a photo the two marks overlapped — the glyph's stem showing
+    past the pill's left edge in a ~7rem box. The flair is fallback TEXTURE, so
+    the photo case is the one that does not need it; the cover-less case still
+    does, because the brand plate alone is a blank rectangle at that size.
+  */
+  test('a ROW drops the flair when it has a photo — the photo already fills the cover', () => {
+    render({
+      layout: 'row',
+      coverImageUrl: 'http://localhost:4100/c/cover/md.webp',
+    });
+    expect(document.querySelector('.jec__flair')).toBeNull();
+    expect(document.querySelector('.jec__dropcap')).toBeNull();
+    // The rest of the layer stack is untouched — this removes ONE layer, it does
+    // not turn the row's cover into a different treatment.
+    expect(cover()?.querySelector('.jec__cover-brand')).not.toBeNull();
+    expect(cover()?.querySelector('.jec__scrim')).not.toBeNull();
+  });
+
+  test('a ROW keeps the flair when it has NO photo — the plate needs the texture', () => {
+    render({ layout: 'row', coverImageUrl: null });
+    expect(document.querySelector('.jec__flair')).not.toBeNull();
+    expect(document.querySelector('.jec__dropcap')).not.toBeNull();
+  });
+
+  test('the flair character is the KICKER initial on a tile, falling back to the title initial', () => {
+    render({ layout: 'tile', kicker: 'Foundation course' });
     expect(document.querySelector('.jec__dropcap')?.textContent?.trim()).toBe(
       'F'
     );
 
     reset();
 
-    render({ kicker: null });
+    render({ layout: 'tile', kicker: null });
+    expect(document.querySelector('.jec__dropcap')?.textContent?.trim()).toBe(
+      'T'
+    );
+  });
+
+  /*
+    Inverted on a row because the two layouts put different KINDS of text in
+    `kicker`. A tile's is the creator's editorial line ("A twelve-practice
+    descent") — per-item, so its initial is a signature. A row's is a TYPE label
+    ("Portal", "Video") shared by every card of that kind, so taking its initial
+    would print the same "P" on every cover-less portal in the shelf.
+  */
+  test('a ROW takes the flair character from the TITLE even when a kicker is present', () => {
+    render({
+      layout: 'row',
+      coverImageUrl: null,
+      kicker: 'Portal',
+      title: 'The Practice of Stillness',
+    });
     expect(document.querySelector('.jec__dropcap')?.textContent?.trim()).toBe(
       'T'
     );

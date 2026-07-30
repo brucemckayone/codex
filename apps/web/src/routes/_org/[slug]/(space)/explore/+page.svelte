@@ -669,11 +669,17 @@
 
 <style>
   /* ── Layout ──
-     Full-bleed browsing surface: fills the org-main content area (no centered
-     max-width column). The page inherits the semantic theme tokens, so it
-     respects the org's light OR dark theme — no per-page palette override. */
+     Full-bleed SURFACE, capped CONTENT. The page inherits the semantic theme
+     tokens so it respects the org's light OR dark theme with no per-page
+     palette override — that is what "full width" was originally asked for, and
+     it does not require the content column to be uncapped too. Uncapped, the
+     browse grid stretched edge-to-edge on a wide display; `--container-max`
+     (80rem) is the platform's one content-width token and matches the org
+     landing page. */
   .explore {
     width: 100%;
+    max-width: var(--container-max);
+    margin-inline: auto;
     padding: var(--space-8) var(--space-8) var(--space-16);
     display: flex;
     flex-direction: column;

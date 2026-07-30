@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { resumeProgress } from './journey-entry-card';
+import type { EnrolledCourseSummary } from '$lib/journeys/types';
+import { enrolledCourseRowEntry, resumeProgress } from './journey-entry-card';
 
 /**
  * `resumeProgress` — the resume rail's progress projection (Codex-tnwnu review
@@ -60,5 +61,98 @@ describe('resumeProgress', () => {
     });
     // A negative position clamps up rather than painting a negative-width fill.
     expect(resumeProgress(-30, 120)).toEqual({ percent: 0, label: null });
+  });
+});
+
+/**
+ * `enrolledCourseRowEntry` — the library "Jump back in" ROW projection.
+ *
+ * The library's resume rail is MIXED: journey rows and standalone-practice rows
+ * sit in one flex track (`library/+page.svelte`), and the practice half labels
+ * its type through `kicker` (`'Video'` / `'Audio'` / `'Article'`) with no badge.
+ * This projection used to send `badge: 'Portal'` instead, so one rail expressed
+ * the same fact — "what kind of thing is this" — in two places with two visual
+ * treatments, which is precisely the inconsistency a shared card exists to
+ * remove.
+ *
+ * These lock the resulting contract, because it is a contract BETWEEN two call
+ * sites rather than a property of either one: nothing in the component or in the
+ * library page fails if this projection drifts back to a badge, and the rail just
+ * quietly looks like two systems again.
+ */
+describe('enrolledCourseRowEntry', () => {
+  function summary(
+    overrides: {
+      kicker?: string | null;
+      nextPracticeTitle?: string | null;
+    } = {}
+  ): EnrolledCourseSummary {
+    return {
+      course: {
+        id: 'c-1',
+        slug: 'rootwork',
+        title: 'Rootwork',
+        organizationSlug: 'of-blood-and-bones',
+        kicker: overrides.kicker ?? null,
+        lede: 'Bone, breath and smoke.',
+        guideName: 'Luzura',
+        coverImageUrl: 'http://localhost:4100/courses/c-1/cover/md.webp',
+      },
+      enrollment: {
+        courseId: 'c-1',
+        enrolledAt: '2026-07-01T00:00:00.000Z',
+        lastActivityAt: null,
+        completedAt: null,
+      },
+      enrollmentSource: 'course_purchase',
+      progress: {
+        done: 1,
+        total: 12,
+        percent: 8,
+        status: 'in-progress',
+        lastCompletedAt: null,
+        nextPracticeSlug: 'tooth-talismans',
+        nextPracticeTitle:
+          overrides.nextPracticeTitle === undefined
+            ? 'Tooth Talismans'
+            : overrides.nextPracticeTitle,
+      },
+    };
+  }
+
+  test('labels the type through the KICKER, and sends no badge', () => {
+    const entry = enrolledCourseRowEntry(summary(), '/journeys/rootwork');
+    expect(entry.kicker).toBe('Portal');
+    // Not merely "falsy" — the prop must be ABSENT, because the component renders
+    // the badge on any truthy value and `undefined` is what "this layout does not
+    // use a badge" looks like.
+    expect(entry.badge).toBeUndefined();
+    expect(entry.layout).toBe('row');
+  });
+
+  /*
+    The load-bearing case. A course WITH an editorial kicker is the one that broke
+    the layout: at `--text-xs` uppercase with `0.2em` tracking, "A twelve-practice
+    descent" wrapped to three lines above the title in the row's text column,
+    which is what pushed the title clear of the cover and made the two columns
+    read as unrelated. So the row must ignore the course's own kicker, not merely
+    default to 'Portal' when it happens to be null.
+  */
+  test('ignores the course editorial kicker rather than forwarding it', () => {
+    const entry = enrolledCourseRowEntry(
+      summary({ kicker: 'A twelve-practice descent' }),
+      '/journeys/rootwork'
+    );
+    expect(entry.kicker).toBe('Portal');
+    expect(entry.kicker).not.toBe('A twelve-practice descent');
+  });
+
+  test('the meta line names the next practice, and degrades without one', () => {
+    expect(enrolledCourseRowEntry(summary(), '/j').meta).toBe(
+      'Next · Tooth Talismans'
+    );
+    expect(
+      enrolledCourseRowEntry(summary({ nextPracticeTitle: null }), '/j').meta
+    ).toBe('Next · Continue');
   });
 });

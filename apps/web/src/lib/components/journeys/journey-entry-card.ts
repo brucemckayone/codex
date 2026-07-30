@@ -270,6 +270,26 @@ export function enrolledCourseTileEntry(
  * `EnrolledCourseSummary` → the library "Jump back in" ROW. Same cover
  * treatment as the tile, at a resume silhouette; the meta line names the next
  * practice rather than the curriculum size.
+ *
+ * THE KICKER IS THE TYPE LABEL, and there is no badge. Both differ from the tile
+ * projections, and the reason is that this row does not sit in a rail of its own.
+ *
+ * The library's "Jump back in" rail holds journey rows AND standalone-practice
+ * rows (`library/+page.svelte`), and the practice half labels its type through
+ * `kicker` (`'Video'` / `'Audio'` / `'Article'`) with no badge. This projection
+ * used to send `badge: 'Portal'` instead — so one rail expressed the same fact,
+ * "what kind of thing is this", in two places with two treatments, which is the
+ * inconsistency a shared card exists to remove. Matching the practice half is
+ * what makes the rail read as one system.
+ *
+ * It also has to be the TYPE and not `course.course.kicker`. The editorial
+ * kicker ("A twelve-practice descent") is a sentence: at `--text-xs` uppercase
+ * with `0.2em` tracking it wrapped to THREE lines above the title, which is what
+ * pushed the title clear of the cover and made the two columns read as
+ * unrelated. Clamping that to one line is worse than dropping it — a truncated
+ * poetic fragment ("A TWELVE-PRACTICE…") reads as breakage. Tiles keep the
+ * editorial kicker: they have a full-width text block that can hold two lines of
+ * it, and no sibling card labelling itself differently.
  */
 export function enrolledCourseRowEntry(
   course: EnrolledCourseSummary,
@@ -278,11 +298,10 @@ export function enrolledCourseRowEntry(
   return {
     href,
     title: course.course.title,
-    kicker: course.course.kicker ?? 'Portal',
+    kicker: 'Portal',
     meta: `Next · ${course.progress.nextPracticeTitle ?? 'Continue'}`,
     coverImageUrl: course.course.coverImageUrl,
     layout: 'row',
-    badge: 'Portal',
     progress: {
       percent: course.progress.percent,
       label: null,

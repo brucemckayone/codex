@@ -579,8 +579,21 @@
     --tone-3: color-mix(in oklab, var(--color-interactive) 60%, var(--color-text));
 
     min-height: 100%;
-    /* Full-bleed browsing layout — fills the org-main width; horizontal scroll
-       lives only in the inner rails. */
+    /*
+      The page SURFACE is full-bleed (the background fills `org-main`, so the
+      org's theme reaches every edge) but the CONTENT column is capped, the same
+      way the org landing page does it (`(space)/+page.svelte`). Those are two
+      separate things: the 2026-07-26 pass removed the cap to fix a narrow
+      centred column showing the wrong background past its edges — a background
+      problem, which `min-height`/`overflow-x` here already solve. Uncapped
+      content on a wide display stretched the shelves to ~2000px, which is what
+      this restores.
+
+      `--container-max` (80rem) is the platform's one content-width token; the
+      cap centres inside `org-main`, which is itself offset by the sidebar.
+    */
+    max-width: var(--container-max);
+    margin-inline: auto;
     overflow-x: clip;
     padding: clamp(var(--space-6), 4vw, var(--space-12))
       clamp(var(--space-4), 4vw, var(--space-10)) var(--space-24);
@@ -782,8 +795,24 @@
   .rail::-webkit-scrollbar {
     display: none;
   }
+  /*
+    26rem, up from 22rem, for the same reason the `.rail` track below went 13→16:
+    a resume card cannot do its job with the text unreadable.
+
+    A row card spends its width on TWO columns, so the text gets whatever the
+    cover does not. At 22rem the split was 144px cover / 160px text — and a 160px
+    column wrapped the kicker to three lines, clamped the title to two, and
+    ellipsised the next-practice name. Two changes share the repair: the cover
+    came down to 7.5rem (`JourneyEntryCard`, row silhouette) and the track went
+    up to 26rem. Together the text column goes 160px → ~248px, which holds a
+    two-line title and the full practice name.
+
+    Unlike the `.rail` widening, this one costs NO height: a row's cover takes its
+    height from the text beside it, not from its own width, so a wider track makes
+    the card shorter if anything.
+  */
   .cont > :global(*) {
-    flex: 0 0 clamp(17rem, 82vw, 22rem);
+    flex: 0 0 clamp(18rem, 86vw, 26rem);
     scroll-snap-align: start;
   }
   /*

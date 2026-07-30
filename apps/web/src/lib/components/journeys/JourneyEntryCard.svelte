@@ -93,13 +93,41 @@
   );
 
   /**
-   * The flair dropcap's character — the kicker's initial, falling back to the
-   * title's. Purely decorative (the title is read out right beside it), so the
-   * whole flair layer is aria-hidden.
+   * The flair dropcap's character — purely decorative (the title is read out
+   * right beside it), so the whole flair layer is aria-hidden.
+   *
+   * The source flips by layout because the two layouts put different KINDS of
+   * text in `kicker`. A tile's kicker is the creator's editorial line ("A
+   * twelve-practice descent"), which is per-item, so its initial is a signature.
+   * A row's kicker is a TYPE label ("Portal", "Video") shared by every card of
+   * that kind — taking its initial would print the same "P" on every cover-less
+   * portal in the shelf. The title is per-item in both, so it leads on rows.
    */
   const flairGlyph = $derived(
-    ((kicker ?? '').trim() || (title ?? '').trim()).charAt(0).toUpperCase()
+    (layout === 'row'
+      ? (title ?? '').trim() || (kicker ?? '').trim()
+      : (kicker ?? '').trim() || (title ?? '').trim()
+    )
+      .charAt(0)
+      .toUpperCase()
   );
+
+  /**
+   * The flair is FALLBACK TEXTURE, not a watermark — so a row that already has a
+   * photograph does not get one.
+   *
+   * On a tile the dropcap has a 3:4 cover to itself and reads as a type
+   * signature. A row's cover is a fraction of that and the badge occupies the
+   * same top-left corner, so over a photo the two marks overlapped: a
+   * `--text-display` glyph and the "PORTAL" pill in the same ~7rem box, with the
+   * glyph's stem showing past the pill's left edge. The empty-cover case still
+   * needs it — the deep brand plate alone is a blank rectangle at that size — so
+   * this suppresses the collision without giving up the state it was added for.
+   *
+   * A string comparison, not `layout !== 'tile'`: apps/web has strictNullChecks
+   * off, so string discriminants are the narrowing that actually works here.
+   */
+  const showFlair = $derived(!(layout === 'row' && Boolean(coverImageUrl)));
 
   /**
    * The bar's value, sanitised to an integer in 0–100.
@@ -190,9 +218,11 @@
         decoding="async"
       />
     {/if}
-    <div class="jec__flair" aria-hidden="true">
-      <span class="jec__dropcap">{flairGlyph}</span>
-    </div>
+    {#if showFlair}
+      <div class="jec__flair" aria-hidden="true">
+        <span class="jec__dropcap">{flairGlyph}</span>
+      </div>
+    {/if}
     <!-- Unconditional: the ramp is part of the cover, not a photo affordance. -->
     <div class="jec__scrim" aria-hidden="true"></div>
 
@@ -640,18 +670,75 @@
 
   /* A row's text sits on the CARD, not on the cover, so it takes the page's
      own text tokens. */
+  /*
+    THREE lines, where a tile gets two. A tile's clamp has to defend a four-child
+    text stack sitting on a scrim inside a fixed-ratio cover; a row's text block
+    holds two children (title, next practice) beside a cover that takes its height
+    from them, so a third line costs nothing structural — the cover simply grows
+    with it.
+
+    Measured in the 248px column this row now has: 20px at two lines holds ~44
+    characters, at three ~66. Real journey names sit inside 66; a 60-character
+    title was clipping at two. The clamp still exists so a pathological name
+    cannot make every card in the flex rail tall (siblings stretch to the
+    tallest), it just stops truncating the names people actually write.
+  */
   .jec[data-layout='row'] .jec__title {
     font-size: var(--text-lg);
     color: var(--color-text);
     display: -webkit-box;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
     overflow: hidden;
   }
 
+  /*
+    A row's text block holds two things (title, then the next practice), so it
+    gets a real gap between them rather than the tile's `--space-1`, which was
+    tuned for a four-child stack sitting on a scrim.
+  */
+  .jec[data-layout='row'] .jec__text {
+    gap: var(--space-1-5);
+  }
+
+  /*
+    Two lines, not one ellipsis. The base rule is `nowrap` + `text-overflow`,
+    which suits a tile's meta (a short credit line, "Guided by …") but on the
+    resume row the meta is the card's most USEFUL line — the name of the practice
+    you are about to open — and it was arriving as "Next · Soul Path Ment…" after
+    16 characters.
+
+    Two lines of `--text-sm` in this column measures ~68 characters INCLUDING the
+    "Next · " prefix, so it is a bound, not unlimited: a practice title past ~60
+    characters still clips. That is a deliberate stopping point rather than a
+    solved problem — the card lives in a flex rail whose siblings stretch to the
+    tallest, so an unbounded meta would let one wordy practice name inflate every
+    card on the shelf.
+  */
+  .jec[data-layout='row'] .jec__meta {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    text-overflow: clip;
+    line-height: var(--leading-normal);
+  }
+
+  /*
+    ONE LINE, always. A row's kicker is a type label, so it fits — but this is a
+    shared component and the prop is a free string, so the clamp is what stops a
+    future call site passing an editorial sentence and silently reintroducing the
+    three-line block that broke this layout. Ellipsis rather than clip so a long
+    one reads as shortened rather than as a rendering fault.
+  */
   .jec[data-layout='row'] .jec__kicker {
     color: var(--jec-ink-quiet);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* On a ROW these sit on the card, not on the scrimmed cover, so they take
@@ -836,11 +923,37 @@
     gap: var(--space-4);
     align-content: stretch;
     padding: var(--space-4);
+    /*
+      A floor, not a height. Two lines of `--text-lg` title + two of `--text-sm`
+      meta + the CTA is the tallest a resume row goes, and the rail's flex
+      `stretch` already equalises siblings — so this only stops a one-line title
+      from collapsing the stretched cover into a letterbox sliver.
+    */
+    min-height: 9rem;
   }
 
+  /*
+    THE COVER SPANS THE ROW'S FULL HEIGHT.
+
+    Grid items already default to `align-self: stretch`, so the fix is the
+    ABSENCE of `aspect-ratio` rather than any new property: `aspect-ratio: 4 / 3`
+    was resolving the cover's height FROM its width, which pinned a 9rem cover to
+    6.75rem tall inside a grid row that the text beside it had grown to ~19rem.
+    The cover then sat at the top of a box three times its height — the "image out
+    of alignment with the text" this fixes. Unpinned, the cover's top and bottom
+    edges track the text block's at every content length, which is the only way
+    this holds for creator-authored copy of unknown size.
+
+    `object-fit: cover` on the photo (`.jec__cover-img`) means the resulting
+    shape — portrait when the text is tall, squarer when short — always crops
+    rather than distorts.
+
+    Narrower than the old 9rem, too. On the library's resume track the cover was
+    taking 144px of a 352px card: 41% of the inner width for a thumbnail, which
+    left the text column 160px. At 7.5rem the same card gives the text ~248px.
+  */
   .jec[data-layout='row'] .jec__cover {
-    width: clamp(6.5rem, 24vw, 9rem);
-    aspect-ratio: 4 / 3;
+    width: clamp(6rem, 22vw, 7.5rem);
     border-radius: var(--radius-lg);
   }
 
