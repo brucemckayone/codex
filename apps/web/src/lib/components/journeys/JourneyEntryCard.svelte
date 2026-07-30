@@ -573,14 +573,35 @@
     text-wrap: balance;
   }
 
-  /* Narrow tiles step the title down one rung. `--text-3xl` matches ContentCard
-     in the grid metric they actually share (`/explore`, 421px), but the library
-     rail's 208px track cannot carry 40px — two clamped lines there hold roughly
-     two words, and the tagline underneath loses its room. Queried against the
-     CARD, not the viewport, so the same component adapts per rail. */
-  @container (max-width: 20rem) {
+  /*
+    A THREE-RUNG type ladder, queried against the CARD rather than the viewport,
+    because `--text-3xl` is viewport-fluid and would otherwise hand 40px to a
+    208px rail. `--text-3xl` is kept where ContentCard and this card genuinely
+    share a grid (`/explore`, 26.3rem); the narrower rails step down.
+
+    The rungs are set by MEASUREMENT, not taste. With the title clamped to two
+    lines, the largest size that fits the fixture's 23-character title is:
+
+      track   13rem → 18px      15rem → 20px      17rem → 24px
+              14rem → 18px      16rem → 22px      20rem → 30px
+
+    …so a 16rem rail can carry `--text-lg` with real margin (its ceiling is 22px)
+    and still fit titles up to ~30 characters, which is the length band real
+    journey names occupy. Above ~30 characters any of these truncate; that is a
+    two-line clamp working, not a sizing error.
+
+    The middle rung is defensive: without it the ladder jumps 20px → 40px at a
+    single breakpoint, so any future rail at 21rem would inherit a 40px title it
+    cannot fit — the exact failure this ladder exists to prevent.
+  */
+  @container (max-width: 26rem) {
     .jec[data-layout='tile'] .jec__title {
       font-size: var(--text-2xl);
+    }
+  }
+  @container (max-width: 20rem) {
+    .jec[data-layout='tile'] .jec__title {
+      font-size: var(--text-lg);
     }
   }
 

@@ -786,8 +786,26 @@
     flex: 0 0 clamp(17rem, 82vw, 22rem);
     scroll-snap-align: start;
   }
+  /*
+    16rem, chosen by measurement rather than by eye (Codex-tnwnu). At the previous
+    13rem the shelf could not show a journey's NAME: with the title clamped to two
+    lines, 13rem tops out at an 18px title, which is off the design token ladder
+    (20/24/30/40) — so the fixture's 23-character name truncated to "ASSSS
+    BLASTE…". A shelf whose whole job is "here is what you own" cannot do that job
+    with the names cut off.
+
+    16rem is the narrowest track where a real token (`--text-lg`, 20px) fits a
+    two-line title with margin to spare — its ceiling there is 22px, and it holds
+    titles up to ~30 characters. 17rem would allow `--text-xl` but costs another
+    1.3rem of height for the same 30-character tolerance.
+
+    The cost is height, and it is unavoidable: the cover is 3:4, so height tracks
+    width. 13→16rem takes the card from 23.97rem to 26.43rem — which is where this
+    shelf already was (26.17rem) before the foot was tightened. That reclaimed
+    budget is spent here, on legible names.
+  */
   .rail > :global(*) {
-    flex: 0 0 13rem;
+    flex: 0 0 16rem;
     scroll-snap-align: start;
   }
 
