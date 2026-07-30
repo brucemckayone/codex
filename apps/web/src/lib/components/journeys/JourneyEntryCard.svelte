@@ -234,6 +234,40 @@
      background lives on `--featured` instead, which is the standing decision
      ("cards are transparent by default, hero/featured earn chrome"). */
   .jec {
+    /*
+      The card's QUIET ink, for foot text that sits on the page rather than on
+      the scrimmed cover (status, access chip, stat nouns, and a row's
+      kicker/meta/tagline).
+
+      It is derived from `--color-text` because that is the only text token here
+      that actually INVERTS with the theme: org-brand.css computes it as
+      `clamp(0.05, (0.6 - l) * 1000, 0.9)` off the brand background, so it is
+      near-black on a light org and near-white on a dark one. Every other quiet
+      option is a FIXED grey — `--color-text-secondary` is oklch(0.65) and
+      `--color-text-muted` is oklch(0.55) in BOTH themes — so each one passes on
+      exactly one theme and fails on the other. Measured on this org:
+        secondary  3.12 light  /  ~5.5 dark
+        muted      4.68 light  /  3.82 dark
+      There is no existing token that is both quiet and AA in both themes, so
+      rather than adding one, this mixes the inverting token back toward the page
+      at 65%: ~6.4:1 in both themes, and still clearly subordinate to the title.
+    */
+    --jec-ink-quiet: color-mix(in oklab, var(--color-text) 65%, transparent);
+
+    /*
+      Makes the card queryable by its OWN width. `--text-3xl` is viewport-fluid
+      (`clamp(…, 4.5vw, …)`), so at a 1440 viewport it is 40px whether the card
+      is the 421px `/explore` tile or the 208px library rail tile — and 40px in
+      208px is about two words per line. The design system's stated answer to
+      exactly this is container queries ("Card adapts to its grid cell size, not
+      viewport" — ContentCard), so the narrow step below uses one.
+
+      Safe to contain: every call site sizes this card EXTERNALLY (a grid cell, a
+      `flex: 0 0` rail track, or a Carousel track), so nothing depends on the
+      card's width being derived from its contents.
+    */
+    container-type: inline-size;
+
     position: relative;
     display: grid;
     height: 100%;
@@ -284,33 +318,70 @@
     aspect-ratio: 3 / 4;
   }
 
-  /* Shared imageless cover — the brand-tinted gradient standing in for a
-     photograph, lifted from `ContentCard.cc__cover--brand` so both card
-     families fall back identically. Re-themes per org via the brand + scrim
-     tokens. */
+  /*
+    Imageless cover — a deep BRANDED plate.
+
+    This was `ContentCard.cc__cover--brand`'s formula, which anchors its stops on
+    `--color-surface-card`. That token is near-WHITE on a light org, so the
+    gradient's top resolved to cream (#ffe0d2) and the always-on scrim was left
+    to supply every bit of tonal depth from a pale base. Four measured symptoms,
+    all from that one fact:
+      • the ghosted dropcap was a near-white glyph on a near-white backdrop —
+        1.015:1, with no letterform discernible in the render. It is the only
+        thing filling the empty upper 60% of a cover-less tile, so on light orgs
+        that area was simply blank.
+      • the composite ran #3d3c38 → #605e59 → #8f8881 → #feddcf: charcoal mud
+        rather than a colour, because a full-strength scrim over a pale base has
+        nowhere else to go.
+      • that charcoal bottom met the cream page at a hard horizontal edge (cards
+        are transparent by default), so the tile read as a grey rectangle
+        dropped on cream rather than as media.
+      • the ramp crossed 3.0:1 at 62.0% up the cover while the 208px library
+        tile's title block starts at 61.7% — so title LENGTH silently governed
+        legibility, and one more wrapped line went illegible.
+
+    Anchoring on a lightness-pinned brand tone fixes all four together, and it is
+    the right lever rather than four patches: the scrim exists to protect text
+    over a photograph we do NOT control. Over a gradient we author ourselves,
+    darkening it further is redundant work whose only product is mud. Give the
+    plate its own depth and the ramp goes back to merely seating the text.
+
+    The lightness is PINNED (`oklch(from … 0.30 …)`) instead of derived from a
+    theme surface, so the plate is the same depth in both themes. That is
+    deliberate, and it is what the token set already assumes about media:
+    `--media-glyph` is a near-white ink in BOTH themes (themes/light.css:63,
+    themes/dark.css:59), which only makes sense over a dark backdrop. A media
+    plate is dark in light mode for the same reason a photograph is.
+
+    Chroma is scaled DOWN as the plate deepens so the bottom lands as a deep
+    brand shadow rather than a saturated block — the text sits there.
+
+    This layer is only ever VISIBLE when there is no photo: the `<img>` is
+    `inset: 0` directly over it. So none of this can regress the covered case,
+    which measures 9.65:1 and is already approved.
+  */
   .jec__cover-brand {
     position: absolute;
     inset: 0;
     background: linear-gradient(
       158deg,
-      color-mix(in oklab, var(--color-brand-primary) 26%, var(--color-surface-card))
-        0%,
-      color-mix(in oklab, var(--color-brand-primary) 12%, var(--color-surface-card))
-        34%,
-      color-mix(in oklab, var(--media-scrim) 40%, var(--color-surface-card)) 66%,
-      var(--media-scrim) 100%
+      oklch(from var(--color-brand-primary) 0.32 calc(c * 0.64) h) 0%,
+      oklch(from var(--color-brand-primary) 0.26 calc(c * 0.55) h) 48%,
+      oklch(from var(--color-brand-primary) 0.17 calc(c * 0.4) h) 100%
     );
   }
 
-  /* Soft off-centre accent glow so the cover reads as lit, not a flat ramp. */
+  /* Soft off-centre accent glow so the plate reads as LIT rather than as a flat
+     ramp — this is most of what separates "media" from "grey rectangle". Also
+     lightness-pinned, for the same reason the plate is. */
   .jec__cover-brand::after {
     content: '';
     position: absolute;
     inset: 0;
     background: radial-gradient(
-      90% 60% at 78% 8%,
-      color-mix(in srgb, var(--color-brand-accent) 26%, transparent),
-      transparent 60%
+      92% 62% at 78% 6%,
+      oklch(from var(--color-brand-accent) 0.58 calc(c * 0.95) h / 0.45),
+      transparent 62%
     );
   }
 
@@ -345,14 +416,26 @@
     font-weight: var(--font-semibold);
     font-size: calc(var(--text-display) * 1.7);
     line-height: var(--leading-none);
-    color: color-mix(in srgb, var(--media-glyph) 26%, transparent);
+    /* 42%, not ContentCard's 26%. At 26% over the OLD near-white plate this
+       measured 1.015:1 and no letterform was discernible; over the deep plate it
+       reaches 1.83, still under the 2.16 that dark mode already ships and
+       accepts. 42% clears that in both themes, and because the plate is now
+       lightness-pinned the figure no longer moves with the theme. It stays
+       ghosted texture — the title is the thing you read. */
+    color: color-mix(in srgb, var(--media-glyph) 42%, transparent);
     user-select: none;
   }
 
   /* A row's cover is a fraction of a tile's, so the same 1.7×display dropcap
-     would spill far past it. Scaled to the smaller box, same treatment. */
+     would spill far past it. Scaled to the smaller box, same treatment.
+
+     Denser ink than the tile's 42%: the row cover is short, so the scrim reaches
+     ~0.47 alpha where the glyph sits (against ~0.33 on a tile) and washes the
+     same ink out — measured 1.80 on a row against the tile's 2.23. 58% restores
+     parity rather than letting the silhouette decide how visible the flair is. */
   .jec[data-layout='row'] .jec__dropcap {
     font-size: var(--text-display);
+    color: color-mix(in srgb, var(--media-glyph) 58%, transparent);
   }
 
   /* ── Scrim ramp ───────────────────────────────────────────────────────────
@@ -373,9 +456,15 @@
   }
 
   /* ── Overlay badge ────────────────────────────────────────────────────────
-     Brings its own scrim (translucent surface wash + blur + border) so it
-     reads over an arbitrary creator-uploaded photo. `--text-xs` is the token
-     floor — there is no `--text-2xs`. */
+     Brings its own scrim (translucent wash + blur + border) so it reads over an
+     arbitrary creator-uploaded photo. `--text-xs` is the token floor — there is
+     no `--text-2xs`.
+
+     Ink is `--media-glyph` on a DARK wash, not `--color-interactive` on a
+     `--color-surface` wash. The old pairing measured 3.00:1 on a light org:
+     brand orange on a near-white pill fails AA, and it fought the cover it sits
+     on. Everything else painted over media in this card already uses the media
+     tokens; the badge was the one holdout. */
   .jec__badge {
     position: absolute;
     top: var(--space-3);
@@ -384,10 +473,10 @@
     padding: var(--space-0-5) var(--space-2);
     border-radius: var(--radius-full);
     border: var(--border-width) var(--border-style)
-      color-mix(in oklab, var(--color-interactive) 45%, transparent);
-    background-color: color-mix(in oklab, var(--color-surface) 65%, transparent);
+      color-mix(in srgb, var(--media-glyph) 38%, transparent);
+    background-color: color-mix(in srgb, var(--media-scrim) 72%, transparent);
     backdrop-filter: blur(var(--blur-md));
-    color: var(--color-interactive);
+    color: var(--media-glyph);
     font-size: var(--text-xs);
     font-weight: var(--font-semibold);
     letter-spacing: 0.16em;
@@ -435,11 +524,38 @@
     text-transform: uppercase;
   }
 
+  /*
+    Matches `ContentCard`'s title-in-cover title — `--text-3xl` (fluid, ≈31px
+    phone → ≈40px desktop) at `--font-semibold`. This was `--text-2xl` at
+    `--font-normal`: measured side by side in the SAME grid metric, 30px/w400
+    against ContentCard's 40px/w600, i.e. 25% smaller and a weight step lighter
+    in the same family and colour. That divergence is exactly what a shared card
+    is supposed to remove.
+
+    `--font-semibold` (600), NOT `--font-bold`: an org brand re-declares
+    `--font-bold` as `var(--heading-weight, 700)` (org-brand.css:171), which
+    computes to 400 on a single-weight display face. `--font-semibold` is not
+    re-declared.
+
+    The TWO-LINE CLAMP is not decoration, it is what makes 40px safe, and it is
+    also copied from ContentCard (`.cc--title-in-cover[data-content-type]
+    .cc__title`). Without it the first attempt at this overflowed: a 23-character
+    title at 40px in a 208px tile grew a four-line block taller than the cover,
+    and because the cover is `align-content: end` with `overflow: hidden` the
+    block ran off the TOP and the opening words were clipped away behind the
+    badge. Measured proof at the time: the title's first line reported
+    `yFracUpFromCoverBottom: 1.069` — above 1.0, i.e. outside the cover entirely.
+  */
   .jec__title {
     margin: 0;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
     font-family: var(--font-heading);
-    font-size: var(--text-2xl);
-    font-weight: var(--font-normal);
+    font-size: var(--text-3xl);
+    font-weight: var(--font-semibold);
     line-height: var(--leading-tight);
     /*
       Titles are creator-authored, so one unbroken word must not widen the tile.
@@ -449,6 +565,17 @@
     */
     overflow-wrap: anywhere;
     text-wrap: balance;
+  }
+
+  /* Narrow tiles step the title down one rung. `--text-3xl` matches ContentCard
+     in the grid metric they actually share (`/explore`, 421px), but the library
+     rail's 208px track cannot carry 40px — two clamped lines there hold roughly
+     two words, and the tagline underneath loses its room. Queried against the
+     CARD, not the viewport, so the same component adapts per rail. */
+  @container (max-width: 20rem) {
+    .jec[data-layout='tile'] .jec__title {
+      font-size: var(--text-2xl);
+    }
   }
 
   .jec__tagline {
@@ -497,12 +624,16 @@
   }
 
   .jec[data-layout='row'] .jec__kicker {
-    color: var(--color-text-muted);
+    color: var(--jec-ink-quiet);
   }
 
+  /* On a ROW these sit on the card, not on the scrimmed cover, so they take
+     the theme-inverting quiet ink rather than a fixed grey. `-secondary`
+     measured 3.12:1 on cream; `-muted` fixed that but measured 3.82:1 on dark.
+     See `--jec-ink-quiet`. */
   .jec[data-layout='row'] .jec__tagline,
   .jec[data-layout='row'] .jec__meta {
-    color: var(--color-text-secondary);
+    color: var(--jec-ink-quiet);
   }
 
   .jec[data-layout='row'].jec--featured .jec__title {
@@ -515,11 +646,18 @@
   .jec__foot {
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
+    gap: var(--space-2);
   }
 
+  /*
+    Tighter than it was (`--space-4/5/5` padding, `--space-3` gap). The foot was
+    7.72rem against a 17.21rem cover on the 208px library tile, which is what
+    drove that rail to ~25rem tall. Nothing was removed — the status line, the
+    access chip and the price/CTA row are all still there — the vertical rhythm
+    just stopped being generous enough for a full-width panel on a 208px card.
+  */
   .jec[data-layout='tile'] .jec__foot {
-    padding: var(--space-4) var(--space-5) var(--space-5);
+    padding: var(--space-3) var(--space-4) var(--space-4);
   }
 
   .jec[data-layout='row'] .jec__foot {
@@ -527,11 +665,13 @@
     gap: var(--space-2);
   }
 
+  /* `align-items: baseline` so the status text and the chip's label sit on one
+     optical line when they DO fit; `center` floated the chip against the text. */
   .jec__facts {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     flex-wrap: wrap;
-    gap: var(--space-1) var(--space-3);
+    gap: var(--space-1) var(--space-2);
   }
 
   /* A flex row of segments, not one sentence. */
@@ -541,7 +681,7 @@
     gap: var(--space-1) var(--space-4);
     margin: 0;
     font-size: var(--text-sm);
-    color: var(--color-text-muted);
+    color: var(--jec-ink-quiet);
   }
 
   /*
@@ -559,22 +699,51 @@
     color: var(--color-text);
   }
 
+  /* The theme-inverting quiet ink — see `--jec-ink-quiet`. `-secondary` measured
+     3.12:1 on cream and `-muted` 3.82:1 on dark, so neither fixed grey works in
+     both themes. (The secondary token's own light-theme value is tracked
+     separately as Codex-k7yum; this only declines to add a NEW failing surface.) */
   .jec__status {
     margin: 0;
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-text-secondary);
+    color: var(--jec-ink-quiet);
   }
 
-  /* Neutral chip. Deliberately ONE style for every access source — a
-     per-source palette is the per-type accent colour the neutral-palette
-     decision rejects; the label already carries the meaning. */
+  /*
+    Neutral chip. Deliberately ONE style for every access source — a per-source
+    palette is the per-type accent colour the neutral-palette decision rejects;
+    the label already carries the meaning.
+
+    It now has a chip's own SHAPE. `--color-border-subtle` measured 1.2:1 against
+    the cream page — an invisible outline, so on the 208px tile (where the chip
+    necessarily wraps below the status line) the label read as an orphaned word
+    mysteriously indented by its own padding rather than as a chip. Geometry
+    confirmed the wrap is a genuine wrap, not a misalignment: the chip's box is
+    flush with the status text above it (`indentDeltaPx: 0`); only its inner
+    padding shifted the glyphs. `--color-border` plus a faint surface fill makes
+    the boundary visible, so the padding reads as intentional.
+  */
   .jec__access {
     padding: var(--space-0-5) var(--space-2);
     border-radius: var(--radius-full);
-    border: var(--border-width) var(--border-style) var(--color-border-subtle);
+    /*
+      Derived from the card's quiet ink, not from a `--color-border-*` token.
+      Measured on cream: `--color-border-subtle` gives 1.20:1 and `--color-border`
+      only 1.44:1 — both invisible, which is what made the label read as a stray
+      word. The border tokens are tuned for panel edges on a surface, not for a
+      hairline that has to survive on the page itself. Mixed off the inverting ink
+      the outline clears 3:1 in BOTH themes: clearly a chip, still quiet.
+
+      No background fill: a 5% wash was tried and it pushed the chip's own 13px
+      label from 4.68:1 to 4.19:1, i.e. it fixed the outline by breaking the text.
+      The outline alone is what the shape needed.
+    */
+    border: var(--border-width) var(--border-style)
+      color-mix(in oklab, var(--color-text) 45%, transparent);
     font-size: var(--text-xs);
-    color: var(--color-text-muted);
+    line-height: var(--leading-tight);
+    color: var(--jec-ink-quiet);
   }
 
   .jec__cta {
@@ -594,16 +763,23 @@
   .jec__membership {
     font-size: var(--text-sm);
     font-weight: var(--font-medium);
-    color: var(--color-text-secondary);
+    color: var(--jec-ink-quiet);
   }
 
+  /* `--color-interactive-active`, not `--color-interactive`. The raw brand
+     (#EA580C) on the cream page measured 3.43:1 — a sub-AA pair for a 15px CTA.
+     `-active` is the same hue at `calc(l - 0.15)` on light and `calc(l + 0.15)`
+     on dark, so it moves AWAY from the page in BOTH themes: 6.39:1 on cream, and
+     it stays unmistakably brand rather than going neutral. That two-directional
+     behaviour is why it is the right token here and `--color-text` is not —
+     `--color-text` would pass at 20:1 and stop reading as a CTA. */
   .jec__go {
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
     font-size: var(--text-sm);
     font-weight: var(--font-semibold);
-    color: var(--color-interactive);
+    color: var(--color-interactive-active);
   }
 
   .jec__arrow {
