@@ -31,6 +31,7 @@
   import {
     enrolledCourseRowEntry,
     enrolledCourseTileEntry,
+    resumeProgress,
   } from '$lib/components/journeys/journey-entry-card';
   import type { EnrolledCourseSummary } from '$lib/journeys/types';
   import { filterLibraryItemsByOrg } from '$lib/library/filter-by-org';
@@ -417,6 +418,12 @@
             {@const pos = item.progress?.positionSeconds ?? 0}
             {@const dur = item.progress?.durationSeconds ?? 0}
             {@const href = buildContentUrl(page.url, item.content)}
+            <!--
+              `resumeProgress` returns NULL, not 0%, when the duration is
+              unknown — see its doc comment. Every item in this rail has been
+              started, so a determinate "0%" bar would be a false claim about
+              something demonstrably in progress.
+            -->
             <JourneyEntryCard
               {href}
               title={item.content?.title ?? ''}
@@ -425,11 +432,7 @@
               coverImageUrl={item.content?.thumbnailUrl ?? null}
               layout="row"
               cta="Resume"
-              progress={{
-                percent:
-                  dur > 0 ? Math.min(100, Math.round((pos / dur) * 100)) : 0,
-                label: null,
-              }}
+              progress={resumeProgress(pos, dur)}
             />
           {/each}
         </div>
@@ -543,8 +546,11 @@
     Candlelit "room" (SPEC §8.4). The prototype palette is warm + dark; we
     re-point the semantic --color-* on the page root, deriving each shade from
     the org brand HUE via relative-color OKLCH — so the surface reads dark and
-    on-brand rather than copying the prototype's literal colours. Reused
-    primitives (ProgressRing) inherit these tokens and adapt to the dark room.
+    on-brand rather than copying the prototype's literal colours. The shared
+    `JourneyEntryCard`s in both rails inherit those tokens and adapt to the
+    room. (This used to name `ProgressRing`, which the page no longer renders —
+    the cards carry a progress BAR on the cover now, and the component was
+    deleted once Codex-tnwnu orphaned its last two importers.)
   */
   .library {
     /*

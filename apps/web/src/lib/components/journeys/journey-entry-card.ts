@@ -136,6 +136,45 @@ export function enrolledCta(
 }
 
 /**
+ * Playback position → the resume card's progress, or `null` when there is no
+ * honest percentage to report.
+ *
+ * A DETERMINATE `progressbar` is a claim about how far through something you
+ * are, so it must not be rendered off a denominator we do not have. Media
+ * `durationSeconds` is only known once the item has been probed, and the resume
+ * rail is filtered to items with `positionSeconds > 0` — so passing a percent
+ * unconditionally made a started-but-unprobed item announce "0%" for something
+ * demonstrably in progress. Returning `null` suppresses the bar entirely, which
+ * is what the caller's meta line already does when it drops its " of X" clause.
+ *
+ * Journeys are deliberately NOT routed through this: an enrolled course always
+ * has a real `practice_completions ⋈ stage_practices` rollup, so its
+ * denominator is never unknown.
+ */
+export function resumeProgress(
+  positionSeconds: number | null | undefined,
+  durationSeconds: number | null | undefined
+): JourneyEntryProgress | null {
+  if (
+    !durationSeconds ||
+    !Number.isFinite(durationSeconds) ||
+    durationSeconds <= 0
+  ) {
+    return null;
+  }
+  const position = Number.isFinite(positionSeconds)
+    ? (positionSeconds ?? 0)
+    : 0;
+  return {
+    percent: Math.max(
+      0,
+      Math.min(100, Math.round((position / durationSeconds) * 100))
+    ),
+    label: null,
+  };
+}
+
+/**
  * `JourneyCardView` (the page-builder discovery projection) → tile props.
  * `progress`, when supplied, turns the tile into an enrolled one: the price
  * affordance becomes a status line and the cover earns its progress bar.

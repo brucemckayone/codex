@@ -235,6 +235,30 @@ describe('JourneyEntryCard', () => {
     ).toBe('0');
   });
 
+  // Tuples typed explicitly: a bare array of mixed literals widens to a union
+  // including `string`, which `progress.percent` rejects.
+  const nonFinitePercents: [string, number][] = [
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['-Infinity', Number.NEGATIVE_INFINITY],
+  ];
+
+  test.each(
+    nonFinitePercents
+  )('a %s percent floors to 0 rather than reaching the DOM as a non-number', (_label, percent) => {
+    // Range clamping alone is NOT enough: both `Math.min` and `Math.max`
+    // PROPAGATE NaN rather than clamping it. Unguarded, this renders
+    // `aria-valuenow="NaN"` (invalid ARIA) and `width: NaN%`, which browsers
+    // drop — a zero-width fill that still announces as a determinate bar.
+    render({ progress: { percent, label: null } });
+
+    const bar = document.querySelector('.jec__progress');
+    expect(bar?.getAttribute('aria-valuenow')).toBe('0');
+    expect(
+      bar?.querySelector<HTMLElement>('.jec__progress-fill')?.style.width
+    ).toBe('0%');
+  });
+
   // ── Foot ──────────────────────────────────────────────────────────────────
 
   test('the price renders in GBP, and falls back to the membership label when unpriced', () => {

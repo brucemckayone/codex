@@ -101,10 +101,27 @@
     ((kicker ?? '').trim() || (title ?? '').trim()).charAt(0).toUpperCase()
   );
 
-  /** Clamped so a bad rollup can never paint a bar wider than its track. */
-  const percent = $derived(
-    progress ? Math.max(0, Math.min(100, Math.round(progress.percent))) : 0
-  );
+  /**
+   * The bar's value, sanitised to an integer in 0–100.
+   *
+   * Two separate hazards, and `Math.min`/`Math.max` only handle one of them:
+   *  • Out of RANGE (a rollup reporting 140) is clamped, so the fill can never
+   *    paint wider than its track.
+   *  • Not a NUMBER is floored to 0. Both `Math.min` and `Math.max` PROPAGATE
+   *    `NaN` rather than clamping it, so a `NaN` percent would otherwise reach
+   *    the DOM as `aria-valuenow="NaN"` (invalid ARIA) and `width: NaN%` (which
+   *    browsers drop, silently degrading to a zero-width fill that still
+   *    announces itself as a determinate bar). `Number.isFinite` also catches
+   *    `Infinity` from a divide-by-zero.
+   *
+   * No producer can currently emit either — every one of them guards its
+   * division (`total > 0 ? … : 0`) — but this expression is the stated safety
+   * net for exactly that, so it should actually be one.
+   */
+  const percent = $derived.by(() => {
+    if (!progress || !Number.isFinite(progress.percent)) return 0;
+    return Math.max(0, Math.min(100, Math.round(progress.percent)));
+  });
 </script>
 
 {#snippet textBlock()}
