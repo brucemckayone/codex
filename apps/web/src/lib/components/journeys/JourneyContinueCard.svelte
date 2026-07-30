@@ -174,7 +174,7 @@
     font-size: var(--text-xs);
     letter-spacing: 0.16em;
     text-transform: uppercase;
-    color: var(--portal-ember);
+    color: var(--portal-ember-text);
   }
 
   .cont__title {

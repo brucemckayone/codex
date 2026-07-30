@@ -45,6 +45,9 @@ const read = (rel: string): string => readFileSync(join(HERE, rel), 'utf8');
 const PALETTE = read('journey-palette.css');
 const SECTIONS_CSS = read('render-edit/journey-sections.css');
 
+/** Comment-free view, for anything that locates a SELECTOR by substring. */
+const PALETTE_CODE = PALETTE.replace(/\/\*[\s\S]*?\*\//g, '');
+
 /**
  * The base rule must out-specify org-brand.css, which sets the same tokens at
  * `[data-org-brand]` (0,1,0) and `[data-theme='dark'] [data-org-brand]` (0,2,0)
@@ -53,11 +56,19 @@ const SECTIONS_CSS = read('render-edit/journey-sections.css');
  */
 const BASE_SELECTOR = '.journey-palette.journey-palette.journey-palette {';
 
-/** Declarations only — `--x: …`, not `var(--x)` reads. */
+/**
+ * Declarations only — `--x: …`, not `var(--x)` reads.
+ *
+ * Comments are stripped FIRST. These files document the token contract by
+ * quoting real declarations in prose (e.g. org-brand.css's two-pole chain), and
+ * without this the helper counts that prose as live CSS — a test that a comment
+ * can break is not measuring the thing it claims to measure.
+ */
 const declarationsOf = (css: string, prop: string): string[] => {
+  const code = css.replace(/\/\*[\s\S]*?\*\//g, '');
   const out: string[] = [];
   const re = new RegExp(`(^|[;{\\s])${prop}\\s*:([^;}]*)`, 'g');
-  for (const m of css.matchAll(re)) out.push(m[2].trim());
+  for (const m of code.matchAll(re)) out.push(m[2].trim());
   return out;
 };
 
@@ -76,18 +87,53 @@ describe('journey palette — one derivation, three surfaces', () => {
     expect(compound).not.toMatch(/[\s>+~]/);
   });
 
-  it('declares the ink ladder in exactly one place', () => {
-    // The ladder's root input. Two declarations means the divergence is back.
-    expect(declarationsOf(PALETTE, '--jp-ink')).toHaveLength(1);
+  it('declares the ink ladder in exactly one place — one declaration per theme pole', () => {
+    // The ladder's root input. Exactly TWO declarations, both in this file: the
+    // light pole and the dark pole (Codex-a1tz6). A third would mean the
+    // divergence this file exists to prevent has come back; a single one would
+    // mean the dark pole was dropped and journeys stopped honouring dark mode.
+    expect(declarationsOf(PALETTE, '--jp-ink')).toHaveLength(2);
     expect(declarationsOf(SECTIONS_CSS, '--jp-ink')).toEqual([]);
     expect(declarationsOf(SECTIONS_CSS, '--jp-heading')).toEqual([]);
   });
 
-  it('derives the ink from the brand BACKGROUND, not the brand primary', () => {
-    const [ink] = declarationsOf(PALETTE, '--jp-ink');
-    expect(ink).toContain('--brand-bg');
-    expect(ink).not.toContain('--color-brand-primary');
-    expect(ink).not.toContain('--brand-color');
+  it('derives the ink from the brand BACKGROUND, not the brand primary, in BOTH themes', () => {
+    const inks = declarationsOf(PALETTE, '--jp-ink');
+    expect(inks).toHaveLength(2);
+    for (const ink of inks) {
+      expect(ink).toContain('--brand-bg');
+      expect(ink).not.toContain('--color-brand-primary');
+      // `--brand-color` is the org PRIMARY. Anchoring the ink on it is the exact
+      // bug this file was created to remove, and the one the member dashboard
+      // still carried (Codex-4i8x5).
+      expect(ink).not.toContain('--brand-color');
+    }
+    const [light, dark] = inks;
+    // The light pole reads the light background only; the dark pole prefers the
+    // org's dark companion and falls back to it.
+    expect(light).not.toContain('--brand-bg-dark');
+    expect(dark).toContain('--brand-bg-dark');
+  });
+
+  it('switches the ink on theme using BOTH selector forms the app emits', () => {
+    // `app.html` sets `data-theme` on <html> AND adds a matching `.dark`/`.light`
+    // class, and org-brand.css keys its dark branches on BOTH. A rule written
+    // against only one form loses to the org-brand rule written against the
+    // other, and the surface silently keeps the light background in dark mode.
+    // (This is also why a browser check that flips only `data-theme` reports a
+    // theme-correct surface as theme-invariant.)
+    const darkRule = PALETTE_CODE.slice(
+      PALETTE_CODE.indexOf('.dark .journey-palette')
+    );
+    const selector = darkRule.slice(0, darkRule.indexOf('{'));
+
+    expect(selector).toContain('.dark .journey-palette');
+    expect(selector).toContain("[data-theme='dark'] .journey-palette");
+    // Each form keeps the triple-class compound, so it clears the (0,3,0) base
+    // rule above it as well as org-brand.css's dark branch.
+    for (const form of selector.split(',')) {
+      expect(form.split('.journey-palette').length - 1).toBe(3);
+    }
   });
 
   it('auto-contrasts the heading off the ink rather than fixing its lightness', () => {
@@ -139,21 +185,87 @@ describe('journey palette — cycle safety', () => {
     // `--color-background: var(--jp-ink)` in the SAME rule is a custom-property
     // cycle: both become invalid at computed-value time and the page paints
     // nothing. So the base class must NOT declare it, and the modifier must.
-    const baseBlock = PALETTE.slice(
-      PALETTE.indexOf(BASE_SELECTOR),
-      PALETTE.indexOf('.journey-palette--page {')
+    const baseBlock = PALETTE_CODE.slice(
+      PALETTE_CODE.indexOf(BASE_SELECTOR),
+      PALETTE_CODE.indexOf('.journey-palette--page {')
     );
-    const pageBlock = PALETTE.slice(
-      PALETTE.indexOf('.journey-palette--page {')
+    const pageBlock = PALETTE_CODE.slice(
+      PALETTE_CODE.indexOf('.journey-palette--page {')
     );
 
-    expect(declarationsOf(baseBlock, '--jp-ink')).toHaveLength(1);
+    // Two `--jp-ink` declarations live here: the light pole and the dark pole.
+    // Both are ABOVE `.journey-palette--page`, which is what keeps the ink and
+    // its re-point on separate elements.
+    expect(declarationsOf(baseBlock, '--jp-ink')).toHaveLength(2);
     expect(declarationsOf(baseBlock, '--color-background')).toEqual([]);
 
     expect(declarationsOf(pageBlock, '--color-background')).toEqual([
       'var(--jp-ink)',
     ]);
     expect(declarationsOf(pageBlock, '--jp-ink')).toEqual([]);
+  });
+});
+
+describe('member dashboard consumes the shared palette (Codex-4i8x5)', () => {
+  const DASHBOARD = read(
+    '../../routes/_org/[slug]/(space)/journeys/[journeySlug]/dashboard/+page.svelte'
+  );
+
+  it('imports the shared palette and applies both classes on separate elements', () => {
+    expect(DASHBOARD).toContain(
+      "import '$lib/page-builder/journey-palette.css'"
+    );
+    // Base on the outer wrapper, re-points on a DESCENDANT — same split the
+    // renderer and the checkout use. Both on one element is the cycle.
+    expect(DASHBOARD).toContain('class="journey-portal journey-palette"');
+    expect(DASHBOARD).toContain(
+      'class="journey-portal__inner journey-palette--page"'
+    );
+  });
+
+  it('no longer anchors the portal palette on the brand PRIMARY', () => {
+    // The third private derivation: `--portal-anchor: var(--brand-color, …)`,
+    // which made one journey purple on its sales page and orange inside.
+    expect(declarationsOf(DASHBOARD, '--portal-anchor')).toEqual([]);
+    for (const prop of [
+      '--portal-bg',
+      '--portal-bg-deep',
+      '--portal-surface',
+      '--portal-surface-2',
+      '--portal-text',
+      '--portal-text-dim',
+      '--portal-text-faint',
+    ]) {
+      const [decl] = declarationsOf(DASHBOARD, prop);
+      expect(decl, `${prop} must be declared`).toBeDefined();
+      expect(decl, `${prop} must not read the brand primary`).not.toContain(
+        '--brand-color'
+      );
+      expect(decl, `${prop} must come off the shared ladder`).toContain(
+        '--jp-'
+      );
+    }
+  });
+
+  it('fixes no lightness on any portal surface or text token', () => {
+    // The actual 4i8x5 defect was the FORCED lightness (0.15 bg / 0.94 text)
+    // with no light branch — identical in both themes. Any bare numeric
+    // lightness in an `oklch(from …)` here means a pole was hardcoded again.
+    for (const prop of [
+      '--portal-bg',
+      '--portal-bg-deep',
+      '--portal-surface',
+      '--portal-surface-2',
+      '--portal-text',
+      '--portal-text-dim',
+      '--portal-text-faint',
+    ]) {
+      for (const decl of declarationsOf(DASHBOARD, prop)) {
+        expect(decl, `${prop} hardcodes a lightness`).not.toMatch(
+          /oklch\(\s*from\s+[^)]*\)?\s+0?\.\d+/
+        );
+      }
+    }
   });
 });
 
