@@ -351,6 +351,16 @@
   >
     <!-- ── top bar ── -->
     <header class="jb__top">
+      <!--
+        Brand home link (prototype builder.html:203). The builder is a
+        full-bleed surface, so this is the only way back out of it besides the
+        icon rail. It targets the Portals index — the list the builder was
+        opened from, matching the prototype's own `href` — rather than /studio,
+        so it reads as "up one level" from the page you are editing.
+      -->
+      <a class="jb__brand" href="/studio/journeys" title="All portals">
+        Studio<span aria-hidden="true">.</span>
+      </a>
       <span class="jb__doc">
         Journey ·
         <input
@@ -553,6 +563,48 @@
     `flex: none` (below), so when the row runs short the title yields instead of
     the whole row squashing — which is what used to clip the action labels.
   */
+  /*
+    Brand wordmark / home link. The prototype tinted the period with a fixed
+    studio gold (`--st-gold: #cdb489`); we have no such token and every brand
+    colour here is org-overridable, so the period takes `--color-brand-primary`
+    and the mark tints per org rather than pinning one org's palette into the
+    studio chrome.
+
+    Sized with `--text-sm` to sit level with `.jb__doc` next to it — the
+    prototype's .82rem-vs-.8rem split is finer than one step of our type scale,
+    so matching its neighbour is the honest translation. Focus ring comes from
+    the global `:focus-visible` in base.css; hover underlines rather than
+    changing colour, because the mark is already at full `--color-text` and the
+    bar's dim→prominent hover convention (`.jb__art a`) has nowhere to go from
+    there.
+
+    DON'T "fix" the weight: `--font-bold` resolves to the ORG's heading weight,
+    not 700, because org-brand.css re-declares
+    `[data-org-brand] { --font-bold: var(--heading-weight, 700) }`. On this org
+    it computes to 400 — the brand heading font is Archivo Black, a single-weight
+    display face, and 700 would make the browser synthesise a smeared fake bold.
+    The mark reads heavy because the FACE is heavy (`--font-heading`, the same
+    token `.jb__doc-title` beside it uses), not because of the weight axis. An
+    org with a multi-weight heading font gets a real 700 here.
+  */
+  .jb__brand {
+    flex: none;
+    font-family: var(--font-heading);
+    font-size: var(--text-sm);
+    font-weight: var(--font-bold);
+    color: var(--color-text);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .jb__brand span {
+    color: var(--color-brand-primary);
+  }
+
+  .jb__brand:hover {
+    text-decoration: underline;
+  }
+
   .jb__doc {
     display: inline-flex;
     align-items: center;
