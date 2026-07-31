@@ -18,7 +18,7 @@
   import JourneyCard from '$lib/components/journeys/JourneyCard.svelte';
   import FeatureCarousel from '$lib/components/carousel/FeatureCarousel.svelte';
   import type { FeatureItem } from '$lib/components/carousel/feature-carousel.types';
-  import TopicGrid from '$lib/components/topic/TopicGrid.svelte';
+  import TopicCarousel from '$lib/components/topic/TopicCarousel.svelte';
   import type { TopicItem } from '$lib/components/topic/topic-card.types';
   import BrowseModule from '$lib/components/browse/BrowseModule.svelte';
   import type {
@@ -729,10 +729,11 @@
     </section>
   {/if}
 
-  <!-- Browse by topic — image-led curated-category grid (streamed). Each topic
+  <!-- Browse by topic — image-led curated-category rail (streamed). Each topic
        is a curated on-ramp into the Explore page's dynamic filter: clicking one
        navigates to /explore?category=<slug> (R4 ⑬), not an inline landing
-       filter. -->
+       filter. A rail, not a grid: an auto-fill grid wrapped six topics into a
+       ragged part-filled second row. -->
   {#if resolvedCategories.length > 0}
     <section class="section section--tight">
       <header class="lede">
@@ -745,9 +746,10 @@
           </a>
         </div>
       </header>
-      <TopicGrid
+      <TopicCarousel
         items={resolvedCategories}
         hrefFor={(slug) => `/explore?category=${encodeURIComponent(slug)}`}
+        ariaLabel="Browse by topic"
       />
     </section>
   {/if}
@@ -1299,7 +1301,7 @@
   /* ══════════════════════════════════════════
      LANDING SECTION MODIFIERS
      The redesigned landing composes its bands from self-styled
-     primitives (FeatureCarousel / TopicGrid / BrowseModule / Carousel),
+     primitives (FeatureCarousel / TopicCarousel / BrowseModule / Carousel),
      so the page only needs section-rhythm modifiers here. Per-section
      card shape + transparent-until-hover chrome is now driven by the
      ContentCard `shape`/`chrome` props (WP-7), not page-level overrides.
