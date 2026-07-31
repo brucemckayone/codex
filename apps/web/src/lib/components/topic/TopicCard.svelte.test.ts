@@ -12,9 +12,9 @@ import TopicCard from './TopicCard.svelte';
  *
  * `browser` is `true` under Vitest (browser resolve condition), so the click
  * handler runs. We assert the presentational contract (label, cover-vs-fallback,
- * the brand duotone layer, the typographic mark that replaced the emoji glyph),
- * the anchor href, and the dual interaction contract (onselect intercepts a
- * plain left-click; absent onselect / modified clicks stay plain navigations).
+ * the untinted cover, the typographic mark that replaced the emoji glyph), the
+ * anchor href, and the dual interaction contract (onselect intercepts a plain
+ * left-click; absent onselect / modified clicks stay plain navigations).
  */
 
 type SelectFn = (slug: string) => void;
@@ -85,16 +85,18 @@ describe('TopicCard — rendering', () => {
     cleanup();
   });
 
-  test('applies the brand duotone over a cover photo, but never over the fallback', () => {
+  test('lays no tint over the cover — photos keep their own colour', () => {
+    // Tripwire for the reverted brand duotone: recolouring creator photography
+    // read as out-of-brand, so the plate must carry NO tint layer in either
+    // state. The scrim (legibility) and the fallback gradient are not tints.
     const withCover = render({
       ...base,
       coverImageUrl: 'https://cdn.test/cover/md.webp',
     });
-    expect(withCover?.querySelector('.topic-card__tint')).not.toBeNull();
+    expect(withCover?.querySelector('.topic-card__tint')).toBeNull();
+    expect(withCover?.querySelector('.topic-card__scrim')).not.toBeNull();
     cleanup();
 
-    // The gradient fallback is already brand-derived; tinting it would only
-    // mute it, so the duotone layer is cover-only.
     const withoutCover = render(base);
     expect(withoutCover?.querySelector('.topic-card__tint')).toBeNull();
     cleanup();

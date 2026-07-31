@@ -14,7 +14,7 @@
   `aria-pressed`; reorder and delete sit OUTSIDE it, because nesting interactive
   elements inside a button is invalid and unreachable by keyboard.
 
-  The thumb repeats the public topic card's 4:3 plate shape, and falls back to
+  The thumb repeats the public topic card's 16:9 plate shape, and falls back to
   the topic's initial — never to the `categories.icon` emoji, which the public
   card no longer renders (an emoji is drawn by the platform's colour-emoji font
   and answers to no design token).
@@ -266,10 +266,12 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    /* Repeats the public topic plate's 4:3 shape, so the thumb previews the
-       real crop rather than a square that lies about it. */
+    /* Repeats the public topic plate's 16:9 shape, so the thumb previews the
+       real crop rather than a square that lies about it. Keep these in step —
+       if TopicCard's aspect-ratio changes, this must follow or the studio
+       shows a crop the landing page never renders. */
     width: var(--space-20);
-    aspect-ratio: 4 / 3;
+    aspect-ratio: 16 / 9;
     border-radius: var(--radius-md);
     border: var(--border-width) var(--border-style) var(--color-border);
     background-color: var(--color-surface-secondary);

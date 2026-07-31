@@ -1,19 +1,16 @@
 <!--
   @component TopicCard
 
-  An image-led "Browse by topic" plate: a cover photo under a brand duotone and
-  a legibility scrim, with the topic name — plus an optional blurb — anchored at
-  the bottom behind a short editorial rule.
+  An image-led "Browse by topic" plate: a cover photo under a legibility scrim,
+  with the topic name — plus an optional blurb — anchored at the bottom behind a
+  short editorial rule.
 
-  IMAGE TREATMENT (the reason this card can survive arbitrary uploads):
-  covers are curator-supplied stock, so their palettes fight each other and the
-  org's brand. Rather than trust the photos, the card greyscales each one and
-  re-tints it through the brand hue with `mix-blend-mode: color` — the tint
-  supplies hue + chroma while LIGHTNESS still comes from the photo, so every
-  cover keeps its own tonal structure but joins one family. Hovering releases
-  the tint and returns the photo to full colour, so the image is a reward for
-  attention rather than constant noise. `isolation: isolate` keeps that blend
-  inside the card; without it the tint would composite against the page.
+  IMAGE TREATMENT: none. Covers render in their own colour. A previous revision
+  greyscaled each photo and re-tinted it through the brand hue
+  (`mix-blend-mode: color`) to force a mismatched set into one family; that read
+  as out-of-brand and was reverted — brand belongs in the chrome (rule, ink,
+  fallback gradient), not painted over photography. The only hover treatment is
+  a slow scale, so nothing about the image's colour changes on interaction.
 
   NO EMOJI. An emoji glyph is painted by the platform's colour-emoji font, so it
   ignores every colour, weight and family token in the system — it is the one
@@ -101,9 +98,7 @@
       <img src={coverImageUrl} alt="" loading="lazy" decoding="async" />
     {/if}
   </div>
-  {#if coverImageUrl}
-    <div class="topic-card__tint" aria-hidden="true"></div>
-  {:else if markGlyph}
+  {#if !coverImageUrl && markGlyph}
     <span class="topic-card__mark" aria-hidden="true">{markGlyph}</span>
   {/if}
   <div class="topic-card__scrim" aria-hidden="true"></div>
@@ -121,15 +116,14 @@
     position: relative;
     display: flex;
     align-items: flex-end;
-    /* Landscape, but taller than 16:9 so the label block has room to breathe
-       instead of crowding the bottom edge. Still clearly wider than the 3:4
-       content cards elsewhere on the page, so a topic never reads as a piece
-       of content. */
-    aspect-ratio: 4 / 3;
+    /* Wide and shallow: a topic is a signpost, not a piece of content, so it
+       reads as a band rather than a block. 4:3 made the rail tower over the
+       portrait content cards it sits beside. */
+    aspect-ratio: 16 / 9;
     border-radius: var(--radius-card);
     overflow: hidden;
-    /* Required: the duotone layer below uses mix-blend-mode, which would
-       otherwise composite against the PAGE rather than this card. */
+    /* Contains this card's internal z-index stack (media / mark / scrim /
+       label) so those values can't interleave with page-level stacked UI. */
     isolation: isolate;
     border: var(--border-width) var(--border-style) var(--color-border);
     text-decoration: none;
@@ -160,39 +154,14 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    /* Drain most of the photo's own colour so the brand tint above decides the
-       hue; contrast compensates for the flattening greyscale causes. */
-    filter: grayscale(0.9) contrast(1.06);
-    transition:
-      transform var(--duration-slower) var(--ease-smooth),
-      filter var(--duration-slower) var(--ease-smooth);
+    transition: transform var(--duration-slower) var(--ease-smooth);
   }
 
-  /* Brand duotone. `color` blending takes hue + chroma from this layer and
-     LIGHTNESS from the photo beneath, so the cover keeps its tonal structure.
-     That is also why a dark brand still works here — unlike a translucent
-     brand gradient, which disappears on dark orgs. */
-  .topic-card__tint {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    background: var(--color-brand-primary);
-    mix-blend-mode: color;
-    opacity: 0.62;
-    transition: opacity var(--duration-slower) var(--ease-smooth);
-  }
-
-  /* Hover releases the treatment: the photograph returns. */
   .topic-card:hover .topic-card__media img {
     transform: scale(var(--card-image-hover-scale, 1.05));
-    filter: grayscale(0) contrast(1);
   }
 
-  .topic-card:hover .topic-card__tint {
-    opacity: 0.12;
-  }
-
-  /* No cover → soft brand duotone that re-themes per org and stays legible
+  /* No cover → soft brand gradient that re-themes per org and stays legible
      under the scrim on both light and dark backgrounds (each brand hue is
      mixed toward --color-surface so it never blows out). */
   .topic-card__media--fallback {
@@ -221,7 +190,9 @@
     top: var(--space-2);
     right: var(--space-3);
     font-family: var(--font-heading);
-    font-size: var(--text-display);
+    /* One step down from --text-display: on the shallow band that token
+       (up to 5rem) filled ~40% of the plate and stopped reading as texture. */
+    font-size: var(--text-5xl);
     line-height: var(--leading-none);
     color: color-mix(in srgb, var(--media-glyph) 13%, transparent);
     pointer-events: none;
@@ -229,7 +200,14 @@
   }
 
   /* Bottom-anchored legibility scrim built from --media-scrim (WP-7) so the
-     label keeps contrast over any cover on any brand. */
+     label keeps contrast over any cover on any brand.
+
+     Stops are tuned to the plate's aspect, not chosen freely: --media-scrim is
+     an OPAQUE colour, so all the alpha comes from the ramp. The label block
+     covers the bottom ~61% of a 16:9 plate (it covered ~46% of the old 4:3
+     one), so the mid stop has to sit higher or the hairline rule and the top of
+     a two-line name fall into the faded zone — which is exactly what happens on
+     a bright cover. */
   .topic-card__scrim {
     position: absolute;
     inset: 0;
@@ -237,8 +215,8 @@
     background: linear-gradient(
       to top,
       var(--media-scrim),
-      color-mix(in srgb, var(--media-scrim) 55%, transparent) 45%,
-      transparent 80%
+      color-mix(in srgb, var(--media-scrim) 66%, transparent) 55%,
+      transparent
     );
   }
 
@@ -249,7 +227,9 @@
     flex-direction: column;
     gap: var(--space-1-5);
     width: 100%;
-    padding: var(--space-5) var(--space-4) var(--space-4);
+    /* Tighter top pad than the old 4:3 plate — on a shallow band the label
+       block is a larger share of the height, so extra lead-in crowds it. */
+    padding: var(--space-4);
     /* Near-white, brand-tinted ink — never dark-on-dark over the scrim. */
     color: var(--media-glyph);
   }
@@ -298,8 +278,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     .topic-card,
-    .topic-card__media img,
-    .topic-card__tint {
+    .topic-card__media img {
       transition: none;
     }
 
