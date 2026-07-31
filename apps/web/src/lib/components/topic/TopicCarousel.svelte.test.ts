@@ -5,13 +5,15 @@ import {
   mount,
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
-import TopicGrid from './TopicGrid.svelte';
+import TopicCarousel from './TopicCarousel.svelte';
 import type { TopicItem } from './topic-card.types';
 
 /**
- * TopicGrid unit tests — the thin item→card mapper. Verifies it renders one
- * card per item, builds the default `?category=<slug>` deep-link href, and
- * forwards `onselect` to each card.
+ * TopicCarousel unit tests — the thin item→card mapper over the shared Carousel
+ * primitive (ported from the retired TopicGrid). Verifies it renders one card
+ * per item inside a carousel region, builds the default `?category=<slug>`
+ * deep-link href, forwards `onselect` to each card, and renders nothing at all
+ * when there are no topics.
  */
 
 type SelectFn = (slug: string) => void;
@@ -36,21 +38,40 @@ const items: TopicItem[] = [
   },
 ];
 
-function render(props: ComponentProps<typeof TopicGrid>) {
-  component = mount(TopicGrid, { target: document.body, props });
+function render(props: ComponentProps<typeof TopicCarousel>) {
+  component = mount(TopicCarousel, { target: document.body, props });
   flushSync();
 }
 
-describe('TopicGrid', () => {
-  test('renders one card per item', () => {
+describe('TopicCarousel', () => {
+  test('renders one card per item inside a carousel region', () => {
     render({ items });
     expect(document.querySelectorAll('.topic-card').length).toBe(2);
+    expect(document.querySelector('.topic-carousel')).not.toBeNull();
     cleanup();
   });
 
-  test('empty items renders no grid', () => {
+  test('is a carousel, not a grid — the track scrolls horizontally', () => {
+    render({ items });
+    // The rail's own container: proves we mounted the Carousel primitive rather
+    // than re-implementing a wrapping grid.
+    expect(document.querySelector('.carousel__track')).not.toBeNull();
+    expect(document.querySelectorAll('.carousel__item').length).toBe(2);
+    cleanup();
+  });
+
+  test('exposes a labelled carousel region for assistive tech', () => {
+    render({ items, ariaLabel: 'Browse by topic' });
+    const region = document.querySelector('[role="region"]');
+    expect(region?.getAttribute('aria-label')).toBe('Browse by topic');
+    expect(region?.getAttribute('aria-roledescription')).toBe('carousel');
+    cleanup();
+  });
+
+  test('empty items renders nothing', () => {
     render({ items: [] });
-    expect(document.querySelector('.topic-grid')).toBeNull();
+    expect(document.querySelector('.carousel')).toBeNull();
+    expect(document.querySelector('.topic-card')).toBeNull();
     cleanup();
   });
 

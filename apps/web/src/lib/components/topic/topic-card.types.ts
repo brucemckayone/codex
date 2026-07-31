@@ -22,12 +22,14 @@ export interface TopicItem {
   /** Curator blurb. Endpoint returns `null` when unset. */
   description?: string | null;
   /**
-   * Curator glyph — an emoji (the inline quick-add curation form). The public
-   * API returns it as a raw `string | null`; there is no lucide name→component
-   * resolver on this surface, so `TopicCard` renders it as text. Endpoint
-   * returns `null` when unset.
+   * NOTE — there is deliberately no `icon` here. The endpoint still returns the
+   * `categories.icon` column (an emoji, from the retired quick-add glyph field),
+   * but the topic card no longer renders it: an emoji is drawn by the platform's
+   * colour-emoji font, so it answers to no colour, weight or family token and
+   * reads as a foreign design system on a brand-token surface. Topic identity is
+   * typographic instead. Omitting the field from the card contract is the point
+   * — a future consumer cannot quietly reintroduce the glyph.
    */
-  icon?: string | null;
   /**
    * md-variant CDN URL for the topic cover, or `null` when the category has no
    * cover — in which case the card paints a brand-duotone gradient fallback.

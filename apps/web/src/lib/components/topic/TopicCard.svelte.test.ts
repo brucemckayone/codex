@@ -12,8 +12,9 @@ import TopicCard from './TopicCard.svelte';
  *
  * `browser` is `true` under Vitest (browser resolve condition), so the click
  * handler runs. We assert the presentational contract (label, cover-vs-fallback,
- * icon), the anchor href, and the dual interaction contract (onselect intercepts
- * a plain left-click; absent onselect / modified clicks stay plain navigations).
+ * the brand duotone layer, the typographic mark that replaced the emoji glyph),
+ * the anchor href, and the dual interaction contract (onselect intercepts a
+ * plain left-click; absent onselect / modified clicks stay plain navigations).
  */
 
 type SelectFn = (slug: string) => void;
@@ -84,15 +85,61 @@ describe('TopicCard — rendering', () => {
     cleanup();
   });
 
-  test('renders the icon glyph when present, and omits it when absent', () => {
-    const withIcon = render({ ...base, icon: '🎧' });
-    expect(withIcon?.querySelector('.topic-card__icon')?.textContent).toContain(
-      '🎧'
-    );
+  test('applies the brand duotone over a cover photo, but never over the fallback', () => {
+    const withCover = render({
+      ...base,
+      coverImageUrl: 'https://cdn.test/cover/md.webp',
+    });
+    expect(withCover?.querySelector('.topic-card__tint')).not.toBeNull();
     cleanup();
 
-    const withoutIcon = render(base);
-    expect(withoutIcon?.querySelector('.topic-card__icon')).toBeNull();
+    // The gradient fallback is already brand-derived; tinting it would only
+    // mute it, so the duotone layer is cover-only.
+    const withoutCover = render(base);
+    expect(withoutCover?.querySelector('.topic-card__tint')).toBeNull();
+    cleanup();
+  });
+
+  test('the no-cover plate carries the ghosted initial of the topic name', () => {
+    const anchor = render(base);
+    expect(anchor?.querySelector('.topic-card__mark')?.textContent).toBe('F');
+    cleanup();
+  });
+
+  test('uppercases the initial regardless of how the name is cased', () => {
+    const anchor = render({ ...base, name: 'ancestral medicine' });
+    expect(anchor?.querySelector('.topic-card__mark')?.textContent).toBe('A');
+    cleanup();
+  });
+
+  test('omits the initial when a cover is present — the photo is the identity', () => {
+    const anchor = render({
+      ...base,
+      coverImageUrl: 'https://cdn.test/cover/md.webp',
+    });
+    expect(anchor?.querySelector('.topic-card__mark')).toBeNull();
+    cleanup();
+  });
+
+  test('a blank name paints no mark rather than an empty one', () => {
+    const anchor = render({ ...base, name: '   ' });
+    expect(anchor?.querySelector('.topic-card__mark')).toBeNull();
+    cleanup();
+  });
+
+  test('renders no emoji-glyph node — topic identity is typographic', () => {
+    // Structural tripwire for the retired `icon` prop. The real guarantee is in
+    // the types (`TopicItem` has no `icon`, the card takes no `icon` prop); this
+    // catches a re-added render path in the markup.
+    const withCover = render({
+      ...base,
+      coverImageUrl: 'https://cdn.test/cover/md.webp',
+    });
+    expect(withCover?.querySelector('.topic-card__icon')).toBeNull();
+    cleanup();
+
+    const withoutCover = render(base);
+    expect(withoutCover?.querySelector('.topic-card__icon')).toBeNull();
     cleanup();
   });
 

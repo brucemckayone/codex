@@ -1,14 +1,30 @@
 <!--
   @component TopicCard
 
-  An image-led "Browse by topic" card: a cover photo (or brand-duotone gradient
-  fallback when the category has no cover) under a legibility scrim, with the
-  topic name — plus an optional glyph and blurb — anchored at the bottom.
+  An image-led "Browse by topic" plate: a cover photo under a brand duotone and
+  a legibility scrim, with the topic name — plus an optional blurb — anchored at
+  the bottom behind a short editorial rule.
+
+  IMAGE TREATMENT (the reason this card can survive arbitrary uploads):
+  covers are curator-supplied stock, so their palettes fight each other and the
+  org's brand. Rather than trust the photos, the card greyscales each one and
+  re-tints it through the brand hue with `mix-blend-mode: color` — the tint
+  supplies hue + chroma while LIGHTNESS still comes from the photo, so every
+  cover keeps its own tonal structure but joins one family. Hovering releases
+  the tint and returns the photo to full colour, so the image is a reward for
+  attention rather than constant noise. `isolation: isolate` keeps that blend
+  inside the card; without it the tint would composite against the page.
+
+  NO EMOJI. An emoji glyph is painted by the platform's colour-emoji font, so it
+  ignores every colour, weight and family token in the system — it is the one
+  element the design system cannot style. Categories may still CARRY an `icon`
+  in the database; this card deliberately does not render it. Identity here is
+  typographic: the heading face, and (when there is no cover) a large ghosted
+  initial behind the label.
 
   The whole card is a SINGLE stretched anchor (one tab stop, one focus ring),
-  mirroring CreatorCarouselCard and the approved mockup. Because the card has no
-  nested interactive element, no `::after` escape trick is needed — the `<a>`
-  IS the card.
+  mirroring CreatorCarouselCard. Because the card has no nested interactive
+  element, no `::after` escape trick is needed — the `<a>` IS the card.
 
   Dual interaction contract:
     • It ALWAYS renders a real `href`, so with JS disabled — and for
@@ -25,9 +41,8 @@
   @prop {string} name - Topic display name; the card's primary label + a11y name.
   @prop {string} slug - Topic slug; passed to `onselect` for inline filtering.
   @prop {string} href - Deep-link destination (real navigation / JS-off / new tab).
-  @prop {string | null} [coverImageUrl] - md-variant CDN URL; null → gradient fallback.
-  @prop {string | null} [icon] - Emoji glyph rendered as text above the name.
-  @prop {string | null} [description] - Optional one-line blurb under the name.
+  @prop {string | null} [coverImageUrl] - md-variant CDN URL; null → gradient + initial.
+  @prop {string | null} [description] - Optional short blurb under the name.
   @prop {(slug: string) => void} [onselect] - Optional inline-filter hook (WP-10).
 -->
 <script lang="ts">
@@ -36,7 +51,6 @@
     slug: string;
     href: string;
     coverImageUrl?: string | null;
-    icon?: string | null;
     description?: string | null;
     onselect?: (slug: string) => void;
   }
@@ -46,10 +60,16 @@
     slug,
     href,
     coverImageUrl = null,
-    icon = null,
     description = null,
     onselect,
   }: Props = $props();
+
+  /**
+   * Ghosted initial for the no-cover plate — the typographic stand-in that
+   * replaced the emoji glyph. Empty string when the name is blank/whitespace, so
+   * the mark simply does not render rather than painting a stray box.
+   */
+  const markGlyph = $derived(name.trim().charAt(0).toUpperCase());
 
   /**
    * Left-click with `onselect` set → filter inline instead of navigating.
@@ -81,11 +101,14 @@
       <img src={coverImageUrl} alt="" loading="lazy" decoding="async" />
     {/if}
   </div>
+  {#if coverImageUrl}
+    <div class="topic-card__tint" aria-hidden="true"></div>
+  {:else if markGlyph}
+    <span class="topic-card__mark" aria-hidden="true">{markGlyph}</span>
+  {/if}
   <div class="topic-card__scrim" aria-hidden="true"></div>
   <div class="topic-card__label">
-    {#if icon}
-      <span class="topic-card__icon" aria-hidden="true">{icon}</span>
-    {/if}
+    <span class="topic-card__rule" aria-hidden="true"></span>
     <h3 class="topic-card__name">{name}</h3>
     {#if description}
       <p class="topic-card__desc">{description}</p>
@@ -98,9 +121,16 @@
     position: relative;
     display: flex;
     align-items: flex-end;
-    aspect-ratio: 16 / 9;
+    /* Landscape, but taller than 16:9 so the label block has room to breathe
+       instead of crowding the bottom edge. Still clearly wider than the 3:4
+       content cards elsewhere on the page, so a topic never reads as a piece
+       of content. */
+    aspect-ratio: 4 / 3;
     border-radius: var(--radius-card);
     overflow: hidden;
+    /* Required: the duotone layer below uses mix-blend-mode, which would
+       otherwise composite against the PAGE rather than this card. */
+    isolation: isolate;
     border: var(--border-width) var(--border-style) var(--color-border);
     text-decoration: none;
     transition:
@@ -130,11 +160,36 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform var(--duration-slower) var(--ease-smooth);
+    /* Drain most of the photo's own colour so the brand tint above decides the
+       hue; contrast compensates for the flattening greyscale causes. */
+    filter: grayscale(0.9) contrast(1.06);
+    transition:
+      transform var(--duration-slower) var(--ease-smooth),
+      filter var(--duration-slower) var(--ease-smooth);
   }
 
+  /* Brand duotone. `color` blending takes hue + chroma from this layer and
+     LIGHTNESS from the photo beneath, so the cover keeps its tonal structure.
+     That is also why a dark brand still works here — unlike a translucent
+     brand gradient, which disappears on dark orgs. */
+  .topic-card__tint {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: var(--color-brand-primary);
+    mix-blend-mode: color;
+    opacity: 0.62;
+    transition: opacity var(--duration-slower) var(--ease-smooth);
+  }
+
+  /* Hover releases the treatment: the photograph returns. */
   .topic-card:hover .topic-card__media img {
     transform: scale(var(--card-image-hover-scale, 1.05));
+    filter: grayscale(0) contrast(1);
+  }
+
+  .topic-card:hover .topic-card__tint {
+    opacity: 0.12;
   }
 
   /* No cover → soft brand duotone that re-themes per org and stays legible
@@ -155,12 +210,30 @@
       );
   }
 
+  /* Typographic stand-in for the retired emoji: the topic's initial, set in the
+     heading face and ghosted back so it reads as texture, not a label. Only
+     ever paired with the no-cover gradient. */
+  .topic-card__mark {
+    position: absolute;
+    z-index: 1;
+    /* Fully inside the plate. Letting it bleed off the top edge got clipped by
+       the border radius and read as a rendering fault rather than a device. */
+    top: var(--space-2);
+    right: var(--space-3);
+    font-family: var(--font-heading);
+    font-size: var(--text-display);
+    line-height: var(--leading-none);
+    color: color-mix(in srgb, var(--media-glyph) 13%, transparent);
+    pointer-events: none;
+    user-select: none;
+  }
+
   /* Bottom-anchored legibility scrim built from --media-scrim (WP-7) so the
      label keeps contrast over any cover on any brand. */
   .topic-card__scrim {
     position: absolute;
     inset: 0;
-    z-index: 1;
+    z-index: 2;
     background: linear-gradient(
       to top,
       var(--media-scrim),
@@ -171,19 +244,23 @@
 
   .topic-card__label {
     position: relative;
-    z-index: 2;
+    z-index: 3;
     display: flex;
     flex-direction: column;
-    gap: var(--space-1);
+    gap: var(--space-1-5);
     width: 100%;
-    padding: var(--space-4);
+    padding: var(--space-5) var(--space-4) var(--space-4);
     /* Near-white, brand-tinted ink — never dark-on-dark over the scrim. */
     color: var(--media-glyph);
   }
 
-  .topic-card__icon {
-    font-size: var(--text-xl);
-    line-height: var(--leading-tight);
+  /* Short editorial rule, echoing the section lede's hairline — the visual
+     anchor the emoji used to (badly) provide. */
+  .topic-card__rule {
+    width: var(--space-6);
+    height: var(--border-width);
+    margin-bottom: var(--space-0-5);
+    background: color-mix(in srgb, var(--media-glyph) 45%, transparent);
   }
 
   .topic-card__name {
@@ -192,6 +269,16 @@
     font-size: var(--text-xl);
     line-height: var(--leading-tight);
     color: var(--media-glyph);
+    /* Two lines: a long topic name ("Ancestral Medicine") must not be clipped
+       to an ellipsis mid-word the way a single line forced. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    /* Long single words (a slug-ish name) shrink the min-content width instead
+       of overflowing the plate. */
+    overflow-wrap: anywhere;
   }
 
   .topic-card__desc {
@@ -199,17 +286,20 @@
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
     color: color-mix(in srgb, var(--media-glyph) 82%, transparent);
-    /* One line — the blurb is a hint, not the headline. */
+    /* Two lines — enough for a real sentence to land, so the blurb stops
+       truncating mid-word after four words. */
     display: -webkit-box;
-    -webkit-line-clamp: 1;
-    line-clamp: 1;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    overflow-wrap: anywhere;
   }
 
   @media (prefers-reduced-motion: reduce) {
     .topic-card,
-    .topic-card__media img {
+    .topic-card__media img,
+    .topic-card__tint {
       transition: none;
     }
 
