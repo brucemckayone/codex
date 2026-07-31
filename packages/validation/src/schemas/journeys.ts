@@ -324,6 +324,36 @@ export type UpdateJourneySellMediaBody = z.infer<
 >;
 
 /**
+ * Journey FEATURED flag body — "feature this portal on the org homepage"
+ * (`PATCH /api/journeys/studio/journeys/:pageId/featured`).
+ *
+ * `landing_pages.featured` has been readable since `listPublishedJourneys` shipped
+ * (it filters on the column for the home rail and orders featured-first), but
+ * nothing ever WROTE it — the flag was reachable only by raw SQL or a seed, so the
+ * home rail could never be curated from the studio. This body is that write.
+ *
+ * A SEPARATE body from {@link saveJourneyPageBodySchema} deliberately, for the
+ * reason that schema's own doc-comment records: it is `.strict()` and shared with
+ * the builder's autosave, so adding `featured` there would either 400 every
+ * existing save (which omits the key) or, under a non-strict widening, accept and
+ * silently discard it while reporting "Page saved" — the exact silent-drop bug
+ * `offer` and `seo` already caused. A distinct route gets a distinct body.
+ *
+ * `.strict()` for the same reason the offer/sell-media bodies are: an unrecognised
+ * key is a client bug that must 400 rather than be dropped. No `.default()` —
+ * featuring is an explicit two-state intent, so an absent `featured` is a
+ * malformed request, not "false".
+ */
+export const setJourneyFeaturedBodySchema = z
+  .object({
+    featured: z.boolean(),
+  })
+  .strict();
+export type SetJourneyFeaturedBody = z.infer<
+  typeof setJourneyFeaturedBodySchema
+>;
+
+/**
  * ── STUDIO curriculum-editor inputs (Codex-03cwh · admin two-pane editor) ──
  *
  * The two-pane curriculum editor is owner/admin (`requireOrgManagement`). The

@@ -8,25 +8,37 @@ import {
 import JourneyCard from './JourneyCard.svelte';
 
 /**
- * JourneyCard cover-band tests (Codex-eqh0z).
+ * `JourneyCard` projection tests.
  *
- * `courses` had three VIDEO refs and no poster column, so this card was
- * typographic-only. It now renders a cover band — and the load-bearing property
- * is that the band exists in BOTH states, so a rail of mixed covered and
- * cover-less journeys does not jump.
+ * `JourneyCard` is now an ADAPTER over `JourneyEntryCard` (Codex-tnwnu): it maps
+ * a `JourneyCardView` onto the one shared journey entry card. So what is under
+ * test here is the PROJECTION — that each DTO field reaches the right slot of the
+ * shared card — while the shared card's own anatomy (cover layers, scrim ramp,
+ * flair, progress bar, chrome gating) is covered by
+ * `JourneyEntryCard.svelte.test.ts`.
+ *
+ * Class names are the shared card's (`.jec__*`), which is the point: the landing
+ * carousel, the /explore rail, the library shelf and the dashboard threshold all
+ * emit the same markup now. They used to emit four different card structures.
  *
  * Under test:
- *   • With a cover: the band holds an `<img>` at the given URL, and the
- *     typographic fallback glyph is absent.
- *   • Without a cover: the band is STILL present (reserved space) and holds the
- *     fallback glyph instead — i.e. the fallback is a swap inside a fixed box,
- *     not a removed element. This is the no-layout-shift guarantee.
- *   • The cover image is decorative (`alt=""`) — the title is the accessible
- *     name, so the cover must not be announced twice.
- *   • The fallback glyph is `aria-hidden` for the same reason.
+ *   • The cover band exists in BOTH cover states, and the covered case promotes
+ *     an `<img>` over the always-painted brand layer — the no-layout-shift
+ *     guarantee, so a rail of mixed covered/cover-less journeys never jumps.
+ *   • The flair character still derives from the kicker, falling back to the
+ *     title. (It is no longer a cover-LESS fallback: it renders either way.)
+ *   • The badge is an overlay on the cover, not a row above the kicker.
+ *   • `featured` — and only `featured` — earns card chrome.
+ *   • Curriculum stats reach the card as SEGMENTS with the numeral separable.
+ *   • `progress` swaps the price affordance for a status line and lights the
+ *     cover's progress bar.
  *
- * Falsifiability: dropping the `{:else}` branch, or gating the whole band behind
- * `{#if journey.coverImageUrl}`, fails the cover-less assertions.
+ * These assert STRUCTURE, deliberately not computed CSS. jsdom does not
+ * implement `color-mix()` / `oklch()` / `backdrop-filter` and hands custom
+ * properties back as their raw declared string, so a "computed style" assertion
+ * here would pass against a still-broken card. Typography and the scrim are
+ * verified by reading computed styles in a real browser; what is mechanised here
+ * is the wiring those styles hang off.
  */
 
 function cardView(overrides: Partial<JourneyCardView> = {}): JourneyCardView {
@@ -58,7 +70,7 @@ describe('JourneyCard cover band', () => {
     document.body.innerHTML = '';
   });
 
-  test('renders the cover image when the journey has one', () => {
+  test('renders the cover image OVER the always-painted brand layer when the journey has one', () => {
     component = mount(JourneyCard, {
       target: document.body,
       props: {
@@ -70,12 +82,10 @@ describe('JourneyCard cover band', () => {
     });
     flushSync();
 
-    const band = document.querySelector('.journey-card__cover');
+    const band = document.querySelector('.jec__cover');
     expect(band).not.toBeNull();
 
-    const img = band?.querySelector<HTMLImageElement>(
-      '.journey-card__cover-img'
-    );
+    const img = band?.querySelector<HTMLImageElement>('.jec__cover-img');
     expect(img).not.toBeNull();
     expect(img?.getAttribute('src')).toBe(
       'http://localhost:4100/courses/abc/cover/md.webp'
@@ -83,11 +93,12 @@ describe('JourneyCard cover band', () => {
     // Decorative — the title carries the accessible name.
     expect(img?.getAttribute('alt')).toBe('');
 
-    // The fallback must NOT also render.
-    expect(document.querySelector('.journey-card__cover-glyph')).toBeNull();
+    // The gradient is NOT an either/or fallback: it stays behind the photo so a
+    // 404 or a pre-hydration load failure reveals it with no handler.
+    expect(band?.querySelector('.jec__cover-brand')).not.toBeNull();
   });
 
-  test('renders the typographic fallback INSIDE the same band when there is no cover', () => {
+  test('renders the same band, minus the image, when there is no cover', () => {
     component = mount(JourneyCard, {
       target: document.body,
       props: { journey: cardView(), href: '/journeys/stillness' },
@@ -97,16 +108,28 @@ describe('JourneyCard cover band', () => {
     // The band itself is still in the DOM — this is the no-layout-shift
     // guarantee. If the band were conditional, a cover-less card would be
     // shorter than a covered one and a mixed rail would jump.
-    const band = document.querySelector('.journey-card__cover');
+    const band = document.querySelector('.jec__cover');
     expect(band).not.toBeNull();
+    expect(band?.querySelector('.jec__cover-img')).toBeNull();
+    expect(band?.querySelector('.jec__cover-brand')).not.toBeNull();
+    expect(band?.querySelector('.jec__scrim')).not.toBeNull();
+  });
 
-    expect(band?.querySelector('.journey-card__cover-img')).toBeNull();
+  test('the flair glyph is the kicker initial, and is hidden from AT', () => {
+    component = mount(JourneyCard, {
+      target: document.body,
+      props: { journey: cardView(), href: '/journeys/stillness' },
+    });
+    flushSync();
 
-    const glyph = band?.querySelector('.journey-card__cover-glyph');
-    expect(glyph).not.toBeNull();
-    // Kicker's initial ("Foundation course" → "F"); decorative, so hidden from AT.
-    expect(glyph?.textContent?.trim()).toBe('F');
-    expect(glyph?.getAttribute('aria-hidden')).toBe('true');
+    // Kicker's initial ("Foundation course" → "F").
+    expect(document.querySelector('.jec__dropcap')?.textContent?.trim()).toBe(
+      'F'
+    );
+    // Decorative — the title is read out right beside it.
+    expect(
+      document.querySelector('.jec__flair')?.getAttribute('aria-hidden')
+    ).toBe('true');
   });
 
   test('falls back to the title initial when there is no kicker either', () => {
@@ -119,9 +142,9 @@ describe('JourneyCard cover band', () => {
     });
     flushSync();
 
-    expect(
-      document.querySelector('.journey-card__cover-glyph')?.textContent?.trim()
-    ).toBe('T');
+    expect(document.querySelector('.jec__dropcap')?.textContent?.trim()).toBe(
+      'T'
+    );
   });
 
   test('the title still renders in both cover states', () => {
@@ -130,34 +153,27 @@ describe('JourneyCard cover band', () => {
       props: { journey: cardView(), href: '/journeys/stillness' },
     });
     flushSync();
-    expect(
-      document.querySelector('.journey-card__title')?.textContent
-    ).toContain('The Practice of Stillness');
+    expect(document.querySelector('.jec__title')?.textContent).toContain(
+      'The Practice of Stillness'
+    );
   });
 });
 
 /**
- * Prototype-conformance structure (Codex-ycsd8).
- *
- * Reference: `.jcard` in docs/design/course-journeys/prototype/explore.html — the
- * file where that card's anatomy is DEFINED (1-threshold.html only consumes it).
- *
- * These assert STRUCTURE, deliberately not computed CSS. jsdom does not implement
- * `color-mix()` / `oklch()` / `backdrop-filter` and hands custom properties back
- * as their raw declared string, so a "computed style" assertion here would pass
- * against a still-broken card. Typography and the scrim were verified instead by
- * reading computed styles in a real browser (recorded on the bead); what is
- * mechanised here is the wiring those styles hang off.
+ * Projection conformance.
  *
  * Falsifiability, per test:
- *   • badge-in-cover — moving the badge back into `__head` fails it.
- *   • featured — deleting the `class:journey-card--featured` directive fails it,
- *     and the false-case fails if the class is applied unconditionally.
- *   • stat segments — reverting to the old single joined `statsLabel` string
- *     removes `.journey-card__stat-value` and fails it.
- *   • kicker/tagline — dropping either `{#if}` branch fails it.
+ *   • badge-in-cover — dropping the `badge` from the projection, or moving the
+ *     badge out of the cover, fails it.
+ *   • featured — dropping `featured` from the projection fails it, and the
+ *     false-case fails if chrome is applied unconditionally.
+ *   • stat segments — collapsing `journeyStats` to one joined string removes
+ *     `.jec__stat-value` and fails it.
+ *   • kicker/tagline — dropping either from the projection fails it.
+ *   • progress — dropping the `progress` branch leaves the price affordance in
+ *     place and no bar, failing both halves.
  */
-describe('JourneyCard prototype conformance', () => {
+describe('JourneyCard projection onto the shared entry card', () => {
   let component: ReturnType<typeof mount> | null = null;
 
   /** Tear the current mount down so the next case starts from a clean document. */
@@ -180,24 +196,17 @@ describe('JourneyCard prototype conformance', () => {
   test('the badge is an overlay INSIDE the cover band, not a row above the kicker', () => {
     render();
 
-    const badge = document.querySelector('.journey-card__badge');
+    const badge = document.querySelector('.jec__badge');
     expect(badge).not.toBeNull();
-    // The prototype places `.jcard__tag` absolutely on the cover. Structurally
-    // that means the badge is a child of the cover band, not of the head.
-    expect(
-      document.querySelector('.journey-card__cover .journey-card__badge')
-    ).toBe(badge);
-    expect(
-      document.querySelector('.journey-card__head .journey-card__badge')
-    ).toBeNull();
+    expect(badge?.textContent?.trim()).toBe('Portal');
+    expect(document.querySelector('.jec__cover .jec__badge')).toBe(badge);
+    expect(document.querySelector('.jec__foot .jec__badge')).toBeNull();
   });
 
   test('a featured journey earns card chrome; a browsing tile does not', () => {
     render({ featured: true });
     expect(
-      document
-        .querySelector('.journey-card')
-        ?.classList.contains('journey-card--featured')
+      document.querySelector('.jec')?.classList.contains('jec--featured')
     ).toBe(true);
 
     // Reset between the two halves so the negative case is a fresh mount.
@@ -205,24 +214,22 @@ describe('JourneyCard prototype conformance', () => {
 
     render({ featured: false });
     expect(
-      document
-        .querySelector('.journey-card')
-        ?.classList.contains('journey-card--featured')
+      document.querySelector('.jec')?.classList.contains('jec--featured')
     ).toBe(false);
   });
 
   test('stats render as segments with the numeral carried separately', () => {
     render({ stageCount: 4, practiceCount: 24 });
 
-    const values = [
-      ...document.querySelectorAll('.journey-card__stat-value'),
-    ].map((el) => el.textContent?.trim());
-    // Prototype `.jcard__stats b` — the number is its own element so it can take
-    // the weight while the noun stays quiet. A single joined string cannot.
+    const values = [...document.querySelectorAll('.jec__stat-value')].map(
+      (el) => el.textContent?.trim()
+    );
+    // The number is its own element so it can take the weight while the noun
+    // stays quiet. A single joined string cannot.
     expect(values).toEqual(['4', '24']);
 
-    const segments = [...document.querySelectorAll('.journey-card__stat')].map(
-      (el) => el.textContent?.replace(/\s+/g, ' ').trim()
+    const segments = [...document.querySelectorAll('.jec__stat')].map((el) =>
+      el.textContent?.replace(/\s+/g, ' ').trim()
     );
     expect(segments).toEqual(['4 stages', '24 practices']);
   });
@@ -230,7 +237,7 @@ describe('JourneyCard prototype conformance', () => {
   test('stats stay singular-aware and drop a stageless segment entirely', () => {
     render({ stageCount: 1, practiceCount: 1 });
     expect(
-      [...document.querySelectorAll('.journey-card__stat')].map((el) =>
+      [...document.querySelectorAll('.jec__stat')].map((el) =>
         el.textContent?.replace(/\s+/g, ' ').trim()
       )
     ).toEqual(['1 stage', '1 practice']);
@@ -240,7 +247,7 @@ describe('JourneyCard prototype conformance', () => {
     // A stageless journey shows practices only — no empty leading segment.
     render({ stageCount: 0, practiceCount: 7 });
     expect(
-      [...document.querySelectorAll('.journey-card__stat')].map((el) =>
+      [...document.querySelectorAll('.jec__stat')].map((el) =>
         el.textContent?.replace(/\s+/g, ' ').trim()
       )
     ).toEqual(['7 practices']);
@@ -248,24 +255,28 @@ describe('JourneyCard prototype conformance', () => {
 
   test('kicker and tagline render when present and are omitted when null', () => {
     render({ kicker: 'Foundation course', tagline: 'Eight weeks of sitting.' });
-    expect(
-      document.querySelector('.journey-card__kicker')?.textContent?.trim()
-    ).toBe('Foundation course');
-    expect(
-      document.querySelector('.journey-card__tagline')?.textContent?.trim()
-    ).toBe('Eight weeks of sitting.');
+    expect(document.querySelector('.jec__kicker')?.textContent?.trim()).toBe(
+      'Foundation course'
+    );
+    expect(document.querySelector('.jec__tagline')?.textContent?.trim()).toBe(
+      'Eight weeks of sitting.'
+    );
 
     reset();
 
     render({ kicker: null, tagline: null });
-    expect(document.querySelector('.journey-card__kicker')).toBeNull();
-    expect(document.querySelector('.journey-card__tagline')).toBeNull();
+    expect(document.querySelector('.jec__kicker')).toBeNull();
+    expect(document.querySelector('.jec__tagline')).toBeNull();
   });
 
   test('the foot shows price + CTA, and swaps to progress when enrolled', () => {
     render();
-    expect(document.querySelector('.journey-card__cta')).not.toBeNull();
-    expect(document.querySelector('.journey-card__progress')).toBeNull();
+    expect(document.querySelector('.jec__price')?.textContent?.trim()).toBe(
+      '£48.00'
+    );
+    expect(document.querySelector('.jec__status')).toBeNull();
+    // A discover card carries no progress bar.
+    expect(document.querySelector('.jec__progress')).toBeNull();
 
     reset();
 
@@ -283,10 +294,18 @@ describe('JourneyCard prototype conformance', () => {
       },
     });
     flushSync();
-    expect(document.querySelector('.journey-card__progress')).not.toBeNull();
-    expect(document.querySelector('.journey-card__cta')).toBeNull();
+
+    expect(document.querySelector('.jec__status')?.textContent?.trim()).toBe(
+      '12 of 24 practices'
+    );
+    // The price affordance is what progress replaces — you already own it.
+    expect(document.querySelector('.jec__price')).toBeNull();
+    expect(document.querySelector('.jec__membership')).toBeNull();
     expect(
-      document.querySelector('.journey-card__status')?.textContent?.trim()
-    ).toBe('12 of 24 practices');
+      document.querySelector('.jec__progress')?.getAttribute('aria-valuenow')
+    ).toBe('50');
+    expect(document.querySelector('.jec__go')?.textContent).toContain(
+      'Continue'
+    );
   });
 });

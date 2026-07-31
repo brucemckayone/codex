@@ -206,6 +206,14 @@ export interface EnrolledCourseSummary {
     kicker: string | null;
     lede: string | null;
     guideName: string | null;
+    /**
+     * Public CDN URL for the course cover, or null when the creator has not
+     * uploaded one (or the worker has no configured CDN base). Never a raw R2
+     * key. Added by Codex-tnwnu: without it the library's journey cards were
+     * structurally unable to render a photo, so they were the only journey
+     * surface permanently stuck on the typographic fallback.
+     */
+    coverImageUrl: string | null;
   };
   enrollment: JourneyEnrollment;
   /** `course_enrollments.source` (e.g. `course_purchase`) → access badge. */

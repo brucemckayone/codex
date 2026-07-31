@@ -16,7 +16,12 @@
   import type { PageStatus } from '@codex/shared-types';
   import EmptyState from '$lib/components/ui/EmptyState/EmptyState.svelte';
   import { CompassIcon, PlusIcon } from '$lib/components/ui/Icon';
-  import { listJourneys, listJourneyRevenue } from '$lib/remote/journeys.remote';
+  import {
+    listJourneys,
+    listJourneyRevenue,
+    setJourneyFeatured,
+  } from '$lib/remote/journeys.remote';
+  import { queryErrorMessage } from '$lib/remote/query-result';
 
   const { data } = $props();
 
@@ -43,6 +48,43 @@
 
   const items = $derived(journeysQuery.current ?? []);
   const loading = $derived(journeysQuery.loading);
+
+  /*
+    HOMEPAGE PROMOTION — `landing_pages.featured`.
+
+    A featured portal takes a slide in "Editor's picks" on the org landing page,
+    beside featured CONTENT. Content has had this affordance for a long time (a
+    "Feature on homepage" switch in the studio content form); portals could not
+    use it because nothing in the codebase wrote the column.
+
+    The pending id is tracked per-ROW rather than as one page-wide boolean: the
+    list can hold many portals and a single flag would disable every toggle while
+    one was in flight, which reads as the page having frozen.
+  */
+  let featurePendingId = $state<string | null>(null);
+  let featureError = $state<string | null>(null);
+
+  async function toggleFeatured(pageId: string, next: boolean) {
+    featurePendingId = pageId;
+    featureError = null;
+    try {
+      await setJourneyFeatured({ pageId, featured: next });
+      // Re-read rather than mutate locally: `featured` also drives the public
+      // ordering, so the server's view is the one worth showing.
+      await journeysQuery.refresh();
+    } catch (err) {
+      // Through `queryErrorMessage`, never `err.message` — SvelteKit rejects with
+      // `HttpError`, which carries its text at `body.message` and has NO
+      // top-level `message`. Reading it directly yields `undefined` forever and
+      // the failure renders as an empty string (Codex-xo3bl).
+      featureError = queryErrorMessage(
+        err,
+        'Could not change the homepage feature. Please try again.'
+      );
+    } finally {
+      featurePendingId = null;
+    }
+  }
 
   // Authoritative per-journey revenue, keyed by landing-page id. A SEPARATE
   // query (independent of the status filter) so the row list paints immediately
@@ -117,6 +159,11 @@
   </header>
 
   <div class="journeys__body">
+    <!-- `role="alert"` so the failure is announced rather than only painted —
+         the toggle's own label snaps back on refresh, which is silent. -->
+    {#if featureError}
+      <p class="journeys__feature-error" role="alert">{featureError}</p>
+    {/if}
     {#if loading}
       <ul class="journeys__rows" role="list">
         {#each Array(3) as _, i (i)}
@@ -157,6 +204,37 @@
               </p>
             </div>
             <div class="journey-row__actions">
+              <!--
+                Homepage promotion. A toggle BUTTON with `aria-pressed` rather
+                than a link, because it mutates rather than navigates, and rather
+                than a `<Switch>` (which is what the content form uses) because
+                this sits in a compact row of text actions where a switch's
+                track would be the only control of its kind.
+
+                Shown for drafts too. `featured` is orthogonal to status — the
+                public read filters `status = PUBLISHED` on its own — so the flag
+                is harmless on a draft, just inert; the title says so instead of
+                the control disappearing and leaving the creator wondering where
+                it went.
+              -->
+              <button
+                type="button"
+                class="journey-row__action journey-row__action--feature"
+                aria-pressed={j.featured ? 'true' : 'false'}
+                disabled={featurePendingId === j.id}
+                title={j.status === 'published'
+                  ? j.featured
+                    ? 'Showing in Editor’s picks on the homepage'
+                    : 'Give this portal a slide in Editor’s picks'
+                  : 'Takes effect on the homepage once this portal is published'}
+                onclick={() => toggleFeatured(j.id, !j.featured)}
+              >
+                {featurePendingId === j.id
+                  ? 'Saving…'
+                  : j.featured
+                    ? 'Featured'
+                    : 'Feature'}
+              </button>
               <!--
                 Curriculum and Insights are both COURSE artifacts (each resolves
                 the page to its subject course server-side), so both sit behind
@@ -420,6 +498,39 @@
   .journey-row__action:hover {
     color: var(--color-text);
     background-color: var(--color-surface-secondary);
+  }
+
+  /*
+    The pressed state has to be legible without colour alone, because "Feature"
+    and "Featured" differ by two characters. A filled brand chip carries it:
+    `--color-text-on-brand` auto-derives its own contrast from the brand hue
+    (org-brand.css), so it stays readable on any org's palette rather than
+    assuming a light one.
+  */
+  .journey-row__action--feature {
+    cursor: pointer;
+    background-color: transparent;
+    font-family: inherit;
+  }
+
+  .journey-row__action--feature[aria-pressed='true'] {
+    border-color: transparent;
+    background-color: var(--color-interactive);
+    color: var(--color-text-on-brand, var(--color-background));
+  }
+
+  .journey-row__action--feature:disabled {
+    cursor: progress;
+    opacity: 0.6;
+  }
+
+  /* `--color-error-600` matches the studio's existing error-text convention
+     (monetisation/pricing-faq, sales) rather than introducing a fifth
+     treatment. */
+  .journeys__feature-error {
+    margin: 0 0 var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--color-error-600);
   }
 
   .journey-row__action--primary {

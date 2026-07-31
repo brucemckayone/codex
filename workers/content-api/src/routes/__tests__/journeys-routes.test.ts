@@ -114,6 +114,7 @@ const ENROLLMENTS = [
       kicker: 'The foundation course',
       lede: null,
       guideName: 'The Guide',
+      coverImageUrl: null,
     },
     enrollment: {
       courseId: COURSE_ID,
@@ -318,9 +319,13 @@ describe('GET /api/journeys/user/enrollments — member journeys shelf', () => {
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ data: ENROLLMENTS });
+    // Third arg is the CDN base the service resolves each course's cover key
+    // against — without it every library journey card reports a null cover
+    // (Codex-tnwnu).
     expect(journeySpies.listEnrolledCourses).toHaveBeenCalledWith(
       USER.id,
-      ORG_ID
+      ORG_ID,
+      R2_PUBLIC_URL_BASE
     );
   });
 
@@ -336,11 +341,13 @@ describe('GET /api/journeys/user/enrollments — member journeys shelf', () => {
     expect(res.status).toBe(200);
     expect(journeySpies.listEnrolledCourses).toHaveBeenCalledWith(
       OTHER.id,
-      ORG_ID
+      ORG_ID,
+      R2_PUBLIC_URL_BASE
     );
     expect(journeySpies.listEnrolledCourses).not.toHaveBeenCalledWith(
       USER.id,
-      ORG_ID
+      ORG_ID,
+      R2_PUBLIC_URL_BASE
     );
   });
 

@@ -18,10 +18,12 @@
  * Data comes exclusively through the `./journey-data` INTEGRATION SEAM (mocked
  * for AGGRESSIVE-MODE today; rewired to the real remote functions post-WP-2).
  */
-import { error } from '@sveltejs/kit';
+import { error, redirect } from '@sveltejs/kit';
+import { evaluateCourseGate } from '$lib/journeys/gate';
 import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import { resolveCanEnterCourse } from '$lib/server/journeys/round-d-seam';
+import { buildJourneyUrl } from '$lib/utils/subdomain';
 import type { PageServerLoad } from './$types';
 import {
   getCoursePage,
@@ -30,8 +32,16 @@ import {
 } from './journey-data';
 
 export const load: PageServerLoad = async (event) => {
-  const { params, parent, setHeaders, depends, locals, platform, cookies } =
-    event;
+  const {
+    params,
+    parent,
+    setHeaders,
+    depends,
+    locals,
+    platform,
+    cookies,
+    url,
+  } = event;
 
   // Ensure the org layout (auth + branding + org resolution) has resolved before
   // we commit cache headers — mirrors the org-landing precedent.
@@ -62,11 +72,13 @@ export const load: PageServerLoad = async (event) => {
     throw error(404, 'This portal could not be found.');
   }
 
-  // AWAIT the enrolment flag: it flips the ABOVE-THE-FOLD hero CTA (anon/
-  // not-enrolled → "join" → checkout; enrolled → "go to your dashboard" →
-  // dashboard), so it belongs on the first-paint path, not streamed. The sales
-  // page itself stays fully PUBLIC (no `canView` gate) — this only re-targets
-  // the CTA. We skip the worker round-trip entirely for anonymous visitors (the
+  // AWAIT the entitlement flag: it now DECIDES THE REDIRECT below (Codex-aectb)
+  // — an entitled viewer is sent to their dashboard rather than sold the course
+  // again — and, on the preview bypass where no redirect fires, still flips the
+  // ABOVE-THE-FOLD hero CTA (anon/not-entitled → "join" → checkout; entitled →
+  // "go to your dashboard"). Either way it is first-paint, never streamed. The
+  // sales page itself stays fully PUBLIC (no `canView` gate). We skip the worker
+  // round-trip entirely for anonymous visitors (the
   // SEO-critical common case): no session ⇒ definitionally not enrolled. The
   // check is `.catch()`-guarded so an entitlement-resolver hiccup degrades to
   // the public/join CTA rather than throwing.
@@ -112,6 +124,102 @@ export const load: PageServerLoad = async (event) => {
   // serve THAT `public, s-maxage` — is a deliberate shell-split refactor, out of
   // WP-3 scope. See docs/caching-strategy.md §HTTP/CDN caching.
   setHeaders(CACHE_HEADERS.PRIVATE);
+
+  // ── Already hold it ⇒ this is the wrong surface (Codex-aectb) ───────────────
+  // A user who owns the course was still served the marketing page, with only
+  // the hero CTA relabelled. Send them to their dashboard instead.
+  //
+  // ON THE ORDERING — this sits after `setHeaders` because that call has to run
+  // before any throw or it never runs at all; the redirect must not be able to
+  // skip it. It does NOT mean the 303 carries those headers. Verified against the
+  // installed SvelteKit 2.55.0 source: a `Redirect` thrown from a load unwinds to
+  // the outer catch in `runtime/server/respond.js:514`, which builds the response
+  // with `redirect_response()` (`runtime/server/utils.js:136` —
+  // `new Response(undefined, { status, headers: { location } })`) and then adds
+  // ONLY cookies. The `setHeaders` bag is applied in the `resolve()` SUCCESS
+  // continuation (`respond.js:441`), which a thrown redirect never reaches. So the
+  // 303 carries `location` alone. Harmless: it has no body and a 303 is not
+  // heuristically cacheable by shared caches, so there is nothing to leak.
+  //
+  // ONE DECISION FUNCTION, BOTH DIRECTIONS: the dashboard load redirects HERE
+  // when `evaluateCourseGate` returns anything but `ok`; this page redirects
+  // THERE when the same pure gate returns `ok`. The two conditions partition the
+  // gate's outcome space, so for any one set of inputs exactly one of the two
+  // surfaces renders — the pair cannot ping-pong.
+  //
+  // ENTITLEMENT, NOT ENROLMENT: `resolveCanEnterCourse` asks
+  // `hasCourseEntitlement` (a live grant or a granting subscription tier), and
+  // deliberately NOT for a `course_enrollments` row. A refunded user KEEPS their
+  // enrollment row after the entitlement is revoked, so triggering on enrolment
+  // would bounce them sell→dashboard→sell forever. Entitlement is the only
+  // loop-free choice because it is the exact predicate the dashboard gates on.
+  //
+  // NEVER REDIRECT ON UNCERTAINTY: `enrolled` is `.catch(() => false)`-guarded
+  // above, so a resolver hiccup RENDERS the sales page rather than redirecting.
+  // That asymmetry is what makes the pair provably loop-free — the failure mode
+  // of BOTH surfaces is "land on sales and stay there".
+  //
+  // BYPASS: a `preview` query param (the builder's View-live link sends
+  // `?preview=1`) or `draftPreview` — which can only be true when the
+  // management-gated preview read succeeded, so it is already proof the viewer is
+  // an org manager. A creator inspecting their own page must see the page, not
+  // their dashboard, and no role or membership read is needed to tell.
+  //
+  // The test is `.has()`, so ANY value bypasses — `?preview=0` and
+  // `?preview=false` included. Deliberate: PRESENCE is the signal, matching the
+  // `searchParams.has('session_id')` idiom in checkout/success/+page.server.ts.
+  // Being loose costs nothing here — the sell page is fully public to anonymous
+  // visitors, so this redirect is a UX convenience and not a security boundary.
+  // The most a hand-typed `?preview=anything` earns is the marketing page the
+  // same person could already read while signed out.
+  if (!(url.searchParams.has('preview') || draftPreview)) {
+    const gate = evaluateCourseGate({
+      // A slug with no page/course already threw 404 above.
+      courseExists: true,
+      isAuthenticated: Boolean(user),
+      canEnterCourse: enrolled,
+    });
+    // A course with no slug has NO reachable dashboard URL, so there is nowhere
+    // confident to send anyone: `buildJourneyUrl` would fall back to
+    // `journey.id`, and the dashboard resolves its course by SLUG only
+    // (`resolveCourseBySlug`), so `/journeys/<uuid>/dashboard` is a guaranteed 404
+    // the visitor cannot escape — every retry of the sell page would 303 them
+    // straight back into it. Treated as doubt, and doubt means render where you
+    // are, exactly as a failed entitlement lookup does.
+    //
+    // Currently unreachable: `courses.slug` is `.notNull()`
+    // (packages/database/src/schema/journeys.ts:134) and `JourneyCourseView.slug`
+    // is `string` (packages/shared-types/src/journeys.ts:650). The guard is here
+    // because `apps/web` has `strictNullChecks` OFF, so if that DTO were ever
+    // relaxed — as the sibling `JourneyCourseSummary.slug` (`string | null`,
+    // :391) already is — nothing would warn and this would silently become a
+    // dead-end redirect.
+    //
+    // NOTE this does NOT mirror the dashboard's `course?.id ?? params.journeySlug`
+    // fallback, and deliberately so. The dashboard can fall back because its
+    // target — the sell page — resolves by PAGE slug, which is exactly what
+    // `params.journeySlug` holds, so the fallback URL genuinely works. Going the
+    // other way the key changes (page slug → course slug), so the mirrored
+    // fallback would build a URL that resolves to nothing. Not redirecting is the
+    // only option here that keeps a way back.
+    if (gate.kind === 'ok' && coursePage.course.slug) {
+      redirect(
+        303,
+        buildJourneyUrl(
+          url,
+          {
+            // The COURSE slug, not the landing-page slug — the dashboard
+            // resolves its course by that (`resolveCourseBySlug`) and the two
+            // are independently authored, so they can differ.
+            slug: coursePage.course.slug,
+            id: coursePage.course.id,
+            organizationSlug: params.slug,
+          },
+          { surface: 'dashboard' }
+        )
+      );
+    }
+  }
 
   return {
     coursePage,

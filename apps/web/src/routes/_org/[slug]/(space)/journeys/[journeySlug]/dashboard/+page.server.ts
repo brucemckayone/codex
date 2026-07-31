@@ -35,9 +35,21 @@ export const load: PageServerLoad = async (event) => {
   const { org, user } = await parent();
   const course = await resolveCourseBySlug(event, params.journeySlug);
 
+  // `.catch(() => false)` (Codex-aectb): `resolveCanEnterCourse` reaches a worker
+  // through the shared `request()` helper, which throws `ApiError` on a timeout
+  // or any non-2xx. Uncaught, that surfaced as a 500 on a surface that has a
+  // perfectly good fallback — so a failed lookup routes to sales instead.
+  //
+  // This is one half of a loop-free pair with the sell page, which redirects HERE
+  // when the same `evaluateCourseGate` returns `ok`. The shared invariant: ONLY
+  // REDIRECT ON A POSITIVE, CONFIDENT SIGNAL; ON DOUBT, RENDER WHERE YOU ARE.
+  // Both surfaces degrade to `false`, and `false` means "the sales page renders",
+  // so an unreliable resolver can never bounce a user around a cycle.
   const canEnter =
     user && course
-      ? await resolveCanEnterCourse(event, user.id, course.id)
+      ? await resolveCanEnterCourse(event, user.id, course.id).catch(
+          () => false
+        )
       : false;
 
   const outcome = evaluateCourseGate({

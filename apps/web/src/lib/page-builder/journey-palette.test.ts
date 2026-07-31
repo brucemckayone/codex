@@ -301,7 +301,32 @@ const coursePage = (
   testimonials: [],
 });
 
-describe('JourneyRenderer (mount)', () => {
+/**
+ * TIMEOUT RAISED TO 45s — not a slow assertion, a one-time mount cost.
+ *
+ * Whichever test in this block mounts FIRST absorbs the entire cost of Vite
+ * transforming + jsdom instantiating the `JourneyRenderer` component graph; its
+ * siblings then run in single-digit milliseconds. Measured here, same machine,
+ * same file, back-to-back runs — the first mount was 13190ms on a cold Vite
+ * cache, 7067ms warmer and 6641ms warmest, tracking `transform` (19.82s → 13.33s
+ * → 8.34s) rather than anything in the test. It has been measured at 33138ms on a
+ * loaded box, against a 15000ms global budget (`vite.config.ts` `testTimeout`).
+ *
+ * So this is not flake: it is reliably too slow and has only ever passed because
+ * the machine happened to be quiet. 45s clears the worst observed run with
+ * headroom. Scoped to this `describe` rather than to one `it`, because the cost
+ * lands on whichever mount runs first and test order is not guaranteed — pinning
+ * a single test would just move the failure to its sibling.
+ *
+ * NOT a weakened test: every assertion below is unchanged. The underlying
+ * pathology — a component mount costing seconds in jsdom — is tracked separately;
+ * this only stops it failing the suite on a busy machine.
+ *
+ * `describe(name, options, fn)` is the supported shape for a suite-level timeout
+ * in Vitest 4 (`SuiteCollectorCallable`); passing options as the THIRD argument
+ * is not — that overload takes a bare number.
+ */
+describe('JourneyRenderer (mount)', { timeout: 45000 }, () => {
   afterEach(() => {
     document.body.innerHTML = '';
   });

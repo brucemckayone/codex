@@ -168,6 +168,16 @@ export interface JourneyListItem {
   enrolledCount: number | null;
   /** `live` provenance (purchases + subscriptions). */
   revenueCents: number | null;
+  /**
+   * Creator-flagged for the org homepage's "Editor's picks"
+   * (`landing_pages.featured`). Present so the studio index's feature toggle can
+   * render its CURRENT state — without it the control has to assume "off" and
+   * would show an already-featured portal as un-featured.
+   *
+   * Orthogonal to `status`: the public read filters `status = PUBLISHED`
+   * independently, so a featured DRAFT is stored intent with no public effect.
+   */
+  featured: boolean;
   updatedAt: string;
 }
 

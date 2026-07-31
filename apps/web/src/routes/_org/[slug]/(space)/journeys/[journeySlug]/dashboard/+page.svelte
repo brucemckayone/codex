@@ -110,6 +110,10 @@
       durationSeconds: practice?.durationSeconds ?? null,
       stageName: resumeEntry.stageName,
       stageIndex: stageIndex < 0 ? 0 : stageIndex,
+      // The threshold card renders a real cover now (Codex-tnwnu), so it takes
+      // the practice's own still when the curriculum has one. Null → the shared
+      // brand cover, same as any other cover-less journey entry.
+      coverImageUrl: practice?.thumbnailUrl ?? null,
     };
   });
 
@@ -173,6 +177,7 @@
         stageName={resumeContext.stageName}
         stageIndex={resumeContext.stageIndex}
         durationSeconds={resumeContext.durationSeconds}
+        coverImageUrl={resumeContext.coverImageUrl}
         percent={rollup.overall.percent}
         state={resumeState}
       />

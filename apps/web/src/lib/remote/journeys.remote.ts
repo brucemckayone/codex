@@ -350,6 +350,43 @@ export const updateJourneyOffer = command(
   }
 );
 
+/**
+ * Promote or demote a journey on the org homepage (`landing_pages.featured`).
+ *
+ * A featured journey takes a slide in "Editor's picks" on the org landing page,
+ * beside featured CONTENT — the same promotion affordance content has had via
+ * `content.featured`, which portals were structurally unable to use because
+ * nothing in the codebase could write the column.
+ *
+ * `featured` is a plain required boolean, not nullable: `command()` infers a
+ * `.nullable()` field as OPTIONAL, so a nullable flag would arrive as
+ * `boolean | undefined` and an intended `false` would travel as a missing key.
+ * A toggle has two states and must send whichever one it is in.
+ */
+export const setJourneyFeatured = command(
+  z.object({
+    pageId: z.string().uuid(),
+    featured: z.boolean(),
+  }),
+  async ({ pageId, featured }): Promise<void> => {
+    const ctx = await resolveStudioOrg();
+    if (!ctx) {
+      error(400, 'Journeys can only be featured within an organization');
+    }
+    try {
+      await ctx.api.access.setJourneyFeatured(ctx.orgId, pageId, featured);
+    } catch (err) {
+      // Forward 4xx text (e.g. "not found" for a page in another org) so the
+      // studio toast can say something true; 5xx propagates untouched because it
+      // may carry internals.
+      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
+        error(err.status, err.message);
+      }
+      throw err;
+    }
+  }
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Course MONETISATION — the authoritative subscription plan + tier-access write
 // (Codex-2pryk.2.4.2).

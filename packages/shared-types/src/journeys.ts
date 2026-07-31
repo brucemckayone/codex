@@ -590,6 +590,16 @@ export interface EnrolledCourseSummary {
     lede: string | null;
     /** The course guide's display name (`courses.guide.name`), or `null`. */
     guideName: string | null;
+    /**
+     * Public CDN URL for the course cover (`courses.coverImageKey` resolved
+     * against `R2_PUBLIC_URL_BASE`), or `null` when the creator uploaded none or
+     * the worker has no configured CDN base. Never a raw R2 key.
+     *
+     * Added by Codex-tnwnu: the library's journey cards had no cover field at
+     * all, so they were the only journey surface structurally unable to render a
+     * photo and were permanently stuck on the typographic fallback.
+     */
+    coverImageUrl: string | null;
   };
   enrollment: JourneyEnrollment;
   /**
@@ -684,6 +694,18 @@ export interface JourneyListItem {
   enrolledCount: number | null;
   /** `live` provenance (completed one-off purchases for the subject course). */
   revenueCents: number | null;
+  /**
+   * Creator-flagged for the org-homepage "featured" rail (`landing_pages.featured`
+   * — the same column {@link JourneyCardView.featured} carries on the public side).
+   * Surfaced on the studio index so the featured toggle can render its CURRENT
+   * state; without it the control would have to guess, and every studio render
+   * would show an un-featured portal as off.
+   *
+   * Orthogonal to `status`: `listPublishedJourneys` filters `status = 'published'`
+   * independently, so a featured DRAFT is a harmless stored intent with no public
+   * effect until the page publishes.
+   */
+  featured: boolean;
   updatedAt: string;
 }
 

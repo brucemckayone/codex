@@ -1624,10 +1624,13 @@
      per-content-type defaults above by source order (equal specificity,
      declared later). NOTE: this selector is UNSCOPED — by source order it
      also overrides the list / featured / compact aspect-ratio rules
-     declared earlier (only audio-row, declared later, still wins). That is
-     currently harmless because `shape` has no consumers yet; WP-11 owns
-     broad `shape` application and will scope these against the structural
-     variants when it wires real callers. `normalizeRatio` (deprecated)
+     declared earlier (only audio-row, declared later, still wins). This
+     comment used to call that harmless "because `shape` has no consumers
+     yet" — no longer true as of 2026-07-30: callers exist in
+     discover/+page.svelte, explore/+page.svelte, LibraryPageView.svelte and
+     the org landing page. So the unscoped override is LIVE wherever a caller
+     sets `shape` on a list / featured / compact card, and WP-11's scoping
+     work is now load-bearing rather than pre-emptive. `normalizeRatio` (deprecated)
      resolves to shape='16:9' upstream, so the old mixed-row normalisation
      lands here too. */
   .cc[data-shape='16:9'] .cc__thumb {
