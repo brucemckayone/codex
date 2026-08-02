@@ -8,29 +8,25 @@
  * conflict UUID for cross-tab reconciliation — it is NOT a schema version.
  * Nothing today records the *shape* of the persisted `data`.
  *
- * That is fine until the shape changes. When the course-grouping work lands
- * (SPEC §11, HARDENING risk R-B) `LibraryItem` gains course-entitlement fields
- * and the library page groups by course. On the first load after that ships,
- * the collection would hydrate OLD-shape rows straight out of localStorage;
- * the new grouping/filter code reads fields those rows never had, so items
- * drop out of view — an empty library that stays empty until a server refetch
- * happens to overwrite every row. That is R-B: "schema change strands stale
- * localStorage".
+ * That is fine until the shape changes. Without a stamp, the collection would
+ * hydrate OLD-shape rows straight out of localStorage; code that reads fields
+ * those rows never had drops items out of view — an empty library that stays
+ * empty until a server refetch happens to overwrite every row. That is
+ * HARDENING risk R-B: "schema change strands stale localStorage".
  *
- * This module scaffolds a schema-version stamp plus a branch that runs BEFORE
- * the collection is created, so an incompatible payload is migrated or
- * discarded (discard is self-healing: the collection loads empty, then
+ * This module holds a schema-version stamp plus a branch that runs BEFORE the
+ * collection is created, so an incompatible payload is migrated or discarded
+ * (discard is self-healing: the collection loads empty, then
  * `loadLibraryFromServer()` on mount refetches current-shape rows) instead of
  * hydrated as garbage.
  *
- * IMPORTANT — behaviour today is unchanged. At the introduction version (v1)
- * there is no schema change yet, so:
- *   - a payload already stamped v1 hydrates untouched (the fast path), and
- *   - an UNSTAMPED payload is, by definition, current-shape (it was written by
- *     this same code), so it is adopted (stamped, kept) — no discard, no
- *     empty-library flash for existing users.
- * The discard/migrate branch only fires once `LIBRARY_SCHEMA_VERSION` is
- * bumped for a real shape change.
+ * Version history:
+ *   - v1 — introduction. Stamping did not exist before this, so an UNSTAMPED
+ *     payload found at v1 is by definition current-shape and is adopted
+ *     (stamped, kept) rather than discarded.
+ *   - v2 — `LibraryItem` gained `journeys` (portal provenance). Migrated
+ *     in place from v1 by defaulting the field to `[]`; see
+ *     `librarySchemaMigrations`.
  *
  * @see $lib/collections/library.ts — the collection this guards.
  * @see $lib/library/filter-by-org.ts — the cross-org filter that trusts the
@@ -59,7 +55,7 @@ export const LIBRARY_SCHEMA_STORAGE_KEY = 'codex-library-schema';
  * derived from the old one, register a migration in `librarySchemaMigrations`
  * instead of relying on discard.
  */
-export const LIBRARY_SCHEMA_VERSION = 1;
+export const LIBRARY_SCHEMA_VERSION = 2;
 
 /**
  * The version at which schema-stamping was introduced. Used to distinguish
@@ -76,16 +72,53 @@ const INTRODUCTION_VERSION = 1;
  * migrate — discard instead". Migrations are keyed by the version being
  * migrated FROM.
  *
- * Empty today (the scaffold discards on any mismatch). The course-grouping
- * change can register `{ 1: (raw) => addCourseFields(raw) }` here to preserve
- * a user's local library across the bump instead of forcing a refetch.
+ * Registering a migration is preferred over relying on discard whenever the
+ * new shape is derivable from the old one: discard leaves the library visibly
+ * empty until `loadLibraryFromServer()` returns, and that request takes
+ * several seconds.
  */
 export type LibrarySchemaMigration = (rawPayload: string) => string | null;
 export type LibrarySchemaMigrations = Readonly<
   Record<number, LibrarySchemaMigration>
 >;
 
-export const librarySchemaMigrations: LibrarySchemaMigrations = {};
+export const librarySchemaMigrations: LibrarySchemaMigrations = {
+  /**
+   * v1 → v2: `LibraryItem` gained `journeys` — the portal(s) a practice sits
+   * inside, which drives the library's "part of <portal>" provenance badge.
+   *
+   * Old rows simply lack the field, and `[]` ("stands alone") is the correct
+   * default: it is what the server returns for a practice in no portal, so a
+   * migrated row renders identically to a fresh one for the common case. The
+   * refetch on mount then fills in real provenance for the minority that do
+   * belong to a portal. Migrating rather than discarding means existing users
+   * keep a populated library through the deploy instead of staring at an empty
+   * one for the duration of the library fetch.
+   */
+  1: (rawPayload) => {
+    const parsed: unknown = JSON.parse(rawPayload);
+    // Expected shape is TanStack DB's `{ [contentId]: { versionKey, data } }`.
+    // Anything else is unrecognised — return null to fall back to discard
+    // rather than write a half-understood payload back to storage.
+    if (
+      parsed === null ||
+      typeof parsed !== 'object' ||
+      Array.isArray(parsed)
+    ) {
+      return null;
+    }
+
+    for (const row of Object.values(parsed as Record<string, unknown>)) {
+      if (row === null || typeof row !== 'object') return null;
+      const data = (row as { data?: unknown }).data;
+      if (data === null || typeof data !== 'object') return null;
+      const item = data as { journeys?: unknown };
+      if (!Array.isArray(item.journeys)) item.journeys = [];
+    }
+
+    return JSON.stringify(parsed);
+  },
+};
 
 /**
  * Outcome of a reconcile pass, surfaced for observability/tests.

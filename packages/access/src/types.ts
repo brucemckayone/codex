@@ -5,7 +5,7 @@
  * Previously in @codex/shared-types — moved here for domain ownership.
  */
 
-import type { PaginationMetadata, ProgressData } from '@codex/shared-types';
+import type { ProgressData } from '@codex/shared-types';
 
 /**
  * Response for GET /api/access/content/:id/stream
@@ -40,32 +40,24 @@ export interface PlaybackProgressResponse {
 }
 
 /**
- * Response for GET /api/access/user/library
- * Returns user's library with content and purchase information
+ * Response for GET `/api/access/user/library`.
+ *
+ * RE-EXPORTED from the service that produces it rather than re-declared here.
+ * This file used to hand-declare a parallel copy, and the two drifted badly:
+ * the copy listed `accessType: 'purchased' | 'membership' | 'subscription'`
+ * long after the service started returning `'free'` and `'followers'` too, and
+ * it never gained the `journeys` provenance field. TypeScript could not catch
+ * it — the service's richer object is structurally assignable to the narrower
+ * declaration, so nothing cross-checked them, and every frontend consumer
+ * (which imports this barrel, not the service internals) was typed against
+ * values the API had stopped restricting itself to.
+ *
+ * Deriving it makes that class of drift impossible rather than merely fixed.
  */
-export interface UserLibraryResponse {
-  items: Array<{
-    content: {
-      id: string;
-      slug: string;
-      title: string;
-      description: string;
-      thumbnailUrl: string | null;
-      contentType: string;
-      durationSeconds: number;
-      organizationId: string | null;
-      organizationSlug: string | null;
-    };
-    /** Access type: 'purchased' = bought, 'membership' = org member access, 'subscription' = active subscription */
-    accessType: 'purchased' | 'membership' | 'subscription';
-    purchase: {
-      purchasedAt: string; // ISO 8601 timestamp
-      priceCents: number;
-    } | null;
-    progress: (ProgressData & { percentComplete: number }) | null;
-  }>;
-  pagination: PaginationMetadata;
-}
+export type {
+  UserLibraryItem,
+  UserLibraryResponse,
+} from './services/content-access/library';
 
 /**
  * Response for POST /api/access/content/:id/progress

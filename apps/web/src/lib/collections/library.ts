@@ -74,6 +74,56 @@ export const libraryCollection = browser
   : undefined;
 
 /**
+ * Largest page the API will serve (`paginationSchema.limit.max`). Asking for
+ * more is a validation error, not a bigger page.
+ */
+const LIBRARY_FETCH_PAGE_SIZE = 100;
+
+/**
+ * Hard stop on the paging loop — 100 pages x 100 items. A backstop against a
+ * server that keeps reporting `totalPages`, never a limit real users hit.
+ */
+const LIBRARY_FETCH_PAGE_CAP = 100;
+
+/**
+ * Fetch the member's ENTIRE library, following pagination to exhaustion.
+ *
+ * This collection is a local-first mirror of "everything you own", so a single
+ * page is the wrong shape for it in two ways. The obvious one: with the API's
+ * default `limit: 20`, a member owning 29 items could only ever see 20, with no
+ * way to reach the rest. The subtle and worse one: the reconcile pass below
+ * treats any locally-cached key ABSENT from the fetch as revoked and deletes
+ * it — so a one-page fetch would actively prune everything past item 20 out of
+ * localStorage on every refresh.
+ *
+ * Caveat worth knowing: when several access arms contribute items, the API's
+ * `total` is the sum of per-arm counts while each arm is independently
+ * LIMIT/OFFSET-ed, so page boundaries above `LIBRARY_FETCH_PAGE_SIZE` items are
+ * approximate. At 100 per page a member needs to own >100 items in one org
+ * before that can bite; fixing it properly means merging in SQL rather than
+ * in JS, which is a service-layer change.
+ */
+async function fetchEntireLibrary(): Promise<LibraryItem[]> {
+  const collected: LibraryItem[] = [];
+
+  for (let page = 1; page <= LIBRARY_FETCH_PAGE_CAP; page++) {
+    const result = await getUserLibrary({
+      page,
+      limit: LIBRARY_FETCH_PAGE_SIZE,
+    });
+    const items = result?.items ?? [];
+    collected.push(...items);
+
+    // Stop on a short/empty page as well as on the reported last page — a
+    // server that under-reports `totalPages` must not spin the loop to the cap.
+    const totalPages = result?.pagination?.totalPages ?? 1;
+    if (items.length < LIBRARY_FETCH_PAGE_SIZE || page >= totalPages) break;
+  }
+
+  return collected;
+}
+
+/**
  * Fetch library from server and reconcile with localStorage collection.
  *
  * Called by invalidateCollection('library') when the server-side version
@@ -82,8 +132,7 @@ export const libraryCollection = browser
 export async function loadLibraryFromServer(): Promise<void> {
   if (!libraryCollection) return;
   try {
-    const result = await getUserLibrary({});
-    const freshItems = result?.items ?? [];
+    const freshItems = await fetchEntireLibrary();
 
     // Track existing keys to detect removals (access revoked, etc.)
     const existingKeys = new Set<string>();
@@ -107,8 +156,9 @@ export async function loadLibraryFromServer(): Promise<void> {
     //
     // Copying each top-level field onto the draft records each as a change,
     // which IS what TanStack DB's proxy tracks. `LibraryItem` has a stable
-    // shape (content / accessType / purchase / progress), so `Object.assign`
-    // is sufficient — no stale keys to prune.
+    // shape (content / accessType / purchase / progress / journeys), so
+    // `Object.assign` is sufficient — no stale keys to prune. Shape changes
+    // must bump `LIBRARY_SCHEMA_VERSION` so cached rows are migrated first.
     for (const item of freshItems) {
       const key = item.content.id;
       if (existingKeys.has(key)) {

@@ -57,6 +57,9 @@ function makeItem(overrides: ItemOverrides = {}): LibraryItem {
     accessType: 'purchased',
     purchase: null,
     progress,
+    // Stands alone (in no portal) — the default these tests care about, since
+    // continue-watching is about resumable MEDIA, not portal membership.
+    journeys: [],
   };
 }
 

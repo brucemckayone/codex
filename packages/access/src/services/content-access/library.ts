@@ -17,11 +17,14 @@ import {
 import { type DatabaseClient, toIso } from '@codex/database';
 import {
   content,
+  courseStages,
+  courses,
   mediaItems,
   organizationFollowers,
   organizationMemberships,
   organizations,
   purchases,
+  stagePractices,
   subscriptions,
   subscriptionTiers,
   videoPlayback,
@@ -41,9 +44,18 @@ import {
 } from 'drizzle-orm';
 
 /**
- * User library item with content, access type, purchase, and progress information
+ * User library item with content, access type, purchase, and progress
+ * information.
+ *
+ * Declared as a `type` alias, NOT an `interface`, and it must stay one.
+ * Consumers such as the web app's `LibraryPageView` accept a loose
+ * `{ [key: string]: unknown; content: { id: string } }` shape, and TypeScript
+ * only infers the implicit index signature that makes that assignment legal for
+ * object type ALIASES — an interface is open to declaration merging, so it never
+ * gets one. Converting this back to an interface breaks those call sites with a
+ * confusing "index signature is missing" error far from the change.
  */
-export interface UserLibraryItem {
+export type UserLibraryItem = {
   content: {
     id: string;
     slug: string;
@@ -82,7 +94,23 @@ export interface UserLibraryItem {
     percentComplete: number;
     updatedAt: string;
   } | null;
-}
+  /**
+   * The portal(s) this practice sits inside, resolved through
+   * `stage_practices → course_stages → courses`. Empty when the practice
+   * stands alone.
+   *
+   * Deliberately SEPARATE from `accessType`. Provenance ("this lives inside
+   * the Descent portal") and access route ("you can open it because you're a
+   * member") are orthogonal facts, and a member needs both: the same practice
+   * can be reachable via membership AND belong to a portal. Folding a
+   * `course:` variant into `accessType` — which is what the frontend's badge
+   * helper originally anticipated — would have made the two mutually
+   * exclusive and silently dropped the access route.
+   *
+   * Ordered by title so the rendered badge is stable across requests.
+   */
+  journeys: Array<{ id: string; title: string; slug: string }>;
+};
 
 /**
  * User library response with pagination
@@ -231,6 +259,29 @@ export async function listUserLibrary(
   const contentFilters = buildContentFilters();
   const progressFilters = buildProgressFilters();
 
+  // ── Shared cross-arm exclusion: "not already acquired by purchase" ──
+  //
+  // Every non-purchase arm excludes content the user has bought (or is
+  // mid-buying) so `queryPurchased` stays the single owner of those rows and
+  // the accessType tag is never wrong. Both `completed` (webhook landed) and
+  // `pending` (Stripe redirect beat the webhook) count as "already owned".
+  //
+  // MUST be NOT EXISTS, never `id NOT IN (SELECT content_id ...)`.
+  // `purchases.content_id` is NULL for COURSE purchases (those rows carry
+  // `course_id` instead), so the NOT IN form returned a NULL from its
+  // subquery, and SQL's three-valued logic collapses
+  // `x NOT IN (NULL)` → `NOT (x = NULL)` → `NULL` → not TRUE — filtering out
+  // EVERY row. One journey purchase therefore blanked the entire library
+  // across the membership, subscription, free, and followers arms at once.
+  // The correlated NOT EXISTS below is null-safe: a NULL `content_id` simply
+  // never equals `content.id`, so it matches nothing and the row survives.
+  const notAcquiredByPurchase = sql`NOT EXISTS (
+    SELECT 1 FROM ${purchases}
+    WHERE ${purchases.customerId} = ${userId}
+      AND ${purchases.contentId} = ${content.id}
+      AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING})
+  )`;
+
   // ── Helper: map a row to UserLibraryItem ──────────────────────────
   const mapProgress = (row: {
     progressPositionSeconds: number | null;
@@ -349,6 +400,9 @@ export async function listUserLibrary(
         priceCents: row.amountPaidCents,
       },
       progress: mapProgress(row),
+      // Populated by `attachJourneyProvenance` once the page is final — one
+      // lookup for the page beats one per arm.
+      journeys: [],
     }));
 
     return { items, count: countResult[0]?.count ?? 0 };
@@ -382,13 +436,9 @@ export async function listUserLibrary(
       membershipContentFilter,
       eq(content.status, CONTENT_STATUS.PUBLISHED),
       isNull(content.deletedAt),
-      // Exclude content the user has acquired or is acquiring via purchase.
-      // Both `completed` (webhook landed) and `pending` (Stripe redirect beat
-      // the webhook — row exists but status hasn't flipped yet) count as
-      // "already owned" for library-categorisation purposes. Without the
-      // `pending` clause, a purchase mid-flight leaks into membership and
-      // shows up with the wrong accessType tag until the webhook lands.
-      sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING}))`,
+      // Cross-arm exclusion — see `notAcquiredByPurchase`. Without it a
+      // mid-flight purchase leaks into membership with the wrong accessType.
+      notAcquiredByPurchase,
       ...contentFilters,
       ...progressFilters,
     ];
@@ -465,6 +515,9 @@ export async function listUserLibrary(
       accessType: 'membership' as const,
       purchase: null,
       progress: mapProgress(row),
+      // Populated by `attachJourneyProvenance` once the page is final — one
+      // lookup for the page beats one per arm.
+      journeys: [],
     }));
 
     return { items, count: countResult[0]?.count ?? 0 };
@@ -523,16 +576,11 @@ export async function listUserLibrary(
       isNull(content.deletedAt),
       // Must belong to one of the user's subscribed orgs (with tier check)
       or(...subConditions)!,
-      // Exclude content the user has acquired or is acquiring via purchase.
-      // Both `completed` and `pending` count — a `pending` purchase is a
-      // Stripe session whose webhook hasn't landed yet. Without the
-      // `pending` clause, a mid-flight purchase leaks into the subscription
-      // arm (particularly for `accessType='paid'` + `minimumTierId` set
-      // content, which now qualifies for both arms — see 1b6f14a0) and
-      // shows up with the wrong accessType tag on the library. Once the
-      // webhook lands and `status` flips to `completed`, the row continues
-      // to be excluded here and surfaces in the purchased arm instead.
-      sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING}))`,
+      // Cross-arm exclusion — see `notAcquiredByPurchase`. Matters most in
+      // this arm: paid + tier-gated content qualifies for BOTH it and the
+      // purchased arm (see 1b6f14a0), so without the exclusion a mid-flight
+      // purchase surfaces with the wrong accessType until the webhook lands.
+      notAcquiredByPurchase,
       // Exclude content from management orgs (owner/admin/creator see
       // all their org's content via the membership query).
       ...(managementOrgIds.length > 0
@@ -619,6 +667,9 @@ export async function listUserLibrary(
       accessType: 'subscription' as const,
       purchase: null,
       progress: mapProgress(row),
+      // Populated by `attachJourneyProvenance` once the page is final — one
+      // lookup for the page beats one per arm.
+      journeys: [],
     }));
 
     return { items, count: countResult[0]?.count ?? 0 };
@@ -669,11 +720,11 @@ export async function listUserLibrary(
       isNull(content.deletedAt),
       sql`${content.organizationId} IS NOT NULL`,
       relationshipPredicate!,
-      // Cross-arm exclusion: purchased rows are surfaced by queryPurchased.
-      // Free items shouldn't be purchased, but flag-flips (paid → free)
-      // could create overlap; followers items shouldn't be priced. Both
-      // exclusions are defensive — keeps the priority contract explicit.
-      sql`${content.id} NOT IN (SELECT ${purchases.contentId} FROM ${purchases} WHERE ${purchases.customerId} = ${userId} AND ${purchases.status} IN (${PURCHASE_STATUS.COMPLETED}, ${PURCHASE_STATUS.PENDING}))`,
+      // Cross-arm exclusion — see `notAcquiredByPurchase`. Defensive here:
+      // free/followers items shouldn't be priced, but a flag-flip
+      // (paid → free) could create overlap. Keeps the priority contract
+      // explicit rather than relying on the flags staying clean.
+      notAcquiredByPurchase,
       // Cross-arm exclusion: management orgs are surfaced by queryMembership
       // which returns ALL of an org's content for owners/admins/creators.
       ...(managementOrgIds.length > 0
@@ -762,6 +813,9 @@ export async function listUserLibrary(
       accessType: tag,
       purchase: null,
       progress: mapProgress(row),
+      // Populated by `attachJourneyProvenance` once the page is final — one
+      // lookup for the page beats one per arm.
+      journeys: [],
     }));
 
     return { items, count: countResult[0]?.count ?? 0 };
@@ -795,6 +849,67 @@ export async function listUserLibrary(
     queryFreeRelationship(),
     queryFollowersRelationship(),
   ]);
+
+  // ── Step 5b: Portal provenance for the FINAL page ────────────────
+  //
+  // Runs once, on the page that is actually being returned, rather than
+  // per-arm: five arms each fetch up to `limit` rows but at most `limit`
+  // survive the merge, so joining provenance inside every arm would do up to
+  // 5x the work and throw most of it away. One `IN (page ids)` lookup instead.
+  //
+  // A practice can appear in several portals (`stage_practices` is keyed
+  // `(stage_id, content_id)` and a portal has many stages), so this collects
+  // ALL of them rather than assuming one. Deleted stages and deleted portals
+  // are filtered out — an archived portal must not keep branding a practice.
+  const attachJourneyProvenance = async (
+    pageItems: UserLibraryItem[]
+  ): Promise<UserLibraryItem[]> => {
+    if (pageItems.length === 0) return pageItems;
+
+    const contentIds = pageItems.map((i) => i.content.id);
+    const rows = await db
+      .selectDistinct({
+        contentId: stagePractices.contentId,
+        courseId: courses.id,
+        courseTitle: courses.title,
+        courseSlug: courses.slug,
+      })
+      .from(stagePractices)
+      .innerJoin(
+        courseStages,
+        and(
+          eq(courseStages.id, stagePractices.stageId),
+          isNull(courseStages.deletedAt)
+        )
+      )
+      .innerJoin(
+        courses,
+        and(eq(courses.id, courseStages.courseId), isNull(courses.deletedAt))
+      )
+      .where(inArray(stagePractices.contentId, contentIds));
+
+    if (rows.length === 0) return pageItems;
+
+    const byContentId = new Map<string, UserLibraryItem['journeys']>();
+    for (const row of rows) {
+      const list = byContentId.get(row.contentId);
+      const entry = {
+        id: row.courseId,
+        title: row.courseTitle,
+        slug: row.courseSlug,
+      };
+      if (list) list.push(entry);
+      else byContentId.set(row.contentId, [entry]);
+    }
+    for (const list of byContentId.values()) {
+      list.sort((a, b) => a.title.localeCompare(b.title));
+    }
+
+    return pageItems.map((item) => {
+      const journeys = byContentId.get(item.content.id);
+      return journeys ? { ...item, journeys } : item;
+    });
+  };
 
   // ── Step 6: Merge, sort, and paginate ─────────────────────────────
   // Source priority (first-match-wins on overlap):
@@ -832,7 +947,7 @@ export async function listUserLibrary(
               : followersResult
       : (activeSources[0] ?? purchaseResult);
     return {
-      items: result.items,
+      items: await attachJourneyProvenance(result.items),
       pagination: {
         page: input.page,
         limit: input.limit,
@@ -875,7 +990,9 @@ export async function listUserLibrary(
   }
 
   // Trim to page size (each source may have returned up to limit items)
-  const items = dedupedItems.slice(0, input.limit);
+  const items = await attachJourneyProvenance(
+    dedupedItems.slice(0, input.limit)
+  );
 
   return {
     items,
