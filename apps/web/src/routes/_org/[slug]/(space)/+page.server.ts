@@ -56,6 +56,8 @@ export const load: PageServerLoad = async ({
     slug: routeParams.slug,
     limit: 12,
   });
+  const { org } = await parent();
+
   /*
     Featured PORTALS — the journeys a creator has promoted
     (`landing_pages.featured`), which join the content picks as slides in
@@ -67,16 +69,20 @@ export const load: PageServerLoad = async ({
     layout, changes the dot count under the user, and re-runs the carousel's
     IntersectionObserver effect. A carousel may not gain slides late.
 
-    Awaiting costs nothing here: `listPublishedJourneys` resolves the org from
-    the request hostname itself (it does not take an org id), so it rides in this
-    pre-`parent()` parallel group rather than adding a serial round trip.
+    Fired AFTER `parent()` so it can pass the org id `parent()` already resolved.
+    It used to run in the pre-`parent()` parallel group precisely BECAUSE it
+    re-derived the org from the request hostname — that made it independent, but
+    it also meant every call paid a redundant `getPublicInfo` hop, twice per
+    render counting the rail below. Passing `organizationId` puts these reads on
+    the same footing as the content/categories/stats reads (Codex-72k55), and
+    costs no wall-clock: it now runs concurrently with the catalogue fetch, which
+    is the longer of the two.
   */
   const featuredJourneysPromise = listPublishedJourneys({
     featured: true,
     limit: MAX_FEATURED_PORTALS,
+    organizationId: org.id,
   }).catch(() => []);
-
-  const { org } = await parent();
 
   // Single catalogue fetch — the client slices it into every section below.
   const catalogueResult = await getPublicContent({
@@ -88,8 +94,8 @@ export const load: PageServerLoad = async ({
   const allContent: ContentItem[] = catalogueResult?.items ?? [];
 
   const statsResult = await statsPromise.catch(() => null);
-  // Already in flight since before `parent()` — this await resolves an existing
-  // promise rather than starting a request.
+  // In flight since just before the catalogue fetch — this await resolves an
+  // existing promise rather than starting a request.
   const featuredJourneys = await featuredJourneysPromise;
 
   // Set cache headers only after the critical awaits. If `parent()` throws
@@ -159,7 +165,11 @@ export const load: PageServerLoad = async ({
     continueWatching: getContinueWatching(undefined).catch(() => []),
     // Streamed: guided journeys for this org (featured-first, capped). Hidden
     // when the org has none; any transport error degrades to an empty rail.
-    journeys: listPublishedJourneys({ limit: 12 }).catch(() => []),
+    // Takes the resolved org id for the same reason as the featured read above.
+    journeys: listPublishedJourneys({
+      limit: 12,
+      organizationId: org.id,
+    }).catch(() => []),
     creators: creatorsPromise
       .then((r) => ({
         items: r?.items ?? [],
