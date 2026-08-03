@@ -56,6 +56,7 @@ import {
   courseStages,
   courses,
   entitlements,
+  landingPages,
   organizationMemberships,
   organizations,
   practiceCompletions,
@@ -82,6 +83,12 @@ interface PortalSpec {
   source: 'grant' | 'course_subscription' | 'course_purchase';
   /** One-off price in GBP pence, or null for "included". */
   priceCents: number | null;
+  /**
+   * Promote this portal into the org landing page's "Editor's picks" carousel
+   * (`landing_pages.featured`). Only a couple are featured — a carousel where
+   * every portal is a pick shows nothing about how curation reads.
+   */
+  featured?: boolean;
 }
 
 /**
@@ -103,6 +110,7 @@ const PORTALS: PortalSpec[] = [
     completions: 0,
     source: 'grant',
     priceCents: null,
+    featured: true,
   },
   {
     slug: 'tending-the-grief',
@@ -131,6 +139,7 @@ const PORTALS: PortalSpec[] = [
     completions: 3,
     source: 'course_purchase',
     priceCents: 4900,
+    featured: true,
   },
   {
     slug: 'return-to-the-shoreline',
@@ -202,7 +211,28 @@ async function main(): Promise<void> {
         updatedAt: new Date(),
       })
       .where(eq(courses.id, junk.id));
-    console.log(`  ✎ retitled "${junk.title}" → "The Long Descent"`);
+
+    // Retitle the PAGE too. Renaming only the course left the landing rail still
+    // advertising the junk name, because `listPublishedJourneys` reads
+    // `landingPages.title`, not `courses.title` — the card and the sell page it
+    // opens disagreed. Scoped to this org's page for the same slug; `sections`
+    // is left alone (a human may have authored this one in the builder).
+    const [renamedPage] = await dbWs
+      .update(landingPages)
+      .set({ title: 'The Long Descent', updatedAt: new Date() })
+      .where(
+        and(
+          eq(landingPages.organizationId, org.id),
+          eq(landingPages.slug, 'pricing-smoke-test'),
+          isNull(landingPages.deletedAt)
+        )
+      )
+      .returning({ id: landingPages.id });
+
+    console.log(
+      `  ✎ retitled "${junk.title}" → "The Long Descent"` +
+        (renamedPage ? ' (course + page)' : ' (course only — no page found)')
+    );
   }
 
   // ── 2. Pick practices from content not already in a portal ───────────
@@ -289,12 +319,162 @@ async function main(): Promise<void> {
       );
     }
 
+    // Runs for BOTH branches, and that is the point: the earlier version of this
+    // script created no page at all, so a re-run against courses it had already
+    // seeded is exactly the case that has to backfill one. Reconciling (rather
+    // than inserting inside `createPortal`) is what makes the fix reach rows that
+    // already exist.
+    await reconcilePage(org.id, userId, courseId, spec);
     await reconcileCover(courseId, spec);
     await reconcileEnrollment(userId, org.id, courseId, spec);
     await reconcileCompletions(userId, courseId, spec.completions);
   }
 
   console.log(`\n✓ Done. Sign in as the owner of "${org.name}" to see them.\n`);
+}
+
+/**
+ * Ensure the portal has a PUBLISHED `course`-type landing page bound to it.
+ *
+ * Idempotent by (org, slug): an existing page is updated in place rather than
+ * duplicated, because `landing_pages.slug` is unique per org over non-deleted
+ * rows — a blind insert on a re-run would violate that partial index. Updating
+ * also repairs a page whose title has drifted from its course, which is how the
+ * pre-existing `pricing-smoke-test` portal ended up advertising a junk name on
+ * the landing rail: `listPublishedJourneys` returns `landingPages.title`, and
+ * only the COURSE had been retitled.
+ *
+ * `sections` is rewritten every run so a copy change here reaches already-seeded
+ * rows. Safe precisely because these are seed-owned demo pages — never call this
+ * against a page a human has edited.
+ */
+async function reconcilePage(
+  organizationId: string,
+  creatorId: string,
+  courseId: string,
+  spec: PortalSpec
+): Promise<void> {
+  const existing = await dbWs.query.landingPages.findFirst({
+    where: and(
+      eq(landingPages.organizationId, organizationId),
+      eq(landingPages.slug, spec.slug),
+      isNull(landingPages.deletedAt)
+    ),
+    columns: { id: true },
+  });
+
+  const shared = {
+    pageType: 'course' as const,
+    title: spec.title,
+    status: 'published' as const,
+    publishedAt: new Date(),
+    featured: spec.featured ?? false,
+    subjectType: 'course' as const,
+    subjectId: courseId,
+    sections: buildSections(spec),
+  };
+
+  if (existing) {
+    await dbWs
+      .update(landingPages)
+      .set(shared)
+      .where(eq(landingPages.id, existing.id));
+    return;
+  }
+
+  await dbWs.insert(landingPages).values({
+    organizationId,
+    creatorId,
+    slug: spec.slug,
+    ...shared,
+  });
+}
+
+/**
+ * The sell-page body for a seeded portal.
+ *
+ * WHY A PAGE AT ALL: a portal is a COURSE plus a published `course`-type LANDING
+ * PAGE, and the public rails are built from the page, not the course.
+ * `listPublishedJourneys` — which feeds the org landing "Editor's picks" and the
+ * portals rail — selects `from(landingPages)`, and `listEnrolledJourneys`
+ * INNER JOINs it. So a course seeded without a page is invisible on every
+ * landing surface no matter how complete its curriculum is. (Only
+ * `listPublishedCourses`, the /explore rail, left-joins and shows it anyway,
+ * which is why this gap looked like it worked.)
+ *
+ * Copy is drawn from the portal's OWN kicker/lede rather than lorem or
+ * "Section title here" placeholders. Codex-maf0y exists because placeholder
+ * section copy on a published page gets served to real visitors — demo data
+ * that reads as real copy at real lengths is the whole point of this seed, and
+ * it keeps that bead's failure mode out of the seeded rows.
+ *
+ * A deliberately SMALL set (hero → ache → map → invite): enough that clicking a
+ * card lands on a page with a shape, without pretending to be a finished sales
+ * page nobody wrote.
+ */
+function buildSections(spec: PortalSpec) {
+  const priceLine =
+    spec.priceCents === null
+      ? 'Included with membership'
+      : `£${(spec.priceCents / 100).toFixed(2)} once · yours to keep`;
+
+  return [
+    {
+      id: crypto.randomUUID(),
+      name: 'Hero',
+      type: 'hero',
+      props: {
+        eyebrow: spec.kicker,
+        headline: spec.title,
+        sub: spec.lede,
+        button: 'Begin',
+        bg: 'ember',
+      },
+      enabled: true,
+      variant: 'split',
+    },
+    {
+      id: crypto.randomUUID(),
+      name: 'The ache',
+      type: 'ache',
+      props: {
+        eyebrow: 'Why this',
+        heading: 'You already know the shape of it.',
+        sub: spec.lede,
+      },
+      enabled: true,
+      variant: 'default',
+    },
+    {
+      id: crypto.randomUUID(),
+      name: 'The map',
+      type: 'map',
+      props: {
+        eyebrow: 'The whole path',
+        heading: "Everything you'll walk.",
+        sub: spec.stages.map((s) => s.name).join(' · '),
+        note: 'The first ground is already open.',
+      },
+      enabled: true,
+      variant: 'descent',
+    },
+    {
+      id: crypto.randomUUID(),
+      name: 'The invite',
+      type: 'invite',
+      props: {
+        eyebrow: 'Begin',
+        heading: spec.title,
+        accent: 'is waiting.',
+        sub: 'One key opens everything that grows from here.',
+        price: priceLine,
+        risk: 'Cancel anytime',
+        button: 'Begin',
+      },
+      enabled: true,
+      variant: 'card',
+    },
+  ];
 }
 
 /** Insert the course, its three stages, and the stage→practice links. */
