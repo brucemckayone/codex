@@ -37,6 +37,78 @@ const PAYLOAD = JSON.stringify({
   'content-1': { versionKey: 'v-uuid', data: { content: { id: 'content-1' } } },
 });
 
+describe('librarySchemaMigrations — v1 → v2 (journeys provenance)', () => {
+  /** A v1 row: everything the shape had BEFORE `journeys` existed. */
+  const v1Payload = JSON.stringify({
+    'content-1': {
+      versionKey: 'v-uuid',
+      data: {
+        content: { id: 'content-1', title: 'Tuning Fork Reset' },
+        accessType: 'membership',
+        purchase: null,
+        progress: null,
+      },
+    },
+  });
+
+  it('defaults journeys to [] so a v1 row survives the bump instead of being discarded', () => {
+    const storage = memoryStorage({
+      [LIBRARY_SCHEMA_STORAGE_KEY]: '1',
+      [LIBRARY_STORAGE_KEY]: v1Payload,
+    });
+
+    const outcome = reconcileLibrarySchemaVersion(storage);
+
+    // Migrated, NOT discarded — the member keeps a populated library through
+    // the deploy rather than an empty one for the length of the library fetch.
+    expect(outcome).toBe('migrated');
+    expect(storage.peek(LIBRARY_SCHEMA_STORAGE_KEY)).toBe(
+      String(LIBRARY_SCHEMA_VERSION)
+    );
+
+    const migrated = JSON.parse(storage.peek(LIBRARY_STORAGE_KEY) as string);
+    expect(migrated['content-1'].data.journeys).toEqual([]);
+    // Every pre-existing field is preserved verbatim.
+    expect(migrated['content-1'].data.accessType).toBe('membership');
+    expect(migrated['content-1'].data.content.title).toBe('Tuning Fork Reset');
+    expect(migrated['content-1'].versionKey).toBe('v-uuid');
+  });
+
+  it('leaves an already-populated journeys array untouched', () => {
+    const withJourneys = JSON.stringify({
+      'content-1': {
+        versionKey: 'v-uuid',
+        data: {
+          content: { id: 'content-1' },
+          journeys: [{ id: 'j1', title: 'Descent', slug: 'descent' }],
+        },
+      },
+    });
+    const storage = memoryStorage({
+      [LIBRARY_SCHEMA_STORAGE_KEY]: '1',
+      [LIBRARY_STORAGE_KEY]: withJourneys,
+    });
+
+    expect(reconcileLibrarySchemaVersion(storage)).toBe('migrated');
+    const migrated = JSON.parse(storage.peek(LIBRARY_STORAGE_KEY) as string);
+    expect(migrated['content-1'].data.journeys).toEqual([
+      { id: 'j1', title: 'Descent', slug: 'descent' },
+    ]);
+  });
+
+  it('falls back to discard when a v1 payload is not the expected shape', () => {
+    // An array, not the `{ [id]: { versionKey, data } }` map — unrecognised, so
+    // the migration must decline rather than write back something it guessed at.
+    const storage = memoryStorage({
+      [LIBRARY_SCHEMA_STORAGE_KEY]: '1',
+      [LIBRARY_STORAGE_KEY]: JSON.stringify([{ nope: true }]),
+    });
+
+    expect(reconcileLibrarySchemaVersion(storage)).toBe('discarded');
+    expect(storage.has(LIBRARY_STORAGE_KEY)).toBe(false);
+  });
+});
+
 describe('reconcileLibrarySchemaVersion', () => {
   describe('current-version data hydrates unchanged', () => {
     it('is a no-op when the stamp already matches the current version', () => {
@@ -75,10 +147,15 @@ describe('reconcileLibrarySchemaVersion', () => {
         [LIBRARY_STORAGE_KEY]: PAYLOAD,
       });
 
-      // Simulate the future course-grouping bump: current is now v2.
+      // `migrations: {}` is what makes this the NO-MIGRATION case. It used to
+      // be omitted, which silently leaned on the real registry being empty — so
+      // the moment a v1 migration was registered (the `journeys` field, v2) this
+      // test started exercising the migrate branch while still asserting
+      // discard. Injecting the empty registry pins the branch under test.
       const outcome = reconcileLibrarySchemaVersion(storage, {
         currentVersion: 2,
         introductionVersion: 1,
+        migrations: {},
       });
 
       expect(outcome).toBe('discarded');

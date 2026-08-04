@@ -30,8 +30,23 @@ import { getEffectiveStatus } from './status';
  * Deliberately narrow so we can test without the full `LibraryItem` type.
  */
 interface LibraryAccessInput {
-  /** The library item's accessType — only 'subscription' triggers joins. */
-  accessType: 'purchased' | 'membership' | 'subscription';
+  /**
+   * The library item's accessType — only `'subscription'` triggers joins; every
+   * other route is unconditionally active.
+   *
+   * This lists the FULL union the API returns. It previously named only
+   * `purchased | membership | subscription`, which made the long-shipping
+   * `'free'` and `'followers'` values look impossible — the mismatch stayed
+   * invisible while `@codex/access` published an under-declared copy of the
+   * library contract. Runtime behaviour is unchanged: those values already fell
+   * through the `!== 'subscription'` guard to "active".
+   */
+  accessType:
+    | 'purchased'
+    | 'membership'
+    | 'subscription'
+    | 'free'
+    | 'followers';
   /** Slug of the owning org (join key against subscriptionCollection). */
   organizationSlug: string | null;
 }

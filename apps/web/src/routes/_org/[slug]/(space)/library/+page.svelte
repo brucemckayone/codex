@@ -27,10 +27,12 @@
     loadLibraryFromServer,
     useLiveQuery,
   } from '$lib/collections';
+  import Carousel from '$lib/components/carousel/Carousel.svelte';
   import JourneyEntryCard from '$lib/components/journeys/JourneyEntryCard.svelte';
+  import Skeleton from '$lib/components/ui/Skeleton/Skeleton.svelte';
   import {
+    enrolledCoursePortalStripEntry,
     enrolledCourseRowEntry,
-    enrolledCourseTileEntry,
     resumeProgress,
   } from '$lib/components/journeys/journey-entry-card';
   import type { EnrolledCourseSummary } from '$lib/journeys/types';
@@ -55,7 +57,6 @@
   });
 
   // ── Owned content — client-side, from the localStorage library collection ──
-  let isLoadingFromServer = $state(false);
   const libraryQuery = useLiveQuery(
     (q) =>
       q
@@ -68,17 +69,38 @@
     filterLibraryItemsByOrg((libraryQuery.data ?? []) as LibraryItem[], orgId)
   );
 
+  /**
+   * Has the server refresh finished (either way)? Starts false — including on
+   * the server, where it can never be true.
+   */
+  let serverFetchSettled = $state(false);
+
   onMount(async () => {
-    const hasData = (libraryCollection?.state.size ?? 0) > 0;
-    if (!hasData) isLoadingFromServer = true;
     try {
       await loadLibraryFromServer();
     } catch {
       // Non-fatal — an empty grid degrades gracefully.
     } finally {
-      isLoadingFromServer = false;
+      serverFetchSettled = true;
     }
   });
+
+  /**
+   * "We do not know what you own yet" — as distinct from "you own nothing".
+   *
+   * Derived rather than assigned in `onMount`, because the previous flag started
+   * `false` and only flipped to `true` inside `onMount`. That made the SSR pass —
+   * where `ssrData` is `[]` and no effect has run — indistinguishable from a
+   * settled empty library, so the server baked the first-run onboarding into the
+   * HTML for members who own plenty, and the real content replaced it a beat
+   * later. The library fetch takes several seconds, so that flash was very
+   * visible rather than theoretical.
+   *
+   * Any locally-cached item short-circuits this to `false`, so a return visit
+   * paints from localStorage immediately and never shows a skeleton — the
+   * skeleton is only for members with genuinely nothing cached yet.
+   */
+  const ownedPending = $derived(!serverFetchSettled && ownedItems.length === 0);
 
   // ── Static maps ────────────────────────────────────────────────────────────
   const TYPE_META: Record<string, { label: string; glyph: string }> = {
@@ -122,7 +144,7 @@
     return months <= 1 ? 'Last month' : `${months} months ago`;
   };
 
-  // Access-source → badge. Owned content maps its `accessType`; journey cards
+  // Access-source → badge. Owned content maps its `accessType`; portal cards
   // map the enrollment `source`. Unknown sources render no badge (never guess).
   type Badge = { cls: string; label: string };
   const badgeFor = (via: string | null | undefined): Badge | null => {
@@ -152,13 +174,47 @@
         return null;
     }
   };
-  const sourceGroup = (via: string | null | undefined) => {
-    if (via?.startsWith('course:')) return 'Part of a journey';
-    if (via === 'paid' || via === 'purchased') return 'Purchased';
-    if (via === 'subscribers' || via === 'members' || via === 'membership') {
-      return 'Included with membership';
+  /**
+   * The badge an owned row carries.
+   *
+   * Portal PROVENANCE wins over access route. A practice inside a portal is
+   * almost always ALSO reachable some other way (an owner reaches everything
+   * "via membership"), so showing the access route there would bury the more
+   * useful fact — that opening this practice means stepping into a portal, and
+   * that its progress counts toward one. `+n` when a practice is shared by
+   * several portals, which `stage_practices` permits.
+   */
+  const ownedBadge = (item: LibraryItem): Badge | null => {
+    const portals = item.journeys ?? [];
+    const first = portals[0];
+    if (first) {
+      const extra = portals.length > 1 ? ` +${portals.length - 1}` : '';
+      return { cls: 'course', label: `part of ${first.title}${extra}` };
     }
-    return 'Free';
+    return badgeFor(item.accessType);
+  };
+
+  /**
+   * Bucket for `group by: source`. Exhaustive over the API's real `accessType`
+   * union — `purchased | membership | subscription | free | followers`.
+   *
+   * It previously also tested `'paid'`, `'subscribers'` and `'members'`, which
+   * the API has never returned for a library item. Those branches were
+   * invisible dead code while the published type under-declared the union (see
+   * `@codex/access` types.ts); with the type derived from the service, the
+   * compiler flags them, so they are gone.
+   */
+  const sourceGroup = (item: LibraryItem) => {
+    if ((item.journeys?.length ?? 0) > 0) return 'Part of a portal';
+    switch (item.accessType) {
+      case 'purchased':
+        return 'Purchased';
+      case 'membership':
+      case 'subscription':
+        return 'Included with membership';
+      default:
+        return 'Free';
+    }
   };
 
   // Routed through `buildJourneyUrl` rather than hand-built, so the slug→id
@@ -200,10 +256,9 @@
     ].sort()
   );
 
+  // Only claim "you have nothing" once the server has actually said so.
   const isFirstRun = $derived(
-    !isLoadingFromServer &&
-      enrolledCourses.length === 0 &&
-      ownedItems.length === 0
+    !ownedPending && enrolledCourses.length === 0 && ownedItems.length === 0
   );
 
   const showContinue = $derived(facetKind === 'all' && !q);
@@ -264,8 +319,8 @@
       return groupByKey(list, (i) => typeMeta(i.content?.contentType).label);
     }
     if (groupBy === 'source') {
-      return groupByKey(list, (i) => sourceGroup(i.accessType), [
-        'Part of a journey',
+      return groupByKey(list, (i) => sourceGroup(i), [
+        'Part of a portal',
         'Included with membership',
         'Purchased',
         'Free',
@@ -316,13 +371,23 @@
   </span>
 {/snippet}
 
+<!-- One portal in the "Your portals" carousel. -->
+{#snippet portalCard(c: EnrolledCourseSummary)}
+  {@const badge = badgeFor(c.enrollmentSource)}
+  <JourneyEntryCard
+    {...enrolledCoursePortalStripEntry(c, journeyDashboardHref(c), {
+      accessLabel: badge?.label ?? null,
+    })}
+  />
+{/snippet}
+
 <main class="library" data-testid="member-library">
   {#if isFirstRun}
     <div class="firstrun">
       <p class="firstrun__kicker">Welcome to {orgName}</p>
       <h1 class="firstrun__title">Your library will grow here.</h1>
       <p class="firstrun__sub">
-        As you gather practices and follow journeys, they'll live in this room —
+        As you gather practices and enter portals, they'll live in this room —
         the ones you're on, and the ones you've kept. For now, there's one clear
         place to begin.
       </p>
@@ -332,7 +397,7 @@
           <span class="firstrun__ck">Start here</span>
           <span class="firstrun__ct">Explore {orgName}</span>
           <span class="firstrun__cd">
-            Browse the catalogue and find your first practice or journey.
+            Browse the catalogue and find your first practice or portal.
           </span>
           <span class="firstrun__cta">Browse everything →</span>
         </span>
@@ -345,7 +410,7 @@
         {memberName ? `Welcome back, ${memberName}` : 'Welcome back'}
       </h1>
       <p class="lib-head__sub">
-        Everything you've gathered lives here — journeys you're on, and the
+        Everything you've gathered lives here — portals you're on, and the
         practices you've kept.
       </p>
     </header>
@@ -376,7 +441,7 @@
           <button
             class="chip"
             class:chip--on={facetKind === 'journeys'}
-            onclick={() => selectFacet('journeys')}>Journeys</button
+            onclick={() => selectFacet('journeys')}>Portals</button
           >
         {/if}
         {#if ownedTypes.length > 0}
@@ -397,7 +462,7 @@
       <section class="sec">
         <div class="sec__head">
           <h2>Jump back in</h2>
-          <span class="sec__ct">across your journeys &amp; practices</span>
+          <span class="sec__ct">across your portals &amp; practices</span>
         </div>
         <!--
           Journeys AND standalone practices render through the SAME card
@@ -443,22 +508,38 @@
     {#if showJourneys}
       <section class="sec">
         <div class="sec__head">
-          <h2>Your journeys</h2>
+          <h2>Your portals</h2>
           <span class="sec__ct">{journeysShown.length} in your library</span>
         </div>
         {#if journeysShown.length > 0}
-          <div class="rail">
-            {#each journeysShown as c (c.course.id)}
-              {@const badge = badgeFor(c.enrollmentSource)}
-              <JourneyEntryCard
-                {...enrolledCourseTileEntry(c, journeyDashboardHref(c), {
-                  accessLabel: badge?.label ?? null,
-                })}
-              />
-            {/each}
-          </div>
+          <!--
+            A CAROUSEL, not a wrapping grid. The grid put five portals on two
+            rows and cost ~2x the vertical space for something the member scans
+            once — worst on mobile, where each row is a full card tall. One
+            scrolling row is a fixed height no matter how many portals you own.
+
+            The shared `Carousel` is used rather than a bare scroll container
+            precisely because the naive version of this is bad UX: it gives
+            prev/next arrows that auto-hide at the ends, a visible thin
+            scrollbar, scroll-snap, swipe, and roving focus that scrolls the
+            focused card into view. The rail this replaces hid its scrollbar and
+            offered no arrows, so there was nothing to tell you more existed.
+          -->
+          <!--
+            25rem for the same reason `.cont` (the resume rail) is 26rem: a row
+            card splits its width between cover and text, and at 22rem the text
+            column was ~200px, which wrapped both the title and the
+            "Next · <practice>" line. 25rem is also exactly the carousel item's
+            400px ceiling, so it asks for what it can actually get.
+          -->
+          <Carousel
+            items={journeysShown}
+            itemMinWidth="25rem"
+            ariaLabel="Your portals"
+            renderItem={portalCard}
+          />
         {:else}
-          <p class="empty">No journeys match — try another filter or search.</p>
+          <p class="empty">No portals match — try another filter or search.</p>
         {/if}
       </section>
     {/if}
@@ -468,7 +549,13 @@
       <section class="sec">
         <div class="sec__head">
           <h2>{ownTitle}</h2>
-          <span class="sec__ct">{ownedShown.length} pieces</span>
+          <!-- Suppressed while pending: "0 pieces" is a claim, not a placeholder. -->
+          {#if !ownedPending}
+            <span class="sec__ct">
+              {ownedShown.length}
+              {ownedShown.length === 1 ? 'piece' : 'pieces'}
+            </span>
+          {/if}
           <div class="groupby">
             <span class="groupby__lbl">Group by</span>
             <div class="seg" role="group" aria-label="Group content by">
@@ -491,7 +578,42 @@
           </div>
         </div>
 
-        {#if ownedShown.length > 0}
+        {#if ownedPending}
+          <!--
+            Mirrors the real row silhouette (motif + two text lines + end chip)
+            in the same two-column grid, so the shelf does not reflow when the
+            data lands. Eight rows is roughly a viewport's worth — enough to read
+            as "a library is loading", not so many that it implies a count.
+          -->
+          <div class="rows" aria-hidden="true">
+            {#each { length: 8 } as _, i (i)}
+              <div class="row row--sk">
+                <Skeleton
+                  width="var(--space-12)"
+                  height="var(--space-12)"
+                  class="sk-thumb"
+                />
+                <div class="row--sk__t">
+                  <!--
+                    Title widths vary deterministically by index rather than
+                    randomly: a column of identical bars reads as a table, and
+                    Math.random() in a template would resample on every rerender
+                    and make the bars twitch. Fixed rem rather than % now that
+                    the text column is content-sized — a percentage of a
+                    content-sized box collapses to nothing.
+                  -->
+                  <Skeleton
+                    width="{9 + ((i * 17) % 7)}rem"
+                    height="var(--text-base)"
+                  />
+                  <Skeleton width="3.5rem" height="var(--text-sm)" />
+                </div>
+                <Skeleton width="6.5rem" height="1.5rem" class="sk-chip" />
+              </div>
+            {/each}
+          </div>
+          <p class="sr-only" role="status">Loading your library…</p>
+        {:else if ownedShown.length > 0}
           {#each ownedGroups as group (group.key)}
             <div class="grp">
               {#if group.key}
@@ -502,7 +624,7 @@
               <div class="rows">
                 {#each group.items as item (item.content?.id)}
                   {@const m = typeMeta(item.content?.contentType)}
-                  {@const badge = badgeFor(item.accessType)}
+                  {@const badge = ownedBadge(item)}
                   {@const opened = relativeTime(
                     item.progress?.updatedAt ?? item.purchase?.purchasedAt
                   )}
@@ -512,16 +634,22 @@
                       <span class="row__title">{item.content?.title}</span>
                       <span class="row__meta">{m.label}</span>
                     </span>
-                    <span class="row__end">
-                      {#if opened}
-                        <span class="row__opened">{opened}</span>
-                      {/if}
-                      {#if badge}
-                        <span class="badge badge--{badge.cls}"
-                          >{badge.label}</span
-                        >
-                      {/if}
-                    </span>
+                    {#if badge}
+                      <!-- Sits NEXT TO the title, not at the far right edge:
+                           "part of <portal>" describes the practice, so the two
+                           belong together, and pinning it to the edge of a
+                           full-width row opened a gutter wide enough to read as
+                           a layout mistake. `title` keeps a name clipped by the
+                           chip's max-width recoverable on hover. -->
+                      <span class="badge badge--{badge.cls}" title={badge.label}
+                        >{badge.label}</span
+                      >
+                    {/if}
+                    {#if opened}
+                      <!-- `margin-left: auto` — the only thing that earns the
+                           right edge, and only on rows that have been opened. -->
+                      <span class="row__opened">{opened}</span>
+                    {/if}
                   </a>
                 {/each}
               </div>
@@ -533,7 +661,7 @@
 
         <p class="seam">
           <span class="seam__g" aria-hidden="true">↳</span>
-          Practices that belong to a journey open inside it, so you keep your
+          Practices that belong to a portal open inside it, so you keep your
           place and can mark them complete.
         </p>
       </section>
@@ -771,19 +899,20 @@
   }
 
   /*
-    Both rails now hold `JourneyEntryCard`s, so the per-rail CARD styling that
+    Both shelves hold `JourneyEntryCard`s, so the per-shelf CARD styling that
     used to live here is gone (Codex-tnwnu): `.contcard*` + `.track` (the resume
-    strip) and `.jc*` (the journeys shelf, including its title-hash tone
+    strip) and `.jc*` (the portals shelf, including its title-hash tone
     gradient). What remains is the SCROLLER — a rail owns its own overflow and
     snap behaviour; a card never does.
 
-    Both scrollers set the card track width, since only the page knows how wide a
-    card should be in ITS rail. The journeys shelf is narrower than it looks
-    relative to the old 16.5rem: the shared card is a 3:4 portrait, so the track
-    had to come down or the shelf would be ~26rem tall.
+    These styles are only "Jump back in" now. The portals shelf moved to the
+    shared `Carousel` component, which owns its own track, arrows and scrollbar
+    — this hand-rolled scroller stays for the resume rail alone. Worth
+    collapsing the two onto `Carousel` eventually; the resume rail mixes portals
+    with standalone practices and sizes its cards differently, so that is a
+    separate change rather than a drive-by.
   */
-  .cont,
-  .rail {
+  .cont {
     display: flex;
     gap: var(--space-4);
     overflow-x: auto;
@@ -791,13 +920,12 @@
     scroll-snap-type: x mandatory;
     scrollbar-width: none;
   }
-  .cont::-webkit-scrollbar,
-  .rail::-webkit-scrollbar {
+  .cont::-webkit-scrollbar {
     display: none;
   }
   /*
-    26rem, up from 22rem, for the same reason the `.rail` track below went 13→16:
-    a resume card cannot do its job with the text unreadable.
+    26rem, up from 22rem: a resume card cannot do its job with the text
+    unreadable.
 
     A row card spends its width on TWO columns, so the text gets whatever the
     cover does not. At 22rem the split was 144px cover / 160px text — and a 160px
@@ -807,35 +935,19 @@
     up to 26rem. Together the text column goes 160px → ~248px, which holds a
     two-line title and the full practice name.
 
-    Unlike the `.rail` widening, this one costs NO height: a row's cover takes its
-    height from the text beside it, not from its own width, so a wider track makes
-    the card shorter if anything.
+    This costs NO height: a row's cover takes its height from the text beside it,
+    not from its own width, so a wider track makes the card shorter if anything.
   */
   .cont > :global(*) {
     flex: 0 0 clamp(18rem, 86vw, 26rem);
     scroll-snap-align: start;
   }
   /*
-    16rem, chosen by measurement rather than by eye (Codex-tnwnu). At the previous
-    13rem the shelf could not show a journey's NAME: with the title clamped to two
-    lines, 13rem tops out at an 18px title, which is off the design token ladder
-    (20/24/30/40) — so the fixture's 23-character name truncated to "ASSSS
-    BLASTE…". A shelf whose whole job is "here is what you own" cannot do that job
-    with the names cut off.
-
-    16rem is the narrowest track where a real token (`--text-lg`, 20px) fits a
-    two-line title with margin to spare — its ceiling there is 22px, and it holds
-    titles up to ~30 characters. 17rem would allow `--text-xl` but costs another
-    1.3rem of height for the same 30-character tolerance.
-
-    The cost is height, and it is unavoidable: the cover is 3:4, so height tracks
-    width. 13→16rem takes the card from 23.97rem to 26.43rem — which is where this
-    shelf already was (26.17rem) before the foot was tightened. That reclaimed
-    budget is spent here, on legible names.
+    The portals carousel owns its own track/arrow/scrollbar styling; the page
+    only supplies the space beneath it before "Everything you own".
   */
-  .rail > :global(*) {
-    flex: 0 0 16rem;
-    scroll-snap-align: start;
+  .sec :global(.carousel) {
+    padding-block-end: var(--space-2);
   }
 
   /* ── Group-by segmented control ── */
@@ -894,6 +1006,17 @@
   .grp__n {
     opacity: 0.6;
   }
+  /*
+    ONE row per line. Multi-column was tried and reverted: two columns of
+    title + chip forced the eye to scan in a Z rather than straight down a
+    single list of names, and every column boundary is another place a long
+    practice title or portal name can collide with a chip.
+
+    The dead-gutter problem that motivated columns is solved in the ROW instead
+    (see `.row__t` / `.row__opened`): the provenance chip now sits immediately
+    after the title rather than being flung to the far right edge, so the width
+    is spent on content adjacency instead of whitespace.
+  */
   .rows {
     display: grid;
     gap: var(--space-1);
@@ -914,8 +1037,43 @@
     background: color-mix(in oklab, var(--lib-ink-2) 55%, transparent);
     border-color: color-mix(in oklab, var(--lib-accent) 24%, transparent);
   }
-  .row__t {
+  /*
+    Skeleton rows reuse `.row` for padding/gap so the placeholder and the real
+    row occupy identical boxes and nothing shifts when data lands. They are
+    `div`s, not `<a>`s — a placeholder must not be focusable or clickable.
+  */
+  .row--sk__t {
     flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+  /* Match the real motif's and chip's silhouettes. */
+  .row--sk :global(.sk-thumb) {
+    border-radius: var(--radius-md);
+    flex-shrink: 0;
+  }
+  .row--sk :global(.sk-chip) {
+    border-radius: var(--radius-full, 999px);
+    flex-shrink: 0;
+  }
+  /*
+    `flex: 0 1 24rem` — a fixed BASIS that may shrink but never grows.
+
+    Three behaviours fall out of that, and all three are wanted:
+      - no grow, so the chip is not pushed to the far right edge (the dead
+        gutter that made a full-width row look like a mistake);
+      - a fixed basis, so every chip starts at the SAME x instead of trailing
+        each title at a different offset — adjacency without raggedness;
+      - shrink allowed (with `min-width: 0`), so a phone-width row compresses
+        the title rather than overflowing the card.
+
+    24rem clears the longest practice title in this catalogue
+    ("Working with Copal & Sacred Smoke") on one line at `--text-base`.
+  */
+  .row__t {
+    flex: 0 1 24rem;
     min-width: 0;
     display: flex;
     flex-direction: column;
@@ -932,16 +1090,38 @@
     font-size: var(--text-sm);
     color: var(--color-text-tertiary);
   }
-  .row__end {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    flex-shrink: 0;
-  }
   .row__opened {
+    margin-left: auto;
+    padding-left: var(--space-3);
     font-size: var(--text-sm);
     color: var(--color-text-tertiary);
     white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /*
+    Below md, a title and a provenance chip cannot share a line. At 390px the
+    row's content box is ~334px, and the chip alone may claim 14rem of it — the
+    title was squeezed under its own longest word and the chip pushed past the
+    viewport edge, clipped mid-word. So the chip takes its own line instead,
+    indented to the title's left edge (past the motif) so the row still reads as
+    one block rather than a stray pill under the artwork.
+  */
+  @media (--below-md) {
+    .row {
+      flex-wrap: wrap;
+      row-gap: var(--space-1);
+      /* Grid items default to `min-width: auto`, which lets a flex row's
+         min-content width force the single-column track wider than the
+         viewport. */
+      min-width: 0;
+    }
+    .row__t {
+      flex: 1 1 8rem;
+    }
+    .badge {
+      margin-left: calc(var(--space-12) + var(--space-3));
+    }
   }
 
   /* ── Badges ── */
@@ -953,7 +1133,10 @@
     border-radius: var(--radius-full, 999px);
     border: var(--border-width) solid transparent;
     white-space: nowrap;
-    align-self: flex-start;
+    /* `center`, not `flex-start`: the chip is now a direct child of the
+       centre-aligned `.row`, where top-aligning it against a two-line
+       title/type block left it visibly floating above the text baseline. */
+    align-self: center;
   }
   .badge--free {
     color: var(--color-text-secondary);
@@ -969,10 +1152,29 @@
     background: color-mix(in oklab, var(--lib-accent) 12%, transparent);
     border-color: color-mix(in oklab, var(--lib-accent) 30%, transparent);
   }
+  /*
+    Provenance chips carry a PROPER NOUN — the portal's title — where every
+    other badge carries a short status word ("purchased", "free"). Two
+    consequences, both handled here rather than by shortening the label:
+
+    1. No uppercase/tracking. Capitalising a title costs ~15% width and reads
+       as shouting a name; "part of Ancestral Threads" is also simply easier to
+       read than "PART OF ANCESTRAL THREADS".
+    2. A hard `max-width` + ellipsis. Portal titles are author-supplied and
+       unbounded, so without a cap a long one crowds the practice name it is
+       meant to annotate. The cap makes that impossible regardless of how a
+       creator names a portal.
+  */
   .badge--course {
     color: var(--lib-accent);
     background: color-mix(in oklab, var(--lib-accent) 12%, transparent);
     border-color: color-mix(in oklab, var(--lib-accent) 32%, transparent);
+    text-transform: none;
+    letter-spacing: normal;
+    max-width: 14rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
   }
 
   /* ── Seam + empty ── */

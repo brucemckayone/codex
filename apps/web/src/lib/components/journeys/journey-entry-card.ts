@@ -267,6 +267,47 @@ export function enrolledCourseTileEntry(
 }
 
 /**
+ * `EnrolledCourseSummary` → the library "Your portals" STRIP card.
+ *
+ * A LANDSCAPE row silhouette, unlike the 3:4 tile this shelf used to render.
+ * The tile is a browsing/showcase treatment: its cover takes height from its
+ * own width, so a shelf of tiles is ~26rem tall and one portal leaves most of
+ * the row empty. In the library the member has already committed — they are not
+ * shopping, they are resuming — so the shelf's job is "which portals am I on,
+ * and where am I in each", which a row answers in about half the height and
+ * lets several portals sit side by side across the page width.
+ *
+ * Distinct from `enrolledCourseRowEntry` (the "Jump back in" rail) even though
+ * both are rows: that rail MIXES portals with standalone practices, so it must
+ * suppress portal-only chrome to read as one system. This strip contains
+ * nothing but portals, so it can afford the status line and the access chip —
+ * and it keeps `kicker: 'Portal'` rather than a cover badge, since a badge on
+ * every card in a shelf titled "Your portals" is pure repetition.
+ */
+export function enrolledCoursePortalStripEntry(
+  course: EnrolledCourseSummary,
+  href: string,
+  extras: EntryExtras = {}
+): JourneyEntryCardProps {
+  return {
+    href,
+    title: course.course.title,
+    kicker: 'Portal',
+    meta: course.progress.nextPracticeTitle
+      ? `Next · ${course.progress.nextPracticeTitle}`
+      : null,
+    coverImageUrl: course.course.coverImageUrl,
+    layout: 'row',
+    progress: {
+      percent: course.progress.percent,
+      label: enrolledStatusLabel(course.progress),
+    },
+    accessLabel: extras.accessLabel ?? null,
+    cta: enrolledCta(course.progress.status),
+  };
+}
+
+/**
  * `EnrolledCourseSummary` → the library "Jump back in" ROW. Same cover
  * treatment as the tile, at a resume silhouette; the meta line names the next
  * practice rather than the curriculum size.
