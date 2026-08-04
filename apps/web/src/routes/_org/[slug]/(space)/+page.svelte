@@ -184,20 +184,6 @@
     ...featureContentItems,
   ]);
 
-  /*
-    A promoted portal appears ONCE. This mirrors what featured CONTENT already
-    does — `newThisWeek` below filters `!c.featured` so a pick never doubles as a
-    new release — and without it the same journey would show as a full-bleed
-    slide and again in the rail directly beneath it, which reads as a bug however
-    defensible it is.
-
-    Keyed off `data.featuredJourneys`, not off `featurePortalItems`, so it stays
-    correct independently of the slide-id namespacing above.
-  */
-  const featuredPortalIds = $derived(
-    new Set((data.featuredJourneys ?? []).map((j) => j.pageId))
-  );
-
   // New this week: most-recent items minus anything already promoted in
   // Editor's picks (dedupe). `allContent` is server-sorted newest-first.
   const NEW_THIS_WEEK_MAX = 12;
@@ -642,13 +628,19 @@
   {/await}
 
   <!-- Guided portals — published course-journeys for this org (Codex-oi2w4).
-       Streamed; hidden when the org has none LEFT to show: anything the creator
-       promoted is already a slide in "Editor's picks" above and is filtered out
-       here, so an org whose only portal is featured shows this rail not at all
-       rather than showing the same journey twice on one page. -->
+       Streamed; hidden only when the org has NO published portals at all.
+
+       Shows EVERY portal, including the ones promoted into "Editor's picks"
+       below. This rail is the org's complete set of portals, so omitting the
+       promoted ones made the most important portals the only ones missing from
+       the place a visitor goes to see them all — and on an org with one portal,
+       featuring it emptied the rail entirely. A pick appearing here as well is
+       repetition by design, the same way a shop's window display also sits on
+       the shelves; portals differ from featured CONTENT (which `newThisWeek`
+       still de-duplicates) because there are few enough of them that the full
+       set is the point. -->
   {#await data.journeys then journeys}
-    {@const shelf = journeys.filter((j) => !featuredPortalIds.has(j.pageId))}
-    {#if shelf.length > 0}
+    {#if journeys.length > 0}
       <section class="section section--tight">
         <header class="lede">
           <p class="lede__eyebrow">Go deeper</p>
@@ -664,7 +656,7 @@
              journey card is a 3:4 portrait now (matching the content tiles it
              shares pages with), so a 20rem track made a ~34rem-tall rail. -->
         <Carousel
-          items={shelf}
+          items={journeys}
           itemMinWidth="15rem"
           gap="var(--space-4)"
           ariaLabel="Guided portals"
