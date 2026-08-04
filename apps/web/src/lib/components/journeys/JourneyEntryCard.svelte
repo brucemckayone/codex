@@ -326,7 +326,21 @@
     outline-offset: var(--space-0-5);
   }
 
-  .jec--featured {
+  /*
+    Scoped to `row`, like the featured title/cover rules below it.
+
+    `featured` means "this card is its page's THRESHOLD" — the dashboard's one
+    way back in (`JourneyContinueCard`, the only consumer that sets it). That is
+    a full-width row standing alone, where an opaque plate and a strong border
+    read as prominence.
+
+    Unscoped, the same declarations reached a featured TILE inside a multi-up
+    carousel, where prominence has nothing to be prominent against: one opaque,
+    strongly-bordered card among transparent siblings reads as a rendering fault,
+    not a promotion. A promoted portal is already promoted — it has a slide in
+    Editor's picks — so in the rail it should look like every other portal.
+  */
+  .jec[data-layout='row'].jec--featured {
     background: var(--color-surface);
     border-color: var(--color-border-strong);
   }
@@ -905,8 +919,15 @@
   }
 
   /* A featured row is a page's THRESHOLD (the dashboard's one way back in), so
-     its CTA earns a filled pill rather than a text link. */
-  .jec--featured .jec__go {
+     its CTA earns a filled pill rather than a text link.
+
+     SCOPED TO `row`, and it must stay that way. A row's foot has the full card
+     width to itself, so a pill fits on one line. A tile's foot is ~15rem and
+     shares that line with the price, which left the pill about 6rem — enough to
+     wrap "View portal" onto two lines inside a rounded pill, in a rail whose
+     other cards showed a one-line text link. Two CTA languages in one carousel,
+     from one unscoped selector. */
+  .jec[data-layout='row'].jec--featured .jec__go {
     align-self: flex-start;
     padding: var(--space-2-5) var(--space-5);
     border-radius: var(--radius-full);
