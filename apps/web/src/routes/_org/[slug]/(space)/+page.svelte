@@ -582,6 +582,24 @@
   </section>
 
   <div class="content-area">
+  <!-- Editor's picks — contained multi-feature carousel over the creator's
+       promoted portals + content (R3 ⑥: sits within the page's content column,
+       not edge-to-edge).
+
+       FIRST in the feed, directly under the hero. It is the creator's own
+       curation — the one rail that says "start here" — so it leads rather than
+       sitting below the catalogue rails it is meant to introduce. Everything here
+       is AWAITED (`featuredJourneys` + `allContent`), so leading with it costs no
+       layout shift: the carousel cannot gain slides after hydration. -->
+  {#if featureItems.length > 0}
+    <section class="section">
+      <header class="lede">
+        <p class="lede__eyebrow">Editor's picks</p>
+      </header>
+      <FeatureCarousel items={featureItems} ariaLabel="Editor's picks" />
+    </section>
+  {/if}
+
   <!-- Continue watching — server-backed cross-device resume rail (WP-6).
        Streamed; hidden when empty (logged-out visitors get an empty list). -->
   {#await data.continueWatching then resume}
@@ -709,17 +727,6 @@
       featured={c.featured ?? false}
     />
   {/snippet}
-
-  <!-- Editor's picks — contained multi-feature carousel over content.featured
-       (R3 ⑥: sits within the page's content column, not edge-to-edge). -->
-  {#if featureItems.length > 0}
-    <section class="section">
-      <header class="lede">
-        <p class="lede__eyebrow">Editor's picks</p>
-      </header>
-      <FeatureCarousel items={featureItems} ariaLabel="Editor's picks" />
-    </section>
-  {/if}
 
   <!-- Browse by topic — image-led curated-category rail (streamed). Each topic
        is a curated on-ramp into the Explore page's dynamic filter: clicking one
