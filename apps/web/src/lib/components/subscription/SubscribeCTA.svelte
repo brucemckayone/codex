@@ -417,12 +417,22 @@
      a rounded promotional card. */
   .subscribe-cta {
     position: relative;
-    /* Escape the parent's max-width by breaking out to full viewport
-       width. `calc(100vw - scrollbar)` isn't bulletproof on all browsers
-       but margin-inline negative works because the parent `.content-area`
-       is centered with max-width. */
-    width: 100vw;
-    margin-inline: calc(50% - 50vw);
+    /* Escape the parent out to the viewport edges — deliberately WITHOUT `vw`.
+       The previous `width: 100vw; margin-inline: calc(50% - 50vw)` carried two
+       compounding errors on org pages:
+         1. `100vw` includes the scrollbar gutter, so on any scrolling page the
+            section was scrollbar-width too wide.
+         2. `calc(50% - 50vw)` only lands at x=0 when the parent is centred in
+            the viewport. `.content-area` is not — it starts at the fixed
+            SidebarRail's edge — so the breakout was pushed right by the rail.
+       Together they pushed the section past the viewport, which gave the org
+       landing page a horizontal scrollbar and left an unpainted strip beside
+       `.content-area`'s gradient/backdrop-filter surface when scrolled into it.
+       Deriving the breakout from the parent's own width plus the rail token is
+       exact at every viewport, needs no scrollbar guesswork, and collapses to a
+       no-op below md where --app-sidebar-width is 0px. */
+    width: calc(100% + var(--app-sidebar-width));
+    margin-inline: calc(-1 * var(--app-sidebar-width)) 0;
     padding-block: var(--space-12);
     padding-inline: var(--space-6);
     display: grid;
