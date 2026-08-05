@@ -137,6 +137,24 @@ const discoverJourneysSchema = z
   .object({
     featured: z.boolean().optional(),
     limit: z.number().int().min(1).max(50).optional(),
+    /**
+     * The org to read, when the caller already has one.
+     *
+     * A `+page.server.ts` that has `await parent()` holds the resolved org
+     * already, so re-deriving it here costs a redundant worker hop —
+     * `getPublicInfo` is KV-cached, but it is still a round trip, and the org
+     * landing page calls this query TWICE per render (featured picks + rail), so
+     * it paid two. Passing it through aligns this read with `getPublicContent`
+     * and the other landing-page reads, which all take `orgId` from `parent()`
+     * (Codex-72k55).
+     *
+     * Safe to accept from the caller: the underlying read is fully PUBLIC and
+     * org-scoped, so an org id only selects WHICH public catalogue is returned —
+     * it grants nothing. It is also not a secret (the org layout already ships
+     * `org.id` to the client). Omit it and the host-derived path below still
+     * applies, which is what component-level callers get.
+     */
+    organizationId: z.string().uuid().optional(),
   })
   .optional();
 
@@ -144,19 +162,28 @@ const discoverJourneysSchema = z
  * Public discovery list — PUBLISHED course-journeys for the org home "featured"
  * rail (`{ featured: true }`) + the Explore grid (`{}` / `{ limit }`). Returns
  * [] off a non-org host.
+ *
+ * Server-side the response is KV cache-aside under
+ * `COLLECTION_ORG_JOURNEYS(orgId)` and carries a 60s CDN header, matching the
+ * content/categories reads it sits beside (Codex-72k55).
  */
 export const listPublishedJourneys = query(
   discoverJourneysSchema,
   async (input): Promise<JourneyCardView[]> => {
     const { platform, cookies, url } = getRequestEvent();
-    const context = getSubdomainContext(url.hostname);
-    if (context.type !== 'organization') return [];
-
     const api = createServerApi(platform, cookies);
-    const org = await api.org.getPublicInfo(context.slug);
-    if (!org || typeof org !== 'object' || !('id' in org)) return [];
 
-    return api.access.listPublishedJourneys((org as { id: string }).id, {
+    // Caller-supplied org wins — it is already resolved, so skip the hop.
+    let orgId = input?.organizationId;
+    if (!orgId) {
+      const context = getSubdomainContext(url.hostname);
+      if (context.type !== 'organization') return [];
+      const org = await api.org.getPublicInfo(context.slug);
+      if (!org || typeof org !== 'object' || !('id' in org)) return [];
+      orgId = (org as { id: string }).id;
+    }
+
+    return api.access.listPublishedJourneys(orgId, {
       featured: input?.featured,
       limit: input?.limit,
     });

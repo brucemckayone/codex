@@ -79,6 +79,12 @@ function bumpOrgContentVersion(
       // set of categories with ≥1 published item, so a cached "Browse by topic"
       // list could otherwise show empty or missing topics until TTL.
       cache.invalidate(CacheType.CATEGORIES(organizationId)),
+      // Invalidate the public portal (journey) rails for the same reason
+      // (Codex-72k55): each card's `practiceCount`/`stageCount` counts only
+      // practices whose content is PUBLISHED, so publishing or unpublishing one
+      // practice changes cards that name no content at all. Without this bump a
+      // portal advertises "8 practices" while only 7 are reachable.
+      cache.invalidate(CacheType.COLLECTION_ORG_JOURNEYS(organizationId)),
     ]).catch((err: unknown) => {
       obs?.warn('Cache invalidation failed', {
         error: err instanceof Error ? err.message : String(err),

@@ -1,4 +1,5 @@
 import { DEFAULT_STREAMING_URL_TTL_SECONDS } from '@codex/access';
+import { VersionedCache } from '@codex/cache';
 import { ValidationError } from '@codex/service-errors';
 import type {
   ContentCourseLinks,
@@ -42,6 +43,13 @@ import {
 } from '@codex/validation';
 import { multipartProcedure, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
+import {
+  bumpOrgJourneysVersion,
+  getCachedPublishedCourses,
+  getCachedPublishedJourneys,
+  isPublicPortalRead,
+  PUBLIC_JOURNEYS_CACHE_CONTROL,
+} from './journeys-cache';
 
 /**
  * Journey member-surface routes (Codex-2pryk · Round-D · Codex-776gg).
@@ -68,6 +76,23 @@ import { Hono } from 'hono';
 const app = new Hono<HonoEnv>();
 
 /**
+ * CDN `Cache-Control` for the PUBLIC portal reads only (Codex-72k55).
+ *
+ * Registered on `'*'` but gated by an exact-path ALLOW-LIST rather than a path
+ * pattern, because this router mixes public reads with `auth: 'required'`
+ * (`/enrolled`, `/user/enrollments`), entitlement-gated reads
+ * (`/courses/:courseId/dashboard`) and `requireOrgManagement` studio routes.
+ * `public.ts` can safely blanket its whole router; this one cannot. See
+ * `isPublicPortalRead` for why the allow-list is not a wildcard.
+ */
+app.use('*', async (c, next) => {
+  await next();
+  if (isPublicPortalRead(c.req.path)) {
+    c.header('Cache-Control', PUBLIC_JOURNEYS_CACHE_CONTROL);
+  }
+});
+
+/**
  * GET /api/journeys/courses?organizationId=
  *
  * List an org's PUBLISHED courses as discovery card summaries — the /explore
@@ -75,6 +100,11 @@ const app = new Hono<HonoEnv>();
  * HARDENING §E course-sell row), the same public-chrome surface as the sales
  * page. Returns `[]` when the org has no published courses. Declared BEFORE the
  * `/courses/:courseId/*` routes so the bare `/courses` match is unambiguous.
+ *
+ * Cache: KV cache-aside under `COLLECTION_ORG_JOURNEYS(orgId)` (Codex-72k55),
+ * the same version key the landing rails use, so one portal write stales this
+ * rail and those together. CDN header set per-route — see
+ * `PUBLIC_JOURNEYS_CACHE_CONTROL` for why this router cannot use `app.use('*')`.
  * @returns {CourseCardSummary[]}
  */
 app.get(
@@ -89,10 +119,17 @@ app.get(
     },
     handler: async (ctx): Promise<CourseCardSummary[]> => {
       const { organizationId } = ctx.input.query;
-      return ctx.services.courseJourney.listPublishedCourses(
-        organizationId,
-        ctx.env.R2_PUBLIC_URL_BASE
-      );
+
+      const fetchCourses = () =>
+        ctx.services.courseJourney.listPublishedCourses(
+          organizationId,
+          ctx.env.R2_PUBLIC_URL_BASE
+        );
+
+      if (!ctx.env.CACHE_KV) return fetchCourses();
+
+      const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+      return getCachedPublishedCourses(cache, organizationId, fetchCourses);
     },
   })
 );
@@ -388,6 +425,13 @@ app.post(
  * Published course-journeys as public discovery cards (SPEC §8.5) — the org home
  * "featured" rail (`featured=true`) + the Explore grid (all). Fully PUBLIC; no
  * per-user state. Returns `[]` when the org has no published journeys.
+ *
+ * Cache: KV cache-aside under `COLLECTION_ORG_JOURNEYS(orgId)` (Codex-72k55), so
+ * the portal rails join the content/categories/stats reads beside them on the
+ * landing page instead of hitting Postgres every render. `featured` and `limit`
+ * take separate data slots under the shared org version key — the landing page
+ * reads this endpoint TWICE per render (featured picks + the full rail), so the
+ * two must not collide.
  * @returns {JourneyCardView[]}
  */
 app.get(
@@ -402,11 +446,24 @@ app.get(
     },
     handler: async (ctx): Promise<JourneyCardView[]> => {
       const { organizationId, featured, limit } = ctx.input.query;
-      return ctx.services.courseJourney.listPublishedJourneys(organizationId, {
-        featured: featured === 'true',
-        limit,
-        r2PublicUrlBase: ctx.env.R2_PUBLIC_URL_BASE,
-      });
+      const isFeatured = featured === 'true';
+
+      const fetchJourneys = () =>
+        ctx.services.courseJourney.listPublishedJourneys(organizationId, {
+          featured: isFeatured,
+          limit,
+          r2PublicUrlBase: ctx.env.R2_PUBLIC_URL_BASE,
+        });
+
+      if (!ctx.env.CACHE_KV) return fetchJourneys();
+
+      const cache = new VersionedCache({ kv: ctx.env.CACHE_KV });
+      return getCachedPublishedJourneys(
+        cache,
+        organizationId,
+        { featured: isFeatured, limit },
+        fetchJourneys
+      );
     },
   })
 );
@@ -601,6 +658,14 @@ app.put(
         ctx.organizationId,
         ctx.input.body
       );
+      // A save can flip `status` to published (or away from it) and can rewrite
+      // the title the cards show, so the public rails must go stale.
+      bumpOrgJourneysVersion(
+        ctx.env,
+        ctx.executionCtx,
+        ctx.organizationId,
+        ctx.obs
+      );
       return null;
     },
   })
@@ -636,11 +701,20 @@ app.patch(
       body: updateJourneyOfferBodySchema,
     },
     handler: async (ctx): Promise<PageOffer> => {
-      return ctx.services.courseJourney.updateJourneyOffer(
+      const offer = await ctx.services.courseJourney.updateJourneyOffer(
         ctx.organizationId,
         ctx.input.params.pageId,
         ctx.input.body
       );
+      // `priceCents` is on every portal card, so a price change that did not
+      // reach the rails would advertise the OLD price for up to the cache TTL.
+      bumpOrgJourneysVersion(
+        ctx.env,
+        ctx.executionCtx,
+        ctx.organizationId,
+        ctx.obs
+      );
+      return offer;
     },
   })
 );
@@ -774,6 +848,15 @@ app.patch(
         ctx.input.params.pageId,
         ctx.input.body.featured
       );
+      // `featured` decides which rail a card appears in AND leads the ordering of
+      // both, so the featured and unfeatured slots must BOTH go stale. One bump
+      // on the shared org version key does that atomically.
+      bumpOrgJourneysVersion(
+        ctx.env,
+        ctx.executionCtx,
+        ctx.organizationId,
+        ctx.obs
+      );
       return null;
     },
   })
@@ -837,6 +920,16 @@ app.post(
         processed.coverImageKey
       );
 
+      // `coverImageUrl` is on every portal card — without this bump a creator
+      // uploads a cover, sees it in the builder, and the rails keep rendering the
+      // typographic fallback until the TTL lapses.
+      bumpOrgJourneysVersion(
+        ctx.env,
+        ctx.executionCtx,
+        ctx.organizationId,
+        ctx.obs
+      );
+
       return { coverImageUrl: processed.url };
     },
   })
@@ -871,6 +964,12 @@ app.delete(
         ctx.organizationId,
         ctx.input.params.pageId,
         null
+      );
+      bumpOrgJourneysVersion(
+        ctx.env,
+        ctx.executionCtx,
+        ctx.organizationId,
+        ctx.obs
       );
       return null;
     },
@@ -943,11 +1042,20 @@ app.put(
         ctx.organizationId,
         ctx.input.params.pageId
       );
-      return ctx.services.courseJourney.saveCurriculum(
+      const curriculum = await ctx.services.courseJourney.saveCurriculum(
         ctx.organizationId,
         courseId,
         ctx.input.body
       );
+      // Every card reports `stageCount`/`practiceCount`, which this write is the
+      // authoring path for.
+      bumpOrgJourneysVersion(
+        ctx.env,
+        ctx.executionCtx,
+        ctx.organizationId,
+        ctx.obs
+      );
+      return curriculum;
     },
   })
 );

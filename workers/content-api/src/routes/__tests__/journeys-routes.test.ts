@@ -54,6 +54,10 @@ const journeySpies = {
   getInCoursePractice: vi.fn(),
   recordPracticeCompletion: vi.fn(),
   listEnrolledCourses: vi.fn(),
+  // The member-discovery reads (Codex-oi2w4). Added with the cache/CDN wiring
+  // (Codex-72k55) — the file previously covered `/courses` but not these two.
+  listPublishedJourneys: vi.fn(),
+  listEnrolledJourneys: vi.fn(),
 };
 
 vi.mock('@codex/access', async (importOriginal) => {
@@ -235,13 +239,54 @@ const STREAM_RESULT = {
 // both inject and assert against.
 const R2_PUBLIC_URL_BASE = 'http://localhost:4100';
 
+/**
+ * In-memory stand-in for `CACHE_KV` (Codex-72k55).
+ *
+ * The public portal reads are now KV cache-aside, and `VersionedCache.get`
+ * writes its data slot FIRE-AND-FORGET (`packages/cache/src/versioned-cache.ts`
+ * — the put is deliberately not awaited so a cache write never delays a
+ * response). Against Miniflare's real KV that floating promise outlives the
+ * test, and `vitest-pool-workers` isolated storage then fails to pop its stack
+ * frame ("IoContext timed out due to inactivity, waitUntil tasks were cancelled"
+ * → "unable to pop KV storage"). `waitOnExecutionContext` cannot help: the write
+ * is never registered on the execution context.
+ *
+ * A plain object is not a Miniflare KV namespace, so there is no storage frame
+ * to pop — and it lets these tests exercise the CACHED branch for real rather
+ * than the `if (!ctx.env.CACHE_KV)` fallback. The underlying fire-and-forget
+ * write is tracked separately (see Codex-72k55 notes) because in production the
+ * same floating promise can be cancelled when the response returns.
+ */
+function createInMemoryKV() {
+  const data = new Map<string, string>();
+  return {
+    get: async (key: string, type?: string) => {
+      const value = data.get(key);
+      if (value === undefined) return null;
+      return type === 'json' ? JSON.parse(value) : value;
+    },
+    put: async (key: string, value: string) => {
+      data.set(key, value);
+    },
+    delete: async (key: string) => {
+      data.delete(key);
+    },
+    list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    getWithMetadata: async () => ({ value: null, metadata: null }),
+    _reset: () => data.clear(),
+  };
+}
+
+const cacheKV = createInMemoryKV();
+
 // The env the real `access` registry getter needs to build its dev R2 signer
 // without touching a real bucket (the service is mocked, so nothing signs).
 const testEnv = {
   ...env,
   ENVIRONMENT: 'development',
   R2_PUBLIC_URL_BASE,
-} as typeof env;
+  CACHE_KV: cacheKV,
+} as unknown as typeof env;
 
 /** Mount both journey route groups behind a user-injection middleware. */
 function buildApp(user: Record<string, unknown> | null) {
@@ -295,10 +340,17 @@ const COURSE_CARDS = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // MUST clear between tests. The public portal reads are cache-aside, so a
+  // value primed by one test would silently satisfy the next — the service spy
+  // would go uncalled and a "service called with …" assertion would fail for a
+  // reason that has nothing to do with the route.
+  cacheKV._reset();
   accessSpies.canEnterCourse.mockResolvedValue(true);
   accessSpies.canView.mockResolvedValue(true);
   accessSpies.getStreamingUrl.mockResolvedValue(STREAM_RESULT);
   journeySpies.listPublishedCourses.mockResolvedValue(COURSE_CARDS);
+  journeySpies.listPublishedJourneys.mockResolvedValue([]);
+  journeySpies.listEnrolledJourneys.mockResolvedValue([]);
   journeySpies.getCourseBySlug.mockResolvedValue(COURSE_SUMMARY);
   journeySpies.getContentCourses.mockResolvedValue(CONTENT_COURSES);
   journeySpies.getCoursePage.mockResolvedValue(COURSE_PAGE);
@@ -520,6 +572,123 @@ describe('GET /api/journeys/courses — list published courses (public)', () => 
     );
     expect(res.status).toBe(400);
     expect(journeySpies.listPublishedCourses).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Portal read caching + CDN headers (Codex-72k55) ─────────────────────────
+//
+// The wiring lives in `journeys-cache.ts` and is unit-tested there; these assert
+// it is actually REACHED through the real route + resolver, and — the part a unit
+// test cannot cover — that the CDN header lands on the public reads and on
+// nothing else.
+
+describe('portal public reads — KV cache-aside through the real route', () => {
+  it('a repeat read is served from cache: the service runs ONCE', async () => {
+    await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/courses?organizationId=${ORG_ID}`)
+    );
+    const second = await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/courses?organizationId=${ORG_ID}`)
+    );
+
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual({ data: COURSE_CARDS });
+    // The DB-backed service was NOT consulted the second time — the whole point
+    // of the change. Before this, both renders queried Postgres.
+    expect(journeySpies.listPublishedCourses).toHaveBeenCalledTimes(1);
+  });
+
+  it('ORG ISOLATION: another org is a miss, not a hit on the first org’s rows', async () => {
+    const otherOrg = '3c222222-2222-4222-8222-222222222222';
+    await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/courses?organizationId=${ORG_ID}`)
+    );
+    await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/courses?organizationId=${otherOrg}`)
+    );
+
+    expect(journeySpies.listPublishedCourses).toHaveBeenCalledTimes(2);
+    expect(journeySpies.listPublishedCourses).toHaveBeenLastCalledWith(
+      otherOrg,
+      R2_PUBLIC_URL_BASE
+    );
+  });
+
+  it('SLOT SPLIT: featured and unfiltered /published reads do not satisfy each other', async () => {
+    // The landing page issues exactly these two reads in one render.
+    await dispatch(
+      buildApp(USER),
+      getReq(
+        `/api/journeys/published?organizationId=${ORG_ID}&featured=true&limit=4`
+      )
+    );
+    await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/published?organizationId=${ORG_ID}&limit=12`)
+    );
+
+    expect(journeySpies.listPublishedJourneys).toHaveBeenCalledTimes(2);
+    expect(journeySpies.listPublishedJourneys).toHaveBeenNthCalledWith(
+      1,
+      ORG_ID,
+      expect.objectContaining({ featured: true, limit: 4 })
+    );
+    expect(journeySpies.listPublishedJourneys).toHaveBeenNthCalledWith(
+      2,
+      ORG_ID,
+      expect.objectContaining({ featured: false, limit: 12 })
+    );
+  });
+});
+
+describe('portal CDN headers — allow-list enforced by the middleware', () => {
+  it('the two public reads carry a shared-cache header', async () => {
+    const courses = await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/courses?organizationId=${ORG_ID}`)
+    );
+    const published = await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/published?organizationId=${ORG_ID}&limit=12`)
+    );
+
+    expect(courses.headers.get('Cache-Control')).toBe(
+      'public, max-age=60, s-maxage=60'
+    );
+    expect(published.headers.get('Cache-Control')).toBe(
+      'public, max-age=60, s-maxage=60'
+    );
+  });
+
+  it('CACHE POISONING GUARD: the per-user enrolled shelf is NEVER publicly cacheable', async () => {
+    // `/enrolled` is auth:'required' and its body varies by session, while shared
+    // caches key by URL and NOT by Cookie. If this response ever carried
+    // `public, max-age=...`, the first member's shelf would be served to every
+    // subsequent visitor to the same URL.
+    journeySpies.listEnrolledJourneys.mockResolvedValue([]);
+    const res = await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/enrolled?organizationId=${ORG_ID}`)
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control') ?? '').not.toContain('public');
+  });
+
+  it('CACHE POISONING GUARD: an entitlement-gated course read is not publicly cacheable', async () => {
+    // Shares the `/courses` prefix with the public list, which is exactly why the
+    // middleware matches an exact-path allow-list rather than `/courses/*`.
+    journeySpies.getCourseDashboard.mockResolvedValue(null);
+    const res = await dispatch(
+      buildApp(USER),
+      getReq(`/api/journeys/courses/${COURSE_ID}/dashboard`)
+    );
+
+    expect(res.headers.get('Cache-Control') ?? '').not.toContain('public');
   });
 });
 
