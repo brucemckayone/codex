@@ -1,6 +1,5 @@
 import { expect } from '@playwright/test';
 import { test } from '../fixtures/auth';
-import { expectClickNavigates } from '../helpers/spa-nav';
 import {
   cleanupSharedStudioAuth,
   injectSharedStudioAuth,
@@ -13,11 +12,15 @@ import {
 /**
  * Studio Settings E2E Tests
  *
- * Tests general settings form and branding settings page.
+ * Tests the general settings form and the settings tab strip.
  * Owner role required for settings access.
  *
  * NOTE: Settings tabs use role="tab" (link-based navigation, not Melt UI).
- * NOTE: Color picker has a native color input + text hex input.
+ * NOTE: Branding is NOT a settings tab. It moved to the unified /studio/brand
+ * workspace (Codex-cijzb); `/studio/settings/branding` is now a 301 stub whose
+ * only job is to forward old bookmarks. The brand workspace itself is covered
+ * by studio/navigation.spec.ts and brand-editor-hero-effects.spec.ts — do not
+ * re-test its contents here.
  */
 
 test.describe('Studio Settings - General', () => {
@@ -156,7 +159,7 @@ test.describe('Studio Settings - Tabs', () => {
     await injectSharedStudioAuth(page, sharedAuth);
   });
 
-  test('General and Branding tabs are visible', async ({ page }) => {
+  test('General is the only settings tab', async ({ page }) => {
     await navigateToStudioPage(
       page,
       sharedAuth.member.organization.slug,
@@ -164,7 +167,12 @@ test.describe('Studio Settings - Tabs', () => {
     );
 
     await expect(page.getByRole('tab', { name: 'General' })).toBeVisible();
-    await expect(page.getByRole('tab', { name: 'Branding' })).toBeVisible();
+
+    // Assert the COUNT, not just the absence of 'Branding'. A stale name check
+    // would keep passing if a different tab were added, and the point of this
+    // assertion is that the strip has exactly one destination since branding
+    // moved to /studio/brand.
+    await expect(page.getByRole('tab')).toHaveCount(1);
   });
 
   test('General tab is selected on settings root', async ({ page }) => {
@@ -177,32 +185,9 @@ test.describe('Studio Settings - Tabs', () => {
     const generalTab = page.getByRole('tab', { name: 'General' });
     await expect(generalTab).toHaveAttribute('aria-selected', 'true');
   });
-
-  test('clicking Branding tab navigates to branding page', async ({ page }) => {
-    await navigateToStudioPage(
-      page,
-      sharedAuth.member.organization.slug,
-      '/settings'
-    );
-
-    await expectClickNavigates(
-      page,
-      page.getByRole('tab', { name: 'Branding' }),
-      /\/studio\/settings\/branding/,
-      // Settings tabs are stable content-area elements, not rail items. Skip
-      // the hover: an expanded desktop rail (left over from a prior hover)
-      // overlays the tab strip and intercepts the hover, while the native JS
-      // click still bubbles to the SPA router. Per spa-nav.ts: hover:false for
-      // stable elements.
-      { hover: false }
-    );
-
-    const brandingTab = page.getByRole('tab', { name: 'Branding' });
-    await expect(brandingTab).toHaveAttribute('aria-selected', 'true');
-  });
 });
 
-test.describe('Studio Settings - Branding', () => {
+test.describe('Studio Settings - legacy branding redirect', () => {
   test.describe.configure({ mode: 'serial' });
 
   let sharedAuth: SharedStudioAuth;
@@ -219,40 +204,25 @@ test.describe('Studio Settings - Branding', () => {
     await injectSharedStudioAuth(page, sharedAuth);
   });
 
-  test('branding page renders Edit Brand Live + Logo upload', async ({
+  test('/studio/settings/branding forwards to the brand workspace', async ({
     page,
   }) => {
+    // `settings/branding/+page.ts` is a redirect(301, '/studio/brand') stub
+    // kept solely so old bookmarks and inbound links keep working. It runs
+    // under the studio subtree's `ssr = false`, so the redirect fires on the
+    // CLIENT during navigation — which is why this asserts the settled URL
+    // rather than the response status.
     await navigateToStudioPage(
       page,
       sharedAuth.member.organization.slug,
       '/settings/branding'
     );
 
-    // The branding settings page was simplified: it now exposes only a
-    // `Edit Brand Live` CTA (which opens the floating brand editor) and a
-    // logo upload card. Hex/color picker controls live INSIDE the brand
-    // editor (tested separately).
-    await expect(
-      page.getByRole('button', { name: 'Edit Brand Live' })
-    ).toBeVisible();
+    // toHaveURL polls, so it tolerates the client-side hop. Per e2e/CLAUDE.md,
+    // never waitForURL on an ssr=false route — there is no second load event.
+    await expect(page).toHaveURL(/\/studio\/brand$/);
 
-    // Logo card heading is a real <h{N}> via Card.Title.
-    await expect(page.getByRole('heading', { name: 'Logo' })).toBeVisible();
-
-    // Read-only brand summary heading.
-    await expect(
-      page.getByRole('heading', { name: 'Current Brand' })
-    ).toBeVisible();
-  });
-
-  test('Branding tab is selected on branding page', async ({ page }) => {
-    await navigateToStudioPage(
-      page,
-      sharedAuth.member.organization.slug,
-      '/settings/branding'
-    );
-
-    const brandingTab = page.getByRole('tab', { name: 'Branding' });
-    await expect(brandingTab).toHaveAttribute('aria-selected', 'true');
+    // The old path must leave no trace in the settings tab strip.
+    await expect(page.getByRole('tab', { name: 'Branding' })).toHaveCount(0);
   });
 });
