@@ -32,7 +32,7 @@
   <figure class="contrib__frame">
     {#if avatarUrl}
       <img
-        src={getThumbnailUrl(avatarUrl, 'md')}
+        src={getThumbnailUrl(avatarUrl, 'lg')}
         alt=""
         class="contrib__img"
         loading="lazy"
@@ -127,7 +127,10 @@
     font-family: var(--font-heading);
     font-size: var(--text-4xl);
     font-weight: var(--font-bold);
-    color: color-mix(in srgb, var(--color-text-muted) 80%, transparent);
+    /* Was `color-mix(--color-text-muted 80%, transparent)`: muted already
+       measures around 4:1 against this panel, and thinning it to 80% pushed the
+       only identity in an empty cell below any readable threshold. */
+    color: var(--color-text-secondary);
     letter-spacing: var(--tracking-tighter);
   }
 
@@ -209,6 +212,20 @@
     line-height: var(--leading-tight);
     letter-spacing: var(--tracking-tight);
     color: var(--color-text-primary);
+    /* Clamped to two lines and reserving both, so this card has a DETERMINISTIC
+       height. It matters beyond tidiness: these cards are flex items in the
+       carousel track, so an unclamped name stretched every sibling to match the
+       longest one in the org — a 38-character name took the row from 435px to
+       510px, and no skeleton can reserve a height that depends on data it has
+       not loaded yet. With the clamp, SkeletonCreatorCard reserves the exact
+       same box and the carousel resolves with no shift at all. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    min-block-size: calc(2 * var(--leading-tight) * 1em);
     /* Hairline underline that draws in on hover */
     background-image: linear-gradient(
       currentColor,
